@@ -198,8 +198,8 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
     assert '@host_iteration("Kernel execution loop - residual watchdog; supplied Mu fuel owns progress")' in py_step, (
         "Python runtime must keep the residual no-fuel kernel loop honestly marked."
     )
-    assert "while (not caller_supplied_fuel) or (fuel_cursor is not None):" in py_step, (
-        "Python runtime must preserve no-fuel compatibility without synthetic fuel."
+    assert "while (not caller_supplied_fuel) or (fuel_cursor is not None):" not in py_step, (
+        "Python runtime reintroduced the old no-fuel kernel loop instead of continuation packets."
     )
     assert "list_to_linked([None] * (max_steps + 1))" not in py_step, (
         "Python runtime must not construct host-counted no-fuel compatibility fuel."
@@ -207,8 +207,20 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
     assert "if caller_supplied_fuel:" in py_step and 'fuel_cursor = fuel_cursor["tail"]' in py_step, (
         "Python runtime must consume Mu fuel only on the explicit supplied-fuel path."
     )
-    assert "if steps_used >= max_steps:" in py_step, (
-        "Python runtime must keep max_steps as a watchdog boundary."
+    assert "if steps_used >= watchdog_cap:" in py_step, (
+        "Python runtime must keep max_steps/watchdog_cap as a watchdog boundary."
+    )
+    assert '"kind": "continuation"' in py_step and '"result": None' in py_step, (
+        "Python runtime must expose nonterminal kernel progress as continuation packets."
+    )
+    assert "BOUNDARY: legacy public no-fuel behavior" in py_step, (
+        "Python public no-fuel compatibility must be explicitly classified outside the driver."
+    )
+    assert 'while packet["kind"] == "continuation":' in py_step, (
+        "Python compatibility boundary must drive explicit returned continuation packets."
+    )
+    assert 'continuation_state=packet["continuation"]' in py_step, (
+        "Python compatibility boundary must resume from Mu continuation data."
     )
 
     assert "const _STAGE0_VM_CUTOVER = true;" in js_kernel  # S1-B: cutover active
@@ -223,8 +235,8 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
     assert "@host_iteration" in js_kernel[:js_kernel.index("function _stepKernelCore(")], (
         "JS runtime must keep the residual no-fuel kernel loop honestly marked."
     )
-    assert "while (!callerSuppliedFuel || fuelCursor !== null)" in js_kernel_core, (
-        "JS runtime must preserve no-fuel compatibility without synthetic fuel."
+    assert "while (!callerSuppliedFuel || fuelCursor !== null)" not in js_kernel_core, (
+        "JS runtime reintroduced the old no-fuel kernel loop instead of continuation packets."
     )
     assert "compatibilityFuelNode <= maxSteps" not in js_kernel_core, (
         "JS runtime must not construct host-counted no-fuel compatibility fuel."
@@ -232,8 +244,20 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
     assert "if (callerSuppliedFuel)" in js_kernel_core and "fuelCursor = fuelCursor.tail" in js_kernel_core, (
         "JS runtime must consume Mu fuel only on the explicit supplied-fuel path."
     )
-    assert "if (stepsUsed >= maxSteps)" in js_kernel_core, (
-        "JS runtime must keep maxSteps as a watchdog boundary."
+    assert "if (stepsUsed >= watchdogCap)" in js_kernel_core, (
+        "JS runtime must keep maxSteps/watchdogCap as a watchdog boundary."
+    )
+    assert "kind: 'continuation'" in js_kernel_core and "result: null" in js_kernel_core, (
+        "JS runtime must expose nonterminal kernel progress as continuation packets."
+    )
+    assert "BOUNDARY: public compatibility driver over explicit Mu continuation data" in js_kernel, (
+        "JS public no-fuel compatibility must be explicitly classified outside the driver."
+    )
+    assert "while (packet.kind === 'continuation')" in js_kernel, (
+        "JS compatibility boundary must drive explicit returned continuation packets."
+    )
+    assert "packet.continuation" in js_kernel, (
+        "JS compatibility boundary must resume from Mu continuation data."
     )
 
 

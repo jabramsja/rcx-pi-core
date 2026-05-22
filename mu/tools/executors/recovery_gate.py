@@ -1628,6 +1628,39 @@ def _commit_continuation_has_local_commit(path: Path, repo_root: Path) -> tuple[
     return True, f"post-commit continuation has local commit {commit_sha} on {target_branch}"
 
 
+def _same_wave_handoff_tracked_packet(repo_root: Path, *, wave_id: str) -> str:
+    if not wave_id:
+        return ""
+    handoff_path = _bus_path(repo_root, "executors", "phase_b_handoff.json")
+    try:
+        payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    handoff_wave = normalize_wave_id(str(payload.get("wave_id") or ""))
+    expected_wave = normalize_wave_id(wave_id)
+    if handoff_wave != expected_wave:
+        return ""
+    tracked_packet = str(payload.get("tracked_packet") or "").strip()
+    if not tracked_packet:
+        scope_items = payload.get("scope_items")
+        if isinstance(scope_items, list):
+            for item in scope_items:
+                candidate = str(item or "").strip()
+                if candidate.startswith(CONTROL_PLANE_PACKET_PREFIX):
+                    tracked_packet = candidate
+                    break
+    if (
+        not tracked_packet
+        or not tracked_packet.startswith(CONTROL_PLANE_PACKET_PREFIX)
+        or Path(tracked_packet).is_absolute()
+        or ".." in PurePosixPath(tracked_packet).parts
+    ):
+        return ""
+    return tracked_packet
+
+
 def fix_stale_active_items(repo_root: Path, *, wave_id: str = "", result: Any = None) -> dict[str, Any]:
     """Run the stale NEXT checker autofix and commit the resulting TASKS.md repair.
 
@@ -1647,6 +1680,21 @@ def fix_stale_active_items(repo_root: Path, *, wave_id: str = "", result: Any = 
     continuation_ok, continuation_detail = _commit_continuation_has_local_commit(continuation, repo_root)
     if not continuation_ok:
         return _fix_result(False, "continuation_not_ready", continuation_detail)
+
+    try:
+        pre_fix_status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "status_failed", f"git status failed before stale NEXT autofix: {exc}")
+    pre_fix_dirty_paths = _porcelain_dirty_paths(pre_fix_status.stdout)
+    tracked_packet = _same_wave_handoff_tracked_packet(repo_root, wave_id=wave_id)
+    allowed_preexisting_dirty = {tracked_packet} if tracked_packet else set()
 
     try:
         fix_proc = subprocess.run(
@@ -1699,11 +1747,20 @@ def fix_stale_active_items(repo_root: Path, *, wave_id: str = "", result: Any = 
     dirty_paths = _porcelain_dirty_paths(status_proc.stdout)
     if not dirty_paths:
         return _fix_result(True, "stale_active_items_already_fixed", "stale NEXT checker passes with clean worktree")
-    if dirty_paths != {"TASKS.md"}:
+    tolerated_preexisting_dirty = pre_fix_dirty_paths & allowed_preexisting_dirty
+    unexpected_dirty_paths = dirty_paths - {"TASKS.md"} - tolerated_preexisting_dirty
+    if unexpected_dirty_paths:
         return _fix_result(
             False,
             "unexpected_dirty_paths",
-            f"stale NEXT autofix dirtied unexpected paths: {sorted(dirty_paths)}",
+            f"stale NEXT autofix dirtied unexpected paths: {sorted(unexpected_dirty_paths)}",
+        )
+    if "TASKS.md" not in dirty_paths:
+        return _fix_result(
+            True,
+            "stale_active_items_already_fixed",
+            "stale NEXT checker passes; preserved pre-existing commit-retry dirty paths: "
+            f"{sorted(tolerated_preexisting_dirty)}",
         )
 
     try:

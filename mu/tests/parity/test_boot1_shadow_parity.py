@@ -85,6 +85,7 @@ def _run_trampoline(projs, initial, **kwargs):
 # Python: Trampoline vs Recursive parity
 # ============================================================================
 
+@pytest.mark.slow
 class TestBoot1PythonShadowParity:
     """Verify use_boot1_recursive=True produces identical results to trampoline."""
 
@@ -370,6 +371,7 @@ class TestBoot1CrossSubstrateParity:
 # Python: S2 Budget accounting across re-entries
 # ============================================================================
 
+@pytest.mark.slow
 class TestBoot1BudgetAccounting:
     """S2: max_engine_iterations is shared across re-entries, not reset."""
 
@@ -488,6 +490,7 @@ class TestBoot1BudgetAccounting:
 # Wave 3: Adversarial budget accounting tests (S2 hardening)
 # ============================================================================
 
+@pytest.mark.slow
 class TestBoot1BudgetAdversarial:
     """Adversarial tests targeting the wave2 budget accounting fix.
 
@@ -615,6 +618,7 @@ class TestBoot1BudgetAdversarial:
 # Wave 3: Parity/property coverage
 # ============================================================================
 
+@pytest.mark.slow
 class TestBoot1ParityProperty:
     """Property-based parity tests between trampoline and Boot1 recursive."""
 
@@ -699,6 +703,7 @@ class TestBoot1ParityProperty:
 # Wave 3: Fail-closed invariants
 # ============================================================================
 
+@pytest.mark.slow
 class TestBoot1FailClosed:
     """Verify fail-closed behavior is enforced, not silent pass-through."""
 
@@ -1016,6 +1021,7 @@ class TestBoot1FourWayParity:
 # Wave 5: Merge-2 gate assertions (invariant regression locks)
 # ============================================================================
 
+@pytest.mark.slow
 class TestBoot1Merge2GateAssertions:
     """Assertions that must hold before merge-2 (default flip) is authorized.
 
@@ -1136,6 +1142,7 @@ class TestBoot1Merge2GateAssertions:
 # Wave 5: Depth stress tests (multi-level re-entry)
 # ============================================================================
 
+@pytest.mark.slow
 class TestBoot1DepthStress:
     """Verify Boot1 handles multiple re-entry depths correctly."""
 
@@ -1196,6 +1203,7 @@ class TestBoot1DepthStress:
 # Wave 7: Determinism, idempotence, depth cap enforcement
 # ============================================================================
 
+@pytest.mark.slow
 class TestBoot1Determinism:
     """Boot1 must be deterministic: same input → identical output, every time."""
 
@@ -1260,6 +1268,7 @@ class TestBoot1Determinism:
             )
 
 
+@pytest.mark.slow
 class TestBoot1Idempotence:
     """Terminal result must be stable: re-running terminal through engine = same output."""
 
@@ -1283,6 +1292,7 @@ class TestBoot1Idempotence:
         )
 
 
+@pytest.mark.slow
 class TestBoot1DepthCapEnforcement:
     """Verify depth cap is enforced, not just declared."""
 
@@ -1861,3 +1871,28 @@ class TestJsReentryPayloadValidation:
         assert not r["ok"]
         assert r["error_code"] == "input.invalid_type"
         assert "not valid Mu" in r["message"]
+
+
+def _has_slow_mark(obj):
+    marks = getattr(obj, "pytestmark", [])
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return any(getattr(mark, "name", None) == "slow" for mark in marks)
+
+
+def test_boot1_shadow_expensive_classes_remain_slow_marked():
+    """Lock expensive Boot1 parity coverage out of the fast PR shard."""
+    expensive_classes = (
+        TestBoot1PythonShadowParity,
+        TestBoot1BudgetAccounting,
+        TestBoot1BudgetAdversarial,
+        TestBoot1ParityProperty,
+        TestBoot1FailClosed,
+        TestBoot1Merge2GateAssertions,
+        TestBoot1DepthStress,
+        TestBoot1Determinism,
+        TestBoot1Idempotence,
+        TestBoot1DepthCapEnforcement,
+    )
+    missing = [cls.__name__ for cls in expensive_classes if not _has_slow_mark(cls)]
+    assert not missing, f"Boot1 expensive parity classes must stay @pytest.mark.slow: {missing}"

@@ -52,9 +52,10 @@ class TestIntermediateValidationBehavior:
             "  return value;\n"
             "}\n"
             "kernel._stepKernelCore = function(_a, _k, _d, _v, _m, _vm) {\n"  # ANTICHEAT_OK: JS kernel module patch for behavioral gate test
-            "  return { output: { _injected: true, value: 42 },\n"
-            "           stall: false, termination_reason: 'projection_applied',\n"
-            "           steps_used: 1, max_steps: 10000 };\n"
+            "  return { kind: 'terminal', continuation: null,\n"
+            "           result: { output: { _injected: true, value: 42 },\n"
+            "             stall: false, termination_reason: 'projection_applied',\n"
+            "             steps_used: 1, max_steps: 10000 } };\n"
             "};\n"
             "const { runAlgorithmWithBridge } = require('./mu/host/js/engine/pipeline');\n"
             "try {\n"

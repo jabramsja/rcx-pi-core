@@ -5,8 +5,8 @@ projection_runner.py AST_OK infra markers added (projection_runner.py retired in
 Proves that scoped sites have honest markers: list_to_linked is
 BOUNDARY boundary-normalization evidence, not tracked @host_iteration,
 collectOntologyEvidence (Py+JS) was reclassified to BOUNDARY in P7 Wave 3
-(off kernel path), and the residual no-fuel kernel-driver loops stay marked
-until a real structural elimination removes the host loops themselves.
+(off kernel path), and the single-step kernel-driver transition markers stay
+ratchet-visible until the host authority baseline is lowered.
 """
 from __future__ import annotations
 
@@ -115,8 +115,8 @@ class TestMarkerTruthAsymmetryGate:
                 return
         pytest.fail("collectOntologyEvidence function not found in pipeline.js")
 
-    def test_ratchet_baseline_remains_current_until_structural_reduction(self):
-        """Ratchet baseline stays current while residual no-fuel loops remain."""
+    def test_ratchet_baseline_remains_current_until_baseline_update(self):
+        """Ratchet baseline stays current while transition markers remain tracked."""
         baseline_path = REPO_ROOT / "tools" / "checks" / "host_semantics_baseline.json"
         data = json.loads(baseline_path.read_text())
         py = data["counts"]["python"]
@@ -140,8 +140,8 @@ class TestMarkerTruthAsymmetryGate:
         assert ratchet["current"]["javascript"]["host_iteration"] == 1
         assert ratchet["decreases"] == []
 
-    def test_js_active_kernel_core_loop_is_mu_fuel_governed_with_watchdog(self):
-        """JS kernel core has an honest residual marker and no synthetic no-fuel fuel."""
+    def test_js_active_kernel_core_is_single_step_packet_boundary(self):
+        """JS kernel core has an honest transition marker and no synthetic no-fuel fuel."""
         path = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
         lines = path.read_text().splitlines()
         function_index = _find_line_index(lines, "function _stepKernelCore(")
@@ -149,16 +149,14 @@ class TestMarkerTruthAsymmetryGate:
         body = _js_function_body(lines, function_index)
 
         assert "@host_iteration" in jsdoc, (
-            "_stepKernelCore still has a residual no-fuel host loop and must stay marked"
+            "_stepKernelCore still carries host transition authority and must stay marked"
         )
-        assert "residual kernel driver watchdog" in jsdoc
-        assert "supplied Mu fuel owns progress" in jsdoc
-        assert "without" in jsdoc and "maxSteps" in jsdoc
+        assert "single-step" in jsdoc
         assert "for (let i = 0; i < maxSteps; i++)" not in body, (
             "_stepKernelCore reintroduced the old maxSteps-owned kernel loop"
         )
-        assert "while (!callerSuppliedFuel || fuelCursor !== null)" in body, (
-            "_stepKernelCore must preserve legacy no-fuel compatibility without synthetic fuel"
+        assert "while (!callerSuppliedFuel || fuelCursor !== null)" not in body, (
+            "_stepKernelCore must not retain legacy no-fuel compatibility inside the kernel body"
         )
         assert "compatibilityFuelNode <= maxSteps" not in body, (
             "_stepKernelCore must not construct host-counted no-fuel compatibility fuel"
@@ -166,15 +164,18 @@ class TestMarkerTruthAsymmetryGate:
         assert "listToLinked(compatibilityFuelItems)" not in body, (
             "_stepKernelCore must not convert a maxSteps-sized host list into fuel"
         )
-        assert "if (stepsUsed >= maxSteps)" in body, (
+        assert "if (stepsUsed >= watchdogCap)" in body, (
             "_stepKernelCore must keep maxSteps as a watchdog check"
         )
+        assert "kind: 'terminal'" in body
+        assert "kind: 'continuation'" in body
+        assert "kernel_driver_continuation_state" in body
         assert "if (callerSuppliedFuel)" in body and "fuelCursor = fuelCursor.tail" in body, (
             "_stepKernelCore must consume Mu fuel only on the explicit supplied-fuel path"
         )
 
-    def test_js_host_iteration_inventory_tracks_active_kernel_loop(self):
-        """The sole JS host-iteration marker is on the active kernel loop."""
+    def test_js_host_iteration_inventory_tracks_active_kernel_transition(self):
+        """The sole JS host-iteration marker is on the active kernel transition."""
         kernel_path = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
         bootstrap_path = REPO_ROOT / "mu" / "host" / "js" / "core" / "bootstrap_core.js"
         sites = _js_host_iteration_sites()

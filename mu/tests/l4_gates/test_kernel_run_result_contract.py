@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import json
 import subprocess
+from copy import deepcopy
 
 import pytest
 
@@ -32,6 +33,20 @@ VALID_TERM_REASONS = {
     "fuel_exhausted",
 }
 FUEL_FIELDS = {"fuel_supplied", "fuel_remaining", "fuel_exhausted"}
+PACKET_FIELDS = {"kind", "result", "continuation"}
+CONTINUATION_FIELDS = {
+    "tag",
+    "version",
+    "kernel_state",
+    "domain_input",
+    "projection_cursor",
+    "remaining_fuel",
+    "fuel_mode",
+    "steps_used",
+    "watchdog_cap",
+    "terminal",
+}
+TERMINAL_METADATA_FIELDS = {"reached", "reason", "error"}
 SHARED_RESULT_FIELDS = (
     "output",
     "stall",
@@ -41,7 +56,6 @@ SHARED_RESULT_FIELDS = (
 )
 def _shared_kernel_result(meta: dict) -> dict:
     return {field: meta[field] for field in SHARED_RESULT_FIELDS}
-
 
 def _make_kernel_fuel(count: int):
     fuel = None
@@ -63,6 +77,579 @@ def _fuel_remaining_count(fuel) -> int:
 
 class TestKernelRunResultPython:
     """Python step_kernel_mu(return_meta=True) must produce KernelRunResult."""
+
+    def test_raw_step_kernel_returns_packet_shape(self):
+        """Raw Python kernel-driver call returns terminal-or-continuation packet."""
+        packet = step_kernel_mu(
+            [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            {"x": 1},
+            max_steps=100,
+            return_packet=True,
+        )
+        assert set(packet.keys()) == PACKET_FIELDS
+        assert packet["kind"] in {"terminal", "continuation"}
+        if packet["kind"] == "terminal":
+            assert packet["continuation"] is None
+            assert REQUIRED_FIELDS <= set(packet["result"].keys())
+        else:
+            assert packet["result"] is None
+            continuation = packet["continuation"]
+            assert set(continuation.keys()) == CONTINUATION_FIELDS
+            assert continuation["tag"] == "kernel_driver_continuation_state"
+            assert continuation["version"] == 1
+            assert continuation["fuel_mode"] in {"explicit", "omitted_compatibility"}
+            assert continuation["remaining_fuel"] is None
+            assert set(continuation["terminal"].keys()) == TERMINAL_METADATA_FIELDS
+            assert continuation["terminal"] == {"reached": False, "reason": None, "error": None}
+
+    def test_raw_step_kernel_terminal_packet_carries_kernel_run_result(self):
+        """Terminal packets carry the existing KernelRunResult unchanged."""
+        packet = step_kernel_mu(
+            [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            {"x": 1},
+            kernel_fuel=None,
+            max_steps=100,
+            return_packet=True,
+        )
+        assert packet["kind"] == "terminal"
+        assert packet["continuation"] is None
+        assert REQUIRED_FIELDS <= set(packet["result"].keys())
+        assert packet["result"]["termination_reason"] == "fuel_exhausted"
+        assert packet["result"]["fuel_supplied"] is True
+
+    def test_continuation_resume_rejects_terminal_metadata_claim(self):
+        """Continuation packets must not smuggle terminal result metadata."""
+        packet = step_kernel_mu(
+            [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            {"x": 1},
+            max_steps=100,
+            return_packet=True,
+        )
+        assert packet["kind"] == "continuation"
+        forged = deepcopy(packet["continuation"])
+        forged["terminal"] = {
+            "reached": True,
+            "reason": "accepted",
+            "error": None,
+        }
+
+        with pytest.raises(ValueError, match="terminal metadata"):
+            step_kernel_mu(
+                [{"pattern": {"x": 1}, "body": {"x": 2}}],
+                {"x": 1},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_rejects_unsupplied_projection_state(self):
+        """Continuation resume must not execute projections absent from the call."""
+        forged_projection = {
+            "pattern": step_mu_mod.normalize_for_match({"x": 1}),
+            "body": step_mu_mod.normalize_for_match({"x": 2}),
+        }
+        state = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": {
+                "_step": step_mu_mod.normalize_for_match({"ignored": True}),
+                "_projs": step_mu_mod.list_to_linked([forged_projection]),
+            },
+            "domain_input": {"ignored": True},
+            "projection_cursor": None,
+            "remaining_fuel": None,
+            "fuel_mode": "omitted_compatibility",
+            "steps_used": 1,
+            "watchdog_cap": 100,
+            "terminal": {"reached": False, "reason": None, "error": None},
+        }
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                [],
+                {"ignored": True},
+                continuation_state=state,
+                return_meta=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_rejects_broader_matching_prefix_projection(self):
+        """Continuation resume must not skip an earlier matching caller projection."""
+        first = {"pattern": {"x": 1}, "body": {"winner": "first"}}
+        second = {"pattern": {"x": 1}, "body": {"winner": "second"}}
+        packet = step_kernel_mu(
+            [second],
+            {"x": 1},
+            return_packet=True,
+            max_steps=100,
+        )
+        assert packet["kind"] == "continuation"
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                [first, second],
+                {"x": 1},
+                continuation_state=packet["continuation"],
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_binds_remaining_cursor_without_hashing_tail(self, monkeypatch):
+        """Continuation binding must compare projection cursors without hashing full tails."""
+        first = {"pattern": {"x": {"var": "v"}}, "body": {"winner": {"var": "v"}}}
+        second = {"pattern": {"x": {"var": "v"}}, "body": {"shadow": {"var": "v"}}}
+        projs = [first, second]
+        inp = {"x": 1}
+        packet = step_kernel_mu(projs, inp, return_packet=True, max_steps=100)
+        assert packet["kind"] == "continuation"
+        packet = step_kernel_mu(
+            projs,
+            inp,
+            continuation_state=packet["continuation"],
+            return_packet=True,
+            max_steps=100,
+        )
+        assert packet["kind"] == "continuation"
+        match_ctx = packet["continuation"]["kernel_state"]["_match_ctx"]
+        assert match_ctx["_remaining"] is not None
+
+        real_mu_hash = step_mu_mod.mu_hash
+
+        def guarded_mu_hash(value):
+            if isinstance(value, dict) and set(value.keys()) == {"head", "tail"}:
+                head = value["head"]
+                if isinstance(head, dict) and set(head.keys()) == {"pattern", "body"}:
+                    raise AssertionError("projection cursor tail was hashed")
+            return real_mu_hash(value)
+
+        monkeypatch.setattr(step_mu_mod, "mu_hash", guarded_mu_hash)
+        resumed = step_kernel_mu(
+            projs,
+            inp,
+            continuation_state=packet["continuation"],
+            return_packet=True,
+            max_steps=100,
+        )
+        assert resumed["kind"] == "continuation"
+
+    def test_continuation_resume_rejects_forged_later_phase_projection_state(self):
+        """Continuation resume must reject later states whose selected projection no longer matches."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        forged = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": {
+                "_mode": "match_done",
+                "_status": "success",
+                "_bindings": None,
+                "_match_ctx": {
+                    "_input": step_mu_mod.normalize_for_match({"x": 0}),
+                    "_body": step_mu_mod.normalize_for_match({"x": 2}),
+                    "_remaining": None,
+                },
+            },
+            "domain_input": {"x": 0},
+            "projection_cursor": None,
+            "remaining_fuel": None,
+            "fuel_mode": "omitted_compatibility",
+            "steps_used": 5,
+            "watchdog_cap": 100,
+            "terminal": {"reached": False, "reason": None, "error": None},
+        }
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                projs,
+                {"x": 0},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_rejects_forged_match_no_match_for_matching_projection(self):
+        """Continuation resume must reject no_match when the selected projection matches."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        forged = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": {
+                "_mode": "match_done",
+                "_status": "no_match",
+                "_match_ctx": {
+                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
+                    "_body": step_mu_mod.normalize_for_match({"x": 2}),
+                    "_remaining": None,
+                },
+            },
+            "domain_input": {"x": 1},
+            "projection_cursor": None,
+            "remaining_fuel": None,
+            "fuel_mode": "omitted_compatibility",
+            "steps_used": 5,
+            "watchdog_cap": 100,
+            "terminal": {"reached": False, "reason": None, "error": None},
+        }
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_rejects_forged_match_success_precursor(self):
+        """Packet mode must not advance a forged match state into success."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        forged = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": {
+                "mode": "match",
+                "pattern_focus": None,
+                "value_focus": None,
+                "bindings": None,
+                "stack": None,
+                "_match_ctx": {
+                    "_input": step_mu_mod.normalize_for_match({"x": 0}),
+                    "_body": step_mu_mod.normalize_for_match({"x": 2}),
+                    "_remaining": None,
+                },
+            },
+            "domain_input": {"x": 0},
+            "projection_cursor": None,
+            "remaining_fuel": None,
+            "fuel_mode": "omitted_compatibility",
+            "steps_used": 4,
+            "watchdog_cap": 100,
+            "terminal": {"reached": False, "reason": None, "error": None},
+        }
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                projs,
+                {"x": 0},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_rejects_forged_subst_done_result(self):
+        """Continuation resume must not trust a caller-supplied subst_done result."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        state = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": {
+                "_mode": "subst_done",
+                "_result": step_mu_mod.normalize_for_match({"x": 999}),
+                "_subst_ctx": {
+                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
+                    "_remaining": None,
+                },
+            },
+            "domain_input": {"x": 1},
+            "projection_cursor": None,
+            "remaining_fuel": None,
+            "fuel_mode": "omitted_compatibility",
+            "steps_used": 21,
+            "watchdog_cap": 100,
+            "terminal": {"reached": False, "reason": None, "error": None},
+        }
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=state,
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_rejects_forged_final_subst_result_focus(self):
+        """Continuation resume must bind final subst result focus to the selected body."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        state = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": {
+                "mode": "subst",
+                "phase": "result",
+                "focus": step_mu_mod.normalize_for_match({"x": 999}),
+                "bindings": None,
+                "context": None,
+                "_subst_ctx": {
+                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
+                    "_remaining": None,
+                },
+            },
+            "domain_input": {"x": 1},
+            "projection_cursor": None,
+            "remaining_fuel": None,
+            "fuel_mode": "omitted_compatibility",
+            "steps_used": 7,
+            "watchdog_cap": 100,
+            "terminal": {"reached": False, "reason": None, "error": None},
+        }
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=state,
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_rejects_watchdog_cap_tampering(self):
+        """Continuation watchdog metadata must stay bound to the supplied watchdog."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        packet = step_kernel_mu(projs, {"x": 1}, max_steps=2, return_packet=True)
+        assert packet["kind"] == "continuation"
+
+        forged = deepcopy(packet["continuation"])
+        forged["watchdog_cap"] = 100
+
+        with pytest.raises(ValueError, match="watchdog_cap"):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=2,
+            )
+
+    def test_continuation_resume_rejects_boolean_versions(self):
+        """Python continuation version fields must reject bools like JS strict equality."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        packet = step_kernel_mu(projs, {"x": 1}, max_steps=2, return_packet=True)
+        assert packet["kind"] == "continuation"
+        assert packet["continuation"]["projection_cursor"] is not None
+
+        forged = deepcopy(packet["continuation"])
+        forged["version"] = True
+        with pytest.raises(ValueError, match="version mismatch"):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=2,
+            )
+
+        forged = deepcopy(packet["continuation"])
+        forged["projection_cursor"]["version"] = True
+        with pytest.raises(ValueError, match="version mismatch"):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=2,
+            )
+
+    def test_continuation_resume_rejects_primitive_kernel_state_with_projection_cursor(self):
+        """Python continuation resume rejects scalar kernel_state values carrying cursor authority."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        packet = step_kernel_mu(projs, {"x": 1}, max_steps=100, return_packet=True)
+        assert packet["kind"] == "continuation"
+
+        forged = deepcopy(packet["continuation"])
+        forged["kernel_state"] = "forged_non_state"
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_allows_cursorless_primitive_hash_stall_state(self):
+        """Python cursorless scalar continuation states preserve defensive hash_stall."""
+        projs = [{"pattern": "a", "body": "b"}]
+        sentinel = "hash_stall_sentinel"
+        packet = step_kernel_mu(projs, "a", max_steps=100, return_packet=True)
+        assert packet["kind"] == "continuation"
+        continuation = deepcopy(packet["continuation"])
+        continuation["kernel_state"] = sentinel
+        continuation["projection_cursor"] = None
+
+        terminal = step_kernel_mu(
+            projs,
+            "a",
+            continuation_state=continuation,
+            return_packet=True,
+            max_steps=100,
+        )
+
+        assert terminal["kind"] == "terminal"
+        assert terminal["result"]["termination_reason"] == "hash_stall"
+        assert terminal["result"]["output"] == "a"
+        assert terminal["result"]["steps_used"] == 2
+
+    @pytest.mark.parametrize("kernel_state", [{"foo": "bar"}, {"_mode": "bogus"}])
+    def test_continuation_resume_rejects_unknown_kernel_state_shape(self, kernel_state):
+        """Python continuation resume rejects object states that are not emitted kernel shapes."""
+        state = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": kernel_state,
+            "domain_input": {"x": 1},
+            "projection_cursor": None,
+            "remaining_fuel": None,
+            "fuel_mode": "omitted_compatibility",
+            "steps_used": 2,
+            "watchdog_cap": 100,
+            "terminal": {"reached": False, "reason": None, "error": None},
+        }
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                [{"pattern": {"x": 1}, "body": {"x": 2}}],
+                {"x": 1},
+                continuation_state=state,
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_rejects_steps_used_cursor_tampering(self):
+        """Python continuation resume rejects steps_used values not bound to the cursor."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        packet = step_kernel_mu(projs, {"x": 1}, max_steps=100, return_packet=True)
+        assert packet["kind"] == "continuation"
+
+        forged = deepcopy(packet["continuation"])
+        forged["steps_used"] = 100
+
+        with pytest.raises(ValueError, match="steps_used"):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=100,
+            )
+
+    def test_continuation_resume_rejects_steps_used_null_cursor_tampering(self):
+        """Python continuation resume rejects cursorless steps_used tampering."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        packet = step_kernel_mu(projs, {"x": 1}, max_steps=100, return_packet=True)
+        assert packet["kind"] == "continuation"
+        packet = step_kernel_mu(
+            projs,
+            {"x": 1},
+            continuation_state=packet["continuation"],
+            return_packet=True,
+            max_steps=100,
+        )
+        assert packet["kind"] == "continuation"
+        assert packet["continuation"]["projection_cursor"] is None
+        assert packet["continuation"]["steps_used"] == 2
+
+        for forged_steps_used in (0, 1, 100):
+            forged = deepcopy(packet["continuation"])
+            forged["steps_used"] = forged_steps_used
+            with pytest.raises(ValueError, match="steps_used"):
+                step_kernel_mu(
+                    projs,
+                    {"x": 1},
+                    continuation_state=forged,
+                    return_packet=True,
+                    max_steps=100,
+                )
+
+    def test_continuation_resume_rejects_subst_null_bindings_when_required(self):
+        """Python continuation resume rejects null subst bindings for a bound projection."""
+        projs = [{"pattern": {"x": {"var": "v"}}, "body": {"y": {"var": "v"}}}]
+        packet = step_kernel_mu(projs, {"x": 1}, max_steps=100, return_packet=True)
+        for _ in range(40):
+            assert packet["kind"] == "continuation"
+            kernel_state = packet["continuation"]["kernel_state"]
+            if isinstance(kernel_state, dict) and "subst" in kernel_state:
+                forged = deepcopy(packet["continuation"])
+                forged["kernel_state"]["subst"]["bindings"] = None
+                with pytest.raises(ValueError, match="kernel_state"):
+                    step_kernel_mu(
+                        projs,
+                        {"x": 1},
+                        continuation_state=forged,
+                        return_packet=True,
+                        max_steps=100,
+                    )
+                break
+            packet = step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=packet["continuation"],
+                return_packet=True,
+                max_steps=100,
+            )
+        else:
+            raise AssertionError("expected subst continuation state")
+
+    @pytest.mark.parametrize(
+        ("case_name", "expected_error"),
+        [
+            ("null_match_ctx", "_match_ctx"),
+            ("null_match_request", "match request"),
+            ("null_subst_ctx", "_subst_ctx"),
+            ("null_subst_request", "subst request"),
+            ("missing_bindings", "binding cursor"),
+        ],
+    )
+    def test_continuation_resume_rejects_malformed_phase_fields(self, case_name, expected_error):
+        """Python continuation resume rejects supplied null/missing phase fields like JS."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        state = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": {
+                "_mode": "match_done",
+                "_status": "success",
+                "_bindings": None,
+                "_match_ctx": {
+                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
+                    "_body": step_mu_mod.normalize_for_match({"x": 2}),
+                    "_remaining": None,
+                },
+                "_subst_ctx": {
+                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
+                    "_remaining": None,
+                },
+            },
+            "domain_input": {"x": 1},
+            "projection_cursor": None,
+            "remaining_fuel": None,
+            "fuel_mode": "omitted_compatibility",
+            "steps_used": 5,
+            "watchdog_cap": 100,
+            "terminal": {"reached": False, "reason": None, "error": None},
+        }
+        kernel_state = state["kernel_state"]
+        if case_name == "null_match_ctx":
+            kernel_state["_match_ctx"] = None
+        elif case_name == "null_match_request":
+            kernel_state["match"] = None
+        elif case_name == "null_subst_ctx":
+            kernel_state["_subst_ctx"] = None
+        elif case_name == "null_subst_request":
+            kernel_state["subst"] = None
+        elif case_name == "missing_bindings":
+            del kernel_state["_bindings"]
+        else:  # pragma: no cover - parametrization guard
+            raise AssertionError(case_name)
+
+        with pytest.raises((TypeError, ValueError), match=expected_error):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=state,
+                return_packet=True,
+                max_steps=100,
+            )
 
     def test_projection_applied_shape(self):
         """Successful projection produces all required fields."""
@@ -118,7 +705,7 @@ class TestKernelRunResultPython:
 
         monkeypatch.setattr(step_mu_mod, "list_to_linked", spy_list_to_linked)
         max_steps = 4
-        meta = step_mu_mod.step_kernel_mu(
+        meta = step_kernel_mu(
             [
                 {"pattern": {"s": "a"}, "body": {"s": "b"}},
                 {"pattern": {"s": "b"}, "body": {"s": "a"}},
@@ -308,6 +895,42 @@ class TestKernelRunResultPython:
 class TestKernelRunResultJS:
     """JS stepKernel via --json-api (live seeded kernel) must produce KernelRunResult."""
 
+    def test_algorithm_runtime_validation_does_not_use_host_cache_metadata(self):
+        """Algorithm-runtime validation authority must be derived each transition."""
+        source = (REPO_ROOT / "mu/host/js/engine/kernel.js").read_text(encoding="utf-8")
+
+        assert "new WeakMap" not in source
+        assert "new WeakSet" not in source
+        assert "runtimeValidationCache" not in source
+        assert "RUNTIME_VALIDATION_CACHE_METADATA" not in source
+
+    def test_js_return_packet_exposes_only_mu_continuation_fields(self):
+        """Internal continuation proof must not become public packet data."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const packet = stepKernel(
+  [],
+  trust({ x: 1 }),
+  [{ pattern: trust({ x: 1 }), body: trust({ x: 2 }) }],
+  { returnPacket: true, maxSteps: 1 }
+);
+console.log(JSON.stringify(Object.keys(packet).sort()));
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        assert json.loads(result.stdout.strip()) == ["continuation", "kind", "result"]
+
     def _run_json_api_response(self, payload: dict) -> dict:
         """Run JS via eval_step.js --json-api with real seed loading."""
         result = subprocess.run(
@@ -357,6 +980,1811 @@ try {{
         )
         assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
         return json.loads(result.stdout.strip())
+
+    def test_direct_step_kernel_rejects_unsupplied_projection_continuation(self):
+        """JS continuation resume rejects embedded projections absent from the call."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize, listToLinked } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const forgedProjection = muContainers.record([
+  ['pattern', normalize(trust({ x: 1 }))],
+  ['body', normalize(trust({ x: 2 }))],
+]);
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_step', normalize(trust({ ignored: true }))],
+    ['_projs', listToLinked([forgedProjection])],
+  ])],
+  ['domain_input', trust({ ignored: true })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 1],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ ignored: true }),
+    [],
+    { continuationState: state, returnMeta: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_rejects_terminal_metadata_claim(self):
+        """JS continuation resume rejects terminal metadata on continuation data."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize, listToLinked } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const projection = muContainers.record([
+  ['pattern', normalize(trust({ x: 1 }))],
+  ['body', normalize(trust({ x: 2 }))],
+]);
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_step', normalize(trust({ x: 1 }))],
+    ['_projs', listToLinked([projection])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 1],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', true],
+    ['reason', 'accepted'],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [trust({ pattern: { x: 1 }, body: { x: 2 } })],
+    { continuationState: state, returnMeta: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "terminal metadata" in payload["error"]
+
+    def test_direct_step_kernel_rejects_broader_matching_prefix_projection(self):
+        """JS continuation resume must not skip an earlier matching caller projection."""
+        script = """
+const fs = require('fs');
+const path = require('path');
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const stage0Vm = require('./mu/host/js/core/stage0_vm');
+const {
+  getSeedSubdir,
+  loadVerifiedSeedImage,
+  SEED_IMAGE_VERIFICATION_MODES,
+} = require('./mu/host/js/core/seed_loader');
+const muRoot = path.join(process.cwd(), 'mu');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const kernel = loadVerifiedSeedImage(
+  'kernel.v1.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('kernel.v1.json'), 'kernel.v1.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const matchSeed = loadVerifiedSeedImage(
+  'match.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('match.v2.json'), 'match.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const substSeed = loadVerifiedSeedImage(
+  'subst.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('subst.v2.json'), 'subst.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const compiledDir = path.join(muRoot, 'stage0', 'compiled');
+const kernelBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'kernel_v1.compiled.v1.json'), 'utf8'));
+const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
+const substBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'subst_v2.compiled.v1.json'), 'utf8'));
+stage0Vm.validateBundle(kernelBundle);
+stage0Vm.validateBundle(matchBundle);
+stage0Vm.validateBundle(substBundle);
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const vmConfig = { kernelBundle, bridgeBundle: null, matchBundle, substBundle };
+const first = trust({ pattern: { x: 1 }, body: { winner: 'first' } });
+const second = trust({ pattern: { x: 1 }, body: { winner: 'second' } });
+const input = trust({ x: 1 });
+let packet = stepKernel(
+  allProjections,
+  input,
+  [second],
+  { returnPacket: true, maxSteps: 100, vmConfig }
+);
+try {
+  stepKernel(
+    allProjections,
+    input,
+    [first, second],
+    { continuationState: packet.continuation, returnPacket: true, maxSteps: 100, vmConfig }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_rejects_matching_prefix_projection(self):
+        """JS algorithm_runtime continuation resume must not skip the first matching projection."""
+        script = """
+const fs = require('fs');
+const path = require('path');
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const {
+  getSeedSubdir,
+  loadVerifiedSeedImage,
+  SEED_IMAGE_VERIFICATION_MODES,
+} = require('./mu/host/js/core/seed_loader');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+function seed(name) {
+  const raw = fs.readFileSync(path.join('mu', getSeedSubdir(name), name));
+  return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
+}
+const kernel = seed('kernel.v1.json');
+const matchSeed = seed('match.v2.json');
+const substSeed = seed('subst.v2.json');
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const input = trust({ x: 1 });
+const first = trust({ pattern: { x: 1 }, body: { winner: 'first' } });
+const second = trust({ pattern: { x: 1 }, body: { winner: 'second' } });
+let packet = stepKernel(
+  allProjections,
+  input,
+  [second],
+  { returnPacket: true, maxSteps: 100, validationMode: 'algorithm_runtime' }
+);
+for (let i = 0; i < 30 && packet.kind === 'continuation'; i++) {
+  const kernelState = packet.continuation.kernel_state;
+  if (kernelState &&
+      typeof kernelState === 'object' &&
+      kernelState._mode === 'match_done' &&
+      kernelState._status === 'success') {
+    break;
+  }
+  packet = stepKernel(
+    allProjections,
+    input,
+    [second],
+    {
+      continuationState: packet.continuation,
+      returnPacket: true,
+      maxSteps: 100,
+      validationMode: 'algorithm_runtime',
+    }
+  );
+}
+try {
+  stepKernel(
+    allProjections,
+    input,
+    [first, second],
+    {
+      continuationState: packet.continuation,
+      returnPacket: true,
+      maxSteps: 100,
+      validationMode: 'algorithm_runtime',
+    }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_rejects_matching_prefix_cursor(self):
+        """JS algorithm_runtime resume must reject a kernel cursor behind a new matching prefix."""
+        script = """
+const fs = require('fs');
+const path = require('path');
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const {
+  getSeedSubdir,
+  loadVerifiedSeedImage,
+  SEED_IMAGE_VERIFICATION_MODES,
+} = require('./mu/host/js/core/seed_loader');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+function seed(name) {
+  const raw = fs.readFileSync(path.join('mu', getSeedSubdir(name), name));
+  return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
+}
+const kernel = seed('kernel.v1.json');
+const matchSeed = seed('match.v2.json');
+const substSeed = seed('subst.v2.json');
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const input = trust({ x: 1 });
+const first = trust({ pattern: { x: 1 }, body: { winner: 'first' } });
+const second = trust({ pattern: { x: 1 }, body: { winner: 'second' } });
+const packet = stepKernel(
+  allProjections,
+  input,
+  [second],
+  { returnPacket: true, maxSteps: 100, validationMode: 'algorithm_runtime' }
+);
+try {
+  stepKernel(
+    allProjections,
+    input,
+    [first, second],
+    {
+      continuationState: packet.continuation,
+      returnPacket: true,
+      maxSteps: 100,
+      validationMode: 'algorithm_runtime',
+    }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_rejects_forged_kernel_try_input(self):
+        """JS algorithm_runtime resume binds kernel try _input to the supplied domain input."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize, normalizeProjection, listToLinked } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const projection = trust({ pattern: { x: 1 }, body: { accepted: true } });
+const normalizedProjection = normalizeProjection(projection);
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_mode', 'kernel'],
+    ['_phase', 'try'],
+    ['_input', normalize(trust({ x: 999 }))],
+    ['_remaining', listToLinked([normalizedProjection])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', muContainers.record([
+    ['tag', 'kernel_projection_cursor'],
+    ['version', 1],
+    ['position', 1],
+    ['exhausted', false],
+  ])],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 1],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [projection],
+    {
+      continuationState: state,
+      returnPacket: true,
+      maxSteps: 100,
+      validationMode: 'algorithm_runtime',
+    }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_rejects_forged_success_bindings(self):
+        """JS algorithm_runtime continuation resume must prove match_done bindings from input/projection."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const projection = trust({ pattern: { x: { var: 'v' } }, body: { y: { var: 'v' } } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_mode', 'match_done'],
+    ['_status', 'success'],
+    ['_bindings', muContainers.record([
+      ['name', 'v'],
+      ['value', 999],
+      ['rest', null],
+    ])],
+    ['_match_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 1 }))],
+      ['_body', normalize(trust({ y: { var: 'v' } }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 4],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [projection],
+    {
+      continuationState: state,
+      returnPacket: true,
+      maxSteps: 100,
+      validationMode: 'algorithm_runtime',
+    }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_rejects_forged_final_match_precursor_bindings(self):
+        """JS algorithm_runtime resume must prove final match precursor bindings."""
+        script = """
+const fs = require('fs');
+const path = require('path');
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize } = require('./mu/host/js/core/normalize');
+const {
+  getSeedSubdir,
+  loadVerifiedSeedImage,
+  SEED_IMAGE_VERIFICATION_MODES,
+} = require('./mu/host/js/core/seed_loader');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+function seed(name) {
+  const raw = fs.readFileSync(path.join('mu', getSeedSubdir(name), name));
+  return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
+}
+const matchSeed = seed('match.v2.json');
+const matchProjections = muContainers.list([...matchSeed.projections]);
+const projection = trust({ pattern: { x: { var: 'v' } }, body: { y: { var: 'v' } } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['mode', 'match'],
+    ['pattern_focus', null],
+    ['value_focus', null],
+    ['bindings', muContainers.record([
+      ['name', 'v'],
+      ['value', 999],
+      ['rest', null],
+    ])],
+    ['stack', null],
+    ['_match_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 1 }))],
+      ['_body', normalize(trust({ y: { var: 'v' } }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 3],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    matchProjections,
+    trust({ x: 1 }),
+    [projection],
+    {
+      continuationState: state,
+      returnPacket: true,
+      maxSteps: 100,
+      validationMode: 'algorithm_runtime',
+    }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_rejects_forged_in_progress_match_binding(self):
+        """JS algorithm_runtime resume must not advance forged match focus into bindings."""
+        script = """
+const fs = require('fs');
+const path = require('path');
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize } = require('./mu/host/js/core/normalize');
+const {
+  getSeedSubdir,
+  loadVerifiedSeedImage,
+  SEED_IMAGE_VERIFICATION_MODES,
+} = require('./mu/host/js/core/seed_loader');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+function seed(name) {
+  const raw = fs.readFileSync(path.join('mu', getSeedSubdir(name), name));
+  return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
+}
+const kernel = seed('kernel.v1.json');
+const matchSeed = seed('match.v2.json');
+const substSeed = seed('subst.v2.json');
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const projection = trust({ pattern: { x: { var: 'v' } }, body: { y: { var: 'v' } } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['mode', 'match'],
+    ['pattern_focus', muContainers.record([['var', 'v']])],
+    ['value_focus', 999],
+    ['bindings', null],
+    ['stack', null],
+    ['_match_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 1 }))],
+      ['_body', normalize(trust({ y: { var: 'v' } }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 3],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    allProjections,
+    trust({ x: 1 }),
+    [projection],
+    {
+      continuationState: state,
+      returnPacket: true,
+      maxSteps: 100,
+      validationMode: 'algorithm_runtime',
+    }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_cache_rejects_forged_in_progress_match_binding(self):
+        """JS runtime validation cache must not disable in-progress match binding proof."""
+        script = """
+const { _stepKernelCore } = require('./mu/host/js/engine/kernel');
+const { validateAlgorithmRuntimeFields } = require('./mu/host/js/core/security');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize, normalizeProjection, listToLinked } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const input = trust({ x: 1 });
+const normalizedInput = normalize(input);
+const projection = normalizeProjection(trust({ pattern: { x: { var: 'v' } }, body: { y: { var: 'v' } } }));
+const kernelInput = muContainers.record([
+  ['_step', normalizedInput],
+  ['_projs', listToLinked([
+    muContainers.record([
+      ['pattern', projection.pattern],
+      ['body', projection.body],
+    ]),
+  ])],
+]);
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['mode', 'match'],
+    ['pattern_focus', muContainers.record([['var', 'v']])],
+    ['value_focus', 999],
+    ['bindings', null],
+    ['stack', null],
+    ['_match_ctx', muContainers.record([
+      ['_input', normalizedInput],
+      ['_body', projection.body],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', input],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 3],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  _stepKernelCore(
+    [],
+    kernelInput,
+    input,
+    validateAlgorithmRuntimeFields,
+    100,
+    null,
+    undefined,
+    state,
+    Object.create(null)
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct _stepKernelCore error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_rejects_caller_forged_cache_context(self):
+        """JS runtime validation cache authority must not come from caller-controlled fields."""
+        script = """
+const { _stepKernelCore } = require('./mu/host/js/engine/kernel');
+const { validateAlgorithmRuntimeFields } = require('./mu/host/js/core/security');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize, normalizeProjection, listToLinked } = require('./mu/host/js/core/normalize');
+const { muHash } = require('./mu/host/js/core/types');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const input = trust({ x: 2 });
+const normalizedInput = normalize(input);
+const projection = normalizeProjection(trust({ pattern: { x: 1 }, body: { accepted: true } }));
+const projectionRecord = muContainers.record([
+  ['pattern', projection.pattern],
+  ['body', projection.body],
+]);
+const projectionCursor = listToLinked([projectionRecord]);
+const kernelInput = muContainers.record([
+  ['_step', normalizedInput],
+  ['_projs', projectionCursor],
+]);
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_mode', 'match_done'],
+    ['_status', 'success'],
+    ['_bindings', null],
+    ['_match_ctx', muContainers.record([
+      ['_input', normalizedInput],
+      ['_body', projection.body],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', input],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 4],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+const fakeCache = Object.create(null);
+fakeCache.inputHash = muHash(normalizedInput);
+fakeCache.projectionAuthorityHash = muHash(projectionCursor);
+fakeCache.projectionContexts = [{
+  projection: projectionRecord,
+  projectionCursor,
+  projectionRest: null,
+  bodyHash: muHash(projection.body),
+  patternHash: muHash(projection.pattern),
+  restHash: muHash(null),
+  cursorHash: muHash(projectionCursor),
+  prefixCleared: true,
+  matchBindings: {},
+  projectionMatches: true,
+}];
+fakeCache.prefixHasMatchingProjection = true;
+try {
+  _stepKernelCore(
+    [],
+    kernelInput,
+    input,
+    validateAlgorithmRuntimeFields,
+    100,
+    null,
+    undefined,
+    state,
+    fakeCache
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct _stepKernelCore error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_rejects_forged_subst_traverse_focus(self):
+        """JS algorithm_runtime resume must bind in-progress subst traverse focus."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const projection = trust({ pattern: { x: { var: 'v' } }, body: { y: { var: 'v' } } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['mode', 'subst'],
+    ['phase', 'traverse'],
+    ['focus', normalize(trust({ forged: 999 }))],
+    ['bindings', muContainers.record([
+      ['name', 'v'],
+      ['value', 1],
+      ['rest', null],
+    ])],
+    ['context', null],
+    ['_subst_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 1 }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 14],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [projection],
+    {
+      continuationState: state,
+      returnPacket: true,
+      maxSteps: 100,
+      validationMode: 'algorithm_runtime',
+    }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_algorithm_runtime_rejects_forged_final_subst_result_focus(self):
+        """JS algorithm_runtime resume must bind final subst focus to selected projection output."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const projection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['mode', 'subst'],
+    ['phase', 'result'],
+    ['focus', normalize(trust({ forged: 999 }))],
+    ['bindings', null],
+    ['context', null],
+    ['_subst_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 1 }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 7],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [projection],
+    {
+      continuationState: state,
+      returnMeta: true,
+      maxSteps: 100,
+      validationMode: 'algorithm_runtime',
+    }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_rejects_forged_later_phase_projection_state(self):
+        """JS continuation resume rejects later states whose selected projection no longer matches."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_mode', 'subst_done'],
+    ['_result', normalize(trust({ x: 2 }))],
+    ['_subst_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 0 }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 0 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 21],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 0 }),
+    [trust({ pattern: { x: 1 }, body: { x: 2 } })],
+    { continuationState: state, returnPacket: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_rejects_forged_match_no_match_for_matching_projection(self):
+        """JS continuation resume rejects no_match when the selected projection matches."""
+        script = """
+const fs = require('fs');
+const path = require('path');
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const stage0Vm = require('./mu/host/js/core/stage0_vm');
+const { normalize } = require('./mu/host/js/core/normalize');
+const {
+  getSeedSubdir,
+  loadVerifiedSeedImage,
+  SEED_IMAGE_VERIFICATION_MODES,
+} = require('./mu/host/js/core/seed_loader');
+const muRoot = path.join(process.cwd(), 'mu');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const kernel = loadVerifiedSeedImage(
+  'kernel.v1.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('kernel.v1.json'), 'kernel.v1.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const matchSeed = loadVerifiedSeedImage(
+  'match.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('match.v2.json'), 'match.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const substSeed = loadVerifiedSeedImage(
+  'subst.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('subst.v2.json'), 'subst.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const compiledDir = path.join(muRoot, 'stage0', 'compiled');
+const kernelBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'kernel_v1.compiled.v1.json'), 'utf8'));
+const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
+const substBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'subst_v2.compiled.v1.json'), 'utf8'));
+stage0Vm.validateBundle(kernelBundle);
+stage0Vm.validateBundle(matchBundle);
+stage0Vm.validateBundle(substBundle);
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const vmConfig = { kernelBundle, bridgeBundle: null, matchBundle, substBundle };
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_mode', 'match_done'],
+    ['_status', 'no_match'],
+    ['_match_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 1 }))],
+      ['_body', normalize(trust({ x: 2 }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 5],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    allProjections,
+    trust({ x: 1 }),
+    [domainProjection],
+    { continuationState: state, returnPacket: true, maxSteps: 100, vmConfig }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_rejects_forged_match_success_precursor(self):
+        """JS packet mode must not advance a forged match state into success."""
+        script = """
+const fs = require('fs');
+const path = require('path');
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const stage0Vm = require('./mu/host/js/core/stage0_vm');
+const { normalize } = require('./mu/host/js/core/normalize');
+const {
+  getSeedSubdir,
+  loadVerifiedSeedImage,
+  SEED_IMAGE_VERIFICATION_MODES,
+} = require('./mu/host/js/core/seed_loader');
+const muRoot = path.join(process.cwd(), 'mu');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const kernel = loadVerifiedSeedImage(
+  'kernel.v1.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('kernel.v1.json'), 'kernel.v1.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const matchSeed = loadVerifiedSeedImage(
+  'match.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('match.v2.json'), 'match.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const substSeed = loadVerifiedSeedImage(
+  'subst.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('subst.v2.json'), 'subst.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const compiledDir = path.join(muRoot, 'stage0', 'compiled');
+const kernelBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'kernel_v1.compiled.v1.json'), 'utf8'));
+const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
+const substBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'subst_v2.compiled.v1.json'), 'utf8'));
+stage0Vm.validateBundle(kernelBundle);
+stage0Vm.validateBundle(matchBundle);
+stage0Vm.validateBundle(substBundle);
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const vmConfig = { kernelBundle, bridgeBundle: null, matchBundle, substBundle };
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['mode', 'match'],
+    ['pattern_focus', null],
+    ['value_focus', null],
+    ['bindings', null],
+    ['stack', null],
+    ['_match_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 0 }))],
+      ['_body', normalize(trust({ x: 2 }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 0 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 4],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    allProjections,
+    trust({ x: 0 }),
+    [domainProjection],
+    { continuationState: state, returnPacket: true, maxSteps: 100, vmConfig }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_rejects_forged_subst_done_result(self):
+        """JS continuation resume must not trust a caller-supplied subst_done result."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_mode', 'subst_done'],
+    ['_result', normalize(trust({ x: 999 }))],
+    ['_subst_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 1 }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 21],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [domainProjection],
+    { continuationState: state, returnPacket: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_rejects_forged_final_subst_result_focus(self):
+        """JS continuation resume must bind final subst result focus to the selected body."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['mode', 'subst'],
+    ['phase', 'result'],
+    ['focus', normalize(trust({ x: 999 }))],
+    ['bindings', null],
+    ['context', null],
+    ['_subst_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 1 }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 7],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [domainProjection],
+    { continuationState: state, returnPacket: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_rejects_watchdog_cap_tampering(self):
+        """JS continuation watchdog metadata must stay bound to the supplied watchdog."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize, normalizeProjection, listToLinked } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const kernelProjection = normalizeProjection(domainProjection);
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_mode', 'kernel'],
+    ['_phase', 'try'],
+    ['_input', normalize(trust({ x: 1 }))],
+    ['_remaining', listToLinked([kernelProjection])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', muContainers.record([
+    ['tag', 'kernel_projection_cursor'],
+    ['version', 1],
+    ['position', 1],
+    ['exhausted', false],
+  ])],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 1],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [domainProjection],
+    { continuationState: state, returnPacket: true, maxSteps: 1 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "watchdog_cap" in payload["error"]
+
+    def test_direct_step_kernel_rejects_cursor_backed_watchdog_cap_terminalization(self):
+        """JS continuation resume rejects cursor-backed state already at watchdog cap."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize, normalizeProjection, listToLinked } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const kernelProjection = normalizeProjection(domainProjection);
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_mode', 'kernel'],
+    ['_phase', 'try'],
+    ['_input', normalize(trust({ x: 1 }))],
+    ['_remaining', listToLinked([kernelProjection])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', muContainers.record([
+    ['tag', 'kernel_projection_cursor'],
+    ['version', 1],
+    ['position', 1],
+    ['exhausted', false],
+  ])],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 1],
+  ['watchdog_cap', 1],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [domainProjection],
+    { continuationState: state, returnPacket: true, maxSteps: 1 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "watchdog_cap" in payload["error"]
+
+    def test_direct_step_kernel_rejects_primitive_kernel_state(self):
+        """JS continuation resume rejects scalar kernel_state values carrying cursor authority."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const fs = require('fs');
+const path = require('path');
+const { loadVerifiedSeedImage, getSeedSubdir, SEED_IMAGE_VERIFICATION_MODES } = require('./mu/host/js/core/seed_loader');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+function seed(name) {
+  const raw = fs.readFileSync(path.join('mu', getSeedSubdir(name), name));
+  return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
+}
+const kernel = seed('kernel.v1.json');
+const matchSeed = seed('match.v2.json');
+const substSeed = seed('subst.v2.json');
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const packet = stepKernel(
+  allProjections,
+  trust({ x: 1 }),
+  [domainProjection],
+  { returnPacket: true, maxSteps: 100 }
+);
+packet.continuation.kernel_state = 'forged_non_state';
+try {
+  stepKernel(
+    allProjections,
+    trust({ x: 1 }),
+    [domainProjection],
+    { continuationState: packet.continuation, returnPacket: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_allows_cursorless_primitive_hash_stall_state(self):
+        """JS cursorless scalar continuation states preserve defensive hash_stall."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const fs = require('fs');
+const path = require('path');
+const { loadVerifiedSeedImage, getSeedSubdir, SEED_IMAGE_VERIFICATION_MODES } = require('./mu/host/js/core/seed_loader');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+function seed(name) {
+  const raw = fs.readFileSync(path.join('mu', getSeedSubdir(name), name));
+  return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
+}
+const kernel = seed('kernel.v1.json');
+const matchSeed = seed('match.v2.json');
+const substSeed = seed('subst.v2.json');
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const domainProjection = trust({ pattern: 'a', body: 'b' });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', 'hash_stall_sentinel'],
+  ['domain_input', 'a'],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 1],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  const packet = stepKernel(
+    allProjections,
+    'a',
+    [domainProjection],
+    { continuationState: state, returnPacket: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({
+    success: true,
+    kind: packet.kind,
+    reason: packet.result && packet.result.termination_reason,
+    output: packet.result && packet.result.output,
+    steps: packet.result && packet.result.steps_used,
+  }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload == {
+            "success": True,
+            "kind": "terminal",
+            "reason": "hash_stall",
+            "output": "a",
+            "steps": 2,
+        }
+
+    def test_direct_step_kernel_rejects_unknown_kernel_state_shape(self):
+        """JS continuation resume rejects object states that are not emitted kernel shapes."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const malformedKernelStates = [
+  muContainers.record([['foo', 'bar']]),
+  muContainers.record([['_mode', 'bogus']]),
+];
+const errors = [];
+for (const kernelState of malformedKernelStates) {
+  const state = muContainers.record([
+    ['tag', 'kernel_driver_continuation_state'],
+    ['version', 1],
+    ['kernel_state', kernelState],
+    ['domain_input', trust({ x: 1 })],
+    ['projection_cursor', null],
+    ['remaining_fuel', null],
+    ['fuel_mode', 'omitted_compatibility'],
+    ['steps_used', 2],
+    ['watchdog_cap', 100],
+    ['terminal', muContainers.record([
+      ['reached', false],
+      ['reason', null],
+      ['error', null],
+    ])],
+  ]);
+  try {
+    stepKernel(
+      [],
+      trust({ x: 1 }),
+      [domainProjection],
+      { continuationState: state, returnPacket: true, maxSteps: 100 }
+    );
+    errors.push(null);
+  } catch (e) {
+    errors.push(e.message);
+  }
+}
+console.log(JSON.stringify({ errors }));
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert len(payload["errors"]) == 2
+        assert all(error and "kernel_state" in error for error in payload["errors"])
+
+    def test_direct_step_kernel_rejects_steps_used_cursor_tampering(self):
+        """JS continuation resume rejects steps_used values not bound to the cursor."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const fs = require('fs');
+const path = require('path');
+const { loadVerifiedSeedImage, getSeedSubdir, SEED_IMAGE_VERIFICATION_MODES } = require('./mu/host/js/core/seed_loader');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+function seed(name) {
+  const raw = fs.readFileSync(path.join('mu', getSeedSubdir(name), name));
+  return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
+}
+const kernel = seed('kernel.v1.json');
+const matchSeed = seed('match.v2.json');
+const substSeed = seed('subst.v2.json');
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const packet = stepKernel(
+  allProjections,
+  trust({ x: 1 }),
+  [domainProjection],
+  { returnPacket: true, maxSteps: 100 }
+);
+packet.continuation.steps_used = 100;
+try {
+  stepKernel(
+    allProjections,
+    trust({ x: 1 }),
+    [domainProjection],
+    { continuationState: packet.continuation, returnPacket: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "steps_used" in payload["error"]
+
+    def test_direct_step_kernel_rejects_steps_used_null_cursor_tampering(self):
+        """JS continuation resume rejects cursorless steps_used tampering."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const fs = require('fs');
+const path = require('path');
+const { loadVerifiedSeedImage, getSeedSubdir, SEED_IMAGE_VERIFICATION_MODES } = require('./mu/host/js/core/seed_loader');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+function seed(name) {
+  const raw = fs.readFileSync(path.join('mu', getSeedSubdir(name), name));
+  return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
+}
+const kernel = seed('kernel.v1.json');
+const matchSeed = seed('match.v2.json');
+const substSeed = seed('subst.v2.json');
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const first = stepKernel(
+  allProjections,
+  trust({ x: 1 }),
+  [domainProjection],
+  { returnPacket: true, maxSteps: 100 }
+);
+const second = stepKernel(
+  allProjections,
+  trust({ x: 1 }),
+  [domainProjection],
+  { continuationState: first.continuation, returnPacket: true, maxSteps: 100 }
+);
+const errors = [];
+const originalStepsUsed = second.continuation.steps_used;
+for (const forgedStepsUsed of [0, 1, 100]) {
+  second.continuation.steps_used = forgedStepsUsed;
+  try {
+    stepKernel(
+      allProjections,
+      trust({ x: 1 }),
+      [domainProjection],
+      { continuationState: second.continuation, returnPacket: true, maxSteps: 100 }
+    );
+    errors.push(null);
+  } catch (e) {
+    errors.push(e.message);
+  } finally {
+    second.continuation.steps_used = originalStepsUsed;
+  }
+}
+console.log(JSON.stringify({
+  secondKind: second.kind,
+  projectionCursor: second.continuation.projection_cursor,
+  stepsUsed: second.continuation.steps_used,
+  errors,
+}));
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["secondKind"] == "continuation"
+        assert payload["projectionCursor"] is None
+        assert payload["stepsUsed"] == 2
+        assert len(payload["errors"]) == 3
+        assert all(error and "steps_used" in error for error in payload["errors"])
+
+    def test_direct_step_kernel_rejects_subst_null_bindings_when_required(self):
+        """JS continuation resume rejects null subst bindings for a bound projection."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const fs = require('fs');
+const path = require('path');
+const { loadVerifiedSeedImage, getSeedSubdir, SEED_IMAGE_VERIFICATION_MODES } = require('./mu/host/js/core/seed_loader');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+function seed(name) {
+  const raw = fs.readFileSync(path.join('mu', getSeedSubdir(name), name));
+  return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
+}
+const kernel = seed('kernel.v1.json');
+const matchSeed = seed('match.v2.json');
+const substSeed = seed('subst.v2.json');
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const domainProjection = trust({ pattern: { x: { var: 'v' } }, body: { y: { var: 'v' } } });
+let packet = stepKernel(
+  allProjections,
+  trust({ x: 1 }),
+  [domainProjection],
+  { returnPacket: true, maxSteps: 100 }
+);
+let error = null;
+let found = false;
+for (let i = 0; i < 40; i++) {
+  if (packet.kind !== 'continuation') break;
+  if (Object.hasOwn(packet.continuation.kernel_state, 'subst')) {
+    found = true;
+    packet.continuation.kernel_state.subst.bindings = null;
+    try {
+      stepKernel(
+        allProjections,
+        trust({ x: 1 }),
+        [domainProjection],
+        { continuationState: packet.continuation, returnPacket: true, maxSteps: 100 }
+      );
+    } catch (e) {
+      error = e.message;
+    }
+    break;
+  }
+  packet = stepKernel(
+    allProjections,
+    trust({ x: 1 }),
+    [domainProjection],
+    { continuationState: packet.continuation, returnPacket: true, maxSteps: 100 }
+  );
+}
+console.log(JSON.stringify({ found, error }));
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["found"] is True
+        assert payload["error"] and "kernel_state" in payload["error"]
 
     def test_projection_applied_has_required_fields(self):
         """JS live kernel produces KernelRunResult on successful projection."""

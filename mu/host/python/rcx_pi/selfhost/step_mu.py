@@ -29,7 +29,14 @@ See mu/docs/core/MetaCircularKernel.v0.md for kernel design.
 from __future__ import annotations
 
 import json
-from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted, _apply_projection_trusted, match as stage0_match
+from .eval_seed import (
+    NO_MATCH,
+    host_iteration,
+    step as eval_step,
+    _step_trusted,
+    _apply_projection_trusted,
+    match as stage0_match,
+)
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
 from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached, MAX_MU_DEPTH, MAX_MU_WIDTH
@@ -1163,6 +1170,89 @@ def _step_kernel_with_vm(
     return input_value  # stall
 
 
+_KERNEL_DRIVER_CONTINUATION_KEYS = frozenset({  # AST_OK: constant - packet contract
+    "tag",
+    "version",
+    "kernel_state",
+    "domain_input",
+    "projection_cursor",
+    "remaining_fuel",
+    "fuel_mode",
+    "steps_used",
+    "watchdog_cap",
+    "terminal",
+})
+_KERNEL_PROJECTION_CURSOR_KEYS = frozenset({  # AST_OK: constant - packet contract
+    "tag",
+    "version",
+    "position",
+    "exhausted",
+})
+_KERNEL_TERMINAL_METADATA_KEYS = frozenset({  # AST_OK: constant - packet contract
+    "reached",
+    "reason",
+    "error",
+})
+_KERNEL_TERMINAL_REASONS = frozenset({  # AST_OK: constant - packet contract
+    "accepted",
+    "fuel_exhausted",
+    "watchdog_exhausted",
+    "malformed_fuel",
+    "error",
+})
+_KERNEL_PROJECTION_KEYS = frozenset({"pattern", "body"})  # AST_OK: constant - continuation key contract
+_KERNEL_MATCH_CTX_KEYS = frozenset({"_input", "_body", "_remaining"})  # AST_OK: constant - continuation key contract
+_KERNEL_MATCH_REQUEST_KEYS = frozenset({"pattern", "value"})  # AST_OK: constant - continuation key contract
+_KERNEL_SUBST_CTX_KEYS = frozenset({"_input", "_remaining"})  # AST_OK: constant - continuation key contract
+_KERNEL_SUBST_REQUEST_KEYS = frozenset({"body", "bindings"})  # AST_OK: constant - continuation key contract
+_KERNEL_TRY_STATE_KEYS = frozenset({"_mode", "_phase", "_input", "_remaining"})  # AST_OK: constant - continuation key contract
+_KERNEL_MATCH_DONE_SUCCESS_KEYS = frozenset({  # AST_OK: constant - continuation key contract
+    "_mode",
+    "_status",
+    "_bindings",
+    "_match_ctx",
+})
+_KERNEL_MATCH_DONE_NO_MATCH_KEYS = frozenset({"_mode", "_status", "_match_ctx"})  # AST_OK: constant - continuation key contract
+_KERNEL_MATCH_REQUEST_STATE_KEYS = frozenset({"match", "_match_ctx"})  # AST_OK: constant - continuation key contract
+_KERNEL_SUBST_REQUEST_STATE_KEYS = frozenset({"subst", "_subst_ctx"})  # AST_OK: constant - continuation key contract
+_KERNEL_SUBST_DONE_KEYS = frozenset({"_mode", "_result", "_subst_ctx"})  # AST_OK: constant - continuation key contract
+_KERNEL_MATCH_LOOKUP_STATE_KEYS = frozenset({  # AST_OK: constant - continuation key contract
+    "mode",
+    "_phase",
+    "_lookup_name",
+    "_lookup_value",
+    "_lookup_bindings",
+    "_original_bindings",
+    "stack",
+    "_match_ctx",
+})
+_KERNEL_MATCH_STATE_KEYS = frozenset({  # AST_OK: constant - continuation key contract
+    "mode",
+    "pattern_focus",
+    "value_focus",
+    "bindings",
+    "stack",
+    "_match_ctx",
+})
+_KERNEL_SUBST_TRAVERSE_STATE_KEYS = frozenset({  # AST_OK: constant - continuation key contract
+    "mode",
+    "phase",
+    "focus",
+    "bindings",
+    "context",
+    "_subst_ctx",
+})
+_KERNEL_SUBST_LOOKUP_STATE_KEYS = frozenset({  # AST_OK: constant - continuation key contract
+    "mode",
+    "phase",
+    "lookup_name",
+    "lookup_bindings",
+    "bindings",
+    "context",
+    "_subst_ctx",
+})
+
+
 @host_iteration("Kernel execution loop - residual watchdog; supplied Mu fuel owns progress")
 def step_kernel_mu(
     projections: list[Mu],
@@ -1173,18 +1263,16 @@ def step_kernel_mu(
     return_meta: bool = False,
     max_steps: int = 10000,
     kernel_fuel: object = _KERNEL_FUEL_UNSET,
+    continuation_state: Mu | None = None,
+    return_packet: bool = False,
 ) -> Mu | dict[str, Mu]:
     """
-    Try each projection in order using structural kernel projections.
+    Perform exactly one single-step kernel-driver transition, or drive public compatibility.
 
-    Mechanical driver with a residual host watchdog. When linked-list
-    ``kernel_fuel`` is supplied, semantic progress is owned by that Mu cursor.
-    Omitted ``kernel_fuel`` preserves the legacy no-fuel compatibility path
-    without synthesizing host-counted compatibility fuel; explicit ``None``
-    still means empty fuel. ``max_steps`` remains a hard pre-step watchdog.
-    Removing this omitted-fuel path requires a separate Mu continuation-state
-    caller migration; do not hide it behind helper, recursion, or synthetic
-    max_steps-derived fuel.
+    Terminal packets carry the existing KernelRunResult under ``result``.
+    Nonterminal packets carry a Mu data continuation under ``continuation``.
+    Omitted ``kernel_fuel`` remains an explicit compatibility fuel mode and
+    never seeds ``remaining_fuel`` from ``max_steps`` or host counts.
 
     The kernel works as a state machine:
     1. kernel.wrap: Wraps input and projections into kernel state
@@ -1193,15 +1281,14 @@ def step_kernel_mu(
     4. kernel.stall: All projections tried, no match -> {_mode: "done", _stall: true}
     5. kernel.unwrap: Success -> {_mode: "done", _result: X, _stall: false}
 
-    The loop ONLY does:
+    With ``return_packet=True``, the kernel-driver body ONLY does:
     - is_kernel_terminal(): Check for structural marker {_mode: "done", ...}
     - extract_kernel_result(): Unpack the marker (no semantic decisions)
     - mu_hash_control_cached(): Detect no-progress stall (hash comparison)
 
     L2 FULL: Projection SELECTION is structural (linked-list cursor).
-    Projection EXECUTION uses a residual host driver; supplied kernel_fuel
-    narrows progress authority to a Mu linked-list cursor, while omitted
-    no-fuel compatibility remains residual host-iteration debt.
+    Projection EXECUTION uses a residual host transition driver; the returned
+    continuation owns progress state across calls.
 
     Args:
         projections: List of domain projections to try.
@@ -1211,11 +1298,9 @@ def step_kernel_mu(
         validation_mode: `domain` uses reserved-field protection for untrusted
             domain inputs. `algorithm_runtime` allows trusted algorithm state
             with strict underscore allowlisting.
-        return_meta: When True, returns metadata payload with fields:
-            `output` (Mu), `stall` (bool), `termination_reason` (str),
-            `steps_used` (int), `max_steps` (int).
-            Reason enum: projection_applied, kernel_stall, hash_stall,
-            max_steps_exhausted, fuel_exhausted.
+        return_meta: Public compatibility flag. Ignored when
+            ``return_packet=True`` because terminal packets always carry the
+            existing KernelRunResult shape under ``result``.
         max_steps: Maximum kernel iteration steps. Default 10000.
             For single-projection calls (e.g. apply_mu), 500 is sufficient.
         kernel_fuel: Optional Mu linked-list fuel. Omitted means legacy
@@ -1223,8 +1308,10 @@ def step_kernel_mu(
             Explicit None means empty fuel.
 
     Returns:
-        Transformed value if any projection matched, input unchanged otherwise.
-        If `return_meta=True`, returns a metadata dict with termination details.
+        When ``return_packet=True``, a KernelDriverStepPacket:
+        - {"kind": "terminal", "result": KernelRunResult, "continuation": None}
+        - {"kind": "continuation", "result": None, "continuation": KernelDriverContinuationState}
+        Otherwise, the historical public output or KernelRunResult metadata.
 
     Raises:
         ValueError: If kernel projections appear after domain projections (security).
@@ -1243,6 +1330,12 @@ def step_kernel_mu(
     if watchdog_steps < 0:
         raise ValueError(f"SECURITY: max_steps must be >= 0, got {watchdog_steps}")
     max_steps = watchdog_steps
+    if not isinstance(return_meta, bool):  # AST_OK: boundary - compatibility guard
+        raise TypeError("SECURITY: return_meta must be bool")
+    if not isinstance(return_packet, bool):  # AST_OK: boundary - compatibility guard
+        raise TypeError("SECURITY: return_packet must be bool")
+    if continuation_state is not None and kernel_fuel is not _KERNEL_FUEL_UNSET:
+        raise ValueError("SECURITY: continuation_state carries remaining_fuel; do not also pass kernel_fuel")
     assert_mu(input_value, "step_kernel_mu.input")
 
     if validation_mode == "domain":
@@ -1255,7 +1348,8 @@ def step_kernel_mu(
             f"got: {validation_mode}"
         )
 
-    # SECURITY: Validate input at the selected boundary mode
+    # SECURITY: Validate input at the selected boundary mode. Continuation
+    # resume still binds to the caller-supplied domain input.
     validator(input_value, "step_kernel_mu input")
 
     # SECURITY: Validate projection order
@@ -1311,35 +1405,18 @@ def step_kernel_mu(
     match_bundle = _load_compiled_match_v2_bundle()
     subst_bundle = _load_compiled_subst_v2_bundle()
 
-    # Normalize domain projections to head/tail format
+    # Normalize domain projections and input for both new packets and resumes;
+    # resume validation uses this canonical call authority before stepping.
     normalized_projs = [normalize_projection(p) for p in projections]  # AST_OK: infra - kernel bridge scaffolding
-
-    # Normalize input value
     normalized_input = normalize_for_match(input_value)
-
-    # Build kernel entry format: {_step: normalized_input, _projs: linked_list}
     kernel_entry: Mu = {
         "_step": normalized_input,
         "_projs": list_to_linked(normalized_projs)
     }
 
-    # Run kernel until done or stall
-    # INVARIANT: eval_step is functionally pure — it returns new structures,
-    # never mutates its input. current_hash caching depends on this property.
-    current = kernel_entry
-    current_hash = mu_hash_control_cached(kernel_entry, "step_kernel_mu")
-    # BOOTSTRAP_PRIMITIVE: max_steps
-    # Residual watchdog boundary. Supplied linked-list fuel owns supplied-fuel
-    # progress; omitted no-fuel compatibility retains this numeric guard.
-    # See mu/docs/core/BootstrapPrimitives.v0.md
-    budget = get_step_budget()
-    started_budget = False
-    if not budget.is_active():
-        budget.start()
-        started_budget = True
-
-    try:
-        caller_supplied_fuel = kernel_fuel is not _KERNEL_FUEL_UNSET
+    caller_supplied_fuel = kernel_fuel is not _KERNEL_FUEL_UNSET
+    if continuation_state is None:
+        current = kernel_entry
         fuel_cursor = kernel_fuel if caller_supplied_fuel else None
         if caller_supplied_fuel:
             assert_mu(kernel_fuel, "step_kernel_mu.kernel_fuel")
@@ -1351,135 +1428,863 @@ def step_kernel_mu(
                 ):
                     raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
                 fuel_probe = fuel_probe["tail"]
-
-        # Mechanical loop over supplied Mu fuel, with retained no-fuel
-        # compatibility that does not synthesize a host-counted fuel budget.
         steps_used = 0
-        while (not caller_supplied_fuel) or (fuel_cursor is not None):
-            if steps_used >= max_steps:
-                validator(input_value, "step_kernel_mu output")
-                canonical = {
-                    "output": input_value,
-                    "stall": True,
-                    "termination_reason": "max_steps_exhausted",
-                    "steps_used": steps_used,
-                    "max_steps": max_steps,
-                }
-                if caller_supplied_fuel:
-                    canonical["fuel_supplied"] = True
-                    canonical["fuel_remaining"] = fuel_cursor
-                    canonical["fuel_exhausted"] = False
-                return canonical if return_meta else canonical["output"]
-
-            if caller_supplied_fuel:
+        watchdog_cap = max_steps
+        domain_input = input_value
+    else:
+        assert_mu(continuation_state, "step_kernel_mu.continuation_state")
+        if not isinstance(continuation_state, dict):  # AST_OK: boundary - continuation shape guard
+            raise TypeError("SECURITY: continuation_state must be a Mu dict")
+        if set(continuation_state.keys()) != _KERNEL_DRIVER_CONTINUATION_KEYS:
+            raise ValueError("SECURITY: continuation_state key set mismatch")
+        if continuation_state.get("tag") != "kernel_driver_continuation_state":
+            raise ValueError("SECURITY: continuation_state tag mismatch")
+        continuation_version = continuation_state.get("version")
+        if isinstance(continuation_version, bool) or continuation_version != 1:  # AST_OK: boundary - JS parity guard
+            raise ValueError("SECURITY: continuation_state version mismatch")
+        fuel_mode = continuation_state.get("fuel_mode")
+        if fuel_mode not in ("explicit", "omitted_compatibility"):
+            raise ValueError("SECURITY: continuation_state fuel_mode mismatch")
+        raw_steps_used = continuation_state.get("steps_used")
+        if isinstance(raw_steps_used, bool) or not isinstance(raw_steps_used, int):  # AST_OK: boundary - continuation shape guard
+            raise TypeError("SECURITY: continuation_state.steps_used must be a non-negative integer")
+        if raw_steps_used < 0:
+            raise ValueError("SECURITY: continuation_state.steps_used must be >= 0")
+        raw_watchdog_cap = continuation_state.get("watchdog_cap")
+        if raw_watchdog_cap is None:
+            raise ValueError("SECURITY: continuation_state.watchdog_cap must match supplied max_steps")
+        if isinstance(raw_watchdog_cap, bool) or not isinstance(raw_watchdog_cap, int):  # AST_OK: boundary - continuation shape guard
+            raise TypeError("SECURITY: continuation_state.watchdog_cap must be a non-negative integer")
+        if raw_watchdog_cap < 0:
+            raise ValueError("SECURITY: continuation_state.watchdog_cap must be >= 0")
+        if raw_watchdog_cap != max_steps:
+            raise ValueError("SECURITY: continuation_state.watchdog_cap must match supplied max_steps")
+        projection_cursor = continuation_state.get("projection_cursor")
+        if projection_cursor is not None:
+            if not isinstance(projection_cursor, dict):  # AST_OK: boundary - continuation shape guard
+                raise TypeError("SECURITY: projection_cursor must be a Mu dict or null")
+            if set(projection_cursor.keys()) != _KERNEL_PROJECTION_CURSOR_KEYS:
+                raise ValueError("SECURITY: projection_cursor key set mismatch")
+            if projection_cursor.get("tag") != "kernel_projection_cursor":
+                raise ValueError("SECURITY: projection_cursor tag mismatch")
+            projection_cursor_version = projection_cursor.get("version")
+            if isinstance(projection_cursor_version, bool) or projection_cursor_version != 1:  # AST_OK: boundary - JS parity guard
+                raise ValueError("SECURITY: projection_cursor version mismatch")
+            cursor_position = projection_cursor.get("position")
+            if isinstance(cursor_position, bool) or not isinstance(cursor_position, int):  # AST_OK: boundary - continuation shape guard
+                raise TypeError("SECURITY: projection_cursor.position must be a non-negative integer")
+            if cursor_position < 0:
+                raise ValueError("SECURITY: projection_cursor.position must be >= 0")
+            if not isinstance(projection_cursor.get("exhausted"), bool):  # AST_OK: boundary - continuation shape guard
+                raise TypeError("SECURITY: projection_cursor.exhausted must be bool")
+        terminal = continuation_state.get("terminal")
+        if not isinstance(terminal, dict):  # AST_OK: boundary - continuation shape guard
+            raise TypeError("SECURITY: continuation terminal metadata must be a Mu dict")
+        if set(terminal.keys()) != _KERNEL_TERMINAL_METADATA_KEYS:
+            raise ValueError("SECURITY: continuation terminal metadata key set mismatch")
+        if not isinstance(terminal.get("reached"), bool):  # AST_OK: boundary - continuation shape guard
+            raise TypeError("SECURITY: continuation terminal.reached must be bool")
+        reason = terminal.get("reason")
+        if reason is not None and reason not in _KERNEL_TERMINAL_REASONS:
+            raise ValueError("SECURITY: continuation terminal.reason mismatch")
+        error = terminal.get("error")
+        if error is not None and not isinstance(error, str):  # AST_OK: boundary - continuation shape guard
+            raise TypeError("SECURITY: continuation terminal.error must be string or null")
+        if (
+            terminal.get("reached") is not False
+            or terminal.get("reason") is not None
+            or terminal.get("error") is not None
+        ):
+            raise ValueError("SECURITY: continuation terminal metadata must remain nonterminal")
+        remaining_fuel = continuation_state.get("remaining_fuel")
+        if fuel_mode == "explicit":
+            assert_mu(remaining_fuel, "step_kernel_mu.continuation_state.remaining_fuel")
+            fuel_probe = remaining_fuel
+            while fuel_probe is not None:
                 if (
-                    not isinstance(fuel_cursor, dict)  # ANTICHEAT_OK: linked-list fuel boundary
-                    or set(fuel_cursor.keys()) != {"head", "tail"}
+                    not isinstance(fuel_probe, dict)  # ANTICHEAT_OK: linked-list fuel boundary
+                    or set(fuel_probe.keys()) != {"head", "tail"}
                 ):
                     raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
+                fuel_probe = fuel_probe["tail"]
+        elif remaining_fuel is not None:
+            raise ValueError("SECURITY: omitted compatibility continuation must not carry remaining_fuel")
+        # SECURITY: A continuation owns progress state, not projection authority.
+        # Bind resume to the current call's supplied input/projection cursor
+        # before stepping the embedded Mu kernel state.
+        normalized_input_hash = mu_hash(kernel_entry["_step"])
+        if mu_hash(continuation_state["domain_input"]) != mu_hash(input_value):
+            raise ValueError("SECURITY: continuation_state domain_input is not bound to supplied input")
 
-            # Account for kernel-driver work in the shared global budget.
-            budget.consume(1)
-            # P7-d: shadow mode or cutover mode
-            if _STAGE0_VM_CUTOVER:
-                result = _step_kernel_with_vm(
-                    kernel_bundle, bridge_bundle,
-                    match_bundle, subst_bundle, current)
+        from rcx_pi.selfhost.stage0_vm import _stage0_vm_run_bounded_trusted  # W6A: trusted path — loader-cached validator
+
+        projection_hashes: set[str] = set()
+        body_hashes: set[str] = set()
+        projection_contexts: list[dict[str, Mu]] = []
+        projection_sequence_hashes: list[str] = []
+        prefix_has_match = False
+        projection_authority_cursor = kernel_entry["_projs"]
+        while projection_authority_cursor is not None:
+            if (
+                not isinstance(projection_authority_cursor, dict)  # AST_OK: boundary - Mu linked-list authority guard
+                or set(projection_authority_cursor.keys()) != {"head", "tail"}
+            ):
+                raise TypeError("SECURITY: kernel projection cursor must be a Mu head/tail linked list")
+            projection_authority = projection_authority_cursor["head"]
+            if (
+                not isinstance(projection_authority, dict)  # AST_OK: boundary - normalized projection authority guard
+                or set(projection_authority.keys()) != _KERNEL_PROJECTION_KEYS
+            ):
+                raise TypeError("SECURITY: kernel projection cursor head must be a normalized projection")
+            projection_hash = mu_hash(projection_authority)
+            body_hash = mu_hash(projection_authority["body"])
+            projection_hashes.add(projection_hash)
+            body_hashes.add(body_hash)
+            projection_sequence_hashes.append(projection_hash)
+            match_result = None
+            if validation_mode == "domain":
+                match_outcome = _stage0_vm_run_bounded_trusted(
+                    match_bundle,
+                    {
+                        "match": {
+                            "pattern": projection_authority["pattern"],
+                            "value": kernel_entry["_step"],
+                        },
+                        "_match_ctx": {
+                            "_input": kernel_entry["_step"],
+                            "_body": projection_authority["body"],
+                            "_remaining": projection_authority_cursor["tail"],
+                        },
+                    },
+                    terminal_field="_mode",
+                    terminal_value="match_done",
+                )
+                if match_outcome["status"] == "terminal":
+                    match_result = match_outcome["root"]
+            projection_contexts.append({
+                "projection": projection_authority,
+                "projection_hash": projection_hash,
+                "cursor": projection_authority_cursor,
+                "rest": projection_authority_cursor["tail"],
+                "body_hash": body_hash,
+                "index": len(projection_contexts),
+                "prefix_cleared": not prefix_has_match,
+                "match_result": match_result,
+            })
+            if (
+                validation_mode == "domain"
+                and
+                isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
+                and match_result.get("_mode") == "match_done"
+                and match_result.get("_status") == "success"
+            ):
+                prefix_has_match = True
+            projection_authority_cursor = projection_authority_cursor["tail"]
+        exhausted_prefix_cleared = not prefix_has_match
+        for context in projection_contexts:
+            index = context["index"]
+            context["cursor_signature"] = projection_sequence_hashes[index:]
+            context["rest_signature"] = projection_sequence_hashes[index + 1:]
+
+        kernel_state = continuation_state["kernel_state"]
+        kernel_state_is_object = isinstance(kernel_state, dict)  # AST_OK: boundary - continuation phase authority guard
+        if not kernel_state_is_object:
+            # Scalar Mu states can only come from the defensive hash-stall path:
+            # they carry no projection authority and must resume as cursorless,
+            # already-progressed continuations.
+            if projection_cursor is not None:
+                raise ValueError("SECURITY: continuation_state projection_cursor is not bound to kernel_state")
+            if raw_steps_used == 0:
+                raise ValueError("SECURITY: continuation_state steps_used is not bound to kernel_state phase")
+            if raw_steps_used >= raw_watchdog_cap:
+                raise ValueError("SECURITY: continuation_state steps_used is not bound to watchdog_cap")
+        if kernel_state_is_object and projection_cursor is not None:
+            if projection_cursor["position"] != raw_steps_used:
+                raise ValueError("SECURITY: continuation_state steps_used/projection_cursor mismatch")
+            if "_remaining" not in kernel_state:
+                raise ValueError("SECURITY: continuation_state projection_cursor is not bound to kernel_state")
+            if projection_cursor["exhausted"] != (kernel_state["_remaining"] is None):
+                raise ValueError("SECURITY: continuation_state projection_cursor exhausted mismatch")
+        elif kernel_state_is_object and "_remaining" in kernel_state:
+            raise ValueError("SECURITY: continuation_state projection_cursor missing for kernel projection state")
+        if kernel_state_is_object and is_kernel_terminal(kernel_state):
+            raise ValueError("SECURITY: continuation_state kernel_state must be nonterminal")
+        if (
+            isinstance(kernel_state, dict)  # AST_OK: boundary - continuation phase authority guard
+            and kernel_state.get("_mode") == "kernel"
+            and kernel_state.get("_phase") == "try"
+        ):
+            if "_remaining" not in kernel_state:
+                raise ValueError("SECURITY: continuation_state kernel_state key set mismatch")
+            remaining_cursor = kernel_state["_remaining"]
+            remaining_cursor_bound = False
+            if remaining_cursor is None:
+                remaining_cursor_bound = exhausted_prefix_cleared
             else:
-                result = _step_trusted(kernel_projs, current)
+                remaining_cursor_signature = []
+                remaining_cursor_probe = remaining_cursor
+                while remaining_cursor_probe is not None:
+                    if (
+                        not isinstance(remaining_cursor_probe, dict)  # AST_OK: boundary - Mu linked-list authority guard
+                        or set(remaining_cursor_probe.keys()) != {"head", "tail"}
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
+                    remaining_projection = remaining_cursor_probe["head"]
+                    if (
+                        not isinstance(remaining_projection, dict)  # AST_OK: boundary - normalized projection authority guard
+                        or set(remaining_projection.keys()) != _KERNEL_PROJECTION_KEYS
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor head must be a normalized projection")
+                    remaining_cursor_signature.append(mu_hash(remaining_projection))
+                    remaining_cursor_probe = remaining_cursor_probe["tail"]
+                for context in projection_contexts:
+                    if context["cursor_signature"] != remaining_cursor_signature:
+                        continue
+                    if validation_mode == "domain" and not context["prefix_cleared"]:
+                        continue
+                    remaining_cursor_bound = True
+                    break
+            if not remaining_cursor_bound:
+                raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+        if isinstance(kernel_state, dict):  # AST_OK: boundary - continuation phase authority guard
+            kernel_state_keys = set(kernel_state.keys())
+            if "_match_ctx" in kernel_state:
+                match_ctx = kernel_state["_match_ctx"]
+                if not isinstance(match_ctx, dict):  # AST_OK: boundary - continuation phase authority guard
+                    raise TypeError("SECURITY: continuation_state _match_ctx must be a Mu dict")
+                if set(match_ctx.keys()) != _KERNEL_MATCH_CTX_KEYS:
+                    raise ValueError("SECURITY: continuation_state _match_ctx key set mismatch")
+                if mu_hash(match_ctx["_input"]) != normalized_input_hash:
+                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                match_body_hash = mu_hash(match_ctx["_body"])
+                match_remaining_signature = []
+                match_remaining_probe = match_ctx["_remaining"]
+                while match_remaining_probe is not None:
+                    if (
+                        not isinstance(match_remaining_probe, dict)  # AST_OK: boundary - Mu linked-list authority guard
+                        or set(match_remaining_probe.keys()) != {"head", "tail"}
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
+                    match_remaining_projection = match_remaining_probe["head"]
+                    if (
+                        not isinstance(match_remaining_projection, dict)  # AST_OK: boundary - normalized projection authority guard
+                        or set(match_remaining_projection.keys()) != _KERNEL_PROJECTION_KEYS
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor head must be a normalized projection")
+                    match_remaining_signature.append(mu_hash(match_remaining_projection))
+                    match_remaining_probe = match_remaining_probe["tail"]
+                match_candidates = []
+                for context in projection_contexts:
+                    if context["rest_signature"] != match_remaining_signature:
+                        continue
+                    if context["body_hash"] != match_body_hash:
+                        continue
+                    if validation_mode == "domain" and not context["prefix_cleared"]:
+                        continue
+                    match_candidates.append(context)
+                if not match_candidates:
+                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                if "match" in kernel_state:
+                    match_request = kernel_state["match"]
+                    if not isinstance(match_request, dict):  # AST_OK: boundary - continuation phase authority guard
+                        raise TypeError("SECURITY: continuation_state match request must be a Mu dict")
+                    if set(match_request.keys()) != _KERNEL_MATCH_REQUEST_KEYS:
+                        raise ValueError("SECURITY: continuation_state match request key set mismatch")
+                    request_pattern_bound = False
+                    for context in match_candidates:
+                        if mu_hash(match_request["pattern"]) == mu_hash(context["projection"]["pattern"]):
+                            request_pattern_bound = True
+                            break
+                    if not request_pattern_bound:
+                        raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                    if mu_hash(match_request["value"]) != normalized_input_hash:
+                        raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                if (
+                    validation_mode == "domain"
+                    and
+                    kernel_state_keys == _KERNEL_MATCH_STATE_KEYS
+                    and
+                    kernel_state.get("mode") == "match"
+                    and kernel_state.get("pattern_focus") is None
+                    and kernel_state.get("value_focus") is None
+                    and kernel_state.get("stack") is None
+                ):
+                    success_bound_to_input = False
+                    for context in match_candidates:
+                        match_result = context["match_result"]
+                        if (
+                            not isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
+                            or match_result.get("_mode") != "match_done"
+                            or match_result.get("_status") != "success"
+                        ):
+                            continue
+                        if "bindings" not in kernel_state:
+                            raise TypeError("SECURITY: continuation_state binding cursor must be a Mu dict or null")
+                        actual_bindings = kernel_state["bindings"]
+                        if mu_hash(actual_bindings) == mu_hash(match_result["_bindings"]):
+                            success_bound_to_input = True
+                            break
+                    if not success_bound_to_input:
+                        raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                if kernel_state.get("_mode") == "match_done":
+                    status = kernel_state.get("_status")
+                    if status == "success" and validation_mode == "domain":
+                        success_bound_to_input = False
+                        for context in match_candidates:
+                            match_result = context["match_result"]
+                            if (
+                                not isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
+                                or match_result.get("_mode") != "match_done"
+                                or match_result.get("_status") != "success"
+                            ):
+                                continue
+                            if "_bindings" not in kernel_state:
+                                raise TypeError("SECURITY: continuation_state binding cursor must be a Mu dict or null")
+                            actual_bindings = kernel_state["_bindings"]
+                            if mu_hash(actual_bindings) == mu_hash(match_result["_bindings"]):
+                                success_bound_to_input = True
+                                break
+                        if not success_bound_to_input:
+                            raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                    elif status == "success":
+                        pass
+                    elif status == "no_match":
+                        if validation_mode == "domain":
+                            for context in match_candidates:
+                                match_result = context["match_result"]
+                                if (
+                                    isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
+                                    and match_result.get("_mode") == "match_done"
+                                    and match_result.get("_status") == "success"
+                                ):
+                                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                    else:
+                        raise ValueError("SECURITY: continuation_state match_done status mismatch")
 
-                # P7-d shadow: run VM path too, assert equivalence
-                # Disabled when _step_trusted is monkeypatched (shadow is meaningless)
-                if _STAGE0_SHADOW_ENABLED:
-                    # record_coverage=False prevents double-counting
-                    vm_result = _step_kernel_with_vm(
-                        kernel_bundle, bridge_bundle,
-                        match_bundle, subst_bundle, current,
-                        record_coverage=False)
-                    host_stalled = result is current
-                    vm_stalled = vm_result is current
-                    if host_stalled != vm_stalled:
-                        raise AssertionError(
-                            f"P7-d shadow: polarity divergence — "
-                            f"host_stalled={host_stalled}, vm_stalled={vm_stalled}")
-                    if not host_stalled:
-                        from rcx_pi.selfhost.stage0_vm import _mu_deep_equal  # ANTICHEAT_OK: infra — parity check
-                        if not _mu_deep_equal(result, vm_result):
-                            raise AssertionError(
-                                f"P7-d shadow: output divergence — "
-                                f"host={result!r}, vm={vm_result!r}")
-
-            if caller_supplied_fuel:
-                fuel_cursor = fuel_cursor["tail"]
-            steps_used += 1
-
-            # Terminal state check - simple structural marker detection
-            if is_kernel_terminal(result):
-                is_stall = result.get("_stall") is True
-                output = extract_kernel_result(result, input_value)
-                validator(output, "step_kernel_mu output")
-                reason = "kernel_stall" if is_stall else "projection_applied"
-                canonical = {
-                    "output": output,
-                    "stall": bool(is_stall),
-                    "termination_reason": reason,
-                    "steps_used": steps_used,
-                    "max_steps": max_steps,
-                }
-                if is_stall:
-                    canonical["undefined_motif"] = make_undefined_motif(
-                        op="kernel",
-                        lhs=input_value,
-                        rhs=None,
-                        cause="no_matching_projection",
+            if "_subst_ctx" in kernel_state:
+                subst_ctx = kernel_state["_subst_ctx"]
+                if not isinstance(subst_ctx, dict):  # AST_OK: boundary - continuation phase authority guard
+                    raise TypeError("SECURITY: continuation_state _subst_ctx must be a Mu dict")
+                if set(subst_ctx.keys()) != _KERNEL_SUBST_CTX_KEYS:
+                    raise ValueError("SECURITY: continuation_state _subst_ctx key set mismatch")
+                if mu_hash(subst_ctx["_input"]) != normalized_input_hash:
+                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                subst_body = None
+                subst_bindings = None
+                if "subst" in kernel_state:
+                    subst_request = kernel_state["subst"]
+                    if not isinstance(subst_request, dict):  # AST_OK: boundary - continuation phase authority guard
+                        raise TypeError("SECURITY: continuation_state subst request must be a Mu dict")
+                    if set(subst_request.keys()) != _KERNEL_SUBST_REQUEST_KEYS:
+                        raise ValueError("SECURITY: continuation_state subst request key set mismatch")
+                    subst_body = subst_request["body"]
+                    subst_bindings = subst_request["bindings"]
+                elif "bindings" in kernel_state:
+                    subst_bindings = kernel_state["bindings"]
+                subst_body_hash = mu_hash(subst_body) if subst_body is not None else None
+                subst_remaining_signature = []
+                subst_remaining_probe = subst_ctx["_remaining"]
+                while subst_remaining_probe is not None:
+                    if (
+                        not isinstance(subst_remaining_probe, dict)  # AST_OK: boundary - Mu linked-list authority guard
+                        or set(subst_remaining_probe.keys()) != {"head", "tail"}
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
+                    subst_remaining_projection = subst_remaining_probe["head"]
+                    if (
+                        not isinstance(subst_remaining_projection, dict)  # AST_OK: boundary - normalized projection authority guard
+                        or set(subst_remaining_projection.keys()) != _KERNEL_PROJECTION_KEYS
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor head must be a normalized projection")
+                    subst_remaining_signature.append(mu_hash(subst_remaining_projection))
+                    subst_remaining_probe = subst_remaining_probe["tail"]
+                subst_candidates = []
+                for context in projection_contexts:
+                    if context["rest_signature"] != subst_remaining_signature:
+                        continue
+                    if subst_body_hash is not None and context["body_hash"] != subst_body_hash:
+                        continue
+                    if validation_mode == "domain" and not context["prefix_cleared"]:
+                        continue
+                    subst_candidates.append(context)
+                if not subst_candidates:
+                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                subst_bound_to_input = False
+                for context in subst_candidates:
+                    match_result = context["match_result"]
+                    if (
+                        not isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
+                        or match_result.get("_mode") != "match_done"
+                        or match_result.get("_status") != "success"
+                    ):
+                        continue
+                    expected_bindings = match_result["_bindings"]
+                    subst_outcome = _stage0_vm_run_bounded_trusted(
+                        subst_bundle,
+                        {
+                            "subst": {
+                                "body": context["projection"]["body"],
+                                "bindings": expected_bindings,
+                            },
+                            "_subst_ctx": {
+                                "_input": kernel_entry["_step"],
+                                "_remaining": context["rest"],
+                            },
+                        },
+                        terminal_field="_mode",
+                        terminal_value="subst_done",
                     )
+                    expected_subst = subst_outcome["root"] if subst_outcome["status"] == "terminal" else None
+                    if not isinstance(expected_subst, dict) or expected_subst.get("_mode") != "subst_done":  # AST_OK: boundary - VM subst terminal guard
+                        continue
+                    if kernel_state.get("_mode") == "subst_done":
+                        if mu_hash(kernel_state.get("_result")) == mu_hash(expected_subst["_result"]):
+                            subst_bound_to_input = True
+                            break
+                        continue
+                    bindings_match = mu_hash(subst_bindings) == mu_hash(expected_bindings)
+                    if (
+                        bindings_match
+                        and kernel_state.get("mode") == "subst"
+                        and kernel_state.get("phase") == "result"
+                        and kernel_state.get("context") is None
+                        and mu_hash(kernel_state.get("focus")) != mu_hash(expected_subst["_result"])
+                    ):
+                        bindings_match = False
+                    if bindings_match:
+                        subst_bound_to_input = True
+                        break
+                if not subst_bound_to_input and validation_mode == "domain":
+                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+        if kernel_state_is_object and not projection_hashes:
+            expected_empty_state = {
+                "_mode": "kernel",
+                "_phase": "try",
+                "_input": kernel_entry["_step"],
+                "_remaining": None,
+            }
+            if (
+                continuation_state["steps_used"] != 1
+                or mu_hash(kernel_state) != mu_hash(expected_empty_state)
+            ):
+                raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+        elif kernel_state_is_object:
+            state_nodes = [kernel_state]
+            while state_nodes:
+                state_node = state_nodes.pop()
+                if not isinstance(state_node, dict):  # AST_OK: boundary - Mu state authority traversal
+                    continue
+                state_node_keys = set(state_node.keys())
+                if state_node_keys == _KERNEL_PROJECTION_KEYS and mu_hash(state_node) not in projection_hashes:
+                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                for projection_cursor_key in ("_projs", "_remaining"):
+                    if projection_cursor_key not in state_node:
+                        continue
+                    projection_cursor = state_node[projection_cursor_key]
+                    while projection_cursor is not None:
+                        if (
+                            not isinstance(projection_cursor, dict)  # AST_OK: boundary - Mu linked-list authority guard
+                            or set(projection_cursor.keys()) != {"head", "tail"}
+                        ):
+                            raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
+                        if mu_hash(projection_cursor["head"]) not in projection_hashes:
+                            raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                        projection_cursor = projection_cursor["tail"]
+                if "_input" in state_node and mu_hash(state_node["_input"]) != normalized_input_hash:
+                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                if "_body" in state_node and mu_hash(state_node["_body"]) not in body_hashes:
+                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                if "body" in state_node and "pattern" not in state_node and mu_hash(state_node["body"]) not in body_hashes:
+                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                state_nodes.extend(state_node.values())
+        if kernel_state_is_object:
+            if "_mode" in kernel_state:
+                kernel_state_mode = kernel_state.get("_mode")
+                if kernel_state_mode == "kernel":
+                    if kernel_state_keys != _KERNEL_TRY_STATE_KEYS:
+                        raise ValueError("SECURITY: continuation_state kernel_state key set mismatch")
+                    if kernel_state.get("_phase") != "try":
+                        raise ValueError("SECURITY: continuation_state kernel_state phase mismatch")
+                elif kernel_state_mode == "match_done":
+                    status = kernel_state.get("_status")
+                    if status == "success":
+                        expected_kernel_state_keys = _KERNEL_MATCH_DONE_SUCCESS_KEYS
+                    elif status == "no_match":
+                        expected_kernel_state_keys = _KERNEL_MATCH_DONE_NO_MATCH_KEYS
+                    else:
+                        raise ValueError("SECURITY: continuation_state kernel_state match_done status mismatch")
+                    if kernel_state_keys != expected_kernel_state_keys:
+                        raise ValueError("SECURITY: continuation_state kernel_state key set mismatch")
+                elif kernel_state_mode == "subst_done":
+                    if kernel_state_keys != _KERNEL_SUBST_DONE_KEYS:
+                        raise ValueError("SECURITY: continuation_state kernel_state key set mismatch")
+                else:
+                    raise ValueError("SECURITY: continuation_state kernel_state mode mismatch")
+            elif "mode" in kernel_state:
+                kernel_state_mode = kernel_state.get("mode")
+                if kernel_state_mode == "match":
+                    if kernel_state.get("_phase") == "lookup_binding":
+                        expected_kernel_state_keys = _KERNEL_MATCH_LOOKUP_STATE_KEYS
+                    else:
+                        expected_kernel_state_keys = _KERNEL_MATCH_STATE_KEYS
+                    if kernel_state_keys != expected_kernel_state_keys:
+                        raise ValueError("SECURITY: continuation_state kernel_state key set mismatch")
+                elif kernel_state_mode == "subst":
+                    phase = kernel_state.get("phase")
+                    if phase in ("traverse", "result"):
+                        expected_kernel_state_keys = _KERNEL_SUBST_TRAVERSE_STATE_KEYS
+                    elif phase == "lookup":
+                        expected_kernel_state_keys = _KERNEL_SUBST_LOOKUP_STATE_KEYS
+                    else:
+                        raise ValueError("SECURITY: continuation_state kernel_state phase mismatch")
+                    if kernel_state_keys != expected_kernel_state_keys:
+                        raise ValueError("SECURITY: continuation_state kernel_state key set mismatch")
+                else:
+                    raise ValueError("SECURITY: continuation_state kernel_state mode mismatch")
+            elif kernel_state_keys not in (_KERNEL_MATCH_REQUEST_STATE_KEYS, _KERNEL_SUBST_REQUEST_STATE_KEYS):
+                raise ValueError("SECURITY: continuation_state kernel_state shape mismatch")
+            if projection_cursor is None:
+                minimum_steps_used = None
+                if kernel_state_keys == _KERNEL_MATCH_REQUEST_STATE_KEYS:
+                    minimum_steps_used = 2
+                elif kernel_state_keys == _KERNEL_SUBST_REQUEST_STATE_KEYS:
+                    minimum_steps_used = 5
+                elif "_mode" in kernel_state:
+                    if kernel_state.get("_mode") == "match_done":
+                        minimum_steps_used = 4
+                    elif kernel_state.get("_mode") == "subst_done":
+                        minimum_steps_used = 8
+                elif "mode" in kernel_state:
+                    if kernel_state.get("mode") == "match":
+                        minimum_steps_used = 3
+                    elif kernel_state.get("mode") == "subst":
+                        minimum_steps_used = 6
+                if minimum_steps_used is not None and raw_steps_used < minimum_steps_used:
+                    raise ValueError("SECURITY: continuation_state steps_used is not bound to kernel_state phase")
+                if raw_steps_used >= raw_watchdog_cap:
+                    raise ValueError("SECURITY: continuation_state steps_used is not bound to watchdog_cap")
+        state = continuation_state
+        current = state["kernel_state"]
+        domain_input = state["domain_input"]
+        validator(domain_input, "step_kernel_mu continuation input")
+        caller_supplied_fuel = state["fuel_mode"] == "explicit"
+        fuel_cursor = state["remaining_fuel"]
+        steps_used = state["steps_used"]
+        watchdog_cap = state["watchdog_cap"] if state["watchdog_cap"] is not None else max_steps
+
+    # INVARIANT: eval_step is functionally pure — it returns new structures,
+    # never mutates its input. current_hash caching depends on this property.
+    current_hash = mu_hash_control_cached(current, "step_kernel_mu")
+    # BOOTSTRAP_PRIMITIVE: max_steps
+    # Residual watchdog boundary. The continuation carries the consumed-step
+    # count; omitted no-fuel compatibility never creates synthetic Mu fuel.
+    # See mu/docs/core/BootstrapPrimitives.v0.md
+    budget = get_step_budget()
+    started_budget = False
+    if not budget.is_active():
+        budget.start()
+        started_budget = True
+
+    try:
+        if caller_supplied_fuel and fuel_cursor is None:
+            validator(domain_input, "step_kernel_mu output")
+            packet = {
+                "kind": "terminal",
+                "result": {
+                    "output": domain_input,
+                    "stall": True,
+                    "termination_reason": "fuel_exhausted",
+                    "steps_used": steps_used,
+                    "max_steps": watchdog_cap,
+                    "fuel_supplied": True,
+                    "fuel_remaining": fuel_cursor,
+                    "fuel_exhausted": True,
+                },
+                "continuation": None,
+            }
+            if return_packet:
+                return packet
+            meta = packet["result"]
+            if return_meta:
+                return meta
+            return meta["output"]
+
+        if steps_used >= watchdog_cap:
+            validator(domain_input, "step_kernel_mu output")
+            canonical = {
+                "output": domain_input,
+                "stall": True,
+                "termination_reason": "max_steps_exhausted",
+                "steps_used": steps_used,
+                "max_steps": watchdog_cap,
+            }
+            if caller_supplied_fuel:
+                canonical["fuel_supplied"] = True
+                canonical["fuel_remaining"] = fuel_cursor
+                canonical["fuel_exhausted"] = False
+            packet = {
+                "kind": "terminal",
+                "result": canonical,
+                "continuation": None,
+            }
+            if return_packet:
+                return packet
+            meta = packet["result"]
+            if return_meta:
+                return meta
+            return meta["output"]
+
+        if caller_supplied_fuel:
+            assert_mu(fuel_cursor, "step_kernel_mu.kernel_fuel")
+            fuel_probe = fuel_cursor
+            while fuel_probe is not None:
+                if (
+                    not isinstance(fuel_probe, dict)  # ANTICHEAT_OK: linked-list fuel boundary
+                    or set(fuel_probe.keys()) != {"head", "tail"}
+                ):
+                    raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
+                fuel_probe = fuel_probe["tail"]
+
+        # Account for one kernel-driver transition in the shared global budget.
+        budget.consume(1)
+        # P7-d: shadow mode or cutover mode
+        if _STAGE0_VM_CUTOVER:
+            result = _step_kernel_with_vm(
+                kernel_bundle, bridge_bundle,
+                match_bundle, subst_bundle, current)
+        else:
+            result = _step_trusted(kernel_projs, current)
+
+            # P7-d shadow: run VM path too, assert equivalence
+            # Disabled when _step_trusted is monkeypatched (shadow is meaningless)
+            if _STAGE0_SHADOW_ENABLED:
+                # record_coverage=False prevents double-counting
+                vm_result = _step_kernel_with_vm(
+                    kernel_bundle, bridge_bundle,
+                    match_bundle, subst_bundle, current,
+                    record_coverage=False)
+                host_stalled = result is current
+                vm_stalled = vm_result is current
+                if host_stalled != vm_stalled:
+                    raise AssertionError(
+                        f"P7-d shadow: polarity divergence — "
+                        f"host_stalled={host_stalled}, vm_stalled={vm_stalled}")
+                if not host_stalled:
+                    from rcx_pi.selfhost.stage0_vm import _mu_deep_equal  # ANTICHEAT_OK: infra — parity check
+                    if not _mu_deep_equal(result, vm_result):
+                        raise AssertionError(
+                            f"P7-d shadow: output divergence — "
+                            f"host={result!r}, vm={vm_result!r}")
+
+        if caller_supplied_fuel:
+            fuel_cursor = fuel_cursor["tail"]
+        steps_used += 1
+
+        # Terminal state check - simple structural marker detection
+        if is_kernel_terminal(result):
+            is_stall = result.get("_stall") is True
+            output = extract_kernel_result(result, domain_input)
+            validator(output, "step_kernel_mu output")
+            reason = "kernel_stall" if is_stall else "projection_applied"
+            undefined = None
+            if is_stall:
+                undefined = make_undefined_motif(
+                    op="kernel",
+                    lhs=domain_input,
+                    rhs=None,
+                    cause="no_matching_projection",
+                )
+            canonical = {
+                "output": output,
+                "stall": bool(is_stall),
+                "termination_reason": reason,
+                "steps_used": steps_used,
+                "max_steps": watchdog_cap,
+            }
+            if undefined is not None:
+                canonical["undefined_motif"] = undefined
+            if caller_supplied_fuel:
+                canonical["fuel_supplied"] = True
+                canonical["fuel_remaining"] = fuel_cursor
+                canonical["fuel_exhausted"] = False
+            packet = {
+                "kind": "terminal",
+                "result": canonical,
+                "continuation": None,
+            }
+            if return_packet:
+                return packet
+            meta = packet["result"]
+            if return_meta:
+                return meta
+            return meta["output"]
+
+        if (
+            isinstance(result, dict)  # AST_OK: boundary - empty projection terminal extraction
+            and result.get("_mode") == "kernel"
+            and result.get("_phase") == "try"
+            and result.get("_remaining") is None
+        ):
+            validator(domain_input, "step_kernel_mu output")
+            canonical = {
+                "output": domain_input,
+                "stall": True,
+                "termination_reason": "kernel_stall",
+                "steps_used": steps_used,
+                "max_steps": watchdog_cap,
+                "undefined_motif": make_undefined_motif(
+                    op="kernel",
+                    lhs=domain_input,
+                    rhs=None,
+                    cause="no_matching_projection",
+                ),
+            }
+            if caller_supplied_fuel:
+                canonical["fuel_supplied"] = True
+                canonical["fuel_remaining"] = fuel_cursor
+                canonical["fuel_exhausted"] = False
+            packet = {
+                "kind": "terminal",
+                "result": canonical,
+                "continuation": None,
+            }
+            if return_packet:
+                return packet
+            meta = packet["result"]
+            if return_meta:
+                return meta
+            return meta["output"]
+
+        # Stall check - no change means no progress.
+        # Skip for intermediate kernel states (they have deep nested structures
+        # and are mid-execution by definition, not stalls).
+        if not is_kernel_intermediate(result):
+            result_hash = mu_hash_control_cached(result, "step_kernel_mu.stall")
+            if result_hash == current_hash:
+                validator(domain_input, "step_kernel_mu output")
+                canonical = {
+                    "output": domain_input,
+                    "stall": True,
+                    "termination_reason": "hash_stall",
+                    "steps_used": steps_used,
+                    "max_steps": watchdog_cap,
+                }
                 if caller_supplied_fuel:
                     canonical["fuel_supplied"] = True
                     canonical["fuel_remaining"] = fuel_cursor
                     canonical["fuel_exhausted"] = False
-                return canonical if return_meta else canonical["output"]
+                packet = {
+                    "kind": "terminal",
+                    "result": canonical,
+                    "continuation": None,
+                }
+                if return_packet:
+                    return packet
+                meta = packet["result"]
+                if return_meta:
+                    return meta
+                return meta["output"]
 
-            # Stall check - no change means no progress
-            # Skip for intermediate kernel states (they have deep nested structures
-            # and are mid-execution by definition, not stalls)
-            if not is_kernel_intermediate(result):
-                result_hash = mu_hash_control_cached(result, "step_kernel_mu.stall")
-                if result_hash == current_hash:
-                    validator(input_value, "step_kernel_mu output")
-                    canonical = {
-                        "output": input_value,
-                        "stall": True,
-                        "termination_reason": "hash_stall",
-                        "steps_used": steps_used,
-                        "max_steps": max_steps,
-                    }
-                    if caller_supplied_fuel:
-                        canonical["fuel_supplied"] = True
-                        canonical["fuel_remaining"] = fuel_cursor
-                        canonical["fuel_exhausted"] = False
-                    return canonical if return_meta else canonical["output"]
-                current_hash = result_hash
+        if caller_supplied_fuel and fuel_cursor is None:
+            validator(domain_input, "step_kernel_mu output")
+            packet = {
+                "kind": "terminal",
+                "result": {
+                    "output": domain_input,
+                    "stall": True,
+                    "termination_reason": "fuel_exhausted",
+                    "steps_used": steps_used,
+                    "max_steps": watchdog_cap,
+                    "fuel_supplied": True,
+                    "fuel_remaining": fuel_cursor,
+                    "fuel_exhausted": True,
+                },
+                "continuation": None,
+            }
+            if return_packet:
+                return packet
+            meta = packet["result"]
+            if return_meta:
+                return meta
+            return meta["output"]
 
-            current = result
+        if steps_used >= watchdog_cap:
+            validator(domain_input, "step_kernel_mu output")
+            canonical = {
+                "output": domain_input,
+                "stall": True,
+                "termination_reason": "max_steps_exhausted",
+                "steps_used": steps_used,
+                "max_steps": watchdog_cap,
+            }
+            if caller_supplied_fuel:
+                canonical["fuel_supplied"] = True
+                canonical["fuel_remaining"] = fuel_cursor
+                canonical["fuel_exhausted"] = False
+            packet = {
+                "kind": "terminal",
+                "result": canonical,
+                "continuation": None,
+            }
+            if return_packet:
+                return packet
+            meta = packet["result"]
+            if return_meta:
+                return meta
+            return meta["output"]
 
-        # Supplied Mu fuel exhausted before the next kernel step.
-        validator(input_value, "step_kernel_mu output")
-        canonical = {
-            "output": input_value,
-            "stall": True,
-            "termination_reason": "fuel_exhausted",
+        projection_cursor = None
+        if isinstance(result, dict) and "_remaining" in result:  # AST_OK: boundary - continuation shape construction
+            projection_cursor = {
+                "tag": "kernel_projection_cursor",
+                "version": 1,
+                "position": steps_used,
+                "exhausted": result.get("_remaining") is None,
+            }
+        continuation = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": result,
+            "domain_input": domain_input,
+            "projection_cursor": projection_cursor,
+            "remaining_fuel": fuel_cursor if caller_supplied_fuel else None,
+            "fuel_mode": "explicit" if caller_supplied_fuel else "omitted_compatibility",
             "steps_used": steps_used,
-            "max_steps": max_steps,
+            "watchdog_cap": watchdog_cap,
+            "terminal": {
+                "reached": False,
+                "reason": None,
+                "error": None,
+            },
         }
-        if caller_supplied_fuel:
-            canonical["fuel_supplied"] = True
-            canonical["fuel_remaining"] = fuel_cursor
-            canonical["fuel_exhausted"] = True
-        return canonical if return_meta else canonical["output"]
+        packet = {
+            "kind": "continuation",
+            "result": None,
+            "continuation": continuation,
+        }
+        if return_packet:
+            return packet
+
+        # BOUNDARY: legacy public no-fuel behavior explicitly drives returned
+        # Mu continuation data. This does not seed or disguise Mu fuel.
+        while packet["kind"] == "continuation":
+            packet = step_kernel_mu(
+                projections,
+                input_value,
+                kernel_mode=kernel_mode,
+                validation_mode=validation_mode,
+                return_meta=return_meta,
+                max_steps=max_steps,
+                continuation_state=packet["continuation"],
+                return_packet=True,
+            )
+        meta = packet["result"]
+        if return_meta:
+            return meta
+        return meta["output"]
     finally:
         if started_budget:
             budget.stop()
-
 
 def run_algorithm_meta_circular(
     projections: list[Mu],
@@ -1734,8 +2539,9 @@ def step_mu(projections: list[Mu], input_value: Mu) -> Mu:
     return step_kernel_mu(projections, input_value)
 
 
-# BOUNDARY: Outer loop scaffolding — calls step_kernel_mu but is NOT on the kernel
-# execution path. Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted
+# BOUNDARY: Outer loop scaffolding — calls step_kernel_mu(return_packet=True)
+# but is NOT on the kernel execution path. Kernel path:
+# step_kernel_mu(return_packet=True) → _step_trusted → _apply_projection_trusted
 # → _stage0_match/_stage0_substitute. run_mu is L3 boundary scaffolding (repeat-until-stall).
 # Reclassified P7W5: was @host_iteration, now BOUNDARY.
 def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[Mu, list[dict], bool]:
@@ -1790,17 +2596,22 @@ def run_mu(projections: list[Mu], initial: Mu, max_steps: int = 1000) -> tuple[M
     return current, trace, False
 
 
-# BOUNDARY: Trace infrastructure — calls step_kernel_mu but is NOT on the kernel
+# BOUNDARY: Trace infrastructure — calls step_kernel_mu(return_packet=True) but is NOT on the kernel
 # execution path. Phase 8d structural trace for EngineNews.
 # Reclassified P7W5: was @host_iteration, now BOUNDARY.
 def run_mu_structural(
     projections: list[Mu],
     initial: Mu,
-    max_steps: int = 1000
+    max_steps: int = 1000,
+    *,
+    kernel_mode: str = "bridge",
+    validation_mode: str = "domain",
+    trace_output: bool = True,
 ) -> dict:
     """
     BOUNDARY: Run projections with structural trace accumulation (Phase 8d).
     Off kernel path — trace infrastructure. Reclassified P7W5.
+    Default kernel discipline: kernel_mode="bridge", validation_mode="domain".
 
     Returns a Mu-compatible result structure that EngineNews can analyze:
     {
@@ -1820,9 +2631,16 @@ def run_mu_structural(
     This enables Rule 2.2 (closure-on-second-demand) - EngineNews projections
     can pattern-match against the trace to detect when a state recurs.
     """
-    _validate_entry_point(
-        projections, initial, validate_no_kernel_reserved_fields, "run_mu_structural",
-    )
+    if validation_mode == "domain":
+        validator = validate_no_kernel_reserved_fields
+    elif validation_mode == "algorithm_runtime":
+        validator = validate_algorithm_runtime_fields
+    else:
+        raise ValueError(
+            "SECURITY: invalid validation_mode. Expected 'domain' or 'algorithm_runtime', "
+            f"got: {validation_mode}"
+        )
+    _validate_entry_point(projections, initial, validator, "run_mu_structural")
 
     budget = get_step_budget()
     started_budget = False
@@ -1832,19 +2650,32 @@ def run_mu_structural(
 
     trace_entries = []
     current = initial
-    # INVARIANT: step_kernel_mu returns new structures — current_hash caching is safe.
+    # INVARIANT: step_kernel_mu(return_packet=True) returns new structures — current_hash caching is safe.
     current_hash = mu_hash_control_cached(initial, "run_mu_structural")
 
     try:
         for i in range(max_steps):
             # Gate 5 parity: run the same bridge-backed kernel path as production.
-            meta = step_kernel_mu(
+            # BOUNDARY: trace runner drives explicit kernel continuation values.
+            packet = step_kernel_mu(
                 projections,
                 current,
-                kernel_mode="bridge",
-                validation_mode="domain",
+                kernel_mode=kernel_mode,
+                validation_mode=validation_mode,
                 return_meta=True,
+                return_packet=True,
             )
+            while packet["kind"] == "continuation":
+                packet = step_kernel_mu(
+                    projections,
+                    current,
+                    kernel_mode=kernel_mode,
+                    validation_mode=validation_mode,
+                    return_meta=True,
+                    continuation_state=packet["continuation"],
+                    return_packet=True,
+                )
+            meta = packet["result"]
             result = meta["output"]
             # Resolve matched projection ID: use Stage 0 match (proven equivalent
             # to match.v2 by 33 parity tests in test_self_hosting_v0.py).
@@ -1852,7 +2683,7 @@ def run_mu_structural(
             # is the one the kernel applied.  O(N) match calls vs the previous
             # O(N*K) step_kernel_mu calls per step.
             matched_id = None
-            if meta["termination_reason"] == "projection_applied":
+            if trace_output and meta["termination_reason"] == "projection_applied":
                 for proj in projections:
                     if isinstance(proj, dict) and "pattern" in proj:  # AST_OK: infra — trace ID resolution
                         bindings = stage0_match(proj["pattern"], current)
@@ -1860,22 +2691,24 @@ def run_mu_structural(
                             matched_id = proj.get("id")
                             break
 
-            validate_no_kernel_reserved_fields(result, "run_mu_structural output")
-            trace_entries.append({
-                "step": i,
-                "state": current,
-                "projection": matched_id
-            })
+            validator(result, "run_mu_structural output")
+            if trace_output:
+                trace_entries.append({
+                    "step": i,
+                    "state": current,
+                    "projection": matched_id
+                })
 
             # Check for stall (no change)
             result_hash = mu_hash_control_cached(result, "run_mu_structural.stall")
             if result_hash == current_hash:
-                trace_entries.append({
-                    "step": i + 1,
-                    "state": result,
-                    "projection": None,
-                    "stall": True
-                })
+                if trace_output:
+                    trace_entries.append({
+                        "step": i + 1,
+                        "state": result,
+                        "projection": None,
+                        "stall": True
+                    })
                 return {
                     "result": result,
                     "trace": list_to_linked(trace_entries),
@@ -1887,12 +2720,13 @@ def run_mu_structural(
             current_hash = result_hash
 
         # Hit max steps without stall
-        trace_entries.append({
-            "step": max_steps,
-            "state": current,
-            "projection": None,
-            "max_steps": True
-        })
+        if trace_output:
+            trace_entries.append({
+                "step": max_steps,
+                "state": current,
+                "projection": None,
+                "max_steps": True
+            })
         return {
             "result": current,
             "trace": list_to_linked(trace_entries),

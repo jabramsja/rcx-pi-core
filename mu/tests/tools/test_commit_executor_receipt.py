@@ -383,6 +383,80 @@ def test_post_commit_pre_push_dirty_isolation_checkpoint_is_durable(tmp_path):
     assert loaded["pre_push_restored_paths"] == ["dirty.py"]
 
 
+def test_post_commit_continuation_rekeys_phase_b_handoff_refresh(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "continuation-rekey-wave"
+    target_branch = f"jabramsja/{wave_id}"
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "checkout", "-b", target_branch],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    (repo / "file.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "file.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "wave commit"], cwd=repo, check=True, capture_output=True)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    continuation_path = commit_mod._continuation_record_path(repo, wave_id)  # ANTICHEAT_OK
+    continuation_path.parent.mkdir(parents=True, exist_ok=True)
+    continuation_path.write_text(
+        json.dumps(
+            {
+                "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                "handoff_sha": "old-phase-b-handoff-sha",
+                "target_branch": target_branch,
+                "commit_sha": head_sha,
+                "receipt_decision": "COMMIT_GO",
+                "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit"],
+                "updated_at_unix": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    packet = f"reports/control_plane/{wave_id}_2026-05-21.md"
+    refreshed_handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        target_branch=target_branch,
+        tracked_packet=packet,
+        files_to_stage=["file.py", packet],
+        force_add_files=[packet],
+    )
+    refreshed_handoff_sha = _canonical_handoff_sha_for_test(refreshed_handoff)
+
+    loaded = commit_mod._load_post_commit_continuation(  # ANTICHEAT_OK: direct continuation loader regression
+        continuation_path,
+        repo_root=repo,
+        handoff_sha=refreshed_handoff_sha,
+        target_branch=target_branch,
+        wave_id=wave_id,
+        handoff=refreshed_handoff,
+    )
+
+    assert loaded is not None
+    assert loaded["handoff_sha"] == refreshed_handoff_sha
+    blocked = commit_mod._load_post_commit_continuation(  # ANTICHEAT_OK: mismatched non-packet handoff must not rekey
+        continuation_path,
+        repo_root=repo,
+        handoff_sha="different-handoff-sha",
+        target_branch=target_branch,
+        wave_id=wave_id,
+        handoff={**refreshed_handoff, "tracked_packet": f"reports/deferred/{wave_id}.md"},
+    )
+    assert blocked is None
+
+
 def test_post_commit_pre_push_dirty_isolation_checkpoints_before_stash(tmp_path):
     import subprocess
 
@@ -503,6 +577,122 @@ def test_bot_remediation_tracker_followup_skips_when_tracker_file_scoped(tmp_pat
         "tracker_paths": ["mu/tools/executors/phase_b_executor.py"],
     }
     assert "Tracker sync follow-up" not in (repo / "TASKS.md").read_text(encoding="utf-8")
+
+
+def test_tracker_followup_preserves_multiple_historical_lines_when_clean():
+    wave_id = "multi-followup-clean-wave"
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    first_followup = (
+        f"- Tracker sync follow-up (2026-05-21T00:00:00Z, {wave_id}): "
+        "same-wave follow-up commit touched tracker-relevant file(s) without "
+        "phase/task-state change: mu/host/js/engine/kernel.js.\n"
+    )
+    second_followup = (
+        f"- Tracker sync follow-up (2026-05-21T00:10:00Z, {wave_id}): "
+        "same-wave pipeline recovery follow-up touched tracker-relevant executor files "
+        "without runtime semantic change: mu/tools/executors/recovery_gate.py.\n"
+    )
+    lines = [
+        "## Ra\n",
+        "\n",
+        tracker_note + "\n",
+        first_followup,
+        second_followup,
+        "---\n",
+    ]
+    original = list(lines)
+
+    modified, error, action = commit_mod._sync_tracker_followup_line(  # ANTICHEAT_OK: direct tracker-ledger regression
+        lines,
+        wave_id=wave_id,
+        canonical_idx=2,
+        tracker_followup_indices=[3, 4],
+        tracker_paths=[],
+        tracker_file_staged=False,
+    )
+
+    assert (modified, error, action) == (False, None, None)
+    assert lines == original
+
+    new_path = "mu/tools/executors/commit_executor.py"
+    modified, error, action = commit_mod._sync_tracker_followup_line(  # ANTICHEAT_OK: direct tracker-ledger regression
+        lines,
+        wave_id=wave_id,
+        canonical_idx=2,
+        tracker_followup_indices=[3, 4],
+        tracker_paths=[new_path],
+        tracker_file_staged=False,
+    )
+
+    assert (modified, error, action) == (True, None, "inserted")
+    followup_lines = [
+        line for line in lines
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 3
+    assert new_path in followup_lines[-1]
+
+
+def test_tracker_followup_reemits_existing_scope_when_tracker_not_staged():
+    wave_id = "multi-followup-restaged-wave"
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    kernel_path = "mu/host/js/engine/kernel.js"
+    pipeline_path = "mu/host/js/engine/pipeline.js"
+    first_followup = (
+        f"- Tracker sync follow-up (2026-05-21T00:00:00Z, {wave_id}): "
+        "same-wave follow-up commit touched tracker-relevant file(s) without "
+        f"phase/task-state change: {kernel_path}, {pipeline_path}.\n"
+    )
+    second_followup = (
+        f"- Tracker sync follow-up (2026-05-21T00:10:00Z, {wave_id}): "
+        "same-wave pipeline recovery follow-up touched tracker-relevant executor files "
+        "without runtime semantic change: mu/tools/executors/recovery_gate.py.\n"
+    )
+    lines = [
+        "## Ra\n",
+        "\n",
+        tracker_note + "\n",
+        first_followup,
+        second_followup,
+        "---\n",
+    ]
+
+    modified, error, action = commit_mod._sync_tracker_followup_line(  # ANTICHEAT_OK: direct tracker-ledger regression
+        lines,
+        wave_id=wave_id,
+        canonical_idx=2,
+        tracker_followup_indices=[3, 4],
+        tracker_paths=[kernel_path, pipeline_path],
+        tracker_file_staged=False,
+    )
+
+    assert (modified, error, action) == (True, None, "inserted")
+    followup_lines = [
+        line for line in lines
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 3
+    assert kernel_path in followup_lines[-1]
+    assert pipeline_path in followup_lines[-1]
+
+    staged_lines = [
+        "## Ra\n",
+        "\n",
+        tracker_note + "\n",
+        first_followup,
+        second_followup,
+        "---\n",
+    ]
+    modified, error, action = commit_mod._sync_tracker_followup_line(  # ANTICHEAT_OK: direct tracker-ledger regression
+        staged_lines,
+        wave_id=wave_id,
+        canonical_idx=2,
+        tracker_followup_indices=[3, 4],
+        tracker_paths=[kernel_path, pipeline_path],
+        tracker_file_staged=True,
+    )
+
+    assert (modified, error, action) == (False, None, None)
 
 
 def test_structural_staged_followup_retargets_supervisor_class_when_branch_range_has_runtime():
@@ -635,6 +825,189 @@ def test_tracker_followup_refreshes_when_canonical_note_updates(tmp_path):
     assert len(followup_lines) == 1
     assert control_rel in followup_lines[0]
     assert runtime_rel not in followup_lines[0]
+
+
+def test_tracker_note_update_preserves_structural_canonical_note_for_control_repair(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "same-wave-structural-control-repair"
+    runtime_rel = "mu/host/js/engine/routing.js"
+    control_rel = "mu/tools/executors/phase_b_executor.py"
+    runtime_path = repo / runtime_rel
+    control_path = repo / control_rel
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    control_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text("// committed runtime\n", encoding="utf-8")
+    control_path.write_text("# committed control\n", encoding="utf-8")
+    structural_note = (
+        f"- Tracker sync note (2026-05-21, {wave_id}): **Structural runtime proof.** "
+        "Class: L4_STRUCTURAL. target_gate_id: G8. workload_target: host_debt_reduction. "
+        "host_semantics_delta_before: runtime/substrate scope must remain structurally governed. "
+        "host_semantics_delta_after: runtime/substrate scope remains governed by structural proof. "
+        f"structural_artifact_ref: {runtime_rel}. "
+        "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py`. "
+        "post_gate_contract_sweep: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/structural/ mu/tests/parity/`.\n"
+    )
+    (repo / "TASKS.md").write_text(f"## Ra\n\n{structural_note}\n---\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "baseline structural tracker note"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    control_path.write_text("# dirty control repair\n", encoding="utf-8")
+
+    handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        wave_class="L4_ENABLER",
+        files_to_stage=[control_rel],
+        scope_items=[control_rel],
+        fixes_implemented=["preserve structural tracker note during control repair"],
+    )
+    with patch.object(
+        commit_mod,
+        "_load_repo_meta_bridge_client",
+        side_effect=ImportError("stop after tracker sync"),
+    ):
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+    assert result["step"] == "build_and_run_supervisor"
+    tasks_content = (repo / "TASKS.md").read_text(encoding="utf-8")
+    canonical_lines = [
+        line for line in tasks_content.splitlines()
+        if line.startswith("- Tracker sync note") and wave_id in line
+    ]
+    assert canonical_lines == [structural_note.rstrip("\n")]
+    followup_lines = [
+        line for line in tasks_content.splitlines()
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 1
+    assert control_rel in followup_lines[0]
+
+
+def test_tracker_followup_ignores_clean_declared_tracker_file(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "tracker-followup-clean-declared-tasks-wave"
+    runtime_rel = "mu/host/python/rcx_pi/selfhost/step_mu.py"
+    pipeline_rel = "mu/tools/executors/commit_executor.py"
+    runtime_path = repo / runtime_rel
+    pipeline_path = repo / pipeline_rel
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    pipeline_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text("# committed runtime\n", encoding="utf-8")
+    pipeline_path.write_text("# committed pipeline\n", encoding="utf-8")
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    (repo / "TASKS.md").write_text(f"## Ra\n\n{tracker_note}\n---\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "baseline tracker state"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    runtime_path.write_text("# dirty runtime follow-up\n", encoding="utf-8")
+    pipeline_path.write_text("# dirty pipeline follow-up\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", runtime_rel, pipeline_rel], cwd=repo, check=True, capture_output=True)
+
+    handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        files_to_stage=["TASKS.md", runtime_rel],
+        scope_items=[runtime_rel],
+        fixes_implemented=["emit tracker follow-up when declared TASKS.md is clean"],
+    )
+    with patch.object(
+        commit_mod,
+        "_load_repo_meta_bridge_client",
+        side_effect=ImportError("stop after tracker sync"),
+    ):
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+    assert result["step"] == "build_and_run_supervisor"
+    tasks_content = (repo / "TASKS.md").read_text(encoding="utf-8")
+    followup_lines = [
+        line for line in tasks_content.splitlines()
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 1
+    assert runtime_rel in followup_lines[0]
+    assert pipeline_rel in followup_lines[0]
+
+
+def test_tracker_followup_preserves_existing_staged_followup(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "tracker-followup-existing-staged-wave"
+    runtime_rel = "mu/host/python/rcx_pi/selfhost/step_mu.py"
+    pipeline_rel = "mu/tools/executors/commit_executor.py"
+    runtime_path = repo / runtime_rel
+    pipeline_path = repo / pipeline_rel
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    pipeline_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text("# committed runtime\n", encoding="utf-8")
+    pipeline_path.write_text("# committed pipeline\n", encoding="utf-8")
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    (repo / "TASKS.md").write_text(f"## Ra\n\n{tracker_note}\n---\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "baseline tracker state"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    runtime_path.write_text("# dirty runtime follow-up\n", encoding="utf-8")
+    pipeline_path.write_text("# dirty pipeline follow-up\n", encoding="utf-8")
+    stale_followup = (
+        f"- Tracker sync follow-up (2026-05-17T00:00:00Z, {wave_id}): "
+        "same-wave follow-up commit touched tracker-relevant file(s) without "
+        f"phase/task-state change: {runtime_rel}.\n"
+    )
+    (repo / "TASKS.md").write_text(
+        f"## Ra\n\n{tracker_note}\n{stale_followup}---\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "--", runtime_rel, pipeline_rel, "TASKS.md"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        files_to_stage=[runtime_rel, pipeline_rel],
+        scope_items=[runtime_rel, pipeline_rel],
+        fixes_implemented=["preserve staged tracker follow-up across retry"],
+    )
+    with patch.object(
+        commit_mod,
+        "_load_repo_meta_bridge_client",
+        side_effect=ImportError("stop after tracker sync"),
+    ):
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+    assert result["step"] == "build_and_run_supervisor"
+    tasks_content = (repo / "TASKS.md").read_text(encoding="utf-8")
+    followup_lines = [
+        line for line in tasks_content.splitlines()
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 1
+    assert runtime_rel in followup_lines[0]
+    assert pipeline_rel in followup_lines[0]
+    staged_tasks = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--", "TASKS.md"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert staged_tasks == ["TASKS.md"]
 
 
 def _setup_repo(tmp_path):
@@ -1393,6 +1766,79 @@ class TestReceiptChainEndToEnd:
         assert durable_handoff["pre_commit_receipt_path"] == handoff["pre_commit_receipt_path"]
         assert "pre_commit_receipt" not in durable_handoff["evidence_handles"]
 
+    def test_pre_push_failure_after_commit_demotes_completed_packet_and_task_for_dispatch_retry(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "runtime-pre-push-failure-reentry-wave"
+        packet_path = "reports/control_plane/runtime_pre_push_failure_reentry_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet\n\n"
+            "Status: COMPLETED (commit-ready, supervisor COMMIT_GO)\n"
+            f"Wave ID: {wave_id}\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text(
+            "## Ra\n"
+            "  6. **[FOUNDER-ORDERED-REDTEAM-RUNTIME-PRE-PUSH-FAILURE-REENTRY] "
+            "IMPLEMENTED / LOCAL EVIDENCE (2026-05-21).** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            f"Wave ID: `{wave_id}`. "
+            f"Packet: `{packet_path}`.\n",
+            encoding="utf-8",
+        )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            tracked_packet=packet_path,
+            files_to_stage=[packet_path, "TASKS.md"],
+            scope_items=[packet_path],
+        )
+        result = {
+            "status": "error",
+            "step": "run_pre_push_script",
+            "errors": ["pre-push-fast failed"],
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "build_and_run_supervisor",
+                "validate_receipt",
+                "run_pre_commit_script",
+                "git_commit",
+            ],
+        }
+
+        getattr(commit_mod, "_maybe_demote_completed_handoff_state_for_commit_retry")(
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+        )
+
+        assert result["status"] == "error"
+        assert set(result["commit_retry_state_demotion"]["changed"]) == {
+            packet_path,
+            "TASKS.md",
+        }
+        assert (
+            f"Status: {commit_mod.COMMIT_RETRY_PENDING_STATUS}"
+            in packet_file.read_text(encoding="utf-8")
+        )
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert (
+            "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT / LOCAL EVIDENCE "
+            "(2026-05-21)"
+        ) in tasks_text
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+        assert packet_path in staged
+        assert "TASKS.md" in staged
+
     def test_pre_validation_failure_does_not_demote_completed_packet_state(self, tmp_path):
         repo = _setup_repo(tmp_path)
         wave_id = "founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06"
@@ -1789,6 +2235,41 @@ class TestReceiptChainEndToEnd:
         assert error is None
         assert len(add_calls) == 2
         assert new_note in (repo / "TASKS.md").read_text(encoding="utf-8")
+
+    def test_tracker_note_refresh_preserves_structural_note_for_control_repair(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = "packet-structural-preserve-wave"
+        structural_note = (
+            f"- Tracker sync note (2026-05-21, {wave_id}): **Structural runtime proof.** "
+            "Class: L4_STRUCTURAL. target_gate_id: G8. workload_target: host_debt_reduction.\n"
+        )
+        enabler_note = (
+            f"- Tracker sync note (2026-05-21, {wave_id}): **Control repair.** "
+            "Class: L4_ENABLER. target_gate_id: G8.\n"
+        )
+        (repo / "TASKS.md").write_text(f"## Ra\n\n{structural_note}\n---\n", encoding="utf-8")
+        add_calls = []
+
+        def fake_run(args, **kwargs):
+            if args == ["git", "add", "--", "TASKS.md"]:
+                add_calls.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run):
+            error = commit_mod.refresh_tasks_tracker_note_after_packet_truth(
+                repo,
+                wave_id=wave_id,
+                tracker_note_text=enabler_note,
+            )
+
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert error is None
+        assert structural_note in tasks_text
+        assert enabler_note not in tasks_text
+        assert add_calls == []
 
     def test_tracker_note_refresh_fails_closed_when_index_lock_persists(self, tmp_path):
         import subprocess
@@ -4514,6 +4995,135 @@ class TestCommitExecutorPytestGate:
 
         assert result == ["mu/tests/tools/test_example_executor.py"]
 
+    def test_collect_commit_test_files_uses_max_steps_guard_selector_for_narrow_diff(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        test_path = "mu/tests/parity/test_js_parity_automated.py"
+        target = repo / test_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "_MAX_STEPS_GUARDED_ACTIONS = (\n"
+            "    ('run_engine_with_routing', {'maxEngineIterations': 5}),\n"
+            ")\n"
+            "_GUARDED_ACTION_BASE_ARGS = {\n"
+            "    'run_engine_with_routing': 'deeper engine convergence',\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+        target.write_text(
+            "_MAX_STEPS_GUARDED_ACTIONS = (\n"
+            "    ('run_engine_with_routing', {'maxEngineIterations': 1}),\n"
+            ")\n"
+            "_GUARDED_ACTION_BASE_ARGS = {\n"
+            "    'run_engine_with_routing': 'deeper engine convergence',\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "--", test_path], cwd=repo, check=True, capture_output=True)
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: locks commit Step 8b selector narrowing
+            repo,
+            [test_path],
+        )
+
+        assert result == [
+            "mu/tests/parity/test_js_parity_automated.py::TestAPIMaxStepsGuard",
+        ]
+
+    def test_collect_commit_test_files_falls_back_to_full_file_for_mixed_parity_diff(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        test_path = "mu/tests/parity/test_js_parity_automated.py"
+        target = repo / test_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "_MAX_STEPS_GUARDED_ACTIONS = (\n"
+            "    ('run_engine_with_routing', {'maxEngineIterations': 5}),\n"
+            ")\n"
+            "UNRELATED_ASSERTION = 1\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+        target.write_text(
+            "_MAX_STEPS_GUARDED_ACTIONS = (\n"
+            "    ('run_engine_with_routing', {'maxEngineIterations': 1}),\n"
+            ")\n"
+            "UNRELATED_ASSERTION = 2\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "--", test_path], cwd=repo, check=True, capture_output=True)
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: locks mixed-diff fallback behavior
+            repo,
+            [test_path],
+        )
+
+        assert result == ["mu/tests/parity/test_js_parity_automated.py"]
+
+    def test_collect_commit_test_files_targets_commit_executor_gate_class(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        (repo / "mu" / "tests" / "tools" / "test_commit_executor_receipt.py").write_text(
+            "class TestCommitExecutorPytestGate: pass\n",
+            encoding="utf-8",
+        )
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: locks commit-executor self-test targeting
+            repo,
+            ["mu/tools/executors/commit_executor.py"],
+        )
+
+        assert result == [
+            "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+        ]
+
+    def test_collect_commit_test_files_uses_full_file_for_direct_mapped_test_file(self, tmp_path):
+        repo = tmp_path / "repo"
+        test_path = "mu/tests/tools/test_phase_b_executor.py"
+        target = repo / test_path
+        target.parent.mkdir(parents=True)
+        target.write_text(
+            "class TestSdkReviewDepthContract: pass\n"
+            "def test_unrelated_new_failure(): assert False\n",
+            encoding="utf-8",
+        )
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: direct test-file edits must not be hidden by selector maps
+            repo,
+            [test_path],
+        )
+
+        assert result == [test_path]
+
+    def test_collect_commit_test_files_targets_phase_b_executor_selectors(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        (repo / "mu" / "tests" / "tools" / "test_phase_b_executor.py").write_text(
+            "class TestSdkReviewDepthContract: pass\n",
+            encoding="utf-8",
+        )
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: locks Phase B executor recovery selectors
+            repo,
+            ["mu/tools/executors/phase_b_executor.py"],
+        )
+
+        assert result == [
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_skips_missing_targeted_executor_tests",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+        ]
+
     def test_run_commit_pipeline_blocks_on_targeted_pytest_failure(self, tmp_path):
         from collections import namedtuple
         import types
@@ -4840,6 +5450,64 @@ class TestCommitExecutorPytestGate:
         assert result["exit_code"] == -1
         assert result["stderr"] == "pytest timed out after 480s"
 
+    def test_run_pytest_on_files_uses_fast_shard_marker_filter(self, tmp_path):
+        from types import SimpleNamespace
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ) as mock_run:
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: locks commit Step 8b fast-shard marker filter
+                repo,
+                [
+                    "mu/tests/l4_gates/test_boot1_default_pipeline_gate.py",
+                    "mu/tests/parity/test_boot1_shadow_parity.py",
+                ],
+            )
+
+        assert result["passed"] is True
+        args = mock_run.call_args.args[0]
+        assert ["-m", "not slow and not fuzzer"] in [
+            args[index:index + 2]
+            for index in range(len(args) - 1)
+        ]
+        env = mock_run.call_args.kwargs["env"]
+        assert env["PYTHONHASHSEED"] == "0"
+        assert env["RCX_CI"] == "1"
+        assert env["HYPOTHESIS_PROFILE"] == "ci_fast"
+
+    def test_run_pytest_on_files_accepts_all_deselected_fast_marker_lane(self, tmp_path):
+        from types import SimpleNamespace
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        stdout = (
+            "collected 17 items / 17 deselected / 0 selected\n\n"
+            "============================ 17 deselected in 0.02s ============================"
+        )
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=5, stdout=stdout, stderr=""),
+        ) as mock_run:
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: locks slow-only commit gate handling
+                repo,
+                ["mu/tests/l4_gates/test_observer_type_guard_gate.py"],
+            )
+
+        assert result["passed"] is True
+        assert result["exit_code"] == 5
+        args = mock_run.call_args.args[0]
+        assert ["-m", "not slow and not fuzzer"] in [
+            args[index:index + 2]
+            for index in range(len(args) - 1)
+        ]
+
 
 class TestReviewFindingExtraction:
     def _base_pr_data(self, *, head_sha="abc123", latest_reviews=None, review_threads=None, comments=None):
@@ -4932,7 +5600,7 @@ class TestReviewFindingExtraction:
 
 
 class TestCIPollFallbackTimeout:
-    """Regression: _poll_ci_checks_fallback 900s budget tolerates observed green-gate wall time.
+    """Regression: fallback CI polling uses the configured commit CI budget.
 
     PR #783 (2026-04-17) demonstrated green-gate can take 5m7s (307s) after a
     bot-remediation push, which exceeded the former 300s fallback budget. The
@@ -4989,40 +5657,43 @@ class TestCIPollFallbackTimeout:
         return result, clock[0]
 
     def test_ci_poll_fallback_tolerates_green_gate_wall_time_over_5_minutes(self):
-        """With the 900s budget, CI completing at t=350s must return True.
+        """With the configured budget, CI completing at t=350s must return True.
 
         The former 300s budget would have false-positive timed out before this
-        transition. The bumped 900s budget must survive with 2.5x headroom.
+        transition. The configured budget must survive with headroom.
         """
         result, final_clock = self._run_fallback_with_simulated_clock(
             ci_transitions_to_success_at=350,
-            runtime_cap=900,
+            runtime_cap=commit_mod.COMMIT_CI_POLL_TIMEOUT_S,
         )
         assert result is True, (
-            f"Expected True (CI passed at t=350s under 900s budget), got {result}"
+            f"Expected True (CI passed at t=350s), got {result}"
         )
         assert final_clock >= 350, (
             f"Simulated clock should have advanced past 350s, got {final_clock}s"
         )
-        assert final_clock < 900, (
-            f"Simulated clock should not have hit the 900s cap, got {final_clock}s"
+        assert final_clock < commit_mod.COMMIT_CI_POLL_TIMEOUT_S, (
+            "Simulated clock should not have hit the configured cap, "
+            f"got {final_clock}s"
         )
 
     def test_ci_poll_fallback_still_times_out_at_new_budget(self):
-        """With the 900s budget, genuinely stalled CI must still return False.
+        """With the configured budget, genuinely stalled CI must still return False.
 
         Guards against the bump making the timeout unconditionally permissive —
         a CI that never completes must still hit the budget ceiling.
         """
         result, final_clock = self._run_fallback_with_simulated_clock(
             ci_transitions_to_success_at=None,
-            runtime_cap=900,
+            runtime_cap=commit_mod.COMMIT_CI_POLL_TIMEOUT_S,
         )
         assert result is False, (
-            f"Expected False (timed out at 900s budget), got {result}"
+            "Expected False (timed out at configured budget), "
+            f"got {result}"
         )
-        assert final_clock >= 900, (
-            f"Simulated clock should have exhausted the 900s budget, got {final_clock}s"
+        assert final_clock >= commit_mod.COMMIT_CI_POLL_TIMEOUT_S, (
+            "Simulated clock should have exhausted the configured budget, "
+            f"got {final_clock}s"
         )
 
 
@@ -5077,6 +5748,8 @@ class TestRequiredCIGreenGuard:
     def test_wait_for_pr_ci_rejects_watch_success_until_required_checks_green(self, tmp_path):
         import subprocess
 
+        watch_timeouts = []
+
         def completed(cmd, *, stdout="", stderr="", returncode=0):
             return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
 
@@ -5084,6 +5757,7 @@ class TestRequiredCIGreenGuard:
             if cmd == ["gh", "pr", "checks", "844", "--required"]:
                 return completed(cmd, stdout="test\tpending\n", returncode=8)
             if cmd == ["gh", "pr", "checks", "844", "--watch", "--required"]:
+                watch_timeouts.append(kwargs.get("timeout"))
                 return completed(cmd)
             if cmd == ["gh", "pr", "view", "844", "--json", "statusCheckRollup"]:
                 return completed(cmd, stdout=json.dumps({"statusCheckRollup": []}))
@@ -5116,6 +5790,7 @@ class TestRequiredCIGreenGuard:
         )
         assert "test\tpending" in response["ci_checks_output"]
         assert result["steps_completed"] == ["git_commit"]
+        assert watch_timeouts == [commit_mod.COMMIT_CI_WATCH_TIMEOUT_S]
 
     def test_wait_for_pr_ci_failure_payload_includes_failed_check_log_excerpt(self, tmp_path):
         import subprocess

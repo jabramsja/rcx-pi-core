@@ -123,7 +123,7 @@ BRIDGE_REVIEW_POLL_SLEEP = 5.0
 BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
 DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
-MAX_PYTEST_GATE_TIMEOUT_S = 900
+MAX_PYTEST_GATE_TIMEOUT_S = 2400
 _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/host/",
     "mu/substrate/",
@@ -1056,6 +1056,11 @@ def _resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
     return max(DEFAULT_PYTEST_GATE_TIMEOUT_S, min(timeout_s, MAX_PYTEST_GATE_TIMEOUT_S))
 
 
+def resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
+    """Public seam for tests and commit-packet refresh code."""
+    return _resolve_pytest_gate_timeout(raw_timeout)
+
+
 def _is_pytest_gate_file(path: str) -> bool:
     if not path.endswith(".py"):
         return False
@@ -1066,23 +1071,187 @@ _RUNTIME_TARGETED_TESTS = {
     "mu/host/js/core/bootstrap_core.js": (
         "tests/l4_gates/test_bootstrap_core_carveout_gate.py",
     ),
+    "mu/tools/executors/phase_b_executor.py": (
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+    ),
+}
+
+_PYTEST_DIFF_SELECTOR_HINTS = {
+    "mu/tests/parity/test_js_parity_automated.py": (
+        (
+            ("_MAX_STEPS_GUARDED_ACTIONS", "_GUARDED_ACTION_BASE_ARGS"),
+            (
+                "maxEngineIterations",
+                "Engine actions use one outer iteration",
+                "API cap validation",
+                "deeper engine convergence",
+                "parity coverage with small structural budgets below",
+                "Base args for each guarded action",
+                "API guard acceptance/rejection",
+                "full engine convergence behavior",
+            ),
+            ("mu/tests/parity/test_js_parity_automated.py::TestAPIMaxStepsGuard",),
+        ),
+    ),
+    "mu/tests/tools/test_phase_b_executor.py": (
+        (
+            (
+                "test_phase_b_pytest_gate_timeout_",
+                "test_pytest_selector_hints_",
+                "test_select_pytest_gate_files_uses",
+            ),
+            (),
+            (
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+            ),
+        ),
+    ),
 }
 
 
-def _select_pytest_gate_files(changed_files: list[str]) -> list[str]:
+def _pytest_gate_diff_text(repo_root: Path, path: str) -> str:
+    diff_parts: list[str] = []
+    for args in (
+        ("git", "diff", "--cached", "--", path),
+        ("git", "diff", "--", path),
+    ):
+        result = subprocess.run(
+            args,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout:
+            diff_parts.append(result.stdout)
+    return "\n".join(diff_parts)
+
+
+def pytest_gate_diff_text(repo_root: Path, path: str) -> str:
+    """Return staged and unstaged diff text for pytest gate selector narrowing."""
+    return _pytest_gate_diff_text(repo_root, path)
+
+
+def _changed_diff_hunks(diff_text: str) -> list[str]:
+    hunks: list[str] = []
+    current_hunk: list[str] = []
+    for line in diff_text.splitlines():
+        if line.startswith("@@ "):
+            if current_hunk:
+                hunks.append("\n".join(current_hunk))
+            current_hunk = [line]
+        elif current_hunk:
+            current_hunk.append(line)
+    if current_hunk:
+        hunks.append("\n".join(current_hunk))
+    return [
+        hunk
+        for hunk in hunks
+        if any(
+            (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+            for line in hunk.splitlines()
+        )
+    ]
+
+
+def _changed_diff_lines(hunk: str) -> list[str]:
+    return [
+        line[1:].strip()
+        for line in hunk.splitlines()
+        if (
+            (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+        )
+    ]
+
+
+def _diff_hunks_match_only_markers(
+    diff_text: str,
+    hunk_markers: tuple[str, ...],
+    changed_line_markers: tuple[str, ...],
+) -> bool:
+    changed_hunks = _changed_diff_hunks(diff_text)
+    if not changed_hunks:
+        return False
+    if not all(any(marker in hunk for marker in hunk_markers) for hunk in changed_hunks):
+        return False
+    effective_changed_line_markers = changed_line_markers or hunk_markers
+    return all(
+        any(marker in changed_line for marker in effective_changed_line_markers)
+        for hunk in changed_hunks
+        for changed_line in _changed_diff_lines(hunk)
+    )
+
+
+def _pytest_selector_hints_for_diff(path: str, diff_text: str) -> list[str]:
+    selectors: list[str] = []
+    for hunk_markers, changed_line_markers, hinted_selectors in _PYTEST_DIFF_SELECTOR_HINTS.get(path, ()):
+        if _diff_hunks_match_only_markers(diff_text, hunk_markers, changed_line_markers):
+            selectors.extend(hinted_selectors)
+    return selectors
+
+
+def pytest_selector_hints_for_diff(path: str, diff_text: str) -> list[str]:
+    """Return public pytest selectors when a diff is known to be narrow."""
+    return _pytest_selector_hints_for_diff(path, diff_text)
+
+
+def _pytest_selector_path(selector: str) -> str:
+    return selector.split("::", 1)[0]
+
+
+def _runtime_targeted_tests_for_path(
+    path: str,
+    repo_root: Path | None,
+) -> tuple[str, ...]:
+    candidates = _RUNTIME_TARGETED_TESTS.get(path, ())
+    if repo_root is None:
+        return candidates
+    return tuple(
+        selector
+        for selector in candidates
+        if (repo_root / _pytest_selector_path(selector)).exists()
+    )
+
+
+def _select_pytest_gate_files(changed_files: list[str], repo_root: Path | None = None) -> list[str]:
     selected: list[str] = []
     seen: set[str] = set()
     for path in changed_files:
         normalized = path.replace("\\", "/")
         candidates = []
         if _is_pytest_gate_file(normalized):
-            candidates.append(normalized)
-        candidates.extend(_RUNTIME_TARGETED_TESTS.get(normalized, ()))
+            selector_hints: list[str] = []
+            if repo_root is not None:
+                selector_hints = pytest_selector_hints_for_diff(
+                    normalized,
+                    pytest_gate_diff_text(repo_root, normalized),
+                )
+            candidates.extend(selector_hints or [normalized])
+        candidates.extend(_runtime_targeted_tests_for_path(normalized, repo_root))
         for candidate in candidates:
             if candidate not in seen:
                 selected.append(candidate)
                 seen.add(candidate)
     return selected
+
+
+def select_pytest_gate_files(changed_files: list[str], repo_root: Path | None = None) -> list[str]:
+    """Public selector seam used by tests and commit-packet refresh paths."""
+    return _select_pytest_gate_files(changed_files, repo_root)
 
 
 def select_private_attr_gate_files(changed_files: list[str]) -> list[str]:
@@ -1297,6 +1466,51 @@ def _plan_declares_routing_boundary(plan_content: str) -> bool:
         or "stopped before commit readiness" in text
         or "no accepted executable runtime delta" in text
     )
+
+
+def _phase_b_declares_structural_runtime_intent(
+    plan_content: str,
+    routing_record: dict[str, Any] | None = None,
+) -> bool:
+    text_parts = [plan_content or ""]
+    if routing_record:
+        text_parts.extend(
+            str(routing_record.get(key) or "")
+            for key in ("summary", "request_for_claude", "wave_class")
+        )
+    text = " ".join(text_parts).lower().replace("`", "")
+    return (
+        "l4_structural implementation wave" in text
+        or "l4_structural runtime wave" in text
+    )
+
+
+def _reentry_findings_indicate_runtime_pre_push_failure(findings: Any) -> bool:
+    if isinstance(findings, (dict, list, tuple)):
+        try:
+            findings_text = json.dumps(findings, sort_keys=True)
+        except TypeError:
+            findings_text = str(findings)
+    else:
+        findings_text = str(findings or "")
+    text = findings_text.lower()
+    commit_gate_signal = (
+        "run_pre_push_script" in text
+        or "pre-push-fast failed" in text
+        or "pre-push failed" in text
+    )
+    runtime_failure_signal = any(
+        token in text
+        for token in (
+            "tests/structural/",
+            "tests/parity/",
+            "mu/tests/structural/",
+            "mu/tests/parity/",
+            "mu/host/",
+            "eval_step.js",
+        )
+    )
+    return commit_gate_signal and runtime_failure_signal
 
 
 def _effective_phase_b_tracker_wave_class(
@@ -2208,6 +2422,8 @@ def _extract_founder_override_from_metadata_line(line: str) -> str:
     clean = _normalize_plan_metadata_line(line)
     lowered = clean.lower()
     if clean.startswith("FOUNDER_OVERRIDE:"):
+        token = clean.split(":", 1)[1].strip()
+    elif clean.startswith("`FOUNDER_OVERRIDE:"):
         token = clean.split(":", 1)[1].strip()
     elif lowered.startswith(_FOUNDER_OVERRIDE_METADATA_PREFIXES):
         match = _FOUNDER_OVERRIDE_TOKEN_RE.search(clean)
@@ -3517,6 +3733,8 @@ def _resolve_phase_b_wave_class(
     plan_wave_class = _parse_plan_wave_class(plan_content)
     if plan_wave_class:
         return plan_wave_class
+    if _phase_b_declares_structural_runtime_intent(plan_content, routing_record):
+        return "L4_STRUCTURAL"
     return str(routing_record.get("wave_class") or "").strip() or "L4_ENABLER"
 
 
@@ -4154,6 +4372,7 @@ def _build_phase_b_tracker_note(
         ),
         wave_class=wave_class,
         target_gate_id=target_gate_id,
+        packet_ref=plan_path if plan_path and not plan_path.startswith("<") else "",
         primary_blocker_class="INTEGRATION",
         primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
         indicator_artifact_ref=indicator_path,
@@ -5191,7 +5410,7 @@ def run_phase_b(
             f"(current fix touched {len(current_fix_changed)})"
         )
 
-        test_files = _select_pytest_gate_files(current_fix_changed)
+        test_files = _select_pytest_gate_files(current_fix_changed, repo_root)
         if test_files:
             log(f"Running pytest on {len(test_files)} newly changed test file(s)...")
             pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=pytest_gate_timeout)
@@ -5414,6 +5633,7 @@ def run_phase_b(
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
             "reentry_findings": reentry_findings,
+            "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
             "skip_reentry_implementer_once": True,
             "pending_reentry_bridge_round": pending_bridge_round,
         })
@@ -5927,6 +6147,11 @@ def run_phase_b(
         resume_after == "reentry_private_attr_remediation_pending_review"
     )
     _skip_to_reentry = resume_after == "needs_phase_b_reentry" or _resume_reentry_private_attr_review
+    reentry_runtime_pre_push_failure = bool(
+        (saved_state or {}).get("runtime_pre_push_failure_reentry")
+    ) or _reentry_findings_indicate_runtime_pre_push_failure(
+        (saved_state or {}).get("reentry_findings") if saved_state else ""
+    )
     _resume_bridge_fix_pending = resume_after == "bridge_fix_pending"
     _skip_through_bridge = (
         resume_after.startswith("bridge_round_")
@@ -6795,7 +7020,7 @@ def run_phase_b(
             )
             if private_attr_bridge_error is not None:
                 return private_attr_bridge_error
-        final_test_files = _select_pytest_gate_files(changed_files)
+        final_test_files = _select_pytest_gate_files(changed_files, repo_root)
         if final_test_files:
             log(f"Final pytest gate: running {len(final_test_files)} test file(s)...")
             bridge_job_for_pytest = str(result.get("bridge_job_id") or "").strip()
@@ -7204,6 +7429,7 @@ def run_phase_b(
                 "all_non_blocking": all_non_blocking,
                 "finding_history": finding_history,
                 "reentry_findings": findings_for_impl,
+                "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
             })
 
         reentry_start_round = result["bridge_rounds"] + 1
@@ -7592,6 +7818,7 @@ def run_phase_b(
                     "finding_history": finding_history,
                     "reentry_findings": findings_for_impl,
                     "last_reentry_bridge_decision": bridge_decision,
+                    "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
                 })
                 log("Re-entry: checkpointed bridge findings; re-invoking implementer in-branch")
                 pre_reentry_files = set(_collect_changed_files(repo_root))
@@ -7748,7 +7975,7 @@ def run_phase_b(
             if private_attr_bridge_error is not None:
                 _clear_state(repo_root)
                 return private_attr_bridge_error
-        reentry_test_files = _select_pytest_gate_files(changed_files)
+        reentry_test_files = _select_pytest_gate_files(changed_files, repo_root)
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
             reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files, timeout=pytest_gate_timeout)
@@ -7929,6 +8156,19 @@ def run_phase_b(
             if packet_scope_modified and plan_path not in changed_files:
                 changed_files.append(plan_path)
                 changed_files = sorted(set(changed_files))
+        if (
+            reentry_runtime_pre_push_failure
+            and _phase_b_declares_structural_runtime_intent(plan.get("content", ""), routing_record)
+            and not _phase_b_scope_has_runtime_substrate_file(changed_files)
+        ):
+            result["status"] = "error"
+            result["step"] = "reentry_runtime_pre_push_scope"
+            result["errors"] = [
+                "Refusing to convert a runtime pre-push failure re-entry for an "
+                "L4_STRUCTURAL implementation wave into a control-only commit-ready package. "
+                "Resume Phase B with a runtime/test structural fix or preserve the failure as a blocker."
+            ]
+            return result
         effective_wave_class = _effective_phase_b_tracker_wave_class(
             wave_class,
             plan_content=plan.get("content", ""),

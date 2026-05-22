@@ -3170,6 +3170,18 @@ class TestFixStaleActiveItems:
                 payload[key] = value
         path.write_text(json.dumps(payload), encoding="utf-8")
 
+    def _write_phase_b_handoff(self, repo_root: Path, wave_id: str, tracked_packet: str) -> None:
+        path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({
+                "wave_id": wave_id,
+                "tracked_packet": tracked_packet,
+                "scope_items": [tracked_packet],
+            }),
+            encoding="utf-8",
+        )
+
     def test_commits_tasks_repair_when_post_commit_continuation_active(self, tmp_path, monkeypatch):
         wave_id = "wave-stale-2026-05-11"
         commit_sha = self._init_repo_with_checker(tmp_path)
@@ -3251,6 +3263,102 @@ class TestFixStaleActiveItems:
             text=True,
         ).stdout
         assert f"fix: mark stale active items landed for {wave_id}" not in log
+
+    def test_allows_preexisting_same_wave_packet_dirty_when_stale_fix_marks_tasks(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        commit_sha = self._init_repo_with_checker(tmp_path)
+        packet = f"reports/control_plane/{wave_id}.md"
+        (tmp_path / packet).parent.mkdir(parents=True)
+        (tmp_path / packet).write_text("Status: IMPLEMENTED / LOCAL EVIDENCE\n", encoding="utf-8")
+        subprocess.run(["git", "add", packet], cwd=tmp_path, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "add packet"], cwd=tmp_path, check=True, capture_output=True, text=True)
+        commit_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        self._write_continuation(tmp_path, wave_id, commit_sha)
+        self._write_phase_b_handoff(tmp_path, wave_id, packet)
+        (tmp_path / packet).write_text(
+            "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT\n",
+            encoding="utf-8",
+        )
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is True, result
+        assert result["action"] == "commit_stale_active_items_repair"
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert status == f" M {packet}\n"
+
+    def test_allows_preexisting_same_wave_packet_dirty_when_checker_already_clean(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        commit_sha = self._init_repo_with_checker(tmp_path)
+        (tmp_path / "TASKS.md").write_text(
+            "- Tracker sync note (2026-05-11, wave-stale): NEXT item **Landed**\n",
+            encoding="utf-8",
+        )
+        packet = f"reports/control_plane/{wave_id}.md"
+        (tmp_path / packet).parent.mkdir(parents=True)
+        (tmp_path / packet).write_text("Status: IMPLEMENTED / LOCAL EVIDENCE\n", encoding="utf-8")
+        subprocess.run(["git", "add", "TASKS.md", packet], cwd=tmp_path, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "mark clean and add packet"], cwd=tmp_path, check=True, capture_output=True, text=True)
+        commit_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        self._write_continuation(tmp_path, wave_id, commit_sha)
+        self._write_phase_b_handoff(tmp_path, wave_id, packet)
+        (tmp_path / packet).write_text(
+            "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT\n",
+            encoding="utf-8",
+        )
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is True, result
+        assert result["action"] == "stale_active_items_already_fixed"
+        assert "pre-existing commit-retry dirty paths" in result["detail"]
+
+    def test_rejects_preexisting_same_wave_non_packet_dirty_path(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        commit_sha = self._init_repo_with_checker(tmp_path)
+        (tmp_path / "TASKS.md").write_text(
+            "- Tracker sync note (2026-05-11, wave-stale): NEXT item **Landed**\n",
+            encoding="utf-8",
+        )
+        non_packet = "mu/tools/executors/not_a_packet.py"
+        (tmp_path / non_packet).parent.mkdir(parents=True)
+        (tmp_path / non_packet).write_text("VALUE = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "TASKS.md", non_packet], cwd=tmp_path, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "mark clean and add non packet"], cwd=tmp_path, check=True, capture_output=True, text=True)
+        commit_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        self._write_continuation(tmp_path, wave_id, commit_sha)
+        self._write_phase_b_handoff(tmp_path, wave_id, non_packet)
+        (tmp_path / non_packet).write_text("VALUE = 2\n", encoding="utf-8")
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is False, result
+        assert result["action"] == "unexpected_dirty_paths"
+        assert non_packet in result["detail"]
 
     def test_refuses_without_post_commit_continuation(self, tmp_path):
         self._init_repo_with_checker(tmp_path)

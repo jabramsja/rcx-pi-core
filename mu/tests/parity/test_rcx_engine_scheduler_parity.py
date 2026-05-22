@@ -6,12 +6,22 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from rcx_pi.selfhost.engine_pipeline import _service_boundary_effect  # ANTICHEAT_OK: parity probe for boundary dispatch path
 from tests.repo_root import REPO_ROOT
 
 
 SCHEDULER_SEED_NAME = "rcx_engine_scheduler.v1.json"
 FIXTURE_PATH = REPO_ROOT / "mu" / "tests" / "fixtures" / "rcx_enginenew_scheduler_operator_pool.json"
+SLOW_SCHEDULER_JS_TIMEOUT_SECONDS = 180
+
+
+def _has_slow_mark(obj):
+    marks = getattr(obj, "pytestmark", [])
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return any(getattr(mark, "name", None) == "slow" for mark in marks)
 
 
 def _load_vector(vector_id: str) -> dict:
@@ -54,7 +64,7 @@ def _run_python_scheduler(input_value: dict) -> dict:
     return result["scheduler_result"]
 
 
-def _run_js_scheduler(input_value: dict) -> dict:
+def _run_js_scheduler(input_value: dict, *, timeout: int = 60) -> dict:
     script = r"""
 const fs = require('fs');
 const path = require('path');
@@ -101,7 +111,7 @@ console.log(JSON.stringify({ success: true, result: result.scheduler_result }));
         cwd=str(REPO_ROOT),
         text=True,
         capture_output=True,
-        timeout=30,
+        timeout=timeout,
         check=False,
     )
     assert proc.returncode == 0, f"JS scheduler failed\nstdout={proc.stdout}\nstderr={proc.stderr}"
@@ -110,17 +120,22 @@ console.log(JSON.stringify({ success: true, result: result.scheduler_result }));
     return response["result"]
 
 
+@pytest.mark.slow
 def test_python_js_agree_on_scheduler_seed_path_selection():
     vector = _load_vector("select_lexicographic_head")
 
     py_result = _run_python_scheduler(vector["input"])
-    js_result = _run_js_scheduler(vector["input"])
+    js_result = _run_js_scheduler(
+        vector["input"],
+        timeout=SLOW_SCHEDULER_JS_TIMEOUT_SECONDS,
+    )
 
     assert py_result == js_result
     assert py_result["scheduler_result"]["action"] == "run_operator"
     assert py_result["scheduler_result"]["operator"]["operator_id"] == "op.alpha"
 
 
+@pytest.mark.slow
 def test_python_js_agree_on_scheduler_negative_order_rejection():
     vector = _load_vector("reject_non_lexicographic_order")
 
@@ -132,6 +147,7 @@ def test_python_js_agree_on_scheduler_negative_order_rejection():
     assert py_result["scheduler_result"]["reason"] == "non_lexicographic_operator_order"
 
 
+@pytest.mark.slow
 def test_python_js_agree_on_scheduler_fail_closed_pair_rejection():
     vector = _load_vector("reject_unhandled_lexicographic_pair")
 
@@ -143,6 +159,7 @@ def test_python_js_agree_on_scheduler_fail_closed_pair_rejection():
     assert py_result["scheduler_result"]["reason"] == "unhandled_lexicographic_operator_pair"
 
 
+@pytest.mark.slow
 def test_python_js_agree_on_scheduler_longer_pool_rejection():
     vector = _load_vector("reject_longer_pool_unchecked_suffix")
 
@@ -154,6 +171,7 @@ def test_python_js_agree_on_scheduler_longer_pool_rejection():
     assert py_result["scheduler_result"]["reason"] == "unhandled_operator_pool_width"
 
 
+@pytest.mark.slow
 def test_python_js_agree_on_scheduler_malformed_tail_rejection():
     vector = _load_vector("reject_malformed_tail_operator")
 
@@ -163,3 +181,16 @@ def test_python_js_agree_on_scheduler_malformed_tail_rejection():
     assert py_result == js_result
     assert py_result["scheduler_result"]["action"] == "reject_pool"
     assert py_result["scheduler_result"]["reason"] == "unhandled_operator_pool_shape"
+
+
+def test_scheduler_js_parity_vectors_remain_slow_marked():
+    """Lock full JS scheduler parity vectors out of fast PR shards."""
+    js_parity_vectors = (
+        test_python_js_agree_on_scheduler_seed_path_selection,
+        test_python_js_agree_on_scheduler_negative_order_rejection,
+        test_python_js_agree_on_scheduler_fail_closed_pair_rejection,
+        test_python_js_agree_on_scheduler_longer_pool_rejection,
+        test_python_js_agree_on_scheduler_malformed_tail_rejection,
+    )
+    for test_func in js_parity_vectors:
+        assert _has_slow_mark(test_func), test_func.__name__

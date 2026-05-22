@@ -297,6 +297,15 @@ COMMIT_EXECUTOR_OUTER_BUDGET_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
     "commit_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_executor"]
 )
 PRE_PUSH_FAST_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get("pre_push_fast", 900)
+COMMIT_CI_WATCH_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
+    "commit_ci_watch", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_ci_watch"]
+)
+COMMIT_CI_POLL_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
+    "commit_ci_poll", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_ci_poll"]
+)
+COMMIT_CI_VERIFY_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
+    "commit_ci_verify", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_ci_verify"]
+)
 BOT_NO_ISSUES_COMMENT_RE = re.compile(
     r"Codex Review:\s*.*did(?:n't| not) find any major issues",
     re.IGNORECASE | re.DOTALL,
@@ -339,6 +348,9 @@ def _runtime_bus_artifact_match(path: str) -> str | None:
 # Validate sub-timeouts fit within outer budget at import time
 for _sub_name, _sub_val in [
     ("pre_push_fast", PRE_PUSH_FAST_TIMEOUT_S),
+    ("commit_ci_watch", COMMIT_CI_WATCH_TIMEOUT_S),
+    ("commit_ci_poll", COMMIT_CI_POLL_TIMEOUT_S),
+    ("commit_ci_verify", COMMIT_CI_VERIFY_TIMEOUT_S),
     ("bot_remediation", BOT_REMEDIATION_TIMEOUT_S),
 ]:
     if _sub_val > COMMIT_EXECUTOR_OUTER_BUDGET_S:
@@ -1354,6 +1366,20 @@ def _tracker_note_declares_l4_structural(note: str) -> bool:
     return re.search(r"\bClass:\s*`?L4_STRUCTURAL`?", note or "") is not None
 
 
+def _tracker_note_declares_l4_enabler(note: str) -> bool:
+    return re.search(r"\bClass:\s*`?L4_ENABLER`?", note or "") is not None
+
+
+def _should_preserve_structural_tracker_note_for_control_refresh(
+    existing_note: str,
+    replacement_note: str,
+) -> bool:
+    return (
+        _tracker_note_declares_l4_structural(existing_note)
+        and _tracker_note_declares_l4_enabler(replacement_note)
+    )
+
+
 def _has_l4_gate_test_path(test_files: list[str]) -> bool:
     return any(
         path.startswith(("mu/tests/l4_gates/", "tests/l4_gates/"))
@@ -1985,6 +2011,30 @@ def _can_rekey_continuation_to_refreshed_handoff(handoff: dict[str, Any]) -> boo
     return str(handoff.get("caller") or "") == "phase_b"
 
 
+def _can_rekey_post_commit_continuation_to_handoff(
+    handoff: dict[str, Any] | None,
+    *,
+    wave_id: str,
+    target_branch: str,
+) -> bool:
+    """Allow Phase B handoff refreshes to resume an existing post-commit record."""
+    if not isinstance(handoff, dict):
+        return False
+    if not _can_rekey_continuation_to_refreshed_handoff(handoff):
+        return False
+    if str(handoff.get("wave_id") or "").strip() != wave_id:
+        return False
+    handoff_target_branch = str(handoff.get("target_branch") or "").strip()
+    if handoff_target_branch and handoff_target_branch != target_branch:
+        return False
+    tracked_packet = _normalize_repo_relpath(str(handoff.get("tracked_packet") or ""))
+    if not tracked_packet.startswith("reports/control_plane/"):
+        return False
+    if wave_id not in Path(tracked_packet).name:
+        return False
+    return True
+
+
 def _refresh_tasks_tracker_note_after_packet_truth(
     repo_root: Path,
     *,
@@ -2022,6 +2072,11 @@ def _refresh_tasks_tracker_note_after_packet_truth(
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
     canonical_idx = canonical_tracker_indices[0]
     if lines[canonical_idx] == note_line:
+        return None
+    if _should_preserve_structural_tracker_note_for_control_refresh(
+        lines[canonical_idx],
+        note_line,
+    ):
         return None
 
     lines[canonical_idx] = note_line
@@ -2617,7 +2672,56 @@ _RUNTIME_TARGETED_TESTS = {
     "mu/host/js/core/bootstrap_core.js": (
         "tests/l4_gates/test_bootstrap_core_carveout_gate.py",
     ),
+    "mu/tools/executors/commit_executor.py": (
+        "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+    ),
+    "mu/tests/tools/test_commit_executor_receipt.py": (
+        "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+    ),
+    "mu/tools/executors/phase_b_executor.py": (
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_skips_missing_targeted_executor_tests",
+    ),
+    "mu/tests/tools/test_phase_b_executor.py": (
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_skips_missing_targeted_executor_tests",
+    ),
 }
+
+_PYTEST_DIFF_SELECTOR_HINTS = {
+    "mu/tests/parity/test_js_parity_automated.py": (
+        (
+            ("_MAX_STEPS_GUARDED_ACTIONS", "_GUARDED_ACTION_BASE_ARGS"),
+            (
+                "maxEngineIterations",
+                "Engine actions use one outer iteration",
+                "API cap validation",
+                "deeper engine convergence",
+                "parity coverage with small structural budgets below",
+                "Base args for each guarded action",
+                "API guard acceptance/rejection",
+                "full engine convergence behavior",
+            ),
+            ("mu/tests/parity/test_js_parity_automated.py::TestAPIMaxStepsGuard",),
+        ),
+    ),
+}
+
+
+def _pytest_selector_path(selector: str) -> str:
+    return selector.split("::", 1)[0]
 
 
 def _canonical_repo_test_path(repo_root: Path, path: str) -> str:
@@ -2630,16 +2734,124 @@ def _canonical_repo_test_path(repo_root: Path, path: str) -> str:
         return normalized
 
 
+def _canonical_repo_test_selector(repo_root: Path, selector: str) -> str:
+    path, separator, suffix = selector.partition("::")
+    canonical_path = _canonical_repo_test_path(repo_root, path)
+    if not separator:
+        return canonical_path
+    return f"{canonical_path}{separator}{suffix}"
+
+
+def _pytest_gate_diff_text(repo_root: Path, path: str) -> str:
+    diff_parts: list[str] = []
+    for args in (
+        ("git", "diff", "--cached", "--", path),
+        ("git", "diff", "--", path),
+    ):
+        result = subprocess.run(
+            args,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout:
+            diff_parts.append(result.stdout)
+    return "\n".join(diff_parts)
+
+
+def _changed_diff_hunks(diff_text: str) -> list[str]:
+    hunks: list[str] = []
+    current_hunk: list[str] = []
+    for line in diff_text.splitlines():
+        if line.startswith("@@ "):
+            if current_hunk:
+                hunks.append("\n".join(current_hunk))
+            current_hunk = [line]
+        elif current_hunk:
+            current_hunk.append(line)
+    if current_hunk:
+        hunks.append("\n".join(current_hunk))
+    return [
+        hunk
+        for hunk in hunks
+        if any(
+            (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+            for line in hunk.splitlines()
+        )
+    ]
+
+
+def _changed_diff_lines(hunk: str) -> list[str]:
+    return [
+        line[1:].strip()
+        for line in hunk.splitlines()
+        if (
+            (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+        )
+    ]
+
+
+def _diff_hunks_match_only_markers(
+    diff_text: str,
+    hunk_markers: tuple[str, ...],
+    changed_line_markers: tuple[str, ...],
+) -> bool:
+    changed_hunks = _changed_diff_hunks(diff_text)
+    if not changed_hunks:
+        return False
+    if not all(any(marker in hunk for marker in hunk_markers) for hunk in changed_hunks):
+        return False
+    effective_changed_line_markers = changed_line_markers or hunk_markers
+    return all(
+        any(marker in changed_line for marker in effective_changed_line_markers)
+        for hunk in changed_hunks
+        for changed_line in _changed_diff_lines(hunk)
+    )
+
+
+def _pytest_selector_hints_for_diff(path: str, diff_text: str) -> list[str]:
+    selectors: list[str] = []
+    for hunk_markers, changed_line_markers, hinted_selectors in _PYTEST_DIFF_SELECTOR_HINTS.get(path, ()):
+        if _diff_hunks_match_only_markers(diff_text, hunk_markers, changed_line_markers):
+            selectors.extend(hinted_selectors)
+    return selectors
+
+
+def _runtime_targeted_tests_for_path(repo_root: Path, path: str) -> tuple[str, ...]:
+    candidates = _RUNTIME_TARGETED_TESTS.get(path, ())
+    return tuple(
+        selector
+        for selector in candidates
+        if (repo_root / _pytest_selector_path(selector)).exists()
+    )
+
+
 def _collect_commit_test_files(repo_root: Path, staged_files: list[str]) -> list[str]:
     """Collect staged test files and mirrored test files for staged Python code."""
     candidates: set[str] = set()
     for path in staged_files:
         normalized = path.replace("\\", "/")
-        for test_path in _RUNTIME_TARGETED_TESTS.get(normalized, ()):
-            if (repo_root / test_path).exists():
-                candidates.add(_canonical_repo_test_path(repo_root, test_path))
         if _is_test_file(normalized) and normalized.endswith(".py"):
-            candidates.add(_canonical_repo_test_path(repo_root, normalized))
+            selector_hints = _pytest_selector_hints_for_diff(
+                normalized,
+                _pytest_gate_diff_text(repo_root, normalized),
+            )
+            if selector_hints:
+                candidates.update(
+                    _canonical_repo_test_selector(repo_root, selector)
+                    for selector in selector_hints
+                    if (repo_root / _pytest_selector_path(selector)).exists()
+                )
+            else:
+                candidates.add(_canonical_repo_test_path(repo_root, normalized))
+            continue
+        targeted_tests = _runtime_targeted_tests_for_path(repo_root, normalized)
+        for test_path in targeted_tests:
+            candidates.add(_canonical_repo_test_selector(repo_root, test_path))
+        if targeted_tests:
             continue
         if not normalized.endswith(".py"):
             continue
@@ -2819,6 +3031,8 @@ def _run_pytest_on_files(
                 "-x",
                 "--tb=short",
                 "--import-mode=importlib",
+                "-m",
+                "not slow and not fuzzer",
                 *test_files,
             ],
             cwd=repo_root,
@@ -2826,13 +3040,23 @@ def _run_pytest_on_files(
             text=True,
             check=False,
             timeout=effective_timeout,
-            env={**os.environ, "PYTHONHASHSEED": "0"},
+            env={
+                **os.environ,
+                "PYTHONHASHSEED": "0",
+                "RCX_CI": "1",
+                "HYPOTHESIS_PROFILE": "ci_fast",
+            },
+        )
+        passed = result.returncode == 0 or _pytest_only_deselected_by_marker_filter(
+            result.returncode,
+            result.stdout,
+            result.stderr,
         )
         return {
             "exit_code": result.returncode,
             "stdout": result.stdout,
             "stderr": result.stderr,
-            "passed": result.returncode == 0,
+            "passed": passed,
         }
     except subprocess.TimeoutExpired:
         return {
@@ -2841,6 +3065,13 @@ def _run_pytest_on_files(
             "stderr": f"pytest timed out after {effective_timeout}s",
             "passed": False,
         }
+
+
+def _pytest_only_deselected_by_marker_filter(returncode: int, stdout: str, stderr: str) -> bool:
+    """Return True when the fast-shard marker filter selected no tests by design."""
+    if returncode != 5 or stderr.strip():
+        return False
+    return "0 selected" in stdout and "deselected" in stdout
 
 
 def _parse_worktree_list(output: str) -> list[dict[str, str]]:
@@ -3546,6 +3777,63 @@ def _dirty_tracker_relevant_paths_for_handoff(
     return _tracker_relevant_paths_for_handoff(dirty_ordered, [])
 
 
+def _staged_tracker_relevant_paths(repo_root: Path) -> list[str]:
+    try:
+        proc = _run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+            cwd=repo_root,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError:
+        return []
+    return _tracker_relevant_paths_for_handoff(proc.stdout.splitlines(), [])
+
+
+def _tracker_file_will_be_staged(
+    repo_root: Path,
+    files_to_stage: list[str],
+    force_add_files: list[str] | None = None,
+) -> bool:
+    tracker_paths = {"STATUS.md", "TASKS.md"}
+    try:
+        staged = _run(
+            ["git", "diff", "--cached", "--name-only", "--", *sorted(tracker_paths)],
+            cwd=repo_root,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError:
+        staged = None
+    if staged is not None:
+        for line in staged.stdout.splitlines():
+            if _normalize_repo_relpath(line) in tracker_paths:
+                return True
+
+    candidate_paths = {
+        _normalize_repo_relpath(path)
+        for path in [*(files_to_stage or []), *((force_add_files or []))]
+        if isinstance(path, str)
+    }
+    if not (candidate_paths & tracker_paths):
+        return False
+
+    try:
+        proc = _run(
+            ["git", "status", "--porcelain", "--", *sorted(tracker_paths)],
+            cwd=repo_root,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError:
+        return False
+    for line in proc.stdout.splitlines():
+        parsed = _parse_porcelain_status_line(line)
+        if parsed is None:
+            continue
+        _, raw_path = parsed
+        if _normalize_repo_relpath(raw_path) in tracker_paths:
+            return True
+    return False
+
+
 def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     preview = ", ".join(tracker_paths[:3])
@@ -3558,6 +3846,15 @@ def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> s
     )
 
 
+def _tracker_followup_mentions_paths(line: str, tracker_paths: list[str]) -> bool:
+    return bool(tracker_paths) and all(path in line for path in tracker_paths)
+
+
+def _tracker_followup_insert_index(canonical_idx: int, tracker_followup_indices: list[int]) -> int:
+    following = [idx for idx in tracker_followup_indices if idx > canonical_idx]
+    return max(following) if following else canonical_idx
+
+
 def _sync_tracker_followup_line(
     lines: list[str],
     *,
@@ -3567,15 +3864,10 @@ def _sync_tracker_followup_line(
     tracker_paths: list[str],
     tracker_file_staged: bool,
 ) -> tuple[bool, str | None, str | None]:
-    if len(tracker_followup_indices) > 1:
-        return (
-            False,
-            f"wave_id '{wave_id}' has {len(tracker_followup_indices)} tracker follow-up notes in TASKS.md (duplicate)",
-            None,
-        )
-
-    should_emit_followup = bool(tracker_paths) and not tracker_file_staged
-    followup_idx = tracker_followup_indices[0] if tracker_followup_indices else None
+    followup_idx = tracker_followup_indices[0] if len(tracker_followup_indices) == 1 else None
+    should_emit_followup = bool(tracker_paths) and (
+        not tracker_file_staged or bool(tracker_followup_indices)
+    )
     if not should_emit_followup:
         if followup_idx is None:
             return False, None, None
@@ -3586,6 +3878,17 @@ def _sync_tracker_followup_line(
         wave_id=wave_id,
         tracker_paths=tracker_paths,
     )
+    if len(tracker_followup_indices) > 1:
+        existing_followup_covers_scope = any(
+            _tracker_followup_mentions_paths(lines[idx], tracker_paths)
+            for idx in tracker_followup_indices
+        )
+        if existing_followup_covers_scope and tracker_file_staged:
+            return False, None, None
+        insert_idx = _tracker_followup_insert_index(canonical_idx, tracker_followup_indices)
+        lines.insert(insert_idx + 1, followup_line)
+        return True, None, "inserted"
+
     if followup_idx is None:
         lines.insert(canonical_idx + 1, followup_line)
         return True, None, "inserted"
@@ -3936,6 +4239,8 @@ def _load_post_commit_continuation(
     repo_root: Path,
     handoff_sha: str,
     target_branch: str,
+    wave_id: str | None = None,
+    handoff: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -3947,7 +4252,14 @@ def _load_post_commit_continuation(
     if payload.get("status") != CONTINUATION_ACTIVE_STATUS:
         return None
     if payload.get("handoff_sha") != handoff_sha:
-        return None
+        expected_wave_id = str(wave_id or "").strip()
+        if not expected_wave_id or not _can_rekey_post_commit_continuation_to_handoff(
+            handoff,
+            wave_id=expected_wave_id,
+            target_branch=target_branch,
+        ):
+            return None
+        payload["handoff_sha"] = handoff_sha
     if payload.get("target_branch") != target_branch:
         return None
 
@@ -4286,21 +4598,29 @@ def ensure_bot_remediation_tracker_followup(
         start_idx=ra_idx,
         end_idx=ra_end_idx,
     )
-    if len(tracker_followup_indices) > 1:
-        return {
-            "updated": False,
-            "tracker_paths": tracker_paths,
-            "errors": [
-                f"wave_id '{wave_id}' has {len(tracker_followup_indices)} tracker follow-up notes in TASKS.md (duplicate)"
-            ],
-        }
 
     followup_line = _build_tracker_followup_note(
         wave_id=wave_id,
         tracker_paths=tracker_paths,
     )
     updated = False
-    if tracker_followup_indices:
+    if len(tracker_followup_indices) > 1:
+        if any(
+            _tracker_followup_mentions_paths(lines[idx], tracker_paths)
+            for idx in tracker_followup_indices
+        ):
+            return {
+                "updated": False,
+                "tracker_paths": tracker_paths,
+                "path": "TASKS.md",
+            }
+        insert_idx = _tracker_followup_insert_index(
+            canonical_tracker_indices[0],
+            tracker_followup_indices,
+        )
+        lines.insert(insert_idx + 1, followup_line)
+        updated = True
+    elif tracker_followup_indices:
         followup_idx = tracker_followup_indices[0]
         if lines[followup_idx] != followup_line:
             lines[followup_idx] = followup_line
@@ -5460,9 +5780,14 @@ def _wait_for_pr_ci(
         )
         _run(
             ["gh", "pr", "checks", pr_number, "--watch", "--required"],
-            cwd=repo_root, timeout=600,
+            cwd=repo_root, timeout=COMMIT_CI_WATCH_TIMEOUT_S,
         )
-        if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+        if not _wait_for_required_checks_to_pass(
+            repo_root,
+            pr_number,
+            timeout=COMMIT_CI_VERIFY_TIMEOUT_S,
+            log=log,
+        ):
             ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
             return {
                 "status": "error",
@@ -5493,7 +5818,12 @@ def _wait_for_pr_ci(
                 f"{step_label}: gh pr checks exited ({exc.__class__.__name__}), "
                 "polling CI as fallback"
             )
-        if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
+        if not _poll_ci_checks_fallback(
+            repo_root,
+            pr_number,
+            timeout=COMMIT_CI_POLL_TIMEOUT_S,
+            log=log,
+        ):
             ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
             return {
                 "status": "error",
@@ -5508,7 +5838,12 @@ def _wait_for_pr_ci(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
             }
-        if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+        if not _wait_for_required_checks_to_pass(
+            repo_root,
+            pr_number,
+            timeout=COMMIT_CI_VERIFY_TIMEOUT_S,
+            log=log,
+        ):
             ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
             return {
                 "status": "error",
@@ -8358,6 +8693,8 @@ def _run_commit_pipeline_impl(
         repo_root=repo_root,
         handoff_sha=handoff_sha,
         target_branch=target_branch,
+        wave_id=wave_id,
+        handoff=handoff,
     )
     if continuation:
         result["steps_completed"] = list(continuation.get("steps_completed", []))
@@ -8589,15 +8926,20 @@ def _run_commit_pipeline_impl(
         start_idx=ra_idx,
         end_idx=ra_end_idx,
     )
-    tracker_relevant_paths = _dirty_tracker_relevant_paths_for_handoff(
+    tracker_relevant_paths = _dedupe_repo_paths(
+        [
+            *_dirty_tracker_relevant_paths_for_handoff(
+                repo_root,
+                list(handoff["files_to_stage"]),
+                list(handoff.get("force_add_files", [])),
+            ),
+            *_staged_tracker_relevant_paths(repo_root),
+        ]
+    )
+    tracker_file_staged = _tracker_file_will_be_staged(
         repo_root,
         list(handoff["files_to_stage"]),
         list(handoff.get("force_add_files", [])),
-    )
-    tracker_file_staged = any(
-        path in {"TASKS.md", "STATUS.md"}
-        for path in [*handoff["files_to_stage"], *handoff.get("force_add_files", [])]
-        if isinstance(path, str)
     )
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
 
@@ -8613,7 +8955,16 @@ def _run_commit_pipeline_impl(
     tasks_modified = False
     if canonical_tracker_indices:
         canonical_idx = canonical_tracker_indices[0]
-        if lines[canonical_idx] != note_line:
+        preserve_structural_tracker_note = _should_preserve_structural_tracker_note_for_control_refresh(
+            lines[canonical_idx],
+            note_line,
+        )
+        if preserve_structural_tracker_note:
+            log(
+                "Step 3: preserving existing L4_STRUCTURAL tracker note for "
+                f"{wave_id}; same-wave L4_ENABLER repair is represented as a follow-up"
+            )
+        elif lines[canonical_idx] != note_line:
             lines[canonical_idx] = note_line
             tasks_modified = True
             log(f"Step 3: tracker note updated for {wave_id}")
@@ -9646,7 +9997,14 @@ def _maybe_demote_completed_handoff_state_for_commit_retry(
     steps_completed = result.get("steps_completed")
     if not isinstance(steps_completed, list):
         return
-    if "git_commit" in steps_completed or result.get("commit_sha"):
+    post_commit_pre_push_failure = (
+        str(result.get("step") or "") == "run_pre_push_script"
+        and "git_commit" in steps_completed
+    )
+    if (
+        ("git_commit" in steps_completed or result.get("commit_sha"))
+        and not post_commit_pre_push_failure
+    ):
         return
     retry_state_restored = "restore_commit_retry_state" in steps_completed
     if "validate_receipt" not in steps_completed and not retry_state_restored:

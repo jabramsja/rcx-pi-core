@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,10 @@ CONFIG_JSON_PATH = EXECUTORS_DIR / "executor_config.json"
 COMMON_PY_PATH = EXECUTORS_DIR / "executor_common.py"
 DISPATCH_PY_PATH = EXECUTORS_DIR / "executor_dispatch.py"
 COMMIT_PY_PATH = EXECUTORS_DIR / "commit_executor.py"
+REQUIRED_CI_WORKFLOW_PATHS = (
+    REPO_ROOT / ".github" / "workflows" / "ci.yml",
+    REPO_ROOT / ".github" / "workflows" / "green_gate.yml",
+)
 
 
 def _load_default_executor_config() -> dict:
@@ -53,6 +58,15 @@ def _load_default_executor_config_timeouts() -> dict[str, int]:
 
 def _load_json_config_timeouts() -> dict[str, int]:
     return json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))["timeouts"]
+
+
+def _workflow_timeout_seconds(path: Path) -> int:
+    values = [
+        int(match.group(1)) * 60
+        for match in re.finditer(r"^\s*timeout-minutes:\s*(\d+)\s*$", path.read_text(), re.MULTILINE)
+    ]
+    assert values, f"{path} has no timeout-minutes entries"
+    return max(values)
 
 
 def _load_default_executor_config_backends() -> dict[str, str | None]:
@@ -117,6 +131,19 @@ class TestDefaultMatchesLiveConfig:
         orphans = set(defaults.keys()) - set(live.keys())
         assert not orphans, (
             f"DEFAULT_EXECUTOR_CONFIG has timeout keys missing from executor_config.json: {orphans}"
+        )
+
+    def test_commit_ci_wait_budget_covers_required_workflow_timeout(self):
+        """Commit CI wait cannot be shorter than required workflow job caps."""
+        live = _load_json_config_timeouts()
+        required_workflow_timeout = max(
+            _workflow_timeout_seconds(path) for path in REQUIRED_CI_WORKFLOW_PATHS
+        )
+        assert live["commit_ci_watch"] >= required_workflow_timeout, (
+            "commit_ci_watch must cover the longest required workflow timeout"
+        )
+        assert live["commit_ci_poll"] >= required_workflow_timeout, (
+            "commit_ci_poll must cover the longest required workflow timeout"
         )
 
 
@@ -196,6 +223,15 @@ class TestCommitExecutorConfigBinding:
 
     def test_pre_push_fast_timeout_from_config(self):
         self._assert_config_derived("PRE_PUSH_FAST_TIMEOUT_S")
+
+    def test_commit_ci_watch_timeout_from_config(self):
+        self._assert_config_derived("COMMIT_CI_WATCH_TIMEOUT_S")
+
+    def test_commit_ci_poll_timeout_from_config(self):
+        self._assert_config_derived("COMMIT_CI_POLL_TIMEOUT_S")
+
+    def test_commit_ci_verify_timeout_from_config(self):
+        self._assert_config_derived("COMMIT_CI_VERIFY_TIMEOUT_S")
 
     def test_bot_remediation_timeout_from_config(self):
         self._assert_config_derived("BOT_REMEDIATION_TIMEOUT_S")

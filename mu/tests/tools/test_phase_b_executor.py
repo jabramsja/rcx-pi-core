@@ -989,6 +989,7 @@ class TestPrepareCommitHandoff:
         assert "pipeline-test-run-2026-03-25): **PIPELINE-TEST-RUN — commit-ready Phase B handoff.**" in note
         assert "Class: L4_ENABLER" in note
         assert "target_gate_id: G8" in note
+        assert "Packet: `reports/control_plane/pipeline_test_run_2026-03-25.md`" in note
         assert "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short" in note
         assert "indicator_artifact_ref: reports/l4_wave_indicators/pipeline-test-run-2026-03-25.json" in note
         assert "progress_proof_after: Phase B emitted a commit-ready handoff for pipeline-test-run-2026-03-25" in note
@@ -1076,6 +1077,37 @@ class TestPrepareCommitHandoff:
             pre_supervisor=True,
         )
 
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in note
+
+    def test_build_phase_b_tracker_note_reads_backticked_same_wave_override_line(self):
+        wave_id = "n3-kernel-driver-mu-continuation-state-runtime-2026-05-20"
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: locks packet override extraction
+            wave_id=wave_id,
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path=(
+                "reports/control_plane/"
+                "n3-kernel-driver-mu-continuation-state-runtime-2026-05-20_2026-05-20.md"
+            ),
+            plan_content=(
+                "## Acceptance criteria\n"
+                "- The packet carries a same-wave authorization line:\n"
+                f"  `FOUNDER_OVERRIDE:{wave_id}`.\n"
+            ),
+            changed_files=[
+                "mu/host/js/engine/kernel.js",
+                "mu/host/js/engine/pipeline.js",
+                "mu/tests/l4_gates/test_kernel_run_result_contract.py",
+            ],
+            test_files=["mu/tests/l4_gates/test_kernel_run_result_contract.py"],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=12,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_STRUCTURAL" in note
         assert f"FOUNDER_OVERRIDE:{wave_id}" in note
 
     def test_build_phase_b_tracker_note_derives_authorized_control_surface_override(self):
@@ -1447,6 +1479,19 @@ class TestLoadPlanPacketPathTraversal:
         assert pb_mod._parse_plan_wave_class(content) == ""  # ANTICHEAT_OK: testing packet metadata parser
         assert pb_mod._resolve_phase_b_wave_class(  # ANTICHEAT_OK: testing package metadata authority
             {"wave_class": "L4_STRUCTURAL"},
+            content,
+        ) == "L4_STRUCTURAL"
+
+    def test_structural_runtime_intent_in_packet_body_wins_over_default_enabler(self):
+        content = (
+            "# Runtime Packet\n"
+            "Status: Phase B\n"
+            "Purpose: This is an L4_STRUCTURAL implementation wave, not another "
+            "plan-only/control-plane package.\n"
+        )
+
+        assert pb_mod._resolve_phase_b_wave_class(  # ANTICHEAT_OK: testing package metadata authority
+            {},
             content,
         ) == "L4_STRUCTURAL"
 
@@ -4280,12 +4325,11 @@ class TestFinalPytestGate:
         assert kwargs["env"]["PYTHONHASHSEED"] == "0"
 
     def test_pytest_gate_ignores_non_python_test_fixtures(self):
-        selected = pb_mod._select_pytest_gate_files([  # ANTICHEAT_OK: regression for final pytest target selection
+        selected = pb_mod.select_pytest_gate_files([
             "mu/tests/fixtures/rcx_engine_state_minimal.json",
             "mu/tests/fixtures/rcx_enginenew_scheduler_operator_pool.json",
             "mu/tests/parity/test_rcx_engine_scheduler_parity.py",
             "mu/tests/structural/test_rcx_enginenew_scheduler.py",
-            "mu/tools/executors/phase_b_executor.py",
             "package/tests/test_cli.py",
             "package/tests/cli_test.py",
             "reports/test_plan.md",
@@ -4299,7 +4343,7 @@ class TestFinalPytestGate:
         ]
 
     def test_pytest_gate_includes_bootstrap_core_carveout_gate(self):
-        selected = pb_mod._select_pytest_gate_files([  # ANTICHEAT_OK: locks runtime gate mirror for bootstrap_core.js
+        selected = pb_mod.select_pytest_gate_files([
             "mu/host/js/core/bootstrap_core.js",
             "mu/tests/l4_gates/test_stage0_production_pilot_gate.py",
         ])
@@ -8607,6 +8651,69 @@ class TestResumeNeedsPhaseB:
         # Should reach commit_ready (not error or supervisor_rejected)
         assert result["status"] == "commit_ready", f"Expected commit_ready, got {result}"
 
+    def test_runtime_pre_push_reentry_refuses_control_only_commit_ready(self, tmp_path):
+        """Runtime pre-push failures must not be repackaged as control-only COMMIT_GO."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Purpose: This is an L4_STRUCTURAL implementation wave, not another "
+            "plan-only/control-plane package.\n",
+            encoding="utf-8",
+        )
+        (repo / ".scratch").mkdir()
+
+        changed_files = [
+            "TASKS.md",
+            "reports/control_plane/plan.md",
+            "reports/l4_wave_indicators/plan.json",
+        ]
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        (state_dir / "phase_b_state.json").write_text(json.dumps({
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "needs_phase_b_reentry",
+            "wave_id": "plan",
+            "bridge_rounds": 1,
+            "bridge_scope_fingerprint": pb_mod._bridge_scope_fingerprint(repo, changed_files),  # ANTICHEAT_OK: testing internal executor functions
+            "deferred_packet_path": None,
+            "implementer_changed": changed_files,
+            "executor_created": [],
+            "all_non_blocking": [],
+            "reentry_findings": (
+                "run_pre_push_script: pre-push-fast failed\n"
+                "FAILED tests/structural/test_engine_pipeline_discipline.py::test_rule\n"
+                "FAILED tests/parity/test_js_parity_automated.py::test_rule"
+            ),
+        }))
+
+        mock_impl = _make_mock_impl()
+        supervisor = MagicMock(return_value={
+            "exit_code": 0,
+            "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+            "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+        })
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "reentry-go",
+             }), \
+             patch.object(pb_mod, "_read_bridge_render", return_value=""), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", return_value=changed_files), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "reentry_runtime_pre_push_scope"
+        assert "control-only commit-ready package" in result["errors"][0]
+        supervisor.assert_not_called()
+
     def test_resume_from_needs_phase_b_reentry_honors_post_implementer_checkpoint(self, tmp_path):
         """A saved post-implementer checkpoint reviews current fixes without re-running them."""
         repo = tmp_path / "repo"
@@ -11123,6 +11230,116 @@ class TestSdkReviewDepthContract:
     def test_phase_b_bridge_turn_timeout_config_rejects_invalid_value(self):
         with pytest.raises(pb_mod.PhaseBExecutorError, match="Invalid bridge turn timeout"):
             pb_mod._resolve_bridge_turn_timeout({"bridge_turn_timeouts": {"phase_b": -1}}, "phase_b", 300)  # ANTICHEAT_OK: testing config resolver
+
+    def test_phase_b_pytest_gate_timeout_allows_pre_push_budget(self):
+        assert pb_mod.resolve_pytest_gate_timeout(18000) == 2400
+
+    def test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values(self):
+        assert pb_mod.resolve_pytest_gate_timeout(0) == 300
+        assert pb_mod.resolve_pytest_gate_timeout("not-a-timeout") == 300
+
+    def test_pytest_selector_hints_max_steps_guard_matrix_diff(self):
+        diff_text = """
+@@ -1826,6 +1826,9 @@ class TestEngineHelpersParity:
++# Engine actions use one outer iteration in this guard matrix because these
++# cases prove API cap validation only; deeper engine convergence has separate
++# parity coverage with small structural budgets below.
+ _MAX_STEPS_GUARDED_ACTIONS = [
+@@ -1849,7 +1849,7 @@ _MAX_STEPS_GUARDED_ACTIONS = [
+-        {"maxEngineIterations": 5},
++        {"maxEngineIterations": 1},
+@@ -1880,7 +1880,7 @@ _GUARDED_ACTION_BASE_ARGS = {
+-    "run_engine_with_routing": {"maxEngineIterations": 5},
++    "run_engine_with_routing": {"maxEngineIterations": 1},
+"""
+        assert pb_mod.pytest_selector_hints_for_diff(
+            "mu/tests/parity/test_js_parity_automated.py",
+            diff_text,
+        ) == ["mu/tests/parity/test_js_parity_automated.py::TestAPIMaxStepsGuard"]
+
+    def test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate(self, monkeypatch):
+        diff_text = """
+@@ -1849,7 +1849,10 @@ _MAX_STEPS_GUARDED_ACTIONS = [
+-        {"maxEngineIterations": 5},
++        {"maxEngineIterations": 1},
++def test_unrelated_behavior():
++    assert new_behavior
+"""
+        assert pb_mod.pytest_selector_hints_for_diff(
+            "mu/tests/parity/test_js_parity_automated.py",
+            diff_text,
+        ) == []
+
+        monkeypatch.setattr(pb_mod, "pytest_gate_diff_text", lambda repo_root, path: diff_text)
+
+        assert pb_mod.select_pytest_gate_files(
+            ["mu/tests/parity/test_js_parity_automated.py"],
+            Path("."),
+        ) == ["mu/tests/parity/test_js_parity_automated.py"]
+
+    def test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file(self, monkeypatch):
+        diff_text = """
+@@ -11260,6 +11260,10 @@ class TestSdkReviewDepthContract:
+     def test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors(self):
+         assert pb_mod.select_pytest_gate_files(["mu/tools/executors/phase_b_executor.py"]) == [
++
++    def test_new_selector_regression_not_in_hint_list(self):
++        assert False
+"""
+        assert pb_mod.pytest_selector_hints_for_diff(
+            "mu/tests/tools/test_phase_b_executor.py",
+            diff_text,
+        ) == []
+
+        monkeypatch.setattr(pb_mod, "pytest_gate_diff_text", lambda repo_root, path: diff_text)
+
+        assert pb_mod.select_pytest_gate_files(
+            ["mu/tests/tools/test_phase_b_executor.py"],
+            Path("."),
+        ) == ["mu/tests/tools/test_phase_b_executor.py"]
+
+    def test_pytest_gate_diff_text_includes_staged_and_unstaged_diff(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+        target = repo / "sample.py"
+        target.write_text("alpha\nbeta\n", encoding="utf-8")
+        subprocess.run(["git", "add", "sample.py"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+        target.write_text("_MAX_STEPS_GUARDED_ACTIONS\nbeta\n", encoding="utf-8")
+        subprocess.run(["git", "add", "sample.py"], cwd=repo, check=True)
+        target.write_text("_MAX_STEPS_GUARDED_ACTIONS\n_GUARDED_ACTION_BASE_ARGS\n", encoding="utf-8")
+
+        diff_text = pb_mod.pytest_gate_diff_text(repo, "sample.py")
+
+        assert "_MAX_STEPS_GUARDED_ACTIONS" in diff_text
+        assert "_GUARDED_ACTION_BASE_ARGS" in diff_text
+
+    def test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors(self):
+        assert pb_mod.select_pytest_gate_files(["mu/tools/executors/phase_b_executor.py"]) == [
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+        ]
+
+    def test_select_pytest_gate_files_skips_missing_targeted_executor_tests(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        executor = repo / "mu" / "tools" / "executors" / "phase_b_executor.py"
+        executor.parent.mkdir(parents=True)
+        executor.write_text("print('wave fixture')\n", encoding="utf-8")
+
+        assert pb_mod.select_pytest_gate_files(
+            ["mu/tools/executors/phase_b_executor.py"],
+            repo,
+        ) == []
 
     def test_bridge_process_snapshot_fail_open_on_permission_error(self, tmp_path, monkeypatch):
         monkeypatch.setattr(pb_mod.os, "kill", lambda pid, sig: None)

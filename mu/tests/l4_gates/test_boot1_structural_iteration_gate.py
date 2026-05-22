@@ -289,6 +289,8 @@ class TestPythonStructuralIterationProof:
 # JS: Boot1 route proof (observer-based)
 # =============================================================================
 
+@pytest.mark.l4_expensive
+@pytest.mark.slow
 class TestJsBoot1RouteProof:
     """JS Boot1 path emits boot1_depth in observer events."""
 
@@ -394,6 +396,7 @@ _CYCLE_PROJECTIONS = [
 _CYCLE_INPUT = {"state": "A"}
 
 
+@pytest.mark.l4_expensive
 @pytest.mark.slow
 class TestRealReentryProof:
     """Prove real (non-mock) engine re-entry via exhaustion freeze path.
@@ -556,6 +559,7 @@ def _find_reentry_boundary(step_events):
     return None
 
 
+@pytest.mark.l4_expensive
 @pytest.mark.slow
 class TestBoot1TimestampResetReproduction:
     """Verify Boot1 timestamp monotonicity across re-entry.
@@ -733,6 +737,7 @@ class TestRegressionLock:
 # Cross-substrate parity
 # =============================================================================
 
+@pytest.mark.l4_expensive
 @pytest.mark.slow
 class TestCrossSubstrateParity:
     """Python and JS produce identical results."""
@@ -927,3 +932,28 @@ class TestHostHasNoExhaustionBranch:
         assert "stripTraceTerminalSentinel" not in source, (
             "Dead helper stripTraceTerminalSentinel still in eval_step.js"
         )
+
+
+def _has_mark(obj, mark_name):
+    marks = getattr(obj, "pytestmark", [])
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return any(getattr(mark, "name", None) == mark_name for mark in marks)
+
+
+def test_boot1_structural_iteration_ci_expensive_classes_remain_l4_expensive_marked():
+    """Lock full JS/cross-substrate re-entry evidence into the l4_expensive lane."""
+    expensive_classes = (
+        TestJsBoot1RouteProof,
+        TestRealReentryProof,
+        TestBoot1TimestampResetReproduction,
+        TestCrossSubstrateParity,
+    )
+    missing_slow = [cls.__name__ for cls in expensive_classes if not _has_mark(cls, "slow")]
+    missing_expensive = [
+        cls.__name__ for cls in expensive_classes if not _has_mark(cls, "l4_expensive")
+    ]
+    assert not missing_slow, f"Boot1 expensive classes must stay @pytest.mark.slow: {missing_slow}"
+    assert not missing_expensive, (
+        f"Boot1 expensive classes must stay @pytest.mark.l4_expensive: {missing_expensive}"
+    )

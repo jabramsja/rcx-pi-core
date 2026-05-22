@@ -496,6 +496,98 @@ class TestDispatcherFreshnessRefresh:
         assert result["completed_candidates"][0]["tracked_packet"] == packet_rel
         assert calls == []
 
+    def test_dispatch_allows_completed_candidate_with_explicit_recovery_reroute(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet_rel = "reports/control_plane/seed_packet.md"
+        (repo / packet_rel).write_text(
+            "# seed packet\n\nStatus: IMPLEMENTED / LOCAL EVIDENCE\n",
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "post-push recovery route",
+            "request_for_claude": "retry after pushed CI failure",
+            "wave_name": "builder-wave-2026-04-20",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "allow_completed_tracked_packet": True,
+            "next_candidates": [
+                {
+                    "candidate": "builder-wave-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": packet_rel,
+                }
+            ],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        result = dispatch_mod.dispatch(record, repo_root=repo, skip_freshness=True)
+
+        assert result["status"] != "stopped"
+        assert result["executor"] == "phase_b_executor"
+        assert calls
+
+    def test_canonical_refresh_preserves_completed_packet_recovery_override(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet_rel = "reports/control_plane/seed_packet.md"
+        (repo / packet_rel).write_text(
+            "# seed packet\n\nStatus: IMPLEMENTED / LOCAL EVIDENCE\n",
+            encoding="utf-8",
+        )
+        routing_file = repo / ".agent_bus" / "meta" / "post_merge_routing.json"
+        record, errors = common_mod.build_and_write_routing_record(
+            **_valid_kwargs(
+                repo,
+                decision="ROUTE_PHASE_B",
+                allow_completed_tracked_packet=True,
+            ),
+            output_path=routing_file,
+        )
+        assert errors == []
+        assert record["allow_completed_tracked_packet"] is True
+
+        stale_record = dict(record)
+        stale_record["state_sha"] = "stale-state"
+        routing_file.write_text(json.dumps(stale_record), encoding="utf-8")
+
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda executor_name, result, **_kwargs: {
+                "status": "success",
+                "executor": executor_name,
+            },
+        )
+
+        result = dispatch_mod.dispatch(
+            stale_record,
+            repo_root=repo,
+            routing_record_path=routing_file,
+        )
+
+        persisted = json.loads(routing_file.read_text(encoding="utf-8"))
+        assert result["status"] == "success"
+        assert result["executor"] == "phase_b_executor"
+        assert calls
+        assert persisted["allow_completed_tracked_packet"] is True
+        assert persisted["state_sha"] != "stale-state"
+
     def test_dispatch_stops_phase_b_implementation_complete_candidate_before_phase_executor(
         self, tmp_path, monkeypatch,
     ):
@@ -6700,6 +6792,149 @@ class TestCommitContinuationAndBotFreshness:
         resumed = captured["result"]
         assert resumed["commit_sha"] == head_sha
         assert resumed["receipt_decision"] == "COMMIT_GO_HOLD_PUSH"
+
+    def test_stale_completed_route_uses_post_commit_continuation(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env, check=True,
+        )
+        packet = "reports/control_plane/test-wave-id.md"
+        (repo / packet).parent.mkdir(parents=True, exist_ok=True)
+        (repo / packet).write_text("Status: IMPLEMENTED / LOCAL EVIDENCE\n", encoding="utf-8")
+        (repo / "file1.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", packet, "file1.py"], cwd=repo, capture_output=True, env=env, check=True)
+        subprocess.run(["git", "commit", "-m", "wave complete"], cwd=repo, capture_output=True, env=env, check=True)
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        bus_dir = repo / ".agent_bus"
+        canonical = bus_dir / "meta" / "post_merge_routing.json"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        handoff_path = bus_dir / "executors" / "phase_b_handoff.json"
+        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_phase_b_handoff(
+            handoff_path,
+            wave_id="test-wave-id",
+            task_id="[TEST-1]",
+            tracked_packet=packet,
+        )
+        (bus_dir / "executors" / "commit_executor_test-wave-id.json").write_text(
+            json.dumps({
+                "version": 1,
+                "status": "post_commit_pending",
+                "target_branch": "jabramsja/test-wave-id",
+                "commit_sha": head_sha,
+                "receipt_decision": "COMMIT_GO",
+                "steps_completed": ["git_commit"],
+            }),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "stale completed route",
+            "request_for_claude": "retry",
+            "wave_name": "test-wave-id",
+            "task_id": "[TEST-1]",
+            "state_sha": "stale-state-sha",
+            "next_candidates": [
+                {"candidate": "test-wave-id", "bounded": True, "tracked_packet": packet}
+            ],
+        }
+        canonical.write_text(json.dumps(record), encoding="utf-8")
+        retry_result = {"status": "success", "decision": "COMMIT_GO", "executor": "commit_executor"}
+
+        with (
+            patch.object(dispatch_mod, "_refresh_canonical_routing_record_state", return_value=(False, None)),
+            patch.object(dispatch_mod, "_auto_refresh_routing", return_value=(False, None)),
+            patch.object(dispatch_mod, "_retry_commit_only", return_value=retry_result) as retry_commit_only,
+        ):
+            result = dispatch_mod.dispatch(
+                record,
+                config=dispatch_mod.DEFAULT_EXECUTOR_CONFIG,
+                repo_root=repo,
+                routing_record_path=canonical,
+                bus_dir=".agent_bus",
+            )
+
+        assert result == retry_result
+        retry_commit_only.assert_called_once()
+
+    def test_stale_completed_route_resumes_post_commit_before_successful_refresh(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env, check=True,
+        )
+        packet = "reports/control_plane/test-wave-id.md"
+        (repo / packet).parent.mkdir(parents=True, exist_ok=True)
+        (repo / packet).write_text(
+            "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT\n",
+            encoding="utf-8",
+        )
+        (repo / "file1.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", packet, "file1.py"], cwd=repo, capture_output=True, env=env, check=True)
+        subprocess.run(["git", "commit", "-m", "wave complete"], cwd=repo, capture_output=True, env=env, check=True)
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        bus_dir = repo / ".agent_bus"
+        canonical = bus_dir / "meta" / "post_merge_routing.json"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        handoff_path = bus_dir / "executors" / "phase_b_handoff.json"
+        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_phase_b_handoff(
+            handoff_path,
+            wave_id="test-wave-id",
+            task_id="[TEST-1]",
+            tracked_packet=packet,
+        )
+        (bus_dir / "executors" / "commit_executor_test-wave-id.json").write_text(
+            json.dumps({
+                "version": 1,
+                "status": "post_commit_pending",
+                "target_branch": "jabramsja/test-wave-id",
+                "commit_sha": head_sha,
+                "receipt_decision": "COMMIT_GO",
+                "steps_completed": ["git_commit"],
+            }),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "stale completed route",
+            "request_for_claude": "retry",
+            "wave_name": "test-wave-id",
+            "task_id": "[TEST-1]",
+            "state_sha": "stale-state-sha",
+            "next_candidates": [
+                {"candidate": "test-wave-id", "bounded": True, "tracked_packet": packet}
+            ],
+        }
+        canonical.write_text(json.dumps(record), encoding="utf-8")
+        retry_result = {"status": "success", "decision": "COMMIT_GO", "executor": "commit_executor"}
+
+        with (
+            patch.object(dispatch_mod, "_refresh_canonical_routing_record_state", return_value=(True, {**record, "state_sha": head_sha})) as refresh,
+            patch.object(dispatch_mod, "_auto_refresh_routing", return_value=(True, {**record, "state_sha": head_sha})) as auto_refresh,
+            patch.object(dispatch_mod, "_retry_commit_only", return_value=retry_result) as retry_commit_only,
+            patch.object(dispatch_mod, "_run_executor_in_group") as run_executor,
+        ):
+            result = dispatch_mod.dispatch(
+                record,
+                config=dispatch_mod.DEFAULT_EXECUTOR_CONFIG,
+                repo_root=repo,
+                routing_record_path=canonical,
+                bus_dir=".agent_bus",
+            )
+
+        assert result == retry_result
+        retry_commit_only.assert_called_once()
+        refresh.assert_not_called()
+        auto_refresh.assert_not_called()
+        run_executor.assert_not_called()
 
     def test_has_fresh_connector_review_requires_current_head_commit(self):
         pr_data = {
@@ -13974,6 +14209,25 @@ class TestRoutingRecordBuilderCompletedPacketRejection:
         assert errors
         assert any("already complete" in e for e in errors)
         assert record == {}
+
+    def test_allows_completed_packet_with_explicit_recovery_reroute(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "seed_packet.md"
+        packet.write_text(
+            "# seed packet\n\nStatus: IMPLEMENTED / LOCAL EVIDENCE\n",
+            encoding="utf-8",
+        )
+
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo),
+            allow_completed_tracked_packet=True,
+        )
+
+        assert errors == []
+        assert record["allow_completed_tracked_packet"] is True
+        assert record["next_candidates"][0]["tracked_packet"] == (
+            "reports/control_plane/seed_packet.md"
+        )
 
     def test_accepts_implemented_pending_commit_control_plane_packet(self, tmp_path):
         repo, _ = _init_builder_repo(tmp_path)

@@ -101,6 +101,9 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "pre_commit_supervisor": 900,
         "post_merge_supervisor": 900,
         "pre_push_fast": 2400,
+        "commit_ci_watch": 3300,
+        "commit_ci_poll": 3300,
+        "commit_ci_verify": 900,
         "bot_remediation": 600,
         "agent_review": 900,
         "pipeline_agent_pager_trigger": 30,
@@ -1002,6 +1005,7 @@ def build_post_merge_routing_record(
     merged_pr: int | None = None,
     merge_sha: str | None = None,
     repo_root: Path | None = None,
+    allow_completed_tracked_packet: bool = False,
 ) -> tuple[dict[str, Any], list[str]]:
     """Build a validated post-merge routing record from kwargs.
 
@@ -1024,6 +1028,8 @@ def build_post_merge_routing_record(
       - decision in POST_MERGE_AUTHORIZED_DECISIONS (lazy-imported)
       - tracked_packet passes _validate_tracked_packet_for_builder
       - explicit tracked_packet Wave ID, when present, matches wave_name
+      - completed tracked packets are rejected unless the caller explicitly
+        marks this as a post-push/same-wave recovery reroute
     """
     errors: list[str] = []
 
@@ -1065,7 +1071,7 @@ def build_post_merge_routing_record(
             tracked_packet if isinstance(tracked_packet, str) else "",
             effective_repo_root,
         )
-        if completed_packet_err:
+        if completed_packet_err and not allow_completed_tracked_packet:
             errors.append(completed_packet_err)
         else:
             packet_wave_err = _tracked_packet_wave_conflict_error(
@@ -1126,6 +1132,8 @@ def build_post_merge_routing_record(
             }
         ],
     }
+    if allow_completed_tracked_packet:
+        record["allow_completed_tracked_packet"] = True
     return record, []
 
 
@@ -1142,6 +1150,7 @@ def build_and_write_routing_record(
     repo_root: Path | None = None,
     output_path: Path | None = None,
     bus_dir: str | Path | None = None,
+    allow_completed_tracked_packet: bool = False,
 ) -> tuple[dict[str, Any], list[str]]:
     """Build + persist a routing record. Returns (record, errors).
 
@@ -1165,6 +1174,7 @@ def build_and_write_routing_record(
         merged_pr=merged_pr,
         merge_sha=merge_sha,
         repo_root=effective_repo_root,
+        allow_completed_tracked_packet=allow_completed_tracked_packet,
     )
     if errors:
         return {}, errors

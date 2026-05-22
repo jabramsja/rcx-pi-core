@@ -84,6 +84,7 @@ class TestPythonSourceLock:
             "mu/host/python/rcx_pi/selfhost/stage0_vm.py",   # Definition
             "mu/host/python/rcx_pi/selfhost/classify_mu.py", # Loader-cached caller
             "mu/host/python/rcx_pi/selfhost/subst_mu.py",    # Loader-cached caller
+            "mu/host/python/rcx_pi/selfhost/step_mu.py",      # Loader-cached continuation validator
             "mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py",  # This test
             "mu/tests/l4_gates/test_subst_vm_unification_gate.py",  # VM fault mocking
             "mu/tests/l4_gates/test_classify_vm_unification_gate.py",  # VM fault mocking
