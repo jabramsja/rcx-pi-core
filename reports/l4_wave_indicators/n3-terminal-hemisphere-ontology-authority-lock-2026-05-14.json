@@ -1,24 +1,24 @@
 {
   "wave_id": "n3-terminal-hemisphere-ontology-authority-lock-2026-05-14",
-  "repeat_run_speedup_ratio": 1.366937,
+  "repeat_run_speedup_ratio": 1.075582,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.250648,
+  "step_growth_slope": 0.249663,
   "repeat_run_raw_seconds": [
-    0.34262,
-    0.250648
+    0.268533,
+    0.249663
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.34262
+      "elapsed_seconds": 0.268533
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.593268
+      "elapsed_seconds": 0.518196
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-22T12:32:05Z",
+  "collection_timestamp_utc": "2026-05-22T13:27:06Z",
   "collector_version": "2.2.0"
 }

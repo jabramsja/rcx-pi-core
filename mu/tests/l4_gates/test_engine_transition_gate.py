@@ -221,6 +221,7 @@ class TestJSClassifierSourceLock:
         actually validates payloads at runtime, not just source-locked.
         """
         import json
+        import os
         import subprocess
 
         # The source-lock test already proves the validation call exists.
@@ -237,9 +238,10 @@ class TestJSClassifierSourceLock:
             "maxEngineIterations": 20,
             "maxAlgorithmIterations": 50,
         })
+        json_api_timeout_s = 120 if os.environ.get("RCX_CI") == "1" else 30
         result = subprocess.run(
             ["node", "mu/host/js/eval_step.js", "--json-api", req],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=json_api_timeout_s,
         )
         lines = [l for l in result.stdout.splitlines() if l.startswith("JSON_API_RESPONSE:")]
         assert lines, f"No JSON_API_RESPONSE in: {result.stdout[:500]}"

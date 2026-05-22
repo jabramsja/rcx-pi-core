@@ -4403,6 +4403,30 @@ def _is_dangerous_command(cmd: str) -> bool:
     return False
 
 
+def _structured_recovery_context_lines(result: dict[str, Any]) -> list[str]:
+    """Render structured executor result fields that are not stdout/stderr."""
+    lines: list[str] = []
+    reason = _summarize_result_reason(result)
+    if reason:
+        lines.append("summary:")
+        lines.extend(_tail_recovery_prompt_lines(reason, 20))
+    for key in ("errors", "ci_failures", "ci_checks_output"):
+        value = result.get(key)
+        if value in (None, "", [], {}):
+            continue
+        try:
+            rendered = (
+                json.dumps(value, indent=2, sort_keys=True)
+                if isinstance(value, (dict, list))
+                else str(value)
+            )
+        except (TypeError, ValueError):
+            rendered = str(value)
+        lines.append(f"{key}:")
+        lines.extend(_tail_recovery_prompt_lines(rendered, 40))
+    return lines or ["(none)"]
+
+
 def _build_diagnosis_prompt(
     result: dict[str, Any], wave_id: str, iteration: int,
     repo_root: Path,
@@ -4418,6 +4442,7 @@ def _build_diagnosis_prompt(
     # is not enough to keep Codex recovery prompts under the input ceiling.
     stderr_lines = _tail_recovery_prompt_lines(stderr, 100)
     stdout_lines = _tail_recovery_prompt_lines(stdout, 50)
+    structured_context_lines = _structured_recovery_context_lines(result)
     # Get git status
     try:
         git_proc = subprocess.run(
@@ -4440,6 +4465,9 @@ Tier: {tier}
 Step: {step}
 Iteration: {iteration + 1}/{MAX_RECOVERY_ITERATIONS}
 Wave: {wave_id}
+
+Structured failure context:
+{chr(10).join(structured_context_lines)}
 
 STDERR (last 100 lines):
 {chr(10).join(stderr_lines)}
