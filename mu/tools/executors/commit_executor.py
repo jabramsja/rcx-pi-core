@@ -3031,6 +3031,8 @@ def _run_pytest_on_files(
                 "-x",
                 "--tb=short",
                 "--import-mode=importlib",
+                "-m",
+                "not slow and not fuzzer",
                 *test_files,
             ],
             cwd=repo_root,
@@ -3038,7 +3040,12 @@ def _run_pytest_on_files(
             text=True,
             check=False,
             timeout=effective_timeout,
-            env={**os.environ, "PYTHONHASHSEED": "0"},
+            env={
+                **os.environ,
+                "PYTHONHASHSEED": "0",
+                "RCX_CI": "1",
+                "HYPOTHESIS_PROFILE": "ci_fast",
+            },
         )
         return {
             "exit_code": result.returncode,

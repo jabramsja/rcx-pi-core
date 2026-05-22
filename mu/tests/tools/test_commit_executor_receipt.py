@@ -5450,6 +5450,36 @@ class TestCommitExecutorPytestGate:
         assert result["exit_code"] == -1
         assert result["stderr"] == "pytest timed out after 480s"
 
+    def test_run_pytest_on_files_uses_fast_shard_marker_filter(self, tmp_path):
+        from types import SimpleNamespace
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ) as mock_run:
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: locks commit Step 8b fast-shard marker filter
+                repo,
+                [
+                    "mu/tests/l4_gates/test_boot1_default_pipeline_gate.py",
+                    "mu/tests/parity/test_boot1_shadow_parity.py",
+                ],
+            )
+
+        assert result["passed"] is True
+        args = mock_run.call_args.args[0]
+        assert ["-m", "not slow and not fuzzer"] in [
+            args[index:index + 2]
+            for index in range(len(args) - 1)
+        ]
+        env = mock_run.call_args.kwargs["env"]
+        assert env["PYTHONHASHSEED"] == "0"
+        assert env["RCX_CI"] == "1"
+        assert env["HYPOTHESIS_PROFILE"] == "ci_fast"
+
 
 class TestReviewFindingExtraction:
     def _base_pr_data(self, *, head_sha="abc123", latest_reviews=None, review_threads=None, comments=None):

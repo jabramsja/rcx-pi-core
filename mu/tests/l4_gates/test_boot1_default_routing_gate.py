@@ -62,6 +62,7 @@ def _js_request(action, **kwargs):
 # Python: omitted flag defaults to Boot1
 # =============================================================================
 
+@pytest.mark.slow
 class TestPythonBoot1Default:
     """Python run_engine_with_routing defaults to Boot1 recursive path."""
 
@@ -114,6 +115,7 @@ class TestPythonBoot1Default:
 # JS: omitted flag defaults to Boot1
 # =============================================================================
 
+@pytest.mark.slow
 class TestJsBoot1Default:
     """JS run_engine_with_routing defaults to Boot1 recursive path.
 
@@ -224,3 +226,21 @@ class TestCrossSubstrateDefaultParity:
         py_val = py_result["engine_result"]["value"]
         js_val = js_resp["result"]["engine_result"]["value"]
         assert py_val == js_val, f"Parity mismatch: Python={py_val}, JS={js_val}"
+
+
+def _has_slow_mark(obj):
+    marks = getattr(obj, "pytestmark", [])
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return any(getattr(mark, "name", None) == "slow" for mark in marks)
+
+
+def test_boot1_default_routing_expensive_classes_remain_slow_marked():
+    """Lock default routing Boot1 evidence into the owned slow gate lane."""
+    expensive_classes = (
+        TestPythonBoot1Default,
+        TestJsBoot1Default,
+        TestCrossSubstrateDefaultParity,
+    )
+    missing = [cls.__name__ for cls in expensive_classes if not _has_slow_mark(cls)]
+    assert not missing, f"Default routing Boot1 classes must stay @pytest.mark.slow: {missing}"

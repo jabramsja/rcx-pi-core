@@ -137,6 +137,7 @@ class TestPythonPipelineBoot1Default:
 # JS: omitted flag defaults to Boot1 (observer route proof)
 # =============================================================================
 
+@pytest.mark.slow
 class TestJsPipelineBoot1Default:
     """JS run_engine_pipeline defaults to Boot1 recursive path.
 
@@ -217,3 +218,20 @@ class TestJsPipelineBoot1Default:
         )
         assert not resp["success"]
         assert resp["error_code"] == "type_error"
+
+
+def _has_slow_mark(obj):
+    marks = getattr(obj, "pytestmark", [])
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return any(getattr(mark, "name", None) == "slow" for mark in marks)
+
+
+def test_boot1_default_pipeline_expensive_classes_remain_slow_marked():
+    """Lock default pipeline Boot1 evidence into the owned slow gate lane."""
+    expensive_classes = (
+        TestPythonPipelineBoot1Default,
+        TestJsPipelineBoot1Default,
+    )
+    missing = [cls.__name__ for cls in expensive_classes if not _has_slow_mark(cls)]
+    assert not missing, f"Default pipeline Boot1 classes must stay @pytest.mark.slow: {missing}"

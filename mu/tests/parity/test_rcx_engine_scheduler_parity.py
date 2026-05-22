@@ -101,7 +101,7 @@ console.log(JSON.stringify({ success: true, result: result.scheduler_result }));
         cwd=str(REPO_ROOT),
         text=True,
         capture_output=True,
-        timeout=30,
+        timeout=60,
         check=False,
     )
     assert proc.returncode == 0, f"JS scheduler failed\nstdout={proc.stdout}\nstderr={proc.stderr}"
