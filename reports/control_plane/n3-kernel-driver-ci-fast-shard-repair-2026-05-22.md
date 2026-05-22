@@ -28,6 +28,15 @@ packaged as the structural runtime wave.
   commit `e08f0ba2173bfccbdcae6bf29151c383ead3da7f` with one remaining
   timeout: `tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_seed_path_selection`
   timed out after 60 seconds in `_run_js_scheduler`.
+- Resend commit `c757b181a5d491e77f1399077050a79a9298e6ff` reached PR #1014 CI,
+  then `test` run `26269953766`, job `77321094665`, failed on
+  `tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_malformed_tail_rejection`
+  at `tests/parity/test_rcx_engine_scheduler_parity.py:180`, also timing out
+  after 60 seconds in `_run_js_scheduler`.
+- The same resend's `green-gate` run `26269954677`, job `77321119497`, failed
+  on `tests/engine/test_engine_hemisphere_integration.py::TestRoutingPriorityRegression::test_null_not_swallowed_by_stall`
+  with a 300-second pytest timeout while validating Mu in
+  `rcx_pi/selfhost/mu_type.py:245`.
 - Earlier green-gate run `26251622398`, job `77263960447`, reached the pytest
   summary in `[PY 10/17] Python test suite (excludes stress, slow, fuzzer)` and
   reported `18 failed, 8451 passed, 22 skipped, 1 warning in 2318.03s`.
@@ -64,6 +73,7 @@ Allowed write set for this repair:
 
 - `mu/tests/parity/test_boot1_shadow_parity.py`
 - `mu/tests/parity/test_rcx_engine_scheduler_parity.py`
+- `mu/tests/engine/test_engine_hemisphere_integration.py`
 - `mu/tests/l4_gates/test_boot1_default_pipeline_gate.py`
 - `mu/tests/l4_gates/test_boot1_default_routing_gate.py`
 - `TASKS.md`, only for this L4_ENABLER tracker sync note
@@ -88,14 +98,18 @@ when the repair is resent through the pipeline.
 - Add source-lock tests that fail if those expensive classes drift back out of
   `@pytest.mark.slow`.
 - Increase the scheduler parity Node subprocess cap from 30s to 60s; local
-  targeted fast proof measured a scheduler case at 31.90s, which exceeds the
-  old cap while remaining under the new cap.
-- Mark only the scheduler success-path selection vector as `@pytest.mark.slow`
-  with a source-lock test so it stays in the owned slow lane; keep the scheduler
-  rejection/fail-closed parity vectors in the fast PR shard.
-- Bind the slow scheduler success-path vector to a slow-lane 180-second Node
-  subprocess cap while retaining the 60-second default for the fast scheduler
-  rejection/fail-closed vectors.
+  targeted proof measured scheduler JS parity cases at 24-32 seconds in
+  isolation, which is too expensive for PR fast-shard execution under xdist
+  contention.
+- Mark all full scheduler JS parity vectors as `@pytest.mark.slow` with a
+  source-lock test so the fast PR shard keeps only lane-classification coverage.
+- Bind the scheduler success-path vector to a slow-lane 180-second Node
+  subprocess cap while retaining the 60-second default for the other scheduler
+  vectors.
+- Mark the two full wrapper hemisphere-routing priority regression probes as
+  `@pytest.mark.slow` with a source-lock test. Local proof measured them at
+  70.23 seconds and 60.47 seconds, while the slow wrapper-equivalence and Paxos
+  probes in the same file measured 236.24 seconds and 117.80 seconds.
 - Preserve fast Boot1 security, validation, primitive-count, and source-lock
   coverage in `[PY 10/17]`.
 - Make commit executor Step 8b mirror the PR fast-shard marker filter with
@@ -125,9 +139,13 @@ when the repair is resent through the pipeline.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -n 4 --dist worksteal -m slow tests/l4_gates/test_boot1_default_pipeline_gate.py tests/l4_gates/test_boot1_default_routing_gate.py --timeout=300 --durations=20 --tb=short -q` passes.
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate::test_run_pytest_on_files_uses_fast_shard_marker_filter --tb=short` passes.
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_phase_b_executor.py::TestPrepareCommitHandoff::test_build_phase_b_tracker_note_reads_backticked_same_wave_override_line --tb=short` passes.
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -m "not slow and not fuzzer" tests/parity/test_rcx_engine_scheduler_parity.py --collect-only -q` reports the slow success-path vector deselected and the scheduler source-lock/rejection vectors selected.
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -m slow tests/parity/test_rcx_engine_scheduler_parity.py --collect-only -q` reports the success-path vector selected by the slow lane.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -m "not slow and not fuzzer" tests/parity/test_rcx_engine_scheduler_parity.py --collect-only -q` reports only the scheduler slow-mark source-lock selected.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -m slow tests/parity/test_rcx_engine_scheduler_parity.py --collect-only -q` reports all five full scheduler JS parity vectors selected by the slow lane.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -m slow tests/parity/test_rcx_engine_scheduler_parity.py --timeout=300 --tb=short` passes.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -m "not slow and not fuzzer" tests/engine/test_engine_hemisphere_integration.py --collect-only -q` reports 13 fast checks selected, including the routing-priority slow-mark source-lock.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -m slow tests/engine/test_engine_hemisphere_integration.py --collect-only -q` reports the four full wrapper probes selected by the slow lane.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -m "not slow and not fuzzer" tests/parity/test_rcx_engine_scheduler_parity.py tests/engine/test_engine_hemisphere_integration.py --timeout=300 --tb=short --durations=10` passes.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -m slow tests/engine/test_engine_hemisphere_integration.py --timeout=420 --tb=short --durations=10` passes.
 - `PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -x --tb=short --import-mode=importlib -m "not slow and not fuzzer" mu/tests/l4_gates/test_boot1_default_pipeline_gate.py mu/tests/l4_gates/test_boot1_default_routing_gate.py mu/tests/parity/test_boot1_shadow_parity.py mu/tests/parity/test_rcx_engine_scheduler_parity.py` passes.
 - `python3 tools/checks/enforce_l4_execution_contract.py --range origin/dev...HEAD --wave-id n3-kernel-driver-mu-continuation-state-runtime-2026-05-20` passes.
 - `python3 tools/checks/check_host_semantics_ratchet.py` passes with no footprint increase.
@@ -160,6 +178,7 @@ FOUNDER_OVERRIDE:n3-kernel-driver-ci-fast-shard-repair-2026-05-22
   - `indicator`: `reports/l4_wave_indicators/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.json`
 - Current staged files:
   - `TASKS.md`
+  - `mu/tests/engine/test_engine_hemisphere_integration.py`
   - `mu/tests/parity/test_rcx_engine_scheduler_parity.py`
   - `reports/control_plane/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.md`
   - `reports/l4_wave_indicators/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.json`

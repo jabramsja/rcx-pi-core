@@ -135,11 +135,7 @@ def test_python_js_agree_on_scheduler_seed_path_selection():
     assert py_result["scheduler_result"]["operator"]["operator_id"] == "op.alpha"
 
 
-def test_scheduler_seed_path_selection_remains_slow_marked():
-    """Lock the expensive success-path scheduler parity vector out of fast PR shards."""
-    assert _has_slow_mark(test_python_js_agree_on_scheduler_seed_path_selection)
-
-
+@pytest.mark.slow
 def test_python_js_agree_on_scheduler_negative_order_rejection():
     vector = _load_vector("reject_non_lexicographic_order")
 
@@ -151,6 +147,7 @@ def test_python_js_agree_on_scheduler_negative_order_rejection():
     assert py_result["scheduler_result"]["reason"] == "non_lexicographic_operator_order"
 
 
+@pytest.mark.slow
 def test_python_js_agree_on_scheduler_fail_closed_pair_rejection():
     vector = _load_vector("reject_unhandled_lexicographic_pair")
 
@@ -162,6 +159,7 @@ def test_python_js_agree_on_scheduler_fail_closed_pair_rejection():
     assert py_result["scheduler_result"]["reason"] == "unhandled_lexicographic_operator_pair"
 
 
+@pytest.mark.slow
 def test_python_js_agree_on_scheduler_longer_pool_rejection():
     vector = _load_vector("reject_longer_pool_unchecked_suffix")
 
@@ -173,6 +171,7 @@ def test_python_js_agree_on_scheduler_longer_pool_rejection():
     assert py_result["scheduler_result"]["reason"] == "unhandled_operator_pool_width"
 
 
+@pytest.mark.slow
 def test_python_js_agree_on_scheduler_malformed_tail_rejection():
     vector = _load_vector("reject_malformed_tail_operator")
 
@@ -182,3 +181,16 @@ def test_python_js_agree_on_scheduler_malformed_tail_rejection():
     assert py_result == js_result
     assert py_result["scheduler_result"]["action"] == "reject_pool"
     assert py_result["scheduler_result"]["reason"] == "unhandled_operator_pool_shape"
+
+
+def test_scheduler_js_parity_vectors_remain_slow_marked():
+    """Lock full JS scheduler parity vectors out of fast PR shards."""
+    js_parity_vectors = (
+        test_python_js_agree_on_scheduler_seed_path_selection,
+        test_python_js_agree_on_scheduler_negative_order_rejection,
+        test_python_js_agree_on_scheduler_fail_closed_pair_rejection,
+        test_python_js_agree_on_scheduler_longer_pool_rejection,
+        test_python_js_agree_on_scheduler_malformed_tail_rejection,
+    )
+    for test_func in js_parity_vectors:
+        assert _has_slow_mark(test_func), test_func.__name__

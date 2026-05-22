@@ -5,7 +5,7 @@ Tests the handoff contract between run_engine_pipeline(),
 run_hemisphere_routing(), and run_metabolization_cycle()
 via the run_engine_with_routing() wrapper.
 
-14 fast tests (green gate) + 2 slow tests (full suite).
+13 fast checks (green gate) + 4 slow tests (full suite).
 No module-level pytestmark — per-test @pytest.mark.slow only.
 """
 import pytest
@@ -19,6 +19,13 @@ from rcx_pi.selfhost.engine_pipeline import (
 
 # Local fixtures (constraint #5: no underscored imports from rcx_pi)
 HEMISPHERE_KEYS = frozenset({"r_null", "r_inf", "r_a", "lobes", "sink"})
+
+
+def _has_slow_mark(obj):
+    marks = getattr(obj, "pytestmark", [])
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return any(getattr(mark, "name", None) == "slow" for mark in marks)
 
 
 def _local_default_hemispheres():
@@ -264,6 +271,7 @@ class TestCycleGuard:
 class TestRoutingPriorityRegression:
     """Regression tests for P1 merge blocker: stall must NOT swallow closure/null."""
 
+    @pytest.mark.slow
     def test_closure_not_swallowed_by_stall(self):
         """closure=True + stall=True → r_a (not r_inf). P1 regression."""
         crafted_engine_result = {
@@ -279,6 +287,7 @@ class TestRoutingPriorityRegression:
         assert h["r_a"] is not None, "closure+stall should route to r_a"
         assert h["r_inf"] is None, "closure+stall must NOT route to r_inf"
 
+    @pytest.mark.slow
     def test_null_not_swallowed_by_stall(self):
         """value=None + stall=True → r_null (not r_inf). P1 regression."""
         crafted_engine_result = {
@@ -293,6 +302,11 @@ class TestRoutingPriorityRegression:
         h = result["hemispheres"]
         assert h["r_null"] is not None, "null+stall should route to r_null"
         assert h["r_inf"] is None, "null+stall must NOT route to r_inf"
+
+    def test_routing_priority_regressions_remain_slow_marked(self):
+        """Lock expensive full wrapper routing probes out of fast PR shards."""
+        assert _has_slow_mark(self.test_closure_not_swallowed_by_stall)
+        assert _has_slow_mark(self.test_null_not_swallowed_by_stall)
 
 
 # --- Slow tests (per-test @pytest.mark.slow) ---

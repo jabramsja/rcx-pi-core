@@ -1,24 +1,24 @@
 {
   "wave_id": "n3-kernel-driver-ci-fast-shard-repair-2026-05-22",
-  "repeat_run_speedup_ratio": 1.074204,
+  "repeat_run_speedup_ratio": 1.092492,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.250271,
+  "step_growth_slope": 0.230918,
   "repeat_run_raw_seconds": [
-    0.268842,
-    0.250271
+    0.252276,
+    0.230918
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.268842
+      "elapsed_seconds": 0.252276
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.519113
+      "elapsed_seconds": 0.483194
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-22T05:13:00Z",
+  "collection_timestamp_utc": "2026-05-22T05:52:20Z",
   "collector_version": "2.2.0"
 }
