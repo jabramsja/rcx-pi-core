@@ -110,6 +110,7 @@ class FailureClass(Enum):
     PR_MERGE_CONFLICT = "pr_merge_conflict"
     PR_CONFLICTING = "pr_conflicting"
     STALE_ACTIVE_ITEMS = "stale_active_items"
+    HANDOFF_RECEIPT_BUILDER_REFRESH = "handoff_receipt_builder_refresh"
     # Tier 3 -- LLM diagnosis (small focused prompt)
     GIT_STAGING_CONFLICT = "git_staging_conflict"
     TEST_FAILURE = "test_failure"
@@ -149,6 +150,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PR_MERGE_CONFLICT: 2,
     FailureClass.PR_CONFLICTING: 2,
     FailureClass.STALE_ACTIVE_ITEMS: 2,
+    FailureClass.HANDOFF_RECEIPT_BUILDER_REFRESH: 2,
     FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
     FailureClass.PRIVATE_ATTR_TEST_INTEGRITY: 3,
     FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
@@ -372,7 +374,6 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         or "pre-push-fast failed" in l4_signal
     ):
         return FailureClass.L4_CONTRACT_VIOLATION
-
     # Tier 1: deterministic lock/state issues
     if "bridge config not found" in reason_lower or "bridge config not found" in combined_lower:
         return FailureClass.MISSING_BRIDGE_CONFIG
@@ -401,6 +402,9 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.MISSING_PLAN_TASK_HEADER
     if _looks_like_mismatched_plan_task_header(result):
         return FailureClass.MISMATCHED_PLAN_TASK_HEADER
+
+    if status_failed and _looks_like_handoff_receipt_builder_refresh_failure(l4_signal):
+        return FailureClass.HANDOFF_RECEIPT_BUILDER_REFRESH
 
     # Tier 2: transient / timeout issues
     if (
@@ -468,6 +472,36 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.UNKNOWN_ERROR
 
     return FailureClass.UNCLASSIFIED
+
+
+def _looks_like_handoff_receipt_builder_refresh_failure(signal: str) -> bool:
+    """Return true for handoff/receipt failures that can be rebuilt from live staged truth."""
+    lowered = signal.lower()
+    if "path traversal" in lowered or "escapes repo root" in lowered:
+        return False
+    direct_hints = (
+        "no phase b handoff file",
+        "cannot retry commit: handoff file missing",
+        "phase b converged but no handoff file found",
+        "produced no handoff",
+        "phase b handoff missing at",
+        "phase b handoff validation failed",
+        "phase b handoff does not match stale routing record",
+        "phase b handoff is not valid json",
+        "phase b handoff must decode to a json object",
+        "phase b handoff wave_id mismatch",
+        "phase b handoff task_id mismatch",
+        "phase b handoff tracked_packet mismatch",
+        "requires a pre-prepared phase b handoff",
+        "receipt chain would be broken",
+        "phase b handoff receipt not found at",
+        "phase b handoff receipt decision",
+        "phase b handoff receipt unreadable",
+        "commit continuation has no commit-capable receipt decision",
+        "commit continuation receipt_decision is",
+        "commit continuation missing handoff_sha",
+    )
+    return any(hint in lowered for hint in direct_hints)
 
 
 def _looks_like_pre_push_pytest_failure(step_lower: str, signal: str) -> bool:
@@ -1958,6 +1992,233 @@ def _bridge_scope_fingerprint_for_files(repo_root: Path, files: list[str]) -> st
     return digest.hexdigest()
 
 
+def _extract_recovery_receipt_path(result: dict[str, Any]) -> str:
+    preferred_keys = ("receipt_path_from_supervisor", "receipt_path", "supervisor_receipt")
+    payloads: list[Any] = [result]
+    for key in ("stdout", "stderr"):
+        parsed = _parse_json_object(result.get(key))
+        if parsed:
+            payloads.append(parsed)
+
+    def walk(value: Any) -> str:
+        if isinstance(value, dict):
+            for key in preferred_keys:
+                candidate = str(value.get(key) or "").strip()
+                if candidate:
+                    return candidate
+            artifact_paths = value.get("artifact_paths")
+            if isinstance(artifact_paths, dict):
+                candidate = str(artifact_paths.get("supervisor_receipt") or "").strip()
+                if candidate:
+                    return candidate
+            for nested in value.values():
+                candidate = walk(nested)
+                if candidate:
+                    return candidate
+        if isinstance(value, list):
+            for item in value:
+                candidate = walk(item)
+                if candidate:
+                    return candidate
+        return ""
+
+    for payload in payloads:
+        candidate = walk(payload)
+        if candidate:
+            return candidate
+    return ""
+
+
+def _phase_b_retry_record_from_routing_record(routing_record: dict[str, Any]) -> dict[str, Any]:
+    retry_record = dict(routing_record)
+    plan_path = _routing_plan_path(routing_record)
+    wave_id = str(
+        retry_record.get("wave_name")
+        or retry_record.get("wave_id")
+        or ""
+    ).strip()
+    retry_record["decision"] = "ROUTE_PHASE_B"
+    retry_record["summary"] = (
+        "Retry Phase B to mint a fresh supervisor receipt after handoff/receipt failure"
+    )
+    if wave_id:
+        retry_record["wave_name"] = normalize_wave_id(wave_id)
+    if plan_path:
+        retry_record["tracked_packet"] = plan_path
+        retry_record["plan_path"] = plan_path
+        if not isinstance(retry_record.get("next_candidates"), list):
+            retry_record["next_candidates"] = [{
+                "candidate": normalize_wave_id(wave_id or Path(plan_path).stem),
+                "bounded": True,
+                "tracked_packet": plan_path,
+            }]
+    return retry_record
+
+
+def _handoff_refresh_signal(result: dict[str, Any]) -> str:
+    return " ".join(
+        part.lower()
+        for part in (
+            str(result.get("executor") or ""),
+            str(result.get("decision") or ""),
+            str(result.get("step") or ""),
+            _summarize_result_reason(result),
+            str(result.get("stdout") or ""),
+            str(result.get("stderr") or ""),
+        )
+        if part
+    )
+
+
+def _requires_phase_b_receipt_chain(routing_record: dict[str, Any], result: dict[str, Any]) -> bool:
+    decision = str(result.get("decision") or routing_record.get("decision") or "").strip()
+    if decision in {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH", "ROUTE_PHASE_B"}:
+        return True
+    signal = _handoff_refresh_signal(result)
+    return "phase b handoff" in signal or "phase b receipt chain" in signal
+
+
+def _arm_phase_b_retry_from_routing_record(repo_root: Path, routing_record: dict[str, Any]) -> str:
+    plan_path = _routing_plan_path(routing_record)
+    if not plan_path:
+        return ""
+    resolved = repo_root / plan_path
+    if not resolved.exists():
+        return ""
+    os.environ[PHASE_B_RECOVERY_PLAN_ENV] = plan_path
+    wave_name = str(routing_record.get("wave_name") or routing_record.get("wave_id") or "").strip()
+    if wave_name:
+        os.environ[PHASE_B_RECOVERY_PLAN_WAVE_ENV] = normalize_wave_id(wave_name)
+    return plan_path
+
+
+def fix_handoff_receipt_builder_refresh(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Refresh a stale/missing handoff through the owning phase builder/API."""
+    result = kw.get("result") if isinstance(kw.get("result"), dict) else {}
+
+    try:
+        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+    except Exception as exc:
+        return _fix_result(False, "routing_record_missing", f"could not load routing record: {exc}")
+    if not isinstance(routing_record, dict):
+        return _fix_result(False, "routing_record_invalid", "routing record was not a JSON object")
+
+    requested_wave = normalize_wave_id(str(kw.get("wave_id") or "").strip())
+    routing_wave = normalize_wave_id(
+        str(routing_record.get("wave_name") or routing_record.get("wave_id") or "").strip()
+    )
+    if requested_wave and routing_wave and requested_wave != routing_wave:
+        return _fix_result(
+            False,
+            "wave_mismatch",
+            f"recovery wave {requested_wave} does not match routing wave {routing_wave}",
+        )
+    if not routing_wave:
+        return _fix_result(False, "routing_wave_missing", "routing record missing wave_name/wave_id")
+
+    receipt_path = _extract_recovery_receipt_path(result)
+    if receipt_path:
+        try:
+            phase_b_mod = _load_executor_module_from_repo(repo_root, "phase_b_executor")
+        except Exception as exc:
+            return _fix_result(False, "module_load_failed", f"could not load phase_b_executor: {exc}")
+        builder = getattr(phase_b_mod, "prepare_dispatcher_commit_handoff_from_routing_record", None)
+        if not callable(builder):
+            return _fix_result(
+                False,
+                "phase_b_builder_missing",
+                "phase_b_executor has no prepare_dispatcher_commit_handoff_from_routing_record API",
+            )
+        try:
+            handoff_path, errors = builder(
+                repo_root,
+                routing_record,
+                receipt_path=receipt_path,
+                plan_path=_routing_plan_path(routing_record) or None,
+                bus_dir=_active_bus_dir(),
+            )
+        except Exception as exc:
+            return _fix_result(False, "phase_b_builder_failed", f"Phase B handoff builder failed: {exc}")
+        if errors:
+            return _fix_result(False, "phase_b_builder_rejected", "; ".join(str(err) for err in errors[:5]))
+        if not handoff_path:
+            return _fix_result(False, "phase_b_builder_invalid", "Phase B handoff builder returned no path")
+        return _fix_result(
+            True,
+            "rebuild_handoff_with_phase_b_builder",
+            f"rebuilt {handoff_path} via phase_b_executor dispatcher handoff builder using receipt {receipt_path}",
+        )
+
+    if _requires_phase_b_receipt_chain(routing_record, result):
+        plan_path = _arm_phase_b_retry_from_routing_record(repo_root, routing_record)
+        if plan_path:
+            result["retry_record"] = _phase_b_retry_record_from_routing_record(routing_record)
+            result["decision"] = "ROUTE_PHASE_B"
+            result["executor"] = "phase_b_executor"
+            result["chained_from"] = None
+            return _fix_result(
+                True,
+                "retry_phase_b_for_fresh_receipt",
+                f"handoff/receipt failure lacks explicit receipt evidence; retry Phase B with --plan {plan_path}",
+            )
+        return _fix_result(
+            False,
+            "phase_b_receipt_required",
+            "handoff/receipt failure requires Phase B receipt evidence; no plan path is available for retry",
+        )
+
+    try:
+        commit_mod = _load_executor_module_from_repo(repo_root, "commit_executor")
+    except Exception as exc:
+        return _fix_result(False, "module_load_failed", f"could not load commit_executor: {exc}")
+    try:
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            routing_record,
+            repo_root,
+            standalone=True,
+            bus_dir=_active_bus_dir(),
+        )
+    except Exception as exc:
+        return _fix_result(False, "builder_failed", f"commit handoff builder failed: {exc}")
+    if errors:
+        return _fix_result(False, "builder_rejected", "; ".join(str(err) for err in errors[:5]))
+    if not isinstance(handoff, dict):
+        return _fix_result(False, "builder_invalid", "commit handoff builder did not return a JSON object")
+
+    handoff_wave = normalize_wave_id(str(handoff.get("wave_id") or "").strip())
+    if handoff_wave != routing_wave:
+        return _fix_result(
+            False,
+            "handoff_wave_mismatch",
+            f"builder returned wave {handoff_wave or '(missing)'}, expected {routing_wave}",
+        )
+    valid, validation_errors = commit_mod.validate_handoff(handoff, repo_root=repo_root)
+    if not valid:
+        return _fix_result(
+            False,
+            "rebuilt_handoff_invalid",
+            "builder handoff failed validation: " + "; ".join(validation_errors[:5]),
+        )
+
+    handoff_path = _bus_path(repo_root, "executors", "phase_b_handoff.json")
+    try:
+        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = handoff_path.with_name(f"{handoff_path.name}.{uuid.uuid4().hex}.tmp")
+        tmp_path.write_text(json.dumps(handoff, indent=2) + "\n", encoding="utf-8")
+        tmp_path.replace(handoff_path)
+    except OSError as exc:
+        return _fix_result(False, "handoff_write_failed", f"could not persist rebuilt handoff: {exc}")
+
+    return _fix_result(
+        True,
+        "rebuild_handoff_with_commit_builder",
+        (
+            f"rebuilt {handoff_path} via commit_executor.prepare_handoff_from_routing_record"
+            "(standalone=True); supervisor receipt remains pending and no Phase B receipt was fabricated"
+        ),
+    )
+
+
 def _post_reentry_scope_files(repo_root: Path, result: dict[str, Any], plan_path: str) -> list[str]:
     explicit_files = _coerce_string_list(result.get("changed_files"))
     if explicit_files:
@@ -3084,6 +3345,7 @@ _TIER2_FIXES: dict[FailureClass, Any] = {
     FailureClass.PR_MERGE_CONFLICT: fix_pr_merge_conflict,
     FailureClass.PR_CONFLICTING: fix_pr_conflicting,
     FailureClass.STALE_ACTIVE_ITEMS: fix_stale_active_items,
+    FailureClass.HANDOFF_RECEIPT_BUILDER_REFRESH: fix_handoff_receipt_builder_refresh,
     FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP: fix_phase_b_wave_class_package_gap,
     FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP: fix_commit_supervisor_structural_override_package_gap,
     FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP: fix_phase_b_l4_structural_tracker_note_gap,
@@ -8001,7 +8263,7 @@ def _retry_target(result: dict[str, Any], step: str) -> str:
 
 
 def _routing_plan_path(record: dict[str, Any]) -> str:
-    plan_path = str(record.get("plan_path") or "").strip()
+    plan_path = str(record.get("plan_path") or record.get("tracked_packet") or "").strip()
     if plan_path:
         return plan_path
     scope_items = record.get("scope_items")

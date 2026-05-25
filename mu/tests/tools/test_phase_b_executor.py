@@ -982,6 +982,123 @@ class TestPrepareCommitHandoff:
         handoff = json.loads(path.read_text())
         assert handoff["pre_commit_receipt_path"] == ".agent_bus/meta/pre_commit_receipts/receipt_2026-03-23.json"
 
+    def test_dispatcher_builder_rebuilds_handoff_with_phase_b_receipt(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "builder-refresh-2026-05-25"
+        plan_rel = f"reports/control_plane/{wave_id}.md"
+        receipt_rel = ".agent_bus/meta/pre_commit_receipts/r.json"
+        (repo / "reports" / "control_plane").mkdir(parents=True, exist_ok=True)
+        (repo / ".agent_bus" / "meta" / "pre_commit_receipts").mkdir(parents=True, exist_ok=True)
+        (repo / plan_rel).write_text(
+            "\n".join([
+                "Task: [NEXT-CODEX-POST-REDTEAM]",
+                f"Wave ID: {wave_id}",
+                "Wave Class: MAINTENANCE",
+                "Target Gate: G8",
+                "Phase-A-Lock: LOCKED",
+                "Status: ACTIVE",
+                "",
+                "May stage exactly:",
+                "- `TASKS.md`",
+                f"- `{plan_rel}`",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text("- Tracker sync note placeholder\n", encoding="utf-8")
+        (repo / "UNRELATED.md").write_text("unrelated staged work\n", encoding="utf-8")
+        subprocess.run(["git", "add", "UNRELATED.md"], cwd=repo, check=True, capture_output=True)
+        bad_receipt_rel = "not_receipt.txt"
+        (repo / bad_receipt_rel).write_text("not json", encoding="utf-8")
+        rejected_path, rejected_errors = pb_mod.prepare_dispatcher_commit_handoff_from_routing_record(
+            repo,
+            {
+                "decision": "COMMIT_GO",
+                "summary": "refresh stale handoff",
+                "wave_name": wave_id,
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "tracked_packet": plan_rel,
+            },
+            receipt_path=bad_receipt_rel,
+        )
+
+        assert rejected_path is None
+        assert any("pre-commit supervisor receipt" in err for err in rejected_errors)
+        assert any("JSON receipt" in err for err in rejected_errors)
+        assert not (repo / ".agent_bus" / "executors" / "phase_b_handoff.json").exists()
+
+        (repo / receipt_rel).write_text(json.dumps({"decision": "COMMIT_GO"}), encoding="utf-8")
+        stub_path, stub_errors = pb_mod.prepare_dispatcher_commit_handoff_from_routing_record(
+            repo,
+            {
+                "decision": "COMMIT_GO",
+                "summary": "refresh stale handoff",
+                "wave_name": wave_id,
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "tracked_packet": plan_rel,
+            },
+            receipt_path=receipt_rel,
+        )
+
+        assert stub_path is None
+        assert any("missing required supervisor receipt field staged_sha" in err for err in stub_errors)
+        assert any("missing required supervisor receipt field package_path" in err for err in stub_errors)
+        assert not (repo / ".agent_bus" / "executors" / "phase_b_handoff.json").exists()
+
+        package_path = repo / ".scratch" / "phase_b_supervisor_package.json"
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        package_path.write_text(json.dumps({"wave_name": wave_id}), encoding="utf-8")
+        (repo / receipt_rel).write_text(
+            json.dumps({
+                "decision": "COMMIT_GO",
+                "staged_sha": "reviewed-staged-sha",
+                "timestamp_utc": "2026-05-25T00:00:00+00:00",
+                "package_digest": "package-digest",
+                "package_path": str(package_path),
+            }),
+            encoding="utf-8",
+        )
+
+        mismatch_path, mismatch_errors = pb_mod.prepare_dispatcher_commit_handoff_from_routing_record(
+            repo,
+            {
+                "decision": "COMMIT_GO",
+                "summary": "refresh stale handoff",
+                "wave_name": "different-wave-2026-05-25",
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "tracked_packet": plan_rel,
+            },
+            receipt_path=receipt_rel,
+        )
+
+        assert mismatch_path is None
+        assert any("does not match routing wave" in err for err in mismatch_errors)
+        assert not (repo / ".agent_bus" / "executors" / "phase_b_handoff.json").exists()
+
+        handoff_path, errors = pb_mod.prepare_dispatcher_commit_handoff_from_routing_record(
+            repo,
+            {
+                "decision": "COMMIT_GO",
+                "summary": "refresh stale handoff",
+                "wave_name": wave_id,
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "tracked_packet": plan_rel,
+            },
+            receipt_path=receipt_rel,
+        )
+
+        assert errors == []
+        assert handoff_path is not None
+        handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+        assert handoff["caller"] == "phase_b"
+        assert handoff["pre_commit_receipt_path"] == receipt_rel
+        assert handoff["tracked_packet"] == plan_rel
+        assert "TASKS.md" in handoff["files_to_stage"]
+        assert "UNRELATED.md" not in handoff["files_to_stage"]
+        assert "UNRELATED.md" not in handoff["tracker_note_text"]
+
     def test_tracker_note_text_in_handoff(self, tmp_path):
         tracker_note_text = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
             wave_id="test",
@@ -1923,7 +2040,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json") as mock_handoff:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        assert result["status"] == "commit_ready"
+        assert result["status"] == "commit_ready", result
         assert "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT" in plan.read_text(
             encoding="utf-8",
         )
@@ -1931,6 +2048,102 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert "Class: MAINTENANCE" in tracker_note_text
         assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in tracker_note_text
         assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in tracker_note_text
+
+    def test_run_phase_b_restages_final_packet_status_before_handoff_receipt(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        wave_id = "phase-b-final-status-receipt-refresh-2026-05-25"
+        plan_rel = f"reports/control_plane/{wave_id}.md"
+        plan = repo / plan_rel
+        plan.write_text(
+            "# Plan\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Class: MAINTENANCE\n"
+            "\n"
+            "May stage exactly:\n"
+            "- `TASKS.md`\n"
+            f"- `{plan_rel}`\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text("## Tracker\n", encoding="utf-8")
+
+        supervisor_calls: list[dict[str, object]] = []
+
+        def fake_supervisor(repo_root, package_path, **_kwargs):
+            idx = len(supervisor_calls) + 1
+            unstaged = subprocess.run(
+                ["git", "diff", "--name-only"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip().splitlines()
+            package = json.loads(package_path.read_text(encoding="utf-8"))
+            receipt = f".agent_bus/meta/pre_commit_receipts/r{idx}.json"
+            supervisor_calls.append({
+                "receipt": receipt,
+                "unstaged": unstaged,
+                "package": package,
+            })
+            return {
+                "exit_code": 0,
+                "parsed": {
+                    "decision": "COMMIT_GO",
+                    "summary": "ok",
+                    "status": "success",
+                    "findings": [],
+                },
+                "receipt_path": receipt,
+            }
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": wave_id,
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "",
+                 "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
+             patch.object(pb_mod, "_verify_phase_b_pre_supervisor_tracker_note", return_value=None), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=fake_supervisor):
+            result = pb_mod.run_phase_b(repo, plan_rel, max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready", result
+        assert len(supervisor_calls) == 2
+        assert supervisor_calls[-1]["receipt"] == result["receipt_path"]
+        assert supervisor_calls[-1]["unstaged"] == []
+        assert subprocess.run(
+            ["git", "diff", "--name-only"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip() == ""
+        staged_plan = subprocess.run(
+            ["git", "show", f":{plan_rel}"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT" in staged_plan
+        handoff = json.loads((repo / ".agent_bus" / "executors" / "phase_b_handoff.json").read_text())
+        assert handoff["pre_commit_receipt_path"] == supervisor_calls[-1]["receipt"]
 
     def test_run_phase_b_same_wave_exception_keeps_handoff_task_id_on_routing_record(self, tmp_path):
         repo = tmp_path / "repo"
@@ -2291,7 +2504,7 @@ class TestMaintenanceTrackerMetadataPropagation:
 
         assert result["status"] == "commit_ready", result
         assert mock_indicator.call_count == 1
-        assert len(captured_packages) == 2
+        assert len(captured_packages) == 3
         reentry_package = captured_packages[-1]
         assert indicator_path in reentry_package["changed_files"]
         assert indicator_path in reentry_package["scope_items"]
@@ -2403,7 +2616,7 @@ class TestMaintenanceTrackerMetadataPropagation:
             result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready", result
-        assert len(captured_packages) == 2
+        assert len(captured_packages) == 3
         assert captured_packages[0]["wave_class"] == "L4_ENABLER"
         reentry_package = captured_packages[-1]
         assert reentry_package["wave_class"] == "L4_STRUCTURAL"
@@ -3858,6 +4071,8 @@ class TestMaintenanceTrackerMetadataPropagation:
             "phase_b_bridge_completed",
             "pre_commit_supervisor_started",
             "pre_commit_supervisor_completed",
+            "pre_commit_supervisor_started",
+            "pre_commit_supervisor_completed",
             "phase_b_final_verdict",
             "commit_ready",
         ]
@@ -4017,6 +4232,11 @@ class TestMaintenanceTrackerMetadataPropagation:
                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
             },
+            {
+                "exit_code": 0,
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r-final.json",
+            },
         ])
         uuid_values = iter(["11111111aaaaaaaa", "22222222bbbbbbbb"])
 
@@ -4066,6 +4286,8 @@ class TestMaintenanceTrackerMetadataPropagation:
             "phase_b_implementer_completed",
             "phase_b_reviewer_started",
             "phase_b_bridge_completed",
+            "pre_commit_supervisor_started",
+            "pre_commit_supervisor_completed",
             "pre_commit_supervisor_started",
             "pre_commit_supervisor_completed",
             "phase_b_final_verdict",
@@ -4814,6 +5036,8 @@ class TestFinalPytestGate:
             "phase_b_final_pytest_passed",
             "pre_commit_supervisor_started",
             "pre_commit_supervisor_completed",
+            "pre_commit_supervisor_started",
+            "pre_commit_supervisor_completed",
             "phase_b_final_verdict",
             "commit_ready",
         ]
@@ -5395,7 +5619,7 @@ class TestBridgeLoopReinvokesImplementer:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready"
-        assert mock_stage.call_count == 3
+        assert mock_stage.call_count == 4
         # Step 5b adds plan_path to changed_files before staging
         assert mock_stage.call_args_list[0].args[1] == ["TASKS.md", "f.py", "reports/control_plane/plan.md"]
         assert mock_stage.call_args_list[1].args[1] == ["TASKS.md", "f.py", "reports/control_plane/plan.md"]
@@ -8171,6 +8395,11 @@ class TestSdkReviewScopeSelection:
                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r2.json",
             },
+            {
+                "exit_code": 0,
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r3.json",
+            },
         ])
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
@@ -8621,7 +8850,7 @@ class TestEmptyFilesToStageBlocksCommitReady:
     """Resume with empty files_to_stage must NOT return commit_ready."""
 
     def test_empty_files_to_stage_returns_error(self, tmp_path):
-        """If wave-owned files are empty at handoff time, fail closed."""
+        """If no add-able files remain at handoff time, fail closed."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -8629,23 +8858,15 @@ class TestEmptyFilesToStageBlocksCommitReady:
 
         mock_impl = _make_mock_impl()
 
-        # _collect_wave_owned_files returns empty at handoff time
-        collect_calls = [0]
-        def collect_side(*a, **kw):
-            collect_calls[0] += 1
-            # Return files for initial/pytest/staging steps, empty for final handoff (call 3)
-            if collect_calls[0] <= 2:
-                return ["f.py"]
-            return []  # Empty at handoff
-
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
-             patch.object(pb_mod, "_collect_wave_owned_files", side_effect=collect_side), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", return_value={
                  "exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1",
              }), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_split_commit_handoff_stage_files", return_value=([], [])), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
                  "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",

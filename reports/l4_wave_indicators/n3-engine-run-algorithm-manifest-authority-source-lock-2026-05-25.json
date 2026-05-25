@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-engine-run-algorithm-manifest-authority-source-lock-2026-05-25",
+  "repeat_run_speedup_ratio": 1.031672,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.25073,
+  "repeat_run_raw_seconds": [
+    0.258671,
+    0.25073
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.258671
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.509401
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-25T19:03:45Z",
+  "collector_version": "2.2.0"
+}
