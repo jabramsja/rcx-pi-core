@@ -2103,7 +2103,8 @@ def fix_handoff_receipt_builder_refresh(repo_root: Path, **kw: Any) -> dict[str,
     if not isinstance(routing_record, dict):
         return _fix_result(False, "routing_record_invalid", "routing record was not a JSON object")
 
-    requested_wave = normalize_wave_id(str(kw.get("wave_id") or "").strip())
+    requested_wave_raw = str(kw.get("wave_id") or "").strip()
+    requested_wave = normalize_wave_id(requested_wave_raw) if requested_wave_raw else ""
     routing_wave = normalize_wave_id(
         str(routing_record.get("wave_name") or routing_record.get("wave_id") or "").strip()
     )
