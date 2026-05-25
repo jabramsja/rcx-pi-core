@@ -3615,9 +3615,10 @@ _PLAN_WAVE_CLASS_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _PLAN_TARGET_GATE_RE = re.compile(
-    r"^\s*(?:[-*]\s*)?`?(?:target[_ -]?gate(?:[_ -]?id)?)\s*[:=]\s*`?(?P<value>[^`#\r\n]+)",
+    r"^\s*(?:[-*]\s*)?`?(?:target[_ -]?gate(?:[_ -]?id)?)\s*[:=]\s*`?(?P<value>G[1-8])\b",
     flags=re.IGNORECASE,
 )
+_PLAN_GATE_ID_TOKEN_RE = re.compile(r"^(?P<gate>G[1-8])\b", flags=re.IGNORECASE)
 
 
 def _normalize_declared_path_token(token: str) -> str | None:
@@ -3792,7 +3793,8 @@ def _normalize_plan_target_gate_id(value: Any) -> str:
         "not-selected",
     }:
         return ""
-    return gate
+    match = _PLAN_GATE_ID_TOKEN_RE.match(gate)
+    return match.group("gate").upper() if match else gate
 
 
 def _collect_baseline_wave_files(repo_root: Path, plan_path: str) -> list[str]:
