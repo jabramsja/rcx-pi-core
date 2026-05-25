@@ -4187,6 +4187,279 @@ def prepare_commit_handoff(
     return handoff_path
 
 
+def _dispatcher_handoff_plan_path(routing_record: dict[str, Any]) -> str:
+    for candidate in (
+        routing_record.get("plan_path"),
+        routing_record.get("tracked_packet"),
+    ):
+        path = str(candidate or "").strip()
+        if path:
+            return path
+    next_candidates = routing_record.get("next_candidates")
+    if isinstance(next_candidates, list):
+        for item in next_candidates:
+            if isinstance(item, dict):
+                path = str(item.get("tracked_packet") or "").strip()
+                if path:
+                    return path
+    return ""
+
+
+def _dispatcher_handoff_explicit_files(routing_record: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+
+    def add_many(value: Any) -> None:
+        if isinstance(value, list):
+            for item in value:
+                text = str(item or "").strip()
+                if text:
+                    paths.append(text)
+
+    add_many(routing_record.get("files_to_stage"))
+    add_many(routing_record.get("force_add_files"))
+    next_candidates = routing_record.get("next_candidates")
+    if isinstance(next_candidates, list):
+        for item in next_candidates:
+            if isinstance(item, dict):
+                add_many(item.get("files"))
+    return _dedupe_phase_b_repo_paths(paths)
+
+
+def _validate_dispatcher_handoff_receipt(
+    repo_root: Path,
+    receipt_rel: str,
+    receipt_file: Path,
+    *,
+    bus_dir: str | Path | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    expected_prefix = str(
+        agent_bus_relpath(bus_dir, "meta", "pre_commit_receipts")
+    ).rstrip("/") + "/"
+    if not receipt_rel.startswith(expected_prefix):
+        errors.append(
+            "receipt_path must point to a pre-commit supervisor receipt under "
+            f"{expected_prefix}: {receipt_rel}"
+        )
+    if Path(receipt_rel).suffix != ".json":
+        errors.append(f"receipt_path must be a JSON receipt file: {receipt_rel}")
+    try:
+        receipt_data = json.loads(receipt_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        errors.append(f"receipt_path is not a readable JSON receipt: {receipt_rel}: {exc}")
+        return errors
+    if not isinstance(receipt_data, dict):
+        errors.append(f"receipt_path must decode to a JSON object: {receipt_rel}")
+        return errors
+    receipt_decision = str(receipt_data.get("decision") or "").strip()
+    if receipt_decision not in {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}:
+        errors.append(
+            "receipt_path decision must be COMMIT_GO or COMMIT_GO_HOLD_PUSH, "
+            f"got {receipt_decision or '<missing>'}: {receipt_rel}"
+        )
+    for field in ("staged_sha", "timestamp_utc", "package_digest", "package_path"):
+        value = receipt_data.get(field)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(
+                "receipt_path missing required supervisor receipt field "
+                f"{field}: {receipt_rel}"
+            )
+    timestamp_utc = str(receipt_data.get("timestamp_utc") or "").strip()
+    if timestamp_utc:
+        try:
+            datetime.fromisoformat(timestamp_utc.replace("Z", "+00:00"))
+        except ValueError:
+            errors.append(
+                f"receipt_path timestamp_utc is unparseable: {receipt_rel}"
+            )
+    return errors
+
+
+def prepare_dispatcher_commit_handoff_from_routing_record(
+    repo_root: Path,
+    routing_record: dict[str, Any],
+    *,
+    receipt_path: str,
+    plan_path: str | None = None,
+    bus_dir: str | Path | None = None,
+) -> tuple[Path | None, list[str]]:
+    """Rebuild the dispatcher-visible Phase B handoff through Phase B builders.
+
+    This is for recovery after Phase B already has receipt evidence but the
+    durable handoff is missing, stale, or mismatched. It does not run the
+    pre-commit supervisor and refuses to synthesize receipt authority.
+    """
+    errors: list[str] = []
+    if not isinstance(routing_record, dict):
+        return None, ["routing_record must be a JSON object"]
+
+    receipt_rel = str(receipt_path or "").strip()
+    if not receipt_rel:
+        errors.append("receipt_path is required for dispatcher Phase B handoff rebuild")
+    elif os.path.isabs(receipt_rel) or any(part == ".." for part in Path(receipt_rel).parts):
+        errors.append(f"unsafe receipt_path for dispatcher Phase B handoff rebuild: {receipt_rel}")
+    else:
+        receipt_file = (repo_root / receipt_rel).resolve()
+        try:
+            receipt_file.relative_to(repo_root.resolve())
+        except ValueError:
+            errors.append(f"receipt_path escapes repo root: {receipt_rel}")
+        if not receipt_file.exists():
+            errors.append(f"receipt_path does not exist: {receipt_rel}")
+        else:
+            errors.extend(
+                _validate_dispatcher_handoff_receipt(
+                    repo_root,
+                    receipt_rel,
+                    receipt_file,
+                    bus_dir=bus_dir,
+                )
+            )
+
+    routing_plan_path = _dispatcher_handoff_plan_path(routing_record)
+    resolved_plan_path = str(plan_path or "").strip() or routing_plan_path
+    if not resolved_plan_path:
+        errors.append("routing record missing plan_path/tracked_packet for dispatcher Phase B handoff rebuild")
+    if resolved_plan_path.startswith("<"):
+        errors.append(f"dispatcher Phase B handoff rebuild requires a real plan packet, got {resolved_plan_path}")
+    if (
+        routing_plan_path
+        and not routing_plan_path.startswith("<")
+        and resolved_plan_path
+        and resolved_plan_path != routing_plan_path
+    ):
+        errors.append(
+            "dispatcher Phase B handoff rebuild plan_path "
+            f"{resolved_plan_path} does not match routing tracked_packet {routing_plan_path}"
+        )
+    if errors:
+        return None, errors
+
+    try:
+        plan = load_plan_packet(repo_root, resolved_plan_path)
+    except PhaseBExecutorError as exc:
+        return None, [str(exc)]
+    plan_content = str(plan.get("content") or "")
+    plan_wave_id = normalize_wave_id(str(plan.get("wave_id") or ""))
+    routing_wave_id = normalize_wave_id(
+        str(routing_record.get("wave_name") or routing_record.get("wave_id") or "")
+    )
+    if plan_wave_id and routing_wave_id and plan_wave_id != routing_wave_id:
+        return None, [
+            "plan Wave ID "
+            f"{plan_wave_id} does not match routing wave {routing_wave_id} "
+            "for dispatcher Phase B handoff rebuild"
+        ]
+    wave_id = plan_wave_id or routing_wave_id
+    if not wave_id:
+        return None, ["cannot resolve wave_id for dispatcher Phase B handoff rebuild"]
+
+    wave_class, target_gate_id = _refresh_phase_b_package_governance(
+        repo_root,
+        plan,
+        resolved_plan_path,
+        routing_record,
+    )
+    fenced_out_files = set(_parse_fenced_out_files(plan_content))
+    exact_stage_scope_files = set(_parse_exact_stage_scope_files(plan_content))
+    if exact_stage_scope_files:
+        plan_declared_files = sorted(
+            path for path in exact_stage_scope_files
+            if path not in fenced_out_files
+        )
+    else:
+        plan_declared_files = [
+            path for path in _parse_plan_declared_files(plan_content)
+            if path not in fenced_out_files
+        ]
+    explicit_files = set(_dispatcher_handoff_explicit_files(routing_record)) - fenced_out_files
+    if exact_stage_scope_files:
+        explicit_files &= exact_stage_scope_files
+    baseline_files = (
+        set(_collect_baseline_wave_files(repo_root, resolved_plan_path))
+        - fenced_out_files
+    )
+    baseline_files = _restrict_baseline_to_exact_scope(
+        baseline_files,
+        exact_stage_scope_files or None,
+    )
+    wave_owned_files = _collect_wave_owned_files(
+        repo_root,
+        resolved_plan_path,
+        plan_declared_files or None,
+        explicit_files or None,
+        set(),
+        baseline_files,
+    )
+    wave_owned_files = _collect_commit_bound_files(
+        repo_root,
+        wave_owned_files,
+        allowed_files=set(wave_owned_files),
+    )
+    wave_owned_files = [
+        path for path in wave_owned_files
+        if path != receipt_rel
+        and not path.startswith(".agent_bus/meta/pre_commit_receipts/")
+        and path != ".agent_bus/executors/phase_b_handoff.json"
+    ]
+    if not wave_owned_files:
+        return None, ["no wave-owned files available for dispatcher Phase B handoff rebuild"]
+
+    handoff_files_to_stage, handoff_staged_deletions = _split_commit_handoff_stage_files(
+        repo_root,
+        wave_id,
+        wave_owned_files,
+    )
+    if not handoff_files_to_stage:
+        return None, ["no add-able files available for dispatcher Phase B handoff rebuild"]
+
+    bridge_status = _build_effective_bridge_status(repo_root, wave_id, resolved_plan_path, 0)
+    test_files = _select_pytest_gate_files(wave_owned_files, repo_root=repo_root)
+    tracker_note_text = build_phase_b_tracker_note(
+        wave_id=wave_id,
+        task_id=str(routing_record.get("task_id") or plan.get("task_id") or f"[{wave_id}]"),
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
+        plan_path=resolved_plan_path,
+        plan_content=plan_content,
+        changed_files=wave_owned_files,
+        test_files=test_files,
+        receipt_path=receipt_rel,
+        bridge_rounds=_bridge_rounds_for_tracker_note(bridge_status),
+        reentry=False,
+        founder_override=str(plan.get("founder_override") or ""),
+        unblocks_wave_id=str(plan.get("unblocks_wave_id") or ""),
+        unblocks_runtime_blocker=str(plan.get("unblocks_runtime_blocker") or ""),
+    )
+    handoff_scope_items = list(dict.fromkeys([resolved_plan_path, *handoff_staged_deletions]))
+    handoff_path = prepare_commit_handoff(
+        repo_root,
+        wave_id=wave_id,
+        task_id=str(routing_record.get("task_id") or plan.get("task_id") or f"[{wave_id}]"),
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
+        tracker_note_text=tracker_note_text,
+        fixes_implemented=["Phase B handoff rebuilt by dispatcher recovery via Phase B builder"],
+        files_to_stage=handoff_files_to_stage,
+        pre_commit_receipt_path=receipt_rel,
+        commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Codex GPT-5.5 xhigh <noreply@openai.com>",
+        pr_title=f"feat: Phase B - {wave_id}",
+        pr_body=f"## Summary\nPhase B implementation per locked plan at {resolved_plan_path}",
+        tracked_packet=resolved_plan_path,
+        supervisor_lane="hooks/agents/bridge control-surface",
+        deferred_items=_collect_supervisor_deferred_items(
+            wave_owned_files,
+            _canonical_deferred_packet_relpath(wave_id),
+            repo_root=repo_root,
+        ),
+        bridge_status=bridge_status,
+        scope_items=handoff_scope_items,
+        evidence_handles={"indicator": f"reports/l4_wave_indicators/{wave_id}.json"},
+        bus_dir=bus_dir,
+    )
+    return handoff_path, []
+
+
 def _wave_bound_target_branch(
     observed_branch: str,
     *,
@@ -8464,6 +8737,180 @@ def run_phase_b(
         return result
 
     # Step 8: Prepare commit handoff with explicit receipt path
+    #
+    # COMMIT_GO means the package is implemented and must remain routable to
+    # commit_executor; dispatcher intentionally rejects COMPLETED packets.
+    # The status mutation is itself part of the commit-bound packet.  Stage it
+    # and rerun the supervisor before writing the handoff so the receipt's
+    # staged_sha authorizes the exact index commit_executor will receive.
+    if not plan_path.startswith("<"):
+        update_plan_packet_status(
+            repo_root, plan_path, "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT",
+        )
+        if plan_path not in changed_files:
+            changed_files.append(plan_path)
+            changed_files = sorted(set(changed_files))
+        status_staged, status_stage_detail = _stage_files_for_pipeline(repo_root, [plan_path])
+        if not status_staged:
+            return {
+                "status": "error",
+                "step": "commit_handoff_packet_status_stage",
+                "stderr": status_stage_detail,
+                "errors": [
+                    "Failed to stage final Phase B packet status before commit handoff",
+                    status_stage_detail,
+                ],
+            }
+        pre_status_refresh_scope = list(changed_files)
+        changed_files = _collect_wave_owned_files(
+            repo_root,
+            plan_path,
+            plan_declared_files,
+            implementer_changed or None,
+            executor_created or None,
+            baseline_wave_files or None,
+        )
+        changed_files = _collect_commit_bound_files(
+            repo_root,
+            changed_files,
+            allowed_files=exact_stage_scope_files or None,
+        )
+        changed_files = sorted({*pre_status_refresh_scope, *changed_files})
+        changed_files = _phase_b_pre_supervisor_note_scope(changed_files)
+        scope_items = [plan_path]
+        for path in changed_files:
+            if path.startswith("reports/l4_wave_indicators/") and path not in scope_items:
+                scope_items.append(path)
+        supervisor_package["changed_files"] = changed_files
+        supervisor_package["fenced_files"] = _collect_fenced_dirty_files(repo_root, changed_files)
+        supervisor_package["scope_items"] = scope_items
+        supervisor_package["deferred_items"] = _collect_supervisor_deferred_items(
+            changed_files,
+            deferred_packet_path,
+            repo_root=repo_root,
+        )
+        supervisor_package["evidence_handles"] = _collect_supervisor_evidence_handles(
+            repo_root,
+            wave_id,
+        )
+        package_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
+
+        log("Re-running supervisor after commit-ready packet status refresh...")
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="pre_commit_supervisor_started",
+                state="commit_ready_status_refresh_started",
+                transition_key=_phase_b_transition_key(
+                    str(package_path.relative_to(repo_root)),
+                    "commit_ready_status_refresh_started",
+                ),
+                summary="Pre-commit supervisor re-started after commit-ready packet status refresh",
+                artifact_paths={"supervisor_package": str(package_path.relative_to(repo_root))},
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"] = [
+                f"Phase B pager emission failed before commit-ready status supervisor: {exc}"
+            ]
+            _clear_state(repo_root)
+            return result
+        supervisor_result = run_pre_commit_supervisor(
+            repo_root, package_path, verbose=verbose, bus_dir=_active_bus_dir(),
+        )
+        supervisor_parsed = supervisor_result.get("parsed", {})
+        decision = supervisor_parsed.get("decision")
+        receipt_path = supervisor_result.get("receipt_path", "")
+        result["pre_commit_decision"] = decision
+        result["pre_commit_summary"] = _supervisor_reason_text(supervisor_parsed)
+        log(f"Commit-ready status supervisor decision: {decision}, receipt: {receipt_path}")
+        if result.get("pre_commit_summary"):
+            log(f"Commit-ready status supervisor summary: {result['pre_commit_summary']}")
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="pre_commit_supervisor_completed",
+                state=f"commit_ready_status_refresh_{decision or 'unknown'}",
+                transition_key=_phase_b_transition_key(
+                    str(receipt_path or package_path.relative_to(repo_root)),
+                    f"commit_ready_status_refresh_completed:{decision or 'unknown'}",
+                ),
+                summary=(
+                    "Pre-commit supervisor commit-ready status refresh completed "
+                    f"with {decision or 'unknown'}"
+                ),
+                artifact_paths={
+                    "supervisor_package": str(package_path.relative_to(repo_root)),
+                    "supervisor_receipt": str(receipt_path or ""),
+                },
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"] = [
+                f"Phase B pager emission failed after commit-ready status supervisor: {exc}"
+            ]
+            _clear_state(repo_root)
+            return result
+        if decision == "NEEDS_PHASE_B":
+            changed_files = _bridge_review_scope_files(changed_files)
+            message = (
+                "Supervisor returned NEEDS_PHASE_B after commit-ready packet "
+                "status refresh. Manual intervention required."
+            )
+            detail = result.get("pre_commit_summary", "")
+            if detail:
+                message += f" {detail}"
+            result["status"] = "needs_phase_b"
+            result["step"] = "commit_ready_status_supervisor"
+            result["detail"] = message
+            result["reason"] = message
+            result["resume_after"] = "commit_ready_status_supervisor"
+            result["errors"] = [message]
+            result["changed_files"] = sorted(changed_files)
+            result["bridge_scope_fingerprint"] = _bridge_scope_fingerprint(repo_root, changed_files)
+            result["implementer_changed"] = sorted(implementer_changed)
+            result["executor_created"] = sorted(executor_created)
+            result["baseline_wave_files"] = sorted(baseline_wave_files)
+            result["all_non_blocking"] = all_non_blocking
+            result["finding_history"] = finding_history
+            try:
+                _emit_phase_b_hard_fail(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    state="needs_phase_b",
+                    changed_files=changed_files,
+                    summary=message,
+                    reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["step"] = "phase_b_pager"
+                result["errors"].append(
+                    f"Phase B pager emission failed on commit-ready status NEEDS_PHASE_B: {exc}"
+                )
+            _clear_state(repo_root)
+            return result
+        if decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+            result["status"] = "supervisor_rejected"
+            result["step"] = "commit_ready_status_supervisor"
+            detail = result.get("pre_commit_summary", "")
+            message = f"Commit-ready status supervisor returned {decision}"
+            if detail:
+                message += f". {detail}"
+            result["errors"] = [message]
+            _clear_state(repo_root)
+            return result
+
     # FAIL CLOSED if receipt_path is empty — supervisor must provide a valid path
     if not receipt_path or not receipt_path.strip():
         return {
@@ -8488,6 +8935,7 @@ def run_phase_b(
                     reconciled_detail,
                 ],
             }
+    pre_handoff_scope = list(changed_files)
     wave_owned_files = _collect_wave_owned_files(
         repo_root,
         plan_path,
@@ -8501,6 +8949,8 @@ def run_phase_b(
         wave_owned_files,
         allowed_files=exact_stage_scope_files or None,
     )
+    wave_owned_files = sorted({*pre_handoff_scope, *wave_owned_files})
+    wave_owned_files = _phase_b_pre_supervisor_note_scope(wave_owned_files)
     if not wave_owned_files:
         return {
             "status": "error",
@@ -8637,12 +9087,6 @@ def run_phase_b(
         result["errors"] = [f"Phase B pager emission failed at commit_ready: {exc}"]
         _clear_state(repo_root)
         return result
-    # COMMIT_GO means the package is implemented and must remain routable to
-    # commit_executor; dispatcher intentionally rejects COMPLETED packets.
-    if not plan_path.startswith("<"):
-        update_plan_packet_status(
-            repo_root, plan_path, "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT",
-        )
     # Clear state file on successful completion
     _clear_state(repo_root)
     log(f"Handoff written: {handoff_path}")
