@@ -3615,7 +3615,7 @@ _PLAN_WAVE_CLASS_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _PLAN_TARGET_GATE_RE = re.compile(
-    r"^\s*(?:[-*]\s*)?`?(?:target[_ -]?gate(?:[_ -]?id)?)\s*[:=]\s*`?(?P<value>[A-Za-z0-9_-]+)",
+    r"^\s*(?:[-*]\s*)?`?(?:target[_ -]?gate(?:[_ -]?id)?)\s*[:=]\s*`?(?P<value>[^`#\r\n]+)",
     flags=re.IGNORECASE,
 )
 
@@ -3759,7 +3759,7 @@ def _refresh_phase_b_package_governance(
             pass
     wave_class = _resolve_phase_b_wave_class(routing_record, plan_content)
     target_gate_id = (
-        str(routing_record.get("target_gate_id") or "").strip()
+        _normalize_plan_target_gate_id(routing_record.get("target_gate_id"))
         or _parse_plan_target_gate_id(plan_content)
         or "G8"
     )
@@ -3771,8 +3771,28 @@ def _parse_plan_target_gate_id(plan_content: str) -> str:
     for line in plan_content.splitlines():
         match = _PLAN_TARGET_GATE_RE.match(line.strip())
         if match:
-            return match.group("value").strip().strip("`.,;")
+            return _normalize_plan_target_gate_id(match.group("value"))
     return ""
+
+
+def _normalize_plan_target_gate_id(value: Any) -> str:
+    """Return a concrete target gate, or empty for packet NO-GO placeholders."""
+    gate = str(value or "").strip().split(" #", 1)[0].strip().strip("`.,;")
+    normalized = " ".join(gate.lower().split())
+    if normalized in {
+        "",
+        "-",
+        "n/a",
+        "na",
+        "none",
+        "none selected",
+        "none-selected",
+        "not applicable",
+        "not selected",
+        "not-selected",
+    }:
+        return ""
+    return gate
 
 
 def _collect_baseline_wave_files(repo_root: Path, plan_path: str) -> list[str]:

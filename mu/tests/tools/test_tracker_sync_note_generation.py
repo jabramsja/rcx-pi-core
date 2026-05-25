@@ -219,6 +219,16 @@ class TestValidateFields:
         errors = validate_fields(fields)
         assert any("evidence_command" in e for e in errors)
 
+    def test_invalid_target_gate_id_rejected(self):
+        fields = _make_enabler_fields(target_gate_id="none")
+        errors = validate_fields(fields)
+        assert any("target_gate_id must match G1-G8" in e for e in errors)
+
+    def test_render_rejects_invalid_target_gate_id(self):
+        fields = _make_enabler_fields(target_gate_id="none")
+        with pytest.raises(TrackerSyncError, match="target_gate_id must match G1-G8"):
+            render_tracker_sync_note(fields)
+
     def test_invalid_invariant_id(self):
         fields = _make_maintenance_fields(primary_invariant_id="INVALID")
         errors = validate_fields(fields)
