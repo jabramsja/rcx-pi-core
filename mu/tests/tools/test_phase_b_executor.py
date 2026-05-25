@@ -70,6 +70,93 @@ def _init_git_repo(repo: Path) -> None:
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
 
 
+def _run_phase_b_public_target_gate_path(
+    tmp_path: Path,
+    *,
+    plan_target_gate: str,
+    routing_target_gate: str | None = None,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "reports" / "control_plane").mkdir(parents=True)
+    (repo / ".agent_bus").mkdir()
+    wave_id = "no-go-target-gate-normalization-2026-05-22"
+    plan_path = f"reports/control_plane/{wave_id}.md"
+    (repo / plan_path).write_text(
+        "# Plan\n"
+        f"Wave ID: {wave_id}\n"
+        "Phase-A-Lock: LOCKED\n"
+        "Status: ACTIVE\n"
+        "Task: [NEXT-CODEX-POST-REDTEAM]\n"
+        "Class: L4_ENABLER\n"
+        f"Target gate: {plan_target_gate}\n"
+        f"FOUNDER_OVERRIDE:{wave_id}\n",
+        encoding="utf-8",
+    )
+    mock_impl = _make_mock_impl()
+    routing = {
+        **_VALID_ROUTING_RECORD,
+        "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+        "wave_name": wave_id,
+        "wave_class": "L4_ENABLER",
+    }
+    if routing_target_gate is not None:
+        routing["target_gate_id"] = routing_target_gate
+    wave_owned = [plan_path, "mu/tools/executors/phase_b_executor.py"]
+    captured_package: dict[str, object] = {}
+
+    def _capture_supervisor_package(repo_root, package_path, **_kwargs):
+        captured_package.update(json.loads(package_path.read_text(encoding="utf-8")))
+        return {
+            "exit_code": 0,
+            "parsed": {
+                "decision": "COMMIT_GO",
+                "summary": "",
+                "status": "success",
+                "findings": [],
+            },
+            "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+        }
+
+    with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+         patch.object(pb_mod, "load_routing_record", return_value=routing), \
+         patch.object(pb_mod, "_collect_changed_files", return_value=wave_owned), \
+         patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_owned), \
+         patch.object(
+             pb_mod,
+             "_run_pytest_on_files",
+             return_value={
+                 "exit_code": 0,
+                 "passed": True,
+                 "stdout": "",
+                 "stderr": "",
+             },
+         ), \
+         patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+         patch.object(
+             pb_mod,
+             "run_bridge_review",
+             return_value={
+                 "exit_code": 0,
+                 "stdout": "GO\n",
+                 "stderr": "",
+                 "decision": "GO",
+                 "job_id": "j1",
+             },
+         ), \
+         patch.object(pb_mod, "_stage_files", return_value=True), \
+         patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
+         patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=_capture_supervisor_package), \
+         patch.object(
+             pb_mod,
+             "prepare_commit_handoff",
+             return_value=repo / ".agent_bus" / "handoff.json",
+         ) as mock_handoff:
+        result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+    return result, mock_handoff.call_args.kwargs, captured_package
+
+
 class TestPrivateAttrGate:
     def test_select_private_attr_gate_files_only_returns_python_tests(self):
         selected = pb_mod.select_private_attr_gate_files([
@@ -1487,11 +1574,49 @@ class TestLoadPlanPacketPathTraversal:
         content = (
             "# Plan\n"
             "Class: L4_STRUCTURAL\n"
-            "Target Gate: G9\n"
+            "Target Gate: G8 (default)\n"
         )
 
         assert pb_mod._parse_plan_wave_class(content) == "L4_STRUCTURAL"  # ANTICHEAT_OK: testing packet metadata parser
-        assert pb_mod._parse_plan_target_gate_id(content) == "G9"  # ANTICHEAT_OK: testing packet metadata parser
+        assert pb_mod._parse_plan_target_gate_id(content) == "G8"  # ANTICHEAT_OK: testing packet metadata parser
+
+    @pytest.mark.parametrize(
+        "placeholder",
+        [
+            "none selected.",
+            "none",
+            "n/a",
+            "not applicable",
+            "not selected",
+            "not-selected",
+        ],
+    )
+    def test_run_phase_b_package_falls_back_for_no_go_target_gate_placeholders(
+        self,
+        tmp_path,
+        placeholder,
+    ):
+        result, handoff_kwargs, captured_package = _run_phase_b_public_target_gate_path(
+            tmp_path,
+            plan_target_gate=placeholder,
+        )
+
+        assert result["status"] == "commit_ready", result
+        assert captured_package["wave_class"] == "L4_ENABLER"
+        assert handoff_kwargs["wave_class"] == "L4_ENABLER"
+        assert handoff_kwargs["target_gate_id"] == "G8"
+
+    def test_run_phase_b_package_normalizes_routing_no_go_target_gate(self, tmp_path):
+        result, handoff_kwargs, captured_package = _run_phase_b_public_target_gate_path(
+            tmp_path,
+            plan_target_gate="none selected.",
+            routing_target_gate="none",
+        )
+
+        assert result["status"] == "commit_ready", result
+        assert captured_package["wave_class"] == "L4_ENABLER"
+        assert handoff_kwargs["wave_class"] == "L4_ENABLER"
+        assert handoff_kwargs["target_gate_id"] == "G8"
 
     def test_resolve_phase_b_wave_class_prefers_locked_packet_over_stale_routing(self):
         content = (

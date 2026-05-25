@@ -39,6 +39,7 @@ VALID_BOOT0_STATES = frozenset({"ADVANCE", "HOLD", "DEFER"})
 
 # Canonical bootstrap policy
 CANONICAL_BOOTSTRAP_POLICY = "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP"
+VALID_TARGET_GATE_RE = re.compile(r"^G[1-8]$")
 
 # Ra section detection
 _RA_HEADER_RE = re.compile(r"^## Ra\b")
@@ -127,6 +128,8 @@ def validate_fields(fields: TrackerSyncNoteFields) -> list[str]:
             errors.append("progress_proof_after required for classless comment-only runtime override")
     if not fields.target_gate_id:
         errors.append("target_gate_id is required")
+    elif not VALID_TARGET_GATE_RE.match(fields.target_gate_id):
+        errors.append(f"target_gate_id must match G1-G8, got: {fields.target_gate_id}")
     if fields.primary_blocker_class not in VALID_BLOCKER_CLASSES:
         errors.append(f"primary_blocker_class must be one of {sorted(VALID_BLOCKER_CLASSES)}, got: {fields.primary_blocker_class}")
     if fields.primary_invariant_id not in VALID_INVARIANT_IDS:
