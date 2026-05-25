@@ -1574,11 +1574,11 @@ class TestLoadPlanPacketPathTraversal:
         content = (
             "# Plan\n"
             "Class: L4_STRUCTURAL\n"
-            "Target Gate: G9\n"
+            "Target Gate: G8 (default)\n"
         )
 
         assert pb_mod._parse_plan_wave_class(content) == "L4_STRUCTURAL"  # ANTICHEAT_OK: testing packet metadata parser
-        assert pb_mod._parse_plan_target_gate_id(content) == "G9"  # ANTICHEAT_OK: testing packet metadata parser
+        assert pb_mod._parse_plan_target_gate_id(content) == "G8"  # ANTICHEAT_OK: testing packet metadata parser
 
     @pytest.mark.parametrize(
         "placeholder",

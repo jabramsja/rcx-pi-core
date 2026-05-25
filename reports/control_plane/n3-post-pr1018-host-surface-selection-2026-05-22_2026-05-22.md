@@ -141,19 +141,15 @@ Authorization: standing pipeline-bug-fix authorization applies only to same-wave
 - Refresh wave: `n3-post-pr1018-host-surface-selection-2026-05-22`
 - Active packet: `reports/control_plane/n3-post-pr1018-host-surface-selection-2026-05-22_2026-05-22.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `58cf0ef57b446c16a8f6bf6badf862cdaab4aee69ba0a170874ad34fac83d7ac`
+- Tracker note sha256: `08fd6a9cb0b119ecc80b4b9ca3c7e43c85768a3a35b4dae9de4d5c6fafe61e00`
 - Indicator artifact: `reports/l4_wave_indicators/n3-post-pr1018-host-surface-selection-2026-05-22.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_tracker_sync_note_generation.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-post-pr1018-host-surface-selection-2026-05-22_2026-05-22.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_phase_b_executor.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-post-pr1018-host-surface-selection-2026-05-22_2026-05-22.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-post-pr1018-host-surface-selection-2026-05-22.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_tracker_sync_note_generation.py`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `mu/tools/executors/tracker_sync_note.py`
   - `reports/control_plane/n3-post-pr1018-host-surface-selection-2026-05-22_2026-05-22.md`
-  - `reports/deferred/non_blocking/n3-post-pr1018-host-surface-selection-2026-05-22_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/n3-post-pr1018-host-surface-selection-2026-05-22.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
