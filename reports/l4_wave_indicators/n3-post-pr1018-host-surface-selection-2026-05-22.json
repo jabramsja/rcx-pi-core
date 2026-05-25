@@ -1,24 +1,24 @@
 {
   "wave_id": "n3-post-pr1018-host-surface-selection-2026-05-22",
-  "repeat_run_speedup_ratio": 1.373651,
+  "repeat_run_speedup_ratio": 1.366614,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.2747,
+  "step_growth_slope": 0.260792,
   "repeat_run_raw_seconds": [
-    0.377342,
-    0.2747
+    0.356402,
+    0.260792
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.377342
+      "elapsed_seconds": 0.356402
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.652042
+      "elapsed_seconds": 0.617194
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-25T02:15:27Z",
+  "collection_timestamp_utc": "2026-05-25T02:58:55Z",
   "collector_version": "2.2.0"
 }

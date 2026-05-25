@@ -128,11 +128,10 @@ Authorization: standing pipeline-bug-fix authorization applies only to same-wave
 ## Same-Wave Deferred Non-Blocking Authorization
 
 - Refresh wave: `n3-post-pr1018-host-surface-selection-2026-05-22`
-- Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
-- Authorized deferred packet(s):
-  - `reports/deferred/non_blocking/n3-post-pr1018-host-surface-selection-2026-05-22_bridge_nonblockers.md`
-- Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
-- Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
+- Purpose: no active same-wave deferred non-blocking bridge findings packet is authorized for this commit package.
+- Authorized deferred packet(s): none
+- Scope binding: no generated bridge packet for this wave is authorized in `reports/deferred/non_blocking/` unless it exists as a staged file and is listed in `deferred_items`.
+- Acceptance binding: generated bridge packet paths for this wave must remain absent from active deferred lanes unless the package carries an existing staged deferred packet.
 <!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
 
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
@@ -141,15 +140,16 @@ Authorization: standing pipeline-bug-fix authorization applies only to same-wave
 - Refresh wave: `n3-post-pr1018-host-surface-selection-2026-05-22`
 - Active packet: `reports/control_plane/n3-post-pr1018-host-surface-selection-2026-05-22_2026-05-22.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `08fd6a9cb0b119ecc80b4b9ca3c7e43c85768a3a35b4dae9de4d5c6fafe61e00`
+- Tracker note sha256: `a07528a689250c2dd2dc98a11fee791c02621cf34a6166cdad6b7b5ba63647f1`
 - Indicator artifact: `reports/l4_wave_indicators/n3-post-pr1018-host-surface-selection-2026-05-22.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_phase_b_executor.py`.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_executor_dispatch.py`.
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-post-pr1018-host-surface-selection-2026-05-22_2026-05-22.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-post-pr1018-host-surface-selection-2026-05-22.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_phase_b_executor.py`
+  - `mu/tests/tools/test_executor_dispatch.py`
+  - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/n3-post-pr1018-host-surface-selection-2026-05-22_2026-05-22.md`
   - `reports/l4_wave_indicators/n3-post-pr1018-host-surface-selection-2026-05-22.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

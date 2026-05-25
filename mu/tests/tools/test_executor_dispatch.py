@@ -7072,6 +7072,44 @@ class TestCommitContinuationAndBotFreshness:
         assert calls["count"] == 2
         assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing connector-review freshness helper
 
+    def test_wait_for_bot_review_freshness_retries_transient_review_query_error(self):
+        calls = {"count": 0}
+        logs: list[str] = []
+
+        def query_state():
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise subprocess.CalledProcessError(
+                    returncode=2,
+                    cmd=["gh", "api", "graphql"],
+                    stderr="temporary transport failure",
+                )
+            return {
+                "headRefOid": "abc123",
+                "latestReviews": {
+                    "nodes": [
+                        {
+                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                            "state": "COMMENTED",
+                            "commit": {"oid": "abc123"},
+                        }
+                    ]
+                },
+            }
+
+        with patch.object(commit_mod.time, "sleep", return_value=None):
+            pr_data = commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing bot-review polling helper
+                query_state,
+                head_sha="abc123",
+                wait_seconds=1,
+                poll_interval=0,
+                log=logs.append,
+            )
+
+        assert calls["count"] == 2
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing connector-review freshness helper
+        assert any("review query failed transiently" in line for line in logs)
+
     def test_bot_review_author_helper_accepts_connector_login(self):
         assert commit_mod._is_bot_review_author(commit_mod.BOT_REVIEW_LOGIN) is True  # ANTICHEAT_OK: testing bot-review author helper
         assert commit_mod._is_bot_review_author("some-bot") is True  # ANTICHEAT_OK: testing bot-review author helper
