@@ -21,6 +21,8 @@ from tests.repo_root import REPO_ROOT
 
 _DEFAULT_CACHED_JS_TIMEOUT_S = 180
 _DEFAULT_UNCACHED_JS_TIMEOUT_S = 60
+_SHARED_LOCK_WAIT_TIMEOUT_S = 600
+_SHARED_LOCK_STALE_AFTER_S = 300
 _JS_PROCESS_CACHE: dict[str, dict[str, Any]] = {}
 
 
@@ -35,6 +37,57 @@ def _shared_cache_dir() -> Path | None:
     cache_dir = Path(tempfile.gettempdir()) / "rcx_l4_engine_evidence" / run_uid
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _lock_owner_pid(lock_text: str) -> int | None:
+    try:
+        pid = int(lock_text.strip().splitlines()[0])
+    except (IndexError, ValueError):
+        return None
+    return pid if pid > 0 else None
+
+
+def _reclaim_stale_shared_cache_lock(lock_path: Path) -> bool:
+    try:
+        lock_stat = lock_path.stat()
+        lock_text = lock_path.read_text()
+    except FileNotFoundError:
+        return True
+
+    owner_pid = _lock_owner_pid(lock_text)
+    stale_by_dead_owner = owner_pid is not None and not _pid_is_alive(owner_pid)
+    stale_by_age = time.time() - lock_stat.st_mtime > _SHARED_LOCK_STALE_AFTER_S
+    if not stale_by_dead_owner and not stale_by_age:
+        return False
+
+    try:
+        current_stat = lock_path.stat()
+    except FileNotFoundError:
+        return True
+    if (
+        current_stat.st_ino != lock_stat.st_ino
+        or current_stat.st_mtime_ns != lock_stat.st_mtime_ns
+        or current_stat.st_size != lock_stat.st_size
+    ):
+        return False
+
+    try:
+        lock_path.unlink()
+    except FileNotFoundError:
+        return True
+    return True
 
 
 def _shared_cache_get_or_compute(kind: str, key: dict[str, Any], compute):
@@ -55,7 +108,9 @@ def _shared_cache_get_or_compute(kind: str, key: dict[str, Any], compute):
         except FileExistsError:
             if path.exists():
                 return json.loads(path.read_text())
-            if time.monotonic() - start > 600:
+            if _reclaim_stale_shared_cache_lock(lock_path):
+                continue
+            if time.monotonic() - start > _SHARED_LOCK_WAIT_TIMEOUT_S:
                 raise TimeoutError(f"timed out waiting for shared L4 evidence cache lock: {lock_path}")
             time.sleep(0.05)
             continue
