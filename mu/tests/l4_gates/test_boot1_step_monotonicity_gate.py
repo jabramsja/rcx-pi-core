@@ -92,6 +92,7 @@ def _assert_same_step_grouping(events: list[dict], label: str):
 class TestPythonBoot1StepMonotonicity:
     """Prove Python Boot1 observer steps are monotonic."""
 
+    @pytest.mark.l4_expensive
     def test_multi_step_monotonic_and_grouped(self):
         """Boot1 multi-step produces monotonic, consistently-grouped step values."""
         events = []

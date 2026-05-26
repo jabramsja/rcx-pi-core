@@ -582,6 +582,37 @@ class TestStagePathSymlinkAliasRecovery:
             {"status": "error", "stderr": "Stale continuation record",
              "step": "commit"}) == FailureClass.STALE_CONTINUATION
 
+    def test_missing_phase_b_handoff_routes_to_builder_refresh(self):
+        result = {
+            "status": "error",
+            "decision": "COMMIT_GO",
+            "executor": "commit_executor",
+            "message": (
+                "No Phase B handoff file at .agent_bus/executors/phase_b_handoff.json "
+                "for COMMIT_GO. Cannot commit without a verified Phase B receipt chain."
+            ),
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.HANDOFF_RECEIPT_BUILDER_REFRESH
+        assert rg_mod.tier_for(fc) == 2
+
+    def test_handoff_receipt_rejection_routes_to_builder_refresh(self):
+        result = {
+            "status": "error",
+            "step": "validate_receipt",
+            "errors": ["Phase B handoff receipt not found at: .agent_bus/meta/pre_commit_receipts/stale.json"],
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.HANDOFF_RECEIPT_BUILDER_REFRESH
+        mixed_staging_result = {
+            "status": "error",
+            "step": "stage_files",
+            "stderr": "mixed staging detected while phase b handoff validation failed",
+        }
+        assert rg_mod.classify_failure(mixed_staging_result) == FailureClass.MIXED_STAGING
+
     def test_pr_merge_conflict_not_misclassified_as_stale_continuation(self):
         stdout = (
             "package note: stale continuation wording appeared in prior evidence\n"
@@ -992,6 +1023,348 @@ class TestTierMapping:
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
         assert tier4 == {FailureClass.TERMINAL_POLICY, FailureClass.UNCLASSIFIED}
+
+
+class TestFixHandoffReceiptBuilderRefresh:
+    def _write_routing_record(
+        self,
+        repo_root: Path,
+        *,
+        wave_id: str = "w-builder-refresh",
+        decision: str = "COMMIT_GO",
+        extra: dict[str, object] | None = None,
+    ) -> None:
+        meta_dir = repo_root / ".agent_bus" / "meta"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "decision": decision,
+            "summary": "refresh stale handoff",
+            "wave_name": wave_id,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "tracked_packet": f"reports/control_plane/{wave_id}.md",
+        }
+        if extra:
+            record.update(extra)
+        (meta_dir / "post_merge_routing.json").write_text(
+            json.dumps(record),
+            encoding="utf-8",
+        )
+
+    def test_rebuilds_dispatcher_handoff_via_phase_b_builder(self, tmp_path, monkeypatch):
+        self._write_routing_record(tmp_path)
+        receipt = ".agent_bus/meta/pre_commit_receipts/r.json"
+        receipt_path = tmp_path / receipt
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(json.dumps({"decision": "COMMIT_GO"}), encoding="utf-8")
+        calls: list[dict[str, object]] = []
+
+        class PhaseBExecutorStub:
+            @staticmethod
+            def prepare_dispatcher_commit_handoff_from_routing_record(
+                repo_root,
+                record,
+                *,
+                receipt_path,
+                plan_path=None,
+                bus_dir=None,
+            ):
+                calls.append({
+                    "record": dict(record),
+                    "repo_root": repo_root,
+                    "receipt_path": receipt_path,
+                    "plan_path": plan_path,
+                    "bus_dir": bus_dir,
+                })
+                handoff_path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
+                handoff_path.parent.mkdir(parents=True, exist_ok=True)
+                handoff_path.write_text(
+                    json.dumps({"wave_id": "w-builder-refresh", "pre_commit_receipt_path": receipt_path}),
+                    encoding="utf-8",
+                )
+                return handoff_path, []
+
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda _repo_root, module_name: PhaseBExecutorStub,
+        )
+
+        fixed = rg_mod.fix_handoff_receipt_builder_refresh(
+            tmp_path,
+            wave_id="w-builder-refresh",
+            result={
+                "status": "error",
+                "decision": "COMMIT_GO",
+                "message": "Phase B handoff validation failed: wave_id mismatch",
+                "receipt_path": receipt,
+            },
+        )
+
+        assert fixed["fixed"] is True, fixed
+        assert fixed["action"] == "rebuild_handoff_with_phase_b_builder"
+        assert len(calls) == 1
+        assert calls[0]["receipt_path"] == receipt
+        handoff_path = tmp_path / ".agent_bus" / "executors" / "phase_b_handoff.json"
+        persisted = json.loads(handoff_path.read_text(encoding="utf-8"))
+        assert persisted["pre_commit_receipt_path"] == receipt
+        assert persisted["wave_id"] == "w-builder-refresh"
+
+    def test_receipt_extraction_prefers_supervisor_source_deterministically(self, tmp_path, monkeypatch):
+        self._write_routing_record(tmp_path)
+        calls: list[dict[str, object]] = []
+
+        class PhaseBExecutorStub:
+            @staticmethod
+            def prepare_dispatcher_commit_handoff_from_routing_record(
+                repo_root,
+                record,
+                *,
+                receipt_path,
+                plan_path=None,
+                bus_dir=None,
+            ):
+                calls.append({"receipt_path": receipt_path})
+                handoff_path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
+                handoff_path.parent.mkdir(parents=True, exist_ok=True)
+                handoff_path.write_text(
+                    json.dumps({"wave_id": "w-builder-refresh", "pre_commit_receipt_path": receipt_path}),
+                    encoding="utf-8",
+                )
+                return handoff_path, []
+
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda _repo_root, module_name: PhaseBExecutorStub,
+        )
+
+        fixed = rg_mod.fix_handoff_receipt_builder_refresh(
+            tmp_path,
+            wave_id="w-builder-refresh",
+            result={
+                "status": "error",
+                "decision": "COMMIT_GO",
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/stale-alias.json",
+                "supervisor_receipt": ".agent_bus/meta/pre_commit_receipts/stale-supervisor.json",
+                "receipt_path_from_supervisor": ".agent_bus/meta/pre_commit_receipts/exact.json",
+            },
+        )
+
+        assert fixed["fixed"] is True, fixed
+        assert calls == [{"receipt_path": ".agent_bus/meta/pre_commit_receipts/exact.json"}]
+
+    def test_phase_b_builder_errors_do_not_write_handoff(self, tmp_path, monkeypatch):
+        self._write_routing_record(tmp_path)
+        receipt = ".agent_bus/meta/pre_commit_receipts/r.json"
+        receipt_path = tmp_path / receipt
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(json.dumps({"decision": "COMMIT_GO"}), encoding="utf-8")
+
+        class PhaseBExecutorStub:
+            @staticmethod
+            def prepare_dispatcher_commit_handoff_from_routing_record(
+                repo_root,
+                record,
+                *,
+                receipt_path,
+                plan_path=None,
+                bus_dir=None,
+            ):
+                return None, ["receipt_path does not exist: missing.json"]
+
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda _repo_root, module_name: PhaseBExecutorStub,
+        )
+
+        fixed = rg_mod.fix_handoff_receipt_builder_refresh(
+            tmp_path,
+            wave_id="w-builder-refresh",
+            result={"status": "error", "decision": "COMMIT_GO", "receipt_path": receipt},
+        )
+
+        assert fixed["fixed"] is False
+        assert fixed["action"] == "phase_b_builder_rejected"
+        assert not (tmp_path / ".agent_bus" / "executors" / "phase_b_handoff.json").exists()
+
+    def test_missing_receipt_arms_phase_b_retry_from_routing_plan(self, tmp_path, monkeypatch):
+        monkeypatch.delenv(rg_mod.PHASE_B_RECOVERY_PLAN_ENV, raising=False)
+        monkeypatch.delenv(rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV, raising=False)
+        self._write_routing_record(tmp_path)
+        plan_path = tmp_path / "reports" / "control_plane" / "w-builder-refresh.md"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text("Task: [NEXT-CODEX-POST-REDTEAM]\nWave ID: w-builder-refresh\n", encoding="utf-8")
+        result = {
+            "status": "failed",
+            "decision": "COMMIT_GO",
+            "executor": "commit_executor",
+            "chained_from": "phase_b_executor",
+            "message": "No Phase B handoff file for COMMIT_GO. Cannot commit without a verified Phase B receipt chain.",
+        }
+
+        fixed = rg_mod.fix_handoff_receipt_builder_refresh(
+            tmp_path,
+            wave_id="w-builder-refresh",
+            result=result,
+        )
+
+        assert fixed["fixed"] is True
+        assert fixed["action"] == "retry_phase_b_for_fresh_receipt"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/w-builder-refresh.md"
+        assert result["retry_record"]["decision"] == "ROUTE_PHASE_B"
+        assert result["retry_record"]["tracked_packet"] == "reports/control_plane/w-builder-refresh.md"
+        assert result["executor"] == "phase_b_executor"
+        assert result["chained_from"] is None
+
+    def test_non_phase_b_failure_uses_dispatcher_commit_builder_when_scope_available(self, tmp_path, monkeypatch):
+        self._write_routing_record(
+            tmp_path,
+            decision="UPDATE_TRACKER_ONLY",
+            extra={
+                "files_to_stage": ["TASKS.md"],
+                "tracker_note_text": "builder refresh note",
+            },
+        )
+        calls: list[dict[str, object]] = []
+
+        class CommitExecutorStub:
+            @staticmethod
+            def prepare_handoff_from_routing_record(record, repo_root, *, standalone=False, bus_dir=None):
+                calls.append({"standalone": standalone, "record": dict(record)})
+                return {
+                    "wave_id": "w-builder-refresh",
+                    "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                    "wave_class": "L4_ENABLER",
+                    "target_gate_id": "G8",
+                    "caller": "dispatcher",
+                    "branch_prefix": "jabramsja",
+                    "tracker_note_text": "builder refresh note",
+                    "fixes_implemented": ["refresh stale handoff through builder"],
+                    "files_to_stage": ["TASKS.md"],
+                    "force_add_files": [],
+                    "commit_message": "chore: refresh stale handoff",
+                    "pr_title": "chore: refresh stale handoff",
+                    "pr_body": "## Summary\n\n- refresh stale handoff",
+                    "base_branch": "dev",
+                    "pre_commit_receipt_path": "",
+                    "tracked_packet": "reports/control_plane/w-builder-refresh.md",
+                    "scope_items": ["TASKS.md", "reports/control_plane/w-builder-refresh.md"],
+                }, []
+
+            @staticmethod
+            def validate_handoff(handoff, *, repo_root=None):
+                return True, []
+
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda _repo_root, module_name: CommitExecutorStub,
+        )
+
+        fixed = rg_mod.fix_handoff_receipt_builder_refresh(
+            tmp_path,
+            wave_id="w-builder-refresh",
+            result={"status": "error", "decision": "UPDATE_TRACKER_ONLY", "message": "handoff builder stale"},
+        )
+
+        assert fixed["fixed"] is True, fixed
+        assert fixed["action"] == "rebuild_handoff_with_commit_builder"
+        assert "standalone=False" in fixed["detail"]
+        assert calls == [{"standalone": False, "record": {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "refresh stale handoff",
+            "wave_name": "w-builder-refresh",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "tracked_packet": "reports/control_plane/w-builder-refresh.md",
+            "files_to_stage": ["TASKS.md"],
+            "tracker_note_text": "builder refresh note",
+        }}]
+
+    def test_non_phase_b_failure_can_fall_back_to_standalone_commit_builder(self, tmp_path, monkeypatch):
+        self._write_routing_record(tmp_path, decision="UPDATE_TRACKER_ONLY")
+        calls: list[dict[str, object]] = []
+
+        class CommitExecutorStub:
+            @staticmethod
+            def prepare_handoff_from_routing_record(record, repo_root, *, standalone=False, bus_dir=None):
+                calls.append({"standalone": standalone, "record": dict(record)})
+                if not standalone:
+                    return None, ["dispatcher routing scope unavailable"]
+                return {
+                    "wave_id": "w-builder-refresh",
+                    "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                    "wave_class": "L4_ENABLER",
+                    "target_gate_id": "G8",
+                    "caller": "standalone",
+                    "branch_prefix": "jabramsja",
+                    "tracker_note_text": "builder refresh note",
+                    "fixes_implemented": ["refresh stale handoff through builder"],
+                    "files_to_stage": ["TASKS.md"],
+                    "force_add_files": [],
+                    "commit_message": "chore: refresh stale handoff",
+                    "pr_title": "chore: refresh stale handoff",
+                    "pr_body": "## Summary\n\n- refresh stale handoff",
+                    "base_branch": "dev",
+                    "pre_commit_receipt_path": "",
+                    "tracked_packet": "reports/control_plane/w-builder-refresh.md",
+                    "scope_items": ["TASKS.md", "reports/control_plane/w-builder-refresh.md"],
+                }, []
+
+            @staticmethod
+            def validate_handoff(handoff, *, repo_root=None):
+                return True, []
+
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda _repo_root, module_name: CommitExecutorStub,
+        )
+
+        fixed = rg_mod.fix_handoff_receipt_builder_refresh(
+            tmp_path,
+            wave_id="w-builder-refresh",
+            result={"status": "error", "decision": "UPDATE_TRACKER_ONLY", "message": "handoff builder stale"},
+        )
+
+        assert fixed["fixed"] is True, fixed
+        assert fixed["action"] == "rebuild_handoff_with_commit_builder"
+        assert "standalone=True" in fixed["detail"]
+        assert calls == [
+            {"standalone": False, "record": {
+                "decision": "UPDATE_TRACKER_ONLY",
+                "summary": "refresh stale handoff",
+                "wave_name": "w-builder-refresh",
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "tracked_packet": "reports/control_plane/w-builder-refresh.md",
+            }},
+            {"standalone": True, "record": {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "refresh stale handoff",
+            "wave_name": "w-builder-refresh",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "tracked_packet": "reports/control_plane/w-builder-refresh.md",
+            }},
+        ]
+
+    def test_refuses_routing_wave_mismatch(self, tmp_path, monkeypatch):
+        self._write_routing_record(tmp_path, wave_id="w-builder-refresh")
+
+        class CommitExecutorStub:
+            @staticmethod
+            def prepare_handoff_from_routing_record(record, repo_root, *, standalone=False, bus_dir=None):
+                raise AssertionError("builder should not run on wave mismatch")
+
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda _repo_root, module_name: CommitExecutorStub,
+        )
+
+        fixed = rg_mod.fix_handoff_receipt_builder_refresh(tmp_path, wave_id="different-wave")
+
+        assert fixed["fixed"] is False
+        assert fixed["action"] == "wave_mismatch"
 
 
 class TestFixTrackerNoteContract:
@@ -2912,6 +3285,7 @@ class TestTier2FixesMap:
             rg_mod.FailureClass.PR_MERGE_CONFLICT,
             rg_mod.FailureClass.PR_CONFLICTING,
             rg_mod.FailureClass.STALE_ACTIVE_ITEMS,
+            rg_mod.FailureClass.HANDOFF_RECEIPT_BUILDER_REFRESH,
             rg_mod.FailureClass.UPSTREAM_CONNECTIVITY,
             rg_mod.FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP,
             rg_mod.FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP,

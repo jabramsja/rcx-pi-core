@@ -283,6 +283,11 @@ BOT_REVIEW_WAIT_SECONDS = 45
 BOT_REVIEW_ACK_WAIT_SECONDS = 60
 BOT_REVIEW_POLL_SECONDS = 5
 BOT_REVIEW_ACK_REACTION = "eyes"
+BOT_REVIEW_QUERY_TRANSIENT_ERRORS = (
+    subprocess.CalledProcessError,
+    subprocess.TimeoutExpired,
+    json.JSONDecodeError,
+)
 CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
 CI_CHECK_REGISTRATION_POLL_SECONDS = 5
 CI_REQUIRED_PASSING_BUCKETS = {"pass", "skipping"}
@@ -4992,7 +4997,23 @@ def _wait_for_bot_review_freshness(
     last_pr_data: dict[str, Any] | None = None
     acknowledgement_logged = False
     while True:
-        pr_data = query_pr_state()
+        try:
+            pr_data = query_pr_state()
+        except BOT_REVIEW_QUERY_TRANSIENT_ERRORS as exc:
+            if time.time() >= deadline:
+                effective_wait_seconds = int(max(wait_seconds, deadline - start_time))
+                raise TimeoutError(
+                    f"No current-head {BOT_REVIEW_LOGIN} review or issue-comment clearance "
+                    f"for {head_sha[:8]} within {effective_wait_seconds}s; "
+                    f"last review query error: {exc}"
+                ) from exc
+            if log is not None:
+                log(
+                    f"Waiting for {BOT_REVIEW_LOGIN} review signal on {head_sha[:8]} "
+                    f"({poll_interval}s poll); review query failed transiently: {exc}"
+                )
+            time.sleep(poll_interval)
+            continue
         last_pr_data = pr_data
         _assert_expected_pr_head(pr_data, head_sha)
         if _has_fresh_connector_review(pr_data, head_sha):

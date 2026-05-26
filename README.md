@@ -18,7 +18,7 @@ A projection-based computational substrate where **structure is the primitive**.
 > Hemispheres v0 is structural routing; hemisphere metabolization COMPLETE (E1-E5 all MET, 2026-02-20).
 
 - **Comprehensive test coverage** (see STATUS.md for current counts)
-- **12 tracked host-debt markers** (6 Py decorator + 6 JS decorator — see STATUS.md)
+- **5 tracked host-debt markers** (2 Py marker + 3 JS marker — see STATUS.md)
 - **44 CRITICAL_TEST_FILES** protected from silent skipping
 - **Current registered projection total** across 21 seed files (see `tests/structural/test_seed_counts.py` for exact counts)
 

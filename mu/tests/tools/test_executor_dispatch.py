@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, PropertyMock
 
 import pytest
@@ -862,6 +863,74 @@ class TestDispatcherFreshnessRefresh:
         assert result["status"] == "success"
         assert calls
         assert calls[0][calls[0].index("--plan-name") + 1] == Path(packet_rel).stem
+
+    def test_phase_a_surface_record_derives_tracker_note_packet_before_file_exists(
+        self, tmp_path,
+    ):
+        wave_id = "n3-js-evidence-walker-runtime-authority-parity-2026-05-22"
+        packet_rel = f"reports/control_plane/{wave_id}.md"
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Queue\n"
+                f"- Tracker sync note (2026-05-22, {wave_id}): "
+                "**NEXT-CODEX-POST-REDTEAM - JS evidence walker parity.** "
+                "Class: L4_STRUCTURAL. "
+                f"Packet: `{packet_rel}`.\n"
+            ),
+            encoding="utf-8",
+        )
+
+        record = dispatch_mod._surface_record_for_chain(  # ANTICHEAT_OK: surface routing regression
+            SimpleNamespace(
+                surface="phase-a",
+                plan_name=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                summary="",
+                request_for_claude="",
+            ),
+            tmp_path,
+        )
+
+        assert record["next_candidates"][0]["tracked_packet"] == packet_rel
+        assert not (tmp_path / packet_rel).exists()
+
+    def test_phase_a_surface_record_routes_date_suffixed_tracker_packet(
+        self, tmp_path,
+    ):
+        wave_id = "example-wave-2026-05-22"
+        packet_rel = f"reports/control_plane/{wave_id}_2026-05-22.md"
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Queue\n"
+                f"- Tracker sync note (2026-05-22, {wave_id}): "
+                "**NEXT-CODEX-POST-REDTEAM - existing suffixed packet.** "
+                "Class: L4_ENABLER. "
+                f"Packet: `{packet_rel}`.\n"
+            ),
+            encoding="utf-8",
+        )
+
+        record = dispatch_mod._surface_record_for_chain(  # ANTICHEAT_OK: surface routing regression
+            SimpleNamespace(
+                surface="phase-a",
+                plan_name=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                summary="",
+                request_for_claude="",
+            ),
+            tmp_path,
+        )
+        scope = phase_a_mod.extract_plan_scope(record)
+        plan = phase_a_mod.create_plan_draft(tmp_path, wave_id, scope)
+
+        assert record["next_candidates"][0]["tracked_packet"] == packet_rel
+        assert plan == tmp_path / packet_rel
+        assert plan.exists()
+        assert not list(
+            (tmp_path / "reports" / "control_plane").glob(
+                f"{wave_id}_2026-05-22_*.md"
+            )
+        )
 
     def test_dispatch_stops_completed_tasks_state_even_when_record_lacks_tracked_packet(
         self, tmp_path, monkeypatch,
@@ -7003,6 +7072,44 @@ class TestCommitContinuationAndBotFreshness:
         assert calls["count"] == 2
         assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing connector-review freshness helper
 
+    def test_wait_for_bot_review_freshness_retries_transient_review_query_error(self):
+        calls = {"count": 0}
+        logs: list[str] = []
+
+        def query_state():
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise subprocess.CalledProcessError(
+                    returncode=2,
+                    cmd=["gh", "api", "graphql"],
+                    stderr="temporary transport failure",
+                )
+            return {
+                "headRefOid": "abc123",
+                "latestReviews": {
+                    "nodes": [
+                        {
+                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                            "state": "COMMENTED",
+                            "commit": {"oid": "abc123"},
+                        }
+                    ]
+                },
+            }
+
+        with patch.object(commit_mod.time, "sleep", return_value=None):
+            pr_data = commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing bot-review polling helper
+                query_state,
+                head_sha="abc123",
+                wait_seconds=1,
+                poll_interval=0,
+                log=logs.append,
+            )
+
+        assert calls["count"] == 2
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing connector-review freshness helper
+        assert any("review query failed transiently" in line for line in logs)
+
     def test_bot_review_author_helper_accepts_connector_login(self):
         assert commit_mod._is_bot_review_author(commit_mod.BOT_REVIEW_LOGIN) is True  # ANTICHEAT_OK: testing bot-review author helper
         assert commit_mod._is_bot_review_author("some-bot") is True  # ANTICHEAT_OK: testing bot-review author helper
@@ -11606,6 +11713,30 @@ class TestPhaseATrackedPacketReuse:
         assert "brand_new_plan" in path.name
         assert "Phase-A-Lock: UNLOCKED" in path.read_text()
 
+    def test_creates_missing_date_suffixed_tracked_packet(self, tmp_path):
+        """TASKS-bound date-suffixed tracked_packet paths remain valid."""
+        wave_id = "example-wave-2026-05-22"
+        packet_rel = f"reports/control_plane/{wave_id}_2026-05-22.md"
+        path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            wave_id,
+            {
+                "request": "create exact TASKS-bound packet",
+                "summary": "date-suffixed tracker note packet",
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "wave_name": wave_id,
+                "tracked_packet": packet_rel,
+            },
+        )
+
+        assert path == tmp_path / packet_rel
+        assert path.exists()
+        assert not list(
+            (tmp_path / "reports" / "control_plane").glob(
+                f"{wave_id}_2026-05-22_*.md"
+            )
+        )
+
     def test_prefers_locked_over_unlocked(self, tmp_path):
         """When both locked and unlocked exist, prefer the locked one."""
         plan_dir = tmp_path / "reports" / "control_plane"
@@ -11676,6 +11807,321 @@ class TestPhaseATrackedPacketReuse:
         content = locked.read_text(encoding="utf-8")
         assert content.count("Phase-A-Lock: LOCKED") == 1
         assert "Phase B (locked, implementing)" in content
+
+
+class TestPhaseAStrictStagedL4Guard:
+    """Strict staged L4 acceptance must be grounded before Phase A lock."""
+
+    @staticmethod
+    def _tracker_note(wave_id: str, packet: str = "reports/control_plane/strict.md") -> str:
+        return (
+            f"- Tracker sync note (2026-05-22, {wave_id}): **Strict L4 test sync.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            f"Packet: `{packet}`. "
+            "evidence_command: `pytest strict`. "
+            "evidence_delta: strict staged L4 tracker authority is detector-visible. "
+            "progress_proof_before: strict staged L4 wave id had no tracker authority. "
+            "progress_proof_after: strict staged L4 wave id has tracker authority. "
+            f"FOUNDER_OVERRIDE:{wave_id}. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            "indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py "
+            f"--wave-id {wave_id} --output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+        )
+
+    @staticmethod
+    def _write_strict_packet(
+        tmp_path: Path,
+        *,
+        packet_wave_id: str = "packet-wave-2026-05-22",
+        strict_wave_id: str = "strict-wave-2026-05-22",
+        strict_command: str | None = None,
+        include_tasks_scope: bool = True,
+        include_override: bool = True,
+        authorization_lines: list[str] | None = None,
+    ) -> str:
+        packet_rel = "reports/control_plane/strict_l4_guard_packet.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        scope_lines = ["- `reports/control_plane/strict_l4_guard_packet.md`"]
+        if include_tasks_scope:
+            scope_lines.insert(0, "- `TASKS.md`")
+        auth_lines = list(authorization_lines or [])
+        if authorization_lines is None and include_override:
+            auth_lines.append(f"- FOUNDER_OVERRIDE:{packet_wave_id}")
+        l4_command = strict_command or (
+            "python3 tools/checks/enforce_l4_execution_contract.py --staged "
+            f"--wave-id {strict_wave_id} --wave-class L4_ENABLER"
+        )
+        packet.write_text(
+            "\n".join([
+                "# Strict L4 Guard Packet",
+                "",
+                "Date: 2026-05-22",
+                "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+                "Task: [NEXT-CODEX-POST-REDTEAM]",
+                f"Wave ID: {packet_wave_id}",
+                "Phase-A-Lock: UNLOCKED",
+                "",
+                "## Scope",
+                "",
+                *scope_lines,
+                "",
+                "## Work Items",
+                "",
+                "- Exercise strict staged L4 guard.",
+                "",
+                "## Constraints",
+                "",
+                "- No runtime changes.",
+                "",
+                "## Stop Conditions",
+                "",
+                "- Stop before Phase A lock if tracker authority is absent.",
+                "",
+                "## Acceptance Criteria",
+                "",
+                f"- `{l4_command}` passes.",
+                "",
+                "## Grounding / Authorization",
+                "",
+                *auth_lines,
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        return packet_rel
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            (
+                "- `python3 tools/checks/enforce_l4_execution_contract.py --staged "
+                "--wave-id example-wave --wave-class L4_ENABLER`"
+            ),
+            (
+                "- `python3 tools/checks/enforce_l4_execution_contract.py\n"
+                "   --staged --wave-id example-wave --wave-class L4_ENABLER`"
+            ),
+            (
+                "- `python3 tools/checks/enforce_l4_execution_contract.py --staged\n"
+                "   --wave-id example-wave --wave-class L4_ENABLER`"
+            ),
+            (
+                "- `python3 tools/checks/enforce_l4_execution_contract.py --staged "
+                '--wave-id "example-wave" --wave-class L4_ENABLER`'
+            ),
+            (
+                "- `python3 tools/checks/enforce_l4_execution_contract.py --staged "
+                "--wave-id='example-wave' --wave-class L4_ENABLER`"
+            ),
+        ],
+    )
+    def test_lock_plan_accepts_wrapped_strict_staged_l4_commands(self, tmp_path, content):
+        packet_wave_id = "packet-wave-2026-05-22"
+        strict_wave_id = "example-wave"
+        command = content.removeprefix("- `").removesuffix("`")
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=strict_wave_id,
+            strict_command=command,
+        )
+        (tmp_path / "TASKS.md").write_text(
+            "## Ra\n\n" + self._tracker_note(strict_wave_id),
+            encoding="utf-8",
+        )
+
+        phase_a_mod.lock_plan(
+            tmp_path,
+            packet_rel,
+            routing_record={"wave_name": packet_wave_id},
+        )
+
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: LOCKED" in content
+
+    def test_lock_plan_rejects_strict_staged_l4_without_tracker_note(self, tmp_path):
+        packet_wave_id = "packet-wave-2026-05-22"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id="missing-strict-wave-2026-05-22",
+        )
+        (tmp_path / "TASKS.md").write_text("## Ra\n", encoding="utf-8")
+
+        with pytest.raises(phase_a_mod.PhaseAExecutorError) as exc:
+            phase_a_mod.lock_plan(
+                tmp_path,
+                packet_rel,
+                routing_record={"wave_name": packet_wave_id},
+            )
+
+        assert "strict staged L4 guard failed before lock" in str(exc.value)
+        assert "missing-strict-wave-2026-05-22" in str(exc.value)
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: UNLOCKED" in content
+        assert "Phase B (locked, implementing)" not in content
+
+    def test_lock_plan_rejects_quoted_strict_staged_l4_without_tracker_note(self, tmp_path):
+        packet_wave_id = "packet-wave-2026-05-22"
+        strict_wave_id = "missing-strict-wave-2026-05-22"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=f'"{strict_wave_id}"',
+        )
+        (tmp_path / "TASKS.md").write_text("## Ra\n", encoding="utf-8")
+
+        with pytest.raises(phase_a_mod.PhaseAExecutorError) as exc:
+            phase_a_mod.lock_plan(
+                tmp_path,
+                packet_rel,
+                routing_record={"wave_name": packet_wave_id},
+            )
+
+        assert "strict staged L4 guard failed before lock" in str(exc.value)
+        assert strict_wave_id in str(exc.value)
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: UNLOCKED" in content
+        assert "Phase B (locked, implementing)" not in content
+
+    def test_lock_plan_rejects_strict_staged_l4_without_same_wave_override(self, tmp_path):
+        packet_wave_id = "packet-wave-2026-05-22"
+        strict_wave_id = "strict-wave-2026-05-22"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=strict_wave_id,
+            include_override=False,
+        )
+        (tmp_path / "TASKS.md").write_text(
+            "## Ra\n\n" + self._tracker_note(strict_wave_id),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(phase_a_mod.PhaseAExecutorError) as exc:
+            phase_a_mod.lock_plan(
+                tmp_path,
+                packet_rel,
+                routing_record={"wave_name": packet_wave_id},
+            )
+
+        assert f"FOUNDER_OVERRIDE:{packet_wave_id}" in str(exc.value)
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: UNLOCKED" in content
+
+    @pytest.mark.parametrize(
+        "authorization_line_template",
+        [
+            "- Stop if missing FOUNDER_OVERRIDE:{packet_wave_id} before lock.",
+            "- Reviewer error: missing `FOUNDER_OVERRIDE:{packet_wave_id}`.",
+        ],
+    )
+    def test_lock_plan_rejects_strict_staged_l4_with_negative_override_mention(
+        self,
+        tmp_path,
+        authorization_line_template,
+    ):
+        packet_wave_id = "packet-wave-2026-05-22"
+        strict_wave_id = "strict-wave-2026-05-22"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=strict_wave_id,
+            authorization_lines=[
+                authorization_line_template.format(packet_wave_id=packet_wave_id),
+            ],
+        )
+        (tmp_path / "TASKS.md").write_text(
+            "## Ra\n\n" + self._tracker_note(strict_wave_id),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(phase_a_mod.PhaseAExecutorError) as exc:
+            phase_a_mod.lock_plan(
+                tmp_path,
+                packet_rel,
+                routing_record={"wave_name": packet_wave_id},
+            )
+
+        assert f"FOUNDER_OVERRIDE:{packet_wave_id}" in str(exc.value)
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: UNLOCKED" in content
+
+    def test_lock_plan_rejects_strict_staged_l4_without_tasks_scope(self, tmp_path):
+        packet_wave_id = "packet-wave-2026-05-22"
+        strict_wave_id = "strict-wave-2026-05-22"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=strict_wave_id,
+            include_tasks_scope=False,
+        )
+        (tmp_path / "TASKS.md").write_text(
+            "## Ra\n\n" + self._tracker_note(strict_wave_id),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(phase_a_mod.PhaseAExecutorError) as exc:
+            phase_a_mod.lock_plan(
+                tmp_path,
+                packet_rel,
+                routing_record={"wave_name": packet_wave_id},
+            )
+
+        assert "Scope does not include TASKS.md" in str(exc.value)
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: UNLOCKED" in content
+
+    def test_lock_plan_accepts_grounded_strict_staged_l4_packet(self, tmp_path):
+        packet_wave_id = "packet-wave-2026-05-22"
+        strict_wave_id = "strict-wave-2026-05-22"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=strict_wave_id,
+        )
+        (tmp_path / "TASKS.md").write_text(
+            "## Ra\n\n" + self._tracker_note(strict_wave_id),
+            encoding="utf-8",
+        )
+
+        phase_a_mod.lock_plan(
+            tmp_path,
+            packet_rel,
+            routing_record={"wave_name": packet_wave_id},
+        )
+
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: LOCKED" in content
+
+    def test_lock_plan_accepts_grounding_override_bullet(self, tmp_path):
+        packet_wave_id = "packet-wave-2026-05-22"
+        strict_wave_id = "strict-wave-2026-05-22"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=strict_wave_id,
+            authorization_lines=[f"- `FOUNDER_OVERRIDE:{packet_wave_id}`."],
+        )
+        (tmp_path / "TASKS.md").write_text(
+            "## Ra\n\n" + self._tracker_note(strict_wave_id),
+            encoding="utf-8",
+        )
+
+        phase_a_mod.lock_plan(
+            tmp_path,
+            packet_rel,
+            routing_record={"wave_name": packet_wave_id},
+        )
+
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: LOCKED" in content
+        assert "Status: Phase B (locked, implementing)" in content
 
 
 class TestFindTrackedPacket:
