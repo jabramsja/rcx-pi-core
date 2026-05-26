@@ -2009,6 +2009,7 @@ class TestInjectKeyCollisionGuardParity:
         """
         source = (REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js").read_text()
         collect_pos = source.index("function collectOntologyEvidence(")
+        collect_prelude = "\n".join(source[:collect_pos].splitlines()[-5:])
         collect_body = source[collect_pos:source.index("// Boot1 re-entry depth limit")]
         has_verified_seed = (
             "loadVerifiedSeed(EVIDENCE_WALKER_SEED" in source
@@ -2017,6 +2018,14 @@ class TestInjectKeyCollisionGuardParity:
         has_projection_step = "step(evidenceWalkerProjections, current)" in collect_body
         has_visited = "visited = new Set()" in collect_body
         has_cap = "EVIDENCE_WALKER_MAX_DRAIN" in collect_body and "100000" in source
+        assert "BOUNDARY" in collect_prelude, (
+            "collectOntologyEvidence BOUNDARY marker must remain adjacent to the "
+            "function after inserting walker constants"
+        )
+        assert "@host_iteration" not in collect_prelude, (
+            "collectOntologyEvidence must remain classified as boundary code, "
+            "not host iteration"
+        )
         assert has_verified_seed, (
             "collectOntologyEvidence must load verified evidence_walker.v1.json "
             "rather than relying on source-lock-only registry presence"

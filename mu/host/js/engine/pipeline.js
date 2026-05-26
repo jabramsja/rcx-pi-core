@@ -820,15 +820,15 @@ function buildOntologyPromotionCandidate(evidence, contextStr) {
   ]);
 }
 
+const EVIDENCE_WALKER_SEED = 'evidence_walker.v1.json';
+const EVIDENCE_WALKER_MAX_STEPS = 5000;
+const EVIDENCE_WALKER_MAX_DRAIN = 100000;
+
 /**
  * Build an observation record from a boundary result (A17).
  * Extracts trace metadata when available, computes control_hash.
  * BOUNDARY — evidence collection (off kernel path, engine boundary-effect servicing)
  */
-const EVIDENCE_WALKER_SEED = 'evidence_walker.v1.json';
-const EVIDENCE_WALKER_MAX_STEPS = 5000;
-const EVIDENCE_WALKER_MAX_DRAIN = 100000;
-
 function collectOntologyEvidence(result, operation) {
   const controlHash = muHashControlCached(result, 'evidence_collector');
 
