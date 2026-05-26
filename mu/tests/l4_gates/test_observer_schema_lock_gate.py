@@ -18,13 +18,10 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import subprocess
-from pathlib import Path
-
 import pytest
 
 from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import cached_js_request, cached_python_pipeline
 
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline, ENGINE_EXIT_REASONS
 
@@ -48,21 +45,16 @@ VALID_EVENT_NAMES = frozenset({
 
 def _js_request_with_observer(action, **kwargs):
     """Send a JSON API request with observer enabled."""
-    request = {"action": action, "observer": True, **kwargs}
-    js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-    result = subprocess.run(
-        ["node", str(js_path), "--json-api", json.dumps(request)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    pytest.fail(
-        f"No JSON_API_RESPONSE in JS output.\n"
-        f"returncode: {result.returncode}\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
-    )
+    return cached_js_request(action, observer=True, **kwargs)
+
+
+def _python_observer(input_value, *, use_boot1_recursive=False):
+    """Return cached Python observer evidence for deterministic schema cases."""
+    return cached_python_pipeline(
+        input_value=input_value,
+        boot1_mode="true" if use_boot1_recursive else "false",
+        observer_enabled=True,
+    )["observer"]
 
 
 # =============================================================================
@@ -74,14 +66,7 @@ class TestEmittedEventNameEnforcement:
 
     def test_python_trampoline_event_names_valid(self):
         """All Python trampoline event names are in VALID_EVENT_NAMES."""
-        reset_step_budget()
-        observer = []
-        run_engine_pipeline(
-            [], "schema_lock_test",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=False,
-        )
+        observer = _python_observer("schema_lock_test", use_boot1_recursive=False)
         for event in observer:
             assert event["event_name"] in VALID_EVENT_NAMES, (
                 f"Python trampoline emitted unregistered event: {event['event_name']!r}"
@@ -89,14 +74,7 @@ class TestEmittedEventNameEnforcement:
 
     def test_python_boot1_event_names_valid(self):
         """All Python Boot1 event names are in VALID_EVENT_NAMES."""
-        reset_step_budget()
-        observer = []
-        run_engine_pipeline(
-            [], "schema_lock_test",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=True,
-        )
+        observer = _python_observer("schema_lock_test", use_boot1_recursive=True)
         for event in observer:
             assert event["event_name"] in VALID_EVENT_NAMES, (
                 f"Python Boot1 emitted unregistered event: {event['event_name']!r}"
@@ -227,14 +205,7 @@ class TestTerminalExtrasCrossSubstrateParity:
 
     def test_terminal_extras_independently_valid_and_equal(self):
         """Python and JS engine_terminal extras are both valid and match."""
-        reset_step_budget()
-        py_observer = []
-        run_engine_pipeline(
-            [], "parity_lock_test",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=py_observer,
-            use_boot1_recursive=False,
-        )
+        py_observer = _python_observer("parity_lock_test", use_boot1_recursive=False)
         js_resp = _js_request_with_observer(
             "run_engine_pipeline",
             input="parity_lock_test",
@@ -279,14 +250,7 @@ class TestBoot1DepthDiscipline:
 
     def test_python_trampoline_no_boot1_depth(self):
         """Python trampoline events must NOT have boot1_depth field."""
-        reset_step_budget()
-        observer = []
-        run_engine_pipeline(
-            [], "depth_test",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=False,
-        )
+        observer = _python_observer("schema_lock_test", use_boot1_recursive=False)
         for event in observer:
             assert "boot1_depth" not in event, (
                 f"Trampoline event should not have boot1_depth: {event['event_name']}"
@@ -294,14 +258,7 @@ class TestBoot1DepthDiscipline:
 
     def test_python_boot1_has_boot1_depth(self):
         """Python Boot1 events must have boot1_depth field."""
-        reset_step_budget()
-        observer = []
-        run_engine_pipeline(
-            [], "depth_test",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=True,
-        )
+        observer = _python_observer("schema_lock_test", use_boot1_recursive=True)
         for event in observer:
             assert "boot1_depth" in event, (
                 f"Boot1 event missing boot1_depth: {event['event_name']}"
@@ -313,7 +270,7 @@ class TestBoot1DepthDiscipline:
         """JS trampoline events must NOT have boot1_depth field."""
         resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="depth_test",
+            input="schema_lock_test",
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=False,
@@ -328,7 +285,7 @@ class TestBoot1DepthDiscipline:
         """JS Boot1 events must have boot1_depth field."""
         resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="depth_test",
+            input="schema_lock_test",
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=True,

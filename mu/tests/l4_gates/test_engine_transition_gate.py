@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.l4_gates.engine_evidence_cache import cached_js_request, cached_python_pipeline
+
 from rcx_pi.selfhost.engine_pipeline import (
     _classify_engine_step,  # ANTICHEAT_OK: test-only — gate test for transition classifier
     _is_engine_terminal,  # ANTICHEAT_OK: test-only — gate test terminal detection
@@ -109,19 +111,24 @@ class TestObserverEventParity:
     """
 
     @staticmethod
-    def _collect_events(use_boot1: bool, projections, input_value, max_steps=10):
+    def _collect_events(
+        use_boot1: bool,
+        projections,
+        input_value,
+        *,
+        max_steps=10,
+        max_algorithm_iterations=100,
+    ):
         """Run engine pipeline and collect observer events."""
-        events = []
-
-        result = run_engine_pipeline(
-            projections, input_value,
+        evidence = cached_python_pipeline(
+            projections=projections,
+            input_value=input_value,
             max_steps=max_steps,
-            max_engine_iterations=20,
-            max_algorithm_iterations=100,
-            use_boot1_recursive=use_boot1,
-            observer=events,
+            max_algorithm_iterations=max_algorithm_iterations,
+            boot1_mode="true" if use_boot1 else "false",
+            observer_enabled=True,
         )
-        return result, events
+        return evidence["result"], evidence["observer"]
 
     def test_simple_terminal_parity(self):
         """Both paths emit same events for simple terminal case."""
@@ -220,32 +227,20 @@ class TestJSClassifierSourceLock:
         Wave 4C: behavioral proof that the new trampoline _run_engine branch
         actually validates payloads at runtime, not just source-locked.
         """
-        import json
-        import os
-        import subprocess
-
         # The source-lock test already proves the validation call exists.
         # This behavioral test verifies the validation RUNS by checking that
         # the existing freeze-path parity test (which exercises _run_engine
         # reentry through the trampoline) produces the correct terminal result
         # with boot1LoopMode:false — proving the trampoline path is live.
-        req = json.dumps({
-            "action": "run_engine_pipeline",
-            "boot1LoopMode": False,
-            "projections": [],
-            "input": {"value": 42},
-            "maxSteps": 5,
-            "maxEngineIterations": 20,
-            "maxAlgorithmIterations": 50,
-        })
-        json_api_timeout_s = 120 if os.environ.get("RCX_CI") == "1" else 30
-        result = subprocess.run(
-            ["node", "mu/host/js/eval_step.js", "--json-api", req],
-            capture_output=True, text=True, timeout=json_api_timeout_s,
+        resp = cached_js_request(
+            "run_engine_pipeline",
+            boot1LoopMode=False,
+            projections=[],
+            input={"value": 42},
+            maxSteps=5,
+            maxEngineIterations=20,
+            maxAlgorithmIterations=50,
         )
-        lines = [l for l in result.stdout.splitlines() if l.startswith("JSON_API_RESPONSE:")]
-        assert lines, f"No JSON_API_RESPONSE in: {result.stdout[:500]}"
-        resp = json.loads(lines[-1][len("JSON_API_RESPONSE:"):])
         assert resp["success"] is True, f"JS trampoline failed: {resp.get('error')}"
         # Verify we got a valid engine result through the trampoline path
         result = resp["result"]

@@ -10,16 +10,13 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import subprocess
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import cached_js_request, uncached_js_request
 
-from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing, run_engine_pipeline
+from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
 
 
 
@@ -41,21 +38,12 @@ def _fake_engine_result():
 
 def _js_request(action, **kwargs):
     """Send a JSON API request to eval_step.js and return the parsed response."""
-    request = {"action": action, **kwargs}
-    js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-    result = subprocess.run(
-        ["node", str(js_path), "--json-api", json.dumps(request)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    pytest.fail(
-        f"No JSON_API_RESPONSE in JS output.\n"
-        f"returncode: {result.returncode}\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
-    )
+    return cached_js_request(action, **kwargs)
+
+
+def _js_request_uncached(action, **kwargs):
+    """Send a JSON API request without evidence caching."""
+    return uncached_js_request(action, **kwargs)
 
 
 # =============================================================================
@@ -69,41 +57,50 @@ class TestPythonBoot1Default:
     def test_omitted_flag_routes_boot1(self):
         """Omitting use_boot1_recursive routes to Boot1 (recursive) path."""
         with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing:
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = _fake_engine_result()
             mock_routing.return_value = _local_default_hemispheres()
+            mock_metab.return_value = _local_default_hemispheres()
 
             run_engine_with_routing(["proj1"], "input_val")
 
             mock_pipeline.assert_called_once_with(
                 ["proj1"], "input_val", use_boot1_recursive=True
             )
+            mock_metab.assert_called_once_with(_local_default_hemispheres())
 
     def test_explicit_false_routes_trampoline(self):
         """Explicit use_boot1_recursive=False routes trampoline path."""
         with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing:
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = _fake_engine_result()
             mock_routing.return_value = _local_default_hemispheres()
+            mock_metab.return_value = _local_default_hemispheres()
 
             run_engine_with_routing(["proj1"], "input_val", use_boot1_recursive=False)
 
             mock_pipeline.assert_called_once_with(
                 ["proj1"], "input_val", use_boot1_recursive=False
             )
+            mock_metab.assert_called_once_with(_local_default_hemispheres())
 
     def test_explicit_true_matches_default(self):
         """Explicit use_boot1_recursive=True matches omitted-flag behavior."""
         with patch("rcx_pi.selfhost.engine_pipeline.run_engine_pipeline") as mock_pipeline, \
-             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing:
+             patch("rcx_pi.selfhost.engine_pipeline.run_hemisphere_routing") as mock_routing, \
+             patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = _fake_engine_result()
             mock_routing.return_value = _local_default_hemispheres()
+            mock_metab.return_value = _local_default_hemispheres()
 
             run_engine_with_routing(["proj1"], "input_val", use_boot1_recursive=True)
 
             mock_pipeline.assert_called_once_with(
                 ["proj1"], "input_val", use_boot1_recursive=True
             )
+            mock_metab.assert_called_once_with(_local_default_hemispheres())
 
     def test_non_bool_flag_fails_typed(self):
         """Non-bool use_boot1_recursive raises TypeError (fail-closed)."""
@@ -191,7 +188,7 @@ class TestJsBoot1Default:
 
     def test_non_bool_flag_fails_typed(self):
         """Non-boolean boot1LoopMode returns type_error."""
-        resp = _js_request(
+        resp = _js_request_uncached(
             "run_engine_with_routing",
             projections=[], input={"test": True},
             maxSteps=5, boot1LoopMode="true",
