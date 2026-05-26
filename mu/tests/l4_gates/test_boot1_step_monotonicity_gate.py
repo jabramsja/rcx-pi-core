@@ -12,14 +12,16 @@ Verifies:
 
 from __future__ import annotations
 
-import json
-import subprocess
 from unittest.mock import patch
 
 import pytest
 
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
-from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import (
+    cached_js_request,
+    cached_python_pipeline,
+    uncached_js_request,
+)
 
 pytestmark = [pytest.mark.slow]
 
@@ -36,20 +38,19 @@ _CHAIN_PROJECTIONS = [
 
 
 def _run_js_json_api(request_dict: dict) -> dict:
-    """Run a JSON API request against the JS substrate."""
-    result = subprocess.run(
-        ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
-        capture_output=True, text=True, cwd=REPO_ROOT, timeout=120
-    )
-    for line in result.stdout.split('\n'):
-        if line.startswith('JSON_API_RESPONSE:'):
-            return json.loads(line[len('JSON_API_RESPONSE:'):])
-    raise RuntimeError(
-        f"No JSON_API_RESPONSE in stdout.\n"
-        f"returncode: {result.returncode}\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
-    )
+    """Run an uncached JSON API request against the JS substrate."""
+    request = dict(request_dict)
+    action = request.pop("action")
+    observer = bool(request.pop("observer", False))
+    return uncached_js_request(action, observer=observer, timeout_s=120, **request)
+
+
+def _run_cached_js_json_api(request_dict: dict) -> dict:
+    """Run a deterministic successful JS API request through the evidence cache."""
+    request = dict(request_dict)
+    action = request.pop("action")
+    observer = bool(request.pop("observer", False))
+    return cached_js_request(action, observer=observer, **request)
 
 
 def _extract_steps(events: list[dict]) -> list[int]:
@@ -89,20 +90,60 @@ def _assert_same_step_grouping(events: list[dict], label: str):
             )
 
 
+@pytest.fixture(scope="module")
+def python_boot1_reentry_events():
+    """Run the expensive mocked Boot1 re-entry evidence once for both invariants."""
+    import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+    from rcx_pi.selfhost.kernel import reset_step_budget
+
+    original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies observer invariants across re-entry
+    injected = [False]
+
+    def reentry_injecting_step(projs, state):
+        result = original_step(projs, state)
+        if (not injected[0]
+                and result is not state
+                and isinstance(result, dict)
+                and "action" in result
+                and "value" in result):
+            injected[0] = True
+            return {"_run_engine": {
+                "projections": [],
+                "input": {"reentry_observer_test": True},
+                "max_steps": 10,
+                "frozen": None,
+            }}
+        return result
+
+    reset_step_budget()
+    observer = []
+    with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
+        run_engine_pipeline(
+            [], {"test": True},
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=50, observer=observer,
+        )
+
+    assert injected[0], "Mock must have injected the re-entry"
+    return observer
+
+
 class TestPythonBoot1StepMonotonicity:
     """Prove Python Boot1 observer steps are monotonic."""
 
     @pytest.mark.l4_expensive
     def test_multi_step_monotonic_and_grouped(self):
         """Boot1 multi-step produces monotonic, consistently-grouped step values."""
-        events = []
         # Chain projections produce multiple engine steps ending in closure
-        run_engine_pipeline(
-            _CHAIN_PROJECTIONS, {"a": 1},
-            use_boot1_recursive=True,
+        evidence = cached_python_pipeline(
+            projections=_CHAIN_PROJECTIONS,
+            input_value={"a": 1},
+            max_steps=100,
+            boot1_mode="true",
             max_engine_iterations=20,
-            observer=events,
+            observer_enabled=True,
         )
+        events = evidence["observer"]
         steps = _extract_steps(events)
         assert len(steps) >= 2, f"Expected >=2 step events, got {len(steps)}"
         _assert_monotonic(steps, "Python Boot1 multi-step")
@@ -159,7 +200,7 @@ class TestJsBoot1StepMonotonicity:
 
     def test_multi_step_monotonic_and_grouped(self):
         """JS Boot1 multi-step produces monotonic, consistently-grouped step values."""
-        resp = _run_js_json_api({
+        resp = _run_cached_js_json_api({
             "action": "run_engine_pipeline",
             "input": {"value": 42},
             "boot1LoopMode": True,
@@ -234,41 +275,9 @@ class TestPythonBoot1ReentryStepMonotonicity:
     remain monotonic across the re-entry boundary.
     """
 
-    def test_step_monotonic_across_reentry(self):
+    def test_step_monotonic_across_reentry(self, python_boot1_reentry_events):
         """Steps remain monotonically non-decreasing across mock-injected re-entry."""
-        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
-        from rcx_pi.selfhost.kernel import reset_step_budget
-
-        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies step monotonicity across re-entry
-        injected = [False]
-
-        def reentry_injecting_step(projs, state):
-            result = original_step(projs, state)
-            # Inject re-entry when engine produces a terminal result.
-            if (not injected[0]
-                    and result is not state
-                    and isinstance(result, dict)
-                    and "action" in result
-                    and "value" in result):
-                injected[0] = True
-                return {"_run_engine": {
-                    "projections": [],
-                    "input": {"reentry_step_test": True},
-                    "max_steps": 10,
-                    "frozen": None,
-                }}
-            return result
-
-        reset_step_budget()
-        observer = []
-        with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
-            run_engine_pipeline(
-                [], {"test": True},
-                max_steps=10, max_engine_iterations=20,
-                max_algorithm_iterations=50, observer=observer,
-            )
-
-        assert injected[0], "Mock must have injected the re-entry"
+        observer = python_boot1_reentry_events
 
         # Step monotonicity across full run including re-entry
         steps = _extract_steps(observer)
@@ -284,40 +293,9 @@ class TestPythonBoot1ReentryStepMonotonicity:
             f"Depths: {depths}"
         )
 
-    def test_timestamp_monotonic_across_reentry(self):
+    def test_timestamp_monotonic_across_reentry(self, python_boot1_reentry_events):
         """Observer timestamps remain monotonically non-decreasing across re-entry."""
-        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
-        from rcx_pi.selfhost.kernel import reset_step_budget
-
-        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies timestamp monotonicity across re-entry
-        injected = [False]
-
-        def reentry_injecting_step(projs, state):
-            result = original_step(projs, state)
-            if (not injected[0]
-                    and result is not state
-                    and isinstance(result, dict)
-                    and "action" in result
-                    and "value" in result):
-                injected[0] = True
-                return {"_run_engine": {
-                    "projections": [],
-                    "input": {"ts_test": True},
-                    "max_steps": 10,
-                    "frozen": None,
-                }}
-            return result
-
-        reset_step_budget()
-        observer = []
-        with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
-            run_engine_pipeline(
-                [], {"test": True},
-                max_steps=10, max_engine_iterations=20,
-                max_algorithm_iterations=50, observer=observer,
-            )
-
-        assert injected[0], "Mock must have injected the re-entry"
+        observer = python_boot1_reentry_events
 
         # Timestamp monotonicity across full run including re-entry
         timestamps = [e["timestamp"] for e in observer]

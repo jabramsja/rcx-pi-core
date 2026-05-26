@@ -19,13 +19,14 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import subprocess
-from pathlib import Path
-
 import pytest
 
 from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import (
+    cached_js_request,
+    cached_python_pipeline,
+    uncached_js_request,
+)
 
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline, ENGINE_EXIT_REASONS
 
@@ -46,21 +47,25 @@ _ENGINE_RESULT_KEYS = frozenset([
 
 def _js_request(action, **kwargs):
     """Send a JSON API request to eval_step.js and return the parsed response."""
-    request = {"action": action, **kwargs}
-    js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-    result = subprocess.run(
-        ["node", str(js_path), "--json-api", json.dumps(request)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    pytest.fail(
-        f"No JSON_API_RESPONSE in JS output.\n"
-        f"returncode: {result.returncode}\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
-    )
+    return cached_js_request(action, **kwargs)
+
+
+def _js_request_uncached(action, **kwargs):
+    """Send a JSON API request without evidence caching."""
+    return uncached_js_request(action, **kwargs)
+
+
+def _python_pipeline(input_value, *, return_meta=True, use_boot1_recursive=None):
+    """Return cached Python engine result/meta evidence for deterministic cases."""
+    if use_boot1_recursive is None:
+        boot1_mode = "omitted"
+    else:
+        boot1_mode = "true" if use_boot1_recursive else "false"
+    return cached_python_pipeline(
+        input_value=input_value,
+        boot1_mode=boot1_mode,
+        return_meta=return_meta,
+    )["result"]
 
 
 def _assert_meta_shape(meta, *, expected_reason):
@@ -101,12 +106,7 @@ class TestPythonEngineExitReason:
 
     def test_closure_reason(self):
         """Simple input triggers recurrence closure detection."""
-        reset_step_budget()
-        meta = run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, return_meta=True,
-        )
+        meta = _python_pipeline("test_input", return_meta=True)
         _assert_meta_shape(meta, expected_reason="closure")
         assert meta["engine_result"]["closure_detected"] is True
 
@@ -135,12 +135,7 @@ class TestPythonEngineExitReason:
 
     def test_meta_false_returns_bare_result(self):
         """return_meta=False returns the 8-key dict directly (backward compat)."""
-        reset_step_budget()
-        result = run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, return_meta=False,
-        )
+        result = _python_pipeline("test_input", return_meta=False)
         assert isinstance(result, dict)
         assert frozenset(result.keys()) == _ENGINE_RESULT_KEYS, (
             f"Non-meta result must have exactly 8 keys, got {sorted(result.keys())}"
@@ -149,41 +144,19 @@ class TestPythonEngineExitReason:
 
     def test_meta_preserves_engine_result_shape(self):
         """Meta envelope engine_result has exactly 8 keys — no additions."""
-        reset_step_budget()
-        meta = run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, return_meta=True,
-        )
+        meta = _python_pipeline("test_input", return_meta=True)
         assert frozenset(meta["engine_result"].keys()) == _ENGINE_RESULT_KEYS
 
     def test_iterations_used_positive(self):
         """engine_iterations_used reflects actual engine steps (> 0)."""
-        reset_step_budget()
-        meta = run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, return_meta=True,
-        )
+        meta = _python_pipeline("test_input", return_meta=True)
         assert meta["engine_iterations_used"] > 0
         assert meta["max_engine_iterations"] == 20
 
     def test_boot1_and_trampoline_same_reason(self):
         """Both engine paths produce same exit reason for same input."""
-        reset_step_budget()
-        meta_boot1 = run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, return_meta=True,
-            use_boot1_recursive=True,
-        )
-        reset_step_budget()
-        meta_tramp = run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, return_meta=True,
-            use_boot1_recursive=False,
-        )
+        meta_boot1 = _python_pipeline("test_input", return_meta=True, use_boot1_recursive=True)
+        meta_tramp = _python_pipeline("test_input", return_meta=True, use_boot1_recursive=False)
         assert meta_boot1["engine_exit_reason"] == meta_tramp["engine_exit_reason"]
         assert meta_boot1["engine_iterations_used"] == meta_tramp["engine_iterations_used"]
 
@@ -269,7 +242,7 @@ class TestJsEngineExitReason:
 
     def test_engine_exhausted_is_error_not_success(self):
         """engine.exhausted in JS returns error_code, not a success meta."""
-        resp = _js_request(
+        resp = _js_request_uncached(
             "run_engine_pipeline_meta",
             input="test_input",
             projections=[],
@@ -288,12 +261,7 @@ class TestCrossSubstrateReasonParity:
 
     def test_closure_parity(self):
         """Both substrates report 'closure' for same simple input."""
-        reset_step_budget()
-        py_meta = run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, return_meta=True,
-        )
+        py_meta = _python_pipeline("test_input", return_meta=True)
         js_resp = _js_request(
             "run_engine_pipeline_meta",
             input="test_input",
@@ -314,12 +282,7 @@ class TestCrossSubstrateReasonParity:
 
     def test_engine_result_values_match(self):
         """Engine result values (not just shape) match across substrates."""
-        reset_step_budget()
-        py_meta = run_engine_pipeline(
-            [], "parity_test",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, return_meta=True,
-        )
+        py_meta = _python_pipeline("parity_test", return_meta=True)
         js_resp = _js_request(
             "run_engine_pipeline_meta",
             input="parity_test",

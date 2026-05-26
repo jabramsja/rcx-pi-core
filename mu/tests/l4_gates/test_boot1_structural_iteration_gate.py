@@ -26,13 +26,12 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import cached_js_request, cached_python_pipeline
 
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
 
@@ -44,20 +43,23 @@ from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
 
 def _js_request(action, **kwargs):
     """Send a JSON API request to eval_step.js and return the parsed response."""
-    request = {"action": action, **kwargs}
-    js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-    result = subprocess.run(
-        ["node", str(js_path), "--json-api", json.dumps(request)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    pytest.fail(
-        f"No JSON_API_RESPONSE in JS output.\n"
-        f"returncode: {result.returncode}\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
+    return cached_js_request(action, **kwargs)
+
+
+def _python_pipeline(
+    *,
+    projections=None,
+    input_value=None,
+    boot1_mode="omitted",
+    max_algorithm_iterations=50,
+    observer_enabled=False,
+):
+    return cached_python_pipeline(
+        projections=projections or [],
+        input_value={"test": True} if input_value is None else input_value,
+        max_algorithm_iterations=max_algorithm_iterations,
+        boot1_mode=boot1_mode,
+        observer_enabled=observer_enabled,
     )
 
 
@@ -85,15 +87,7 @@ class TestPythonBoot1RouteProof:
 
     def test_boot1_path_has_boot1_depth(self):
         """Boot1 path observer events contain boot1_depth field."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        observer = []
-        run_engine_pipeline(
-            [], {"test": True},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-        )
+        observer = _python_pipeline(boot1_mode="omitted", observer_enabled=True)["observer"]
         assert len(observer) > 0, "must emit at least one observer event"
         assert all("boot1_depth" in e for e in observer), (
             "Boot1 path must have boot1_depth in all observer events"
@@ -101,16 +95,7 @@ class TestPythonBoot1RouteProof:
 
     def test_trampoline_path_no_boot1_depth(self):
         """Trampoline path observer events do NOT contain boot1_depth."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        observer = []
-        run_engine_pipeline(
-            [], {"test": True},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=False,
-        )
+        observer = _python_pipeline(boot1_mode="false", observer_enabled=True)["observer"]
         assert len(observer) > 0, "must emit at least one observer event"
         assert all("boot1_depth" not in e for e in observer), (
             "Trampoline path must NOT have boot1_depth in observer events"
@@ -120,6 +105,44 @@ class TestPythonBoot1RouteProof:
 # =============================================================================
 # Python: Re-entry proof (mock-injected, boot1_depth >= 1)
 # =============================================================================
+
+@pytest.fixture(scope="module")
+def python_mock_reentry_observer():
+    """Run the expensive mock-injected re-entry evidence once for depth assertions."""
+    import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+    from rcx_pi.selfhost.kernel import reset_step_budget
+
+    original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies iterative re-entry mechanism
+    injected = [False]
+
+    def reentry_injecting_step(projs, state):
+        result = original_step(projs, state)
+        if (not injected[0]
+                and result is not state
+                and isinstance(result, dict)
+                and "action" in result
+                and "value" in result):
+            injected[0] = True
+            return {"_run_engine": {
+                "projections": [],
+                "input": {"reentry_marker": True},
+                "max_steps": 10,
+                "frozen": None,
+            }}
+        return result
+
+    reset_step_budget()
+    observer = []
+    with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
+        run_engine_pipeline(
+            [], {"test": True},
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=50, observer=observer,
+        )
+
+    assert injected[0], "Mock must have injected the re-entry"
+    return observer
+
 
 @pytest.mark.slow
 class TestPythonReentryProof:
@@ -131,43 +154,9 @@ class TestPythonReentryProof:
     iterative re-entry loop and verify depth increments.
     """
 
-    def test_mock_injected_reentry_increments_depth(self):
+    def test_mock_injected_reentry_increments_depth(self, python_mock_reentry_observer):
         """Injected re-entry produces observer events with boot1_depth >= 1."""
-        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
-        from rcx_pi.selfhost.kernel import reset_step_budget
-
-        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies iterative re-entry mechanism
-        injected = [False]
-
-        def reentry_injecting_step(projs, state):
-            result = original_step(projs, state)
-            # Inject re-entry when engine produces a terminal result.
-            # Terminal results are NEW dicts (result is not state) with
-            # 'action' and 'value' keys from engine.unwrap.
-            if (not injected[0]
-                    and result is not state
-                    and isinstance(result, dict)
-                    and "action" in result
-                    and "value" in result):
-                injected[0] = True
-                return {"_run_engine": {
-                    "projections": [],
-                    "input": {"reentry_marker": True},
-                    "max_steps": 10,
-                    "frozen": None,
-                }}
-            return result
-
-        reset_step_budget()
-        observer = []
-        with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
-            run_engine_pipeline(
-                [], {"test": True},
-                max_steps=10, max_engine_iterations=20,
-                max_algorithm_iterations=50, observer=observer,
-            )
-
-        assert injected[0], "Mock must have injected the re-entry"
+        observer = python_mock_reentry_observer
         step_events = [e for e in observer if e["event_name"] == "step_boundary"]
         assert len(step_events) > 0, "must emit step_boundary events"
 
@@ -180,41 +169,9 @@ class TestPythonReentryProof:
         # Verify depth 0 events exist too (pre-reentry)
         assert 0 in depths, "Must have depth-0 events before re-entry"
 
-    def test_depth_monotonically_increases_on_reentry(self):
+    def test_depth_monotonically_increases_on_reentry(self, python_mock_reentry_observer):
         """boot1_depth increases across re-entry boundary, never decreases."""
-        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
-        from rcx_pi.selfhost.kernel import reset_step_budget
-
-        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies depth monotonicity
-        injected = [False]
-
-        def reentry_injecting_step(projs, state):
-            result = original_step(projs, state)
-            # Inject re-entry when engine produces a terminal result.
-            if (not injected[0]
-                    and result is not state
-                    and isinstance(result, dict)
-                    and "action" in result
-                    and "value" in result):
-                injected[0] = True
-                return {"_run_engine": {
-                    "projections": [],
-                    "input": {"depth_test": True},
-                    "max_steps": 10,
-                    "frozen": None,
-                }}
-            return result
-
-        reset_step_budget()
-        observer = []
-        with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
-            run_engine_pipeline(
-                [], {"test": True},
-                max_steps=10, max_engine_iterations=20,
-                max_algorithm_iterations=50, observer=observer,
-            )
-
-        assert injected[0], "Mock must have injected the re-entry"
+        observer = python_mock_reentry_observer
         step_events = [e for e in observer if e["event_name"] == "step_boundary"]
         depths = [e["boot1_depth"] for e in step_events]
 
@@ -413,15 +370,14 @@ class TestRealReentryProof:
 
     def test_python_real_reentry_depth(self):
         """Python cycling input reaches boot1_depth >= 1 via real freeze."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        observer = []
-        result = run_engine_pipeline(
-            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=100, observer=observer,
+        evidence = _python_pipeline(
+            projections=_CYCLE_PROJECTIONS,
+            input_value=_CYCLE_INPUT,
+            max_algorithm_iterations=100,
+            observer_enabled=True,
         )
+        observer = evidence["observer"]
+        result = evidence["result"]
         step_events = [e for e in observer if e["event_name"] == "step_boundary"]
         assert len(step_events) > 0, "must emit step_boundary events"
 
@@ -460,14 +416,11 @@ class TestRealReentryProof:
 
     def test_real_reentry_cross_substrate_parity(self):
         """Python and JS produce identical results on cycling input."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        py_result = run_engine_pipeline(
-            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
-            max_steps=10, max_engine_iterations=20,
+        py_result = _python_pipeline(
+            projections=_CYCLE_PROJECTIONS,
+            input_value=_CYCLE_INPUT,
             max_algorithm_iterations=100,
-        )
+        )["result"]
 
         resp = _js_request(
             "run_engine_pipeline",
@@ -485,15 +438,13 @@ class TestRealReentryProof:
 
     def test_real_reentry_depth_monotonic(self):
         """boot1_depth is non-decreasing across real re-entry."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        observer = []
-        run_engine_pipeline(
-            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=100, observer=observer,
+        observer = _python_pipeline(
+            projections=_CYCLE_PROJECTIONS,
+            input_value=_CYCLE_INPUT,
+            max_algorithm_iterations=100,
+            observer_enabled=True,
         )
+        observer = observer["observer"]
         step_events = [e for e in observer if e["event_name"] == "step_boundary"]
         depths = [e["boot1_depth"] for e in step_events]
         for i in range(1, len(depths)):
@@ -510,15 +461,12 @@ class TestRealReentryProof:
         trampoline path returns action=continue while Boot1 returns
         action=already_frozen — a parity violation.
         """
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        py_result = run_engine_pipeline(
-            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
-            max_steps=10, max_engine_iterations=20,
+        py_result = _python_pipeline(
+            projections=_CYCLE_PROJECTIONS,
+            input_value=_CYCLE_INPUT,
             max_algorithm_iterations=100,
-            use_boot1_recursive=False,
-        )
+            boot1_mode="false",
+        )["result"]
         # Trampoline path must also reach freeze (frozen_set populated)
         assert py_result.get("frozen_set") is not None, (
             f"Trampoline path must produce non-null frozen_set on cycling input, "
@@ -576,15 +524,12 @@ class TestBoot1TimestampResetReproduction:
 
     def test_python_timestamp_monotonic_on_real_reentry(self):
         """Python real re-entry via cycling projections - timestamp stays monotonic."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        observer = []
-        run_engine_pipeline(
-            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=100, observer=observer,
-        )
+        observer = _python_pipeline(
+            projections=_CYCLE_PROJECTIONS,
+            input_value=_CYCLE_INPUT,
+            max_algorithm_iterations=100,
+            observer_enabled=True,
+        )["observer"]
 
         step_events = [e for e in observer if e["event_name"] == "step_boundary"]
         assert len(step_events) >= 2, "Expected multiple step events"
@@ -636,16 +581,12 @@ class TestBoot1TimestampResetReproduction:
 
     def test_cross_substrate_timestamp_parity(self):
         """Python and JS have identical timestamp reset behavior."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-
-        # Python
-        reset_step_budget()
-        py_observer = []
-        run_engine_pipeline(
-            _CYCLE_PROJECTIONS, _CYCLE_INPUT,
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=100, observer=py_observer,
-        )
+        py_observer = _python_pipeline(
+            projections=_CYCLE_PROJECTIONS,
+            input_value=_CYCLE_INPUT,
+            max_algorithm_iterations=100,
+            observer_enabled=True,
+        )["observer"]
         py_steps = [e for e in py_observer if e["event_name"] == "step_boundary"]
 
         # JS
@@ -690,15 +631,9 @@ class TestRegressionLock:
 
     def test_stall_case_no_reentry(self):
         """Empty projections: depth stays 0, action=continue."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        observer = []
-        result = run_engine_pipeline(
-            [], {"test": True},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-        )
+        evidence = _python_pipeline(boot1_mode="omitted", observer_enabled=True)
+        observer = evidence["observer"]
+        result = evidence["result"]
         step_events = [e for e in observer if e["event_name"] == "step_boundary"]
         depths = [e["boot1_depth"] for e in step_events]
         assert max(depths) == 0, (
@@ -710,19 +645,18 @@ class TestRegressionLock:
 
     def test_different_id_cycle_no_freeze(self):
         """Different-ID cycling projections: exhaustion scan_different fires, no freeze."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
         projections = [
             {"id": "cycle.a2b", "pattern": {"state": "A"}, "body": {"state": "B"}},
             {"id": "cycle.b2a", "pattern": {"state": "B"}, "body": {"state": "A"}},
         ]
-        observer = []
-        result = run_engine_pipeline(
-            projections, {"state": "A"},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=100, observer=observer,
+        evidence = _python_pipeline(
+            projections=projections,
+            input_value={"state": "A"},
+            max_algorithm_iterations=100,
+            observer_enabled=True,
         )
+        observer = evidence["observer"]
+        result = evidence["result"]
         step_events = [e for e in observer if e["event_name"] == "step_boundary"]
         depths = [e["boot1_depth"] for e in step_events]
         assert max(depths) == 0, (
@@ -744,14 +678,10 @@ class TestCrossSubstrateParity:
 
     def test_results_match(self):
         """Python and JS Boot1 results match."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        py_result = run_engine_pipeline(
-            [], {"test": True},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50,
-        )
+        py_result = _python_pipeline(
+            input_value={"test": True},
+            boot1_mode="omitted",
+        )["result"]
 
         resp = _js_request(
             "run_engine_pipeline",
