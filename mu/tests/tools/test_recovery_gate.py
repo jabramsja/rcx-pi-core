@@ -1032,19 +1032,21 @@ class TestFixHandoffReceiptBuilderRefresh:
         *,
         wave_id: str = "w-builder-refresh",
         decision: str = "COMMIT_GO",
+        extra: dict[str, object] | None = None,
     ) -> None:
         meta_dir = repo_root / ".agent_bus" / "meta"
         meta_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "decision": decision,
+            "summary": "refresh stale handoff",
+            "wave_name": wave_id,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "tracked_packet": f"reports/control_plane/{wave_id}.md",
+        }
+        if extra:
+            record.update(extra)
         (meta_dir / "post_merge_routing.json").write_text(
-            json.dumps(
-                {
-                    "decision": decision,
-                    "summary": "refresh stale handoff",
-                    "wave_name": wave_id,
-                    "task_id": "[NEXT-CODEX-POST-REDTEAM]",
-                    "tracked_packet": f"reports/control_plane/{wave_id}.md",
-                }
-            ),
+            json.dumps(record),
             encoding="utf-8",
         )
 
@@ -1215,7 +1217,71 @@ class TestFixHandoffReceiptBuilderRefresh:
         assert result["executor"] == "phase_b_executor"
         assert result["chained_from"] is None
 
-    def test_non_phase_b_failure_can_fall_back_to_commit_builder(self, tmp_path, monkeypatch):
+    def test_non_phase_b_failure_uses_dispatcher_commit_builder_when_scope_available(self, tmp_path, monkeypatch):
+        self._write_routing_record(
+            tmp_path,
+            decision="UPDATE_TRACKER_ONLY",
+            extra={
+                "files_to_stage": ["TASKS.md"],
+                "tracker_note_text": "builder refresh note",
+            },
+        )
+        calls: list[dict[str, object]] = []
+
+        class CommitExecutorStub:
+            @staticmethod
+            def prepare_handoff_from_routing_record(record, repo_root, *, standalone=False, bus_dir=None):
+                calls.append({"standalone": standalone, "record": dict(record)})
+                return {
+                    "wave_id": "w-builder-refresh",
+                    "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                    "wave_class": "L4_ENABLER",
+                    "target_gate_id": "G8",
+                    "caller": "dispatcher",
+                    "branch_prefix": "jabramsja",
+                    "tracker_note_text": "builder refresh note",
+                    "fixes_implemented": ["refresh stale handoff through builder"],
+                    "files_to_stage": ["TASKS.md"],
+                    "force_add_files": [],
+                    "commit_message": "chore: refresh stale handoff",
+                    "pr_title": "chore: refresh stale handoff",
+                    "pr_body": "## Summary\n\n- refresh stale handoff",
+                    "base_branch": "dev",
+                    "pre_commit_receipt_path": "",
+                    "tracked_packet": "reports/control_plane/w-builder-refresh.md",
+                    "scope_items": ["TASKS.md", "reports/control_plane/w-builder-refresh.md"],
+                }, []
+
+            @staticmethod
+            def validate_handoff(handoff, *, repo_root=None):
+                return True, []
+
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda _repo_root, module_name: CommitExecutorStub,
+        )
+
+        fixed = rg_mod.fix_handoff_receipt_builder_refresh(
+            tmp_path,
+            wave_id="w-builder-refresh",
+            result={"status": "error", "decision": "UPDATE_TRACKER_ONLY", "message": "handoff builder stale"},
+        )
+
+        assert fixed["fixed"] is True, fixed
+        assert fixed["action"] == "rebuild_handoff_with_commit_builder"
+        assert "standalone=False" in fixed["detail"]
+        assert calls == [{"standalone": False, "record": {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "refresh stale handoff",
+            "wave_name": "w-builder-refresh",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "tracked_packet": "reports/control_plane/w-builder-refresh.md",
+            "files_to_stage": ["TASKS.md"],
+            "tracker_note_text": "builder refresh note",
+        }}]
+
+    def test_non_phase_b_failure_can_fall_back_to_standalone_commit_builder(self, tmp_path, monkeypatch):
         self._write_routing_record(tmp_path, decision="UPDATE_TRACKER_ONLY")
         calls: list[dict[str, object]] = []
 
@@ -1223,6 +1289,8 @@ class TestFixHandoffReceiptBuilderRefresh:
             @staticmethod
             def prepare_handoff_from_routing_record(record, repo_root, *, standalone=False, bus_dir=None):
                 calls.append({"standalone": standalone, "record": dict(record)})
+                if not standalone:
+                    return None, ["dispatcher routing scope unavailable"]
                 return {
                     "wave_id": "w-builder-refresh",
                     "task_id": "[NEXT-CODEX-POST-REDTEAM]",
@@ -1261,13 +1329,23 @@ class TestFixHandoffReceiptBuilderRefresh:
 
         assert fixed["fixed"] is True, fixed
         assert fixed["action"] == "rebuild_handoff_with_commit_builder"
-        assert calls == [{"standalone": True, "record": {
+        assert "standalone=True" in fixed["detail"]
+        assert calls == [
+            {"standalone": False, "record": {
+                "decision": "UPDATE_TRACKER_ONLY",
+                "summary": "refresh stale handoff",
+                "wave_name": "w-builder-refresh",
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "tracked_packet": "reports/control_plane/w-builder-refresh.md",
+            }},
+            {"standalone": True, "record": {
             "decision": "UPDATE_TRACKER_ONLY",
             "summary": "refresh stale handoff",
             "wave_name": "w-builder-refresh",
             "task_id": "[NEXT-CODEX-POST-REDTEAM]",
             "tracked_packet": "reports/control_plane/w-builder-refresh.md",
-        }}]
+            }},
+        ]
 
     def test_refuses_routing_wave_mismatch(self, tmp_path, monkeypatch):
         self._write_routing_record(tmp_path, wave_id="w-builder-refresh")

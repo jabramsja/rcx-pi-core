@@ -2172,51 +2172,62 @@ def fix_handoff_receipt_builder_refresh(repo_root: Path, **kw: Any) -> dict[str,
         commit_mod = _load_executor_module_from_repo(repo_root, "commit_executor")
     except Exception as exc:
         return _fix_result(False, "module_load_failed", f"could not load commit_executor: {exc}")
-    try:
-        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
-            routing_record,
-            repo_root,
-            standalone=True,
-            bus_dir=_active_bus_dir(),
-        )
-    except Exception as exc:
-        return _fix_result(False, "builder_failed", f"commit handoff builder failed: {exc}")
-    if errors:
-        return _fix_result(False, "builder_rejected", "; ".join(str(err) for err in errors[:5]))
-    if not isinstance(handoff, dict):
-        return _fix_result(False, "builder_invalid", "commit handoff builder did not return a JSON object")
+    builder_errors_by_mode: list[str] = []
+    for standalone in (False, True):
+        try:
+            handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+                routing_record,
+                repo_root,
+                standalone=standalone,
+                bus_dir=_active_bus_dir(),
+            )
+        except Exception as exc:
+            mode = "standalone=True" if standalone else "standalone=False"
+            return _fix_result(False, "builder_failed", f"commit handoff builder failed ({mode}): {exc}")
+        mode = "standalone=True" if standalone else "standalone=False"
+        if errors:
+            builder_errors_by_mode.append(f"{mode}: " + "; ".join(str(err) for err in errors[:5]))
+            continue
+        if not isinstance(handoff, dict):
+            builder_errors_by_mode.append(f"{mode}: commit handoff builder did not return a JSON object")
+            continue
 
-    handoff_wave = normalize_wave_id(str(handoff.get("wave_id") or "").strip())
-    if handoff_wave != routing_wave:
-        return _fix_result(
-            False,
-            "handoff_wave_mismatch",
-            f"builder returned wave {handoff_wave or '(missing)'}, expected {routing_wave}",
-        )
-    valid, validation_errors = commit_mod.validate_handoff(handoff, repo_root=repo_root)
-    if not valid:
-        return _fix_result(
-            False,
-            "rebuilt_handoff_invalid",
-            "builder handoff failed validation: " + "; ".join(validation_errors[:5]),
-        )
+        handoff_wave = normalize_wave_id(str(handoff.get("wave_id") or "").strip())
+        if handoff_wave != routing_wave:
+            return _fix_result(
+                False,
+                "handoff_wave_mismatch",
+                f"builder returned wave {handoff_wave or '(missing)'}, expected {routing_wave}",
+            )
+        valid, validation_errors = commit_mod.validate_handoff(handoff, repo_root=repo_root)
+        if not valid:
+            builder_errors_by_mode.append(
+                f"{mode}: builder handoff failed validation: " + "; ".join(validation_errors[:5])
+            )
+            continue
 
-    handoff_path = _bus_path(repo_root, "executors", "phase_b_handoff.json")
-    try:
-        handoff_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = handoff_path.with_name(f"{handoff_path.name}.{uuid.uuid4().hex}.tmp")
-        tmp_path.write_text(json.dumps(handoff, indent=2) + "\n", encoding="utf-8")
-        tmp_path.replace(handoff_path)
-    except OSError as exc:
-        return _fix_result(False, "handoff_write_failed", f"could not persist rebuilt handoff: {exc}")
+        handoff_path = _bus_path(repo_root, "executors", "phase_b_handoff.json")
+        try:
+            handoff_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = handoff_path.with_name(f"{handoff_path.name}.{uuid.uuid4().hex}.tmp")
+            tmp_path.write_text(json.dumps(handoff, indent=2) + "\n", encoding="utf-8")
+            tmp_path.replace(handoff_path)
+        except OSError as exc:
+            return _fix_result(False, "handoff_write_failed", f"could not persist rebuilt handoff: {exc}")
+
+        return _fix_result(
+            True,
+            "rebuild_handoff_with_commit_builder",
+            (
+                f"rebuilt {handoff_path} via commit_executor.prepare_handoff_from_routing_record"
+                f"({mode}); supervisor receipt remains pending and no Phase B receipt was fabricated"
+            ),
+        )
 
     return _fix_result(
-        True,
-        "rebuild_handoff_with_commit_builder",
-        (
-            f"rebuilt {handoff_path} via commit_executor.prepare_handoff_from_routing_record"
-            "(standalone=True); supervisor receipt remains pending and no Phase B receipt was fabricated"
-        ),
+        False,
+        "builder_rejected",
+        " | ".join(builder_errors_by_mode[:4]) or "commit handoff builder rejected recovery",
     )
 
 
