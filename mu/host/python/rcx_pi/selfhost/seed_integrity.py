@@ -25,7 +25,7 @@ from typing import Any
 SEED_REGISTRY_MANIFEST_NAME = "seed_registry_manifest.v1.json"
 SEED_REGISTRY_MANIFEST_SCHEMA = "rcx.seed_registry_manifest.v1"
 SEED_REGISTRY_MANIFEST_SHA256 = (
-    "74dea09a1022ecaba89e8834b9a8bff3f9498f05b6fb4d79b0e5d0ad8707597f"
+    "0681e854327229c78dc63bb3e415e94ba4032e658b2e0513eb235bfddbdae7a5"
 )
 
 _MU_DIR = Path(__file__).resolve().parents[4]

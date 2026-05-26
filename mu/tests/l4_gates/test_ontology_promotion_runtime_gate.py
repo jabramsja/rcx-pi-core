@@ -676,6 +676,7 @@ class TestFullLockConsistency:
         locked = set(json.loads(result.stdout))
         # Expected: seeds in both CORE_SEED_CHECKSUMS and CORE_SEED_PROJECTION_IDS.
         expected = {
+            "evidence_walker.v1.json",
             "terminal_classify.v1.json",
             "hemispheres.v1.json",
             "rcx_engine.v1.json",
@@ -1923,6 +1924,112 @@ class TestEvidenceCollectorJS:
         result = _run_js_expr(js_code)
         assert result.stdout == "PASS", f"JS collector failed: {result.stdout} {result.stderr}"
 
+    def test_runtime_uses_evidence_walker_projection_output(self):
+        """JS collector must execute evidence_walker projections as primary authority."""
+        js_code = textwrap.dedent("""\
+            const seedLoader = require('./mu/host/js/core/seed_loader');
+            const originalLoad = seedLoader.loadVerifiedSeed;
+            seedLoader.loadVerifiedSeed = function(seedName, subdir) {
+                if (seedName === 'evidence_walker.v1.json') {
+                    return { projections: trustMu([{
+                        id: 'evidence.walk.test_override',
+                        pattern: { evidence_walk: { trace: { var: 'trace' } } },
+                        body: {
+                            evidence_done: {
+                                collected: {
+                                    head: { projection: 'seed_override' },
+                                    tail: null
+                                }
+                            }
+                        }
+                    }]) };
+                }
+                return originalLoad.call(this, seedName, subdir);
+            };
+            const pipeline = require('./mu/host/js/engine/pipeline');
+            try {
+                const result = trustMu({
+                    result: 'final',
+                    trace: { head: { projection: 'host_trace' }, tail: null },
+                    stall: false
+                });
+                const obs = pipeline.collectOntologyEvidence(result, 'run_trace');
+                const checks = [
+                    obs.trace_len === 1,
+                    JSON.stringify(obs.projection_ids) === JSON.stringify(['seed_override']),
+                ];
+                process.stdout.write(checks.every(Boolean) ? 'PASS' : 'FAIL:' + JSON.stringify(obs));
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            } finally {
+                seedLoader.loadVerifiedSeed = originalLoad;
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", (
+            f"JS collector did not execute walker projection output: {result.stdout} {result.stderr}"
+        )
+
+    def test_runtime_consumes_evidence_done_on_final_allowed_walker_step(self):
+        """JS collector must consume evidence_done returned on the walker step cap."""
+        js_code = textwrap.dedent("""\
+            const bootstrapCore = require('./mu/host/js/core/bootstrap_core');
+            const seedLoader = require('./mu/host/js/core/seed_loader');
+            const originalStep = bootstrapCore.step;
+            const originalLoad = seedLoader.loadVerifiedSeed;
+            let stepCalls = 0;
+
+            bootstrapCore.step = function(projections, current) {
+                stepCalls += 1;
+                if (stepCalls < 5000) {
+                    return { evidence_walk_pending: stepCalls };
+                }
+                return {
+                    evidence_done: {
+                        collected: {
+                            head: { projection: 'seed_done_at_limit' },
+                            tail: null
+                        }
+                    }
+                };
+            };
+            seedLoader.loadVerifiedSeed = function(seedName, subdir) {
+                if (seedName === 'evidence_walker.v1.json') {
+                    return { projections: trustMu([]) };
+                }
+                return originalLoad.call(this, seedName, subdir);
+            };
+
+            try {
+                const pipeline = require('./mu/host/js/engine/pipeline');
+                const result = trustMu({
+                    result: 'final',
+                    trace: { head: { projection: 'host_fallback' }, tail: null },
+                    stall: false
+                });
+                const obs = pipeline.collectOntologyEvidence(result, 'run_trace');
+                const checks = [
+                    stepCalls === 5000,
+                    obs.trace_len === 1,
+                    JSON.stringify(obs.projection_ids) === JSON.stringify(['seed_done_at_limit']),
+                ];
+                process.stdout.write(checks.every(Boolean) ? 'PASS' : 'FAIL:' + JSON.stringify({
+                    stepCalls,
+                    obs
+                }));
+            } catch (err) {
+                process.stdout.write('FAIL:' + (err.error_code || 'unknown') + ':' + err.message);
+            } finally {
+                bootstrapCore.step = originalStep;
+                seedLoader.loadVerifiedSeed = originalLoad;
+            }
+        """)
+        result = _run_js_expr(js_code)
+        assert result.stdout == "PASS", (
+            "JS collector ignored evidence_done produced on the final allowed "
+            f"walker step: {result.stdout} {result.stderr}"
+        )
+
     def test_non_trace_result_null_fields(self):
         """Non-trace result → null trace fields."""
         js_code = textwrap.dedent("""\
@@ -2318,6 +2425,126 @@ class TestEvidenceCollectorBoundaryPath:
         assert "ontology_promotion" not in result, (
             "Collector path must not add ontology_promotion — observation only"
         )
+
+
+def _js_collect_ontology_evidence(result: dict, operation: str) -> dict:
+    """Collect JS ontology evidence for cross-substrate parity checks."""
+    js_code = textwrap.dedent(f"""\
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        const result = trustMu({json.dumps(result)});
+        const obs = pipeline.collectOntologyEvidence(result, {json.dumps(operation)});
+        process.stdout.write(JSON.stringify(obs));
+    """)
+    proc = _run_js_expr(js_code)
+    assert proc.returncode == 0, f"JS collect failed: stdout={proc.stdout} stderr={proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def _evidence_walker_parity_cases() -> list[tuple[str, dict, str]]:
+    return [
+        (
+            "null_trace",
+            {"result": "final", "trace": None, "stall": False},
+            "run_trace",
+        ),
+        (
+            "one_entry_trace",
+            {
+                "result": "final",
+                "trace": _make_linked_trace([
+                    {"step": 0, "state": "s0", "projection": "proj.one"},
+                ]),
+                "stall": False,
+            },
+            "run_trace",
+        ),
+        (
+            "multi_entry_trace",
+            {
+                "result": "final",
+                "trace": _make_linked_trace([
+                    {"step": 0, "state": "s0", "projection": "proj.b"},
+                    {"step": 1, "state": "s1", "projection": "proj.a"},
+                    {"step": 2, "state": "s2", "projection": None, "stall": True},
+                ]),
+                "stall": True,
+            },
+            "run_trace",
+        ),
+        (
+            "duplicate_projection_ids",
+            {
+                "result": "final",
+                "trace": _make_linked_trace([
+                    {"step": 0, "state": "s0", "projection": "proj.same"},
+                    {"step": 1, "state": "s1", "projection": "proj.other"},
+                    {"step": 2, "state": "s2", "projection": "proj.same"},
+                ]),
+                "stall": False,
+            },
+            "run_trace",
+        ),
+        (
+            "non_string_projection_ids",
+            {
+                "result": "final",
+                "trace": _make_linked_trace([
+                    {"step": 0, "state": "s0", "projection": "proj.valid"},
+                    {"step": 1, "state": "s1", "projection": 42},
+                    {"step": 2, "state": "s2", "projection": {"bad": "id"}},
+                    {"step": 3, "state": "s3", "projection": None},
+                ]),
+                "stall": False,
+            },
+            "run_trace",
+        ),
+        (
+            "malformed_trace",
+            {
+                "result": "final",
+                "trace": {
+                    "head": {"step": 0, "state": "s0", "projection": "proj.malformed"},
+                },
+                "stall": None,
+            },
+            "run_trace",
+        ),
+    ]
+
+
+class TestEvidenceWalkerCollectorParity:
+    """Python/JS parity for ontology evidence walker runtime authority."""
+
+    @pytest.mark.parametrize("case_name,result,operation", _evidence_walker_parity_cases())
+    def test_python_js_collect_ontology_evidence_parity(
+        self,
+        case_name: str,
+        result: dict,
+        operation: str,
+    ):
+        py_obs = _collect_ontology_evidence(deepcopy(result), operation)
+        js_obs = _js_collect_ontology_evidence(deepcopy(result), operation)
+        assert js_obs == py_obs, f"{case_name}: JS/Python observation mismatch"
+
+    @pytest.mark.parametrize("case_name,result,operation", _evidence_walker_parity_cases())
+    def test_control_hash_and_collected_at_are_deterministic(
+        self,
+        case_name: str,
+        result: dict,
+        operation: str,
+    ):
+        py_first = _collect_ontology_evidence(deepcopy(result), operation)
+        py_second = _collect_ontology_evidence(deepcopy(result), operation)
+        js_first = _js_collect_ontology_evidence(deepcopy(result), operation)
+        js_second = _js_collect_ontology_evidence(deepcopy(result), operation)
+
+        assert py_first == py_second, f"{case_name}: Python observation changed"
+        assert js_first == js_second, f"{case_name}: JS observation changed"
+        assert js_first["control_hash"] == py_first["control_hash"], (
+            f"{case_name}: JS/Python control_hash mismatch"
+        )
+        assert py_first["collected_at"] == "derived:" + py_first["control_hash"]
+        assert js_first["collected_at"] == "derived:" + js_first["control_hash"]
 
 
 class TestF44HandlerResultImmutability:
