@@ -22,7 +22,7 @@ Editable implementation surfaces for the downstream Phase B wave:
 - `mu/host/python/rcx_pi/selfhost/step_mu.py`: production runtime continuation-binding hash hot path, limited to trusted local hashing after the existing boundary Mu validation in `step_kernel_mu`.
 - `mu/tools/hooks/pre-push-fast`: same-wave CI/local enforcement recovery surface, limited to mirroring `scripts/green_gate.sh` PY 2/17 contraband validation before local pushes after PR #1028 proved the local hook did not run that check.
 - `reports/control_plane/l4-ci-evidence-superset-cache-2026-05-27_2026-05-27.md`: governing packet and Phase A design record.
-- `reports/deferred/non_blocking/l4-ci-evidence-superset-cache-2026-05-27_bridge_nonblockers.md`: Phase B non-blocking findings record, limited to resolving same-wave reviewer doc-accuracy findings after the waiver-path NO_GO.
+- `reports/archive/deferred/l4-ci-evidence-superset-cache-2026-05-27_bridge_nonblockers_closed-by-l4-ci-evidence-superset-cache-deferred-archive-remediation-2026-05-27.md`: archived Phase B non-blocking findings record after the same-wave reviewer doc-accuracy findings were resolved and the follow-up archive-placement remediation moved the resolved packet out of the active deferred lane.
 - `TASKS.md`: grounding/tracker surface for same-wave strict staged L4 authority, Phase A acceptance, and downstream dispatcher/commit automation.
 - `reports/l4_wave_indicators/l4-ci-evidence-superset-cache-2026-05-27.json`: required same-wave L4 indicator artifact for the `TASKS.md` tracker note for `l4-ci-evidence-superset-cache-2026-05-27`; strict L4 requires this path to be present in the downstream changed-file set, not merely referenced by tracker metadata.
 
@@ -148,6 +148,6 @@ Questions? Concerns? Thoughts? -- Think hard
   - `mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py`
   - `mu/tools/hooks/pre-push-fast`
   - `reports/control_plane/l4-ci-evidence-superset-cache-2026-05-27_2026-05-27.md`
-  - `reports/deferred/non_blocking/l4-ci-evidence-superset-cache-2026-05-27_bridge_nonblockers.md`
+  - `reports/archive/deferred/l4-ci-evidence-superset-cache-2026-05-27_bridge_nonblockers_closed-by-l4-ci-evidence-superset-cache-deferred-archive-remediation-2026-05-27.md`
   - `reports/l4_wave_indicators/l4-ci-evidence-superset-cache-2026-05-27.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->

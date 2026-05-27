@@ -6911,6 +6911,50 @@ class TestDeferredPacketFiling:
         assert untracked_dirty == set()
         assert outside_scope == []
 
+    def test_commit_handoff_stage_files_scope_predecessor_deletion_with_closed_archive(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "current-repair-wave"
+        active_rel = "reports/deferred/non_blocking/predecessor-wave_bridge_nonblockers.md"
+        archive_rel = (
+            "reports/archive/deferred/"
+            "predecessor-wave_bridge_nonblockers_closed-by-current-repair-wave.md"
+        )
+        (repo / "reports" / "deferred" / "non_blocking").mkdir(parents=True)
+        (repo / active_rel).write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", active_rel], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "rm", "--", active_rel], cwd=repo, check=True, capture_output=True)
+        (repo / archive_rel).parent.mkdir(parents=True)
+        (repo / archive_rel).write_text("# Deferred archive\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", archive_rel], cwd=repo, check=True)
+
+        files_to_stage, staged_deletions = pb_mod._split_commit_handoff_stage_files(  # ANTICHEAT_OK: regression for remediation waves archiving predecessor packets
+            repo,
+            wave_id,
+            [active_rel, archive_rel],
+        )
+
+        assert files_to_stage == [archive_rel]
+        assert staged_deletions == [active_rel]
+
+    def test_phase_b_target_branch_preserves_authorized_existing_pr_branch(self):
+        wave_id = "current-repair-wave"
+        target = pb_mod._phase_b_target_branch_for_current_worktree(  # ANTICHEAT_OK: regression for PR-branch remediation target preservation
+            "jabramsja/existing-pr-wave",
+            wave_id=wave_id,
+            wave_class="L4_ENABLER",
+            plan_content=(
+                f"Wave ID: {wave_id}\n"
+                "Purpose: bounded repair on the existing PR branch.\n"
+                f"FOUNDER_OVERRIDE:{wave_id}\n"
+            ),
+            branch_prefix="jabramsja",
+        )
+
+        assert target == "jabramsja/existing-pr-wave"
+
     def test_sync_deferred_notes_into_closed_archive_without_reopening_active_lane(self, tmp_path):
         repo = tmp_path / "repo"
         active = repo / "reports" / "deferred" / "non_blocking" / "wave_bridge_nonblockers.md"

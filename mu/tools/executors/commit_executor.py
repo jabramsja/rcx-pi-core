@@ -1205,11 +1205,11 @@ def _is_authorized_control_surface_repair_target_branch(
     """Allow standalone repair waves to land on an existing PR branch.
 
     This is intentionally narrower than generic target-branch override support:
-    only standalone L4_ENABLER handoffs with an indexed same-wave control-plane
-    packet that declares control-surface authorization may target a non-wave
-    branch under the caller's branch prefix.
+    only standalone or Phase B L4_ENABLER handoffs with an indexed same-wave
+    control-plane packet that declares control-surface authorization may target a
+    non-wave branch under the caller's branch prefix.
     """
-    if handoff.get("caller") != "standalone":
+    if handoff.get("caller") not in {"standalone", "phase_b"}:
         return False
     if str(handoff.get("wave_class") or "").strip() != "L4_ENABLER":
         return False

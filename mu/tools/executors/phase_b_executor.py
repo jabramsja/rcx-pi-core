@@ -635,6 +635,27 @@ def _is_staged_deletion(repo_root: Path, rel_path: str) -> bool:
     return False
 
 
+def _has_closed_archive_for_deferred_source(rel_path: str, wave_owned_files: list[str]) -> bool:
+    """Return whether a deferred source deletion has a tracked closed archive mate."""
+    if not (
+        rel_path.startswith("reports/deferred/non_blocking/")
+        and rel_path.endswith(".md")
+    ):
+        return False
+    source_stem = Path(rel_path).name[:-3]
+    for candidate in wave_owned_files:
+        if not candidate.startswith("reports/archive/deferred/"):
+            continue
+        candidate_name = Path(candidate).name
+        if (
+            candidate_name.startswith(source_stem)
+            and "_closed-by-" in candidate_name
+            and candidate_name.endswith(".md")
+        ):
+            return True
+    return False
+
+
 def _collect_supervisor_deferred_items(
     changed_files: list[str],
     deferred_packet_path: str | None,
@@ -671,21 +692,11 @@ def _split_commit_handoff_stage_files(
     wave_owned_files: list[str],
 ) -> tuple[list[str], list[str]]:
     """Separate add-able handoff paths from staged-deleted active deferred packets."""
-    active_deferred_rel = _canonical_deferred_packet_relpath(wave_id)
-    safe_wave = normalize_wave_id(wave_id)
-    closed_archive_prefix = f"reports/archive/deferred/{safe_wave}_bridge_nonblockers"
-    has_closed_archive = any(
-        rel_path.startswith(closed_archive_prefix)
-        and "_closed-by-" in Path(rel_path).name
-        and rel_path.endswith(".md")
-        for rel_path in wave_owned_files
-    )
     stage_files: list[str] = []
     staged_deletions: list[str] = []
     for rel_path in wave_owned_files:
         if (
-            rel_path == active_deferred_rel
-            and has_closed_archive
+            _has_closed_archive_for_deferred_source(rel_path, wave_owned_files)
             and _is_staged_deletion(repo_root, rel_path)
         ):
             staged_deletions.append(rel_path)
@@ -4477,6 +4488,40 @@ def _wave_bound_target_branch(
     if observed_branch.startswith(f"{canonical_branch}-restart-"):
         return observed_branch
     return ""
+
+
+def _phase_b_target_branch_for_current_worktree(
+    observed_branch: str,
+    *,
+    wave_id: str,
+    wave_class: str,
+    plan_content: str,
+    branch_prefix: str = "jabramsja",
+) -> str:
+    """Return the commit target branch Phase B may preserve from the worktree."""
+    wave_bound = _wave_bound_target_branch(
+        observed_branch,
+        wave_id=wave_id,
+        branch_prefix=branch_prefix,
+    )
+    if wave_bound:
+        return wave_bound
+    if str(wave_class or "").strip() != "L4_ENABLER":
+        return ""
+    if "existing PR branch" not in plan_content:
+        return ""
+    if f"FOUNDER_OVERRIDE:{wave_id}" not in plan_content:
+        return ""
+    if observed_branch in ("dev", "main", "master", "HEAD"):
+        return ""
+    prefix = f"{branch_prefix}/"
+    if not observed_branch.startswith(prefix):
+        return ""
+    if ".." in observed_branch or observed_branch.endswith("/"):
+        return ""
+    if not re.fullmatch(r"[A-Za-z0-9._/-]+", observed_branch):
+        return ""
+    return observed_branch
 
 
 def _build_phase_b_tracker_note(
@@ -9014,17 +9059,19 @@ def run_phase_b(
         text=True,
     )
     if branch_result.returncode == 0:
-        observed_branch = branch_result.stdout.strip()
-        if "/" in observed_branch and observed_branch not in ("dev", "main", "master", "HEAD"):
-            observed_branch_prefix = observed_branch.split("/", 1)[0].strip() or "jabramsja"
-            wave_bound_target_branch = _wave_bound_target_branch(
-                observed_branch,
-                wave_id=wave_id,
-                branch_prefix=observed_branch_prefix,
-            )
-            if wave_bound_target_branch:
-                commit_branch_prefix = observed_branch_prefix
-                commit_target_branch = wave_bound_target_branch
+            observed_branch = branch_result.stdout.strip()
+            if "/" in observed_branch and observed_branch not in ("dev", "main", "master", "HEAD"):
+                observed_branch_prefix = observed_branch.split("/", 1)[0].strip() or "jabramsja"
+                preserved_target_branch = _phase_b_target_branch_for_current_worktree(
+                    observed_branch,
+                    wave_id=wave_id,
+                    wave_class=wave_class,
+                    plan_content=str(plan.get("content") or ""),
+                    branch_prefix=observed_branch_prefix,
+                )
+                if preserved_target_branch:
+                    commit_branch_prefix = observed_branch_prefix
+                    commit_target_branch = preserved_target_branch
     handoff_path = prepare_commit_handoff(
         repo_root,
         wave_id=wave_id,
