@@ -21,6 +21,24 @@ Purpose: practical instructions for running RCX agents via SDK runners.
 
 **Quick Reference:** `./tools/agents.sh`
 
+## Current Codex Pipeline Contract
+
+For Codex-operated WorkingRCX waves, `run_review.py` is not the active
+pre-merge review path. The current executor config sets
+`agent_review_enabled=false`, so Phase A and Phase B skip SDK agent review and
+route review through the dispatcher/bridge/pre-commit/commit-executor pipeline.
+
+Current Codex path:
+
+```bash
+python3 mu/tools/executors/executor_dispatch.py --routing-record .agent_bus/meta/post_merge_routing.json --json
+```
+
+Use `run_review.py` only when a separate Claude/SDK review wave explicitly
+requires it and the SDK runner is available. Do not substitute `run_review.py`
+for dispatcher, Phase B, pre-commit supervisor, or commit executor in Codex
+sessions.
+
 ## Tool Overview
 
 Two complementary systems exist for running agents:
@@ -43,15 +61,19 @@ Two complementary systems exist for running agents:
 
 **When to use:** Quick single-agent checks during development, targeted review of specific files/functions, ad-hoc security or invariant verification.
 
-**When NOT to use:** Batch review (use SDK orchestrator instead), anything requiring parallel groups, depth tiers, unified reports, or verdict synthesis.
+**When NOT to use:** Current Codex pipeline waves (use dispatcher / Phase B /
+pre-commit supervisor / commit executor), or any explicit SDK batch review that
+requires parallel groups, depth tiers, unified reports, or verdict synthesis.
 
-### 2. SDK Orchestrator (`run_review.py`) — Batch Review
+### 2. SDK Orchestrator (`run_review.py`) — Legacy Claude/SDK Batch Review
 
-Full orchestration pipeline with parallel execution, depth tiers, unified reports, and regression tracking. This is the primary review system for pre-merge gates.
+Parallel SDK review with depth tiers, unified reports, and regression tracking.
+This is not the current Codex pre-merge gate while
+`mu/tools/executors/executor_config.json` has `agent_review_enabled=false`.
 
 | Tool | What it is | When to use | Time |
 |------|------------|-------------|------|
-| `run_review.py` | Multi-agent code review orchestrator | After changing core code (`rcx_pi/selfhost/`, `mu/`) | ~8-30 min (scope/model dependent) |
+| `run_review.py` | Multi-agent code review orchestrator | Explicit Claude/SDK review wave | ~8-30 min (scope/model dependent) |
 | `run_deep_analysis.py` | Full codebase health scan | Monthly, pre-release, or after large refactors | ~5-10 min |
 | `run_ci_review.py` | Lightweight CI review | Manual dispatch in GitHub Actions (API cost) | ~2-4 min |
 | `run_interactive.py` | Conversational agent session | When you want to dig deeper with follow-up questions | Interactive |
@@ -59,9 +81,8 @@ Full orchestration pipeline with parallel execution, depth tiers, unified report
 
 **Decision guide:**
 - Quick check on one file? → Native subagent (`Agent(name="adversary", prompt="...")`)
-  - **Note:** Native subagents do NOT satisfy the pre-bridge evidence gate. Use `run_review.py` for bridge-prep.
-- Changed core code? → `run_review.py --depth full`
-- Security-sensitive change? → `run_review.py --rigorous`
+- Codex wave ready? → `executor_dispatch.py` / Phase B / pre-commit supervisor / commit executor
+- Explicit Claude/SDK review requested and available? → `run_review.py`
 - Monthly health check? → `run_deep_analysis.py`
 - Want to explore a finding? → `run_interactive.py <agent> <files>`
 - Implementation ready for independent review? → `bridge_supervisor.py review`
@@ -71,15 +92,16 @@ Full orchestration pipeline with parallel execution, depth tiers, unified report
 
 | Tier | Command | When | Time |
 |------|---------|------|------|
-| **Quick** | `python tools/runners/run_review.py --pr --depth quick` | Daily dev loop, most commits | ~2-3 min |
-| **Full** | `python tools/runners/run_review.py --pr --depth full` | Pre-merge PR gate | ~5-8 min |
-| **Rigorous** | `python tools/runners/run_review.py --pr --rigorous` | Security/runtime/core kernel changes | ~10-15 min |
-| **Release** | `python tools/runners/run_review.py rcx_pi/selfhost/ mu/ --rigorous --output reports/release_review.md` | Release/hardening pass | ~15-20 min |
+| **Codex Pipeline** | `python3 mu/tools/executors/executor_dispatch.py --routing-record .agent_bus/meta/post_merge_routing.json --json` | Current Codex waves | varies |
+| **SDK Quick** | `python tools/runners/run_review.py --pr --depth quick` | Explicit Claude/SDK review only | ~2-3 min |
+| **SDK Full** | `python tools/runners/run_review.py --pr --depth full` | Explicit Claude/SDK review only | ~5-8 min |
+| **SDK Rigorous** | `python tools/runners/run_review.py --pr --rigorous` | Explicit Claude/SDK review only | ~10-15 min |
+| **SDK Release** | `python tools/runners/run_review.py rcx_pi/selfhost/ mu/ --rigorous --output reports/release_review.md` | Explicit release/hardening SDK review | ~15-20 min |
 
 Times assume healthy SDK/runtime infrastructure (auth, Claude SDK, Bun compatibility). Infra failures can fail fast before review starts.
 
-**Practical rules:**
-1. Default habit: `quick` for iteration, then `full` once before merge
+**SDK practical rules, when an explicit SDK review wave is active:**
+1. Use `quick` for iteration, then `full` once before merge
 2. Reserve `--rigorous` for high-risk PRs (`rcx_pi/selfhost/`, `mu/`, compliance/gating tooling)
 3. If runtime is too long, reduce scope (files) before increasing depth
 4. `--show-warnings` on `full` when you want detail on soft-gate findings
@@ -87,13 +109,13 @@ Times assume healthy SDK/runtime infrastructure (auth, Claude SDK, Bun compatibi
 ## Quick Start
 
 ```bash
-# Full parallel review (recommended)
+# Current Codex wave path
+python3 mu/tools/executors/executor_dispatch.py --routing-record .agent_bus/meta/post_merge_routing.json --json
+
+# Legacy SDK review only when explicitly requested and available
 python tools/runners/run_review.py rcx_pi/selfhost/ --depth full
 
-# Quick review (4 agents)
-python tools/runners/run_review.py rcx_pi/selfhost/step_mu.py --depth quick
-
-# PR review (auto-selects depth from diff)
+# Legacy SDK PR review (auto-selects depth from diff)
 python tools/runners/run_review.py --pr
 
 # Interactive session with follow-up
@@ -102,7 +124,9 @@ python tools/runners/run_interactive.py adversary rcx_pi/selfhost/step_mu.py
 
 ## What is run_review.py?
 
-`run_review.py` is the **main orchestrator** - it's the "one command to rule them all" for code review.
+`run_review.py` is the legacy SDK batch-review orchestrator. It is not the
+current Codex pipeline entrypoint when SDK agent review is disabled in executor
+config.
 
 **What it does:**
 1. Runs multiple specialized agents **in parallel** (3-4x faster than sequential)
@@ -334,17 +358,17 @@ python tools/runners/run_ci_review.py --pr-number 123 --post-comment
 - Does NOT run reasoning validator or skeptic challenge
 - Compliance validation is still strict (FILE:LINE must exist)
 - Hard-gate failures (`verifier`, `adversary`, `structural-proof`) block CI; soft-gate findings are warnings
-- For thorough review, use `run_review.py --rigorous` locally
+- For explicit SDK review depth, use `run_review.py --rigorous` locally
 
 ## Preflight
 
-Before running agents:
+Before running SDK agents:
 ```bash
 PYTHONHASHSEED=0 python3 tools/checks/check_agent_runtime.py
 PYTHONHASHSEED=0 ./tools/audit_fast.sh
 ```
 
-`run_review.py` also enforces preflight automatically unless `--skip-preflight` is set.
+`run_review.py` also enforces SDK preflight automatically unless `--skip-preflight` is set.
 
 ## Agent Memory
 
@@ -426,7 +450,9 @@ Neither replaces the other. Do not deprecate `.agent_memory/` — it provides st
 
 **Native subagents** can run in background via Claude Code's built-in background execution (`run_in_background` for Bash tool, `background: true` frontmatter for subagents, or Ctrl+B to background a running task), but this is ad-hoc and doesn't provide the deterministic control plane of `run_review.py`.
 
-**Decision (2026-03-11):** The asyncio orchestration in `run_review.py` is NOT being replaced. Claude Code's background execution options don't support parallel agent groups, phased execution, or unified reporting. The SDK orchestrator remains the batch review tool.
+**Decision (2026-03-11):** The asyncio orchestration in `run_review.py` is not
+replaced inside the legacy SDK review lane. That decision does not make it the
+current Codex wave path when executor config disables SDK agent review.
 
 ## Agent Teams (Evaluation — Parked)
 

@@ -5321,7 +5321,7 @@ def _check_pr_conflict_state(
     pr_number: str,
     log: Any = None,
 ) -> str | None:
-    """Return a human-readable conflict indicator if PR is CONFLICTING/DIRTY.
+    """Return a human-readable indicator if a PR needs base-branch refresh.
 
     2026-04-17 learning: when a PR has ``mergeable: CONFLICTING`` or
     ``mergeStateStatus: DIRTY``, GitHub Actions silently skips
@@ -5329,11 +5329,16 @@ def _check_pr_conflict_state(
     required-checks list is permanently incomplete. Polling such a PR
     wastes the full CI timeout without a chance of success.
 
-    Returns a short conflict-state string (``"CONFLICTING"`` or
-    ``"mergeStateStatus=DIRTY"``) when the PR cannot complete CI until
-    dev is merged in; returns ``None`` when the PR is either mergeable or
-    in a transient state that should be polled normally. Fails open on
-    any ``gh`` error so that the normal Step 14 path still runs: the
+    2026-05-27 learning: GitHub can also report a PR as behind the base
+    branch via REST ``mergeable_state=behind`` while the GraphQL fields used by
+    ``gh pr view`` do not expose that exact state. That stale-base state must
+    take the same merge-base refresh path as CONFLICTING/DIRTY so the executor
+    does not wait on or merge a stale head.
+
+    Returns a short state string when the PR cannot complete the intended
+    merge path until dev is merged in; returns ``None`` when the PR is either
+    mergeable or in a transient state that should be polled normally. Fails
+    open on any ``gh`` error so that the normal Step 14 path still runs: the
     pre-check is a performance optimization, not a correctness guard.
     """
     try:
@@ -5368,6 +5373,44 @@ def _check_pr_conflict_state(
         return "mergeable=CONFLICTING"
     if merge_state == "DIRTY":
         return "mergeStateStatus=DIRTY"
+    if merge_state == "BEHIND":
+        return "mergeStateStatus=BEHIND"
+
+    try:
+        repo_owner, repo_name = _parse_origin_owner_repo(repo_root)
+    except (subprocess.SubprocessError, OSError, IndexError) as exc:
+        if log is not None:
+            log(f"Step 14 pre-check: cannot determine repo for REST PR state ({exc}); skipping")
+        return None
+    try:
+        rest_proc = subprocess.run(
+            ["gh", "api", f"repos/{repo_owner}/{repo_name}/pulls/{pr_number}"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        if log is not None:
+            log(f"Step 14 pre-check: gh api PR state error ({exc}); skipping")
+        return None
+    if rest_proc.returncode != 0:
+        if log is not None:
+            log(
+                f"Step 14 pre-check: gh api PR state exit={rest_proc.returncode}; "
+                "skipping"
+            )
+        return None
+    try:
+        rest_data = json.loads(rest_proc.stdout or "{}")
+    except json.JSONDecodeError:
+        if log is not None:
+            log("Step 14 pre-check: malformed gh api PR state JSON; skipping")
+        return None
+    mergeable_state = str(rest_data.get("mergeable_state") or "").lower()
+    if mergeable_state == "behind":
+        return "mergeable_state=behind"
     return None
 
 
@@ -5460,7 +5503,7 @@ def _try_auto_resolve_pr_conflict(
     branch_name: str,
     log: Any = None,
 ) -> dict[str, Any]:
-    """Attempt automatic merge-base resolution for a CONFLICTING/DIRTY PR.
+    """Attempt automatic merge-base resolution for a stale-base PR.
 
     2026-04-17 learning recipe mechanized: on detection of a conflicting
     PR, fetch the base branch, merge it in, resolve a TASKS.md tracker-
@@ -5470,7 +5513,7 @@ def _try_auto_resolve_pr_conflict(
     aborts the merge and returns an error for the caller to surface.
 
     Returns a dict:
-      resolved: bool — True if no conflict OR auto-resolve succeeded + pushed
+      resolved: bool — True if no refresh needed OR auto-resolve succeeded + pushed
       action: str — 'no_action' | 'clean_merge' | 'tasks_md_resolved' | 'aborted'
       detail: str — human-readable explanation
     """
@@ -5481,7 +5524,7 @@ def _try_auto_resolve_pr_conflict(
         return {
             "resolved": True,
             "action": "no_action",
-            "detail": "PR not in CONFLICTING/DIRTY state",
+            "detail": "PR not in CONFLICTING/DIRTY/BEHIND state",
         }
     if log is not None:
         log(
@@ -8276,7 +8319,7 @@ def _run_post_commit_pipeline(
                 "status": "error",
                 "step": "wait_ci",
                 "errors": [
-                    f"PR #{pr_number} CONFLICTING/DIRTY and auto-resolve "
+                    f"PR #{pr_number} CONFLICTING/DIRTY/BEHIND and auto-resolve "
                     f"action={action}: {detail}. Manual recovery required: "
                     f"`cd <worktree> && git fetch origin {base_branch} && "
                     f"git merge origin/{base_branch} --no-edit` (resolve "
