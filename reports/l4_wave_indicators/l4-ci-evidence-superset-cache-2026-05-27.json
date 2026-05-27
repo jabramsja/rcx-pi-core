@@ -1,24 +1,24 @@
 {
   "wave_id": "l4-ci-evidence-superset-cache-2026-05-27",
-  "repeat_run_speedup_ratio": 0.97472,
+  "repeat_run_speedup_ratio": 1.033084,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.281766,
+  "step_growth_slope": 0.281312,
   "repeat_run_raw_seconds": [
-    0.274643,
-    0.281766
+    0.290619,
+    0.281312
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.274643
+      "elapsed_seconds": 0.290619
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.556409
+      "elapsed_seconds": 0.571931
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-27T18:08:16Z",
+  "collection_timestamp_utc": "2026-05-27T19:49:52Z",
   "collector_version": "2.2.0"
 }

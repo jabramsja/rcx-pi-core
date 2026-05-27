@@ -156,17 +156,23 @@ class TestPythonOuterLoopBoundary:
     def test_algorithm_runtime_continuation_hash_fast_path_stays_off_domain_boundary(self):
         """Trusted continuation hash narrowing stays off the public domain boundary."""
         source = _get_function_source(step_kernel_mu)
-        assert 'continuation_hash = mu_hash' in source, (
-            "domain continuation validation must keep the public hash boundary"
-        )
-        assert 'if validation_mode == "algorithm_runtime":' in source, (
+        assert 'trusted_continuation_hash = validation_mode == "algorithm_runtime"' in source, (
             "algorithm-runtime continuation hashing must remain explicitly narrowed"
         )
-        assert 'continuation_hash = lambda value: _compute_mu_hash(' in source, (
-            "algorithm-runtime continuation hashing must use the trusted canonical hash fast path"
+        assert "def continuation_hash(" not in source, (
+            "trusted continuation hashing must not add a nested authority-inventory site"
         )
-        assert 'json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)' in source, (
+        assert "continuation_hash = lambda" not in source, (
+            "algorithm-runtime continuation hashing must not use lambda or require a contraband waiver"
+        )
+        assert "_compute_mu_hash(json.dumps(" in source, (
+            "algorithm-runtime continuation hashing must use the trusted canonical SHA-256 fast path"
+        )
+        assert "sort_keys=True, ensure_ascii=False, allow_nan=False" in source, (
             "trusted fast path must preserve canonical JSON hashing"
+        )
+        assert 'else mu_hash(' in source, (
+            "domain continuation validation must keep the public hash boundary"
         )
         assert 'validator(domain_input, "step_kernel_mu continuation input")' in source, (
             "continuation input validation must remain after resume binding"
