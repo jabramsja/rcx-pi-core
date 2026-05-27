@@ -367,6 +367,12 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         or "mergestatestatus=dirty" in reason_lower
         or "mergestatestatus=dirty" in combined_lower
         or "mergestatestatus=dirty" in stdout_lower
+        or "mergestatestatus=behind" in reason_lower
+        or "mergestatestatus=behind" in combined_lower
+        or "mergestatestatus=behind" in stdout_lower
+        or "mergeable_state=behind" in reason_lower
+        or "mergeable_state=behind" in combined_lower
+        or "mergeable_state=behind" in stdout_lower
     ):
         return FailureClass.PR_CONFLICTING
 
@@ -3514,7 +3520,7 @@ def _extract_branch_context_field(result: dict[str, Any], field: str) -> str:
 
 
 def fix_pr_conflicting(repo_root: Path, **kw: Any) -> dict[str, Any]:
-    """Delegate to commit_executor._try_auto_resolve_pr_conflict on CONFLICTING/DIRTY PRs.
+    """Delegate to commit_executor._try_auto_resolve_pr_conflict on stale-base PRs.
 
     Widens the Step 14 auto-resolve recipe beyond its original call site so
     any recovery-gate path can reach it. Preconditions (clean worktree +

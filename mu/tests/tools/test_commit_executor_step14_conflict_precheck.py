@@ -8,11 +8,12 @@ timeout. Detecting and fail-fast eliminates the wasted 15-min poll
 documented in the 2026-04-20 learning entry.
 
 Covers:
-1. CONFLICTING detection returns human-readable marker
-2. DIRTY (mergeStateStatus) detection returns marker
-3. MERGEABLE + CLEAN returns None (normal polling path)
-4. gh error fails open (return None — pre-check is perf optimization)
-5. Malformed JSON fails open
+    1. CONFLICTING detection returns human-readable marker
+    2. DIRTY (mergeStateStatus) detection returns marker
+    3. BEHIND detection returns marker from GraphQL or REST state
+    4. MERGEABLE + CLEAN returns None (normal polling path)
+    5. gh error fails open (return None — pre-check is perf optimization)
+    6. Malformed JSON fails open
 """
 
 from __future__ import annotations
@@ -62,6 +63,44 @@ class TestCheckPrConflictState:
                 tmp_path, pr_number="456", log=None
             )
         assert result == "mergeStateStatus=DIRTY"
+
+    def test_behind_graphql_state_returns_marker(self, tmp_path):
+        payload = '{"mergeable":"MERGEABLE","mergeStateStatus":"BEHIND"}'
+        with patch.object(
+            commit_mod.subprocess, "run",
+            return_value=_make_gh_result(stdout=payload),
+        ):
+            result = commit_mod._check_pr_conflict_state(  # ANTICHEAT_OK: helper verify
+                tmp_path, pr_number="457", log=None
+            )
+        assert result == "mergeStateStatus=BEHIND"
+
+    def test_rest_behind_state_returns_marker(self, tmp_path):
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return _make_gh_result(
+                    stdout='{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+                )
+            if cmd[:3] == ["git", "remote", "get-url"]:
+                return subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=0,
+                    stdout="https://github.com/jabramsja/rcx-pi-core.git\n",
+                    stderr="",
+                )
+            if cmd[:2] == ["gh", "api"]:
+                return _make_gh_result(stdout='{"mergeable_state":"behind"}')
+            return _make_gh_result(returncode=1)
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=fake_run):
+            result = commit_mod._check_pr_conflict_state(  # ANTICHEAT_OK: helper verify
+                tmp_path, pr_number="1022", log=None
+            )
+        assert result == "mergeable_state=behind"
+        assert ["gh", "api", "repos/jabramsja/rcx-pi-core/pulls/1022"] in calls
 
     def test_mergeable_clean_returns_none(self, tmp_path):
         payload = '{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'

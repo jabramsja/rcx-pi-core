@@ -254,6 +254,43 @@ class TestTryAutoResolvePrConflict:
             "feature/bar",
         ]
 
+    def test_rest_behind_state_merges_base_then_pushes(self, tmp_path):
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if cmd[:3] == ["gh", "pr", "view"]:
+                return self._mk_gh_result(
+                    stdout='{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+                )
+            if cmd[:3] == ["git", "remote", "get-url"]:
+                return self._mk_gh_result(
+                    stdout="https://github.com/jabramsja/rcx-pi-core.git\n"
+                )
+            if cmd[:2] == ["gh", "api"]:
+                return self._mk_gh_result(stdout='{"mergeable_state":"behind"}')
+            if cmd[:2] == ["git", "fetch"]:
+                return self._mk_gh_result(returncode=0)
+            if cmd[:2] == ["git", "merge"] and cmd[2] == "origin/dev":
+                return self._mk_gh_result(returncode=0)
+            if cmd[:2] == ["git", "push"]:
+                return self._mk_gh_result(returncode=0)
+            return self._mk_gh_result(returncode=0)
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=fake_run):
+            result = commit_mod._try_auto_resolve_pr_conflict(  # ANTICHEAT_OK: helper verify
+                tmp_path,
+                pr_number="1022",
+                base_branch="dev",
+                branch_name="feature/behind",
+                log=None,
+            )
+        assert result["resolved"] is True
+        assert result["action"] == "clean_merge"
+        assert ["gh", "api", "repos/jabramsja/rcx-pi-core/pulls/1022"] in calls
+        assert ["git", "merge", "origin/dev", "--no-edit"] in calls
+        assert ["git", "push", "--no-verify", "origin", "feature/behind"] in calls
+
     def test_non_tasks_conflict_aborts(self, tmp_path):
         payload = '{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}'
         aborted = {"flag": False}

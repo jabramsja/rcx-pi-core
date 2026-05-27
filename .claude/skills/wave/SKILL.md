@@ -36,7 +36,8 @@ python3 mu/tools/executors/phase_a_executor.py --plan-name <name> -v --json
 ```
 The executor:
 1. Creates a plan packet draft in `reports/control_plane/`
-2. Runs SDK agent review
+2. Skips SDK agent review when `executor_config.json` sets
+   `agent_review_enabled=false`
 3. Loops bridge until only non-blockers remain
 4. Sets Phase-A-Lock: LOCKED
 
@@ -50,7 +51,8 @@ python3 mu/tools/executors/phase_b_executor.py --plan <plan-path> -v --json
 The executor:
 1. Reads the locked plan
 2. Detects code changes
-3. Runs SDK agents + bridge convergence loop
+3. Skips SDK agents when `executor_config.json` sets
+   `agent_review_enabled=false`; uses the bridge convergence loop
 4. Prepares commit handoff
 
 ## Commit Pipeline via Executor

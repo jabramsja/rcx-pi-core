@@ -15713,6 +15713,24 @@ class TestClassifyPrConflicting:
         }
         assert rg_mod.classify_failure(payload) == FailureClass.PR_CONFLICTING
 
+    def test_signature4_mergestatestatus_behind_stdout(self):
+        """Signature 4: mergeStateStatus=BEHIND in stdout."""
+        payload = {
+            "status": "error",
+            "stdout": "pr state: mergeStateStatus=BEHIND detected",
+            "step": "some_step",
+        }
+        assert rg_mod.classify_failure(payload) == FailureClass.PR_CONFLICTING
+
+    def test_signature5_rest_mergeable_state_behind_stderr(self):
+        """Signature 5: REST mergeable_state=behind in stderr."""
+        payload = {
+            "status": "error",
+            "stderr": "gh output: mergeable_state=behind",
+            "step": "some_step",
+        }
+        assert rg_mod.classify_failure(payload) == FailureClass.PR_CONFLICTING
+
     def test_pr_conflicting_is_tier2(self):
         """FailureClass.PR_CONFLICTING maps to recovery tier 2."""
         assert rg_mod.tier_for(FailureClass.PR_CONFLICTING) == 2
