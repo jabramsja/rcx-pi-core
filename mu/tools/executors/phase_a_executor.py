@@ -1720,7 +1720,14 @@ def _parse_git_porcelain_z_paths(output: bytes) -> set[str]:
 def _git_dirty_paths(repo_root: Path) -> set[str] | None:
     try:
         proc = subprocess.run(
-            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            [
+                "git",
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                "--ignored",
+            ],
             cwd=repo_root,
             capture_output=True,
             check=False,
