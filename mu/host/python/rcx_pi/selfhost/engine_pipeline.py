@@ -1420,7 +1420,17 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
         raise ValueError("engine_result must be a dict")
     projs = load_verified_seed(get_seed_path("hemispheres.v1.json"))["projections"]
     wrapped = {"route_hemisphere": {"engine_result": engine_result, "hemispheres": hemispheres}}
-    result, _trace, stall = run_mu(projs, wrapped, max_steps=30)
+    validate_no_kernel_reserved_fields(wrapped, "run_hemisphere_routing input")
+    structural_result = run_mu_structural(
+        projs,
+        wrapped,
+        max_steps=30,
+        kernel_mode="core",
+        validation_mode="algorithm_runtime",
+        trace_output=False,
+        reject_nonlinear=True,
+    )
+    result = structural_result["result"]
     # Stall is the EXPECTED completion signal: init→classify→add→unwrap→stall
     # Verify the result looks like a completed hemisphere dict
     if isinstance(result, dict) and set(result.keys()) == _get_hemisphere_keys():

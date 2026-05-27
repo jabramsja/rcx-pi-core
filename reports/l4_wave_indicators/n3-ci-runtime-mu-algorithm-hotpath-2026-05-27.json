@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-ci-runtime-mu-algorithm-hotpath-2026-05-27",
+  "repeat_run_speedup_ratio": 1.028654,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.275386,
+  "repeat_run_raw_seconds": [
+    0.283277,
+    0.275386
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.283277
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.558663
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-27T06:20:41Z",
+  "collector_version": "2.2.0"
+}

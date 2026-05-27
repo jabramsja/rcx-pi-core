@@ -653,7 +653,8 @@ def mu_hash_control(value: Any, context: str = "mu_hash_control") -> str:
     """
     assert_mu(value, context)
     canonical_value = _canonicalize_hash_numeric(value)
-    return mu_hash(canonical_value)
+    canonical = json.dumps(canonical_value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    return _compute_mu_hash(canonical)
 
 
 def mu_hash_control_cached(value: Any, context: str = "mu_hash_control_cached") -> str:
@@ -664,7 +665,16 @@ def mu_hash_control_cached(value: Any, context: str = "mu_hash_control_cached") 
     """
     assert_mu(value, context)
     canonical_value = _canonicalize_hash_numeric(value)
-    return mu_hash_cached(canonical_value)
+    canonical = json.dumps(canonical_value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    cached = _mu_hash_cache.get(canonical)
+    if cached is not None:
+        _mu_hash_cache.move_to_end(canonical)
+        return cached
+    h = _compute_mu_hash(canonical)
+    _mu_hash_cache[canonical] = h
+    if len(_mu_hash_cache) > MAX_MU_HASH_CACHE:
+        _mu_hash_cache.popitem(last=False)
+    return h
 
 
 # =============================================================================
