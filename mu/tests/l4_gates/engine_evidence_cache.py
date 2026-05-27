@@ -140,8 +140,6 @@ def _cached_python_pipeline(
     max_engine_iterations: int,
     max_algorithm_iterations: int,
     boot1_mode: str,
-    return_meta: bool,
-    observer_enabled: bool,
 ) -> dict[str, Any]:
     key = {
         "projections_json": projections_json,
@@ -150,8 +148,6 @@ def _cached_python_pipeline(
         "max_engine_iterations": max_engine_iterations,
         "max_algorithm_iterations": max_algorithm_iterations,
         "boot1_mode": boot1_mode,
-        "return_meta": return_meta,
-        "observer_enabled": observer_enabled,
     }
 
     def compute():
@@ -162,10 +158,9 @@ def _cached_python_pipeline(
             "max_steps": max_steps,
             "max_engine_iterations": max_engine_iterations,
             "max_algorithm_iterations": max_algorithm_iterations,
-            "return_meta": return_meta,
+            "observer": observer,
+            "return_meta": True,
         }
-        if observer_enabled:
-            kwargs["observer"] = observer
         if boot1_mode == "true":
             kwargs["use_boot1_recursive"] = True
         elif boot1_mode == "false":
@@ -175,9 +170,14 @@ def _cached_python_pipeline(
 
         reset_step_budget()
         result = run_engine_pipeline(projections, input_value, **kwargs)
-        return {"result": result, "observer": observer}
+        return {"meta": result, "observer": observer}
 
-    return _shared_cache_get_or_compute("python_pipeline", key, compute)
+    return _shared_cache_get_or_compute("python_pipeline_superset", key, compute)
+
+
+def clear_python_pipeline_cache() -> None:
+    """Clear in-process Python engine evidence cached for focused tests."""
+    _cached_python_pipeline.cache_clear()
 
 
 def cached_python_pipeline(
@@ -199,10 +199,13 @@ def cached_python_pipeline(
         max_engine_iterations,
         max_algorithm_iterations,
         boot1_mode,
-        return_meta,
-        observer_enabled,
     )
-    return copy.deepcopy(evidence)
+    meta = evidence["meta"]
+    view = {
+        "result": meta if return_meta else meta["engine_result"],
+        "observer": evidence["observer"] if observer_enabled else [],
+    }
+    return copy.deepcopy(view)
 
 
 def _cached_js_json_api(payload_json: str, timeout_s: int) -> dict[str, Any]:

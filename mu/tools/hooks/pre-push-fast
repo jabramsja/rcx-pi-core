@@ -5,7 +5,7 @@
 #
 # Install: ln -sf ../../tools/pre-push-fast .git/hooks/pre-push
 
-echo "Running pre-push check (semantic purity → dev.sh → audit_fast.sh)..."
+echo "Running pre-push check (contraband -> semantic purity -> dev.sh -> audit_fast.sh)..."
 echo ""
 
 # Get repo root
@@ -85,8 +85,15 @@ if [ -f "$REPO_ROOT/tools/checks/check_untracked_artifacts.sh" ]; then
     fi
 fi
 
-# CI green-gate treats semantic debt reductions as ratchet-tightening failures.
-# Run it locally before the fast audit so Step 11 catches threshold drift pre-push.
+# CI green-gate runs contraband validation at PY 2/17.
+# Run the same check locally before semantic purity and dev.sh.
+if ! "$REPO_ROOT/tools/checks/linters/contraband.sh" rcx_pi; then
+    echo ""
+    echo "❌ Contraband check failed."
+    echo "   This mirrors green_gate.sh [PY 2/17]; fix forbidden runtime syntax before pushing."
+    exit 1
+fi
+
 if ! "$REPO_ROOT/tools/audit_semantic_purity.sh"; then
     echo ""
     echo "❌ Semantic purity audit failed."

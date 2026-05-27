@@ -39,7 +39,18 @@ from .eval_seed import (
 )
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
-from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached, MAX_MU_DEPTH, MAX_MU_WIDTH
+from .mu_type import (
+    Mu,
+    MAX_MU_DEPTH,
+    MAX_MU_WIDTH,
+    _compute_mu_hash,
+    assert_mu,
+    is_mu,
+    mu_hash,
+    mu_hash_cached,
+    mu_hash_control,
+    mu_hash_control_cached,
+)
 from .kernel import get_step_budget
 from collections.abc import Callable
 from .seed_integrity import get_seed_path, load_verified_seed, MU_SEED_LOCATIONS, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
@@ -1512,10 +1523,29 @@ def step_kernel_mu(
         # SECURITY: A continuation owns progress state, not projection authority.
         # Bind resume to the current call's supplied input/projection cursor
         # before stepping the embedded Mu kernel state.
-        continuation_hash = mu_hash_cached if validation_mode == "algorithm_runtime" else mu_hash
-        normalized_input_hash = continuation_hash(kernel_entry["_step"])
-        domain_input_hash = continuation_hash(input_value)
-        if continuation_hash(continuation_state["domain_input"]) != domain_input_hash:
+        # Boundary validation above has already proven algorithm-runtime
+        # continuation inputs are Mu; that trusted branch avoids re-running
+        # assert_mu inside mu_hash_cached while preserving the canonical
+        # SHA-256 hash contract. Keep the public/domain source-lock shape
+        # visible before narrowing the trusted branch below.
+        trusted_continuation_hash = validation_mode == "algorithm_runtime"
+
+        normalized_input_hash = (
+            _compute_mu_hash(json.dumps(kernel_entry["_step"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+            if trusted_continuation_hash
+            else mu_hash(kernel_entry["_step"])
+        )
+        domain_input_hash = (
+            _compute_mu_hash(json.dumps(input_value, sort_keys=True, ensure_ascii=False, allow_nan=False))
+            if trusted_continuation_hash
+            else mu_hash(input_value)
+        )
+        continuation_domain_input_hash = (
+            _compute_mu_hash(json.dumps(continuation_state["domain_input"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+            if trusted_continuation_hash
+            else mu_hash(continuation_state["domain_input"])
+        )
+        if continuation_domain_input_hash != domain_input_hash:
             raise ValueError("SECURITY: continuation_state domain_input is not bound to supplied input")
 
         from rcx_pi.selfhost.stage0_vm import _stage0_vm_run_bounded_trusted  # W6A: trusted path — loader-cached validator
@@ -1538,8 +1568,16 @@ def step_kernel_mu(
                 or set(projection_authority.keys()) != _KERNEL_PROJECTION_KEYS
             ):
                 raise TypeError("SECURITY: kernel projection cursor head must be a normalized projection")
-            projection_hash = continuation_hash(projection_authority)
-            body_hash = continuation_hash(projection_authority["body"])
+            projection_hash = (
+                _compute_mu_hash(json.dumps(projection_authority, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                if trusted_continuation_hash
+                else mu_hash(projection_authority)
+            )
+            body_hash = (
+                _compute_mu_hash(json.dumps(projection_authority["body"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                if trusted_continuation_hash
+                else mu_hash(projection_authority["body"])
+            )
             projection_hashes.add(projection_hash)
             body_hashes.add(body_hash)
             projection_sequence_hashes.append(projection_hash)
@@ -1637,7 +1675,11 @@ def step_kernel_mu(
                         or set(remaining_projection.keys()) != _KERNEL_PROJECTION_KEYS
                     ):
                         raise TypeError("SECURITY: continuation_state kernel projection cursor head must be a normalized projection")
-                    remaining_cursor_signature.append(continuation_hash(remaining_projection))
+                    remaining_cursor_signature.append(
+                        _compute_mu_hash(json.dumps(remaining_projection, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(remaining_projection)
+                    )
                     remaining_cursor_probe = remaining_cursor_probe["tail"]
                 for context in projection_contexts:
                     if context["cursor_signature"] != remaining_cursor_signature:
@@ -1656,9 +1698,18 @@ def step_kernel_mu(
                     raise TypeError("SECURITY: continuation_state _match_ctx must be a Mu dict")
                 if set(match_ctx.keys()) != _KERNEL_MATCH_CTX_KEYS:
                     raise ValueError("SECURITY: continuation_state _match_ctx key set mismatch")
-                if continuation_hash(match_ctx["_input"]) != normalized_input_hash:
+                match_input_hash = (
+                    _compute_mu_hash(json.dumps(match_ctx["_input"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                    if trusted_continuation_hash
+                    else mu_hash(match_ctx["_input"])
+                )
+                if match_input_hash != normalized_input_hash:
                     raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
-                match_body_hash = continuation_hash(match_ctx["_body"])
+                match_body_hash = (
+                    _compute_mu_hash(json.dumps(match_ctx["_body"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                    if trusted_continuation_hash
+                    else mu_hash(match_ctx["_body"])
+                )
                 match_remaining_signature = []
                 match_remaining_probe = match_ctx["_remaining"]
                 while match_remaining_probe is not None:
@@ -1673,7 +1724,11 @@ def step_kernel_mu(
                         or set(match_remaining_projection.keys()) != _KERNEL_PROJECTION_KEYS
                     ):
                         raise TypeError("SECURITY: continuation_state kernel projection cursor head must be a normalized projection")
-                    match_remaining_signature.append(continuation_hash(match_remaining_projection))
+                    match_remaining_signature.append(
+                        _compute_mu_hash(json.dumps(match_remaining_projection, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(match_remaining_projection)
+                    )
                     match_remaining_probe = match_remaining_probe["tail"]
                 match_candidates = []
                 for context in projection_contexts:
@@ -1693,13 +1748,28 @@ def step_kernel_mu(
                     if set(match_request.keys()) != _KERNEL_MATCH_REQUEST_KEYS:
                         raise ValueError("SECURITY: continuation_state match request key set mismatch")
                     request_pattern_bound = False
+                    request_pattern_hash = (
+                        _compute_mu_hash(json.dumps(match_request["pattern"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(match_request["pattern"])
+                    )
                     for context in match_candidates:
-                        if continuation_hash(match_request["pattern"]) == continuation_hash(context["projection"]["pattern"]):
+                        context_pattern_hash = (
+                            _compute_mu_hash(json.dumps(context["projection"]["pattern"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                            if trusted_continuation_hash
+                            else mu_hash(context["projection"]["pattern"])
+                        )
+                        if request_pattern_hash == context_pattern_hash:
                             request_pattern_bound = True
                             break
                     if not request_pattern_bound:
                         raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
-                    if continuation_hash(match_request["value"]) != normalized_input_hash:
+                    match_request_value_hash = (
+                        _compute_mu_hash(json.dumps(match_request["value"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(match_request["value"])
+                    )
+                    if match_request_value_hash != normalized_input_hash:
                         raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 if (
                     validation_mode == "domain"
@@ -1723,7 +1793,17 @@ def step_kernel_mu(
                         if "bindings" not in kernel_state:
                             raise TypeError("SECURITY: continuation_state binding cursor must be a Mu dict or null")
                         actual_bindings = kernel_state["bindings"]
-                        if continuation_hash(actual_bindings) == continuation_hash(match_result["_bindings"]):
+                        actual_bindings_hash = (
+                            _compute_mu_hash(json.dumps(actual_bindings, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                            if trusted_continuation_hash
+                            else mu_hash(actual_bindings)
+                        )
+                        expected_bindings_hash = (
+                            _compute_mu_hash(json.dumps(match_result["_bindings"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                            if trusted_continuation_hash
+                            else mu_hash(match_result["_bindings"])
+                        )
+                        if actual_bindings_hash == expected_bindings_hash:
                             success_bound_to_input = True
                             break
                     if not success_bound_to_input:
@@ -1743,7 +1823,17 @@ def step_kernel_mu(
                             if "_bindings" not in kernel_state:
                                 raise TypeError("SECURITY: continuation_state binding cursor must be a Mu dict or null")
                             actual_bindings = kernel_state["_bindings"]
-                            if continuation_hash(actual_bindings) == continuation_hash(match_result["_bindings"]):
+                            actual_bindings_hash = (
+                                _compute_mu_hash(json.dumps(actual_bindings, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                                if trusted_continuation_hash
+                                else mu_hash(actual_bindings)
+                            )
+                            expected_bindings_hash = (
+                                _compute_mu_hash(json.dumps(match_result["_bindings"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                                if trusted_continuation_hash
+                                else mu_hash(match_result["_bindings"])
+                            )
+                            if actual_bindings_hash == expected_bindings_hash:
                                 success_bound_to_input = True
                                 break
                         if not success_bound_to_input:
@@ -1769,7 +1859,12 @@ def step_kernel_mu(
                     raise TypeError("SECURITY: continuation_state _subst_ctx must be a Mu dict")
                 if set(subst_ctx.keys()) != _KERNEL_SUBST_CTX_KEYS:
                     raise ValueError("SECURITY: continuation_state _subst_ctx key set mismatch")
-                if continuation_hash(subst_ctx["_input"]) != normalized_input_hash:
+                subst_input_hash = (
+                    _compute_mu_hash(json.dumps(subst_ctx["_input"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                    if trusted_continuation_hash
+                    else mu_hash(subst_ctx["_input"])
+                )
+                if subst_input_hash != normalized_input_hash:
                     raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 subst_body = None
                 subst_bindings = None
@@ -1783,7 +1878,14 @@ def step_kernel_mu(
                     subst_bindings = subst_request["bindings"]
                 elif "bindings" in kernel_state:
                     subst_bindings = kernel_state["bindings"]
-                subst_body_hash = continuation_hash(subst_body) if subst_body is not None else None
+                subst_body_hash = (
+                    (
+                        _compute_mu_hash(json.dumps(subst_body, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(subst_body)
+                    )
+                    if subst_body is not None else None
+                )
                 subst_remaining_signature = []
                 subst_remaining_probe = subst_ctx["_remaining"]
                 while subst_remaining_probe is not None:
@@ -1798,7 +1900,11 @@ def step_kernel_mu(
                         or set(subst_remaining_projection.keys()) != _KERNEL_PROJECTION_KEYS
                     ):
                         raise TypeError("SECURITY: continuation_state kernel projection cursor head must be a normalized projection")
-                    subst_remaining_signature.append(continuation_hash(subst_remaining_projection))
+                    subst_remaining_signature.append(
+                        _compute_mu_hash(json.dumps(subst_remaining_projection, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(subst_remaining_projection)
+                    )
                     subst_remaining_probe = subst_remaining_probe["tail"]
                 subst_candidates = []
                 for context in projection_contexts:
@@ -1840,17 +1946,48 @@ def step_kernel_mu(
                     if not isinstance(expected_subst, dict) or expected_subst.get("_mode") != "subst_done":  # AST_OK: boundary - VM subst terminal guard
                         continue
                     if kernel_state.get("_mode") == "subst_done":
-                        if continuation_hash(kernel_state.get("_result")) == continuation_hash(expected_subst["_result"]):
+                        kernel_result_hash = (
+                            _compute_mu_hash(json.dumps(kernel_state.get("_result"), sort_keys=True, ensure_ascii=False, allow_nan=False))
+                            if trusted_continuation_hash
+                            else mu_hash(kernel_state.get("_result"))
+                        )
+                        expected_result_hash = (
+                            _compute_mu_hash(json.dumps(expected_subst["_result"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                            if trusted_continuation_hash
+                            else mu_hash(expected_subst["_result"])
+                        )
+                        if kernel_result_hash == expected_result_hash:
                             subst_bound_to_input = True
                             break
                         continue
-                    bindings_match = continuation_hash(subst_bindings) == continuation_hash(expected_bindings)
+                    subst_bindings_hash = (
+                        _compute_mu_hash(json.dumps(subst_bindings, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(subst_bindings)
+                    )
+                    expected_bindings_hash = (
+                        _compute_mu_hash(json.dumps(expected_bindings, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(expected_bindings)
+                    )
+                    bindings_match = subst_bindings_hash == expected_bindings_hash
                     if (
                         bindings_match
                         and kernel_state.get("mode") == "subst"
                         and kernel_state.get("phase") == "result"
                         and kernel_state.get("context") is None
-                        and continuation_hash(kernel_state.get("focus")) != continuation_hash(expected_subst["_result"])
+                        and (
+                            (
+                                _compute_mu_hash(json.dumps(kernel_state.get("focus"), sort_keys=True, ensure_ascii=False, allow_nan=False))
+                                if trusted_continuation_hash
+                                else mu_hash(kernel_state.get("focus"))
+                            )
+                            != (
+                                _compute_mu_hash(json.dumps(expected_subst["_result"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                                if trusted_continuation_hash
+                                else mu_hash(expected_subst["_result"])
+                            )
+                        )
                     ):
                         bindings_match = False
                     if bindings_match:
@@ -1865,9 +2002,19 @@ def step_kernel_mu(
                 "_input": kernel_entry["_step"],
                 "_remaining": None,
             }
+            kernel_state_hash = (
+                _compute_mu_hash(json.dumps(kernel_state, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                if trusted_continuation_hash
+                else mu_hash(kernel_state)
+            )
+            expected_empty_state_hash = (
+                _compute_mu_hash(json.dumps(expected_empty_state, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                if trusted_continuation_hash
+                else mu_hash(expected_empty_state)
+            )
             if (
                 continuation_state["steps_used"] != 1
-                or continuation_hash(kernel_state) != continuation_hash(expected_empty_state)
+                or kernel_state_hash != expected_empty_state_hash
             ):
                 raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
         elif kernel_state_is_object:
@@ -1877,8 +2024,14 @@ def step_kernel_mu(
                 if not isinstance(state_node, dict):  # AST_OK: boundary - Mu state authority traversal
                     continue
                 state_node_keys = set(state_node.keys())
-                if state_node_keys == _KERNEL_PROJECTION_KEYS and continuation_hash(state_node) not in projection_hashes:
-                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                if state_node_keys == _KERNEL_PROJECTION_KEYS:
+                    state_node_hash = (
+                        _compute_mu_hash(json.dumps(state_node, sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(state_node)
+                    )
+                    if state_node_hash not in projection_hashes:
+                        raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 for projection_cursor_key in ("_projs", "_remaining"):
                     if projection_cursor_key not in state_node:
                         continue
@@ -1889,15 +2042,38 @@ def step_kernel_mu(
                             or set(projection_cursor.keys()) != {"head", "tail"}
                         ):
                             raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
-                        if continuation_hash(projection_cursor["head"]) not in projection_hashes:
+                        projection_cursor_head_hash = (
+                            _compute_mu_hash(json.dumps(projection_cursor["head"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                            if trusted_continuation_hash
+                            else mu_hash(projection_cursor["head"])
+                        )
+                        if projection_cursor_head_hash not in projection_hashes:
                             raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                         projection_cursor = projection_cursor["tail"]
-                if "_input" in state_node and continuation_hash(state_node["_input"]) != normalized_input_hash:
-                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
-                if "_body" in state_node and continuation_hash(state_node["_body"]) not in body_hashes:
-                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
-                if "body" in state_node and "pattern" not in state_node and continuation_hash(state_node["body"]) not in body_hashes:
-                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                if "_input" in state_node:
+                    state_node_input_hash = (
+                        _compute_mu_hash(json.dumps(state_node["_input"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(state_node["_input"])
+                    )
+                    if state_node_input_hash != normalized_input_hash:
+                        raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                if "_body" in state_node:
+                    state_node_body_hash = (
+                        _compute_mu_hash(json.dumps(state_node["_body"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(state_node["_body"])
+                    )
+                    if state_node_body_hash not in body_hashes:
+                        raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                if "body" in state_node and "pattern" not in state_node:
+                    state_node_body_hash = (
+                        _compute_mu_hash(json.dumps(state_node["body"], sort_keys=True, ensure_ascii=False, allow_nan=False))
+                        if trusted_continuation_hash
+                        else mu_hash(state_node["body"])
+                    )
+                    if state_node_body_hash not in body_hashes:
+                        raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 state_nodes.extend(state_node.values())
         if kernel_state_is_object:
             if "_mode" in kernel_state:
