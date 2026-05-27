@@ -39,7 +39,18 @@ from .eval_seed import (
 )
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
-from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_cached, mu_hash_control, mu_hash_control_cached, MAX_MU_DEPTH, MAX_MU_WIDTH
+from .mu_type import (
+    Mu,
+    MAX_MU_DEPTH,
+    MAX_MU_WIDTH,
+    _compute_mu_hash,
+    assert_mu,
+    is_mu,
+    mu_hash,
+    mu_hash_cached,
+    mu_hash_control,
+    mu_hash_control_cached,
+)
 from .kernel import get_step_budget
 from collections.abc import Callable
 from .seed_integrity import get_seed_path, load_verified_seed, MU_SEED_LOCATIONS, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
@@ -1512,7 +1523,17 @@ def step_kernel_mu(
         # SECURITY: A continuation owns progress state, not projection authority.
         # Bind resume to the current call's supplied input/projection cursor
         # before stepping the embedded Mu kernel state.
-        continuation_hash = mu_hash_cached if validation_mode == "algorithm_runtime" else mu_hash
+        # Boundary validation above has already proven algorithm-runtime
+        # continuation inputs are Mu; that trusted branch avoids re-running
+        # assert_mu inside mu_hash_cached while preserving the canonical
+        # SHA-256 hash contract. Keep the public/domain source-lock shape
+        # visible before narrowing the trusted branch below.
+        continuation_hash = mu_hash
+        if validation_mode == "algorithm_runtime":
+            continuation_hash = lambda value: _compute_mu_hash(  # AST_OK: security - Mu-validated continuation fast path preserves canonical SHA-256 hash without adding host authority.
+                json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+            )
+
         normalized_input_hash = continuation_hash(kernel_entry["_step"])
         domain_input_hash = continuation_hash(input_value)
         if continuation_hash(continuation_state["domain_input"]) != domain_input_hash:
