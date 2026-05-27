@@ -12123,6 +12123,77 @@ class TestPhaseAStrictStagedL4Guard:
         assert "Phase-A-Lock: LOCKED" in content
         assert "Status: Phase B (locked, implementing)" in content
 
+    def test_run_phase_a_recovers_strict_staged_l4_missing_tracker_before_lock(
+        self, tmp_path, monkeypatch
+    ):
+        packet_wave_id = "strict-guard-recovery-2026-05-27"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=packet_wave_id,
+        )
+        (tmp_path / "TASKS.md").write_text("## Ra\n", encoding="utf-8")
+        rendered_dir = tmp_path / ".agent_bus" / "rendered"
+        rendered_dir.mkdir(parents=True, exist_ok=True)
+        bridge_calls: list[int] = []
+        prompts: list[str] = []
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(
+            repo_root,
+            plan_path,
+            round_num,
+            *,
+            job_id=None,
+            timeout=1200,
+            agent_review_context="",
+            bus_dir=None,
+        ):
+            bridge_calls.append(round_num)
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nStrict guard recovery packet is grounded.\n")
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": ""}
+
+        def fake_invoke(repo_root, prompt, *, backend="codex", timeout=900, verbose=False, bus_dir=None):
+            prompts.append(prompt)
+            assert f"ONLY to `{packet_rel}` and `TASKS.md`" in prompt
+            assert "strict staged L4 pre-lock guard failure" in prompt
+            assert "TASKS.md lacks detector-visible tracker sync note(s)" in prompt
+            (repo_root / "TASKS.md").write_text(
+                "## Ra\n\n" + self._tracker_note(packet_wave_id, packet=packet_rel),
+                encoding="utf-8",
+            )
+            return {"status": "success", "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+        monkeypatch.setattr(phase_a_mod, "_invoke_implementer", fake_invoke)
+
+        result = phase_a_mod.run_phase_a(
+            tmp_path,
+            "strict_l4_guard_packet",
+            max_bridge_rounds=5,
+            routing_record_override={
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": packet_wave_id,
+                "summary": "strict guard recovery test",
+            },
+        )
+
+        assert result["status"] == "converged"
+        assert result["strict_l4_guard_recovery_ran"] is True
+        assert result["strict_l4_guard_recovery_changed_files"] == ["TASKS.md"]
+        assert bridge_calls == [1, 2]
+        assert len(prompts) == 1
+        assert f"FOUNDER_OVERRIDE:{packet_wave_id}" in (tmp_path / "TASKS.md").read_text(
+            encoding="utf-8"
+        )
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: LOCKED" in content
+        assert "Status: Phase B (locked, implementing)" in content
+
 
 class TestFindTrackedPacket:
     """_find_tracked_packet searches for existing packets by plan name."""

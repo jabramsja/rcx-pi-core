@@ -1,0 +1,24 @@
+{
+  "wave_id": "phase-a-strict-l4-tracker-recovery-2026-05-27",
+  "repeat_run_speedup_ratio": 0.97819,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.281568,
+  "repeat_run_raw_seconds": [
+    0.275427,
+    0.281568
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.275427
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.556995
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-27T02:32:01Z",
+  "collector_version": "2.2.0"
+}
