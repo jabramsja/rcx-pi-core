@@ -2002,31 +2002,46 @@ class TestInjectKeyCollisionGuardParity:
         )
 
     def test_js_collect_ontology_evidence_cycle_detection(self):
-        """JS collectOntologyEvidence must have cycle detection for linked-list traversal.
+        """JS collectOntologyEvidence must use structural walker plus cycle/cap fallback.
 
         Parity with Python _collect_ontology_evidence which uses visited_ids set
         and _MAX_TRACE_ENTRIES_HARD_CAP iteration cap.
         """
         source = (REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js").read_text()
-        # Find collectOntologyEvidence function
-        in_fn = False
-        has_visited = False
-        has_cap = False
-        for line in source.splitlines():
-            if "function collectOntologyEvidence(" in line:
-                in_fn = True
-            elif in_fn and line.startswith("function "):
-                break
-            if in_fn:
-                if "visited" in line and "Set" in line:
-                    has_visited = True
-                if "MAX_DRAIN" in line or "100000" in line:
-                    has_cap = True
+        collect_pos = source.index("function collectOntologyEvidence(")
+        collect_prelude = "\n".join(source[:collect_pos].splitlines()[-5:])
+        collect_body = source[collect_pos:source.index("// Boot1 re-entry depth limit")]
+        has_verified_seed = (
+            "loadVerifiedSeed(EVIDENCE_WALKER_SEED" in source
+            and "evidence_walker.v1.json" in source
+        )
+        has_projection_step = "step(evidenceWalkerProjections, current)" in collect_body
+        has_visited = "visited = new Set()" in collect_body
+        has_cap = "EVIDENCE_WALKER_MAX_DRAIN" in collect_body and "100000" in source
+        assert "BOUNDARY" in collect_prelude, (
+            "collectOntologyEvidence BOUNDARY marker must remain adjacent to the "
+            "function after inserting walker constants"
+        )
+        assert "@host_iteration" not in collect_prelude, (
+            "collectOntologyEvidence must remain classified as boundary code, "
+            "not host iteration"
+        )
+        assert has_verified_seed, (
+            "collectOntologyEvidence must load verified evidence_walker.v1.json "
+            "rather than relying on source-lock-only registry presence"
+        )
+        assert has_projection_step, (
+            "collectOntologyEvidence must execute evidence_walker projections as "
+            "the primary trace walking authority"
+        )
+        assert "collected = result.trace" in collect_body, (
+            "collectOntologyEvidence may use host traversal only as fallback input"
+        )
         assert has_visited, (
             "collectOntologyEvidence must use a visited Set for cycle detection "
-            "(parity with Python visited_ids)"
+            "in boundary fallback (parity with Python visited_ids)"
         )
         assert has_cap, (
             "collectOntologyEvidence must have iteration cap "
-            "(parity with Python _MAX_TRACE_ENTRIES_HARD_CAP)"
+            "in boundary fallback (parity with Python _MAX_TRACE_ENTRIES_HARD_CAP)"
         )

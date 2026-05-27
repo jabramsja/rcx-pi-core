@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-js-evidence-walker-runtime-authority-parity-2026-05-22",
+  "repeat_run_speedup_ratio": 1.099966,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.23607,
+  "repeat_run_raw_seconds": [
+    0.259669,
+    0.23607
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.259669
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.495739
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-26T11:09:44Z",
+  "collector_version": "2.2.0"
+}

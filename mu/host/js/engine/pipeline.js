@@ -820,6 +820,10 @@ function buildOntologyPromotionCandidate(evidence, contextStr) {
   ]);
 }
 
+const EVIDENCE_WALKER_SEED = 'evidence_walker.v1.json';
+const EVIDENCE_WALKER_MAX_STEPS = 5000;
+const EVIDENCE_WALKER_MAX_DRAIN = 100000;
+
 /**
  * Build an observation record from a boundary result (A17).
  * Extracts trace metadata when available, computes control_hash.
@@ -833,22 +837,73 @@ function collectOntologyEvidence(result, operation) {
   let projectionIds = null;
 
   if (result !== null && typeof result === 'object' && !Array.isArray(result) && 'trace' in result) {
+    const subdir = seedLoader.getSeedSubdir(EVIDENCE_WALKER_SEED);
+    const evidenceWalkerProjections = seedLoader.loadVerifiedSeed(EVIDENCE_WALKER_SEED, subdir).projections;
+    let current = muContainers.record([
+      ['evidence_walk', muContainers.record([
+        ['trace', result.trace],
+      ])],
+    ]);
+    let collected = result.trace;
+    try {
+      for (let i = 0; i < EVIDENCE_WALKER_MAX_STEPS; i++) {
+        if (
+          current !== null &&
+          typeof current === 'object' &&
+          !Array.isArray(current) &&
+          'evidence_done' in current
+        ) {
+          const done = current.evidence_done;
+          if (done !== null && typeof done === 'object' && !Array.isArray(done)) {
+            collected = done.collected ?? null;
+          }
+          break;
+        }
+        const next = step(evidenceWalkerProjections, current);
+        if (next === current) break;
+        current = next;
+        if (
+          current !== null &&
+          typeof current === 'object' &&
+          !Array.isArray(current) &&
+          'evidence_done' in current
+        ) {
+          const done = current.evidence_done;
+          if (done !== null && typeof done === 'object' && !Array.isArray(done)) {
+            collected = done.collected ?? null;
+          }
+          break;
+        }
+      }
+    } catch (err) {
+      if (!(err instanceof RcxError && err.error_code === 'input.invalid_type')) {
+        throw err;
+      }
+    }
+
     traceLen = 0;
     const projSet = new Set();
-    const visited = new Set();  // Cycle detection (parity with Python visited_ids)
-    const MAX_DRAIN = 100000;   // Iteration cap (parity with Python _MAX_TRACE_ENTRIES_HARD_CAP)
-    let node = result.trace;
-    while (node !== null && typeof node === 'object' && 'head' in node) {
-      if (visited.has(node)) break;   // cyclic — stop draining
-      visited.add(node);
-      if (traceLen >= MAX_DRAIN) break;  // iteration cap — defense-in-depth
-      traceLen++;
-      const entry = node.head;
-      // C4: only collect string IDs — skip int/dict/null for parity with Python.
-      if (entry !== null && typeof entry === 'object' && typeof entry.projection === 'string') {
-        projSet.add(entry.projection);
+    if (Array.isArray(collected)) {
+      traceLen = collected.length;
+      for (const entry of collected) {
+        if (entry !== null && typeof entry === 'object' && typeof entry.projection === 'string') {
+          projSet.add(entry.projection);
+        }
       }
-      node = ('tail' in node) ? node.tail : null;
+    } else {
+      const visited = new Set();  // Cycle detection (parity with Python visited_ids)
+      let node = collected;
+      while (node !== null && typeof node === 'object' && 'head' in node) {
+        if (visited.has(node)) break;   // cyclic walker fallback output — stop draining
+        visited.add(node);
+        if (traceLen >= EVIDENCE_WALKER_MAX_DRAIN) break;  // iteration cap — defense-in-depth
+        traceLen++;
+        const entry = node.head;
+        if (entry !== null && typeof entry === 'object' && typeof entry.projection === 'string') {
+          projSet.add(entry.projection);
+        }
+        node = ('tail' in node) ? node.tail : null;
+      }
     }
     projectionIds = [...projSet].sort();
     stall = result.stall ?? null;

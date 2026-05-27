@@ -432,7 +432,7 @@
       "status": "production",
       "dependencies": [],
       "js_cli_registered": true,
-      "js_core_locked": false
+      "js_core_locked": true
     }
   }
 }
