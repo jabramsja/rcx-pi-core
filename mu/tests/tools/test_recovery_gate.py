@@ -20,6 +20,34 @@ web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR
 FailureClass = rg_mod.FailureClass
 
 
+_RECOVERY_TIMEOUT_ENV_KEYS = (
+    "RCX_RECOVERY_TIMEOUT_OVERRIDE",
+    "RCX_RECOVERY_TIMEOUT_KEY",
+    "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE",
+    "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY",
+    "RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE",
+)
+_RECOVERY_TIMEOUT_ENV_PREFIXES = (
+    "RCX_RECOVERY_ORIGINAL_TIMEOUT_",
+    "RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_",
+)
+
+
+def _clear_recovery_timeout_test_env() -> None:
+    for env_key in list(os.environ):
+        if env_key in _RECOVERY_TIMEOUT_ENV_KEYS or env_key.startswith(
+            _RECOVERY_TIMEOUT_ENV_PREFIXES
+        ):
+            os.environ.pop(env_key, None)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_recovery_timeout_env():
+    _clear_recovery_timeout_test_env()
+    yield
+    _clear_recovery_timeout_test_env()
+
+
 def _shell_quote(text: str) -> str:
     import shlex as _shlex
     return _shlex.quote(text)
@@ -1933,10 +1961,10 @@ class TestAttemptRecovery:
         (cfg_dir / "executor_config.json").write_text(json.dumps({
             "timeouts": {"phase_b_executor": 100}
         }))
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        _clear_recovery_timeout_test_env()
         r = rg_mod.attempt_recovery(tmp_path, {"status": "timeout", "step": "p"}, "w1")
         assert r["recovered"] is True and r["tier"] == 2
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        _clear_recovery_timeout_test_env()
 
     def test_tier2_upstream_connectivity_recovers_via_retry(self, tmp_path, monkeypatch):
         monkeypatch.delenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", raising=False)
@@ -2346,31 +2374,27 @@ class TestAttemptRecovery:
         (cfg_dir / "executor_config.json").write_text(json.dumps({
             "timeouts": {"phase_b_executor": 100, "commit_executor": 100}
         }))
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
         # Two phase_b timeouts (no step — falls back to executor name)
         r1 = rg_mod.attempt_recovery(
             tmp_path,
             {"status": "timeout", "executor": "phase_b_executor"},
             "w-timeout")
         assert r1["recovered"] is True
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
         r2 = rg_mod.attempt_recovery(
             tmp_path,
             {"status": "timeout", "executor": "phase_b_executor"},
             "w-timeout")
         assert r2["recovered"] is True
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
         # Third phase_b timeout should be exhausted (max 2 per tuple)
         r3 = rg_mod.attempt_recovery(
             tmp_path,
             {"status": "timeout", "executor": "phase_b_executor"},
             "w-timeout")
         assert r3["exhausted"] is True
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
         # But a COMMIT executor timeout should NOT be exhausted — separate bucket
         r4 = rg_mod.attempt_recovery(
             tmp_path,
@@ -2379,8 +2403,7 @@ class TestAttemptRecovery:
         assert r4["recovered"] is True, (
             "commit_executor timeout should not be exhausted by "
             "phase_b_executor exhaustion — they must use separate buckets")
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
 
 
 # ===========================================================================
@@ -2567,16 +2590,14 @@ class TestFixProcessTimeout:
         (cfg_dir / "executor_config.json").write_text(json.dumps({
             "timeouts": {"phase_b_executor": 100}
         }))
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
         r = rg_mod.fix_process_timeout(tmp_path)
         assert r["fixed"] is True
         assert r["action"] == "increase_timeout"
         assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "150"
         # Default timeout key when no result provided
         assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "phase_b_executor"
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
 
     def test_cap_at_2x(self, tmp_path, monkeypatch):
         """50% of 100 = 150, cap = 200. 150 < 200 so no cap. Test with explicit cap scenario."""
@@ -2588,16 +2609,13 @@ class TestFixProcessTimeout:
         (cfg_dir / "executor_config.json").write_text(json.dumps({
             "timeouts": {"phase_b_executor": 3600}
         }))
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_b_executor", raising=False)
+        _clear_recovery_timeout_test_env()
         r = rg_mod.fix_process_timeout(tmp_path)
         new_val = int(os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"])
         assert new_val == 5400  # 1.5 * 3600
         assert new_val <= 3600 * 2  # never exceeds 2x
         assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "phase_b_executor"
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
 
     def test_increases_timeout_commit_executor(self, tmp_path, monkeypatch):
         """Step-aware: commit_executor timeout targets the correct config key."""
@@ -2606,17 +2624,14 @@ class TestFixProcessTimeout:
         (cfg_dir / "executor_config.json").write_text(json.dumps({
             "timeouts": {"phase_b_executor": 3600, "commit_executor": 3600}
         }))
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_commit_executor", raising=False)
+        _clear_recovery_timeout_test_env()
         r = rg_mod.fix_process_timeout(
             tmp_path, result={"executor": "commit_executor", "status": "timeout"})
         assert r["fixed"] is True
         assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "5400"
         assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "commit_executor"
         assert "commit_executor" in r["detail"]
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
 
     def test_bridge_lock_cleared_for_phase_b_executor(self, tmp_path, monkeypatch):
         """bridge.lock is cleared when the bridge-owning phase_b_executor times out."""
@@ -2629,16 +2644,13 @@ class TestFixProcessTimeout:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text("999999\n")
 
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_b_executor", raising=False)
+        _clear_recovery_timeout_test_env()
         r = rg_mod.fix_process_timeout(
             tmp_path, result={"executor": "phase_b_executor", "status": "timeout"})
         assert r["fixed"] is True
         assert not lock_path.exists(), "bridge.lock should be cleared for phase_b_executor"
         assert "bridge.lock cleared" in r["detail"]
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
 
     def test_bridge_lock_preserved_for_commit_executor(self, tmp_path, monkeypatch):
         """bridge.lock must NOT be cleared when a non-bridge executor times out.
@@ -2655,16 +2667,13 @@ class TestFixProcessTimeout:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text("999999\n")
 
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_commit_executor", raising=False)
+        _clear_recovery_timeout_test_env()
         r = rg_mod.fix_process_timeout(
             tmp_path, result={"executor": "commit_executor", "status": "timeout"})
         assert r["fixed"] is True
         assert lock_path.exists(), "bridge.lock must NOT be cleared for commit_executor"
         assert "bridge.lock cleared" not in r["detail"]
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
 
 
 class TestFixMissingPhaseALock:
@@ -3038,10 +3047,7 @@ class TestFixMissingPhaseALock:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
 
-            monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-            monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
-            monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_b_executor",
-                               raising=False)
+            _clear_recovery_timeout_test_env()
             r = rg_mod.fix_process_timeout(
                 tmp_path,
                 result={"executor": "phase_b_executor", "status": "timeout"})
@@ -3052,8 +3058,7 @@ class TestFixMissingPhaseALock:
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
-            monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-            monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+            _clear_recovery_timeout_test_env()
 
     def test_bridge_subprocess_timeout_targets_bridge_turn_timeout(self, tmp_path, monkeypatch):
         cfg_dir = tmp_path / "mu" / "tools" / "executors"
@@ -3062,11 +3067,7 @@ class TestFixMissingPhaseALock:
             "timeouts": {"phase_b_executor": 3600},
             "bridge_turn_timeouts": {"phase_b": 900},
         }))
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_phase_b", raising=False)
+        _clear_recovery_timeout_test_env()
         r = rg_mod.fix_process_timeout(
             tmp_path,
             result={"executor": "phase_b_executor", "step": "bridge_subprocess", "status": "error"},
@@ -3075,8 +3076,7 @@ class TestFixMissingPhaseALock:
         assert os.environ["RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE"] == "1350"
         assert os.environ["RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY"] == "phase_b"
         assert "bridge_turn_timeouts.phase_b" in r["detail"]
-        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", raising=False)
+        _clear_recovery_timeout_test_env()
 
 
 class TestFixTransientKill:
@@ -3265,12 +3265,12 @@ class TestFixImplementerStale:
         (cfg_dir / "executor_config.json").write_text(json.dumps({
             "timeouts": {"phase_b_implementer_stale": 200}
         }))
-        monkeypatch.delenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", raising=False)
+        _clear_recovery_timeout_test_env()
         r = rg_mod.fix_implementer_stale(tmp_path)
         assert r["fixed"] is True
         assert r["action"] == "increase_stale_timeout"
         assert os.environ["RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE"] == "300"
-        monkeypatch.delenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", raising=False)
+        _clear_recovery_timeout_test_env()
 
 
 class TestTier2FixesMap:
@@ -3290,8 +3290,258 @@ class TestTier2FixesMap:
             rg_mod.FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP,
             rg_mod.FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP,
             rg_mod.FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP,
+            rg_mod.FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE,
         }
         assert set(rg_mod._TIER2_FIXES.keys()) == expected  # ANTICHEAT_OK
+
+
+class TestOutOfWaveTasksTrackerNoteRecovery:
+    active_wave = "recovery-out-of-wave-tasks-note-auto-fix-2026-05-26"
+    other_wave = "n3-js-evidence-walker-runtime-authority-parity-2026-05-22"
+
+    def _init_repo(self, repo_root: Path) -> str:
+        subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "RCX Test"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        base_tasks = (
+            "# RCX Task List (Canonical)\n"
+            "\n"
+            "## Ra (Resolved / Merged)\n"
+            "\n"
+            "- Existing tracker note from a previous committed wave.\n"
+        )
+        (repo_root / "TASKS.md").write_text(base_tasks, encoding="utf-8")
+        (repo_root / "other.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", "TASKS.md", "other.txt"], cwd=repo_root, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "seed"], cwd=repo_root, check=True, capture_output=True, text=True)
+        return base_tasks
+
+    def _result(self) -> dict[str, object]:
+        payload = {
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B: git diff --cached -- TASKS.md "
+                f"reported an added out-of-wave staged TASKS.md tracker note for {self.other_wave}."
+            ],
+        }
+        return {
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": json.dumps(payload),
+            "stderr": "",
+        }
+
+    def test_classifies_commit_supervisor_out_of_wave_tasks_tracker_note_as_tier2(self):
+        fc = rg_mod.classify_failure(self._result())
+
+        assert fc == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        assert rg_mod.tier_for(fc) == 2
+
+    def test_terminal_status_is_not_demoted_by_out_of_wave_tasks_signal(self):
+        payload = {
+            "status": "needs_phase_b",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B: git diff --cached -- TASKS.md "
+                f"reported an added out-of-wave staged TASKS.md tracker note for {self.other_wave}."
+            ],
+        }
+        result = {
+            "status": "question_for_founder",
+            "step": "build_and_run_supervisor",
+            "stdout": json.dumps(payload),
+            "stderr": "",
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.TERMINAL_POLICY
+        assert rg_mod.tier_for(fc) == 4
+
+    def test_removes_only_out_of_wave_added_tracker_line_and_restages(self, tmp_path):
+        base_tasks = self._init_repo(tmp_path)
+        out_of_wave_line = (
+            f"- Tracker sync note (2026-05-22, {self.other_wave}): "
+            "out-of-wave tracker note.\n"
+        )
+        same_wave_line = (
+            f"- Tracker sync note (2026-05-26, {self.active_wave}): "
+            "same-wave tracker note.\n"
+        )
+        non_tracker_line = "- Non-tracker TASKS.md addition stays staged.\n"
+        (tmp_path / "TASKS.md").write_text(
+            base_tasks + out_of_wave_line + same_wave_line + non_tracker_line,
+            encoding="utf-8",
+        )
+        (tmp_path / "other.txt").write_text("base\nunrelated staged change\n", encoding="utf-8")
+        subprocess.run(["git", "add", "TASKS.md", "other.txt"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+        recovery = rg_mod.attempt_recovery(tmp_path, self._result(), self.active_wave)
+
+        assert recovery["recovered"] is True, recovery
+        assert recovery["tier"] == 2
+        assert recovery["failure_class"] == (
+            FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE.value
+        )
+        tasks_text = (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+        assert out_of_wave_line not in tasks_text
+        assert same_wave_line in tasks_text
+        assert non_tracker_line in tasks_text
+        staged_tasks = subprocess.run(
+            ["git", "diff", "--cached", "--", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert self.other_wave not in staged_tasks
+        assert self.active_wave in staged_tasks
+        assert "Non-tracker TASKS.md addition stays staged" in staged_tasks
+        unstaged_tasks = subprocess.run(
+            ["git", "diff", "--", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert unstaged_tasks == ""
+        staged_names = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        assert staged_names == ["TASKS.md", "other.txt"]
+
+    def test_preserves_same_wave_tracker_note_when_no_out_of_wave_candidate(self, tmp_path):
+        base_tasks = self._init_repo(tmp_path)
+        same_wave_line = (
+            f"- Tracker sync follow-up (2026-05-26T20:00:00Z, {self.active_wave}): "
+            "same-wave follow-up stays.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + same_wave_line, encoding="utf-8")
+        subprocess.run(["git", "add", "TASKS.md"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+        result = rg_mod.fix_commit_supervisor_out_of_wave_tasks_tracker_note(
+            tmp_path,
+            wave_id=self.active_wave,
+            result=self._result(),
+        )
+
+        assert result["fixed"] is False
+        assert result["action"] == "no_out_of_wave_tasks_tracker_addition"
+        assert same_wave_line in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+
+    def test_fails_closed_when_tasks_has_unstaged_changes(self, tmp_path):
+        base_tasks = self._init_repo(tmp_path)
+        out_of_wave_line = (
+            f"- Tracker sync note (2026-05-22, {self.other_wave}): "
+            "out-of-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + out_of_wave_line, encoding="utf-8")
+        subprocess.run(["git", "add", "TASKS.md"], cwd=tmp_path, check=True, capture_output=True, text=True)
+        with (tmp_path / "TASKS.md").open("a", encoding="utf-8") as fh:
+            fh.write("- Unstaged local operator note.\n")
+
+        result = rg_mod.fix_commit_supervisor_out_of_wave_tasks_tracker_note(
+            tmp_path,
+            wave_id=self.active_wave,
+            result=self._result(),
+        )
+
+        assert result["fixed"] is False
+        assert result["action"] == "unstaged_tasks_changes"
+        tasks_text = (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+        assert out_of_wave_line in tasks_text
+        assert "Unstaged local operator note" in tasks_text
+
+    def test_fails_closed_for_replacement_hunk_tracker_candidate(self, tmp_path):
+        base_tasks = self._init_repo(tmp_path)
+        out_of_wave_line = (
+            f"- Tracker sync note (2026-05-22, {self.other_wave}): "
+            "edited tracker note.\n"
+        )
+        original_line = "- Existing tracker note from a previous committed wave.\n"
+        assert original_line in base_tasks
+        (tmp_path / "TASKS.md").write_text(
+            base_tasks.replace(original_line, out_of_wave_line),
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "TASKS.md"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+        result = rg_mod.fix_commit_supervisor_out_of_wave_tasks_tracker_note(
+            tmp_path,
+            wave_id=self.active_wave,
+            result=self._result(),
+        )
+
+        assert result["fixed"] is False
+        assert result["action"] == "unproven_tasks_tracker_diff"
+        assert "replacement/deletion hunk" in result["detail"]
+        tasks_text = (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+        assert out_of_wave_line in tasks_text
+        staged_tasks = subprocess.run(
+            ["git", "diff", "--cached", "--", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert "-- Existing tracker note from a previous committed wave" in staged_tasks
+        assert f"+{out_of_wave_line.rstrip()}" in staged_tasks
+
+    def test_restoring_worktree_when_restage_fails(self, tmp_path):
+        base_tasks = self._init_repo(tmp_path)
+        out_of_wave_line = (
+            f"- Tracker sync note (2026-05-22, {self.other_wave}): "
+            "out-of-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + out_of_wave_line, encoding="utf-8")
+        subprocess.run(["git", "add", "TASKS.md"], cwd=tmp_path, check=True, capture_output=True, text=True)
+        lock_path = tmp_path / ".git" / "index.lock"
+        lock_path.write_text("held by test\n", encoding="utf-8")
+
+        result = rg_mod.fix_commit_supervisor_out_of_wave_tasks_tracker_note(
+            tmp_path,
+            wave_id=self.active_wave,
+            result=self._result(),
+        )
+
+        lock_path.unlink()
+        assert result["fixed"] is False
+        assert result["action"] == "tasks_restage_failed"
+        tasks_text = (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+        assert out_of_wave_line in tasks_text
+        unstaged_tasks = subprocess.run(
+            ["git", "diff", "--", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert unstaged_tasks == ""
+        staged_tasks = subprocess.run(
+            ["git", "diff", "--cached", "--", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert self.other_wave in staged_tasks
 
 
 class TestCheckStaleNextItemsRetry:
@@ -3819,13 +4069,13 @@ class TestTier2AttemptRecovery:
         (cfg_dir / "executor_config.json").write_text(json.dumps({
             "timeouts": {"phase_b_executor": 100}
         }))
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        _clear_recovery_timeout_test_env()
         r = rg_mod.attempt_recovery(
             tmp_path, {"status": "timeout", "step": "phase_b"}, "w1")
         assert r["recovered"] is True
         assert r["tier"] == 2
         assert r["failure_class"] == "process_timeout"
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        _clear_recovery_timeout_test_env()
 
     def test_tier2_upstream_connectivity_recovers_as_retryable(self, tmp_path, monkeypatch):
         monkeypatch.delenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", raising=False)
