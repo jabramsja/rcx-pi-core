@@ -285,9 +285,9 @@ class TestHemisphereRoutingLimitParity:
         """Python max_steps=30 must match JS const limit = 30."""
         import re as _re
         py_source = (_REPO / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py").read_text()
-        # Find max_steps=N in run_hemisphere_routing function
+        # Find max_steps=N in run_hemisphere_routing's structural runtime call.
         m = _re.search(
-            r'def run_hemisphere_routing.*?run_mu\([^)]*max_steps=(\d+)',
+            r'def run_hemisphere_routing.*?run_mu_structural\([^)]*max_steps=(\d+)',
             py_source, _re.DOTALL,
         )
         assert m, "Could not find max_steps in run_hemisphere_routing"

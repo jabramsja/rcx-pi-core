@@ -588,7 +588,6 @@ class TestEngineWithRoutingReturnShape:
 
 # All functions that call run_mu() directly in production code.
 KNOWN_RUN_MU_CALLERS = {
-    "run_hemisphere_routing",  # hemispheres.v1 routing
     "run_metabolization_cycle",  # metabolize_cycle.v1 structural walker
     "_collect_ontology_evidence",  # evidence_walker.v1 trace walker
 }
@@ -618,11 +617,11 @@ class TestRunMuCallsiteInventory:
         )
 
     def test_caller_count_locked(self):
-        """Exactly 3 production callers of run_mu."""
+        """Exactly 2 production callers of run_mu."""
         source = _STEP_MU_PATH.read_text()
         actual = _find_callers(source, "run_mu")
-        assert len(actual) == 3, (
-            f"Expected 3 run_mu callers, found {len(actual)}: {actual}"
+        assert len(actual) == 2, (
+            f"Expected 2 run_mu callers, found {len(actual)}: {actual}"
         )
 
 
@@ -632,6 +631,7 @@ class TestRunMuCallsiteInventory:
 # _boundary_op_run_trace: handler for run_trace boundary op (A10: extracted from _service_boundary_effect)
 KNOWN_RUN_MU_STRUCTURAL_CALLERS = {
     "_boundary_op_run_trace",
+    "run_hemisphere_routing",  # hemispheres.v1 routing uses structural boundary validation
 }
 
 
@@ -659,11 +659,11 @@ class TestRunMuStructuralCallsiteInventory:
         )
 
     def test_caller_count_locked(self):
-        """Exactly 1 caller of run_mu_structural (shared boundary handler)."""
+        """Exactly 2 callers of run_mu_structural."""
         source = _STEP_MU_PATH.read_text()
         actual = _find_callers(source, "run_mu_structural")
-        assert len(actual) == 1, (
-            f"Expected 1 run_mu_structural caller, found {len(actual)}: {actual}"
+        assert len(actual) == 2, (
+            f"Expected 2 run_mu_structural callers, found {len(actual)}: {actual}"
         )
 
 
