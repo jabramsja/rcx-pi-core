@@ -36,6 +36,7 @@ try:
         load_routing_record as _common_load_routing_record,
         build_and_write_routing_record as _common_build_and_write_routing_record,
         ROUTING_RECORD_PATH as _COMMON_ROUTING_RECORD_PATH,
+        apply_recovery_config_env_overrides,
         merge_executor_config_overrides,
         ensure_git_worktree_clean,
         ensure_not_agent_review_mode,
@@ -64,6 +65,7 @@ except ImportError:
     _common_load_routing_record = _mod.load_routing_record
     _common_build_and_write_routing_record = _mod.build_and_write_routing_record
     _COMMON_ROUTING_RECORD_PATH = _mod.ROUTING_RECORD_PATH
+    apply_recovery_config_env_overrides = _mod.apply_recovery_config_env_overrides
     merge_executor_config_overrides = _mod.merge_executor_config_overrides
     ensure_git_worktree_clean = _mod.ensure_git_worktree_clean
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
@@ -290,9 +292,9 @@ def load_config(config_path: Path | None = None) -> dict[str, Any]:
     if path == DEFAULT_CONFIG_PATH:
         return _common_load_executor_config(REPO_ROOT)
     if not path.exists():
-        return merge_executor_config_overrides({})
+        return apply_recovery_config_env_overrides(merge_executor_config_overrides({}))
     loaded = json.loads(path.read_text(encoding="utf-8"))
-    return merge_executor_config_overrides(loaded)
+    return apply_recovery_config_env_overrides(merge_executor_config_overrides(loaded))
 
 
 def load_routing_record(
@@ -1600,6 +1602,7 @@ def run_recoverable_surface_command(
             config["bridge_turn_timeouts"] = _recovery_original_section(
                 original_timeouts, "bridge_turn_timeouts"
             )
+        _clear_recovery_override_env()
         for env_key in list(os.environ):
             if env_key.startswith((
                 "RCX_RECOVERY_ORIGINAL_TIMEOUT_",
@@ -2718,7 +2721,19 @@ def _post_commit_continuation_ready_for_record(
     return True, f"post-commit continuation ready for {wave_id}"
 
 
-_DISPATCHER_ONLY_TIMEOUT_KEYS = frozenset({"commit_executor"})
+_RECOVERY_OVERRIDE_ENV_KEYS = (
+    "RCX_RECOVERY_TIMEOUT_OVERRIDE",
+    "RCX_RECOVERY_TIMEOUT_KEY",
+    "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE",
+    "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY",
+    "RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE",
+)
+
+
+def _clear_recovery_override_env() -> None:
+    """Clear one-shot recovery override env vars after retry scope exits."""
+    for env_key in _RECOVERY_OVERRIDE_ENV_KEYS:
+        os.environ.pop(env_key, None)
 
 
 def _apply_recovery_overrides(
@@ -2726,44 +2741,25 @@ def _apply_recovery_overrides(
     repo_root: Path | None = None,
     verbose: bool = False,
 ) -> dict[str, Any] | None:
-    """Apply Tier 2 recovery env var overrides to config for retry.
+    """Apply Tier 2 recovery env var overrides to in-memory config for retry.
 
     fix_process_timeout sets RCX_RECOVERY_TIMEOUT_OVERRIDE (and
     RCX_RECOVERY_TIMEOUT_KEY to target the correct executor timeout).
     fix_implementer_stale sets RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE.
 
-    These are applied to the in-memory config dict. Overrides are also written
-    to executor_config.json on disk (when repo_root is provided) for executors
-    whose subprocesses reload config from disk (e.g. phase_b_implementer).
-    Dispatcher-owned timeout keys stay in memory because the dispatcher itself
-    enforces that subprocess timeout and tracked default drift is not needed.
+    These are applied to the in-memory config dict. Child executors that reload
+    config materialize the same inherited env vars through executor_common.
+    The tracked executor_config.json must remain read-only during recovery.
 
     Returns original in-memory timeout sections if any override was applied so
-    loop callers can restore the live config between waves. The snapshot also
-    records original disk timeout sections when disk was modified; callers may
-    pass it to _restore_config_on_disk after retry.
+    loop callers can restore the live config between waves.
     """
-    disk_config = None
     original_config: dict[str, Any] = {
         "timeouts": dict(config.get("timeouts", {})),
         "bridge_turn_timeouts": dict(config.get("bridge_turn_timeouts", {})),
         "_restore_disk": False,
     }
-    original_disk_config = None
-    config_path = None
-    disk_modified = False
     config_modified = False
-
-    if repo_root is not None:
-        config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
-        try:
-            disk_config = json.loads(config_path.read_text(encoding="utf-8"))
-            original_disk_config = {
-                "timeouts": dict(disk_config.get("timeouts", {})),
-                "bridge_turn_timeouts": dict(disk_config.get("bridge_turn_timeouts", {})),
-            }
-        except (json.JSONDecodeError, OSError):
-            disk_config = None
 
     timeout_override = os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE")
     if timeout_override:
@@ -2773,20 +2769,10 @@ def _apply_recovery_overrides(
                 "RCX_RECOVERY_TIMEOUT_KEY", "phase_b_executor")
             config.setdefault("timeouts", {})[timeout_key] = val
             config_modified = True
-            if (
-                disk_config is not None
-                and timeout_key not in _DISPATCHER_ONLY_TIMEOUT_KEYS
-            ):
-                disk_config.setdefault("timeouts", {})[timeout_key] = val
-                disk_modified = True
             if verbose:
                 print(f"[dispatch] Applied timeout override: {timeout_key}={val}s")
         except ValueError:
             pass
-        # Clear env vars after consumption to prevent leakage to later
-        # retries or --loop waves (Bridge R4 Finding fix).
-        os.environ.pop("RCX_RECOVERY_TIMEOUT_OVERRIDE", None)
-        os.environ.pop("RCX_RECOVERY_TIMEOUT_KEY", None)
 
     bridge_turn_timeout_override = os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE")
     if bridge_turn_timeout_override:
@@ -2795,9 +2781,6 @@ def _apply_recovery_overrides(
             phase_key = os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", "phase_b")
             config.setdefault("bridge_turn_timeouts", {})[phase_key] = val
             config_modified = True
-            if disk_config is not None:
-                disk_config.setdefault("bridge_turn_timeouts", {})[phase_key] = val
-                disk_modified = True
             if verbose:
                 print(
                     "[dispatch] Applied bridge turn timeout override: "
@@ -2805,8 +2788,6 @@ def _apply_recovery_overrides(
                 )
         except ValueError:
             pass
-        os.environ.pop("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", None)
-        os.environ.pop("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", None)
 
     stale_override = os.environ.get("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE")
     if stale_override:
@@ -2814,35 +2795,13 @@ def _apply_recovery_overrides(
             val = int(stale_override)
             config.setdefault("timeouts", {})["phase_b_implementer_stale"] = val
             config_modified = True
-            if disk_config is not None:
-                disk_config.setdefault("timeouts", {})["phase_b_implementer_stale"] = val
-                disk_modified = True
             if verbose:
                 print(f"[dispatch] Applied stale timeout override: "
                       f"phase_b_implementer_stale={val}s")
         except ValueError:
             pass
-        # Clear env var after consumption (Bridge R4 Finding fix).
-        os.environ.pop("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", None)
 
-    if disk_modified and config_path is not None and disk_config is not None:
-        try:
-            config_path.write_text(
-                json.dumps(disk_config, indent=2) + "\n", encoding="utf-8")
-            if verbose:
-                print("[dispatch] Recovery overrides written to executor_config.json")
-        except OSError:
-            pass
-
-    if disk_modified:
-        original_config["_restore_disk"] = True
-        if original_disk_config is not None:
-            original_config["_disk_timeouts"] = original_disk_config["timeouts"]
-            original_config["_disk_bridge_turn_timeouts"] = original_disk_config[
-                "bridge_turn_timeouts"
-            ]
-
-    return original_config if config_modified or disk_modified else None
+    return original_config if config_modified else None
 
 
 def _merge_recovery_original_config(
@@ -4071,8 +4030,7 @@ def main(argv: list[str] | None = None) -> int:
             attempt += 1
 
         # Restore in-memory config after recovery overrides. Disk restore is
-        # gated by the snapshot metadata so dispatcher-only overrides do not
-        # write executor_config.json.
+        # metadata-gated; normal recovery keeps executor_config.json read-only.
         if _recovery_original_timeouts is not None:
             _restore_config_on_disk(
                 repo_root, _recovery_original_timeouts,
@@ -4093,6 +4051,7 @@ def main(argv: list[str] | None = None) -> int:
                 PHASE_B_RECOVERY_PLAN_WAVE_ENV,
             )):
                 os.environ.pop(_env_key, None)
+        _clear_recovery_override_env()
 
         if result.get("status") in ("success", "held"):
             _wave_id = normalize_wave_id(

@@ -425,6 +425,58 @@ def merge_executor_config_overrides(overrides: dict[str, Any]) -> dict[str, Any]
     return _deep_merge(DEFAULT_EXECUTOR_CONFIG, overrides)
 
 
+def _apply_int_env_override(
+    section: dict[str, Any],
+    key: str,
+    raw_value: str | None,
+) -> None:
+    if not raw_value:
+        return
+    try:
+        section[key] = int(raw_value)
+    except (TypeError, ValueError):
+        return
+
+
+def apply_recovery_config_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
+    """Materialize dispatcher recovery overrides without mutating config files.
+
+    Recovery gate communicates Tier 2 timeout adjustments through environment
+    variables so dispatcher retries and child executors can share the same
+    adjusted config while tracked executor_config.json stays read-only.
+    """
+    if not isinstance(config, dict):
+        return config
+
+    timeouts = config.setdefault("timeouts", {})
+    if isinstance(timeouts, dict):
+        timeout_key = os.environ.get("RCX_RECOVERY_TIMEOUT_KEY", "phase_b_executor")
+        _apply_int_env_override(
+            timeouts,
+            timeout_key,
+            os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE"),
+        )
+        _apply_int_env_override(
+            timeouts,
+            "phase_b_implementer_stale",
+            os.environ.get("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE"),
+        )
+
+    bridge_turn_timeouts = config.setdefault("bridge_turn_timeouts", {})
+    if isinstance(bridge_turn_timeouts, dict):
+        bridge_turn_key = os.environ.get(
+            "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY",
+            "phase_b",
+        )
+        _apply_int_env_override(
+            bridge_turn_timeouts,
+            bridge_turn_key,
+            os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE"),
+        )
+
+    return config
+
+
 def _nonempty_str(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -634,6 +686,7 @@ def load_executor_config(repo_root: Path) -> dict[str, Any]:
     else:
         raw_overrides = json.loads(config_path.read_text(encoding="utf-8"))
         config = merge_executor_config_overrides(raw_overrides)
+    apply_recovery_config_env_overrides(config)
     return _materialize_role_agents(config, raw_overrides=raw_overrides)
 
 
