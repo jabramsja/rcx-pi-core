@@ -111,6 +111,7 @@ class FailureClass(Enum):
     PR_CONFLICTING = "pr_conflicting"
     STALE_ACTIVE_ITEMS = "stale_active_items"
     HANDOFF_RECEIPT_BUILDER_REFRESH = "handoff_receipt_builder_refresh"
+    COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE = "commit_supervisor_out_of_wave_tasks_tracker_note"
     # Tier 3 -- LLM diagnosis (small focused prompt)
     GIT_STAGING_CONFLICT = "git_staging_conflict"
     TEST_FAILURE = "test_failure"
@@ -151,6 +152,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PR_CONFLICTING: 2,
     FailureClass.STALE_ACTIVE_ITEMS: 2,
     FailureClass.HANDOFF_RECEIPT_BUILDER_REFRESH: 2,
+    FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE: 2,
     FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
     FailureClass.PRIVATE_ATTR_TEST_INTEGRITY: 3,
     FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
@@ -188,6 +190,24 @@ CONTROL_PLANE_PACKET_PREFIX = "reports/control_plane/"
 _FEATURE_BRANCH_RE = re.compile(
     r"On branch (?P<current>[^,\n]+), expected (?P<base>\S+) or (?P<target>\S+)"
 )
+_TASKS_TRACKER_LINE_RE = re.compile(
+    r"^\s*-\s+Tracker sync (?:note|follow-up)\b",
+    re.IGNORECASE,
+)
+_TASKS_TRACKER_WAVE_RE = re.compile(
+    r"^\s*-\s+Tracker sync (?:note|follow-up)\s+\((?P<meta>[^)]*)\):",
+    re.IGNORECASE,
+)
+_DIFF_HUNK_RE = re.compile(
+    r"^@@\s+-(?P<old_start>\d+)(?:,(?P<old_count>\d+))?\s+"
+    r"\+(?P<start>\d+)(?:,(?P<count>\d+))?\s+@@"
+)
+
+
+class _TasksTrackerAddition(NamedTuple):
+    line_number: int
+    text: str
+    wave_id: str
 
 
 def tier_for(fc: FailureClass) -> int:
@@ -265,6 +285,9 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.TERMINAL_POLICY
     if embedded_status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
+
+    if _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result):
+        return FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
 
     if any(
         _json_field_equals(candidate, frozenset({"error_subtype", "subtype"}), "error_max_turns")
@@ -891,6 +914,51 @@ def _looks_like_phase_b_l4_structural_tracker_note_gap(result: dict[str, Any]) -
         "post_gate_contract_sweep must reference",
     )
     return any(marker in signal for marker in structural_note_markers)
+
+
+def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[str, Any]) -> bool:
+    candidates = _extract_result_candidates(result)
+    steps = {
+        str(candidate.get("step", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("step", "") or "").strip()
+    }
+    executors = {
+        str(candidate.get("executor", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("executor", "") or "").strip()
+    }
+    commit_supervisor_steps = {
+        "build_and_run_supervisor",
+        "commit_ready_status_supervisor",
+    }
+    if not (steps & commit_supervisor_steps or "commit_executor" in executors):
+        return False
+    text_parts = [
+        _summarize_result_reason(result),
+        *(_summarize_json_value(candidate) for candidate in candidates),
+    ]
+    signal = " ".join(part for part in text_parts if part).lower()
+    statuses = {
+        str(candidate.get("status", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("status", "") or "").strip()
+    }
+    if "needs_phase_b" not in statuses and "needs_phase_b" not in signal:
+        return False
+    if "tasks.md" not in signal or ("out-of-wave" not in signal and "out of wave" not in signal):
+        return False
+    tracker_markers = (
+        "tracker note",
+        "tracker-note",
+        "tracker sync note",
+        "tracker follow-up",
+        "tracker sync follow-up",
+    )
+    if not any(marker in signal for marker in tracker_markers):
+        return False
+    staged_markers = ("staged", "git diff --cached", "added")
+    return any(marker in signal for marker in staged_markers)
 
 
 def _looks_like_upstream_connectivity_failure(detail: str) -> bool:
@@ -2766,6 +2834,217 @@ def fix_phase_b_l4_structural_tracker_note_gap(repo_root: Path, **kw: Any) -> di
     )
 
 
+def _resolve_active_recovery_wave_id(result: dict[str, Any], wave_id: Any) -> str:
+    candidates: list[Any] = [wave_id]
+    for candidate in _extract_result_candidates(result):
+        candidates.append(candidate.get("wave_id"))
+        candidates.append(candidate.get("wave_name"))
+    for raw in candidates:
+        normalized = normalize_wave_id(str(raw or "").strip())
+        if normalized and normalized != "wave-unknown":
+            return normalized
+    return ""
+
+
+def _tracker_wave_token(line: str) -> str:
+    match = _TASKS_TRACKER_WAVE_RE.match(line)
+    if not match:
+        return ""
+    fields = [part.strip() for part in match.group("meta").split(",")]
+    if len(fields) < 2:
+        return ""
+    token = fields[1].strip().strip("`'\"")
+    normalized = normalize_wave_id(token)
+    return "" if normalized == "wave-unknown" else normalized
+
+
+def _parse_staged_tasks_tracker_additions(
+    diff_text: str,
+    active_wave_id: str,
+) -> tuple[list[_TasksTrackerAddition], list[str]]:
+    removals: list[_TasksTrackerAddition] = []
+    errors: list[str] = []
+    current_new_line: int | None = None
+    current_old_count = 0
+    current_hunk_has_deletion = False
+    current_hunk_removals: list[_TasksTrackerAddition] = []
+
+    def flush_hunk() -> None:
+        nonlocal current_hunk_removals
+        if current_hunk_removals and (current_hunk_has_deletion or current_old_count != 0):
+            for removal in current_hunk_removals:
+                errors.append(
+                    "staged TASKS.md tracker addition at line "
+                    f"{removal.line_number} is in a replacement/deletion hunk; "
+                    "refusing to remove existing tracker history"
+                )
+        else:
+            removals.extend(current_hunk_removals)
+        current_hunk_removals = []
+
+    for raw_line in diff_text.splitlines():
+        if raw_line.startswith("@@"):
+            flush_hunk()
+            match = _DIFF_HUNK_RE.match(raw_line)
+            if not match:
+                current_new_line = None
+                current_old_count = 0
+                current_hunk_has_deletion = False
+                errors.append(f"could not parse TASKS.md staged diff hunk header: {raw_line}")
+                continue
+            current_new_line = int(match.group("start"))
+            current_old_count = int(match.group("old_count") or "1")
+            current_hunk_has_deletion = False
+            continue
+        if raw_line.startswith("+++ ") or raw_line.startswith("--- "):
+            continue
+        if raw_line.startswith("\\ No newline"):
+            continue
+        if raw_line.startswith("+"):
+            added_text = raw_line[1:]
+            line_number = current_new_line
+            if current_new_line is not None:
+                current_new_line += 1
+            if not _TASKS_TRACKER_LINE_RE.match(added_text):
+                continue
+            if line_number is None:
+                errors.append(
+                    "staged TASKS.md tracker addition has no provable new-file line number"
+                )
+                continue
+            tracker_wave = _tracker_wave_token(added_text)
+            if not tracker_wave:
+                errors.append(
+                    f"staged TASKS.md tracker addition at line {line_number} lacks an explicit wave token"
+                )
+                continue
+            if tracker_wave != active_wave_id:
+                current_hunk_removals.append(
+                    _TasksTrackerAddition(
+                        line_number=line_number,
+                        text=added_text,
+                        wave_id=tracker_wave,
+                    )
+                )
+            continue
+        if raw_line.startswith("-"):
+            current_hunk_has_deletion = True
+            continue
+        if current_new_line is not None:
+            current_new_line += 1
+    flush_hunk()
+    return removals, errors
+
+
+def fix_commit_supervisor_out_of_wave_tasks_tracker_note(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Remove only proven out-of-wave staged TASKS.md tracker additions."""
+    result = kw.get("result", {})
+    if not isinstance(result, dict):
+        result = {}
+    active_wave_id = _resolve_active_recovery_wave_id(result, kw.get("wave_id"))
+    if not active_wave_id:
+        return _fix_result(
+            False,
+            "missing_active_wave_id",
+            "out-of-wave TASKS.md tracker-note recovery could not resolve the active recovery wave_id",
+        )
+
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.exists():
+        return _fix_result(False, "tasks_missing", "TASKS.md is missing")
+
+    unstaged = subprocess.run(
+        ["git", "diff", "--quiet", "--", "TASKS.md"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if unstaged.returncode == 1:
+        return _fix_result(
+            False,
+            "unstaged_tasks_changes",
+            "TASKS.md has unstaged changes; refusing deterministic staged-diff repair",
+        )
+    if unstaged.returncode != 0:
+        return _fix_result(
+            False,
+            "tasks_unstaged_check_failed",
+            f"could not check unstaged TASKS.md changes: {unstaged.stderr.strip()}",
+        )
+
+    diff = subprocess.run(
+        ["git", "diff", "--cached", "--unified=0", "--", "TASKS.md"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if diff.returncode != 0:
+        return _fix_result(
+            False,
+            "tasks_staged_diff_failed",
+            f"could not inspect staged TASKS.md diff: {diff.stderr.strip()}",
+        )
+    removals, parse_errors = _parse_staged_tasks_tracker_additions(
+        diff.stdout,
+        active_wave_id,
+    )
+    if parse_errors:
+        return _fix_result(False, "unproven_tasks_tracker_diff", "; ".join(parse_errors))
+    if not removals:
+        return _fix_result(
+            False,
+            "no_out_of_wave_tasks_tracker_addition",
+            "staged TASKS.md diff contains no proven out-of-wave tracker-note additions",
+        )
+
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    for removal in removals:
+        if removal.line_number < 1 or removal.line_number > len(lines):
+            return _fix_result(
+                False,
+                "tasks_tracker_line_number_unproven",
+                f"staged TASKS.md tracker addition line {removal.line_number} is outside the working file",
+            )
+        working_text = lines[removal.line_number - 1].rstrip("\r\n")
+        if working_text != removal.text:
+            return _fix_result(
+                False,
+                "tasks_tracker_line_mismatch",
+                f"working TASKS.md line {removal.line_number} no longer matches the staged tracker addition",
+            )
+
+    original_text = "".join(lines)
+    removal_lines = {removal.line_number for removal in removals}
+    repaired_text = "".join(
+        line for line_number, line in enumerate(lines, start=1)
+        if line_number not in removal_lines
+    )
+    tasks_path.write_text(repaired_text, encoding="utf-8")
+    restage = subprocess.run(
+        ["git", "add", "TASKS.md"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if restage.returncode != 0:
+        tasks_path.write_text(original_text, encoding="utf-8")
+        return _fix_result(
+            False,
+            "tasks_restage_failed",
+            "git add TASKS.md failed after local rewrite; restored TASKS.md "
+            f"to its pre-repair content: {restage.stderr.strip()}",
+        )
+
+    removed_waves = sorted({removal.wave_id for removal in removals})
+    return _fix_result(
+        True,
+        "remove_out_of_wave_tasks_tracker_note",
+        "removed "
+        f"{len(removals)} out-of-wave staged TASKS.md tracker addition(s) "
+        f"for {removed_waves}; active wave_id={active_wave_id}",
+    )
+
+
 _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.STALE_BRIDGE_LOCK: lambda root, **kw: fix_stale_bridge_lock(root),
     # STALE_GIT_INDEX_LOCK demoted to Tier 2: no sound ownership check exists
@@ -2796,23 +3075,29 @@ _CONFIG_PATH_REL = Path("mu") / "tools" / "executors" / "executor_config.json"
 
 
 def _load_config_timeouts(repo_root: Path) -> dict[str, Any]:
-    """Load timeouts dict from executor_config.json (read-only)."""
+    """Load effective timeouts without mutating executor_config.json."""
     config_path = repo_root / _CONFIG_PATH_REL
     try:
-        cfg = json.loads(config_path.read_text(encoding="utf-8"))
-        return cfg.get("timeouts", {})
-    except (json.JSONDecodeError, OSError):
-        return {}
+        return dict(load_executor_config(repo_root).get("timeouts", {}))
+    except Exception:
+        try:
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+            return cfg.get("timeouts", {})
+        except (json.JSONDecodeError, OSError):
+            return {}
 
 
 def _load_config_bridge_turn_timeouts(repo_root: Path) -> dict[str, Any]:
-    """Load bridge_turn_timeouts dict from executor_config.json (read-only)."""
+    """Load effective bridge turn timeouts without mutating executor_config.json."""
     config_path = repo_root / _CONFIG_PATH_REL
     try:
-        cfg = json.loads(config_path.read_text(encoding="utf-8"))
-        return cfg.get("bridge_turn_timeouts", {})
-    except (json.JSONDecodeError, OSError):
-        return {}
+        return dict(load_executor_config(repo_root).get("bridge_turn_timeouts", {}))
+    except Exception:
+        try:
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+            return cfg.get("bridge_turn_timeouts", {})
+        except (json.JSONDecodeError, OSError):
+            return {}
 
 
 def _probe_bridge_lock_unheld(lock_path: Path) -> bool:
@@ -2908,10 +3193,10 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     Falls back to 'phase_b_executor' if not available.
 
     The 2x cap is against the *original* baseline (before any recovery
-    bumps), not the current config value.  The dispatcher writes each
-    override back to executor_config.json between attempts, so reading
-    ``current`` from disk on the second recovery would already reflect
-    the first bump — compounding past the intended cap.
+    bumps), not the current effective timeout. Dispatcher leaves tracked
+    executor_config.json read-only and propagates overrides through the
+    environment; the effective config loader materializes the prior override
+    so sequential recovery still increases from the last attempted value.
 
     Also clears the bridge lock when the bridge-owning executor
     (phase_b_executor) timed out AND the lock can be atomically claimed and
@@ -3361,6 +3646,7 @@ _TIER2_FIXES: dict[FailureClass, Any] = {
     FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP: fix_phase_b_wave_class_package_gap,
     FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP: fix_commit_supervisor_structural_override_package_gap,
     FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP: fix_phase_b_l4_structural_tracker_note_gap,
+    FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE: fix_commit_supervisor_out_of_wave_tasks_tracker_note,
 }
 
 

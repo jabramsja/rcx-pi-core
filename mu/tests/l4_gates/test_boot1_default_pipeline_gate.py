@@ -13,13 +13,13 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import subprocess
-from pathlib import Path
-
 import pytest
 
-from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import (
+    cached_js_request,
+    cached_python_pipeline,
+    uncached_js_request,
+)
 
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
 
@@ -31,20 +31,20 @@ from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
 
 def _js_request(action, **kwargs):
     """Send a JSON API request to eval_step.js and return the parsed response."""
-    request = {"action": action, **kwargs}
-    js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-    result = subprocess.run(
-        ["node", str(js_path), "--json-api", json.dumps(request)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    pytest.fail(
-        f"No JSON_API_RESPONSE in JS output.\n"
-        f"returncode: {result.returncode}\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
+    return cached_js_request(action, **kwargs)
+
+
+def _js_request_uncached(action, **kwargs):
+    """Send a JSON API request without evidence caching."""
+    return uncached_js_request(action, **kwargs)
+
+
+def _python_pipeline(boot1_mode: str, *, observer_enabled=False):
+    """Return cached Python pipeline evidence for the fixed default-route case."""
+    return cached_python_pipeline(
+        input_value={"test": True},
+        boot1_mode=boot1_mode,
+        observer_enabled=observer_enabled,
     )
 
 
@@ -61,15 +61,7 @@ class TestPythonPipelineBoot1Default:
 
     def test_omitted_flag_routes_boot1(self):
         """Omitting use_boot1_recursive routes Boot1 — boot1_depth in events."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        observer = []
-        run_engine_pipeline(
-            [], {"test": True},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-        )
+        observer = _python_pipeline("omitted", observer_enabled=True)["observer"]
         assert len(observer) > 0, "must emit at least one observer event"
         assert all("boot1_depth" in e for e in observer), (
             "Default route must use Boot1 path (all events should have boot1_depth)"
@@ -77,16 +69,7 @@ class TestPythonPipelineBoot1Default:
 
     def test_explicit_true_routes_boot1(self):
         """Explicit use_boot1_recursive=True routes Boot1 — boot1_depth in events."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        observer = []
-        run_engine_pipeline(
-            [], {"test": True},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=True,
-        )
+        observer = _python_pipeline("true", observer_enabled=True)["observer"]
         assert len(observer) > 0, "must emit at least one observer event"
         assert all("boot1_depth" in e for e in observer), (
             "Explicit true must use Boot1 path (all events should have boot1_depth)"
@@ -94,16 +77,7 @@ class TestPythonPipelineBoot1Default:
 
     def test_explicit_false_routes_trampoline(self):
         """Explicit use_boot1_recursive=False routes trampoline — no boot1_depth."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-        reset_step_budget()
-
-        observer = []
-        run_engine_pipeline(
-            [], {"test": True},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=False,
-        )
+        observer = _python_pipeline("false", observer_enabled=True)["observer"]
         assert len(observer) > 0, "must emit at least one observer event"
         assert all("boot1_depth" not in e for e in observer), (
             "Explicit false must use trampoline path (no boot1_depth in events)"
@@ -111,20 +85,8 @@ class TestPythonPipelineBoot1Default:
 
     def test_omitted_matches_explicit_true(self):
         """Omitted and explicit true produce identical results."""
-        from rcx_pi.selfhost.kernel import reset_step_budget
-
-        reset_step_budget()
-        result_omit = run_engine_pipeline(
-            [], {"test": True},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50,
-        )
-        reset_step_budget()
-        result_true = run_engine_pipeline(
-            [], {"test": True},
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, use_boot1_recursive=True,
-        )
+        result_omit = _python_pipeline("omitted")["result"]
+        result_true = _python_pipeline("true")["result"]
         assert result_omit == result_true
 
     def test_non_bool_flag_fails_typed(self):
@@ -211,7 +173,7 @@ class TestJsPipelineBoot1Default:
 
     def test_non_bool_flag_fails_typed(self):
         """Non-boolean boot1LoopMode returns type_error."""
-        resp = _js_request(
+        resp = _js_request_uncached(
             "run_engine_pipeline",
             projections=[], input={"test": True},
             maxSteps=5, boot1LoopMode="true",

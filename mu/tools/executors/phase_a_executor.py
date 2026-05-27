@@ -22,6 +22,7 @@ See: reports/control_plane/executor_surfaces_plan_2026-03-22.md Section B.2
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -1673,6 +1674,168 @@ def _phase_a_strict_staged_l4_guard_errors(
     return errors
 
 
+def _is_strict_staged_l4_guard_error(message: str) -> bool:
+    """Return true when Phase A failed at the strict L4 missing-tracker guard."""
+    return (
+        message.startswith("Phase A strict staged L4 guard failed before lock:")
+        and "TASKS.md lacks detector-visible tracker sync note(s)" in message
+    )
+
+
+def _normalize_phase_a_relpath(path: str | Path) -> str:
+    return Path(str(path)).as_posix().lstrip("./")
+
+
+def _is_phase_a_generated_runtime_path(rel_path: str) -> bool:
+    parts = Path(rel_path).parts
+    if not parts:
+        return False
+    first = parts[0]
+    return first in {".git", ".scratch", ".pytest_cache", "__pycache__"} or (
+        first == ".agent_bus" or first.startswith(".agent_bus-")
+    )
+
+
+def _parse_git_porcelain_z_paths(output: bytes) -> set[str]:
+    paths: set[str] = set()
+    entries = output.split(b"\0")
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if not entry or len(entry) < 4:
+            continue
+        status = entry[:2].decode("ascii", errors="replace")
+        path = entry[3:].decode("utf-8", errors="surrogateescape")
+        if path:
+            paths.add(path)
+        if ("R" in status or "C" in status) and i < len(entries):
+            old_path = entries[i].decode("utf-8", errors="surrogateescape")
+            i += 1
+            if old_path:
+                paths.add(old_path)
+    return paths
+
+
+def _git_dirty_paths(repo_root: Path) -> set[str] | None:
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                "--ignored",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return _parse_git_porcelain_z_paths(proc.stdout)
+
+
+def _iter_phase_a_recovery_repo_files(repo_root: Path) -> set[str]:
+    paths: set[str] = set()
+    for root, dirnames, filenames in os.walk(repo_root):
+        root_path = Path(root)
+        rel_root = "." if root_path == repo_root else root_path.relative_to(repo_root).as_posix()
+        kept_dirnames = []
+        for dirname in dirnames:
+            rel_dir = dirname if rel_root == "." else f"{rel_root}/{dirname}"
+            if not _is_phase_a_generated_runtime_path(rel_dir):
+                kept_dirnames.append(dirname)
+        dirnames[:] = kept_dirnames
+        for filename in filenames:
+            rel_file = filename if rel_root == "." else f"{rel_root}/{filename}"
+            if not _is_phase_a_generated_runtime_path(rel_file):
+                paths.add(rel_file)
+    return paths
+
+
+def _phase_a_file_fingerprint(path: Path) -> str:
+    if not path.exists():
+        return "missing"
+    if not path.is_file():
+        return "non-file"
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        return f"unreadable:{exc.__class__.__name__}"
+    return digest.hexdigest()
+
+
+def _strict_l4_recovery_scope_snapshot(
+    repo_root: Path,
+    allowed_relpaths: set[str],
+) -> dict[str, str]:
+    dirty_paths = _git_dirty_paths(repo_root)
+    if dirty_paths is None:
+        snapshot_paths = _iter_phase_a_recovery_repo_files(repo_root)
+    else:
+        snapshot_paths = set(dirty_paths)
+    snapshot_paths.update(allowed_relpaths)
+    return {
+        path: _phase_a_file_fingerprint(repo_root / path)
+        for path in sorted(snapshot_paths)
+        if not _is_phase_a_generated_runtime_path(path)
+    }
+
+
+def _changed_paths_between_snapshots(
+    before: dict[str, str],
+    after: dict[str, str],
+) -> list[str]:
+    return sorted(
+        path
+        for path in set(before) | set(after)
+        if before.get(path) != after.get(path)
+    )
+
+
+def _strict_staged_l4_guard_recovery_prompt(
+    *,
+    rel_plan_path: str,
+    current_plan_content: str,
+    guard_error: str,
+) -> str:
+    """Build a bounded implementer prompt for Phase A strict L4 tracker recovery."""
+    return (
+        "You are repairing a Phase A strict staged L4 pre-lock guard failure.\n\n"
+        f"IMPORTANT: Write changes ONLY to `{rel_plan_path}` and `TASKS.md`. "
+        "Do NOT create new files. Do NOT write to any other path.\n\n"
+        "The bridge already returned GO, but Phase A refused to lock the packet "
+        "because strict staged L4 validation requires detector-visible same-wave "
+        "tracker authority before implementation can proceed.\n\n"
+        f"Guard failure:\n{guard_error}\n\n"
+        "Required recovery:\n"
+        "- Add or repair detector-visible TASKS.md tracker sync note(s) for every "
+        "missing wave id named in the guard failure.\n"
+        "- Keep the tracker note wave id, Class, Packet, evidence command, "
+        "evidence delta, progress proofs, FOUNDER_OVERRIDE, indicator artifact, "
+        "and invariant metadata parseable by `tools/checks/enforce_l4_execution_contract.py`.\n"
+        "- Ensure the Phase A packet Scope includes `TASKS.md` when strict staged "
+        "L4 validation is part of acceptance.\n"
+        "- Ensure the Phase A packet Grounding / Authorization carries exact "
+        "same-wave authorization, for example `FOUNDER_OVERRIDE:<wave_id>`.\n"
+        "- Preserve the existing packet scope and stop conditions. Do not broaden "
+        "into implementation, runtime, workflow, branch-protection, or unrelated "
+        "documentation changes.\n\n"
+        "This is a guard recovery task, not a broad repo investigation. Use only "
+        "the current packet and the exact TASKS.md tracker area needed for the "
+        "missing wave id.\n\n"
+        f"## Current plan content:\n\n{current_plan_content}\n\n"
+        "Questions? Concerns? Thoughts? -- Think hard\n"
+    )
+
+
 def lock_plan(
     repo_root: Path,
     plan_path: str,
@@ -2648,13 +2811,96 @@ def run_phase_a(
                 ):
                     return result
 
-    # Lock the plan
-    try:
-        lock_plan(repo_root, rel_plan_path, routing_record=routing_record)
-    except PhaseAExecutorError as exc:
-        result["status"] = "error"
-        result["error"] = str(exc)
-        return result
+    # Lock the plan. If bridge GO missed detector-visible TASKS.md authority for
+    # strict staged L4 validation, run one bounded recovery pass that may edit
+    # only the packet and TASKS.md, then require bridge review again before lock.
+    strict_l4_recovery_attempted = False
+    while True:
+        try:
+            lock_plan(repo_root, rel_plan_path, routing_record=routing_record)
+            break
+        except PhaseAExecutorError as exc:
+            error_text = str(exc)
+            if (
+                _is_strict_staged_l4_guard_error(error_text)
+                and _invoke_implementer is not None
+                and not strict_l4_recovery_attempted
+            ):
+                strict_l4_recovery_attempted = True
+                current_plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
+                allowed_recovery_paths = {_normalize_phase_a_relpath(rel_plan_path), "TASKS.md"}
+                pre_recovery_snapshot = _strict_l4_recovery_scope_snapshot(
+                    repo_root,
+                    allowed_recovery_paths,
+                )
+                impl_prompt = _strict_staged_l4_guard_recovery_prompt(
+                    rel_plan_path=rel_plan_path,
+                    current_plan_content=current_plan_content,
+                    guard_error=error_text,
+                )
+                log("Strict staged L4 guard failed before lock — invoking bounded tracker recovery...")
+                impl_result = _invoke_implementer(
+                    repo_root,
+                    impl_prompt,
+                    backend=implementer_backend,
+                    timeout=900,
+                    verbose=verbose,
+                    bus_dir=bus_dir,
+                )
+                post_recovery_snapshot = _strict_l4_recovery_scope_snapshot(
+                    repo_root,
+                    allowed_recovery_paths,
+                )
+                changed_paths = _changed_paths_between_snapshots(
+                    pre_recovery_snapshot,
+                    post_recovery_snapshot,
+                )
+                out_of_scope_paths = [
+                    path for path in changed_paths if path not in allowed_recovery_paths
+                ]
+                if out_of_scope_paths:
+                    result["status"] = "error"
+                    result["error"] = (
+                        "Strict staged L4 guard recovery edited out-of-scope path(s): "
+                        f"{', '.join(out_of_scope_paths)}; allowed paths: "
+                        f"{', '.join(sorted(allowed_recovery_paths))}"
+                    )
+                    return result
+                recovery_changed_paths = [
+                    path for path in changed_paths if path in allowed_recovery_paths
+                ]
+                recovery_changed = bool(recovery_changed_paths)
+                impl_status = str(impl_result.get("status") or "unknown")
+                if impl_status != "success" and not recovery_changed:
+                    result["status"] = "error"
+                    result["error"] = (
+                        "Strict staged L4 guard recovery implementer failed without edits: "
+                        f"{impl_status}; original guard error: {error_text}"
+                    )
+                    return result
+                if not recovery_changed:
+                    result["status"] = "error"
+                    result["error"] = (
+                        "Strict staged L4 guard recovery made no packet or TASKS.md edits; "
+                        f"original guard error: {error_text}"
+                    )
+                    return result
+                result["strict_l4_guard_recovery_ran"] = True
+                result["strict_l4_guard_recovery_changed_files"] = recovery_changed_paths
+                log(
+                    "Strict staged L4 guard recovery edited "
+                    f"{', '.join(recovery_changed_paths)}; "
+                    "rerunning bridge review before lock"
+                )
+                if not _run_bridge_convergence(
+                    start_round=result["bridge_rounds"] + 1,
+                    agent_review_context=agent_review_bridge_ctx,
+                ):
+                    return result
+                continue
+            result["status"] = "error"
+            result["error"] = error_text
+            return result
     log(f"Phase-A-Lock: LOCKED in {rel_plan_path}")
 
     # No checkpoint commit — the locked plan is a working artifact that

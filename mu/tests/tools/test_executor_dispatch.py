@@ -12123,6 +12123,77 @@ class TestPhaseAStrictStagedL4Guard:
         assert "Phase-A-Lock: LOCKED" in content
         assert "Status: Phase B (locked, implementing)" in content
 
+    def test_run_phase_a_recovers_strict_staged_l4_missing_tracker_before_lock(
+        self, tmp_path, monkeypatch
+    ):
+        packet_wave_id = "strict-guard-recovery-2026-05-27"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=packet_wave_id,
+        )
+        (tmp_path / "TASKS.md").write_text("## Ra\n", encoding="utf-8")
+        rendered_dir = tmp_path / ".agent_bus" / "rendered"
+        rendered_dir.mkdir(parents=True, exist_ok=True)
+        bridge_calls: list[int] = []
+        prompts: list[str] = []
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(
+            repo_root,
+            plan_path,
+            round_num,
+            *,
+            job_id=None,
+            timeout=1200,
+            agent_review_context="",
+            bus_dir=None,
+        ):
+            bridge_calls.append(round_num)
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nStrict guard recovery packet is grounded.\n")
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": ""}
+
+        def fake_invoke(repo_root, prompt, *, backend="codex", timeout=900, verbose=False, bus_dir=None):
+            prompts.append(prompt)
+            assert f"ONLY to `{packet_rel}` and `TASKS.md`" in prompt
+            assert "strict staged L4 pre-lock guard failure" in prompt
+            assert "TASKS.md lacks detector-visible tracker sync note(s)" in prompt
+            (repo_root / "TASKS.md").write_text(
+                "## Ra\n\n" + self._tracker_note(packet_wave_id, packet=packet_rel),
+                encoding="utf-8",
+            )
+            return {"status": "success", "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+        monkeypatch.setattr(phase_a_mod, "_invoke_implementer", fake_invoke)
+
+        result = phase_a_mod.run_phase_a(
+            tmp_path,
+            "strict_l4_guard_packet",
+            max_bridge_rounds=5,
+            routing_record_override={
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": packet_wave_id,
+                "summary": "strict guard recovery test",
+            },
+        )
+
+        assert result["status"] == "converged"
+        assert result["strict_l4_guard_recovery_ran"] is True
+        assert result["strict_l4_guard_recovery_changed_files"] == ["TASKS.md"]
+        assert bridge_calls == [1, 2]
+        assert len(prompts) == 1
+        assert f"FOUNDER_OVERRIDE:{packet_wave_id}" in (tmp_path / "TASKS.md").read_text(
+            encoding="utf-8"
+        )
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: LOCKED" in content
+        assert "Status: Phase B (locked, implementing)" in content
+
 
 class TestFindTrackedPacket:
     """_find_tracked_packet searches for existing packets by plan name."""
@@ -13601,11 +13672,14 @@ class TestRecoveryGateWiring:
             orig, "timeouts"
         )
         assert in_memory["timeouts"]["commit_executor"] == 3600
+        assert os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE") == "5400"
+        assert os.environ.get("RCX_RECOVERY_TIMEOUT_KEY") == "commit_executor"
+        dispatch_mod._clear_recovery_override_env()  # ANTICHEAT_OK
         assert os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE") is None
         assert os.environ.get("RCX_RECOVERY_TIMEOUT_KEY") is None
 
-    def test_apply_overrides_writes_to_disk(self, tmp_path, monkeypatch):
-        """_apply_recovery_overrides writes overrides to executor_config.json on disk."""
+    def test_apply_overrides_keeps_tracked_config_read_only(self, tmp_path, monkeypatch):
+        """Recovery overrides must not drift tracked executor_config.json."""
         cfg_dir = tmp_path / "mu" / "tools" / "executors"
         cfg_dir.mkdir(parents=True)
         original_config = {
@@ -13618,26 +13692,28 @@ class TestRecoveryGateWiring:
         cfg_path = cfg_dir / "executor_config.json"
         cfg_path.write_text(json.dumps(original_config, indent=2) + "\n")
 
-        # Test stale timeout override writes to disk
+        # Test stale timeout override materializes without writing disk.
         monkeypatch.setenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", "450")
         in_memory = {"timeouts": dict(original_config["timeouts"])}
         orig = dispatch_mod._apply_recovery_overrides(  # ANTICHEAT_OK
             in_memory, repo_root=tmp_path)
-        assert orig is not None  # disk was modified
+        assert orig is not None
         assert orig["timeouts"]["phase_b_implementer_stale"] == 300  # original value
         # In-memory config updated
         assert in_memory["timeouts"]["phase_b_implementer_stale"] == 450
-        # Disk config updated
+        # Disk config remains the tracked default; child executors get the
+        # override through inherited env and executor_common config loading.
         disk = json.loads(cfg_path.read_text())
-        assert disk["timeouts"]["phase_b_implementer_stale"] == 450
-        # Restore
+        assert disk["timeouts"]["phase_b_implementer_stale"] == 300
+        child_config = dispatch_mod._common_load_executor_config(tmp_path)  # ANTICHEAT_OK
+        assert child_config["timeouts"]["phase_b_implementer_stale"] == 450
         dispatch_mod._restore_config_on_disk(tmp_path, orig)  # ANTICHEAT_OK
         restored = json.loads(cfg_path.read_text())
         assert restored["timeouts"]["phase_b_implementer_stale"] == 300
         monkeypatch.delenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", raising=False)
 
-    def test_apply_overrides_clears_env_vars(self, tmp_path, monkeypatch):
-        """Env vars are consumed and cleared to prevent leakage (Bridge R4 fix)."""
+    def test_recovery_override_env_cleared_after_retry_scope(self, tmp_path, monkeypatch):
+        """Env vars persist for child executors, then clear at retry-scope exit."""
         cfg_dir = tmp_path / "mu" / "tools" / "executors"
         cfg_dir.mkdir(parents=True)
         (cfg_dir / "executor_config.json").write_text(json.dumps({
@@ -13651,7 +13727,14 @@ class TestRecoveryGateWiring:
         # Values applied to in-memory config
         assert in_memory["timeouts"]["phase_b_executor"] == 5400
         assert in_memory["timeouts"]["phase_b_implementer_stale"] == 450
-        # Env vars cleared after consumption
+        # Env vars remain available for child executors that reload config.
+        assert os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE") == "5400"
+        assert os.environ.get("RCX_RECOVERY_TIMEOUT_KEY") == "phase_b_executor"
+        assert os.environ.get("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE") == "450"
+        child_config = dispatch_mod._common_load_executor_config(tmp_path)  # ANTICHEAT_OK
+        assert child_config["timeouts"]["phase_b_executor"] == 5400
+        assert child_config["timeouts"]["phase_b_implementer_stale"] == 450
+        dispatch_mod._clear_recovery_override_env()  # ANTICHEAT_OK
         assert os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE") is None
         assert os.environ.get("RCX_RECOVERY_TIMEOUT_KEY") is None
         assert os.environ.get("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE") is None
@@ -13677,9 +13760,12 @@ class TestRecoveryGateWiring:
         assert orig["bridge_turn_timeouts"]["phase_b"] == 900
         assert in_memory["bridge_turn_timeouts"]["phase_b"] == 1350
         disk = json.loads(cfg_path.read_text())
-        assert disk["bridge_turn_timeouts"]["phase_b"] == 1350
-        assert os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE") is None
-        assert os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY") is None
+        assert disk["bridge_turn_timeouts"]["phase_b"] == 900
+        child_config = dispatch_mod._common_load_executor_config(tmp_path)  # ANTICHEAT_OK
+        assert child_config["bridge_turn_timeouts"]["phase_b"] == 1350
+        assert os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE") == "1350"
+        assert os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY") == "phase_b"
+        dispatch_mod._clear_recovery_override_env()  # ANTICHEAT_OK
         dispatch_mod._restore_config_on_disk(tmp_path, orig)  # ANTICHEAT_OK
         restored = json.loads(cfg_path.read_text())
         assert restored["bridge_turn_timeouts"]["phase_b"] == 900
@@ -13825,7 +13911,7 @@ class TestRecoveryGateWiring:
             "RCX_RECOVERY_TIMEOUT_KEY",
             "RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_b_executor",
         ):
-            monkeypatch.delenv(key, raising=False)
+            os.environ.pop(key, None)
 
         def run_chained_timeout() -> dict[str, object]:
             return dispatch_mod._continue_successful_executor_chain(  # ANTICHEAT_OK: live chained timeout regression
@@ -13857,7 +13943,11 @@ class TestRecoveryGateWiring:
             retry_config,
             repo_root=tmp_path,
         )
-        assert json.loads(cfg_path.read_text(encoding="utf-8"))["timeouts"]["phase_b_executor"] == 150
+        assert json.loads(cfg_path.read_text(encoding="utf-8"))["timeouts"]["phase_b_executor"] == 100
+        assert (
+            dispatch_mod._common_load_executor_config(tmp_path)["timeouts"]["phase_b_executor"]  # ANTICHEAT_OK
+            == 150
+        )
 
         second_timeout = run_chained_timeout()
         second_recovery = recovery_mod.attempt_recovery(
@@ -13876,6 +13966,8 @@ class TestRecoveryGateWiring:
         )
         assert third_recovery["exhausted"] is True
         assert "phase_b_executor, process_timeout" in third_recovery["detail"]
+        dispatch_mod._clear_recovery_override_env()  # ANTICHEAT_OK
+        os.environ.pop("RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_b_executor", None)
 
     def test_sequential_recovery_preserves_original_timeouts(
         self, tmp_path, monkeypatch,

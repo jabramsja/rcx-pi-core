@@ -14,13 +14,14 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import subprocess
-from pathlib import Path
-
 import pytest
 
 from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import (
+    cached_js_request,
+    cached_python_pipeline,
+    uncached_js_request,
+)
 
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline, ENGINE_EXIT_REASONS
 
@@ -38,42 +39,28 @@ def _collect_terminal_events(observer):
     return [e for e in observer if e.get("event_name") == "engine_terminal"]
 
 
+def _python_observer(input_value, *, use_boot1_recursive=False):
+    """Return cached Python engine observer evidence for deterministic cases."""
+    return cached_python_pipeline(
+        input_value=input_value,
+        boot1_mode="true" if use_boot1_recursive else "false",
+        observer_enabled=True,
+    )["observer"]
+
+
 def _js_request(action, **kwargs):
     """Send a JSON API request to eval_step.js and return the parsed response."""
-    request = {"action": action, **kwargs}
-    js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-    result = subprocess.run(
-        ["node", str(js_path), "--json-api", json.dumps(request)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    pytest.fail(
-        f"No JSON_API_RESPONSE in JS output.\n"
-        f"returncode: {result.returncode}\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
-    )
+    return cached_js_request(action, **kwargs)
 
 
 def _js_request_with_observer(action, **kwargs):
     """Send a JSON API request with observer enabled."""
-    request = {"action": action, "observer": True, **kwargs}
-    js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-    result = subprocess.run(
-        ["node", str(js_path), "--json-api", json.dumps(request)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    pytest.fail(
-        f"No JSON_API_RESPONSE in JS output.\n"
-        f"returncode: {result.returncode}\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
-    )
+    return cached_js_request(action, observer=True, **kwargs)
+
+
+def _js_request_with_observer_uncached(action, **kwargs):
+    """Send a JSON API request with observer enabled and no evidence caching."""
+    return uncached_js_request(action, observer=True, **kwargs)
 
 
 # =============================================================================
@@ -85,14 +72,7 @@ class TestPythonEngineTerminalEvent:
 
     def test_closure_emits_engine_terminal(self):
         """Successful closure run emits exactly one engine_terminal event."""
-        reset_step_budget()
-        observer = []
-        run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=False,
-        )
+        observer = _python_observer("test_input", use_boot1_recursive=False)
         terminals = _collect_terminal_events(observer)
         assert len(terminals) == 1, (
             f"Expected exactly 1 engine_terminal, got {len(terminals)}"
@@ -102,14 +82,7 @@ class TestPythonEngineTerminalEvent:
 
     def test_exactly_one_terminal_event(self):
         """Count of engine_terminal events is always exactly 1 on success."""
-        reset_step_budget()
-        observer = []
-        run_engine_pipeline(
-            [], "another_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=False,
-        )
+        observer = _python_observer("another_input", use_boot1_recursive=False)
         terminals = _collect_terminal_events(observer)
         assert len(terminals) == 1
 
@@ -131,14 +104,7 @@ class TestPythonEngineTerminalEvent:
 
     def test_terminal_event_has_required_fields(self):
         """engine_terminal event has base 6 fields + engine_exit_reason + engine_iterations_used."""
-        reset_step_budget()
-        observer = []
-        run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=False,
-        )
+        observer = _python_observer("test_input", use_boot1_recursive=False)
         terminals = _collect_terminal_events(observer)
         assert len(terminals) == 1
         event = terminals[0]
@@ -157,14 +123,7 @@ class TestPythonEngineTerminalEvent:
 
     def test_boot1_emits_engine_terminal(self):
         """Boot1 path also emits exactly one engine_terminal."""
-        reset_step_budget()
-        observer = []
-        run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=observer,
-            use_boot1_recursive=True,
-        )
+        observer = _python_observer("test_input", use_boot1_recursive=True)
         terminals = _collect_terminal_events(observer)
         assert len(terminals) == 1
         assert terminals[0]["engine_exit_reason"] == "closure"
@@ -172,22 +131,8 @@ class TestPythonEngineTerminalEvent:
 
     def test_boot1_and_trampoline_terminal_parity(self):
         """Both engine paths emit engine_terminal with same reason and iteration count."""
-        reset_step_budget()
-        obs_tramp = []
-        run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=obs_tramp,
-            use_boot1_recursive=False,
-        )
-        reset_step_budget()
-        obs_boot1 = []
-        run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=obs_boot1,
-            use_boot1_recursive=True,
-        )
+        obs_tramp = _python_observer("test_input", use_boot1_recursive=False)
+        obs_boot1 = _python_observer("test_input", use_boot1_recursive=True)
         tramp_terms = _collect_terminal_events(obs_tramp)
         boot1_terms = _collect_terminal_events(obs_boot1)
         assert len(tramp_terms) == 1
@@ -223,7 +168,7 @@ class TestJsEngineTerminalEvent:
 
     def test_js_no_engine_terminal_on_error(self):
         """JS engine.exhausted returns error, observer has 0 engine_terminal."""
-        resp = _js_request_with_observer(
+        resp = _js_request_with_observer_uncached(
             "run_engine_pipeline",
             input="test_input",
             projections=[],
@@ -259,14 +204,7 @@ class TestCrossSubstrateTerminalEventParity:
 
     def test_closure_terminal_parity(self):
         """Both substrates emit engine_terminal with same reason for closure input."""
-        reset_step_budget()
-        py_observer = []
-        run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50, observer=py_observer,
-            use_boot1_recursive=False,
-        )
+        py_observer = _python_observer("test_input", use_boot1_recursive=False)
         js_resp = _js_request_with_observer(
             "run_engine_pipeline",
             input="test_input",
