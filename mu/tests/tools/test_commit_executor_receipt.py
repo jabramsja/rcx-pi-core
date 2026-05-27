@@ -4220,6 +4220,39 @@ class TestWaveIdBounds:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_phase_b_handoff_allows_authorized_existing_pr_target_branch(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "existing-pr-control-surface-repair"
+        packet_rel = f"reports/control_plane/{wave_id}.md"
+        packet = repo / packet_rel
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Existing PR control-surface repair\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Class: L4_ENABLER\n"
+            "Lane: control-surface (agent automation / observability)\n"
+            "Purpose: bounded repair on the existing PR branch.\n"
+            "Founder authorization: standing pipeline-bug-fix authorization.\n"
+            f"FOUNDER_OVERRIDE:{wave_id}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "--", packet_rel], cwd=repo, check=True)
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            target_branch="jabramsja/existing-pr-branch",
+            tracked_packet=packet_rel,
+            tracker_note_text=_with_founder_override(
+                _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"],
+                wave_id,
+            ),
+        )
+
+        valid, validation_errors = commit_mod.validate_handoff(handoff, repo_root=repo)
+
+        assert valid, validation_errors
+
     def test_prepare_handoff_from_routing_record_standalone_preserves_restart_target_branch(self, tmp_path):
         import subprocess
 
