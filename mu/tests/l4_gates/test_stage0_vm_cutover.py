@@ -24,6 +24,7 @@ from rcx_pi.selfhost.step_mu import (
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline  # ANTICHEAT_OK: S1-A — integration cutover test  # SPEED_OK: called with small inputs — completes in <1s
 from rcx_pi.selfhost.match_mu import normalize_for_match
 from rcx_pi.selfhost.kernel import reset_step_budget
+from rcx_pi.selfhost.mu_type import get_bootstrap_registry
 from rcx_pi.selfhost.eval_seed import _step_trusted, NO_MATCH  # ANTICHEAT_OK: P7-d gate test
 from rcx_pi.selfhost.stage0_vm import _mu_deep_equal, stage0_vm_step  # ANTICHEAT_OK: P7-d gate test
 
@@ -430,6 +431,16 @@ class TestCutoverIntegration:
 
     def test_stage0_marker_truth_current_paths(self, cutover_mode, monkeypatch):
         """Current-path proof for host Stage0 marker truth after VM cutover."""
+        marker_entries = [
+            entry for entry in get_bootstrap_registry()
+            if entry.startswith("host_builtin:_stage0_match: Host builtin: ")
+        ]
+        assert len(marker_entries) == 1
+        marker_reason = marker_entries[0]
+        assert "Sole production path" not in marker_reason
+        assert "Engine/bootstrap trusted-helper path remains reachable" in marker_reason
+        assert "step_kernel_mu VM cutover" in marker_reason
+
         counts = _patch_stage0_current_path_counters(monkeypatch, cutover_mode)
 
         step_result = step_kernel_mu(
