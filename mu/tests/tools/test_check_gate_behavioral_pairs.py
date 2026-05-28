@@ -173,6 +173,146 @@ class TestCLIOutput:
 
 
 # ---------------------------------------------------------------------------
+# TestSpeedEnforcer
+# ---------------------------------------------------------------------------
+
+class TestSpeedEnforcer:
+    """Regression coverage for check_test_speed.sh mixed-file classification."""
+
+    _speed_check_path = REPO_ROOT / "tools" / "checks" / "check_test_speed.sh"
+
+    def _run_speed_check(self, path: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(self._speed_check_path), str(path)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_mixed_file_slow_mark_does_not_hide_unmarked_slow_test(self, tmp_path):
+        test_file = tmp_path / "test_mixed_speed.py"
+        test_file.write_text(
+            textwrap.dedent(
+                """
+                import pytest
+                from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
+
+                @pytest.mark.slow
+                def test_marked_slow_path():
+                    run_engine_pipeline([], {"slow": True})
+
+
+                def test_unmarked_slow_leak():
+                    run_engine_pipeline([], {"leak": True})
+                """
+            ).strip()
+            + "\n"
+        )
+
+        result = self._run_speed_check(test_file)
+
+        assert result.returncode == 1
+        assert "test_unmarked_slow_leak" in result.stdout
+        assert "test_marked_slow_path calls" not in result.stdout
+
+    def test_package_level_module_import_does_not_hide_unmarked_slow_test(self, tmp_path):
+        test_file = tmp_path / "test_package_import_slow_leak.py"
+        test_file.write_text(
+            textwrap.dedent(
+                """
+                from rcx_pi.selfhost import engine_pipeline
+
+
+                def test_unmarked_package_import_slow_leak():
+                    engine_pipeline.run_engine_pipeline([], {"leak": True})
+                """
+            ).strip()
+            + "\n"
+        )
+
+        result = self._run_speed_check(test_file)
+
+        assert result.returncode == 1
+        assert "test_unmarked_package_import_slow_leak" in result.stdout
+        assert "run_engine_pipeline" in result.stdout
+
+    def test_helper_routed_slow_call_does_not_hide_unmarked_slow_test(self, tmp_path):
+        test_file = tmp_path / "test_helper_run_mu_leak.py"
+        test_file.write_text(
+            textwrap.dedent(
+                """
+                from rcx_pi.selfhost.step_mu import run_mu
+
+
+                def helper_run_mu():
+                    return run_mu([], {"leak": True})
+
+
+                def test_unmarked_helper_slow_leak():
+                    helper_run_mu()
+                """
+            ).strip()
+            + "\n"
+        )
+
+        result = self._run_speed_check(test_file)
+
+        assert result.returncode == 1
+        assert "test_unmarked_helper_slow_leak" in result.stdout
+        assert "run_mu" in result.stdout
+
+    def test_module_level_slow_mark_exempts_whole_file(self, tmp_path):
+        test_file = tmp_path / "test_module_slow.py"
+        test_file.write_text(
+            textwrap.dedent(
+                """
+                import pytest
+                from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
+                pytestmark = [pytest.mark.slow]
+
+
+                def test_module_slow_path():
+                    run_engine_pipeline([], {"slow": True})
+                """
+            ).strip()
+            + "\n"
+        )
+
+        result = self._run_speed_check(test_file)
+
+        assert result.returncode == 0
+        assert "No speed violations found" in result.stdout
+
+    def test_function_level_speed_ok_exempts_only_that_test(self, tmp_path):
+        test_file = tmp_path / "test_speed_ok_scope.py"
+        test_file.write_text(
+            textwrap.dedent(
+                """
+                from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
+
+
+                def test_boundary_stubbed_path():
+                    run_engine_pipeline([], {"fast": True})  # SPEED_OK: stubbed public-boundary proof
+
+
+                def test_unmarked_slow_leak():
+                    run_engine_pipeline([], {"leak": True})
+                """
+            ).strip()
+            + "\n"
+        )
+
+        result = self._run_speed_check(test_file)
+
+        assert result.returncode == 1
+        assert "test_unmarked_slow_leak" in result.stdout
+        assert "test_boundary_stubbed_path calls" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # TestEdgeCases
 # ---------------------------------------------------------------------------
 
