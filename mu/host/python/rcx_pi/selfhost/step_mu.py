@@ -2150,9 +2150,6 @@ def step_kernel_mu(
         steps_used = state["steps_used"]
         watchdog_cap = state["watchdog_cap"] if state["watchdog_cap"] is not None else max_steps
 
-    # INVARIANT: eval_step is functionally pure — it returns new structures,
-    # never mutates its input. current_hash caching depends on this property.
-    current_hash = mu_hash_control_cached(current, "step_kernel_mu")
     # BOOTSTRAP_PRIMITIVE: max_steps
     # Residual watchdog boundary. The continuation carries the consumed-step
     # count; omitted no-fuel compatibility never creates synthetic Mu fuel.
@@ -2164,186 +2161,39 @@ def step_kernel_mu(
         started_budget = True
 
     try:
-        if caller_supplied_fuel and fuel_cursor is None:
-            validator(domain_input, "step_kernel_mu output")
-            packet = {
-                "kind": "terminal",
-                "result": {
-                    "output": domain_input,
-                    "stall": True,
-                    "termination_reason": "fuel_exhausted",
-                    "steps_used": steps_used,
-                    "max_steps": watchdog_cap,
-                    "fuel_supplied": True,
-                    "fuel_remaining": fuel_cursor,
-                    "fuel_exhausted": True,
-                },
-                "continuation": None,
-            }
-            if return_packet:
-                return packet
-            meta = packet["result"]
-            if return_meta:
-                return meta
-            return meta["output"]
+        while True:
+            # INVARIANT: eval_step is functionally pure — it returns new structures,
+            # never mutates its input. current_hash caching depends on this property.
+            current_hash = mu_hash_control_cached(current, "step_kernel_mu")
+            if caller_supplied_fuel and fuel_cursor is None:
+                validator(domain_input, "step_kernel_mu output")
+                packet = {
+                    "kind": "terminal",
+                    "result": {
+                        "output": domain_input,
+                        "stall": True,
+                        "termination_reason": "fuel_exhausted",
+                        "steps_used": steps_used,
+                        "max_steps": watchdog_cap,
+                        "fuel_supplied": True,
+                        "fuel_remaining": fuel_cursor,
+                        "fuel_exhausted": True,
+                    },
+                    "continuation": None,
+                }
+                if return_packet:
+                    return packet
+                meta = packet["result"]
+                if return_meta:
+                    return meta
+                return meta["output"]
 
-        if steps_used >= watchdog_cap:
-            validator(domain_input, "step_kernel_mu output")
-            canonical = {
-                "output": domain_input,
-                "stall": True,
-                "termination_reason": "max_steps_exhausted",
-                "steps_used": steps_used,
-                "max_steps": watchdog_cap,
-            }
-            if caller_supplied_fuel:
-                canonical["fuel_supplied"] = True
-                canonical["fuel_remaining"] = fuel_cursor
-                canonical["fuel_exhausted"] = False
-            packet = {
-                "kind": "terminal",
-                "result": canonical,
-                "continuation": None,
-            }
-            if return_packet:
-                return packet
-            meta = packet["result"]
-            if return_meta:
-                return meta
-            return meta["output"]
-
-        if caller_supplied_fuel:
-            assert_mu(fuel_cursor, "step_kernel_mu.kernel_fuel")
-            fuel_probe = fuel_cursor
-            while fuel_probe is not None:
-                if (
-                    not isinstance(fuel_probe, dict)  # ANTICHEAT_OK: linked-list fuel boundary
-                    or set(fuel_probe.keys()) != {"head", "tail"}
-                ):
-                    raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
-                fuel_probe = fuel_probe["tail"]
-
-        # Account for one kernel-driver transition in the shared global budget.
-        budget.consume(1)
-        # P7-d: shadow mode or cutover mode
-        if _STAGE0_VM_CUTOVER:
-            result = _step_kernel_with_vm(
-                kernel_bundle, bridge_bundle,
-                match_bundle, subst_bundle, current)
-        else:
-            result = _step_trusted(kernel_projs, current)
-
-            # P7-d shadow: run VM path too, assert equivalence
-            # Disabled when _step_trusted is monkeypatched (shadow is meaningless)
-            if _STAGE0_SHADOW_ENABLED:
-                # record_coverage=False prevents double-counting
-                vm_result = _step_kernel_with_vm(
-                    kernel_bundle, bridge_bundle,
-                    match_bundle, subst_bundle, current,
-                    record_coverage=False)
-                host_stalled = result is current
-                vm_stalled = vm_result is current
-                if host_stalled != vm_stalled:
-                    raise AssertionError(
-                        f"P7-d shadow: polarity divergence — "
-                        f"host_stalled={host_stalled}, vm_stalled={vm_stalled}")
-                if not host_stalled:
-                    from rcx_pi.selfhost.stage0_vm import _mu_deep_equal  # ANTICHEAT_OK: infra — parity check
-                    if not _mu_deep_equal(result, vm_result):
-                        raise AssertionError(
-                            f"P7-d shadow: output divergence — "
-                            f"host={result!r}, vm={vm_result!r}")
-
-        if caller_supplied_fuel:
-            fuel_cursor = fuel_cursor["tail"]
-        steps_used += 1
-
-        # Terminal state check - simple structural marker detection
-        if is_kernel_terminal(result):
-            is_stall = result.get("_stall") is True
-            output = extract_kernel_result(result, domain_input)
-            validator(output, "step_kernel_mu output")
-            reason = "kernel_stall" if is_stall else "projection_applied"
-            undefined = None
-            if is_stall:
-                undefined = make_undefined_motif(
-                    op="kernel",
-                    lhs=domain_input,
-                    rhs=None,
-                    cause="no_matching_projection",
-                )
-            canonical = {
-                "output": output,
-                "stall": bool(is_stall),
-                "termination_reason": reason,
-                "steps_used": steps_used,
-                "max_steps": watchdog_cap,
-            }
-            if undefined is not None:
-                canonical["undefined_motif"] = undefined
-            if caller_supplied_fuel:
-                canonical["fuel_supplied"] = True
-                canonical["fuel_remaining"] = fuel_cursor
-                canonical["fuel_exhausted"] = False
-            packet = {
-                "kind": "terminal",
-                "result": canonical,
-                "continuation": None,
-            }
-            if return_packet:
-                return packet
-            meta = packet["result"]
-            if return_meta:
-                return meta
-            return meta["output"]
-
-        if (
-            isinstance(result, dict)  # AST_OK: boundary - empty projection terminal extraction
-            and result.get("_mode") == "kernel"
-            and result.get("_phase") == "try"
-            and result.get("_remaining") is None
-        ):
-            validator(domain_input, "step_kernel_mu output")
-            canonical = {
-                "output": domain_input,
-                "stall": True,
-                "termination_reason": "kernel_stall",
-                "steps_used": steps_used,
-                "max_steps": watchdog_cap,
-                "undefined_motif": make_undefined_motif(
-                    op="kernel",
-                    lhs=domain_input,
-                    rhs=None,
-                    cause="no_matching_projection",
-                ),
-            }
-            if caller_supplied_fuel:
-                canonical["fuel_supplied"] = True
-                canonical["fuel_remaining"] = fuel_cursor
-                canonical["fuel_exhausted"] = False
-            packet = {
-                "kind": "terminal",
-                "result": canonical,
-                "continuation": None,
-            }
-            if return_packet:
-                return packet
-            meta = packet["result"]
-            if return_meta:
-                return meta
-            return meta["output"]
-
-        # Stall check - no change means no progress.
-        # Skip for intermediate kernel states (they have deep nested structures
-        # and are mid-execution by definition, not stalls).
-        if not is_kernel_intermediate(result):
-            result_hash = mu_hash_control_cached(result, "step_kernel_mu.stall")
-            if result_hash == current_hash:
+            if steps_used >= watchdog_cap:
                 validator(domain_input, "step_kernel_mu output")
                 canonical = {
                     "output": domain_input,
                     "stall": True,
-                    "termination_reason": "hash_stall",
+                    "termination_reason": "max_steps_exhausted",
                     "steps_used": steps_used,
                     "max_steps": watchdog_cap,
                 }
@@ -2363,103 +2213,248 @@ def step_kernel_mu(
                     return meta
                 return meta["output"]
 
-        if caller_supplied_fuel and fuel_cursor is None:
-            validator(domain_input, "step_kernel_mu output")
-            packet = {
-                "kind": "terminal",
-                "result": {
-                    "output": domain_input,
-                    "stall": True,
-                    "termination_reason": "fuel_exhausted",
+            if caller_supplied_fuel:
+                assert_mu(fuel_cursor, "step_kernel_mu.kernel_fuel")
+                fuel_probe = fuel_cursor
+                while fuel_probe is not None:
+                    if (
+                        not isinstance(fuel_probe, dict)  # ANTICHEAT_OK: linked-list fuel boundary
+                        or set(fuel_probe.keys()) != {"head", "tail"}
+                    ):
+                        raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
+                    fuel_probe = fuel_probe["tail"]
+
+            # Account for one kernel-driver transition in the shared global budget.
+            budget.consume(1)
+            # P7-d: shadow mode or cutover mode
+            if _STAGE0_VM_CUTOVER:
+                result = _step_kernel_with_vm(
+                    kernel_bundle, bridge_bundle,
+                    match_bundle, subst_bundle, current)
+            else:
+                result = _step_trusted(kernel_projs, current)
+
+                # P7-d shadow: run VM path too, assert equivalence
+                # Disabled when _step_trusted is monkeypatched (shadow is meaningless)
+                if _STAGE0_SHADOW_ENABLED:
+                    # record_coverage=False prevents double-counting
+                    vm_result = _step_kernel_with_vm(
+                        kernel_bundle, bridge_bundle,
+                        match_bundle, subst_bundle, current,
+                        record_coverage=False)
+                    host_stalled = result is current
+                    vm_stalled = vm_result is current
+                    if host_stalled != vm_stalled:
+                        raise AssertionError(
+                            f"P7-d shadow: polarity divergence — "
+                            f"host_stalled={host_stalled}, vm_stalled={vm_stalled}")
+                    if not host_stalled:
+                        from rcx_pi.selfhost.stage0_vm import _mu_deep_equal  # ANTICHEAT_OK: infra — parity check
+                        if not _mu_deep_equal(result, vm_result):
+                            raise AssertionError(
+                                f"P7-d shadow: output divergence — "
+                                f"host={result!r}, vm={vm_result!r}")
+
+            if caller_supplied_fuel:
+                fuel_cursor = fuel_cursor["tail"]
+            steps_used += 1
+
+            # Terminal state check - simple structural marker detection
+            if is_kernel_terminal(result):
+                is_stall = result.get("_stall") is True
+                output = extract_kernel_result(result, domain_input)
+                validator(output, "step_kernel_mu output")
+                reason = "kernel_stall" if is_stall else "projection_applied"
+                undefined = None
+                if is_stall:
+                    undefined = make_undefined_motif(
+                        op="kernel",
+                        lhs=domain_input,
+                        rhs=None,
+                        cause="no_matching_projection",
+                    )
+                canonical = {
+                    "output": output,
+                    "stall": bool(is_stall),
+                    "termination_reason": reason,
                     "steps_used": steps_used,
                     "max_steps": watchdog_cap,
-                    "fuel_supplied": True,
-                    "fuel_remaining": fuel_cursor,
-                    "fuel_exhausted": True,
-                },
-                "continuation": None,
-            }
-            if return_packet:
-                return packet
-            meta = packet["result"]
-            if return_meta:
-                return meta
-            return meta["output"]
+                }
+                if undefined is not None:
+                    canonical["undefined_motif"] = undefined
+                if caller_supplied_fuel:
+                    canonical["fuel_supplied"] = True
+                    canonical["fuel_remaining"] = fuel_cursor
+                    canonical["fuel_exhausted"] = False
+                packet = {
+                    "kind": "terminal",
+                    "result": canonical,
+                    "continuation": None,
+                }
+                if return_packet:
+                    return packet
+                meta = packet["result"]
+                if return_meta:
+                    return meta
+                return meta["output"]
 
-        if steps_used >= watchdog_cap:
-            validator(domain_input, "step_kernel_mu output")
-            canonical = {
-                "output": domain_input,
-                "stall": True,
-                "termination_reason": "max_steps_exhausted",
-                "steps_used": steps_used,
-                "max_steps": watchdog_cap,
-            }
-            if caller_supplied_fuel:
-                canonical["fuel_supplied"] = True
-                canonical["fuel_remaining"] = fuel_cursor
-                canonical["fuel_exhausted"] = False
-            packet = {
-                "kind": "terminal",
-                "result": canonical,
-                "continuation": None,
-            }
-            if return_packet:
-                return packet
-            meta = packet["result"]
-            if return_meta:
-                return meta
-            return meta["output"]
+            if (
+                isinstance(result, dict)  # AST_OK: boundary - empty projection terminal extraction
+                and result.get("_mode") == "kernel"
+                and result.get("_phase") == "try"
+                and result.get("_remaining") is None
+            ):
+                validator(domain_input, "step_kernel_mu output")
+                canonical = {
+                    "output": domain_input,
+                    "stall": True,
+                    "termination_reason": "kernel_stall",
+                    "steps_used": steps_used,
+                    "max_steps": watchdog_cap,
+                    "undefined_motif": make_undefined_motif(
+                        op="kernel",
+                        lhs=domain_input,
+                        rhs=None,
+                        cause="no_matching_projection",
+                    ),
+                }
+                if caller_supplied_fuel:
+                    canonical["fuel_supplied"] = True
+                    canonical["fuel_remaining"] = fuel_cursor
+                    canonical["fuel_exhausted"] = False
+                packet = {
+                    "kind": "terminal",
+                    "result": canonical,
+                    "continuation": None,
+                }
+                if return_packet:
+                    return packet
+                meta = packet["result"]
+                if return_meta:
+                    return meta
+                return meta["output"]
 
-        projection_cursor = None
-        if isinstance(result, dict) and "_remaining" in result:  # AST_OK: boundary - continuation shape construction
-            projection_cursor = {
-                "tag": "kernel_projection_cursor",
+            # Stall check - no change means no progress.
+            # Skip for intermediate kernel states (they have deep nested structures
+            # and are mid-execution by definition, not stalls).
+            if not is_kernel_intermediate(result):
+                result_hash = mu_hash_control_cached(result, "step_kernel_mu.stall")
+                if result_hash == current_hash:
+                    validator(domain_input, "step_kernel_mu output")
+                    canonical = {
+                        "output": domain_input,
+                        "stall": True,
+                        "termination_reason": "hash_stall",
+                        "steps_used": steps_used,
+                        "max_steps": watchdog_cap,
+                    }
+                    if caller_supplied_fuel:
+                        canonical["fuel_supplied"] = True
+                        canonical["fuel_remaining"] = fuel_cursor
+                        canonical["fuel_exhausted"] = False
+                    packet = {
+                        "kind": "terminal",
+                        "result": canonical,
+                        "continuation": None,
+                    }
+                    if return_packet:
+                        return packet
+                    meta = packet["result"]
+                    if return_meta:
+                        return meta
+                    return meta["output"]
+
+            if caller_supplied_fuel and fuel_cursor is None:
+                validator(domain_input, "step_kernel_mu output")
+                packet = {
+                    "kind": "terminal",
+                    "result": {
+                        "output": domain_input,
+                        "stall": True,
+                        "termination_reason": "fuel_exhausted",
+                        "steps_used": steps_used,
+                        "max_steps": watchdog_cap,
+                        "fuel_supplied": True,
+                        "fuel_remaining": fuel_cursor,
+                        "fuel_exhausted": True,
+                    },
+                    "continuation": None,
+                }
+                if return_packet:
+                    return packet
+                meta = packet["result"]
+                if return_meta:
+                    return meta
+                return meta["output"]
+
+            if steps_used >= watchdog_cap:
+                validator(domain_input, "step_kernel_mu output")
+                canonical = {
+                    "output": domain_input,
+                    "stall": True,
+                    "termination_reason": "max_steps_exhausted",
+                    "steps_used": steps_used,
+                    "max_steps": watchdog_cap,
+                }
+                if caller_supplied_fuel:
+                    canonical["fuel_supplied"] = True
+                    canonical["fuel_remaining"] = fuel_cursor
+                    canonical["fuel_exhausted"] = False
+                packet = {
+                    "kind": "terminal",
+                    "result": canonical,
+                    "continuation": None,
+                }
+                if return_packet:
+                    return packet
+                meta = packet["result"]
+                if return_meta:
+                    return meta
+                return meta["output"]
+
+            projection_cursor = None
+            if isinstance(result, dict) and "_remaining" in result:  # AST_OK: boundary - continuation shape construction
+                projection_cursor = {
+                    "tag": "kernel_projection_cursor",
+                    "version": 1,
+                    "position": steps_used,
+                    "exhausted": result.get("_remaining") is None,
+                }
+            continuation = {
+                "tag": "kernel_driver_continuation_state",
                 "version": 1,
-                "position": steps_used,
-                "exhausted": result.get("_remaining") is None,
+                "kernel_state": result,
+                "domain_input": domain_input,
+                "projection_cursor": projection_cursor,
+                "remaining_fuel": fuel_cursor if caller_supplied_fuel else None,
+                "fuel_mode": "explicit" if caller_supplied_fuel else "omitted_compatibility",
+                "steps_used": steps_used,
+                "watchdog_cap": watchdog_cap,
+                "terminal": {
+                    "reached": False,
+                    "reason": None,
+                    "error": None,
+                },
             }
-        continuation = {
-            "tag": "kernel_driver_continuation_state",
-            "version": 1,
-            "kernel_state": result,
-            "domain_input": domain_input,
-            "projection_cursor": projection_cursor,
-            "remaining_fuel": fuel_cursor if caller_supplied_fuel else None,
-            "fuel_mode": "explicit" if caller_supplied_fuel else "omitted_compatibility",
-            "steps_used": steps_used,
-            "watchdog_cap": watchdog_cap,
-            "terminal": {
-                "reached": False,
-                "reason": None,
-                "error": None,
-            },
-        }
-        packet = {
-            "kind": "continuation",
-            "result": None,
-            "continuation": continuation,
-        }
-        if return_packet:
-            return packet
+            packet = {
+                "kind": "continuation",
+                "result": None,
+                "continuation": continuation,
+            }
+            if return_packet:
+                return packet
 
-        # BOUNDARY: legacy public no-fuel behavior explicitly drives returned
-        # Mu continuation data. This does not seed or disguise Mu fuel.
-        while packet["kind"] == "continuation":
-            packet = step_kernel_mu(
-                projections,
-                input_value,
-                kernel_mode=kernel_mode,
-                validation_mode=validation_mode,
-                return_meta=return_meta,
-                max_steps=max_steps,
-                continuation_state=packet["continuation"],
-                return_packet=True,
-            )
-        meta = packet["result"]
-        if return_meta:
-            return meta
-        return meta["output"]
+            # BOUNDARY: legacy public no-fuel behavior explicitly drives returned
+            # Mu continuation data through the already prepared caller context.
+            # This does not seed or disguise Mu fuel and does not re-enter the
+            # public validation/normalization boundary for self-returned packets.
+            state = packet["continuation"]
+            current = state["kernel_state"]
+            domain_input = state["domain_input"]
+            caller_supplied_fuel = state["fuel_mode"] == "explicit"
+            fuel_cursor = state["remaining_fuel"]
+            steps_used = state["steps_used"]
+            watchdog_cap = state["watchdog_cap"] if state["watchdog_cap"] is not None else max_steps
     finally:
         if started_budget:
             budget.stop()

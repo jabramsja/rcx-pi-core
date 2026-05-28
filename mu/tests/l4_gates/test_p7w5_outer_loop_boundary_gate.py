@@ -148,7 +148,19 @@ class TestPythonOuterLoopBoundary:
         assert "continuation_state" in source
         assert "return_packet=True" in source
         assert "BOUNDARY: legacy public no-fuel behavior" in source
-        assert "while packet[\"kind\"] == \"continuation\":" in source
+        tree = ast.parse(source)
+        recursive_calls = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "step_kernel_mu"
+        ]
+        assert not recursive_calls, (
+            "public compatibility must drive prepared continuation packets "
+            "without re-entering the step_kernel_mu boundary"
+        )
+        assert "already prepared caller context" in source
+        assert "public validation/normalization boundary" in source
         assert "if caller_supplied_fuel:" in source and 'fuel_cursor = fuel_cursor["tail"]' in source, (
             "step_kernel_mu must consume Mu fuel only on the explicit supplied-fuel path"
         )
