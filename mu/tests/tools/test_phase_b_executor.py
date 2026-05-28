@@ -1806,6 +1806,27 @@ class TestLoadPlanPacketPathTraversal:
             ],
         ) == "L4_ENABLER"
 
+    def test_effective_phase_b_tracker_wave_class_preserves_locked_enabler_runtime_text_scope(self):
+        plan_content = (
+            "# Runtime Text Packet\n"
+            "Class: L4_ENABLER\n"
+            "Scope: eval_seed.py comment, source-lock, and marker wording around _stage0_match; "
+            "behavior is not in scope unless current code truth contradicts the evidence.\n"
+            "Acceptance: Keep the change as wording/proof-class alignment, not runtime behavior change.\n"
+        )
+
+        assert pb_mod._effective_phase_b_tracker_wave_class(  # ANTICHEAT_OK: tests locked packet class preservation
+            "L4_ENABLER",
+            plan_content=plan_content,
+            changed_files=[
+                "TASKS.md",
+                "mu/host/python/rcx_pi/selfhost/eval_seed.py",
+                "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+                "reports/control_plane/n3-stage0-marker-truth-current-path-sync-2026-05-28.md",
+                "reports/l4_wave_indicators/n3-stage0-marker-truth-current-path-sync-2026-05-28.json",
+            ],
+        ) == "L4_ENABLER"
+
     def test_pre_supervisor_pending_status_is_not_dispatch_complete(self):
         assert common_mod.packet_status_is_completed(  # ANTICHEAT_OK: locks reroute-safe pending status
             pb_mod.PHASE_B_PRE_SUPERVISOR_PENDING_STATUS
@@ -3115,6 +3136,65 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert "TASKS.md" in final_scope
         assert "Class: L4_ENABLER" in note
         assert "no_op_proof:" in note
+        assert raw_override == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert package_override == f"FOUNDER_OVERRIDE:{wave_id}"
+
+    def test_pre_supervisor_tracker_note_preserves_locked_enabler_runtime_text_scope(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "n3-stage0-marker-truth-current-path-sync-2026-05-28"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        plan_content = (
+            "# N3-Stage0-Marker-Truth-Current-Path-Sync-2026-05-28\n"
+            "Class: L4_ENABLER\n"
+            f"FOUNDER_OVERRIDE:{wave_id}\n"
+            "Scope: eval_seed.py comment, source-lock, and marker wording around "
+            "_stage0_match; behavior is not in scope unless current code truth directly "
+            "contradicts the reviewer evidence.\n"
+            "Acceptance: Keep the change as wording/proof-class alignment, not runtime behavior change.\n"
+        )
+
+        with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: sorted(set(files))):
+            (
+                note,
+                raw_override,
+                package_override,
+                modified,
+                final_scope,
+                error,
+            ) = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: locks current Stage0 marker-truth package class
+                repo,
+                wave_id=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                wave_class="L4_ENABLER",
+                target_gate_id="G8",
+                plan_path=f"reports/control_plane/{wave_id}_2026-05-28.md",
+                plan_content=plan_content,
+                changed_files=[
+                    "TASKS.md",
+                    "mu/host/python/rcx_pi/selfhost/eval_seed.py",
+                    "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+                    f"reports/control_plane/{wave_id}_2026-05-28.md",
+                    indicator_path,
+                ],
+                test_files=["mu/tests/l4_gates/test_stage0_vm_cutover.py"],
+                receipt_path=".scratch/phase_b_supervisor_package.json",
+                bridge_status={"rounds": 3, "reentry": True},
+                reentry=True,
+                founder_override=wave_id,
+            )
+
+        assert error is None
+        assert modified is True
+        assert "TASKS.md" in final_scope
+        assert "Class: L4_ENABLER" in note
+        assert "no_op_proof:" in note
+        assert "workload_target:" not in note
         assert raw_override == f"FOUNDER_OVERRIDE:{wave_id}"
         assert package_override == f"FOUNDER_OVERRIDE:{wave_id}"
 

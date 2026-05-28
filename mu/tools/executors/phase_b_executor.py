@@ -1456,6 +1456,35 @@ def _plan_declares_classless_comment_only_runtime_override(plan_content: str) ->
     )
 
 
+def _plan_declares_l4_enabler_runtime_text_override(plan_content: str) -> bool:
+    """Return true for locked enabler packets that scope runtime edits to text."""
+    text = (plan_content or "").lower().replace("`", "")
+    if "class: l4_enabler" not in text:
+        return False
+    text_scope = any(
+        phrase in text
+        for phrase in (
+            "comment, source-lock, and marker wording",
+            "comment/source-lock",
+            "comment-only",
+            "docstring-only",
+            "wording/proof-class alignment",
+            "source-lock or marker-truth test expectations",
+        )
+    )
+    no_behavior = any(
+        phrase in text
+        for phrase in (
+            "behavior is not in scope",
+            "not runtime behavior change",
+            "zero executable runtime",
+            "no runtime behavior",
+            "without runtime behavior",
+        )
+    )
+    return text_scope and no_behavior
+
+
 def _plan_declares_routing_boundary(plan_content: str) -> bool:
     text = (plan_content or "").lower()
     return (
@@ -1542,6 +1571,8 @@ def _effective_phase_b_tracker_wave_class(
     an enabler, even when the selected future route is structural.
     """
     if _phase_b_scope_has_runtime_substrate_file(changed_files):
+        if _plan_declares_l4_enabler_runtime_text_override(plan_content):
+            return "L4_ENABLER"
         if _plan_declares_classless_comment_only_runtime_override(plan_content):
             if _phase_b_scope_has_control_plane_tooling_file(changed_files):
                 return "L4_ENABLER"
@@ -4649,7 +4680,10 @@ def _build_phase_b_tracker_note(
         "progress_proof_after": progress_after,
     }
     runtime_comment_override = (
-        _plan_declares_classless_comment_only_runtime_override(plan_content)
+        (
+            _plan_declares_classless_comment_only_runtime_override(plan_content)
+            or _plan_declares_l4_enabler_runtime_text_override(plan_content)
+        )
         and _phase_b_scope_has_runtime_substrate_file(changed_files)
     )
     if not wave_class or (wave_class == "L4_ENABLER" and runtime_comment_override):
