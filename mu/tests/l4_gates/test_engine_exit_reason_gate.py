@@ -137,7 +137,12 @@ class TestPythonEngineExitReason:
 
     def test_meta_false_returns_bare_result(self):
         """return_meta=False returns the 8-key dict directly (backward compat)."""
-        result = _python_pipeline(_CANONICAL_ENGINE_INPUT, return_meta=False)
+        reset_step_budget()
+        result = run_engine_pipeline(
+            [], _CANONICAL_ENGINE_INPUT,
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=50, return_meta=False,
+        )
         assert isinstance(result, dict)
         assert frozenset(result.keys()) == _ENGINE_RESULT_KEYS, (
             f"Non-meta result must have exactly 8 keys, got {sorted(result.keys())}"
