@@ -216,11 +216,14 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
     assert "BOUNDARY: legacy public no-fuel behavior" in py_step, (
         "Python public no-fuel compatibility must be explicitly classified outside the driver."
     )
-    assert 'while packet["kind"] == "continuation":' in py_step, (
-        "Python compatibility boundary must drive explicit returned continuation packets."
+    assert 'state = packet["continuation"]' in py_step, (
+        "Python compatibility boundary must drive self-returned continuation data."
     )
-    assert 'continuation_state=packet["continuation"]' in py_step, (
-        "Python compatibility boundary must resume from Mu continuation data."
+    assert 'current = state["kernel_state"]' in py_step and 'domain_input = state["domain_input"]' in py_step, (
+        "Python compatibility boundary must resume inside the prepared caller context."
+    )
+    assert 'continuation_state=packet["continuation"]' not in py_step, (
+        "Python compatibility boundary must not re-enter public validation with self-returned continuation data."
     )
 
     assert "const _STAGE0_VM_CUTOVER = true;" in js_kernel  # S1-B: cutover active

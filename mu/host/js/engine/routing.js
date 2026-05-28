@@ -32,30 +32,17 @@ function runHemisphereRouting(allProjections, hemisphereProjections, engineResul
   validateDomainBoundary(wrapped, 'runHemisphereRouting input');
   let current = wrapped;
   const limit = 30;
+  const kernelOptions = {
+    maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
+    validationMode: 'algorithm_runtime',
+    returnMeta: true,
+    vmConfig: vmConfig || null,
+  };
   for (let i = 0; i < limit; i++) {
-    let packet = stepKernel(
+    const meta = stepKernel(
       allProjections, current, hemisphereProjections,
-      {
-        maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
-        validationMode: 'algorithm_runtime',
-        returnPacket: true,
-        vmConfig: vmConfig || null,
-      }
+      kernelOptions
     );
-    // BOUNDARY: routing drives explicit Mu continuation data returned by the kernel driver.
-    while (packet.kind === 'continuation') {
-      packet = stepKernel(
-        allProjections, current, hemisphereProjections,
-        {
-          maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
-          validationMode: 'algorithm_runtime',
-          returnPacket: true,
-          vmConfig: vmConfig || null,
-          continuationState: packet.continuation,
-        }
-      );
-    }
-    const meta = packet.result;
     if (meta.stall) break;
     current = meta.output;
   }
@@ -136,30 +123,17 @@ function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemi
   const stepBudget = Math.max(20, 4 * entryCount + 10);
 
   let current = wrapped;
+  const kernelOptions = {
+    maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
+    validationMode: 'algorithm_runtime',
+    returnMeta: true,
+    vmConfig: vmConfig || null,
+  };
   for (let i = 0; i < stepBudget; i++) {
-    let packet = stepKernel(
+    const meta = stepKernel(
       allProjections, current, metabolizeCycleProjections,
-      {
-        maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
-        validationMode: 'algorithm_runtime',
-        returnPacket: true,
-        vmConfig: vmConfig || null,
-      }
+      kernelOptions
     );
-    // BOUNDARY: metabolization drives explicit Mu continuation data returned by the kernel driver.
-    while (packet.kind === 'continuation') {
-      packet = stepKernel(
-        allProjections, current, metabolizeCycleProjections,
-        {
-          maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
-          validationMode: 'algorithm_runtime',
-          returnPacket: true,
-          vmConfig: vmConfig || null,
-          continuationState: packet.continuation,
-        }
-      );
-    }
-    const meta = packet.result;
     if (meta.stall) break;
     current = meta.output;
   }

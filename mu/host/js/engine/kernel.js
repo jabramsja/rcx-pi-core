@@ -247,23 +247,40 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     // SECURITY: continuation data owns progress, not projection authority.
     // Bind resume to the current call's supplied input/projection cursor before
     // stepping the embedded Mu kernel state.
-    const normalizedInputHash = muHash(kernelInput._step);
-    const domainInputHash = muHash(domainInput);
-    if (muHash(continuationState.domain_input) !== domainInputHash) {
-      throw new Error('SECURITY: continuationState domain_input is not bound to supplied input');
-    }
-    const projectionAuthorityHash = muHash(kernelInput._projs);
-    const trustedContinuationProof =
+    const proofTokenOk =
       continuationProof !== null &&
       typeof continuationProof === 'object' &&
       !Array.isArray(continuationProof) &&
-      continuationProof._token === KERNEL_CONTINUATION_PROOF_TOKEN &&
-      continuationProof.continuationHash === muHash(continuationState) &&
-      continuationProof.domainInputHash === domainInputHash &&
-      continuationProof.normalizedInputHash === normalizedInputHash &&
-      continuationProof.projectionAuthorityHash === projectionAuthorityHash &&
+      continuationProof._token === KERNEL_CONTINUATION_PROOF_TOKEN;
+    const trustedSameProcessContinuation =
+      proofTokenOk &&
+      continuationProof.continuation === continuationState &&
+      continuationProof.domainInput === domainInput &&
+      continuationState.domain_input === domainInput &&
+      continuationProof.normalizedInput === kernelInput._step &&
+      continuationProof.projectionAuthority === kernelInput._projs &&
       continuationProof.watchdogCap === watchdogCap;
     const useDomainValidation = validator !== validateAlgorithmRuntimeFields;
+    const skipContinuationBindingHashes = trustedSameProcessContinuation && !useDomainValidation;
+    const normalizedInputHash = skipContinuationBindingHashes ? null : muHash(kernelInput._step);
+    const domainInputHash = skipContinuationBindingHashes ? null : muHash(domainInput);
+    if (
+      !trustedSameProcessContinuation &&
+      muHash(continuationState.domain_input) !== domainInputHash
+    ) {
+      throw new Error('SECURITY: continuationState domain_input is not bound to supplied input');
+    }
+    const projectionAuthorityHash = skipContinuationBindingHashes ? null : muHash(kernelInput._projs);
+    const trustedContinuationProof =
+      trustedSameProcessContinuation ||
+      (
+        proofTokenOk &&
+        continuationProof.continuationHash === muHash(continuationState) &&
+        continuationProof.domainInputHash === domainInputHash &&
+        continuationProof.normalizedInputHash === normalizedInputHash &&
+        continuationProof.projectionAuthorityHash === projectionAuthorityHash &&
+        continuationProof.watchdogCap === watchdogCap
+      );
     const kernelState = continuationState.kernel_state;
     const kernelStateIsObject = kernelState !== null && typeof kernelState === 'object' && !Array.isArray(kernelState);
     if (!useDomainValidation && !trustedContinuationProof) {
@@ -2067,10 +2084,10 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     continuation,
     continuationProof: Object.freeze({
       _token: KERNEL_CONTINUATION_PROOF_TOKEN,
-      continuationHash: muHash(continuation),
-      domainInputHash: muHash(effectiveDomainInput),
-      normalizedInputHash: muHash(kernelInput._step),
-      projectionAuthorityHash: muHash(kernelInput._projs),
+      continuation,
+      domainInput: effectiveDomainInput,
+      normalizedInput: kernelInput._step,
+      projectionAuthority: kernelInput._projs,
       watchdogCap,
     }),
   };

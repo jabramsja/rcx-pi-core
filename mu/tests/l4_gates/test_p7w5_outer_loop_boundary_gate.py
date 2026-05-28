@@ -250,8 +250,8 @@ class TestJSOuterLoopBoundary:
     def test_js_run_engine_pipeline_recursive_boundary(self):
         self._check_js_function_boundary(JS_PIPELINE_PATH, "runEnginePipelineRecursive")
 
-    def test_js_routing_continuation_driver_is_bounded_packet_boundary(self):
-        """Routing/metabolization must drive explicit packets through kernel domain validation."""
+    def test_js_routing_continuation_driver_uses_bounded_return_meta(self):
+        """Routing and metabolization use the public bounded returnMeta driver."""
         routing_lines = JS_ROUTING_PATH.read_text().splitlines()
         routing_text = "\n".join(routing_lines)
         assert "const KERNEL_DRIVER_BOUNDARY_WATCHDOG = 1000;" in routing_text
@@ -267,11 +267,15 @@ class TestJSOuterLoopBoundary:
 
             assert "validateNoKernelReservedFields(wrapped" not in body
             assert "validateDomainBoundary(wrapped" in body
-            assert "returnPacket: true" in body
-            assert "continuationState: packet.continuation" in body
+            assert "returnMeta: true" in body
             assert "validationMode: 'algorithm_runtime'" in body
             assert "maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG" in body
             assert "maxSteps: 10000" not in body
+            assert "returnPacket" not in body
+            assert "continuationState" not in body
+            assert "while (" not in body
+            assert "packet.kind === 'continuation'" not in body
+            assert "packet.continuation" not in body
 
     def test_json_api_dispatch_does_not_run_cli_self_tests(self):
         """JSON API parity calls must not pay the human CLI self-test suite."""
