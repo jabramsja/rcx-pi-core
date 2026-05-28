@@ -26,6 +26,10 @@ commit_mod = load_module(
     "commit_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "commit_executor.py",
 )
+meta_bridge_mod = load_module(
+    "meta_bridge_supervisor_for_commit_receipt_tests",
+    REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
+)
 
 
 def _canonical_handoff_sha_for_test(handoff: dict) -> str:
@@ -5540,6 +5544,217 @@ class TestCommitExecutorPytestGate:
             args[index:index + 2]
             for index in range(len(args) - 1)
         ]
+
+
+class TestBotRemediationValidation:
+    def _fake_bridge_adapters(self, write_changes):
+        from types import SimpleNamespace
+
+        class BridgeAdapterError(Exception):
+            pass
+
+        def run_adapter(_adapter=None, *, repo_root, **_kwargs):
+            write_changes(repo_root)
+
+        return SimpleNamespace(
+            AdapterSpec=lambda **kwargs: SimpleNamespace(**kwargs),
+            BridgeAdapterError=BridgeAdapterError,
+            load_bridge_config=lambda _path: {},
+            get_adapter=lambda _config, _name: SimpleNamespace(
+                name="fake",
+                cmd=["true"],
+                prompt_via_stdin=True,
+                env={},
+                mode="test",
+            ),
+            run_adapter=run_adapter,
+        )
+
+    def _base_result(self):
+        return {
+            "handoff_sha": "handoff-sha",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "1036",
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "stage_files",
+                "pre_commit_supervisor",
+                "validate_receipt",
+                "run_pre_commit_script",
+                "git_commit",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+        }
+
+    def test_bot_remediation_private_attr_gate_blocks_before_commit_or_push(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        linters = repo / "mu" / "tools" / "checks" / "linters"
+        linters.mkdir(parents=True, exist_ok=True)
+        (linters / "check_private_attr_access.py").write_text(
+            "import sys\n"
+            "print('ERROR: Found private attr access in tests/ or mu/tests/:')\n"
+            "print('  mu/tests/test_bot_fix.py:3: ._stage0_match')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8",
+        )
+        (linters / "check_underscore_imports.py").write_text(
+            "import sys\nsys.exit(0)\n",
+            encoding="utf-8",
+        )
+        (repo / "mu" / "tests").mkdir(parents=True, exist_ok=True)
+        (repo / "mu" / "tests" / ".keep").write_text("", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "baseline linters"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+
+        def write_changes(repo_root):
+            test_path = repo_root / "mu" / "tests" / "test_bot_fix.py"
+            test_path.parent.mkdir(parents=True, exist_ok=True)
+            test_path.write_text("def test_bot_fix():\n    assert True\n", encoding="utf-8")
+
+        real_run = commit_mod._run  # ANTICHEAT_OK: verifies bot remediation git command ordering
+        seen_commands: list[list[str]] = []
+
+        def intercept_run(args, cwd, check=True, timeout=120, env=None):
+            command = list(args)
+            seen_commands.append(command)
+            if command[:2] == ["git", "commit"] or command[:2] == ["git", "push"]:
+                raise AssertionError("bot-remediation gate failure must block commit/push")
+            return real_run(args, cwd=cwd, check=check, timeout=timeout, env=env)
+
+        logs: list[str] = []
+        with patch.object(
+            commit_mod,
+            "_bridge_adapters",
+            self._fake_bridge_adapters(write_changes),
+        ), patch.object(
+            commit_mod,
+            "_run_pytest_on_files",
+            return_value={"exit_code": 0, "stdout": "", "stderr": "", "passed": True},
+        ), patch.object(commit_mod, "_run", side_effect=intercept_run):
+            result = commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: direct Step 15 remediation regression
+                [{
+                    "path": "mu/tests/test_bot_fix.py",
+                    "body": "P1 private attr fallout",
+                    "author": commit_mod.BOT_REVIEW_LOGIN,
+                    "line": 3,
+                }],
+                repo_root=repo,
+                repo_owner="owner",
+                repo_name="repo",
+                pr_number="1036",
+                target_branch="bot-remediation-test",
+                head_sha="old-head",
+                wave_id="bot-remediation-private-attr-test",
+                continuation_path=repo / ".agent_bus" / "meta" / "commit_continuation.json",
+                result=self._base_result(),
+                log=logs.append,
+            )
+
+        assert result["status"] == "bot_findings_pending"
+        assert "errors" in result, (result, logs, seen_commands)
+        assert "private-attr test-integrity gate failed" in "\n".join(result["errors"])
+        assert "ERROR: Found private attr access in tests/" in "\n".join(result["errors"])
+        assert not any(cmd[:2] == ["git", "commit"] for cmd in seen_commands)
+        assert not any(cmd[:2] == ["git", "push"] for cmd in seen_commands)
+        receipt_ok, receipt_message = meta_bridge_mod.verify_pre_commit_receipt(repo)
+        assert receipt_ok is False, receipt_message
+        assert (
+            "No pre-commit receipt found" in receipt_message
+            or "Pre-commit receipt is stale" in receipt_message
+            or "does not authorize commit" in receipt_message
+        )
+
+    def test_bot_remediation_pre_push_guard_runs_before_push(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        linters = repo / "mu" / "tools" / "checks" / "linters"
+        linters.mkdir(parents=True, exist_ok=True)
+        (linters / "check_private_attr_access.py").write_text(
+            "import sys\nsys.exit(0)\n",
+            encoding="utf-8",
+        )
+        (linters / "check_underscore_imports.py").write_text(
+            "import sys\nsys.exit(0)\n",
+            encoding="utf-8",
+        )
+        pre_push = repo / "mu" / "tools" / "hooks" / "pre-push-fast"
+        pre_push.parent.mkdir(parents=True, exist_ok=True)
+        pre_push.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "baseline gates"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+
+        def write_changes(repo_root):
+            (repo_root / "file.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+        real_run = commit_mod._run  # ANTICHEAT_OK: verifies bot remediation pre-push before push
+        seen_commands: list[list[str]] = []
+
+        def intercept_run(args, cwd, check=True, timeout=120, env=None):
+            command = list(args)
+            seen_commands.append(command)
+            if command[:3] == ["git", "push", "--no-verify"]:
+                raise subprocess.CalledProcessError(
+                    1,
+                    command,
+                    output="",
+                    stderr="blocked test push",
+                )
+            return real_run(args, cwd=cwd, check=check, timeout=timeout, env=env)
+
+        with patch.object(
+            commit_mod,
+            "_bridge_adapters",
+            self._fake_bridge_adapters(write_changes),
+        ), patch.object(commit_mod, "_run", side_effect=intercept_run):
+            result = commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: direct Step 15 remediation regression
+                [{
+                    "path": "file.py",
+                    "body": "P1 update file",
+                    "author": commit_mod.BOT_REVIEW_LOGIN,
+                    "line": 1,
+                }],
+                repo_root=repo,
+                repo_owner="owner",
+                repo_name="repo",
+                pr_number="1036",
+                target_branch="bot-remediation-test",
+                head_sha="old-head",
+                wave_id="bot-remediation-pre-push-test",
+                continuation_path=repo / ".agent_bus" / "meta" / "commit_continuation.json",
+                result=self._base_result(),
+                log=lambda _msg: None,
+            )
+
+        assert result["status"] == "bot_findings_pending"
+        pre_push_command = ["bash", str(pre_push)]
+        push_indexes = [
+            index for index, command in enumerate(seen_commands)
+            if command[:3] == ["git", "push", "--no-verify"]
+        ]
+        pre_push_indexes = [
+            index for index, command in enumerate(seen_commands)
+            if command == pre_push_command
+        ]
+        assert pre_push_indexes, seen_commands
+        assert push_indexes, seen_commands
+        assert pre_push_indexes[0] < push_indexes[0]
 
 
 class TestReviewFindingExtraction:

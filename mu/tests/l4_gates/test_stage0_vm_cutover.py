@@ -7,6 +7,8 @@ and cross-substrate parity.
 L4_STRUCTURAL gate: G2 (first-match-wins / structural forward motion).
 """
 
+import importlib
+
 import pytest
 from rcx_pi.selfhost.step_mu import (
     step_kernel_mu,
@@ -25,7 +27,32 @@ from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline  # ANTICHEAT_OK:
 from rcx_pi.selfhost.match_mu import normalize_for_match
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.eval_seed import _step_trusted, NO_MATCH  # ANTICHEAT_OK: P7-d gate test
+from rcx_pi.selfhost.mu_type import get_bootstrap_registry
 from rcx_pi.selfhost.stage0_vm import _mu_deep_equal, stage0_vm_step  # ANTICHEAT_OK: P7-d gate test
+
+
+_STAGE0_MATCH_BOOTSTRAP_PREFIX = "host_builtin:_stage0_match: Host builtin: "
+
+
+def _stage0_match_bootstrap_marker_reason():
+    """Return Stage0 marker reason from public bootstrap registry evidence."""
+    import rcx_pi.selfhost.eval_seed as eval_mod
+
+    registry = get_bootstrap_registry()
+    if not registry:
+        importlib.reload(eval_mod)
+        registry = get_bootstrap_registry()
+
+    marker_entries = [
+        entry
+        for entry in registry
+        if entry.startswith(_STAGE0_MATCH_BOOTSTRAP_PREFIX)
+    ]
+    assert marker_entries, (
+        "expected public bootstrap registry marker for Stage0 match; "
+        f"registry={registry!r}"
+    )
+    return marker_entries[0][len(_STAGE0_MATCH_BOOTSTRAP_PREFIX):]
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +457,12 @@ class TestCutoverIntegration:
 
     def test_stage0_marker_truth_current_paths(self, cutover_mode, monkeypatch):
         """Current-path proof for host Stage0 marker truth after VM cutover."""
+
+        marker_reason = _stage0_match_bootstrap_marker_reason()
+        assert "Stage 0 micro-match" in marker_reason
+        assert "host type/key primitives" in marker_reason
+        assert "Tracked separately from match()" in marker_reason
+
         counts = _patch_stage0_current_path_counters(monkeypatch, cutover_mode)
 
         step_result = step_kernel_mu(

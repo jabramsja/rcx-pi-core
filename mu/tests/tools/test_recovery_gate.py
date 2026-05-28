@@ -3350,6 +3350,30 @@ class TestOutOfWaveTasksTrackerNoteRecovery:
         assert fc == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
         assert rg_mod.tier_for(fc) == 2
 
+    def test_classifies_commit_supervisor_out_of_scope_tasks_tracker_note_as_tier2(self):
+        payload = {
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B: The staged file list matches "
+                "the package and no active blocking deferred packet was found, "
+                "but the staged TASKS.md diff contains an unrelated structural "
+                "tracker note outside the package scope."
+            ],
+        }
+
+        fc = rg_mod.classify_failure(
+            {
+                "status": "failed",
+                "executor": "commit_executor",
+                "stdout": json.dumps(payload),
+                "stderr": "",
+            }
+        )
+
+        assert fc == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        assert rg_mod.tier_for(fc) == 2
+
     def test_terminal_status_is_not_demoted_by_out_of_wave_tasks_signal(self):
         payload = {
             "status": "needs_phase_b",
