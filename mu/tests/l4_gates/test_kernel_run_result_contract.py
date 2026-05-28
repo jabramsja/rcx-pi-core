@@ -719,6 +719,60 @@ class TestKernelRunResultPython:
         assert meta["steps_used"] == max_steps
         assert max_steps + 1 not in lengths, lengths
 
+    def test_no_fuel_compatibility_reuses_prepared_normalization(self, monkeypatch):
+        """Public omitted-fuel compatibility must not normalize once per continuation."""
+        counts = {"normalize_projection": 0, "normalize_for_match": 0}
+        real_normalize_projection = step_mu_mod.normalize_projection
+        real_normalize_for_match = step_mu_mod.normalize_for_match
+
+        def counting_normalize_projection(value):
+            counts["normalize_projection"] += 1
+            return real_normalize_projection(value)
+
+        def counting_normalize_for_match(value):
+            counts["normalize_for_match"] += 1
+            return real_normalize_for_match(value)
+
+        monkeypatch.setattr(step_mu_mod, "normalize_projection", counting_normalize_projection)
+        monkeypatch.setattr(step_mu_mod, "normalize_for_match", counting_normalize_for_match)
+
+        meta = step_kernel_mu(
+            [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            {"x": 1},
+            return_meta=True,
+            max_steps=100,
+        )
+
+        assert meta["termination_reason"] == "projection_applied"
+        assert meta["output"] == {"x": 2}
+        assert counts["normalize_projection"] == 1
+        assert counts["normalize_for_match"] <= 4
+
+    def test_direct_packet_resume_keeps_public_boundary_normalization(self, monkeypatch):
+        """External return_packet resume still enters the public resume boundary."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        packet = step_kernel_mu(projs, {"x": 1}, return_packet=True, max_steps=100)
+        assert packet["kind"] == "continuation"
+
+        counts = {"normalize_projection": 0}
+        real_normalize_projection = step_mu_mod.normalize_projection
+
+        def counting_normalize_projection(value):
+            counts["normalize_projection"] += 1
+            return real_normalize_projection(value)
+
+        monkeypatch.setattr(step_mu_mod, "normalize_projection", counting_normalize_projection)
+        resumed = step_kernel_mu(
+            projs,
+            {"x": 1},
+            continuation_state=packet["continuation"],
+            return_packet=True,
+            max_steps=100,
+        )
+
+        assert resumed["kind"] == "continuation"
+        assert counts["normalize_projection"] == 1
+
     def test_kernel_fuel_zero_exhausts_before_attempting_step(self):
         """Python kernel fuel uses explicit empty Mu fuel as execution authority."""
         meta = step_kernel_mu(
