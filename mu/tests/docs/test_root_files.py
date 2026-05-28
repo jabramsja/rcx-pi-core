@@ -467,6 +467,33 @@ class TestRootFileConsistency:
                 f"{wf.name} missing origin/dev fallback for unreachable SHAs."
             )
 
+    def test_ci_test_job_is_bounded_branch_feedback_not_full_green_gate(self):
+        """CI/test must stay present without duplicating the authoritative green gate."""
+        content = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+
+        assert re.search(r"(?m)^  test:\s*$", content), "CI workflow must keep the test job"
+        forbidden_full_gate = r"scripts/green_gate[.]sh(?:\s+(?:all|python-only))?(?:\s|$)"
+        assert not re.search(forbidden_full_gate, content), (
+            "CI/test must not call the full authoritative green gate"
+        )
+        for required in (
+            "tools/checks/check_docs_consistency.sh",
+            "tools/checks/enforce_tracker_sync.sh",
+            "tools/checks/enforce_l4_execution_contract.py",
+            "Branch feedback smoke",
+            "python -m pytest -q",
+        ):
+            assert required in content, f"CI/test missing bounded evidence step: {required}"
+
+    def test_green_gate_workflow_remains_authoritative_full_runner(self):
+        """rcx-green-gate/green-gate must keep the full green gate invocation."""
+        content = (REPO_ROOT / ".github" / "workflows" / "green_gate.yml").read_text()
+
+        assert "name: rcx-green-gate" in content
+        assert re.search(r"(?m)^  green-gate:\s*$", content)
+        assert "name: green-gate" in content
+        assert "scripts/green_gate.sh python-only" in content
+
     def test_critical_test_files_count_matches(self):
         """CRITICAL_TEST_FILES count must match between README and STATUS."""
         status_path = REPO_ROOT / "STATUS.md"
