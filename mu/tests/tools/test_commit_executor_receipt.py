@@ -5800,15 +5800,12 @@ class TestRequiredCIGreenGuard:
         def fake_run(cmd, **kwargs):
             if cmd == ["gh", "pr", "checks", "1030", "--watch", "--required"]:
                 return completed(cmd)
-            raise AssertionError(f"unexpected command: {cmd}")
-
-        def fake_subprocess_run(cmd, **kwargs):
             if cmd == ["gh", "pr", "view", "1030", "--json", "statusCheckRollup"]:
                 return completed(
                     cmd,
                     stdout=json.dumps({"statusCheckRollup": subset_rollup}),
                 )
-            raise AssertionError(f"unexpected subprocess command: {cmd}")
+            raise AssertionError(f"unexpected command: {cmd}")
 
         result = {
             "commit_sha": "a" * 40,
@@ -5820,7 +5817,6 @@ class TestRequiredCIGreenGuard:
         with patch.object(commit_mod, "_wait_for_required_checks_to_register", return_value=None), \
              patch.object(commit_mod, "_wait_for_required_checks_to_pass", return_value=True), \
              patch.object(commit_mod, "_run", side_effect=fake_run), \
-             patch.object(commit_mod.subprocess, "run", side_effect=fake_subprocess_run), \
              patch.object(commit_mod, "COMMIT_CI_VERIFY_TIMEOUT_S", 0):
             response = commit_mod._wait_for_pr_ci(  # ANTICHEAT_OK: locks full PR status surface before wait_ci completion
                 tmp_path,
@@ -5857,15 +5853,12 @@ class TestRequiredCIGreenGuard:
         def fake_run(cmd, **kwargs):
             if cmd == ["gh", "pr", "checks", "1030", "--watch", "--required"]:
                 return completed(cmd)
-            raise AssertionError(f"unexpected command: {cmd}")
-
-        def fake_subprocess_run(cmd, **kwargs):
             if cmd == ["gh", "pr", "view", "1030", "--json", "statusCheckRollup"]:
                 return completed(
                     cmd,
                     stdout=json.dumps({"statusCheckRollup": full_rollup}),
                 )
-            raise AssertionError(f"unexpected subprocess command: {cmd}")
+            raise AssertionError(f"unexpected command: {cmd}")
 
         result = {
             "commit_sha": "a" * 40,
@@ -5877,7 +5870,6 @@ class TestRequiredCIGreenGuard:
         with patch.object(commit_mod, "_wait_for_required_checks_to_register", return_value=None), \
              patch.object(commit_mod, "_wait_for_required_checks_to_pass", return_value=True), \
              patch.object(commit_mod, "_run", side_effect=fake_run), \
-             patch.object(commit_mod.subprocess, "run", side_effect=fake_subprocess_run), \
              patch.object(commit_mod, "COMMIT_CI_VERIFY_TIMEOUT_S", 0):
             response = commit_mod._wait_for_pr_ci(  # ANTICHEAT_OK: locks seven-check PR status surface acceptance
                 tmp_path,

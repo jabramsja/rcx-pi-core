@@ -5911,11 +5911,10 @@ def _summarize_pr_check_surface(checks: Any) -> dict[str, Any]:
 
 
 def _fetch_pr_check_surface_rollup(repo_root: Path, pr_number: str) -> Any:
-    result = subprocess.run(
+    result = _run(
         ["gh", "pr", "view", pr_number, "--json", "statusCheckRollup"],
         cwd=repo_root,
-        capture_output=True,
-        text=True,
+        check=False,
         timeout=30,
     )
     if result.returncode != 0:

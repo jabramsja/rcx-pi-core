@@ -34,6 +34,9 @@ Out of scope:
 - Any skip, xfail, delete, or mark-slow change that reduces the authoritative full green-gate evidence.
 - Runtime/projection optimization; route that as a separate L4_STRUCTURAL profiling wave after this CI-control wave.
 
+- `reports/deferred/non_blocking/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28_bridge_nonblockers.md`
+  - Same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
+
 ## Direct Grounding
 
 - `.github/workflows/ci.yml:3-5` says CI is a light feature-branch feedback gate and PRs to `dev` are handled by `green_gate.yml`.
@@ -88,14 +91,24 @@ Authorization: bounded L4_ENABLER repair for CI workflow duplication and commit-
 - Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
 - Current staged files:
-  - `.github/workflows/ci.yml`
-  - `TASKS.md`
-  - `mu/tests/docs/test_root_files.py`
   - `mu/tests/tools/test_commit_executor_receipt.py`
+  - `mu/tests/tools/test_executor_dispatch.py`
   - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28.md`
+  - `reports/deferred/non_blocking/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
+
+<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->
+## Same-Wave Deferred Non-Blocking Authorization
+
+- Refresh wave: `ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28`
+- Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
+- Authorized deferred packet(s):
+  - `reports/deferred/non_blocking/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28_bridge_nonblockers.md`
+- Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
+- Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
+<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
 
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
 ## Commit Path Truth Refresh
@@ -103,18 +116,18 @@ Authorization: bounded L4_ENABLER repair for CI workflow duplication and commit-
 - Refresh wave: `ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28`
 - Active packet: `reports/control_plane/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `4506548199b1481df8b6ce50ad23d882fe939d81cd7b99acd220c7aa51efa8cf`
+- Tracker note sha256: `ac9a33dd04364a1e7949daaee10fec6cbe2607d435cdde9131f4c901a5b63703`
 - Indicator artifact: `reports/l4_wave_indicators/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_root_files.py mu/tests/tools/test_commit_executor_receipt.py`.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py`.
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28.json`
 - Current staged files:
-  - `.github/workflows/ci.yml`
   - `TASKS.md`
-  - `mu/tests/docs/test_root_files.py`
   - `mu/tests/tools/test_commit_executor_receipt.py`
+  - `mu/tests/tools/test_executor_dispatch.py`
   - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28.md`
+  - `reports/deferred/non_blocking/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
