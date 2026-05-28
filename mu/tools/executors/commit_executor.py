@@ -3088,6 +3088,112 @@ def _pytest_only_deselected_by_marker_filter(returncode: int, stdout: str, stder
     return "0 selected" in stdout and "deselected" in stdout
 
 
+def _run_bot_remediation_staged_test_gate(
+    repo_root: Path,
+    *,
+    log: Any = None,
+) -> dict[str, Any]:
+    """Validate staged test changes before creating a bot-remediation commit."""
+    try:
+        staged_files = _run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo_root,
+            timeout=30,
+        ).stdout.strip().splitlines()
+    except subprocess.CalledProcessError as exc:
+        detail = _tail_failure_excerpt(exc.stderr or exc.stdout or "", limit=1000)
+        return {
+            "passed": False,
+            "errors": [f"bot-remediation staged-file discovery failed: {detail or exc}"],
+            "staged_files": [],
+            "test_files": [],
+        }
+
+    test_files = _collect_commit_test_files(repo_root, staged_files)
+    result: dict[str, Any] = {
+        "passed": True,
+        "errors": [],
+        "staged_files": staged_files,
+        "test_files": test_files,
+    }
+
+    if test_files:
+        if log is not None:
+            log(
+                "Step 15: running bot-remediation pytest gate on "
+                f"{len(test_files)} affected test file(s)"
+            )
+        pytest_result = _run_pytest_on_files(repo_root, test_files)
+        result["pytest_gate"] = pytest_result
+        if not pytest_result["passed"]:
+            stderr = (pytest_result.get("stderr") or "").strip()
+            stdout = (pytest_result.get("stdout") or "").strip()
+            failure_detail = _tail_failure_excerpt(
+                stderr if stderr else stdout,
+                limit=1500,
+                max_lines=30,
+            )
+            result["passed"] = False
+            result["errors"] = [
+                "bot-remediation targeted pytest gate failed before local "
+                f"remediation commit (exit={pytest_result['exit_code']}): "
+                f"{failure_detail}"
+            ]
+            return result
+
+    private_attr_gate = run_private_attr_test_gate(repo_root, staged_files)
+    result["private_attr_gate"] = private_attr_gate
+    if not private_attr_gate["passed"]:
+        result["passed"] = False
+        result["errors"] = [_private_attr_gate_error(private_attr_gate)]
+        return result
+    if log is not None and not private_attr_gate.get("skipped"):
+        log(
+            "Step 15: bot-remediation private-attr/import gate passed for "
+            f"{len(private_attr_gate.get('test_files') or [])} staged test file(s)"
+        )
+    return result
+
+
+def _run_bot_remediation_pre_push_guard(
+    repo_root: Path,
+    *,
+    log: Any = None,
+) -> dict[str, Any]:
+    """Run the local pre-push gate for the newly created remediation head."""
+    pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
+    if not pre_push_script.exists():
+        return {"passed": True, "skipped": True, "errors": []}
+    try:
+        _run(
+            ["bash", str(pre_push_script)],
+            cwd=repo_root,
+            timeout=PRE_PUSH_FAST_TIMEOUT_S,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = _tail_failure_excerpt(
+            exc.stderr or exc.stdout or "",
+            limit=4000,
+            max_lines=80,
+        )
+        if not detail:
+            detail = f"exit {exc.returncode}"
+        return {
+            "passed": False,
+            "skipped": False,
+            "errors": [f"bot-remediation pre-push-fast failed: {detail}"],
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "passed": False,
+            "skipped": False,
+            "errors": ["bot-remediation pre-push-fast timed out"],
+        }
+    if log is not None:
+        log("Step 15: bot-remediation pre-push-fast passed")
+    return {"passed": True, "skipped": False, "errors": []}
+
+
 def _parse_worktree_list(output: str) -> list[dict[str, str]]:
     """Parse `git worktree list --porcelain` into entry dicts."""
     entries: list[dict[str, str]] = []
@@ -5165,6 +5271,29 @@ def _mint_bot_remediation_receipt(
     return per_invocation
 
 
+def _invalidate_bot_remediation_hook_receipt(repo_root: Path, *, reason: str) -> bool:
+    """Invalidate the canonical bot-remediation hook receipt if one exists."""
+    canonical = agent_bus_path(
+        repo_root,
+        _active_bus_dir(),
+        "meta",
+        "pre_commit_receipt.json",
+    )
+    try:
+        receipt = json.loads(canonical.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return False
+    if not isinstance(receipt, dict):
+        return False
+    if receipt.get("receipt_type") != "bot_remediation":
+        return False
+    receipt["decision"] = "COMMIT_BLOCKED"
+    receipt["invalidated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    receipt["invalidation_reason"] = reason
+    canonical.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    return True
+
+
 def _extract_review_findings(
     pr_data: dict[str, Any],
     head_sha: str,
@@ -6669,9 +6798,33 @@ def _attempt_bot_finding_remediation(
                     f"({len(tracker_followup.get('tracker_paths') or [])} tracker-relevant file(s))"
                 )
 
-            # Mint bot-remediation receipt (type B) so the pre-commit hook
-            # sees a valid receipt for this staged state.  This is a
-            # lightweight alternative to a full supervisor round-trip.
+            staged_test_gate = _run_bot_remediation_staged_test_gate(
+                repo_root,
+                log=log,
+            )
+            if not staged_test_gate["passed"]:
+                gate_errors = list(staged_test_gate.get("errors") or [])
+                invalidated = _invalidate_bot_remediation_hook_receipt(
+                    repo_root,
+                    reason="bot-remediation staged validation failed before commit",
+                )
+                log(
+                    "Step 15: bot-remediation staged test gate failed before "
+                    f"commit: {gate_errors}; receipt_invalidated={invalidated}"
+                )
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                    "errors": gate_errors,
+                    "bot_remediation_gate": staged_test_gate,
+                }
+
+            # Mint bot-remediation receipt (type B) only after local staged
+            # validation passes so the hook never accepts rejected staged test
+            # content.
             bot_receipt = _mint_bot_remediation_receipt(
                 repo_root=repo_root,
                 findings_addressed=[
@@ -6704,12 +6857,51 @@ def _attempt_bot_finding_remediation(
                 continuation_path=continuation_path,
                 target_branch=target_branch,
             )
-            # --no-verify on push: same rationale as step 12 — pre-push gate
-            # was already proven on the original wave commit.
+
+            result["steps_completed"] = list(remediation_checkpoint["steps_completed"])
+
+            pre_push_guard = _run_bot_remediation_pre_push_guard(
+                repo_root,
+                log=log,
+            )
+            if not pre_push_guard["passed"]:
+                gate_errors = list(pre_push_guard.get("errors") or [])
+                log(
+                    "Step 15: bot-remediation pre-push gate failed before "
+                    f"push: {gate_errors}"
+                )
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                    "errors": gate_errors,
+                    "bot_remediation_pre_push": pre_push_guard,
+                }
+            if "run_pre_push_script" not in remediation_checkpoint["steps_completed"]:
+                remediation_checkpoint["steps_completed"].append("run_pre_push_script")
+                _checkpoint_post_commit_progress(
+                    remediation_checkpoint,
+                    continuation_path=continuation_path,
+                    target_branch=target_branch,
+                )
+                result["steps_completed"] = list(remediation_checkpoint["steps_completed"])
+
+            # --no-verify on push: same rationale as step 12 — pre-push-fast
+            # just validated this new remediation head locally.
             _run(
                 ["git", "push", "--no-verify", "origin", target_branch],
                 cwd=repo_root, timeout=300,
             )
+            if "git_push" not in remediation_checkpoint["steps_completed"]:
+                remediation_checkpoint["steps_completed"].append("git_push")
+                _checkpoint_post_commit_progress(
+                    remediation_checkpoint,
+                    continuation_path=continuation_path,
+                    target_branch=target_branch,
+                )
+                result["steps_completed"] = list(remediation_checkpoint["steps_completed"])
         except subprocess.CalledProcessError as exc:
             failure_detail = _tail_failure_excerpt(
                 "\n".join(part for part in (exc.stderr, exc.stdout) if part),

@@ -942,6 +942,7 @@ def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[st
         return False
     text_parts = [
         _summarize_result_reason(result),
+        _extract_classifier_signal(result),
         *(_summarize_json_value(candidate) for candidate in candidates),
     ]
     signal = " ".join(part for part in text_parts if part).lower()
@@ -952,7 +953,19 @@ def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[st
     }
     if "needs_phase_b" not in statuses and "needs_phase_b" not in signal:
         return False
-    if "tasks.md" not in signal or ("out-of-wave" not in signal and "out of wave" not in signal):
+    out_of_scope_markers = (
+        "out-of-wave",
+        "out of wave",
+        "out-of-scope",
+        "out of scope",
+        "outside the package scope",
+        "outside package scope",
+        "scope drift",
+        "unrelated structural tracker note",
+    )
+    if "tasks.md" not in signal or not any(
+        marker in signal for marker in out_of_scope_markers
+    ):
         return False
     tracker_markers = (
         "tracker note",
