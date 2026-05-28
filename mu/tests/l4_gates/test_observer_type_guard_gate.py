@@ -21,19 +21,20 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import subprocess
-from pathlib import Path
 
 import pytest
 
 from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import cached_python_pipeline
 
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline, run_engine_with_routing
 
 from rcx_pi.selfhost.kernel import reset_step_budget
 
 pytestmark = [pytest.mark.slow]
+
+_CANONICAL_ENGINE_INPUT = "test_input"
 
 
 # =============================================================================
@@ -64,7 +65,7 @@ class TestPythonPipelineObserverTypeGuard:
         """None observer is valid (disables observation)."""
         reset_step_budget()
         result = run_engine_pipeline(
-            [], "test_input",
+            [], _CANONICAL_ENGINE_INPUT,
             max_steps=10, max_engine_iterations=20,
             max_algorithm_iterations=50,
             observer=None,
@@ -73,16 +74,15 @@ class TestPythonPipelineObserverTypeGuard:
 
     def test_accepts_empty_list_observer(self):
         """Empty list observer is valid (enables observation)."""
-        reset_step_budget()
-        observer = []
-        result = run_engine_pipeline(
-            [], "test_input",
-            max_steps=10, max_engine_iterations=20,
-            max_algorithm_iterations=50,
-            observer=observer,
+        evidence = cached_python_pipeline(
+            input_value=_CANONICAL_ENGINE_INPUT,
+            observer_enabled=True,
         )
+        result = evidence["result"]
+        observer = evidence["observer"]
         assert result is not None
         assert isinstance(observer, list)
+        assert len(observer) > 0
 
 
 # =============================================================================

@@ -29,6 +29,8 @@ from rcx_pi.selfhost.kernel import reset_step_budget
 
 pytestmark = [pytest.mark.slow]
 
+_CANONICAL_ENGINE_INPUT = "test_input"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -72,7 +74,7 @@ class TestPythonEngineTerminalEvent:
 
     def test_closure_emits_engine_terminal(self):
         """Successful closure run emits exactly one engine_terminal event."""
-        observer = _python_observer("test_input", use_boot1_recursive=False)
+        observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=False)
         terminals = _collect_terminal_events(observer)
         assert len(terminals) == 1, (
             f"Expected exactly 1 engine_terminal, got {len(terminals)}"
@@ -82,7 +84,7 @@ class TestPythonEngineTerminalEvent:
 
     def test_exactly_one_terminal_event(self):
         """Count of engine_terminal events is always exactly 1 on success."""
-        observer = _python_observer("another_input", use_boot1_recursive=False)
+        observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=False)
         terminals = _collect_terminal_events(observer)
         assert len(terminals) == 1
 
@@ -92,7 +94,7 @@ class TestPythonEngineTerminalEvent:
         observer = []
         with pytest.raises(RuntimeError, match="exhausted"):
             run_engine_pipeline(
-                [], "test_input",
+                [], _CANONICAL_ENGINE_INPUT,
                 max_steps=10, max_engine_iterations=1,
                 max_algorithm_iterations=50, observer=observer,
                 use_boot1_recursive=False,
@@ -104,7 +106,7 @@ class TestPythonEngineTerminalEvent:
 
     def test_terminal_event_has_required_fields(self):
         """engine_terminal event has base 6 fields + engine_exit_reason + engine_iterations_used."""
-        observer = _python_observer("test_input", use_boot1_recursive=False)
+        observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=False)
         terminals = _collect_terminal_events(observer)
         assert len(terminals) == 1
         event = terminals[0]
@@ -123,7 +125,7 @@ class TestPythonEngineTerminalEvent:
 
     def test_boot1_emits_engine_terminal(self):
         """Boot1 path also emits exactly one engine_terminal."""
-        observer = _python_observer("test_input", use_boot1_recursive=True)
+        observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=True)
         terminals = _collect_terminal_events(observer)
         assert len(terminals) == 1
         assert terminals[0]["engine_exit_reason"] == "closure"
@@ -131,8 +133,8 @@ class TestPythonEngineTerminalEvent:
 
     def test_boot1_and_trampoline_terminal_parity(self):
         """Both engine paths emit engine_terminal with same reason and iteration count."""
-        obs_tramp = _python_observer("test_input", use_boot1_recursive=False)
-        obs_boot1 = _python_observer("test_input", use_boot1_recursive=True)
+        obs_tramp = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=False)
+        obs_boot1 = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=True)
         tramp_terms = _collect_terminal_events(obs_tramp)
         boot1_terms = _collect_terminal_events(obs_boot1)
         assert len(tramp_terms) == 1
@@ -152,7 +154,7 @@ class TestJsEngineTerminalEvent:
         """JS successful closure run emits exactly one engine_terminal event."""
         resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="test_input",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=False,
@@ -170,7 +172,7 @@ class TestJsEngineTerminalEvent:
         """JS engine.exhausted returns error, observer has 0 engine_terminal."""
         resp = _js_request_with_observer_uncached(
             "run_engine_pipeline",
-            input="test_input",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=1, maxAlgorithmIterations=50,
             boot1LoopMode=False,
@@ -184,7 +186,7 @@ class TestJsEngineTerminalEvent:
         """JS count of engine_terminal is always exactly 1 on success."""
         resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="another_input",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=False,
@@ -204,10 +206,10 @@ class TestCrossSubstrateTerminalEventParity:
 
     def test_closure_terminal_parity(self):
         """Both substrates emit engine_terminal with same reason for closure input."""
-        py_observer = _python_observer("test_input", use_boot1_recursive=False)
+        py_observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=False)
         js_resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="test_input",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=False,

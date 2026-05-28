@@ -21,13 +21,10 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import subprocess
-from pathlib import Path
-
 import pytest
 
 from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import cached_js_request, uncached_js_request
 
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
 
@@ -41,26 +38,19 @@ pytestmark = [pytest.mark.slow]
 # ---------------------------------------------------------------------------
 
 def _js_request(action, **kwargs):
-    """Send a JSON API request and return the parsed response."""
-    request = {"action": action, **kwargs}
-    js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
-    result = subprocess.run(
-        ["node", str(js_path), "--json-api", json.dumps(request)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
-    )
-    for line in result.stdout.split("\n"):
-        if line.startswith("JSON_API_RESPONSE:"):
-            return json.loads(line[len("JSON_API_RESPONSE:"):])
-    pytest.fail(
-        f"No JSON_API_RESPONSE in JS output.\n"
-        f"returncode: {result.returncode}\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
-    )
+    """Send an uncached JSON API request for negative/error-path proofs."""
+    return uncached_js_request(action, **kwargs)
 
 
+def _cached_js_request(action, **kwargs):
+    """Send a cached JSON API request for deterministic successful evidence."""
+    return cached_js_request(action, **kwargs)
+
+
+_PIPELINE_CANONICAL_INPUT = {"test": True}
+_META_CANONICAL_INPUT = "test_input"
 _PIPELINE_BASE = dict(
-    input="api_guard_test",
+    input=_PIPELINE_CANONICAL_INPUT,
     projections=[],
     maxSteps=10,
     maxEngineIterations=20,
@@ -103,14 +93,14 @@ class TestPipelineStrictObserverAcceptance:
 
     def test_accepts_array_observer_strict(self):
         """observer_strict: [] -> success with observer_events."""
-        resp = _js_request("run_engine_pipeline", observer_strict=[], **_PIPELINE_BASE)
+        resp = _cached_js_request("run_engine_pipeline", observer_strict=[], **_PIPELINE_BASE)
         assert resp["success"]
         assert "observer_events" in resp
         assert isinstance(resp["observer_events"], list)
 
     def test_accepts_null_observer_strict(self):
         """observer_strict: null -> success, no observer_events."""
-        resp = _js_request("run_engine_pipeline", observer_strict=None, **_PIPELINE_BASE)
+        resp = _cached_js_request("run_engine_pipeline", observer_strict=None, **_PIPELINE_BASE)
         assert resp["success"]
         assert "observer_events" not in resp
 
@@ -124,7 +114,7 @@ class TestLegacyObserverBackwardCompat:
 
     def test_observer_true_still_works(self):
         """observer: true -> success with observer_events (legacy path)."""
-        resp = _js_request("run_engine_pipeline", observer=True, **_PIPELINE_BASE)
+        resp = _cached_js_request("run_engine_pipeline", observer=True, **_PIPELINE_BASE)
         assert resp["success"]
         assert "observer_events" in resp
         assert isinstance(resp["observer_events"], list)
@@ -132,7 +122,7 @@ class TestLegacyObserverBackwardCompat:
 
     def test_observer_omitted_no_events(self):
         """observer omitted -> success, no observer_events."""
-        resp = _js_request("run_engine_pipeline", **_PIPELINE_BASE)
+        resp = _cached_js_request("run_engine_pipeline", **_PIPELINE_BASE)
         assert resp["success"]
         assert "observer_events" not in resp
 
@@ -188,10 +178,10 @@ class TestMetaStrictObserverGuard:
              "error_code": None, "substrate": "js", "timestamp": i}
             for i in range(3)
         ]
-        resp = _js_request(
+        resp = _cached_js_request(
             "run_engine_pipeline_meta",
             observer_strict=prior_events,
-            input="delta_test",
+            input=_META_CANONICAL_INPUT,
             projections=[],
             maxSteps=10,
             maxEngineIterations=20,
@@ -202,10 +192,9 @@ class TestMetaStrictObserverGuard:
         # Must NOT include the 3 pre-populated events
         assert iters > 0, f"engine_iterations_used must be > 0, got {iters}"
         # A fresh run produces the same count
-        resp_fresh = _js_request(
+        resp_fresh = _cached_js_request(
             "run_engine_pipeline_meta",
-            observer_strict=[],
-            input="delta_test",
+            input=_META_CANONICAL_INPUT,
             projections=[],
             maxSteps=10,
             maxEngineIterations=20,
