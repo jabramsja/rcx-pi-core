@@ -226,6 +226,7 @@ def test_adversary_timeout_blocks_merge(tmp_path):
                 verbose=False,
                 use_memory=False,
                 agent_timeout_s=1,
+                heartbeat_interval_s=1,
                 single_tail_timeout_s=5,
                 group_stale_timeout_s=10,
             )
