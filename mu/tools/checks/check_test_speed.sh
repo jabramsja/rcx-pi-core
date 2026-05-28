@@ -30,10 +30,13 @@ echo "Scanning $TESTS_DIR for unmarked slow test files..."
 echo ""
 
 # Two-step detection for slow function imports (handles multiline imports):
-# Step 1: File must have an import from the modules that contain slow functions.
+# Step 1: File must have an import hint for modules that contain slow functions.
 # Matches rcx_pi.selfhost.* modules, package-level imports such as
-# `from rcx_pi.selfhost import engine_pipeline`, and legacy rcx_pi.* modules.
-SLOW_MODULE_IMPORT='rcx_pi(\.selfhost)?(\.(step_mu|engine|engine_pipeline)([^[:alnum:]_]|$)|[[:space:]]+import[[:space:]]+(step_mu|engine|engine_pipeline)([^[:alnum:]_]|$))'
+# `from rcx_pi.selfhost import engine_pipeline`, parenthesized package imports,
+# and legacy rcx_pi.* modules.
+SLOW_MODULE_IMPORT='rcx_pi(\.selfhost)?(\.(step_mu|engine|engine_pipeline)([^[:alnum:]_]|$)|[[:space:]]+import[[:space:]]*\(?[[:space:]]*(step_mu|engine|engine_pipeline)([^[:alnum:]_]|$))'
+SLOW_PACKAGE_IMPORT_START='from[[:space:]]+rcx_pi(\.selfhost)?[[:space:]]+import([^[:alnum:]_]|$)'
+SLOW_MODULE_BASENAME='(^|[^[:alnum:]_])(step_mu|engine|engine_pipeline)([^[:alnum:]_]|$)'
 # Step 2: File must mention a slow function name (on import line or in multiline block)
 SLOW_FUNC_NAME='\b(run_mu_structural|run_algorithm_meta_circular|run_engine_pipeline|run_hemisphere_routing|run_mu)\b'
 
@@ -323,6 +326,20 @@ for func in test_functions:
 PY
 }
 
+has_slow_module_import_hint() {
+    local filepath="$1"
+
+    if grep -qE "$SLOW_MODULE_IMPORT" "$filepath" 2>/dev/null; then
+        return 0
+    fi
+
+    # For legal multiline package imports, the package import opener and slow
+    # module basename can be on separate lines. Let the AST scanner decide the
+    # exact alias/import truth instead of returning before it runs.
+    grep -qE "$SLOW_PACKAGE_IMPORT_START" "$filepath" 2>/dev/null \
+        && grep -qE "$SLOW_MODULE_BASENAME" "$filepath" 2>/dev/null
+}
+
 check_file() {
     local filepath="$1"
 
@@ -336,9 +353,9 @@ check_file() {
         return
     fi
 
-    # Two-step check: file must import from a slow module AND mention a slow function
-    # This handles both single-line and multiline imports without false positives
-    if ! grep -qE "$SLOW_MODULE_IMPORT" "$filepath" 2>/dev/null; then
+    # Two-step check: file must have a slow import hint AND mention a slow function.
+    # The AST scanner below performs the exact import/call validation.
+    if ! has_slow_module_import_hint "$filepath"; then
         return
     fi
     if ! grep -qE "$SLOW_FUNC_NAME" "$filepath" 2>/dev/null; then
