@@ -37,6 +37,7 @@ VALID_EVENT_NAMES = frozenset({
     "fail_closed",
     "engine_terminal",
 })
+_CANONICAL_ENGINE_INPUT = "test_input"
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +67,7 @@ class TestEmittedEventNameEnforcement:
 
     def test_python_trampoline_event_names_valid(self):
         """All Python trampoline event names are in VALID_EVENT_NAMES."""
-        observer = _python_observer("schema_lock_test", use_boot1_recursive=False)
+        observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=False)
         for event in observer:
             assert event["event_name"] in VALID_EVENT_NAMES, (
                 f"Python trampoline emitted unregistered event: {event['event_name']!r}"
@@ -74,7 +75,7 @@ class TestEmittedEventNameEnforcement:
 
     def test_python_boot1_event_names_valid(self):
         """All Python Boot1 event names are in VALID_EVENT_NAMES."""
-        observer = _python_observer("schema_lock_test", use_boot1_recursive=True)
+        observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=True)
         for event in observer:
             assert event["event_name"] in VALID_EVENT_NAMES, (
                 f"Python Boot1 emitted unregistered event: {event['event_name']!r}"
@@ -84,7 +85,7 @@ class TestEmittedEventNameEnforcement:
         """All JS trampoline event names are in VALID_EVENT_NAMES."""
         resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="schema_lock_test",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=False,
@@ -99,7 +100,7 @@ class TestEmittedEventNameEnforcement:
         """All JS Boot1 event names are in VALID_EVENT_NAMES."""
         resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="schema_lock_test",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=True,
@@ -205,10 +206,10 @@ class TestTerminalExtrasCrossSubstrateParity:
 
     def test_terminal_extras_independently_valid_and_equal(self):
         """Python and JS engine_terminal extras are both valid and match."""
-        py_observer = _python_observer("parity_lock_test", use_boot1_recursive=False)
+        py_observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=False)
         js_resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="parity_lock_test",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=False,
@@ -250,7 +251,7 @@ class TestBoot1DepthDiscipline:
 
     def test_python_trampoline_no_boot1_depth(self):
         """Python trampoline events must NOT have boot1_depth field."""
-        observer = _python_observer("schema_lock_test", use_boot1_recursive=False)
+        observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=False)
         for event in observer:
             assert "boot1_depth" not in event, (
                 f"Trampoline event should not have boot1_depth: {event['event_name']}"
@@ -258,7 +259,7 @@ class TestBoot1DepthDiscipline:
 
     def test_python_boot1_has_boot1_depth(self):
         """Python Boot1 events must have boot1_depth field."""
-        observer = _python_observer("schema_lock_test", use_boot1_recursive=True)
+        observer = _python_observer(_CANONICAL_ENGINE_INPUT, use_boot1_recursive=True)
         for event in observer:
             assert "boot1_depth" in event, (
                 f"Boot1 event missing boot1_depth: {event['event_name']}"
@@ -270,7 +271,7 @@ class TestBoot1DepthDiscipline:
         """JS trampoline events must NOT have boot1_depth field."""
         resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="schema_lock_test",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=False,
@@ -285,7 +286,7 @@ class TestBoot1DepthDiscipline:
         """JS Boot1 events must have boot1_depth field."""
         resp = _js_request_with_observer(
             "run_engine_pipeline",
-            input="schema_lock_test",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
             boot1LoopMode=True,

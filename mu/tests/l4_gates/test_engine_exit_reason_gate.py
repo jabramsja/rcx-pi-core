@@ -34,6 +34,8 @@ from rcx_pi.selfhost.kernel import reset_step_budget
 
 pytestmark = [pytest.mark.slow]
 
+_CANONICAL_ENGINE_INPUT = "test_input"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -106,7 +108,7 @@ class TestPythonEngineExitReason:
 
     def test_closure_reason(self):
         """Simple input triggers recurrence closure detection."""
-        meta = _python_pipeline("test_input", return_meta=True)
+        meta = _python_pipeline(_CANONICAL_ENGINE_INPUT, return_meta=True)
         _assert_meta_shape(meta, expected_reason="closure")
         assert meta["engine_result"]["closure_detected"] is True
 
@@ -119,7 +121,7 @@ class TestPythonEngineExitReason:
         reset_step_budget()
         try:
             meta = run_engine_pipeline(
-                [], "test_input",
+                [], _CANONICAL_ENGINE_INPUT,
                 max_steps=10, max_engine_iterations=20,
                 max_algorithm_iterations=0, return_meta=True,
             )
@@ -135,7 +137,12 @@ class TestPythonEngineExitReason:
 
     def test_meta_false_returns_bare_result(self):
         """return_meta=False returns the 8-key dict directly (backward compat)."""
-        result = _python_pipeline("test_input", return_meta=False)
+        reset_step_budget()
+        result = run_engine_pipeline(
+            [], _CANONICAL_ENGINE_INPUT,
+            max_steps=10, max_engine_iterations=20,
+            max_algorithm_iterations=50, return_meta=False,
+        )
         assert isinstance(result, dict)
         assert frozenset(result.keys()) == _ENGINE_RESULT_KEYS, (
             f"Non-meta result must have exactly 8 keys, got {sorted(result.keys())}"
@@ -144,19 +151,19 @@ class TestPythonEngineExitReason:
 
     def test_meta_preserves_engine_result_shape(self):
         """Meta envelope engine_result has exactly 8 keys — no additions."""
-        meta = _python_pipeline("test_input", return_meta=True)
+        meta = _python_pipeline(_CANONICAL_ENGINE_INPUT, return_meta=True)
         assert frozenset(meta["engine_result"].keys()) == _ENGINE_RESULT_KEYS
 
     def test_iterations_used_positive(self):
         """engine_iterations_used reflects actual engine steps (> 0)."""
-        meta = _python_pipeline("test_input", return_meta=True)
+        meta = _python_pipeline(_CANONICAL_ENGINE_INPUT, return_meta=True)
         assert meta["engine_iterations_used"] > 0
         assert meta["max_engine_iterations"] == 20
 
     def test_boot1_and_trampoline_same_reason(self):
         """Both engine paths produce same exit reason for same input."""
-        meta_boot1 = _python_pipeline("test_input", return_meta=True, use_boot1_recursive=True)
-        meta_tramp = _python_pipeline("test_input", return_meta=True, use_boot1_recursive=False)
+        meta_boot1 = _python_pipeline(_CANONICAL_ENGINE_INPUT, return_meta=True, use_boot1_recursive=True)
+        meta_tramp = _python_pipeline(_CANONICAL_ENGINE_INPUT, return_meta=True, use_boot1_recursive=False)
         assert meta_boot1["engine_exit_reason"] == meta_tramp["engine_exit_reason"]
         assert meta_boot1["engine_iterations_used"] == meta_tramp["engine_iterations_used"]
 
@@ -165,7 +172,7 @@ class TestPythonEngineExitReason:
         reset_step_budget()
         with pytest.raises(RuntimeError, match="exhausted"):
             run_engine_pipeline(
-                [], "test_input",
+                [], _CANONICAL_ENGINE_INPUT,
                 max_steps=10, max_engine_iterations=1,
                 max_algorithm_iterations=50, return_meta=True,
             )
@@ -186,7 +193,7 @@ class TestPythonEngineExitReason:
         prior_count = len(prior_observer)
 
         meta = run_engine_pipeline(
-            [], "test_input",
+            [], _CANONICAL_ENGINE_INPUT,
             max_steps=10, max_engine_iterations=20,
             max_algorithm_iterations=50, return_meta=True,
             observer=prior_observer,
@@ -217,7 +224,7 @@ class TestJsEngineExitReason:
         """Simple input triggers closure detection in JS."""
         resp = _js_request(
             "run_engine_pipeline_meta",
-            input="test_input",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
         )
@@ -230,7 +237,7 @@ class TestJsEngineExitReason:
         """JS meta envelope engine_result has exactly 8 keys."""
         resp = _js_request(
             "run_engine_pipeline_meta",
-            input="test_input",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
         )
@@ -244,7 +251,7 @@ class TestJsEngineExitReason:
         """engine.exhausted in JS returns error_code, not a success meta."""
         resp = _js_request_uncached(
             "run_engine_pipeline_meta",
-            input="test_input",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=1, maxAlgorithmIterations=50,
         )
@@ -261,10 +268,10 @@ class TestCrossSubstrateReasonParity:
 
     def test_closure_parity(self):
         """Both substrates report 'closure' for same simple input."""
-        py_meta = _python_pipeline("test_input", return_meta=True)
+        py_meta = _python_pipeline(_CANONICAL_ENGINE_INPUT, return_meta=True)
         js_resp = _js_request(
             "run_engine_pipeline_meta",
-            input="test_input",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
         )
@@ -282,10 +289,10 @@ class TestCrossSubstrateReasonParity:
 
     def test_engine_result_values_match(self):
         """Engine result values (not just shape) match across substrates."""
-        py_meta = _python_pipeline("parity_test", return_meta=True)
+        py_meta = _python_pipeline(_CANONICAL_ENGINE_INPUT, return_meta=True)
         js_resp = _js_request(
             "run_engine_pipeline_meta",
-            input="parity_test",
+            input=_CANONICAL_ENGINE_INPUT,
             projections=[],
             maxSteps=10, maxEngineIterations=20, maxAlgorithmIterations=50,
         )
