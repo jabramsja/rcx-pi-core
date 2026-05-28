@@ -90,16 +90,14 @@ jobs:
           source tools/checks/derive_wave_id.sh "$GH_HEAD_REF" --range "$RANGE"
           python tools/checks/enforce_l4_execution_contract.py --range "$RANGE" $WAVE_ID_FLAG
 
-      - name: Green gate (authoritative, python-only)
+      - name: Branch feedback smoke
         shell: bash
         run: |
           set -euo pipefail
-          # green_gate.sh already runs:
-          # - goldens (via pytest)
-          # - JS parity (eval_step.js + test_js_parity_automated.py)
-          # - all other python tests
-          # RCX_CI=1 ensures CLI failures fail tests instead of skipping
-          scripts/green_gate.sh python-only
+          python -m pytest -q \
+            tests/engine/test_spec_ground_truth.py \
+            tests/parity/test_js_parity_automated.py::test_parity_canary \
+            tests/structural/test_seed_counts.py
 
       - name: Branch coverage report (rcx_pi/selfhost/)
         shell: bash

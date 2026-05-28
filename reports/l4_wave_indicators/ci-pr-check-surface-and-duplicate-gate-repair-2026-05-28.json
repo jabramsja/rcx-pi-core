@@ -1,0 +1,24 @@
+{
+  "wave_id": "ci-pr-check-surface-and-duplicate-gate-repair-2026-05-28",
+  "repeat_run_speedup_ratio": 0.990047,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.283131,
+  "repeat_run_raw_seconds": [
+    0.280313,
+    0.283131
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.280313
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.563444
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-28T07:15:00Z",
+  "collector_version": "2.2.0"
+}

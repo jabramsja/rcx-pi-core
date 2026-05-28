@@ -5731,6 +5731,17 @@ class TestCIPollFallbackTimeout:
 
 
 class TestRequiredCIGreenGuard:
+    @staticmethod
+    def _successful_rollup(names):
+        return [
+            {
+                "name": name,
+                "workflowName": "CI" if name == "test" else "rcx-green-gate",
+                "conclusion": "SUCCESS",
+            }
+            for name in names
+        ]
+
     def test_required_check_guard_waits_after_watch_reports_success(self, tmp_path):
         import subprocess
 
@@ -5777,6 +5788,100 @@ class TestRequiredCIGreenGuard:
         assert len(json_calls) == 2
         assert clock[0] == 15
         assert any("pending required check(s): test=IN_PROGRESS" in line for line in logs)
+
+    def test_wait_for_pr_ci_rejects_branch_protection_subset_check_surface(self, tmp_path):
+        import subprocess
+
+        subset_rollup = self._successful_rollup(["test", "green-gate"])
+
+        def completed(cmd, *, stdout="", stderr="", returncode=0):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["gh", "pr", "checks", "1030", "--watch", "--required"]:
+                return completed(cmd)
+            if cmd == ["gh", "pr", "view", "1030", "--json", "statusCheckRollup"]:
+                return completed(
+                    cmd,
+                    stdout=json.dumps({"statusCheckRollup": subset_rollup}),
+                )
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        result = {
+            "commit_sha": "a" * 40,
+            "handoff_sha": "handoff-sha",
+            "receipt_decision": "COMMIT_GO",
+            "steps_completed": ["git_commit"],
+        }
+
+        with patch.object(commit_mod, "_wait_for_required_checks_to_register", return_value=None), \
+             patch.object(commit_mod, "_wait_for_required_checks_to_pass", return_value=True), \
+             patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "COMMIT_CI_VERIFY_TIMEOUT_S", 0):
+            response = commit_mod._wait_for_pr_ci(  # ANTICHEAT_OK: locks full PR status surface before wait_ci completion
+                tmp_path,
+                pr_number="1030",
+                result=result,
+                continuation_path=tmp_path / "continuation.json",
+                target_branch="jabramsja/test",
+                log=lambda _msg: None,
+            )
+
+        assert response is not None
+        assert response["status"] == "error"
+        assert response["step"] == "wait_ci"
+        assert response["failure_class"] == "unknown_error"
+        assert "wait_ci" not in result["steps_completed"]
+        surface = response["ci_check_surface"]
+        assert surface["missing_expected_checks"] == [
+            "engine-run-schema",
+            "orbit-dot",
+            "orbit-index",
+            "orbit-provenance",
+            "orbit-svg",
+        ]
+        assert "missing expected check(s): engine-run-schema" in response["errors"][0]
+
+    def test_wait_for_pr_ci_accepts_completed_seven_check_green_surface(self, tmp_path):
+        import subprocess
+
+        full_rollup = self._successful_rollup(commit_mod.EXPECTED_PR_CHECK_SURFACE)
+
+        def completed(cmd, *, stdout="", stderr="", returncode=0):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["gh", "pr", "checks", "1030", "--watch", "--required"]:
+                return completed(cmd)
+            if cmd == ["gh", "pr", "view", "1030", "--json", "statusCheckRollup"]:
+                return completed(
+                    cmd,
+                    stdout=json.dumps({"statusCheckRollup": full_rollup}),
+                )
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        result = {
+            "commit_sha": "a" * 40,
+            "handoff_sha": "handoff-sha",
+            "receipt_decision": "COMMIT_GO",
+            "steps_completed": ["git_commit"],
+        }
+
+        with patch.object(commit_mod, "_wait_for_required_checks_to_register", return_value=None), \
+             patch.object(commit_mod, "_wait_for_required_checks_to_pass", return_value=True), \
+             patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "COMMIT_CI_VERIFY_TIMEOUT_S", 0):
+            response = commit_mod._wait_for_pr_ci(  # ANTICHEAT_OK: locks seven-check PR status surface acceptance
+                tmp_path,
+                pr_number="1030",
+                result=result,
+                continuation_path=tmp_path / "continuation.json",
+                target_branch="jabramsja/test",
+                log=lambda _msg: None,
+            )
+
+        assert response is None
+        assert "wait_ci" in result["steps_completed"]
 
     def test_wait_for_pr_ci_rejects_watch_success_until_required_checks_green(self, tmp_path):
         import subprocess

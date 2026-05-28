@@ -6707,6 +6707,17 @@ class TestIntegrationScenarios:
 class TestCommitContinuationAndBotFreshness:
     """Regression coverage for bounded post-commit continuation and bot freshness."""
 
+    @pytest.fixture(autouse=True)
+    def _green_expected_pr_check_surface(self, monkeypatch):
+        monkeypatch.setattr(
+            commit_mod,
+            "_fetch_pr_check_surface_rollup",
+            lambda _repo_root, _pr_number: [
+                {"name": name, "conclusion": "SUCCESS"}
+                for name in commit_mod.EXPECTED_PR_CHECK_SURFACE
+            ],
+        )
+
     def test_valid_post_commit_continuation_resumes_at_post_commit_helper(self, tmp_path):
         repo, env = _init_git_repo(tmp_path)
         subprocess.run(

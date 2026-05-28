@@ -296,6 +296,15 @@ CI_REQUIRED_PENDING_BUCKETS = {"pending"}
 CI_REQUIRED_PASSING_STATES = {"SUCCESS", "SKIPPED", "NEUTRAL"}
 CI_REQUIRED_FAILING_STATES = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"}
 CI_REQUIRED_PENDING_STATES = {"PENDING", "IN_PROGRESS", "QUEUED", "REQUESTED", "WAITING", "EXPECTED"}
+EXPECTED_PR_CHECK_SURFACE = (
+    "engine-run-schema",
+    "green-gate",
+    "orbit-dot",
+    "orbit-index",
+    "orbit-provenance",
+    "orbit-svg",
+    "test",
+)
 _COMMIT_EXECUTOR_CONFIG = load_executor_config(SCRIPT_DIR.parent.parent.parent)
 _COMMIT_EXECUTOR_TIMEOUTS = _COMMIT_EXECUTOR_CONFIG.get("timeouts", {})
 COMMIT_EXECUTOR_OUTER_BUDGET_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
@@ -5823,6 +5832,186 @@ def _wait_ci_failure_class(ci_failure: dict[str, Any]) -> str:
     return "unknown_error"
 
 
+def _rollup_check_name(check: dict[str, Any]) -> str:
+    return str(
+        check.get("name")
+        or check.get("context")
+        or check.get("workflowName")
+        or "unknown"
+    ).strip()
+
+
+def _rollup_check_state(check: dict[str, Any]) -> tuple[str, str]:
+    for field in ("conclusion", "state", "status"):
+        value = check.get(field)
+        if value:
+            return field, str(value).upper()
+    return "", ""
+
+
+def _summarize_pr_check_surface(checks: Any) -> dict[str, Any]:
+    if not isinstance(checks, list):
+        missing = list(EXPECTED_PR_CHECK_SURFACE)
+        return {
+            "status": "pending",
+            "summary": (
+                "statusCheckRollup was not a list; "
+                "missing expected check(s): " + ", ".join(missing)
+            ),
+            "present_checks": [],
+            "missing_expected_checks": missing,
+            "pending_checks": ["statusCheckRollup=invalid"],
+            "failing_checks": [],
+        }
+
+    present_names: set[str] = set()
+    pending: list[str] = []
+    failing: list[str] = []
+
+    for check in checks:
+        if not isinstance(check, dict):
+            pending.append(f"{check}=invalid")
+            continue
+        name = _rollup_check_name(check)
+        if name:
+            present_names.add(name)
+        state_field, state = _rollup_check_state(check)
+        label = f"{name}={state or 'PENDING'}"
+        if state in CI_REQUIRED_PASSING_STATES:
+            continue
+        if state_field == "conclusion" or state in CI_REQUIRED_FAILING_STATES:
+            failing.append(label)
+        else:
+            pending.append(label)
+
+    missing = sorted(set(EXPECTED_PR_CHECK_SURFACE) - present_names)
+    if failing:
+        status = "failed"
+        summary = "failing PR check(s): " + ", ".join(failing)
+    elif missing or pending:
+        status = "pending"
+        summary_parts = []
+        if missing:
+            summary_parts.append("missing expected check(s): " + ", ".join(missing))
+        if pending:
+            summary_parts.append("pending PR check(s): " + ", ".join(pending))
+        summary = "; ".join(summary_parts)
+    else:
+        status = "passed"
+        summary = "expected PR check surface green"
+
+    return {
+        "status": status,
+        "summary": summary,
+        "present_checks": sorted(present_names),
+        "missing_expected_checks": missing,
+        "pending_checks": pending,
+        "failing_checks": failing,
+    }
+
+
+def _fetch_pr_check_surface_rollup(repo_root: Path, pr_number: str) -> Any:
+    result = _run(
+        ["gh", "pr", "view", pr_number, "--json", "statusCheckRollup"],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    payload = json.loads(result.stdout or "{}")
+    if not isinstance(payload, dict):
+        return []
+    return payload.get("statusCheckRollup", [])
+
+
+def _wait_for_expected_pr_check_surface_to_pass(
+    repo_root: Path,
+    pr_number: str,
+    *,
+    timeout: int = 900,
+    poll_interval: int = 15,
+    log: Any = None,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_snapshot: dict[str, Any] | None = None
+
+    while True:
+        try:
+            checks = _fetch_pr_check_surface_rollup(repo_root, pr_number)
+            snapshot = _summarize_pr_check_surface(checks)
+            snapshot["checks_output"] = json.dumps(
+                {"statusCheckRollup": checks},
+                sort_keys=True,
+            )
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            json.JSONDecodeError,
+            ValueError,
+            OSError,
+        ) as exc:
+            missing = list(EXPECTED_PR_CHECK_SURFACE)
+            snapshot = {
+                "status": "pending",
+                "summary": (
+                    f"statusCheckRollup unavailable ({type(exc).__name__}: {exc}); "
+                    "missing expected check(s): " + ", ".join(missing)
+                ),
+                "present_checks": [],
+                "missing_expected_checks": missing,
+                "pending_checks": ["statusCheckRollup=unavailable"],
+                "failing_checks": [],
+                "checks_output": "",
+            }
+
+        last_snapshot = snapshot
+        if snapshot["status"] == "passed":
+            snapshot["ok"] = True
+            return snapshot
+        if snapshot["status"] == "failed":
+            snapshot["ok"] = False
+            return snapshot
+        if time.monotonic() >= deadline:
+            snapshot["ok"] = False
+            snapshot["timed_out"] = True
+            snapshot["summary"] = (
+                f"expected PR check surface did not reach green within {timeout}s: "
+                + str(snapshot.get("summary", "unknown"))
+            )
+            return snapshot
+        if log is not None:
+            log(f"Waiting for expected PR check surface: {snapshot['summary']}")
+        time.sleep(poll_interval)
+
+    # Unreachable, but keeps static analyzers honest if the loop changes.
+    assert last_snapshot is not None
+
+
+def _wait_ci_surface_failure_response(
+    surface: dict[str, Any],
+    *,
+    result: dict[str, Any],
+    pr_number: str,
+) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "step": "wait_ci",
+        "failure_class": "test_failure" if surface.get("failing_checks") else "unknown_error",
+        "errors": ["Expected PR check surface did not reach green. " + surface["summary"]],
+        "ci_failures": [],
+        "ci_checks_output": surface.get("checks_output", ""),
+        "ci_check_surface": surface,
+        "steps_completed": result["steps_completed"],
+        "pr_number": pr_number,
+    }
+
+
 def _wait_for_pr_ci(
     repo_root: Path,
     *,
@@ -5866,6 +6055,18 @@ def _wait_for_pr_ci(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
             }
+        surface = _wait_for_expected_pr_check_surface_to_pass(
+            repo_root,
+            pr_number,
+            timeout=COMMIT_CI_VERIFY_TIMEOUT_S,
+            log=log,
+        )
+        if not surface.get("ok"):
+            return _wait_ci_surface_failure_response(
+                surface,
+                result=result,
+                pr_number=pr_number,
+            )
         if "wait_ci" not in result["steps_completed"]:
             result["steps_completed"].append("wait_ci")
             _checkpoint_post_commit_progress(
@@ -5922,6 +6123,18 @@ def _wait_for_pr_ci(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
             }
+        surface = _wait_for_expected_pr_check_surface_to_pass(
+            repo_root,
+            pr_number,
+            timeout=COMMIT_CI_VERIFY_TIMEOUT_S,
+            log=log,
+        )
+        if not surface.get("ok"):
+            return _wait_ci_surface_failure_response(
+                surface,
+                result=result,
+                pr_number=pr_number,
+            )
         if "wait_ci" not in result["steps_completed"]:
             result["steps_completed"].append("wait_ci")
             _checkpoint_post_commit_progress(
