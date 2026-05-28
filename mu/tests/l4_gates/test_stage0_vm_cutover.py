@@ -267,6 +267,45 @@ def _patch_counting_trusted(monkeypatch, mod):
     return call_count
 
 
+def _patch_stage0_current_path_counters(monkeypatch, step_mod):
+    """Count host Stage0 helper reachability on the current cutover/engine paths."""
+    import rcx_pi.selfhost.eval_seed as eval_mod  # ANTICHEAT_OK: current-path counter
+    import rcx_pi.selfhost.engine_pipeline as engine_mod  # ANTICHEAT_OK: current-path counter
+
+    counts = {
+        "stage0_match": 0,
+        "apply_projection_trusted": 0,
+        "step_kernel_trusted": 0,
+        "engine_step_trusted": 0,
+    }
+    original_stage0_match = eval_mod._stage0_match  # ANTICHEAT_OK: current-path counter
+    original_apply = eval_mod._apply_projection_trusted  # ANTICHEAT_OK: current-path counter
+    original_step = _step_trusted  # ANTICHEAT_OK: current-path counter
+
+    def _counting_stage0_match(*args, **kwargs):
+        counts["stage0_match"] += 1
+        return original_stage0_match(*args, **kwargs)
+
+    def _counting_apply(proj, value):
+        counts["apply_projection_trusted"] += 1
+        return original_apply(proj, value)
+
+    def _counting_step_kernel_trusted(projs, value):
+        counts["step_kernel_trusted"] += 1
+        return original_step(projs, value)
+
+    def _counting_engine_step_trusted(projs, value):
+        counts["engine_step_trusted"] += 1
+        return original_step(projs, value)
+
+    monkeypatch.setattr(eval_mod, "_stage0_match", _counting_stage0_match)
+    monkeypatch.setattr(eval_mod, "_apply_projection_trusted", _counting_apply)
+    monkeypatch.setattr(eval_mod, "_step_trusted", _counting_step_kernel_trusted)
+    monkeypatch.setattr(step_mod, "_step_trusted", _counting_step_kernel_trusted)
+    monkeypatch.setattr(engine_mod, "_step_trusted", _counting_engine_step_trusted)
+    return counts
+
+
 class TestCutoverTruePath:
     """S1-A D2: Prove _STAGE0_VM_CUTOVER=True branch works correctly.
 
@@ -388,6 +427,50 @@ class TestCutoverIntegration:
         ]
         result = run_algorithm_meta_circular(projs, "a")
         assert result == "b"
+
+    def test_stage0_marker_truth_current_paths(self, cutover_mode, monkeypatch):
+        """Current-path proof for host Stage0 marker truth after VM cutover."""
+        counts = _patch_stage0_current_path_counters(monkeypatch, cutover_mode)
+
+        step_result = step_kernel_mu(
+            [{"id": "test.marker_truth", "pattern": "a", "body": "b"}],
+            "a",
+        )
+
+        assert step_result == "b"
+        assert counts["step_kernel_trusted"] == 0, (
+            "step_kernel_mu cutover must not call _step_trusted"
+        )
+        assert counts["apply_projection_trusted"] == 0, (
+            "step_kernel_mu cutover must not call _apply_projection_trusted"
+        )
+        assert counts["stage0_match"] == 0, (
+            "step_kernel_mu cutover must not call host _stage0_match"
+        )
+
+        engine_result = run_engine_pipeline(
+            [
+                {"id": "c.ab", "pattern": {"state": "A"}, "body": {"state": "B"}},
+                {"id": "c.ba", "pattern": {"state": "B"}, "body": {"state": "A"}},
+            ],
+            {"state": "A"},
+            max_steps=10,
+            max_engine_iterations=20,
+            max_algorithm_iterations=50,
+        )
+
+        assert isinstance(engine_result, dict), (
+            f"Expected dict engine terminal result, got {type(engine_result).__name__}"
+        )
+        assert counts["engine_step_trusted"] > 0, (
+            "run_engine_pipeline must still reach _step_trusted on the engine path"
+        )
+        assert counts["apply_projection_trusted"] > 0, (
+            "run_engine_pipeline must still reach _apply_projection_trusted through _step_trusted"
+        )
+        assert counts["stage0_match"] > 0, (
+            "run_engine_pipeline must still reach host _stage0_match through _step_trusted"
+        )
 
     def test_no_monolithic_host_path(self, cutover_mode, monkeypatch):
         """Prove monolithic host path (_step_trusted) does NOT fire when cutover=True.

@@ -274,9 +274,10 @@ def get_var_name(mu: Mu) -> str:
     return name
 
 
-# BOUNDARY: match() is OFF the kernel execution path since Stage 0 became default (Wave H).
-# Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted → stage0 match.
-# match() is only called by the public API (match_mu → apply_mu), not by the kernel.
+# BOUNDARY: match() is OFF the step_kernel_mu VM cutover path and the
+# engine/bootstrap trusted-helper path.
+# Trusted helper path: _step_trusted → _apply_projection_trusted → _stage0_match.
+# match() is only called by the public API (match_mu → apply_mu), not by either path.
 # Reclassified P7W4: was @host_recursion + @host_builtin, now BOUNDARY.
 def match(pattern: Mu, input_value: Mu) -> dict[str, Mu] | _NoMatch:
     """
@@ -514,16 +515,17 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
 # structural host traversal. Markers added Wave H (2026-03-11).
 # ---------------------------------------------------------------------------
 
-# Stage 0 is the sole production path since Wave H (2026-03-11).
-# 90 gate tests proved ON/OFF parity. Flag removed Wave 4 (2026-03-12):
-# _stage0_match/_stage0_substitute are now called directly in _apply_projection_trusted
-# (no conditional routing). Legacy _match_inner/substitute paths remain available for
-# direct unit testing and parity regression tests.
+# Stage 0 host helpers remain the engine/bootstrap trusted-helper path.
+# The current step_kernel_mu cutover routes through _step_kernel_with_vm /
+# Stage0 VM instead of _stage0_match/_stage0_substitute. Flag removed Wave 4
+# (2026-03-12): _apply_projection_trusted calls these helpers directly on its
+# compatibility path, with no conditional routing. Legacy _match_inner/substitute
+# paths remain available for direct unit testing and parity regression tests.
 
 
 @host_builtin(
     "Stage 0 micro-match still depends on host type/key primitives while "
-    "dict traversal is explicit worklist structure. Sole production path "
+    "dict traversal is explicit worklist structure. Sole production path "  # Historical marker metadata; current path split is documented above.
     "(flag removed Wave 4). Tracked separately from match() for ratchet accuracy."
 )
 def _stage0_match(pattern, input_value, bindings=None, _depth=0):
@@ -635,9 +637,10 @@ def _stage0_substitute(body, bindings, _depth=0):
     return values[-1]
 
 
-# BOUNDARY: substitute() is OFF the kernel execution path since Stage 0 became default (Wave H).
-# Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted → stage0 substitute.
-# substitute() is only called by the public API (subst_mu → apply_mu), not by the kernel.
+# BOUNDARY: substitute() is OFF the step_kernel_mu VM cutover path and the
+# engine/bootstrap trusted-helper path.
+# Trusted helper path: _step_trusted → _apply_projection_trusted → _stage0_substitute.
+# substitute() is only called by the public API (subst_mu → apply_mu), not by either path.
 # Reclassified P7W4: was @host_recursion, now BOUNDARY.
 def substitute(body: Mu, bindings: dict[str, Mu], *, _depth: int = 0,
                _budget: object = _NO_BUDGET) -> Mu:
@@ -838,11 +841,12 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
 
     Skips assert_mu on input_value (caller already validated at boundary).
     Still validates projection structure (dict with pattern/body keys).
-    Uses _stage0_match + _stage0_substitute directly (sole production path
-    since Wave 4, 2026-03-12).
+    Uses _stage0_match + _stage0_substitute directly on the engine/bootstrap
+    trusted-helper path. The current step_kernel_mu cutover path uses
+    _step_kernel_with_vm / Stage0 VM instead.
 
     ONLY for use by kernel loops that have already validated at the boundary.
-    Callers: _step_trusted, _step_kernel_with_vm.
+    Callers: _step_trusted and direct trusted-helper tests.
 
     Host debt (isinstance) tracked on _stage0_match's @host_builtin decorator.
 
@@ -866,7 +870,7 @@ def _apply_projection_trusted(projection: Mu, input_value: Mu) -> Mu | _NoMatch:
 
     # Deliberate double-match: first match selects projection (in _step_trusted loop),
     # second match here in apply verifies and extracts bindings for substitution.
-    # Stage 0 production path (sole path since Wave 4, 2026-03-12)
+    # Engine/bootstrap trusted-helper path; step_kernel_mu cutover uses Stage0 VM.
     bindings = _stage0_match(pattern, input_value)
 
     if bindings is NO_MATCH:
@@ -886,7 +890,9 @@ def _step_trusted(projections: list[Mu], input_value: Mu) -> Mu:
     """Internal: step without validating input_value.
 
     ONLY for use by kernel loops that have already validated at the boundary.
-    Callers: step_kernel_mu, run_engine_pipeline.
+    Callers: run_engine_pipeline, step_algorithm_with_bridge, and the
+    non-cutover compatibility branch in step_kernel_mu. The current default
+    step_kernel_mu cutover bypasses this helper via _step_kernel_with_vm.
 
     Host debt (isinstance for coverage ID, for-loop) tracked on the
     host_builtin decorator on match(). For-loop is bootstrap primitive (not debt).
