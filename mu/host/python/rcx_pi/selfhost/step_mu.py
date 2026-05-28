@@ -2836,26 +2836,14 @@ def run_mu_structural(
     try:
         for i in range(max_steps):
             # Gate 5 parity: run the same bridge-backed kernel path as production.
-            # BOUNDARY: trace runner drives explicit kernel continuation values.
-            packet = step_kernel_mu(
+            # BOUNDARY: public driver owns self-returned continuation values.
+            meta = step_kernel_mu(
                 projections,
                 current,
                 kernel_mode=kernel_mode,
                 validation_mode=validation_mode,
                 return_meta=True,
-                return_packet=True,
             )
-            while packet["kind"] == "continuation":
-                packet = step_kernel_mu(
-                    projections,
-                    current,
-                    kernel_mode=kernel_mode,
-                    validation_mode=validation_mode,
-                    return_meta=True,
-                    continuation_state=packet["continuation"],
-                    return_packet=True,
-                )
-            meta = packet["result"]
             result = meta["output"]
             # Resolve matched projection ID: use Stage 0 match (proven equivalent
             # to match.v2 by 33 parity tests in test_self_hosting_v0.py).
