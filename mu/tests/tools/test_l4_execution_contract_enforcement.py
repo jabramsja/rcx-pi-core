@@ -43,6 +43,7 @@ from enforce_l4_execution_contract import (
     enforce,
     extract_touched_tracker_wave_ids,
     filter_to_tracked_files,
+    has_ambiguous_touched_structural_runtime_binding,
     validate_indicator_artifact_json,
     validate_indicator_with_ratchet,
     has_non_comment_runtime_delta,
@@ -1258,6 +1259,41 @@ class TestWaveBinding:
         assert bound is not None
         assert bound["wave_id"] == "current-wave"
 
+    def test_bind_note_from_touched_wave_ids_prefers_single_structural_runtime_scope(self) -> None:
+        notes = [
+            {"wave_id": "recovery-wave", "wave_class": "L4_ENABLER"},
+            {"wave_id": "structural-wave", "wave_class": "L4_STRUCTURAL"},
+        ]
+
+        bound = bind_note_from_touched_wave_ids(
+            notes,
+            ["structural-wave", "recovery-wave"],
+            ["mu/host/js/core/stage0_vm.js", "mu/tools/executors/recovery_gate.py"],
+        )
+
+        assert bound is not None
+        assert bound["wave_id"] == "structural-wave"
+
+    def test_bind_note_from_touched_wave_ids_rejects_multiple_structural_runtime_scope(self) -> None:
+        notes = [
+            {"wave_id": "second-structural", "wave_class": "L4_STRUCTURAL"},
+            {"wave_id": "first-structural", "wave_class": "L4_STRUCTURAL"},
+        ]
+
+        changed_files = ["mu/host/js/core/stage0_vm.js"]
+        bound = bind_note_from_touched_wave_ids(
+            notes,
+            ["first-structural", "second-structural"],
+            changed_files,
+        )
+
+        assert bound is None
+        assert has_ambiguous_touched_structural_runtime_binding(
+            notes,
+            ["first-structural", "second-structural"],
+            changed_files,
+        )
+
     def test_bind_note_from_changed_indicator_artifacts_matches_exact_ref(self) -> None:
         notes = [
             {
@@ -1405,6 +1441,119 @@ def _init_staged_l4_checker_repo(tmp_path: Path, wave_id: str) -> Path:
 
 class TestStagedIndicatorBinding:
     """Canonical --staged binding must not require TASKS.md to be staged."""
+
+    def test_runtime_range_with_followup_enabler_binds_structural_note(self, tmp_path: Path) -> None:
+        structural_wave = "structural-runtime-wave"
+        recovery_wave = "recovery-enabler-wave"
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "tools" / "checks").mkdir(parents=True)
+        (repo / "tools" / "checks" / "enforce_l4_execution_contract.py").write_text(
+            (REPO_ROOT / "tools" / "checks" / "enforce_l4_execution_contract.py").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        _write_fake_l4_ratchet(repo)
+
+        (repo / "mu" / "host" / "js" / "core").mkdir(parents=True)
+        (repo / "mu" / "host" / "js" / "core" / "stage0_vm.js").write_text(
+            "export function stage0VmStep(bundle) {\n"
+            "  return bundle;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (repo / "mu" / "tests" / "l4_gates").mkdir(parents=True)
+        (repo / "mu" / "tests" / "l4_gates" / "test_stage0_vm_trusted_path_gate.py").write_text(
+            "def test_baseline():\n"
+            "    assert True\n",
+            encoding="utf-8",
+        )
+        (repo / "mu" / "tools" / "executors").mkdir(parents=True)
+        (repo / "mu" / "tools" / "executors" / "recovery_gate.py").write_text(
+            "# baseline\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text("## Ra\n\n", encoding="utf-8")
+
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True, text=True)
+
+        (repo / "mu" / "host" / "js" / "core" / "stage0_vm.js").write_text(
+            "export function stage0VmStep(bundle) {\n"
+            "  const trustedBundle = bundle;\n"
+            "  return trustedBundle;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (repo / "mu" / "tests" / "l4_gates" / "test_stage0_vm_trusted_path_gate.py").write_text(
+            "def test_baseline():\n"
+            "    assert True\n\n"
+            "def test_trusted_path():\n"
+            "    assert True\n",
+            encoding="utf-8",
+        )
+        (repo / "mu" / "tools" / "executors" / "recovery_gate.py").write_text(
+            "# same-range recovery classifier update\n",
+            encoding="utf-8",
+        )
+        _write_l4_indicator(repo, structural_wave)
+        _write_l4_indicator(repo, recovery_wave)
+        (repo / "TASKS.md").write_text(
+            "## Ra\n\n"
+            f"- Tracker sync note (2026-05-29, {structural_wave}): **STRUCTURAL.** "
+            "Class: L4_STRUCTURAL. target_gate_id: G8. workload_target: host_debt_reduction. "
+            "host_semantics_delta_before: baseline host semantics ratchet showed no new bootstrap host debt before runtime binding. "
+            "host_semantics_delta_after: current host semantics ratchet remains equal after runtime binding. "
+            "structural_artifact_ref: mu/host/js/core/stage0_vm.js; mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py. "
+            "evidence_command: PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py --tb=short. "
+            "evidence_delta: executable runtime trusted path is covered by the changed L4 gate. "
+            "progress_proof_before: dev push mixed ranges were evaluated through the later recovery tracker note. "
+            "progress_proof_after: dev push mixed ranges bind to the runtime structural tracker note. "
+            "post_gate_contract_sweep: PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_l4_execution_contract_enforcement.py --tb=short. "
+            "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{structural_wave}.json. "
+            f"indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id {structural_wave} --output reports/l4_wave_indicators/{structural_wave}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            f"- Tracker sync note (2026-05-29, {recovery_wave}): **RECOVERY.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "no_op_proof: recovery classifier files are control-plane only and do not carry executable runtime edits. "
+            "evidence_command: PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_l4_execution_contract_enforcement.py --tb=short. "
+            "evidence_delta: recovery classifier tracker note is in the same range after the structural wave. "
+            "progress_proof_before: recovery classifier handoff was not range-bound in post-merge dev push checks. "
+            "progress_proof_after: recovery classifier handoff remains present without stealing runtime range ownership. "
+            "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{recovery_wave}.json. "
+            f"indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id {recovery_wave} --output reports/l4_wave_indicators/{recovery_wave}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD. "
+            f"FOUNDER_OVERRIDE:{recovery_wave}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "mixed structural and recovery range"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "tools/checks/enforce_l4_execution_contract.py",
+                "--range",
+                "HEAD~1...HEAD",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Wave class: L4_STRUCTURAL" in result.stdout
+        assert "L4 Execution Contract v2: L4_STRUCTURAL compliant" in result.stdout
 
     def test_staged_control_plane_with_changed_indicator_binds_tracker_note(self, tmp_path: Path) -> None:
         wave_id = "current-control-plane-wave"

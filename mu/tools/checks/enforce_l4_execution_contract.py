@@ -1094,22 +1094,47 @@ def extract_touched_tracker_wave_ids(tasks_diff: str) -> list[str]:
 def bind_note_from_touched_wave_ids(
     notes: list[dict[str, str | None]],
     touched_wave_ids: list[str],
+    changed_files: list[str] | None = None,
 ) -> dict[str, str | None] | None:
-    """Return the most recent touched tracker note from TASKS diff wave_ids."""
+    """Return the scope-bound touched tracker note from TASKS diff wave_ids."""
     if not touched_wave_ids:
         return None
-    touched = set(touched_wave_ids)
-    selected_wave_id = None
-    for wave_id in reversed(touched_wave_ids):
-        if wave_id in touched:
-            selected_wave_id = wave_id
-            break
-    if selected_wave_id is None:
-        return None
+
+    runtime_scope = any(is_runtime_file(path) for path in (changed_files or []))
+    if runtime_scope:
+        structural_notes = []
+        for wave_id in touched_wave_ids:
+            for note in notes:
+                if note["wave_id"] == wave_id and note.get("wave_class") == "L4_STRUCTURAL":
+                    structural_notes.append(note)
+                    break
+        if len(structural_notes) == 1:
+            return structural_notes[0]
+        if len(structural_notes) > 1:
+            return None
+
+    selected_wave_id = touched_wave_ids[-1]
     for note in notes:
         if note["wave_id"] == selected_wave_id:
             return note
     return None
+
+
+def has_ambiguous_touched_structural_runtime_binding(
+    notes: list[dict[str, str | None]],
+    touched_wave_ids: list[str],
+    changed_files: list[str],
+) -> bool:
+    """Return true when a runtime range touches more than one STRUCTURAL note."""
+    if not any(is_runtime_file(path) for path in changed_files):
+        return False
+    structural_count = 0
+    for wave_id in touched_wave_ids:
+        for note in notes:
+            if note["wave_id"] == wave_id and note.get("wave_class") == "L4_STRUCTURAL":
+                structural_count += 1
+                break
+    return structural_count > 1
 
 
 def bind_note_from_changed_indicator_artifacts(
@@ -2286,6 +2311,7 @@ def main() -> int:
     # Planning commits that add NEXT/VECTOR items without tracker notes must
     # not inherit the latest wave's class — that causes false positives.
     tracker_note_touched = False
+    binding_errors: list[str] = []
     touched_wave_ids: list[str] = []
     if "TASKS.md" in changed_files:
         # Scope check to TASKS.md diff only — the full diff_text includes all
@@ -2309,9 +2335,20 @@ def main() -> int:
         touched_wave_ids = extract_touched_tracker_wave_ids(tasks_diff)
         tracker_note_touched = bool(touched_wave_ids)
         if not bound_note and touched_wave_ids:
-            bound_note = bind_note_from_touched_wave_ids(all_notes, touched_wave_ids)
+            bound_note = bind_note_from_touched_wave_ids(
+                all_notes, touched_wave_ids, changed_files,
+            )
             if bound_note:
                 notes = [bound_note] + [n for n in all_notes if n["wave_id"] != bound_note["wave_id"]]
+            elif has_ambiguous_touched_structural_runtime_binding(
+                all_notes, touched_wave_ids, changed_files,
+            ):
+                notes = None
+                tracker_note_touched = False
+                binding_errors.append(
+                    "Ambiguous runtime range touches multiple L4_STRUCTURAL tracker notes. "
+                    "Pass --wave-id to bind the intended structural wave."
+                )
     wave_class = args.wave_class
     if not wave_class and notes and (bound_note or tracker_note_touched):
         wave_class = notes[0]["wave_class"] if notes else None
@@ -2362,6 +2399,9 @@ def main() -> int:
         wave_class, changed_files, diff_text, notes,
         old_ref=old_ref, override_wave_bound=override_wave_bound,
     )
+    if binding_errors:
+        passed = False
+        errors = binding_errors + errors
 
     # Indicator artifact file-level validation (CLI only)
     # Only validate when wave_class is active (skip for non-wave PRs)
