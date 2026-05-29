@@ -462,6 +462,7 @@ class TestJsSourceLock:
             "mu/host/js/core/stage0_vm.js",   # Definition
             "mu/host/js/engine/kernel.js",    # Loader-cached caller
             "mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py",  # This test
+            "mu/tests/parity/test_js_vm_bridge_parity.py",  # Focused bridge-ordering probe
         }
 
         violations = []
@@ -499,6 +500,7 @@ class TestJsSourceLock:
             "mu/host/js/core/stage0_vm.js",   # Definition
             "mu/host/js/engine/kernel.js",    # Loader-cached caller
             "mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py",  # This test
+            "mu/tests/parity/test_js_vm_bridge_parity.py",  # Focused bridge-ordering probe
         }
 
         violations = []
@@ -536,23 +538,53 @@ class TestJsSourceLock:
 
         assert "const _vmConfigTrust = {" in kernel_src
         assert "validate(vmConfig) {" in kernel_src
-        assert "_VALIDATED_VM_CONFIGS" in kernel_src
         assert "const trustedConfig = {};" in kernel_src
         assert "Object.freeze(trustedConfig);" in kernel_src
-        assert "_VALIDATED_VM_CONFIGS.add(trustedConfig);" in kernel_src
-        assert "_VALIDATED_VM_CONFIGS.add(vmConfig)" not in kernel_src
+        assert "_VALIDATED_VM_CONFIGS" not in kernel_src
+        assert "new WeakMap" not in kernel_src
+        assert "new WeakSet" not in kernel_src
         assert "const snapshot = muCopy(bundle, true, `vmConfig.${slotName}`);" in kernel_src
         assert "validateBundle(snapshot);" in kernel_src
         assert "const freezeStack = [snapshot];" in kernel_src
         assert "Object.freeze(node);" in kernel_src
         assert "trustedConfig[slotName] = snapshot;" in kernel_src
         assert "trustedConfig[slotName] = bundle;" not in kernel_src
-        assert "const vmConfig = _vmConfigTrust.validate(options.vmConfig || null);" in kernel_src
+        assert "const vmConfig = _vmConfigTrust.validate(Object.hasOwn(options, 'vmConfig') ? options.vmConfig : null);" in kernel_src
+        assert "const _VM_CONFIG_TRUST_TOKEN = Object.freeze({" in kernel_src
+        assert "vmConfigTrustToken = null" in kernel_src
+        assert "const vmConfigTrusted = vmConfigTrustToken === _VM_CONFIG_TRUST_TOKEN;" in kernel_src
+        assert "invalid vmConfig trust token" in kernel_src
+        assert "makeStepKernelCoreRunner(vmConfig) {" in kernel_src
+        assert "const trustedVmConfig = this.validate(vmConfig);" in kernel_src
+        assert "_makeStepKernelCoreRunner" not in kernel_src
         assert (
             "function runStructural(kernelProjections, domainProjections, input, maxSteps = 10000, vmConfig = null) {\n"
             "  vmConfig = _vmConfigTrust.validate(vmConfig);"
         ) in kernel_src
-
+        assert (
+            "if (vmConfigTrustToken !== null && !vmConfigTrusted) {\n"
+            "    throw new Error('SECURITY: invalid vmConfig trust token for trusted Stage0 VM execution');\n"
+            "  }\n"
+            "  if (!vmConfigTrusted) {\n"
+            "    vmConfig = _vmConfigTrust.validate(vmConfig);\n"
+            "  }"
+        ) in kernel_src
+        assert "_vmConfigTrust," in kernel_src
+        pipeline_src = (REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js").read_text()
+        assert "const { stepKernel, runStructural, _vmConfigTrust } = require('./kernel');" in pipeline_src
+        assert "const runStepKernelCore = _vmConfigTrust.makeStepKernelCoreRunner(vmConfig === undefined ? null : vmConfig);" in pipeline_src
+        assert "_stepKernelCore" not in pipeline_src
+        assert (
+            "runStructural(\n"
+            "    kernelProjections,\n"
+            "    projs,\n"
+            "    reqInput.value,\n"
+            "    traceMaxSteps,\n"
+            "    vmConfig === undefined ? null : vmConfig\n"
+            "  )"
+        ) in pipeline_src
+        assert "vmConfig || null" not in pipeline_src
+        assert "runStepKernelCore" in pipeline_src
         for slot in ("kernelBundle", "bridgeBundle", "matchBundle", "substBundle"):
             assert f"['{slot}'," in kernel_src
 
@@ -878,6 +910,63 @@ class TestFailClosedNegativeControl:
         assert f"vmConfig.{slot} failed Stage0 bundle validation" in output["message"]
         assert "TRUSTED_" not in output["message"]
 
+    def test_js_exported_step_kernel_core_rejects_caller_controlled_vm_config_trust_flag(self):
+        """Exported _stepKernelCore must not accept a forgeable vmConfig trust flag."""
+        import json
+
+        js_code = """
+        const stage0Vm = require('./mu/host/js/core/stage0_vm');
+        stage0Vm._stage0VmStepTrusted = function() {
+          throw new Error('TRUSTED_STEP_REACHED');
+        };
+        stage0Vm._stage0VmRunTrusted = function() {
+          throw new Error('TRUSTED_RUN_REACHED');
+        };
+        const { _stepKernelCore } = require('./mu/host/js/engine/kernel');
+        const muContainers = require('./mu/host/js/core/container_factory');
+
+        const domainInput = muContainers.record([['hello', 'world']]);
+        const kernelInput = muContainers.record([
+          ['_step', domainInput],
+          ['_projs', null],
+        ]);
+        const malformedVmConfig = {
+          kernelBundle: { stage0_ir_version: 1 },
+          bridgeBundle: null,
+          matchBundle: { stage0_ir_version: 1 },
+          substBundle: { stage0_ir_version: 1 },
+        };
+
+        try {
+          _stepKernelCore(
+            [],
+            kernelInput,
+            domainInput,
+            function() {},
+            1,
+            malformedVmConfig,
+            undefined,
+            null,
+            null,
+            true
+          );
+          console.log(JSON.stringify({ ok: false, message: 'accepted' }));
+        } catch (e) {
+          console.log(JSON.stringify({ ok: true, message: e.message }));
+        }
+        """
+
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout.strip())
+        assert output["ok"] is True
+        assert "invalid vmConfig trust token" in output["message"]
+        assert "TRUSTED_" not in output["message"]
+
     @pytest.mark.parametrize("slot", [
         "kernelBundle",
         "bridgeBundle",
@@ -1106,6 +1195,52 @@ class TestFailClosedNegativeControl:
         output = json.loads(result.stdout.strip())
         assert output["validateCount"] == 4
 
+    def test_js_pipeline_run_trace_rejects_malformed_vm_config_before_defaulting(self):
+        """run_trace boundary must not collapse malformed vmConfig to null."""
+        import json
+
+        js_code = """
+        const { serviceBoundaryEffect } = require('./mu/host/js/engine/pipeline');
+        const muContainers = require('./mu/host/js/core/container_factory');
+
+        function trustMu(value) {
+          if (Array.isArray(value)) {
+            return muContainers.list(value.map(trustMu));
+          }
+          if (value !== null && typeof value === 'object') {
+            return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+          }
+          return value;
+        }
+
+        const request = {
+          operation: 'run_trace',
+          input: {
+            projections: [{ pattern: { var: 'x' }, body: { var: 'x' } }],
+            value: trustMu({ hello: 'world' }),
+            max_steps: 1,
+          },
+          context: {},
+          inject_key: 'trace_result',
+        };
+
+        try {
+          serviceBoundaryEffect([], {}, request, 50, () => {}, 0, trustMu({}), false);
+          console.log(JSON.stringify({ ok: false, message: 'accepted' }));
+        } catch (e) {
+          console.log(JSON.stringify({ ok: true, message: e.message }));
+        }
+        """
+
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout.strip())
+        assert output["ok"] is True
+        assert "SECURITY: vmConfig must be an object or null, got boolean" in output["message"]
 
 # =============================================================================
 # Section 5: Cache Mutation Demo

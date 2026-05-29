@@ -20,13 +20,15 @@ const { validateBundle, _stage0VmStepTrusted, _stage0VmRunTrusted, muDeepEqual, 
 // Founder GO 2026-03-15: VM path is now primary for match.v2/subst.v2
 const _STAGE0_VM_CUTOVER = true;
 let _STAGE0_SHADOW_ENABLED = false; // Shadow disabled (cutover=true makes shadow dead code)
-const _VALIDATED_VM_CONFIGS = new WeakSet();
 const _VM_CONFIG_BUNDLE_SLOTS = Object.freeze([
   ['kernelBundle', true],
   ['bridgeBundle', false],
   ['matchBundle', true],
   ['substBundle', true],
 ]);
+const _VM_CONFIG_TRUST_TOKEN = Object.freeze({
+  tag: 'validated_vm_config_trust_token',
+});
 
 const _vmConfigTrust = {
   validate(vmConfig) {
@@ -37,9 +39,6 @@ const _vmConfigTrust = {
       throw new Error(
         `SECURITY: vmConfig must be an object or null, got ${vmConfig === null ? 'null' : Array.isArray(vmConfig) ? 'array' : typeof vmConfig}`
       );
-    }
-    if (_VALIDATED_VM_CONFIGS.has(vmConfig)) {
-      return vmConfig;
     }
     const trustedConfig = {};
     for (const [slotName, required] of _VM_CONFIG_BUNDLE_SLOTS) {
@@ -76,8 +75,33 @@ const _vmConfigTrust = {
       }
     }
     Object.freeze(trustedConfig);
-    _VALIDATED_VM_CONFIGS.add(trustedConfig);
     return trustedConfig;
+  },
+  makeStepKernelCoreRunner(vmConfig) {
+    const trustedVmConfig = this.validate(vmConfig);
+    return function stepKernelCoreRunner(
+      kernelProjections,
+      kernelInput,
+      domainInput,
+      validator,
+      maxSteps,
+      kernelFuel = undefined,
+      continuationState = null,
+      continuationProof = null
+    ) {
+      return _stepKernelCore(
+        kernelProjections,
+        kernelInput,
+        domainInput,
+        validator,
+        maxSteps,
+        trustedVmConfig,
+        kernelFuel,
+        continuationState,
+        continuationProof,
+        _VM_CONFIG_TRUST_TOKEN
+      );
+    };
   },
 };
 
@@ -162,8 +186,14 @@ const KERNEL_CONTINUATION_PROOF_TOKEN = Object.freeze({
  *
  * @host_iteration — single-step host transition marker retained until ratchet baseline update.
  */
-function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined, continuationState = null, continuationProof = null) {
-  vmConfig = _vmConfigTrust.validate(vmConfig);
+function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined, continuationState = null, continuationProof = null, vmConfigTrustToken = null) {
+  const vmConfigTrusted = vmConfigTrustToken === _VM_CONFIG_TRUST_TOKEN;
+  if (vmConfigTrustToken !== null && !vmConfigTrusted) {
+    throw new Error('SECURITY: invalid vmConfig trust token for trusted Stage0 VM execution');
+  }
+  if (!vmConfigTrusted) {
+    vmConfig = _vmConfigTrust.validate(vmConfig);
+  }
   if (typeof maxSteps !== 'number' || !Number.isFinite(maxSteps) || !Number.isInteger(maxSteps)) {
     throw new RcxError(
       'api.bad_request',
@@ -2263,7 +2293,7 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   ]);
 
   // P7-d: Accept custom vmConfig only after one-time bundle validation.
-  const vmConfig = _vmConfigTrust.validate(options.vmConfig || null);
+  const vmConfig = _vmConfigTrust.validate(Object.hasOwn(options, 'vmConfig') ? options.vmConfig : null);
 
   let packet = _stepKernelCore(
     projections,
@@ -2273,7 +2303,9 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     maxSteps,
     vmConfig,
     hasKernelFuel ? kernelFuel : undefined,
-    continuationState
+    continuationState,
+    null,
+    _VM_CONFIG_TRUST_TOKEN
   );
   if (returnPacket) {
     return {
@@ -2294,7 +2326,8 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
       vmConfig,
       undefined,
       packet.continuation,
-      packet.continuationProof
+      packet.continuationProof,
+      _VM_CONFIG_TRUST_TOKEN
     );
   }
   const canonical = packet.result;
@@ -2374,7 +2407,7 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
       ['_projs', linkedProjs],
     ]);
     // BOUNDARY: trace runner drives explicit kernel continuation values.
-    let packet = _stepKernelCore(kernelProjections, kernelInput, current, validator, 10000, vmConfig);
+    let packet = _stepKernelCore(kernelProjections, kernelInput, current, validator, 10000, vmConfig, undefined, null, null, _VM_CONFIG_TRUST_TOKEN);
     while (packet.kind === 'continuation') {
       packet = _stepKernelCore(
         kernelProjections,
@@ -2384,7 +2417,9 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
         10000,
         vmConfig,
         undefined,
-        packet.continuation
+        packet.continuation,
+        packet.continuationProof,
+        _VM_CONFIG_TRUST_TOKEN
       );
     }
     const meta = packet.result;
@@ -2465,6 +2500,7 @@ module.exports = {
   stepKernelStructural,
   // Internal: exported for pipeline.js canonical kernel step
   _stepKernelCore,
+  _vmConfigTrust,
   // P7-d: exported for shadow mode control and testing
   _stepKernelWithVM,
   get _STAGE0_SHADOW_ENABLED() { return _STAGE0_SHADOW_ENABLED; },

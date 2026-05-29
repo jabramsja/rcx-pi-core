@@ -211,15 +211,16 @@ const path = require('path');
 const vm = require('vm');
 
 const repoRoot = process.cwd();
-const { validateBundle, muCopy } = require('./mu/host/js/core/stage0_vm');
+const stage0Vm = require('./mu/host/js/core/stage0_vm');
+const { validateBundle, muCopy } = stage0Vm;
+const originalStage0VmStepTrusted = stage0Vm._stage0VmStepTrusted;
+const originalStage0VmRunTrusted = stage0Vm._stage0VmRunTrusted;
 const MAX_STEPS = 80;
 const vmStepCallLog = [];
 const vmAccessLog = [];
 const activeCallsByBundleId = new Map();
 let traceEnabled = false;
 let nextVmCallIndex = 0;
-
-const { stepKernel } = require('./mu/host/js/engine/kernel');
 
 function traceEvent(event) {
   if (traceEnabled) {
@@ -263,92 +264,41 @@ function finishBundleCall(call, status, eventName) {
   });
 }
 
-function instrumentProgramOrder(bundle, order, call) {
-  return new Proxy(order, {
-    get(target, prop, receiver) {
-      if (prop !== Symbol.iterator) {
-        return Reflect.get(target, prop, receiver);
-      }
-      return function tracedProgramOrderIterator() {
-        traceEvent({
-          event: 'bundle.program_order.iterate',
-          call_index: call.call_index,
-          bundle_id: bundle.bundle_id,
-          bundle: call.bundle,
-        });
-        let index = 0;
-        let closed = false;
-        const iterator = {
-          next() {
-            if (index < target.length) {
-              return { value: target[index++], done: false };
-            }
-            if (!closed) {
-              closed = true;
-              finishBundleCall(call, 'stall', 'bundle.program_order.exhausted');
-            }
-            return { value: undefined, done: true };
-          },
-          return() {
-            if (!closed) {
-              closed = true;
-              finishBundleCall(call, 'match', 'bundle.program_order.closed');
-            }
-            return { done: true };
-          },
-          [Symbol.iterator]() {
-            return this;
-          },
-        };
-        return iterator;
-      };
-    },
-  });
+function recordTrustedVmCall(bundle, status, eventName) {
+  if (!traceEnabled) return;
+  const call = startBundleCall(bundle);
+  finishBundleCall(call, status, eventName);
 }
 
-function instrumentBundle(rawBundle) {
-  const bundle = {};
-  for (const [key, value] of Object.entries(rawBundle)) {
-    if (key !== 'programs' && key !== 'program_order') {
-      bundle[key] = value;
+stage0Vm._stage0VmStepTrusted = function tracedStage0VmStepTrusted(bundle, inputValue, maxOps) {
+  const result = maxOps === undefined
+    ? originalStage0VmStepTrusted(bundle, inputValue)
+    : originalStage0VmStepTrusted(bundle, inputValue, maxOps);
+  recordTrustedVmCall(bundle, result.status, 'trusted.step.complete');
+  return result;
+};
+
+stage0Vm._stage0VmRunTrusted = function tracedStage0VmRunTrusted(bundle, inputValue, maxSteps, maxOps) {
+  const result = maxOps === undefined
+    ? originalStage0VmRunTrusted(bundle, inputValue, maxSteps)
+    : originalStage0VmRunTrusted(bundle, inputValue, maxSteps, maxOps);
+  if (traceEnabled) {
+    for (const _step of result.steps) {
+      recordTrustedVmCall(bundle, 'match', 'trusted.run.step');
     }
+    recordTrustedVmCall(bundle, 'stall', 'trusted.run.complete');
   }
-  Object.defineProperty(bundle, 'programs', {
-    enumerable: true,
-    configurable: false,
-    get() {
-      if (traceEnabled) {
-        startBundleCall(bundle);
-      }
-      return rawBundle.programs;
-    },
-  });
-  Object.defineProperty(bundle, 'program_order', {
-    enumerable: true,
-    configurable: false,
-    get() {
-      if (!traceEnabled) {
-        return rawBundle.program_order;
-      }
-      const call = activeBundleCall(bundle);
-      traceEvent({
-        event: 'bundle.program_order',
-        call_index: call.call_index,
-        bundle_id: bundle.bundle_id,
-        bundle: call.bundle,
-      });
-      return instrumentProgramOrder(bundle, rawBundle.program_order, call);
-    },
-  });
-  return bundle;
-}
+  return result;
+};
 
 function loadBundle(relPath) {
   const bundlePath = path.join(repoRoot, relPath);
   const rawBundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
   validateBundle(rawBundle);
-  return instrumentBundle(rawBundle);
+  return rawBundle;
 }
+
+const { stepKernel } = require('./mu/host/js/engine/kernel');
 
 function readConstInitializer(source, constName) {
   const needle = `const ${constName} =`;
