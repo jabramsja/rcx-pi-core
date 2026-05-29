@@ -207,6 +207,36 @@ class TestScanIntegration:
         violations = checker.scan(tmp_path)
         assert violations == []
 
+    def test_scan_files_ignores_unselected_dirty_tests(self, tmp_path):
+        tests_dir = tmp_path / "mu" / "tests" / "tools"
+        tests_dir.mkdir(parents=True)
+        (tests_dir / "test_selected_clean.py").write_text("pass\n")
+        (tests_dir / "test_unselected_dirty.py").write_text(
+            "from module import foo\nfoo._unselected_violation()\n"
+        )
+
+        violations = checker.scan_files(
+            tmp_path,
+            ["mu/tests/tools/test_selected_clean.py"],
+        )
+
+        assert violations == []
+
+    def test_scan_files_reports_selected_dirty_test(self, tmp_path):
+        tests_dir = tmp_path / "mu" / "tests" / "tools"
+        tests_dir.mkdir(parents=True)
+        (tests_dir / "test_selected_dirty.py").write_text(
+            "from module import foo\nfoo._selected_violation()\n"
+        )
+
+        violations = checker.scan_files(
+            tmp_path,
+            ["mu/tests/tools/test_selected_dirty.py"],
+        )
+
+        assert len(violations) == 1
+        assert "_selected_violation" in violations[0]
+
 
 class TestMainEntrypoint:
     def test_main_exits_0_on_clean(self, tmp_path):

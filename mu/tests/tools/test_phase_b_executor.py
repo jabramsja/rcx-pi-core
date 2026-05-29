@@ -194,6 +194,34 @@ class TestPrivateAttrGate:
         assert result["test_files"] == ["mu/tests/tools/test_phase_b_executor.py"]
         assert "ERROR: Found private attr access in tests/" in result["stdout"]
 
+    def test_private_attr_gate_scans_only_selected_wave_tests(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        checker = repo / "mu" / "tools" / "checks" / "linters" / "check_private_attr_access.py"
+        checker.parent.mkdir(parents=True)
+        checker_source = _EXECUTORS_DIR.parent / "checks" / "linters" / "check_private_attr_access.py"
+        checker.write_text(
+            checker_source.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        selected = repo / "mu" / "tests" / "l4_gates" / "test_selected_clean.py"
+        unselected = repo / "mu" / "tests" / "tools" / "test_unselected_dirty.py"
+        selected.parent.mkdir(parents=True)
+        unselected.parent.mkdir(parents=True)
+        selected.write_text("pass\n", encoding="utf-8")
+        unselected.write_text(
+            "from module import foo\nfoo._unselected_violation()\n",
+            encoding="utf-8",
+        )
+
+        result = pb_mod.run_private_attr_gate(
+            repo,
+            ["mu/tests/l4_gates/test_selected_clean.py"],
+        )
+
+        assert result["passed"] is True
+        assert result["test_files"] == ["mu/tests/l4_gates/test_selected_clean.py"]
+
 
 class TestPhaseBWaveClassResolution:
     def test_planning_only_structural_packet_packages_as_enabler(self):
@@ -8291,11 +8319,193 @@ class TestSdkReviewScopeSelection:
             "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
         )
 
-        assert pb_mod._parse_exact_stage_scope_files(plan) == [  # ANTICHEAT_OK: testing internal executor functions
+        assert pb_mod.parse_exact_stage_scope_files(plan) == [
             "TASKS.md",
             "reports/control_plane/plan.md",
             "reports/deferred/non_blocking/plan_bridge_nonblockers.md",
             "reports/l4_wave_indicators/plan.json",
+        ]
+
+    def test_exact_stage_scope_accepts_authorized_staged_files_refresh_block(self):
+        plan = (
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+            "## Phase B Indicator Scope Reconciliation\n\n"
+            "- Authorized staged files:\n"
+            "  - `TASKS.md`\n"
+            "  - `tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py`\n"
+            "  - `reports/control_plane/p7w5-metabolization-source-lock-repair-2026-05-28_2026-05-28.md`\n"
+            "  - `reports/l4_wave_indicators/p7w5-metabolization-source-lock-repair-2026-05-28.json`\n"
+            "- Excluded from this repair package: prior-wave control-plane edits and generated bridge nonblocker packets.\n"
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+        )
+
+        assert pb_mod.parse_exact_stage_scope_files(plan) == [
+            "TASKS.md",
+            "tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py",
+            "reports/control_plane/p7w5-metabolization-source-lock-repair-2026-05-28_2026-05-28.md",
+            "reports/l4_wave_indicators/p7w5-metabolization-source-lock-repair-2026-05-28.json",
+        ]
+
+    def test_exact_stage_scope_accepts_current_staged_files_refresh_block(self):
+        plan = (
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+            "## Phase B Indicator Scope Reconciliation\n\n"
+            "- Current staged files:\n"
+            "  - `TASKS.md`\n"
+            "  - `tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py`\n"
+            "  - `reports/control_plane/p7w5-metabolization-source-lock-repair-2026-05-28_2026-05-28.md`\n"
+            "  - `reports/l4_wave_indicators/p7w5-metabolization-source-lock-repair-2026-05-28.json`\n"
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+        )
+
+        assert pb_mod.parse_exact_stage_scope_files(plan) == [
+            "TASKS.md",
+            "tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py",
+            "reports/control_plane/p7w5-metabolization-source-lock-repair-2026-05-28_2026-05-28.md",
+            "reports/l4_wave_indicators/p7w5-metabolization-source-lock-repair-2026-05-28.json",
+        ]
+
+    def test_exact_stage_scope_ignores_prose_mentions_of_legacy_headers(self):
+        plan = (
+            "## Direct Evidence\n\n"
+            "- A prior review said `_parse_exact_stage_scope_files()` returned `[]` "
+            "because the parser matched `may stage exactly` / `authorized staged files`, "
+            "while the renderer emitted `- Current staged files:`.\n"
+            "- `mu/tools/executors/phase_b_executor.py` now parses those labels.\n\n"
+            "## Related Files\n\n"
+            "- `TASKS.md`\n"
+            "- `mu/tests/tools/test_phase_b_executor.py`\n"
+        )
+
+        assert pb_mod.parse_exact_stage_scope_files(plan) == []
+
+    def test_exact_stage_scope_prefers_allowed_write_scope_over_stale_refresh_block(self):
+        plan = (
+            "## Scope\n\n"
+            "Allowed write scope:\n\n"
+            "- `TASKS.md`\n"
+            "- `mu/tests/tools/test_phase_b_executor.py`\n"
+            "- `reports/control_plane/packet.md`\n"
+            "- `reports/l4_wave_indicators/packet.json`\n\n"
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+            "## Phase B Indicator Scope Reconciliation\n\n"
+            "- Authorized staged files:\n"
+            "  - `reports/control_plane/packet.md`\n"
+            "  - `reports/l4_wave_indicators/packet.json`\n"
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+        )
+
+        assert pb_mod.parse_exact_stage_scope_files(plan) == [
+            "TASKS.md",
+            "mu/tests/tools/test_phase_b_executor.py",
+            "reports/control_plane/packet.md",
+            "reports/l4_wave_indicators/packet.json",
+        ]
+
+    def test_scope_refresh_renderer_uses_authorized_staged_files_label(self):
+        block = pb_mod._render_phase_b_indicator_scope_refresh_block(  # ANTICHEAT_OK: locks control-packet scope label
+            wave_id="packet-scope-test",
+            plan_path="reports/control_plane/packet.md",
+            indicator_path="reports/l4_wave_indicators/packet.json",
+            changed_files=["TASKS.md"],
+        )
+
+        assert "- Authorized staged files:" in block
+        assert "- Current staged files:" not in block
+
+    def test_exact_stage_scope_expands_tests_symlink_to_git_path(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "mu" / "tests" / "l4_gates").mkdir(parents=True)
+        try:
+            os.symlink("mu/tests", repo / "tests")
+        except OSError as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        expanded = pb_mod.expand_exact_stage_scope_files_for_git(
+            repo,
+            {
+                "TASKS.md",
+                "tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py",
+            },
+        )
+
+        assert "tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py" in expanded
+        assert "mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py" in expanded
+
+    def test_exact_stage_scope_saved_reentry_state_cannot_restage_excluded_files(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / "README.md").write_text("init\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+        (repo / "mu" / "tests" / "l4_gates").mkdir(parents=True)
+        try:
+            os.symlink("mu/tests", repo / "tests")
+        except OSError as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        p7w5_packet = "reports/control_plane/p7w5-metabolization-source-lock-repair-2026-05-28_2026-05-28.md"
+        prior_packet = "reports/control_plane/ci-green-gate-js-metabolization-continuation-reuse-2026-05-28_2026-05-28.md"
+        nonblocker = "reports/deferred/non_blocking/p7w5-metabolization-source-lock-repair-2026-05-28_bridge_nonblockers.md"
+        indicator = "reports/l4_wave_indicators/p7w5-metabolization-source-lock-repair-2026-05-28.json"
+        test_path = "mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py"
+        for rel_path in [
+            "TASKS.md",
+            test_path,
+            p7w5_packet,
+            indicator,
+            prior_packet,
+            nonblocker,
+        ]:
+            full = repo / rel_path
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text(f"{rel_path}\n", encoding="utf-8")
+        subprocess.run(
+            [
+                "git", "add", "--",
+                "TASKS.md", test_path, p7w5_packet, indicator, prior_packet, nonblocker,
+            ],
+            cwd=repo,
+            check=True,
+        )
+
+        plan = (
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+            "- Authorized staged files:\n"
+            "  - `TASKS.md`\n"
+            "  - `tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py`\n"
+            f"  - `{p7w5_packet}`\n"
+            f"  - `{indicator}`\n"
+            "- Excluded from this repair package: prior-wave control-plane edits and generated bridge nonblocker packets.\n"
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+        )
+        exact = pb_mod.expand_exact_stage_scope_files_for_git(
+            repo,
+            set(pb_mod.parse_exact_stage_scope_files(plan)),
+        )
+        implementer_changed = {test_path, indicator} & exact
+        executor_created = {nonblocker} & exact
+        baseline_wave_files = pb_mod._restrict_baseline_to_exact_scope(  # ANTICHEAT_OK: testing internal executor functions
+            {"TASKS.md", prior_packet, p7w5_packet},
+            exact,
+        )
+
+        changed = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            p7w5_packet,
+            sorted(exact),
+            implementer_changed,
+            executor_created,
+            baseline_wave_files,
+        )
+
+        assert changed == [
+            "TASKS.md",
+            test_path,
+            p7w5_packet,
+            indicator,
         ]
 
     def test_exact_stage_scope_unstages_stale_wave_owned_files(self, tmp_path):
@@ -8481,7 +8691,10 @@ class TestSdkReviewScopeSelection:
             encoding="utf-8",
         )
 
-        changed_files = ["mu/tools/executors/foo.py"]
+        changed_files = [
+            "mu/tools/executors/foo.py",
+            "mu/tools/executors/stale_scope.py",
+        ]
         mock_impl = _make_mock_impl()
         events: list[tuple[str, object]] = []
 
@@ -8559,6 +8772,10 @@ class TestSdkReviewScopeSelection:
         )
         assert events[reentry_bridge_index - 2][0] == "unstage"
         assert events[reentry_bridge_index - 1][0] == "stage"
+        assert events[reentry_bridge_index - 1][1] == [
+            "mu/tools/executors/foo.py",
+            "reports/control_plane/plan.md",
+        ]
 
     def test_report_only_changed_files_skip_sdk_gate(self, tmp_path):
         repo = tmp_path / "repo"

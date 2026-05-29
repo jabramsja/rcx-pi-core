@@ -2961,7 +2961,7 @@ def run_private_attr_test_gate(
         for checker_name, checker in checker_specs:
             assert checker is not None
             completed = subprocess.run(
-                [sys.executable, str(checker), str(repo_root)],
+                [sys.executable, str(checker), str(repo_root), *gate_files],
                 cwd=repo_root,
                 capture_output=True,
                 text=True,

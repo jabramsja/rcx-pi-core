@@ -5032,6 +5032,44 @@ class TestCommitExecutorPytestGate:
 
         assert result == ["mu/tests/tools/test_example_executor.py"]
 
+    def test_private_attr_gate_scans_only_selected_staged_tests(self, tmp_path):
+        repo = _setup_repo(tmp_path)
+        linters = repo / "mu" / "tools" / "checks" / "linters"
+        linters.mkdir(parents=True, exist_ok=True)
+        for checker_name in [
+            "check_private_attr_access.py",
+            "check_underscore_imports.py",
+        ]:
+            (linters / checker_name).write_text(
+                (REPO_ROOT / "mu" / "tools" / "checks" / "linters" / checker_name).read_text(
+                    encoding="utf-8",
+                ),
+                encoding="utf-8",
+            )
+        tests_dir = repo / "mu" / "tests" / "tools"
+        tests_dir.mkdir(parents=True, exist_ok=True)
+        (tests_dir / "test_selected_clean.py").write_text(
+            "from rcx_pi.selfhost.step_mu import run_mu\n"
+            "def test_selected_clean():\n"
+            "    assert True\n",
+            encoding="utf-8",
+        )
+        (tests_dir / "test_unselected_dirty.py").write_text(
+            "from rcx_pi.selfhost.step_mu import _unselected_private\n"
+            "def test_unselected_dirty(foo):\n"
+            "    foo._unselected_violation()\n",
+            encoding="utf-8",
+        )
+
+        result = commit_mod.run_private_attr_test_gate(
+            repo,
+            ["mu/tests/tools/test_selected_clean.py"],
+        )
+
+        assert result["passed"] is True, result
+        assert result["skipped"] is False
+        assert result["test_files"] == ["mu/tests/tools/test_selected_clean.py"]
+
     def test_collect_commit_test_files_uses_max_steps_guard_selector_for_narrow_diff(self, tmp_path):
         import subprocess
 
