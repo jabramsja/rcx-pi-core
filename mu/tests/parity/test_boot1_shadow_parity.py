@@ -12,7 +12,6 @@ Wave 5: 4-way path comparison, multi-projection parity, merge-2 gate assertions.
 See mu/docs/core/Boot1LoopContract.v0.md §5 for test plan.
 """
 import json
-import os
 import subprocess
 
 import pytest
@@ -32,6 +31,7 @@ from rcx_pi.selfhost.kernel import reset_step_budget
 
 # Root directory of the project (symlink-safe — see tests/repo_root.py)
 from tests.repo_root import REPO_ROOT
+from tests.l4_gates.engine_evidence_cache import cached_js_request, cached_python_pipeline
 ROOT = str(REPO_ROOT)
 
 
@@ -54,6 +54,13 @@ def _run_js_json_api(request_dict: dict) -> dict:
         f"stdout: {result.stdout[:500]}\n"
         f"stderr: {result.stderr[:500]}"
     )
+
+
+def _run_cached_js_json_api(request_dict: dict) -> dict:
+    """Run deterministic JS JSON API evidence through the shared L4 cache."""
+    request = dict(request_dict)
+    action = request.pop("action")
+    return cached_js_request(action, **request)
 
 
 def _cross_substrate_equal(a, b):
@@ -79,6 +86,18 @@ def _run_boot1(projs, initial, **kwargs):
 def _run_trampoline(projs, initial, **kwargs):
     """Run engine pipeline with explicit trampoline (not Boot1 recursive)."""
     return run_engine_pipeline(projs, initial, use_boot1_recursive=False, **kwargs)
+
+
+def _run_cached_engine_path(projs, initial, *, boot1_mode: str, **kwargs):
+    """Run deterministic Python engine evidence through the shared L4 cache."""
+    return cached_python_pipeline(
+        projections=projs,
+        input_value=initial,
+        max_steps=kwargs.get("max_steps", 10),
+        max_engine_iterations=kwargs.get("max_engine_iterations", 20),
+        max_algorithm_iterations=kwargs.get("max_algorithm_iterations", 50),
+        boot1_mode=boot1_mode,
+    )["result"]
 
 
 # ============================================================================
@@ -174,6 +193,7 @@ class TestBoot1PythonShadowParity:
 class TestBoot1SafetyInvariants:
     """Verify Boot1 safety invariants S1–S7 via public API."""
 
+    @pytest.mark.slow
     def test_s4_terminal_shape_preserved(self):
         """S4: Terminal result has exactly 8 keys."""
         reset_step_budget()
@@ -183,6 +203,7 @@ class TestBoot1SafetyInvariants:
                         "operator_frozen", "frozen_set", "action", "stall"}
         assert set(result.keys()) == expected_keys
 
+    @pytest.mark.slow
     def test_s7_no_config_leak(self):
         """S7: _config must not appear in terminal result."""
         reset_step_budget()
@@ -190,6 +211,7 @@ class TestBoot1SafetyInvariants:
         result = _run_boot1(projs, {"test": 42}, max_steps=10)
         assert "_config" not in result
 
+    @pytest.mark.slow
     def test_s7_no_tail_call_leak(self):
         """S7: _tail_call must not appear in terminal result."""
         reset_step_budget()
@@ -213,6 +235,7 @@ class TestBoot1SafetyInvariants:
                 context="test_domain",
             )
 
+    @pytest.mark.slow
     def test_no_reserved_fields_in_boot1_terminal(self):
         """Boot1 terminal result contains no kernel-reserved fields."""
         reset_step_budget()
@@ -627,10 +650,12 @@ class TestBoot1ParityProperty:
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
         initial = {"double": 42}
         for max_steps in [1, 5, 10, 50, 100]:
-            reset_step_budget()
-            tramp = _run_trampoline(projs, initial, max_steps=max_steps)
-            reset_step_budget()
-            boot1 = _run_boot1(projs, initial, max_steps=max_steps)
+            tramp = _run_cached_engine_path(
+                projs, initial, boot1_mode="false", max_steps=max_steps
+            )
+            boot1 = _run_cached_engine_path(
+                projs, initial, boot1_mode="true", max_steps=max_steps
+            )
             assert tramp == boot1, f"Mismatch at max_steps={max_steps}"
 
     def test_parity_various_inputs(self):
@@ -647,10 +672,8 @@ class TestBoot1ParityProperty:
             {"op": True},
         ]
         for inp in inputs:
-            reset_step_budget()
-            tramp = _run_trampoline(projs, inp, max_steps=10)
-            reset_step_budget()
-            boot1 = _run_boot1(projs, inp, max_steps=10)
+            tramp = _run_cached_engine_path(projs, inp, boot1_mode="false", max_steps=10)
+            boot1 = _run_cached_engine_path(projs, inp, boot1_mode="true", max_steps=10)
             assert tramp == boot1, f"Mismatch for input: {inp}"
 
     def test_observer_event_count_parity(self):
@@ -675,27 +698,22 @@ class TestBoot1ParityProperty:
 
     def test_no_match_input_parity(self):
         """Input that doesn't match any projection: trampoline == recursive."""
-        reset_step_budget()
         projs = [{"pattern": {"specific": 42}, "body": "matched"}]
         initial = {"different": 99}
 
-        tramp = _run_trampoline(projs, initial, max_steps=10)
-        reset_step_budget()
-        boot1 = _run_boot1(projs, initial, max_steps=10)
+        tramp = _run_cached_engine_path(projs, initial, boot1_mode="false", max_steps=10)
+        boot1 = _run_cached_engine_path(projs, initial, boot1_mode="true", max_steps=10)
         assert tramp == boot1
 
     def test_multiple_projection_parity(self):
         """Multiple projections with first-match-wins: trampoline == recursive."""
-        reset_step_budget()
         projs = [
             {"pattern": {"a": {"var": "x"}}, "body": {"result_a": {"var": "x"}}},
             {"pattern": {"b": {"var": "x"}}, "body": {"result_b": {"var": "x"}}},
         ]
         for inp in [{"a": 1}, {"b": 2}]:
-            reset_step_budget()
-            tramp = _run_trampoline(projs, inp, max_steps=10)
-            reset_step_budget()
-            boot1 = _run_boot1(projs, inp, max_steps=10)
+            tramp = _run_cached_engine_path(projs, inp, boot1_mode="false", max_steps=10)
+            boot1 = _run_cached_engine_path(projs, inp, boot1_mode="true", max_steps=10)
             assert tramp == boot1, f"First-match-wins parity failed for {inp}"
 
 
@@ -896,22 +914,22 @@ class TestBoot1FourWayParity:
         max_engine_iterations = kwargs.get("max_engine_iterations", 20)
         max_algorithm_iterations = kwargs.get("max_algorithm_iterations", 50)
 
-        reset_step_budget()
-        py_tramp = _run_trampoline(
+        py_tramp = _run_cached_engine_path(
             projs, initial,
+            boot1_mode="false",
             max_steps=max_steps,
             max_engine_iterations=max_engine_iterations,
             max_algorithm_iterations=max_algorithm_iterations,
         )
-        reset_step_budget()
-        py_boot1 = _run_boot1(
+        py_boot1 = _run_cached_engine_path(
             projs, initial,
+            boot1_mode="true",
             max_steps=max_steps,
             max_engine_iterations=max_engine_iterations,
             max_algorithm_iterations=max_algorithm_iterations,
         )
 
-        js_tramp_resp = _run_js_json_api({
+        js_tramp_resp = _run_cached_js_json_api({
             "action": "run_engine_pipeline",
             "projections": projs,
             "input": initial,
@@ -919,7 +937,7 @@ class TestBoot1FourWayParity:
             "maxEngineIterations": max_engine_iterations,
             "maxAlgorithmIterations": max_algorithm_iterations,
         })
-        js_boot1_resp = _run_js_json_api({
+        js_boot1_resp = _run_cached_js_json_api({
             "action": "run_engine_pipeline",
             "projections": projs,
             "input": initial,
@@ -1382,6 +1400,7 @@ class TestBoot1BoundaryRequestSecurity:
                 max_steps=5, use_boot1_recursive=True,
             )
 
+    @pytest.mark.slow
     def test_boot1_and_trampoline_both_reject_reserved_input(self):
         """Both paths reject reserved fields identically (parity)."""
         reset_step_budget()

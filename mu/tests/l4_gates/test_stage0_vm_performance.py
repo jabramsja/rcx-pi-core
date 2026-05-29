@@ -13,6 +13,7 @@ L4_ENABLER evidence: G8 (Irreducible Primitive Consensus).
 # Tier 1 diagnostics are fast (<10s) but Tier 2 integration workloads take ~60s.
 
 import json
+import os
 import time
 import pytest
 
@@ -132,6 +133,18 @@ def _stats(times):
     return {"median": median, "p95": p95, "stdev": stdev, "n": n}
 
 
+_FULL_PROFILING_ENV = "RCX_STAGE0_VM_FULL_PROFILING"
+
+
+def _stage0_profile_counts(default_runs, default_warmup):
+    """Bound CI sampling while preserving full profiling behind an explicit opt-in."""
+    if os.environ.get(_FULL_PROFILING_ENV) == "1":
+        return default_runs, default_warmup, "full"
+    if os.environ.get("RCX_CI") == "1":
+        return min(default_runs, 3), min(default_warmup, 1), "ci_bounded"
+    return default_runs, default_warmup, "default"
+
+
 class TestTier1MatchDiagnostics:
     """Tier 1: Per-projection timing for match.v2 corpus vectors.
     Diagnostic only — no CI gating assertions."""
@@ -193,8 +206,8 @@ class TestTier1SubstDiagnostics:
 
 def _time_kernel_mu(projections, input_value, n_runs=30, kernel_mode="core"):
     """Time N runs of step_kernel_mu through the full kernel path."""
-    # Warm-up
-    for _ in range(5):
+    n_runs, warmup, _profile_mode = _stage0_profile_counts(n_runs, 5)
+    for _ in range(warmup):
         step_kernel_mu(projections, input_value, kernel_mode=kernel_mode)
     times = []
     for _ in range(n_runs):
@@ -204,6 +217,34 @@ def _time_kernel_mu(projections, input_value, n_runs=30, kernel_mode="core"):
         step_kernel_mu(projections, input_value, kernel_mode=kernel_mode)
         times.append(time.perf_counter() - t0)
     return times
+
+
+def _time_engine_pipeline(projections, input_value, *, n_runs=10, warmup=3):
+    """Time run_engine_pipeline with CI-bounded observational sampling."""
+    n_runs, warmup, profile_mode = _stage0_profile_counts(n_runs, warmup)
+    for _ in range(warmup):
+        reset_step_budget()
+        run_engine_pipeline(
+            projections,
+            input_value,
+            max_steps=10,
+            max_engine_iterations=20,
+            max_algorithm_iterations=50,
+        )
+
+    times = []
+    for _ in range(n_runs):
+        reset_step_budget()
+        t0 = time.perf_counter()
+        run_engine_pipeline(
+            projections,
+            input_value,
+            max_steps=10,
+            max_engine_iterations=20,
+            max_algorithm_iterations=50,
+        )
+        times.append(time.perf_counter() - t0)
+    return times, profile_mode
 
 
 @pytest.mark.l4_expensive
@@ -224,10 +265,12 @@ class TestTier2IntegrationWorkloads:
 
         times = _time_kernel_mu(projs, inp, n_runs=30)
         stats = _stats(times)
+        _n_runs, _warmup, profile_mode = _stage0_profile_counts(30, 5)
 
         print(json.dumps({
             "tier": 2,
             "workload": "cycling_ab",
+            "profile_mode": profile_mode,
             "stats": stats,
         }))
         # Observational — data feeds GO/NO-GO memo
@@ -241,10 +284,12 @@ class TestTier2IntegrationWorkloads:
 
         times = _time_kernel_mu(projs, inp, n_runs=30, kernel_mode="bridge")
         stats = _stats(times)
+        _n_runs, _warmup, profile_mode = _stage0_profile_counts(30, 5)
 
         print(json.dumps({
             "tier": 2,
             "workload": "bridge_var_bind",
+            "profile_mode": profile_mode,
             "stats": stats,
         }))
 
@@ -256,26 +301,12 @@ class TestTier2IntegrationWorkloads:
         ]
         inp = {"state": "A"}
 
-        # Warm-up (cycling produces recurrence closure with enough iterations)
-        for _ in range(3):
-            reset_step_budget()
-            run_engine_pipeline(
-                projs, inp, max_steps=10,
-                max_engine_iterations=20, max_algorithm_iterations=50)
-
-        times = []
-        for _ in range(10):
-            reset_step_budget()
-            t0 = time.perf_counter()
-            run_engine_pipeline(
-                projs, inp, max_steps=10,
-                max_engine_iterations=20, max_algorithm_iterations=50)
-            times.append(time.perf_counter() - t0)
-
+        times, profile_mode = _time_engine_pipeline(projs, inp, n_runs=10, warmup=3)
         stats = _stats(times)
         print(json.dumps({
             "tier": 2,
             "workload": "engine_pipeline_cycling_shadow",
+            "profile_mode": profile_mode,
             "stats": stats,
         }))
 
@@ -293,10 +324,12 @@ class TestTier2IntegrationWorkloads:
 
         times = _time_kernel_mu(projs, inp, n_runs=30)
         stats = _stats(times)
+        _n_runs, _warmup, profile_mode = _stage0_profile_counts(30, 5)
 
         print(json.dumps({
             "tier": 2,
             "workload": "cycling_ab_cutover",
+            "profile_mode": profile_mode,
             "stats": stats,
         }))
 
@@ -312,25 +345,12 @@ class TestTier2IntegrationWorkloads:
         ]
         inp = {"state": "A"}
 
-        for _ in range(3):
-            reset_step_budget()
-            run_engine_pipeline(
-                projs, inp, max_steps=10,
-                max_engine_iterations=20, max_algorithm_iterations=50)
-
-        times = []
-        for _ in range(10):
-            reset_step_budget()
-            t0 = time.perf_counter()
-            run_engine_pipeline(
-                projs, inp, max_steps=10,
-                max_engine_iterations=20, max_algorithm_iterations=50)
-            times.append(time.perf_counter() - t0)
-
+        times, profile_mode = _time_engine_pipeline(projs, inp, n_runs=10, warmup=3)
         stats = _stats(times)
         print(json.dumps({
             "tier": 2,
             "workload": "engine_pipeline_cycling_cutover",
+            "profile_mode": profile_mode,
             "stats": stats,
         }))
 
