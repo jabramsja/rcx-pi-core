@@ -117,6 +117,43 @@ class TestCleanFile:
         assert len(violations) == 0
 
 
+class TestScanIntegration:
+    def test_scan_files_ignores_unselected_dirty_tests(self, tmp_path):
+        tests_dir = tmp_path / "mu" / "tests" / "tools"
+        tests_dir.mkdir(parents=True)
+        (tests_dir / "test_selected_clean.py").write_text(
+            "from rcx_pi.selfhost.step_mu import run_mu\n",
+            encoding="utf-8",
+        )
+        (tests_dir / "test_unselected_dirty.py").write_text(
+            "from rcx_pi.selfhost.step_mu import _unselected_private\n",
+            encoding="utf-8",
+        )
+
+        violations = checker.scan_files(
+            tmp_path,
+            ["mu/tests/tools/test_selected_clean.py"],
+        )
+
+        assert violations == []
+
+    def test_scan_files_reports_selected_dirty_test(self, tmp_path):
+        tests_dir = tmp_path / "mu" / "tests" / "tools"
+        tests_dir.mkdir(parents=True)
+        (tests_dir / "test_selected_dirty.py").write_text(
+            "from rcx_pi.selfhost.step_mu import _selected_private\n",
+            encoding="utf-8",
+        )
+
+        violations = checker.scan_files(
+            tmp_path,
+            ["mu/tests/tools/test_selected_dirty.py"],
+        )
+
+        assert len(violations) == 1
+        assert "_selected_private" in violations[0]
+
+
 class TestCheckerRootResolution:
     """Regression: checker ROOT must resolve to repo root, not a subdirectory."""
 

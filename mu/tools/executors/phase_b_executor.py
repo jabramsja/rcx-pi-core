@@ -1320,7 +1320,7 @@ def run_private_attr_gate(
         }
     try:
         completed = subprocess.run(
-            [sys.executable, str(checker), str(repo_root)],
+            [sys.executable, str(checker), str(repo_root), *gate_files],
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -3717,8 +3717,18 @@ def _parse_exact_stage_scope_files(plan_content: str) -> list[str]:
     lines = plan_content.splitlines()
     marker_index: int | None = None
     for index, line in enumerate(lines):
-        lower = line.lower()
-        if "may stage exactly" in lower and "file" in lower:
+        stripped = line.strip()
+        lower = stripped.lower()
+        bullet_body = lower[2:].strip() if lower.startswith("- ") else lower
+        is_exact_stage_header = (
+            "`" not in stripped
+            and (
+                lower == "allowed write scope:"
+                or ("may stage exactly" in lower and "file" in lower and lower.endswith(":"))
+                or bullet_body in {"authorized staged files:", "current staged files:"}
+            )
+        )
+        if is_exact_stage_header:
             marker_index = index
             break
     if marker_index is None:
@@ -3745,6 +3755,11 @@ def _parse_exact_stage_scope_files(plan_content: str) -> list[str]:
             parsed.append(normalized)
             started = True
     return parsed
+
+
+def parse_exact_stage_scope_files(plan_content: str) -> list[str]:
+    """Public selector seam for exact staged-scope control-packet tests."""
+    return _parse_exact_stage_scope_files(plan_content)
 
 
 def _parse_fenced_out_files(plan_content: str) -> list[str]:
@@ -3865,6 +3880,38 @@ def _restrict_baseline_to_exact_scope(
     if not exact_stage_scope_files:
         return baseline_wave_files
     return set(baseline_wave_files) & set(exact_stage_scope_files)
+
+
+def _expand_exact_stage_scope_files_for_git(
+    repo_root: Path,
+    exact_stage_scope_files: set[str],
+) -> set[str]:
+    """Include git-tracked equivalents for exact-scope paths behind symlinks."""
+    if not exact_stage_scope_files:
+        return set()
+    expanded = set(exact_stage_scope_files)
+    try:
+        root_resolved = repo_root.resolve()
+    except OSError:
+        return expanded
+    for rel_path in list(exact_stage_scope_files):
+        candidate = repo_root / rel_path
+        try:
+            resolved = candidate.resolve(strict=False)
+            git_rel = resolved.relative_to(root_resolved).as_posix()
+        except (OSError, ValueError):
+            continue
+        if git_rel and git_rel != rel_path and not git_rel.startswith("../"):
+            expanded.add(git_rel)
+    return expanded
+
+
+def expand_exact_stage_scope_files_for_git(
+    repo_root: Path,
+    exact_stage_scope_files: set[str],
+) -> set[str]:
+    """Public seam for resolving exact staged-scope paths to git paths."""
+    return _expand_exact_stage_scope_files_for_git(repo_root, exact_stage_scope_files)
 
 
 def _collect_wave_owned_files(
@@ -4403,7 +4450,10 @@ def prepare_dispatcher_commit_handoff_from_routing_record(
         routing_record,
     )
     fenced_out_files = set(_parse_fenced_out_files(plan_content))
-    exact_stage_scope_files = set(_parse_exact_stage_scope_files(plan_content))
+    exact_stage_scope_files = _expand_exact_stage_scope_files_for_git(
+        repo_root,
+        set(_parse_exact_stage_scope_files(plan_content)),
+    )
     if exact_stage_scope_files:
         plan_declared_files = sorted(
             path for path in exact_stage_scope_files
@@ -4926,7 +4976,7 @@ def _render_phase_b_indicator_scope_refresh_block(
         "before pre-commit supervisor review so the tracker note, Gate 8 package, and "
         "governing packet describe one staged scope.",
         "- Scope binding: no indicator file other than the artifact above is in scope for this wave.",
-        "- Current staged files:",
+        "- Authorized staged files:",
     ]
     for path in staged_paths:
         lines.append(f"  - `{path}`")
@@ -5674,7 +5724,10 @@ def run_phase_b(
 
     # Parse plan-declared files from markdown/body content.
     fenced_out_files = set(_parse_fenced_out_files(plan_content))
-    exact_stage_scope_files = set(_parse_exact_stage_scope_files(plan_content))
+    exact_stage_scope_files = _expand_exact_stage_scope_files_for_git(
+        repo_root,
+        set(_parse_exact_stage_scope_files(plan_content)),
+    )
     plan_declared_files: list[str] | None = None
     if exact_stage_scope_files:
         _parsed = sorted(path for path in exact_stage_scope_files if path not in fenced_out_files)
@@ -6041,6 +6094,8 @@ def run_phase_b(
         scoped = list(candidate_files)
         if plan_path and not plan_path.startswith("<") and plan_path not in scoped:
             scoped.append(plan_path)
+        if exact_stage_scope_files:
+            scoped = [path for path in scoped if path in exact_stage_scope_files]
         return scoped
 
     def _private_attr_pending_review_step(*, reentry: bool) -> str:

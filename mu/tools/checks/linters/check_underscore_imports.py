@@ -6,7 +6,9 @@ Replaces the grep-based check which could be bypassed by multiline imports:
         _private_function,   # grep misses this
     )
 
-Usage: python3 tools/check_underscore_imports.py
+Usage:
+  python3 tools/check_underscore_imports.py
+  python3 tools/check_underscore_imports.py <root> <file>...
 Exit 0: clean, Exit 1: violations found
 """
 
@@ -27,7 +29,7 @@ FILE_ALLOWLIST = frozenset({
     "test_type_tag_security.py",
 })
 
-SCAN_DIRS = ["tests"]
+SCAN_DIRS = ("tests", "mu/tests")
 
 
 def check_file(filepath: Path) -> list[str]:
@@ -78,17 +80,63 @@ def check_file(filepath: Path) -> list[str]:
     return violations
 
 
-def main() -> int:
-    all_violations = []
-
+def scan(root: Path) -> list[str]:
+    """Scan all Python files under SCAN_DIRS below ``root``."""
+    all_violations: list[str] = []
+    seen_files: set[Path] = set()
     for scan_dir in SCAN_DIRS:
-        dirpath = ROOT / scan_dir
+        dirpath = root / scan_dir
         if not dirpath.exists():
             continue
         for pyfile in sorted(dirpath.rglob("*.py")):
             if "__pycache__" in str(pyfile):
                 continue
+            resolved = pyfile.resolve(strict=False)
+            if resolved in seen_files:
+                continue
+            seen_files.add(resolved)
             all_violations.extend(check_file(pyfile))
+    return all_violations
+
+
+def _is_scan_path(root: Path, filepath: Path) -> bool:
+    try:
+        rel_path = filepath.resolve(strict=False).relative_to(root)
+    except ValueError:
+        return False
+    for scan_dir in SCAN_DIRS:
+        scan_parts = Path(scan_dir).parts
+        if rel_path.parts[:len(scan_parts)] == scan_parts:
+            return True
+    return False
+
+
+def scan_files(root: Path, files: list[str]) -> list[str]:
+    """Scan only the requested Python files under SCAN_DIRS below ``root``."""
+    all_violations: list[str] = []
+    seen_files: set[Path] = set()
+    for file_arg in files:
+        filepath = Path(file_arg)
+        if not filepath.is_absolute():
+            filepath = root / filepath
+        if filepath.suffix != ".py":
+            continue
+        if "__pycache__" in filepath.parts:
+            continue
+        resolved = filepath.resolve(strict=False)
+        if resolved in seen_files:
+            continue
+        if not _is_scan_path(root, filepath):
+            continue
+        seen_files.add(resolved)
+        all_violations.extend(check_file(filepath))
+    return all_violations
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv if argv is None else argv
+    root = Path(argv[1]).resolve() if len(argv) > 1 else ROOT
+    all_violations = scan_files(root, argv[2:]) if len(argv) > 2 else scan(root)
 
     if all_violations:
         print("ERROR: Found underscored imports from rcx_pi:")

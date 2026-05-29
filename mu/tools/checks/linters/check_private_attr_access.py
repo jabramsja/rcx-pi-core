@@ -23,7 +23,9 @@ Allowlist parity with legacy grep (6 cases):
   - `test_contraband_detection.py` (grounding tests for contraband guard)
   - `__pycache__` directory (skipped during file discovery)
 
-Usage: `python3 tools/checks/linters/check_private_attr_access.py`
+Usage:
+  `python3 tools/checks/linters/check_private_attr_access.py`
+  `python3 tools/checks/linters/check_private_attr_access.py <root> <file>...`
 Exit 0: clean. Exit 1: violations found (one per line to stdout).
 """
 import ast
@@ -116,9 +118,43 @@ def scan(root: Path) -> list[str]:
     return all_violations
 
 
+def _is_scan_path(root: Path, filepath: Path) -> bool:
+    try:
+        rel_path = filepath.resolve(strict=False).relative_to(root)
+    except ValueError:
+        return False
+    for scan_dir in SCAN_DIRS:
+        scan_parts = Path(scan_dir).parts
+        if rel_path.parts[:len(scan_parts)] == scan_parts:
+            return True
+    return False
+
+
+def scan_files(root: Path, files: list[str]) -> list[str]:
+    """Scan only the requested Python files under SCAN_DIRS below ``root``."""
+    all_violations: list[str] = []
+    seen_files: set[Path] = set()
+    for file_arg in files:
+        filepath = Path(file_arg)
+        if not filepath.is_absolute():
+            filepath = root / filepath
+        if filepath.suffix != ".py":
+            continue
+        if "__pycache__" in filepath.parts:
+            continue
+        resolved = filepath.resolve(strict=False)
+        if resolved in seen_files:
+            continue
+        if not _is_scan_path(root, filepath):
+            continue
+        seen_files.add(resolved)
+        all_violations.extend(check_file(filepath))
+    return all_violations
+
+
 def main(argv: list[str]) -> int:
     root = Path(argv[1]).resolve() if len(argv) > 1 else ROOT
-    violations = scan(root)
+    violations = scan_files(root, argv[2:]) if len(argv) > 2 else scan(root)
     if violations:
         print("ERROR: Found private attr access in tests/ or mu/tests/:")
         for v in violations:
