@@ -938,7 +938,7 @@ def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[st
         "build_and_run_supervisor",
         "commit_ready_status_supervisor",
     }
-    if not (steps & commit_supervisor_steps or "commit_executor" in executors):
+    if not (steps & commit_supervisor_steps):
         return False
     text_parts = [
         _summarize_result_reason(result),
@@ -5554,9 +5554,13 @@ def _is_ignored_hybrid_scratch_cache_path(rel_path: str) -> bool:
     if rel_path == ".scratch/__pycache__":
         return True
     prefix = ".scratch/__pycache__/"
-    if not rel_path.startswith(prefix):
+    nested_marker = "/.scratch/__pycache__/"
+    if rel_path.startswith(prefix):
+        cache_name = rel_path[len(prefix):]
+    elif rel_path.startswith(".scratch/") and nested_marker in rel_path:
+        cache_name = rel_path.rsplit(nested_marker, 1)[1]
+    else:
         return False
-    cache_name = rel_path[len(prefix):]
     if not cache_name or "/" in cache_name:
         return False
     return re.fullmatch(
@@ -5573,6 +5577,10 @@ def _validate_ignored_hybrid_scratch_cache_path(
     snapshot = _absolute_path_snapshot(path)
     expected_realpath = str(path.resolve(strict=False))
     if not snapshot["exists"]:
+        return True, ""
+    if rel_path.startswith(".scratch/") and "/.scratch/__pycache__/" in rel_path:
+        if snapshot["type"] not in {"file", "symlink"}:
+            return False, f"hybrid nested .scratch cache exception must remain a regular file or symlink: {rel_path}"
         return True, ""
     if rel_path == ".scratch/__pycache__":
         if snapshot["type"] != "directory":

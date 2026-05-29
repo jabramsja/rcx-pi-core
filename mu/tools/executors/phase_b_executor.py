@@ -1448,6 +1448,18 @@ def _phase_b_scope_has_control_plane_tooling_file(changed_files: list[str]) -> b
     return any(path.startswith(_CONTROL_PLANE_TOOLING_PREFIXES) for path in changed_files)
 
 
+def _phase_b_scope_is_tracker_or_packet_only(changed_files: list[str]) -> bool:
+    scoped = [path for path in changed_files if path]
+    if not scoped:
+        return False
+    packet_prefixes = (
+        "reports/control_plane/",
+        "reports/l4_wave_indicators/",
+        "reports/deferred/",
+    )
+    return all(path == "TASKS.md" or path.startswith(packet_prefixes) for path in scoped)
+
+
 def _plan_declares_classless_comment_only_runtime_override(plan_content: str) -> bool:
     text = (plan_content or "").lower().replace("`", "")
     return (
@@ -1511,6 +1523,11 @@ def _plan_declares_routing_boundary(plan_content: str) -> bool:
         or "stopped before commit readiness" in text
         or "no accepted executable runtime delta" in text
     )
+
+
+def _plan_declares_smaller_prerequisite_only(plan_content: str) -> bool:
+    text = (plan_content or "").lower()
+    return "needs a smaller prerequisite before implementation" in text
 
 
 def _phase_b_declares_structural_runtime_intent(
@@ -1581,6 +1598,10 @@ def _effective_phase_b_tracker_wave_class(
     if wave_class != "L4_STRUCTURAL":
         return wave_class
     if _plan_declares_routing_boundary(plan_content):
+        return "L4_ENABLER"
+    if _plan_declares_smaller_prerequisite_only(plan_content):
+        return wave_class
+    if _phase_b_scope_is_tracker_or_packet_only(changed_files):
         return "L4_ENABLER"
     return wave_class
 
