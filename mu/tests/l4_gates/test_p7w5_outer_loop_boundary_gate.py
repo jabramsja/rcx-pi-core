@@ -250,27 +250,32 @@ class TestJSOuterLoopBoundary:
     def test_js_run_engine_pipeline_recursive_boundary(self):
         self._check_js_function_boundary(JS_PIPELINE_PATH, "runEnginePipelineRecursive")
 
-    def test_js_routing_continuation_driver_uses_bounded_return_meta(self):
-        """Routing and metabolization use the public bounded returnMeta driver."""
+    def test_js_routing_continuation_drivers_use_bounded_return_meta(self):
+        """Routing source lock requires bounded public returnMeta drivers."""
         routing_lines = JS_ROUTING_PATH.read_text().splitlines()
         routing_text = "\n".join(routing_lines)
         assert "const KERNEL_DRIVER_BOUNDARY_WATCHDOG = 1000;" in routing_text
         assert "../core/security" not in routing_text
 
+        function_bodies = {}
         for func_name in ("runHemisphereRouting", "runMetabolizationCycle"):
             for i, line in enumerate(routing_lines):
                 if f"function {func_name}(" in line:
-                    body = _js_function_body(routing_lines, i)
+                    function_bodies[func_name] = _js_function_body(routing_lines, i)
                     break
             else:
                 pytest.fail(f"JS {func_name}() function not found in routing.js")
 
+        for body in function_bodies.values():
             assert "validateNoKernelReservedFields(wrapped" not in body
             assert "validateDomainBoundary(wrapped" in body
-            assert "returnMeta: true" in body
             assert "validationMode: 'algorithm_runtime'" in body
             assert "maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG" in body
             assert "maxSteps: 10000" not in body
+
+        for body in function_bodies.values():
+            assert "stepKernel(" in body
+            assert "returnMeta: true" in body
             assert "returnPacket" not in body
             assert "continuationState" not in body
             assert "while (" not in body
