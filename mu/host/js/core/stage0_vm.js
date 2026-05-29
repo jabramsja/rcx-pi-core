@@ -994,47 +994,66 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
  * Unchanged signature for backward compatibility.
  */
 function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {
-  validateBundle(bundle);
-  return _stage0VmStepTrusted(bundle, inputValue, maxOps);
+  const trustedBundle = safeMuCopy(bundle, true, 'stage0VmStep bundle');
+  validateBundle(trustedBundle);
+  return _stage0VmStepTrusted(trustedBundle, inputValue, maxOps);
 }
 
 // ---------------------------------------------------------------------------
 // VM run — multi-step until stall
 // ---------------------------------------------------------------------------
-function stage0VmRun(bundle, inputValue, maxSteps = 100, maxOps = undefined) {
-  let current = inputValue;
-  const steps = [];
-  let totalAttempts = 0;
-  let totalOps = 0;
+const _stage0VmTrustedRun = {
+  run(bundle, inputValue, maxSteps = 100, maxOps = undefined) {
+    let current = inputValue;
+    const steps = [];
+    let totalAttempts = 0;
+    let totalOps = 0;
 
-  for (let i = 0; i < maxSteps; i++) {
-    const result = maxOps !== undefined
-      ? stage0VmStep(bundle, current, maxOps)
-      : stage0VmStep(bundle, current);
-    totalAttempts += result.metrics.program_attempts;
-    totalOps += result.metrics.op_steps;
+    for (let i = 0; i < maxSteps; i++) {
+      const result = maxOps !== undefined
+        ? _stage0VmStepTrusted(bundle, current, maxOps)
+        : _stage0VmStepTrusted(bundle, current);
+      totalAttempts += result.metrics.program_attempts;
+      totalOps += result.metrics.op_steps;
 
-    if (result.status === 'stall') {
-      return {
-        status: 'complete',
-        root: current,
-        steps,
-        metrics: {
-          total_steps: steps.length,
-          total_attempts: totalAttempts,
-          total_ops: totalOps,
-        },
-      };
+      if (result.status === 'stall') {
+        return {
+          status: 'complete',
+          root: current,
+          steps,
+          metrics: {
+            total_steps: steps.length,
+            total_attempts: totalAttempts,
+            total_ops: totalOps,
+          },
+        };
+      }
+
+      steps.push({
+        program_id: result.matched_program_id,
+        root: result.root,
+      });
+      current = result.root;
     }
 
-    steps.push({
-      program_id: result.matched_program_id,
-      root: result.root,
-    });
-    current = result.root;
-  }
+    throw new Stage0VMError(`Run step limit exceeded (${maxSteps})`);
+  },
+};
 
-  throw new Stage0VMError(`Run step limit exceeded (${maxSteps})`);
+function stage0VmRun(bundle, inputValue, maxSteps = 100, maxOps = undefined) {
+  const trustedBundle = safeMuCopy(bundle, true, 'stage0VmRun bundle');
+  validateBundle(trustedBundle);
+  const freezeStack = [trustedBundle];
+  while (freezeStack.length > 0) {
+    const node = freezeStack.pop();
+    if (node !== null && typeof node === 'object' && !Object.isFrozen(node)) {
+      for (const key of Object.keys(node)) {
+        freezeStack.push(node[key]);
+      }
+      Object.freeze(node);
+    }
+  }
+  return _stage0VmTrustedRun.run(trustedBundle, inputValue, maxSteps, maxOps);
 }
 
 // ---------------------------------------------------------------------------
@@ -1045,6 +1064,7 @@ module.exports = {
   validateBundle,
   stage0VmStep,
   _stage0VmStepTrusted,  // W6A: exported for kernel.js, source-lock enforced
+  _stage0VmRunTrusted: _stage0VmTrustedRun.run, // Trusted multi-step helper; source-lock enforced
   stage0VmRun,
   resolvePath,
   classifyKind,

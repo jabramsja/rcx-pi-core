@@ -493,6 +493,91 @@ class TestJsSourceLock:
             "\n".join(violations)
         )
 
+    def test_js_trusted_run_allowlist(self):
+        """All JS trusted-run symbol/fragments must be in allowlist."""
+        allowlist = {
+            "mu/host/js/core/stage0_vm.js",   # Definition
+            "mu/host/js/engine/kernel.js",    # Loader-cached caller
+            "mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py",  # This test
+        }
+
+        violations = []
+        for token in ("_stage0VmRunTrusted", "RunTrusted"):
+            result = subprocess.run(
+                ["grep", "-rn", "--include=*.js", "--include=*.py", token, str(REPO_ROOT)],
+                capture_output=True, text=True
+            )
+
+            for line in result.stdout.strip().split("\n"):
+                if not line or line.startswith("Binary file"):
+                    continue
+                file_path = line.split(":")[0]
+                try:
+                    rel_path = str(Path(file_path).relative_to(REPO_ROOT))
+                except ValueError:
+                    continue
+
+                if any(skip in rel_path for skip in [".scratch", ".agent_bus", "node_modules"]):
+                    continue
+
+                norm_path = _normalize_path(rel_path)
+                if norm_path not in allowlist:
+                    violations.append(f"{token} in {norm_path}: {line.split(':', 2)[-1][:60]}")
+
+        assert not violations, (
+            f"JS trusted-run symbol/fragments found outside allowlist:\n" +
+            "\n".join(violations)
+        )
+
+    def test_js_kernel_vm_config_validation_boundary_source_lock(self):
+        """Custom vmConfig must be validated before trusted JS VM helpers."""
+        kernel_src = (REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js").read_text()
+        stage0_src = self._stage0_vm_source()
+
+        assert "const _vmConfigTrust = {" in kernel_src
+        assert "validate(vmConfig) {" in kernel_src
+        assert "_VALIDATED_VM_CONFIGS" in kernel_src
+        assert "const trustedConfig = {};" in kernel_src
+        assert "Object.freeze(trustedConfig);" in kernel_src
+        assert "_VALIDATED_VM_CONFIGS.add(trustedConfig);" in kernel_src
+        assert "_VALIDATED_VM_CONFIGS.add(vmConfig)" not in kernel_src
+        assert "const snapshot = muCopy(bundle, true, `vmConfig.${slotName}`);" in kernel_src
+        assert "validateBundle(snapshot);" in kernel_src
+        assert "const freezeStack = [snapshot];" in kernel_src
+        assert "Object.freeze(node);" in kernel_src
+        assert "trustedConfig[slotName] = snapshot;" in kernel_src
+        assert "trustedConfig[slotName] = bundle;" not in kernel_src
+        assert "const vmConfig = _vmConfigTrust.validate(options.vmConfig || null);" in kernel_src
+        assert (
+            "function runStructural(kernelProjections, domainProjections, input, maxSteps = 10000, vmConfig = null) {\n"
+            "  vmConfig = _vmConfigTrust.validate(vmConfig);"
+        ) in kernel_src
+
+        for slot in ("kernelBundle", "bridgeBundle", "matchBundle", "substBundle"):
+            assert f"['{slot}'," in kernel_src
+
+        assert not re.search(r"(?<!_)\bstage0VmRun\b", kernel_src)
+        assert "_stage0VmRunTrusted(vmConfig.matchBundle" in kernel_src
+        assert "_stage0VmRunTrusted(vmConfig.substBundle" in kernel_src
+        assert (
+            "function stage0VmStep(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) {\n"
+            "  const trustedBundle = safeMuCopy(bundle, true, 'stage0VmStep bundle');"
+        ) in stage0_src
+        assert (
+            "function stage0VmRun(bundle, inputValue, maxSteps = 100, maxOps = undefined) {\n"
+            "  const trustedBundle = safeMuCopy(bundle, true, 'stage0VmRun bundle');"
+        ) in stage0_src
+        assert stage0_src.count("validateBundle(trustedBundle);") == 2
+        assert stage0_src.count("const freezeStack = [trustedBundle];") == 1
+        assert "Object.freeze(node);" in stage0_src
+        assert "_stage0VmRunTrusted: _stage0VmTrustedRun.run" in stage0_src
+        trusted_run_start = stage0_src.index("const _stage0VmTrustedRun = {")
+        public_run_start = stage0_src.index("function stage0VmRun")
+        trusted_run_body = stage0_src[trusted_run_start:public_run_start]
+        assert "stage0VmStep(" not in trusted_run_body
+        assert "validateBundle(" not in trusted_run_body
+        assert "_stage0VmStepTrusted(" in trusted_run_body
+
     def test_js_public_mu_copy_export_forces_strict_mode(self):
         """The public JS Stage0 copy export must not expose lax rejectNonMu=false."""
         block = self._stage0_vm_export_block()
@@ -523,7 +608,7 @@ class TestJsSourceLock:
         copy_exports = {name for name in names if "copy" in name.lower()}
         assert copy_exports == {"muCopy"}
         trust_exports = {name for name in names if "trust" in name.lower()}
-        assert trust_exports == {"_stage0VmStepTrusted"}
+        assert trust_exports == {"_stage0VmStepTrusted", "_stage0VmRunTrusted"}
 
 
 # =============================================================================
@@ -633,6 +718,393 @@ class TestFailClosedNegativeControl:
                 terminal_field="mode",
                 terminal_value="already_done"
             )
+
+    def test_js_public_run_rejects_malformed_bundle(self):
+        """JS public stage0VmRun validates malformed bundles before running."""
+        import json
+
+        js_code = """
+        const { stage0VmRun } = require('./mu/host/js/core/stage0_vm');
+        try {
+          stage0VmRun({ not: 'a_valid_bundle' }, { mode: 'already_done' }, 0);
+          console.log(JSON.stringify({ ok: false, message: 'accepted' }));
+        } catch (e) {
+          console.log(JSON.stringify({ ok: true, message: e.message }));
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout.strip())
+        assert output["ok"] is True
+        assert "Missing required bundle field" in output["message"]
+
+    def test_js_public_run_and_step_reject_accessor_backed_bundle(self):
+        """JS public Stage0 entry points must not execute after live bundle accessors swap data."""
+        import json
+
+        js_code = """
+        const { stage0VmRun, stage0VmStep } = require('./mu/host/js/core/stage0_vm');
+
+        function makeAccessorBundle() {
+          let programsReads = 0;
+          const validPrograms = [{
+            id: 'p',
+            ops: [
+              { op: 'assert_focus_kind', path: ['focus', 'root'], kind: 'dict' },
+              { op: 'write_path', template: { kind: 'literal', value: { done: true } } },
+              { op: 'return_projection_success' },
+            ],
+          }];
+          const malformedPrograms = [{
+            id: 'p',
+            ops: [
+              {
+                op: 'write_path',
+                template: { kind: 'literal', value: 'bad' },
+                extra_unvalidated_field: true,
+              },
+              { op: 'return_projection_success' },
+            ],
+          }];
+          const bundle = {
+            stage0_ir_version: 1,
+            bundle_id: 'accessor-backed-test',
+            source_seed: 'test',
+            machine_profile: 'rcx.stage0.v1',
+            hand_authored: true,
+            program_order: ['p'],
+            get programs() {
+              programsReads += 1;
+              return programsReads === 1 ? validPrograms : malformedPrograms;
+            },
+          };
+          return { bundle, reads: () => programsReads };
+        }
+
+        function capture(label, fn) {
+          const holder = makeAccessorBundle();
+          try {
+            const result = fn(holder.bundle);
+            return { label, ok: false, result, programsReads: holder.reads() };
+          } catch (e) {
+            return { label, ok: true, message: e.message, programsReads: holder.reads() };
+          }
+        }
+
+        console.log(JSON.stringify({
+          step: capture('step', bundle => stage0VmStep(bundle, { x: 1 })),
+          run: capture('run', bundle => stage0VmRun(bundle, { x: 1 }, 3)),
+        }));
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout.strip())
+        for key in ("step", "run"):
+            assert output[key]["ok"] is True, output[key]
+            assert "non-Mu value cannot be captured" in output[key]["message"]
+
+    @pytest.mark.parametrize("slot", [
+        "kernelBundle",
+        "bridgeBundle",
+        "matchBundle",
+        "substBundle",
+    ])
+    def test_js_kernel_options_vm_config_rejects_malformed_bundle_slots_before_trusted_helpers(self, slot):
+        """Kernel options.vmConfig rejects every bundle slot before trusted VM helpers run."""
+        import json
+
+        js_code = f"""
+        const fs = require('fs');
+        const stage0Vm = require('./mu/host/js/core/stage0_vm');
+        stage0Vm._stage0VmStepTrusted = function() {{
+          throw new Error('TRUSTED_STEP_REACHED');
+        }};
+        stage0Vm._stage0VmRunTrusted = function() {{
+          throw new Error('TRUSTED_RUN_REACHED');
+        }};
+        const {{ stepKernel }} = require('./mu/host/js/engine/kernel');
+        const muContainers = require('./mu/host/js/core/container_factory');
+
+        function loadBundle(name) {{
+          return JSON.parse(fs.readFileSync('./mu/stage0/compiled/' + name, 'utf8'));
+        }}
+        function trustMu(value) {{
+          if (Array.isArray(value)) {{
+            return muContainers.list(value.map(trustMu));
+          }}
+          if (value !== null && typeof value === 'object') {{
+            return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+          }}
+          return value;
+        }}
+
+        const vmConfig = {{
+          kernelBundle: loadBundle('kernel_v1.compiled.v1.json'),
+          bridgeBundle: loadBundle('bootstrap_structural_v1.compiled.v1.json'),
+          matchBundle: loadBundle('match_v2.compiled.v1.json'),
+          substBundle: loadBundle('subst_v2.compiled.v1.json'),
+        }};
+        vmConfig[{slot!r}] = {{ stage0_ir_version: 1 }};
+
+        try {{
+          stepKernel(
+            [],
+            trustMu({{ hello: 'world' }}),
+            trustMu([{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }} }}]),
+            {{ maxSteps: 3, vmConfig, returnPacket: true }}
+          );
+          console.log(JSON.stringify({{ ok: false, message: 'accepted' }}));
+        }} catch (e) {{
+          console.log(JSON.stringify({{ ok: true, message: e.message }}));
+        }}
+        """
+
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout.strip())
+        assert output["ok"] is True
+        assert f"vmConfig.{slot} failed Stage0 bundle validation" in output["message"]
+        assert "TRUSTED_" not in output["message"]
+
+    @pytest.mark.parametrize("slot", [
+        "kernelBundle",
+        "bridgeBundle",
+        "matchBundle",
+        "substBundle",
+    ])
+    def test_js_kernel_options_vm_config_rejects_accessor_backed_bundle_slots(self, slot):
+        """Accessor-backed vmConfig bundle slots must fail before trusted helpers use live references."""
+        import json
+
+        js_code = f"""
+        const fs = require('fs');
+        const stage0Vm = require('./mu/host/js/core/stage0_vm');
+        stage0Vm._stage0VmStepTrusted = function() {{
+          throw new Error('TRUSTED_STEP_REACHED');
+        }};
+        stage0Vm._stage0VmRunTrusted = function() {{
+          throw new Error('TRUSTED_RUN_REACHED');
+        }};
+        const {{ stepKernel }} = require('./mu/host/js/engine/kernel');
+        const muContainers = require('./mu/host/js/core/container_factory');
+
+        function loadBundle(name) {{
+          return JSON.parse(fs.readFileSync('./mu/stage0/compiled/' + name, 'utf8'));
+        }}
+        function trustMu(value) {{
+          if (Array.isArray(value)) {{
+            return muContainers.list(value.map(trustMu));
+          }}
+          if (value !== null && typeof value === 'object') {{
+            return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+          }}
+          return value;
+        }}
+        function accessorBackedBundle(bundle) {{
+          let programsReads = 0;
+          const validPrograms = bundle.programs;
+          const malformedPrograms = [{{
+            id: validPrograms[0].id,
+            ops: [
+              {{
+                op: 'write_path',
+                template: {{ kind: 'literal', value: 'hacked-output' }},
+                extra_unvalidated_field: true,
+              }},
+              {{ op: 'return_projection_success' }},
+            ],
+          }}];
+          const wrapped = {{ ...bundle }};
+          Object.defineProperty(wrapped, 'programs', {{
+            enumerable: true,
+            configurable: true,
+            get() {{
+              programsReads += 1;
+              return programsReads === 1 ? validPrograms : malformedPrograms;
+            }},
+          }});
+          return {{ bundle: wrapped, reads: () => programsReads }};
+        }}
+
+        const vmConfig = {{
+          kernelBundle: loadBundle('kernel_v1.compiled.v1.json'),
+          bridgeBundle: loadBundle('bootstrap_structural_v1.compiled.v1.json'),
+          matchBundle: loadBundle('match_v2.compiled.v1.json'),
+          substBundle: loadBundle('subst_v2.compiled.v1.json'),
+        }};
+        const wrapped = accessorBackedBundle(vmConfig[{slot!r}]);
+        vmConfig[{slot!r}] = wrapped.bundle;
+
+        try {{
+          stepKernel(
+            [],
+            trustMu({{ hello: 'world' }}),
+            trustMu([{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }} }}]),
+            {{ maxSteps: 3, vmConfig, returnPacket: true }}
+          );
+          console.log(JSON.stringify({{ ok: false, message: 'accepted', programsReads: wrapped.reads() }}));
+        }} catch (e) {{
+          console.log(JSON.stringify({{ ok: true, message: e.message, programsReads: wrapped.reads() }}));
+        }}
+        """
+
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout.strip())
+        assert output["ok"] is True
+        assert f"vmConfig.{slot} failed Stage0 bundle validation" in output["message"]
+        assert "TRUSTED_" not in output["message"]
+        assert "hacked-output" not in output["message"]
+
+    @pytest.mark.parametrize("slot", [
+        "kernelBundle",
+        "bridgeBundle",
+        "matchBundle",
+        "substBundle",
+    ])
+    def test_js_kernel_options_vm_config_revalidates_mutated_original_slots(self, slot):
+        """Caller-owned vmConfig mutation after validation must not bypass the boundary."""
+        import json
+
+        js_code = f"""
+        const fs = require('fs');
+        const stage0Vm = require('./mu/host/js/core/stage0_vm');
+        stage0Vm._stage0VmStepTrusted = function() {{
+          throw new Error('TRUSTED_STEP_REACHED');
+        }};
+        stage0Vm._stage0VmRunTrusted = function() {{
+          throw new Error('TRUSTED_RUN_REACHED');
+        }};
+        const {{ stepKernel }} = require('./mu/host/js/engine/kernel');
+        const muContainers = require('./mu/host/js/core/container_factory');
+
+        function loadBundle(name) {{
+          return JSON.parse(fs.readFileSync('./mu/stage0/compiled/' + name, 'utf8'));
+        }}
+        function trustMu(value) {{
+          if (Array.isArray(value)) {{
+            return muContainers.list(value.map(trustMu));
+          }}
+          if (value !== null && typeof value === 'object') {{
+            return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+          }}
+          return value;
+        }}
+
+        const domainInput = trustMu({{ hello: 'world' }});
+        const domainProjections = trustMu([{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }} }}]);
+        const vmConfig = {{
+          kernelBundle: loadBundle('kernel_v1.compiled.v1.json'),
+          bridgeBundle: loadBundle('bootstrap_structural_v1.compiled.v1.json'),
+          matchBundle: loadBundle('match_v2.compiled.v1.json'),
+          substBundle: loadBundle('subst_v2.compiled.v1.json'),
+        }};
+
+        stepKernel(
+          [],
+          domainInput,
+          domainProjections,
+          {{ maxSteps: 0, vmConfig, returnPacket: true }}
+        );
+        vmConfig[{slot!r}] = {{ stage0_ir_version: 1 }};
+
+        try {{
+          stepKernel(
+            [],
+            domainInput,
+            domainProjections,
+            {{ maxSteps: 1, vmConfig, returnPacket: true }}
+          );
+          console.log(JSON.stringify({{ ok: false, message: 'accepted' }}));
+        }} catch (e) {{
+          console.log(JSON.stringify({{ ok: true, message: e.message }}));
+        }}
+        """
+
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        output = json.loads(result.stdout.strip())
+        assert output["ok"] is True
+        assert f"vmConfig.{slot} failed Stage0 bundle validation" in output["message"]
+        assert "TRUSTED_" not in output["message"]
+
+    def test_js_kernel_options_vm_config_validates_bundles_once_per_config(self):
+        """Valid custom vmConfig validation is one-time, not once per VM step."""
+        import json
+
+        js_code = """
+        const fs = require('fs');
+        const stage0Vm = require('./mu/host/js/core/stage0_vm');
+        const originalValidateBundle = stage0Vm.validateBundle;
+        let validateCount = 0;
+        stage0Vm.validateBundle = function(bundle) {
+          validateCount += 1;
+          return originalValidateBundle(bundle);
+        };
+        const { stepKernel } = require('./mu/host/js/engine/kernel');
+        const muContainers = require('./mu/host/js/core/container_factory');
+
+        function loadBundle(name) {
+          return JSON.parse(fs.readFileSync('./mu/stage0/compiled/' + name, 'utf8'));
+        }
+        function trustMu(value) {
+          if (Array.isArray(value)) {
+            return muContainers.list(value.map(trustMu));
+          }
+          if (value !== null && typeof value === 'object') {
+            return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+          }
+          return value;
+        }
+
+        const vmConfig = {
+          kernelBundle: loadBundle('kernel_v1.compiled.v1.json'),
+          bridgeBundle: loadBundle('bootstrap_structural_v1.compiled.v1.json'),
+          matchBundle: loadBundle('match_v2.compiled.v1.json'),
+          substBundle: loadBundle('subst_v2.compiled.v1.json'),
+        };
+
+        const result = stepKernel(
+          [],
+          trustMu({ hello: 'world' }),
+          trustMu([{ pattern: { var: 'x' }, body: { var: 'x' } }]),
+          { maxSteps: 10, vmConfig }
+        );
+        console.log(JSON.stringify({ validateCount, result }));
+        """
+
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, (
+            f"JS execution failed with exit {result.returncode}:\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+        output = json.loads(result.stdout.strip())
+        assert output["validateCount"] == 4
 
 
 # =============================================================================
@@ -765,6 +1237,48 @@ class TestJsBehavioralParity:
         output = json.loads(result.stdout.strip())
         assert output["match"], (
             f"JS parity violation:\n"
+            f"public:  {output['public']}\n"
+            f"trusted: {output['trusted']}"
+        )
+
+    def test_js_run_trusted_parity(self):
+        """JS _stage0VmRunTrusted produces same result as public stage0VmRun."""
+        import json
+
+        js_code = """
+        const fs = require('fs');
+        const { stage0VmRun, _stage0VmRunTrusted } = require('./mu/host/js/core/stage0_vm');
+
+        const bundle = JSON.parse(fs.readFileSync(
+          './mu/stage0/compiled/match_v2.compiled.v1.json', 'utf8'));
+        const input = {
+          match: { pattern: { var: 'x' }, value: { foo: 'bar' } },
+          _match_ctx: { _input: { foo: 'bar' }, _body: { var: 'x' }, _remaining: null },
+        };
+
+        const publicResult = stage0VmRun(bundle, input, 100);
+        const trustedResult = _stage0VmRunTrusted(bundle, input, 100);
+        console.log(JSON.stringify({
+          match: JSON.stringify(publicResult) === JSON.stringify(trustedResult),
+          public: publicResult,
+          trusted: trustedResult,
+        }));
+        """
+
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT)
+        )
+
+        assert result.returncode == 0, (
+            f"JS execution failed with exit {result.returncode}:\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+        output = json.loads(result.stdout.strip())
+        assert output["match"], (
+            f"JS run parity violation:\n"
             f"public:  {output['public']}\n"
             f"trusted: {output['trusted']}"
         )
