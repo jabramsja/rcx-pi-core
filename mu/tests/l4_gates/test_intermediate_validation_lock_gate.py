@@ -1,15 +1,12 @@
 """
 Gate test: Intermediate Validation Lock (F-37)
 
-Proves that JS runAlgorithmWithBridge() validates intermediate results
-after denormalize and before re-feeding them into the loop body.
-
-Gap: JS runAlgorithmWithBridge (pipeline.js) denormalizes wrapped.result
-and re-feeds as `current` without calling validateAlgorithmRuntimeFields.
-Python step_kernel_mu validates output at every exit path (step_mu.py:1474).
+Proves that JS runAlgorithmWithBridge() keeps validating intermediate
+results after kernel output extraction and before re-feeding them into
+the loop body.
 
 Two tests:
-1. Behavioral rejection: patched _stepKernelCoreNonMeta returns unsupported
+1. Behavioral rejection: patched trusted kernel runner returns unsupported
    underscore field (_injected) -> validator rejects at intermediate check.
 2. Source lock: validator(next, ...) appears between denormalize(wrapped.result)
    and current = next in pipeline.js source.
@@ -35,12 +32,10 @@ class TestIntermediateValidationBehavior:
 
     def test_js_rejects_unsupported_underscore_in_intermediate(self):
         """Patched kernel returns {_injected: true} -> validator rejects."""
-        # Patch _stepKernelCoreNonMeta BEFORE requiring pipeline.js.
-        # Pipeline destructures _stepKernelCoreNonMeta at module load time
-        # (line 17), so we must patch the kernel module export before
-        # pipeline is loaded. Node caches by resolved path, so patching
-        # the kernel export object before pipeline's require('./kernel')
-        # makes pipeline pick up the patched function.
+        # Patch the trusted runner factory BEFORE requiring pipeline.js.
+        # runAlgorithmWithBridge asks _vmConfigTrust for a kernel-core runner
+        # at runtime; patching the exported trust hook keeps this gate aimed at
+        # the same seam pipeline.js uses without changing runtime code.
         js_script = (
             "const kernel = require('./mu/host/js/engine/kernel');\n"
             "const muContainers = require('./mu/host/js/core/container_factory');\n"
@@ -51,11 +46,13 @@ class TestIntermediateValidationBehavior:
             "  }\n"
             "  return value;\n"
             "}\n"
-            "kernel._stepKernelCore = function(_a, _k, _d, _v, _m, _vm) {\n"  # ANTICHEAT_OK: JS kernel module patch for behavioral gate test
-            "  return { kind: 'terminal', continuation: null,\n"
-            "           result: { output: { _injected: true, value: 42 },\n"
-            "             stall: false, termination_reason: 'projection_applied',\n"
-            "             steps_used: 1, max_steps: 10000 } };\n"
+            "kernel._vmConfigTrust.makeStepKernelCoreRunner = function(_vmConfig) {\n"  # ANTICHEAT_OK: JS kernel module patch for behavioral gate test
+            "  return function(_allProjs, _kernelInput, _domainInput, _validator, _maxSteps) {\n"
+            "    return { kind: 'terminal', continuation: null,\n"
+            "             result: { output: { _injected: true, value: 42 },\n"
+            "               stall: false, termination_reason: 'projection_applied',\n"
+            "               steps_used: 1, max_steps: 10000 } };\n"
+            "  };\n"
             "};\n"
             "const { runAlgorithmWithBridge } = require('./mu/host/js/engine/pipeline');\n"
             "try {\n"

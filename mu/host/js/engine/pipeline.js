@@ -15,7 +15,7 @@ const { normalize, normalizeProjection, listToLinked } = require('../core/normal
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
 const { step } = require('../core/bootstrap_core');
 const { isTerminalShape, isEngineTerminal, deriveEngineExitReason, setsEqual } = require('../core/terminal_classification');
-const { stepKernel, runStructural, _stepKernelCore } = require('./kernel');
+const { stepKernel, runStructural, _vmConfigTrust } = require('./kernel');
 const seedLoader = require('../core/seed_loader');
 
 // JS built-in property names that must never be used as inject_key.
@@ -84,6 +84,7 @@ function _clearBoundaryOpsCache() {
  * BOUNDARY: Algorithm harness — off kernel path. Reclassified P7W5: was host iteration marker.
  */
 function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig) {
+  const runStepKernelCore = _vmConfigTrust.makeStepKernelCoreRunner(vmConfig === undefined ? null : vmConfig);
   // Validate input and projections once at entry (same checks as stepKernel).
   const validator = validateAlgorithmRuntimeFields;
   validator(input, 'domainInput');
@@ -136,31 +137,27 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig
       ['_projs', linkedProjs],
     ]);
     // BOUNDARY: algorithm harness drives explicit kernel continuation values.
-    let packet = _stepKernelCore(
+    let packet = runStepKernelCore(
       allProjs,
       kernelInput,
       current,
       validator,
-      10000,
-      vmConfig || null,
-      undefined,
-      null
+      10000
     );
     while (packet.kind === 'continuation') {
-      packet = _stepKernelCore(
+      packet = runStepKernelCore(
         allProjs,
         kernelInput,
         current,
         validator,
         10000,
-        vmConfig || null,
         undefined,
         packet.continuation,
         packet.continuationProof
       );
     }
     const canonical = packet.result;
-    const next = canonical.output;  // already extracted + denormalized by _stepKernelCore
+    const next = canonical.output;  // already extracted + denormalized by kernel core
     validator(next, 'runAlgorithmWithBridge.intermediate');
     const nextHash = muHashControlCached(next, 'runAlgorithmWithBridge.stall');
     if (nextHash === currentHash) break;
@@ -281,7 +278,13 @@ function boundaryOpRunTrace(kernelProjections, seedProjectionMap, request, reqIn
     throw new RcxError('api.bad_request',
       `run_trace input 'max_steps' exceeds boundary cap of ${MAX_BOUNDARY_TRACE_STEPS}`);
   }
-  const raw = runStructural(kernelProjections, projs, reqInput.value, traceMaxSteps, vmConfig || null);
+  const raw = runStructural(
+    kernelProjections,
+    projs,
+    reqInput.value,
+    traceMaxSteps,
+    vmConfig === undefined ? null : vmConfig
+  );
   return muContainers.record([
     ['result', raw.result],
     ['trace', raw.trace],

@@ -3063,6 +3063,58 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert raw_override == f"FOUNDER_OVERRIDE:{wave_id}"
         assert package_override == ""
 
+    def test_pre_supervisor_tracker_note_demotes_docs_only_structural_scope_to_enabler(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "docs-only-structural-rerun-2026-05-29"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+
+        with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: sorted(set(files))), \
+             patch.object(pb_mod, "_verify_phase_b_pre_supervisor_tracker_note", return_value=None):
+            (
+                note,
+                raw_override,
+                package_override,
+                modified,
+                final_scope,
+                error,
+            ) = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: locks docs-only structural rerun demotion
+                repo,
+                wave_id=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                wave_class="L4_STRUCTURAL",
+                target_gate_id="G8",
+                plan_path=f"reports/control_plane/{wave_id}.md",
+                plan_content="# Plan\nClass: L4_STRUCTURAL\n",
+                changed_files=[
+                    f"reports/control_plane/{wave_id}.md",
+                    indicator_path,
+                ],
+                test_files=[],
+                receipt_path=".scratch/phase_b_supervisor_package.json",
+                bridge_status={"rounds": 2},
+                reentry=False,
+                founder_override="",
+            )
+
+        assert error is None
+        assert modified is True
+        assert final_scope == [
+            "TASKS.md",
+            f"reports/control_plane/{wave_id}.md",
+            indicator_path,
+        ]
+        assert "Class: L4_ENABLER" in note
+        assert "workload_target:" not in note
+        assert "structural_artifact_ref:" not in note
+        assert raw_override == ""
+        assert package_override == ""
+
     def test_pre_supervisor_tracker_note_uses_classless_comment_runtime_override(
         self,
         tmp_path,
