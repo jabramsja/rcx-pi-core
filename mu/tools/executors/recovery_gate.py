@@ -5578,9 +5578,21 @@ def _validate_ignored_hybrid_scratch_cache_path(
     expected_realpath = str(path.resolve(strict=False))
     if not snapshot["exists"]:
         return True, ""
-    if rel_path.startswith(".scratch/") and "/.scratch/__pycache__/" in rel_path:
-        if snapshot["type"] not in {"file", "symlink"}:
-            return False, f"hybrid nested .scratch cache exception must remain a regular file or symlink: {rel_path}"
+    nested_cache = rel_path.startswith(".scratch/") and "/.scratch/__pycache__/" in rel_path
+    if nested_cache and snapshot["type"] == "symlink":
+        target = Path(str(snapshot["realpath"]))
+        allowed_temp_roots = {
+            Path("/tmp").resolve(strict=False),
+            Path(tempfile.gettempdir()).resolve(strict=False),
+        }
+        if target not in allowed_temp_roots or not target.is_dir():
+            return False, f"hybrid nested .scratch cache symlink must point at a temp directory root: {rel_path}"
+        return True, ""
+    if nested_cache:
+        if snapshot["type"] != "file":
+            return False, f"hybrid nested .scratch cache exception must remain a regular file: {rel_path}"
+        if snapshot["realpath"] != expected_realpath:
+            return False, f"hybrid nested .scratch cache exception escaped its stable realpath: {rel_path}"
         return True, ""
     if rel_path == ".scratch/__pycache__":
         if snapshot["type"] != "directory":

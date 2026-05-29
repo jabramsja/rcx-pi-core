@@ -5695,8 +5695,9 @@ class TestHybridScopeAudit:
             / "__pycache__"
         )
         nested_pycache.mkdir(parents=True)
-        target = tmp_path / "scratch-cache-target"
-        target.mkdir()
+        target = Path("/tmp")
+        if not target.is_dir():
+            pytest.skip("/tmp unavailable for nested review cache symlink regression")
         nested_pyc = nested_pycache / "artifact.cpython-313.pyc"
         try:
             nested_pyc.symlink_to(target, target_is_directory=True)
@@ -5721,6 +5722,38 @@ class TestHybridScopeAudit:
 
         assert ok is True
         assert audit["observed_drift"] == []
+
+    def test_nested_review_scratch_pycache_symlink_to_file_is_rejected(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        nested_pycache = (
+            tmp_path
+            / ".scratch"
+            / "phase_b_r2_review_bd4aea6b"
+            / ".scratch"
+            / "__pycache__"
+        )
+        nested_pycache.mkdir(parents=True)
+        target = tmp_path / "outside-cache.pyc"
+        target.write_bytes(b"\0\0")
+        nested_pyc = nested_pycache / "artifact.cpython-313.pyc"
+        try:
+            nested_pyc.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: bot P2 nested pycache symlink escape
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+
+        assert ok is False
+        assert "hybrid nested .scratch cache symlink must point at a temp directory root" in baseline["detail"]
 
     def test_prior_same_lineage_recovery_prompt_artifacts_are_allowed_but_unrelated_prompt_is_not(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)

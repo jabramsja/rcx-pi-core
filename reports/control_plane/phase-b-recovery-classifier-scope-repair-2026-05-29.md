@@ -89,18 +89,15 @@ semantic changes are authorized by this packet.
 - Refresh wave: `phase-b-recovery-classifier-scope-repair-2026-05-29`
 - Active packet: `reports/control_plane/phase-b-recovery-classifier-scope-repair-2026-05-29.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `9e227e869677007a32734bb99805ba2b7651d573e7eb549caf9d6f0f633453ed`
+- Tracker note sha256: `855f47035e58df02b03057e6299256df776ef3d9943253a765e8f8cb2ef28e3c`
 - Indicator artifact: `reports/l4_wave_indicators/phase-b-recovery-classifier-scope-repair-2026-05-29.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/l4_gates/test_intermediate_validation_lock_gate.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py`.
-- Evidence delta: (1) Routed commit handoff scopes 8 wave-owned file(s). (2) Evidence gate exercises 3 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/phase-b-recovery-classifier-scope-repair-2026-05-29.json..
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`.
+- Evidence delta: (1) Routed commit handoff scopes 5 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/phase-b-recovery-classifier-scope-repair-2026-05-29.json..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/phase-b-recovery-classifier-scope-repair-2026-05-29.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/l4_gates/test_intermediate_validation_lock_gate.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
   - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/executors/phase_b_executor.py`
   - `mu/tools/executors/recovery_gate.py`
   - `reports/control_plane/phase-b-recovery-classifier-scope-repair-2026-05-29.md`
   - `reports/l4_wave_indicators/phase-b-recovery-classifier-scope-repair-2026-05-29.json`
