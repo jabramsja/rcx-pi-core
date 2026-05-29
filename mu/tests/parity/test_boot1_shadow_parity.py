@@ -193,9 +193,9 @@ class TestBoot1PythonShadowParity:
 class TestBoot1SafetyInvariants:
     """Verify Boot1 safety invariants S1–S7 via public API."""
 
-    @pytest.mark.slow
     def test_s4_terminal_shape_preserved(self):
         """S4: Terminal result has exactly 8 keys."""
+        # SPEED_OK: bounded Boot1 safety invariant; tiny input/max_steps stays in fast gate.
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
         result = _run_boot1(projs, {"test": 42}, max_steps=10)
@@ -203,17 +203,17 @@ class TestBoot1SafetyInvariants:
                         "operator_frozen", "frozen_set", "action", "stall"}
         assert set(result.keys()) == expected_keys
 
-    @pytest.mark.slow
     def test_s7_no_config_leak(self):
         """S7: _config must not appear in terminal result."""
+        # SPEED_OK: bounded Boot1 safety invariant; tiny input/max_steps stays in fast gate.
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
         result = _run_boot1(projs, {"test": 42}, max_steps=10)
         assert "_config" not in result
 
-    @pytest.mark.slow
     def test_s7_no_tail_call_leak(self):
         """S7: _tail_call must not appear in terminal result."""
+        # SPEED_OK: bounded Boot1 safety invariant; tiny input/max_steps stays in fast gate.
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
         result = _run_boot1(projs, {"test": 42}, max_steps=10)
@@ -235,9 +235,9 @@ class TestBoot1SafetyInvariants:
                 context="test_domain",
             )
 
-    @pytest.mark.slow
     def test_no_reserved_fields_in_boot1_terminal(self):
         """Boot1 terminal result contains no kernel-reserved fields."""
+        # SPEED_OK: bounded Boot1 safety invariant; tiny input/max_steps stays in fast gate.
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
         result = _run_boot1(projs, {"test": 42}, max_steps=10)
@@ -1400,9 +1400,9 @@ class TestBoot1BoundaryRequestSecurity:
                 max_steps=5, use_boot1_recursive=True,
             )
 
-    @pytest.mark.slow
     def test_boot1_and_trampoline_both_reject_reserved_input(self):
         """Both paths reject reserved fields identically (parity)."""
+        # SPEED_OK: bounded reserved-field parity check; tiny max_steps stays in fast gate.
         reset_step_budget()
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         reserved_input = {"_stall": True}

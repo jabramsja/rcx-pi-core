@@ -183,17 +183,15 @@ Questions? Concerns? Thoughts? -- Think hard
 - Refresh wave: `ci-slow-tests-evidence-cache-2026-05-29`
 - Active packet: `reports/control_plane/ci-slow-tests-evidence-cache-2026-05-29_2026-05-29.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `6745c25ce1b6562ac8306656ee4c63a7ba1c168f0bb286e9b55645cd45cda0ed`
+- Tracker note sha256: `306b0ef263c4b09bb98559e0f528f118f712105ffacef97b2da1e035205a820d`
 - Indicator artifact: `reports/l4_wave_indicators/ci-slow-tests-evidence-cache-2026-05-29.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/l4_gates/test_stage0_vm_performance.py mu/tests/parity/test_boot1_shadow_parity.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/ci-slow-tests-evidence-cache-2026-05-29_2026-05-29.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/parity/test_boot1_shadow_parity.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/ci-slow-tests-evidence-cache-2026-05-29_2026-05-29.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/ci-slow-tests-evidence-cache-2026-05-29.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/l4_gates/test_stage0_vm_performance.py`
   - `mu/tests/parity/test_boot1_shadow_parity.py`
   - `reports/control_plane/ci-slow-tests-evidence-cache-2026-05-29_2026-05-29.md`
-  - `reports/deferred/non_blocking/ci-slow-tests-evidence-cache-2026-05-29_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/ci-slow-tests-evidence-cache-2026-05-29.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
