@@ -24,6 +24,14 @@ from tests.repo_root import REPO_ROOT
 ROOT = REPO_ROOT
 FIXTURES = ROOT / "tests" / "fixtures"
 
+# JS-parity subprocess timeout. A `node eval_step.js` parity call normally completes
+# in <2s, but under the scheduled full suite's high parallelism (xdist -n auto) the
+# node process can be CPU-starved well past a tight 60s budget — which intermittently
+# failed the scheduled green-gate on 2026-05-30 (test_route_default_parity:
+# subprocess.TimeoutExpired after 60s). Generous headroom per learning.md 2026-04-11
+# (timeout budgets should be >=10x expected wall time, not ~2x).
+_JS_PARITY_TIMEOUT = 180
+
 
 def _run_python(projs, input_val, max_steps=20):
     result, trace, stall = run_mu(projs, input_val, max_steps=max_steps)
@@ -37,7 +45,7 @@ def _run_js(input_val, max_steps=100):
         cwd=ROOT,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_JS_PARITY_TIMEOUT,
         check=False,
     )
     last = None
@@ -132,7 +140,7 @@ class TestHemisphereProjectionCountParity:
             cwd=ROOT,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=_JS_PARITY_TIMEOUT,
             check=False,
         )
         last = None
@@ -161,7 +169,7 @@ def _js_api(request_dict):
         cwd=ROOT,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_JS_PARITY_TIMEOUT,
         check=False,
     )
     last = None
