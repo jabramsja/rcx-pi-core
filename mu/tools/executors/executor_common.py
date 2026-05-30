@@ -43,19 +43,19 @@ IMPLEMENTER_BACKEND_KEYS = frozenset(
 )
 REVIEWER_BRIDGE_KEYS = frozenset({"phase_a", "phase_b"})
 DEFAULT_AGENT_DISPLAY_NAMES = {
-    "claude": "Claude Opus 4.7 max",
+    "claude": "Claude Opus 4.8 max",
     "codex": "Codex 5.5 xhigh",
 }
 
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "role_agents": {
-        "implementer": "codex",
-        "reviewer": "codex",
+        "implementer": "claude",
+        "reviewer": "claude",
     },
     "bridge_agent_defaults": {
         "claude": {
-            "display_name": "Claude Opus 4.7 max",
-            "model": "claude-opus-4-7",
+            "display_name": "Claude Opus 4.8 max",
+            "model": "claude-opus-4-8",
             "effort": "max",
         },
         "codex": {

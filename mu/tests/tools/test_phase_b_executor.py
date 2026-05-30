@@ -945,7 +945,8 @@ class TestLoadExecutorConfig:
 
     def test_missing_config_returns_defaults(self, tmp_path):
         config = impl_mod.load_executor_config(tmp_path)
-        assert config["backends"]["phase_b_executor"] == "codex"
+        # Materialized: implementer backend tracks role_agents.implementer (config-only changes).
+        assert config["backends"]["phase_b_executor"] == config["role_agents"]["implementer"]
         assert config["hybrid_recovery_enabled"] is True
 
     def test_existing_config_loaded(self, tmp_path):

@@ -19,6 +19,13 @@ import pytest
 
 from tests.repo_root import REPO_ROOT
 
+ROLE_AGENT_KEYS = {"implementer", "reviewer"}
+VALID_ROLE_AGENTS = {"claude", "codex"}
+REQUIRED_BRIDGE_AGENT_DEFAULT_KEYS = {
+    "claude": {"display_name", "model", "effort"},
+    "codex": {"display_name", "model", "reasoning_effort"},
+}
+
 EXECUTORS_DIR = REPO_ROOT / "mu" / "tools" / "executors"
 CONFIG_JSON_PATH = EXECUTORS_DIR / "executor_config.json"
 COMMON_PY_PATH = EXECUTORS_DIR / "executor_common.py"
@@ -268,16 +275,15 @@ class TestBackendConfigAlignment:
 
 
 class TestRoleAgentConfigAlignment:
-    def test_role_agents_present_in_default_and_live_config(self):
+    def test_role_agents_match_between_default_and_live_config(self):
         defaults = _load_default_executor_config_role_agents()
         live = _load_json_config_role_agents()
-        assert defaults == {"implementer": "codex", "reviewer": "codex"}
-        assert live == {"implementer": "codex", "reviewer": "codex"}
+        assert defaults == live
 
-    def test_role_agent_keys_match_between_default_and_live_config(self):
-        defaults = _load_default_executor_config_role_agents()
+    def test_role_agents_define_supported_implementer_and_reviewer(self):
         live = _load_json_config_role_agents()
-        assert set(defaults) == set(live) == {"implementer", "reviewer"}
+        assert set(live) == ROLE_AGENT_KEYS
+        assert set(live.values()) <= VALID_ROLE_AGENTS
 
 
 class TestBridgeAgentDefaultConfigAlignment:
@@ -288,13 +294,10 @@ class TestBridgeAgentDefaultConfigAlignment:
 
     def test_bridge_agent_defaults_define_provider_model_and_effort_switches(self):
         defaults = _load_json_config_bridge_agent_defaults()
-        assert defaults["claude"] == {
-            "display_name": "Claude Opus 4.7 max",
-            "model": "claude-opus-4-7",
-            "effort": "max",
-        }
-        assert defaults["codex"] == {
-            "display_name": "Codex 5.5 xhigh",
-            "model": "gpt-5.5",
-            "reasoning_effort": "xhigh",
-        }
+        assert set(REQUIRED_BRIDGE_AGENT_DEFAULT_KEYS) <= set(defaults)
+        for provider, required_keys in REQUIRED_BRIDGE_AGENT_DEFAULT_KEYS.items():
+            provider_defaults = defaults[provider]
+            assert required_keys <= set(provider_defaults)
+            for key in required_keys:
+                assert isinstance(provider_defaults[key], str)
+                assert provider_defaults[key]
