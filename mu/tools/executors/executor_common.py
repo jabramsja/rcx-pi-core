@@ -701,6 +701,7 @@ def emit_pipeline_agent_event(
         from pipeline_agent_pager import emit_transition_event
     except ImportError:
         import importlib.util as _ilu
+        import sys as _sys
 
         pager_path = (
             Path(__file__).resolve().parent.parent / "observability" / "pipeline_agent_pager.py"
@@ -708,6 +709,8 @@ def emit_pipeline_agent_event(
         spec = _ilu.spec_from_file_location("pipeline_agent_pager", str(pager_path))
         module = _ilu.module_from_spec(spec)
         assert spec.loader is not None
+        # Cache before exec so a later emit resolves from sys.modules after the worktree (and __file__) is removed.
+        _sys.modules["pipeline_agent_pager"] = module
         spec.loader.exec_module(module)
         emit_transition_event = module.emit_transition_event
     return emit_transition_event(repo_root, bus_dir=bus_dir, **kwargs)
