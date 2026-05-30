@@ -29,6 +29,7 @@ from executor_common import (  # noqa: E402  (path insert must precede import)
     DEFAULT_EXECUTOR_CONFIG,
     ROLE_AGENT_ENV_VARS,
     apply_role_agents,
+    resolve_committed_role_agent,
     resolve_role_agent,
 )
 
@@ -92,9 +93,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: executor_config.json not found: {cfg_path}", file=sys.stderr)
         return 2
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
-    current = raw.get("role_agents") if isinstance(raw.get("role_agents"), dict) else {}
-    cur_impl = current.get("implementer", "codex")
-    cur_rev = current.get("reviewer", "codex")
+    # Resolve the CURRENT committed roles with the same precedence the runtime
+    # loader uses (explicit role_agents -> legacy backends/bridge_reviewers ->
+    # default), so a partial switch preserves the un-changed role even for legacy
+    # configs that predate role_agents. Env shadows are excluded on purpose: they
+    # must not be baked into the written file (they surface as a warning below).
+    cur_impl = resolve_committed_role_agent(raw, "implementer")
+    cur_rev = resolve_committed_role_agent(raw, "reviewer")
 
     if not args.implementer and not args.reviewer:
         # --show or no-op: report current state, change nothing

@@ -562,6 +562,30 @@ def resolve_role_agent(
     return default_agent
 
 
+def resolve_committed_role_agent(config: dict[str, Any], role: str) -> str:
+    """Resolve a role's agent from committed config only, ignoring env shadows.
+
+    Read-side counterpart to apply_role_agents: same precedence as
+    resolve_role_agent (explicit role_agents -> legacy backends/bridge_reviewers
+    -> role-aware default) MINUS the environment-variable override loop.
+
+    set_roles.py uses this so a partial switch (e.g. only --reviewer) preserves
+    the role it is NOT changing from the actual committed file state — including
+    legacy configs that predate role_agents and carry only backends/
+    bridge_reviewers. Env overrides are deliberately excluded so a transient
+    runtime shadow is never baked into the written config; set_roles reports an
+    active shadow as a separate warning instead.
+    """
+    explicit = _explicit_role_agent_override(config, role)
+    if explicit is not None:
+        return explicit
+    legacy = _legacy_role_agent_override(config, role)
+    if legacy is not None:
+        return legacy
+    default_role_agents = DEFAULT_EXECUTOR_CONFIG.get("role_agents", {})
+    return _nonempty_str(default_role_agents.get(role)) or "codex"
+
+
 def apply_role_agents(
     config: dict[str, Any],
     implementer_agent: str,
