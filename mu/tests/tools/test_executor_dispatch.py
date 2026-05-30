@@ -283,10 +283,14 @@ class TestDispatcherConfig:
 
     def test_load_default_config(self):
         config = dispatch_mod.load_config()
-        expected_implementer = os.environ.get("RCX_IMPLEMENTER_AGENT_OVERRIDE", "codex")
+        # De-brittled: defaults derive from canonical DEFAULT_EXECUTOR_CONFIG; env overrides still win.
+        default_role_agents = common_mod.DEFAULT_EXECUTOR_CONFIG["role_agents"]
+        expected_implementer = os.environ.get(
+            "RCX_IMPLEMENTER_AGENT_OVERRIDE", default_role_agents["implementer"]
+        )
         expected_reviewer = os.environ.get(
             "RCX_REVIEWER_AGENT_OVERRIDE",
-            os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "codex"),
+            os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", default_role_agents["reviewer"]),
         )
         assert config["role_agents"]["implementer"] == expected_implementer
         assert config["role_agents"]["reviewer"] == expected_reviewer
@@ -307,28 +311,40 @@ class TestDispatcherConfig:
         assert config["timeouts"]["pre_push_fast"] >= 1800
 
     def test_bridge_reviewer_override_does_not_retarget_implementers(self, monkeypatch):
-        monkeypatch.setenv("RCX_BRIDGE_REVIEWER_OVERRIDE", "claude")
+        # De-brittled: pick a reviewer override that differs from the default implementer
+        # so the "implementers unaffected" property holds for any configured default.
+        default_impl = common_mod.DEFAULT_EXECUTOR_CONFIG["role_agents"]["implementer"]
+        reviewer_value = "codex" if default_impl != "codex" else "claude"
+        monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
+        monkeypatch.setenv("RCX_BRIDGE_REVIEWER_OVERRIDE", reviewer_value)
         config = dispatch_mod.load_config()
-        assert config["bridge_reviewers"]["phase_a"] == "claude"
-        assert config["bridge_reviewers"]["phase_b"] == "claude"
-        assert config["backends"]["post_merge_supervisor"] == "claude"
-        assert config["backends"]["dialectic_executor"] == "claude"
-        assert config["backends"]["phase_a_executor"] == "codex"
-        assert config["backends"]["phase_b_executor"] == "codex"
-        assert config["backends"]["bot_remediation"] == "codex"
+        assert config["bridge_reviewers"]["phase_a"] == reviewer_value
+        assert config["bridge_reviewers"]["phase_b"] == reviewer_value
+        assert config["backends"]["post_merge_supervisor"] == reviewer_value
+        assert config["backends"]["dialectic_executor"] == reviewer_value
+        assert config["backends"]["phase_a_executor"] == default_impl
+        assert config["backends"]["phase_b_executor"] == default_impl
+        assert config["backends"]["bot_remediation"] == default_impl
 
     def test_implementer_override_retargets_only_implementers(self, monkeypatch):
-        monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", "claude")
+        # De-brittled: pick an implementer override that differs from the default reviewer
+        # and clear reviewer env so the reviewer side exercises the true default (CI parity).
+        default_rev = common_mod.DEFAULT_EXECUTOR_CONFIG["role_agents"]["reviewer"]
+        impl_value = "claude" if default_rev != "claude" else "codex"
+        monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+        monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", impl_value)
         config = dispatch_mod.load_config()
-        assert config["role_agents"]["implementer"] == "claude"
-        assert config["role_agents"]["reviewer"] == "codex"
-        assert config["backends"]["phase_a_executor"] == "claude"
-        assert config["backends"]["phase_b_executor"] == "claude"
-        assert config["backends"]["bot_remediation"] == "claude"
-        assert config["backends"]["post_merge_supervisor"] == "codex"
-        assert config["backends"]["dialectic_executor"] == "codex"
-        assert config["bridge_reviewers"]["phase_a"] == "codex"
-        assert config["bridge_reviewers"]["phase_b"] == "codex"
+        assert config["role_agents"]["implementer"] == impl_value
+        assert config["role_agents"]["reviewer"] == default_rev
+        assert config["backends"]["phase_a_executor"] == impl_value
+        assert config["backends"]["phase_b_executor"] == impl_value
+        assert config["backends"]["bot_remediation"] == impl_value
+        assert config["backends"]["post_merge_supervisor"] == default_rev
+        assert config["backends"]["dialectic_executor"] == default_rev
+        assert config["bridge_reviewers"]["phase_a"] == default_rev
+        assert config["bridge_reviewers"]["phase_b"] == default_rev
 
     def test_load_missing_config_returns_defaults(self, tmp_path):
         config = dispatch_mod.load_config(tmp_path / "nonexistent.json")
