@@ -35,6 +35,7 @@ try:
         ExecutorCommonError,
         resolve_agent_bus_dir,
         run_bridge_subprocess,
+        configured_role_agents,
     )
 except ImportError:
     import importlib.util as _ilu
@@ -47,6 +48,7 @@ except ImportError:
     ExecutorCommonError = _mod.ExecutorCommonError
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     run_bridge_subprocess = _mod.run_bridge_subprocess
+    configured_role_agents = _mod.configured_role_agents
 
 
 class DialecticExecutorError(RuntimeError):
@@ -194,6 +196,20 @@ def _proposal_for_next_round(
     return fallback
 
 
+def resolve_dialectic_reviewer(repo_root: Path) -> str:
+    """Reviewer agent for dialectic narrowing rounds.
+
+    Follows the configured reviewer role (``role_agents.reviewer``, env-aware) so a
+    ``set_roles --reviewer X`` switch propagates to CONTINUE_DIALECTIC rounds instead
+    of being pinned to a hardcoded provider. Falls back to ``"codex"`` if resolution
+    fails for any reason (missing/invalid config), preserving prior behavior.
+    """
+    try:
+        return configured_role_agents(repo_root)["reviewer"]["agent"]
+    except Exception:
+        return "codex"
+
+
 def run_dialectic(
     repo_root: Path,
     *,
@@ -241,6 +257,7 @@ def run_dialectic(
     scratch_dir = repo_root / ".scratch"
     scratch_dir.mkdir(exist_ok=True)
     bridge_script = repo_root / "tools" / "agents" / "bridge_supervisor.py"
+    dialectic_reviewer = resolve_dialectic_reviewer(repo_root)
     current_proposal = proposal
     round_feedback: list[str] = []
     errors: list[str] = []
@@ -268,7 +285,7 @@ def run_dialectic(
             "review",
             "--task-file", str(task_path),
             "--summary", f"Dialectic narrowing round {round_number}/{max_rounds}",
-            "--reviewer", "codex",
+            "--reviewer", dialectic_reviewer,
             "-v", "--no-diff",
             "--job-id", dialectic_job_id,
         ])
