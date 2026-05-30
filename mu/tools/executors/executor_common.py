@@ -50,7 +50,7 @@ DEFAULT_AGENT_DISPLAY_NAMES = {
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "role_agents": {
         "implementer": "claude",
-        "reviewer": "claude",
+        "reviewer": "codex",
     },
     "bridge_agent_defaults": {
         "claude": {
@@ -67,9 +67,9 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "backends": {
         "post_merge_supervisor": "codex",
         "dialectic_executor": "codex",
-        "phase_a_executor": "codex",
-        "phase_b_executor": "codex",
-        "bot_remediation": "codex",
+        "phase_a_executor": "claude",
+        "phase_b_executor": "claude",
+        "bot_remediation": "claude",
         "commit_executor": None,
     },
     "bridge_reviewers": {
@@ -562,22 +562,41 @@ def resolve_role_agent(
     return default_agent
 
 
-def _materialize_role_agents(
-    config: dict[str, Any],
-    *,
-    raw_overrides: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    implementer_agent = resolve_role_agent(
-        config,
-        "implementer",
-        raw_overrides=raw_overrides,
-    )
-    reviewer_agent = resolve_role_agent(
-        config,
-        "reviewer",
-        raw_overrides=raw_overrides,
-    )
+def resolve_committed_role_agent(config: dict[str, Any], role: str) -> str:
+    """Resolve a role's agent from committed config only, ignoring env shadows.
 
+    Read-side counterpart to apply_role_agents: same precedence as
+    resolve_role_agent (explicit role_agents -> legacy backends/bridge_reviewers
+    -> role-aware default) MINUS the environment-variable override loop.
+
+    set_roles.py uses this so a partial switch (e.g. only --reviewer) preserves
+    the role it is NOT changing from the actual committed file state — including
+    legacy configs that predate role_agents and carry only backends/
+    bridge_reviewers. Env overrides are deliberately excluded so a transient
+    runtime shadow is never baked into the written config; set_roles reports an
+    active shadow as a separate warning instead.
+    """
+    explicit = _explicit_role_agent_override(config, role)
+    if explicit is not None:
+        return explicit
+    legacy = _legacy_role_agent_override(config, role)
+    if legacy is not None:
+        return legacy
+    default_role_agents = DEFAULT_EXECUTOR_CONFIG.get("role_agents", {})
+    return _nonempty_str(default_role_agents.get(role)) or "codex"
+
+
+def apply_role_agents(
+    config: dict[str, Any],
+    implementer_agent: str,
+    reviewer_agent: str,
+) -> dict[str, Any]:
+    """Write role_agents and the derived backends/bridge_reviewers into config in place.
+
+    Single source of the derivation rule, shared by _materialize_role_agents (runtime
+    load) and set_roles.py (config writer) so the role_agents switch and every derived
+    field stay consistent.
+    """
     role_agents = config.setdefault("role_agents", {})
     role_agents["implementer"] = implementer_agent
     role_agents["reviewer"] = reviewer_agent
@@ -593,6 +612,24 @@ def _materialize_role_agents(
         bridge_reviewers[key] = reviewer_agent
 
     return config
+
+
+def _materialize_role_agents(
+    config: dict[str, Any],
+    *,
+    raw_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    implementer_agent = resolve_role_agent(
+        config,
+        "implementer",
+        raw_overrides=raw_overrides,
+    )
+    reviewer_agent = resolve_role_agent(
+        config,
+        "reviewer",
+        raw_overrides=raw_overrides,
+    )
+    return apply_role_agents(config, implementer_agent, reviewer_agent)
 
 
 def load_bridge_agent_catalog(

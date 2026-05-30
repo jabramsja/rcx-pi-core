@@ -270,8 +270,17 @@ class TestBackendConfigAlignment:
     def test_bot_remediation_backend_present_in_default_and_live_config(self):
         defaults = _load_default_executor_config_backends()
         live = _load_json_config_backends()
-        assert defaults.get("bot_remediation") == "codex"
-        assert live.get("bot_remediation") == "codex"
+        # bot_remediation is an implementer-backend key. It must be present in both
+        # DEFAULT and live, the two must agree, and the value must equal the
+        # implementer role agent (DEFAULT and live are the materialization fixed-point
+        # of role_agents -- see executor_common.apply_role_agents). Asserting against
+        # the implementer agent stays correct across role switches instead of
+        # hard-coding a provider name.
+        assert "bot_remediation" in defaults
+        assert "bot_remediation" in live
+        assert defaults.get("bot_remediation") == live.get("bot_remediation")
+        implementer = _load_default_executor_config_role_agents().get("implementer")
+        assert defaults.get("bot_remediation") == implementer
 
 
 class TestRoleAgentConfigAlignment:
