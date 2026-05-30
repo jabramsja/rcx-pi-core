@@ -10605,14 +10605,22 @@ def run_commit_pipeline(
                 },
             )
         except Exception as exc:
-            outcome_errors = list(result.get("errors") or [])
-            outcome_errors.append(f"Commit-outcome pager emission failed: {exc}")
-            result = {
-                **result,
-                "status": "error",
-                "step": "commit_outcome_pager",
-                "errors": outcome_errors,
-            }
+            pager_failure = f"Commit-outcome pager emission failed: {exc}"
+            if status in ("success", "held"):
+                # Side-channel pager failure must not flip a terminal-success verdict (deferred note 2026-05-29).
+                warnings = result.setdefault("warnings", [])
+                if isinstance(warnings, list):
+                    warnings.append(pager_failure)
+                result["commit_outcome_pager_warning"] = str(exc)
+            else:
+                outcome_errors = list(result.get("errors") or [])
+                outcome_errors.append(pager_failure)
+                result = {
+                    **result,
+                    "status": "error",
+                    "step": "commit_outcome_pager",
+                    "errors": outcome_errors,
+                }
     return result
 
 
