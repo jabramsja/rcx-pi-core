@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -62,8 +63,20 @@ def _atomic_write_text(path: Path, text: str) -> None:
     every later config load. Write to a temp file in the SAME directory, flush+fsync
     it, then os.replace() onto the target -- an atomic rename on the same filesystem,
     so a crash mid-switch leaves the complete old file, never invalid JSON.
+
+    Preserve the target's existing permission bits across the swap. os.replace() is a
+    rename, so the installed file keeps the TEMP file's mode, and tempfile.mkstemp()
+    hard-codes 0600 -- a naive replace would silently make the authoritative config
+    owner-only and lock out executor/observability processes running as a different
+    user. Re-apply the prior mode before the rename; if the target does not yet exist,
+    fall back to the umask-aware default a normal create would produce rather than
+    inheriting mkstemp's restrictive 0600.
     """
     directory = path.parent
+    try:
+        preserve_mode: int | None = stat.S_IMODE(os.stat(path).st_mode)
+    except FileNotFoundError:
+        preserve_mode = None
     fd, tmp_name = tempfile.mkstemp(dir=str(directory), prefix=f".{path.name}.", suffix=".tmp")
     tmp_path = Path(tmp_name)
     try:
@@ -71,6 +84,14 @@ def _atomic_write_text(path: Path, text: str) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
+        if preserve_mode is None:
+            # Brand-new target: match what open()+write would have produced under the
+            # active umask instead of mkstemp's restrictive 0600. os.umask() has no
+            # read-only form, so set-and-restore to observe the current value.
+            current_umask = os.umask(0)
+            os.umask(current_umask)
+            preserve_mode = 0o666 & ~current_umask
+        os.chmod(tmp_path, preserve_mode)
         os.replace(tmp_path, path)
     except BaseException:
         # Never leave truncated temp residue behind on a failed switch.
