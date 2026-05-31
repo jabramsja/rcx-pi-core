@@ -11,13 +11,27 @@ See: reports/control_plane/post_commit_roundtrip_2026-04-04.md
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests.repo_root import REPO_ROOT
+
+# executor_common owns the single derivation rule role_agents -> backends/
+# bridge_reviewers (apply_role_agents). Import it the same way set_roles.py and
+# the observability panes do, so the LIVE-internal consistency check re-derives
+# through the canonical rule instead of duplicating the role->key mapping here.
+sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "executors"))
+from executor_common import (  # noqa: E402  (path insert must precede import)
+    IMPLEMENTER_BACKEND_KEYS,
+    REVIEW_OVERRIDE_BACKEND_KEYS,
+    REVIEWER_BRIDGE_KEYS,
+    apply_role_agents,
+)
 
 ROLE_AGENT_KEYS = {"implementer", "reviewer"}
 VALID_ROLE_AGENTS = {"claude", "codex"}
@@ -268,26 +282,81 @@ class TestCommitExecutorConfigBinding:
 
 class TestBackendConfigAlignment:
     def test_bot_remediation_backend_present_in_default_and_live_config(self):
+        # bot_remediation is an implementer-backend key, so in EACH config it must
+        # be present and equal THAT config's own implementer role agent
+        # (executor_common.apply_role_agents materializes IMPLEMENTER_BACKEND_KEYS
+        # from role_agents.implementer). Per A2
+        # (FOUNDER_OVERRIDE:role-switch-convergence-2026-05-31) the live config is
+        # authoritative and need NOT equal DEFAULT, so each config is checked
+        # against its OWN role_agents rather than asserting DEFAULT==live -- the old
+        # DEFAULT==live coupling broke on an implementer-role flip because
+        # set_roles.py edits live only. Asserting against the implementer agent
+        # also stays correct across role switches instead of hard-coding a provider.
         defaults = _load_default_executor_config_backends()
         live = _load_json_config_backends()
-        # bot_remediation is an implementer-backend key. It must be present in both
-        # DEFAULT and live, the two must agree, and the value must equal the
-        # implementer role agent (DEFAULT and live are the materialization fixed-point
-        # of role_agents -- see executor_common.apply_role_agents). Asserting against
-        # the implementer agent stays correct across role switches instead of
-        # hard-coding a provider name.
         assert "bot_remediation" in defaults
         assert "bot_remediation" in live
-        assert defaults.get("bot_remediation") == live.get("bot_remediation")
-        implementer = _load_default_executor_config_role_agents().get("implementer")
-        assert defaults.get("bot_remediation") == implementer
+        default_implementer = _load_default_executor_config_role_agents().get("implementer")
+        live_implementer = _load_json_config_role_agents().get("implementer")
+        assert defaults.get("bot_remediation") == default_implementer
+        assert live.get("bot_remediation") == live_implementer
 
 
 class TestRoleAgentConfigAlignment:
     def test_role_agents_match_between_default_and_live_config(self):
-        defaults = _load_default_executor_config_role_agents()
-        live = _load_json_config_role_agents()
-        assert defaults == live
+        """LIVE config is internally consistent with its OWN role_agents.
+
+        A2 (founder-approved, FOUNDER_OVERRIDE:role-switch-convergence-2026-05-31):
+        the live executor_config.json role_agents is authoritative;
+        DEFAULT_EXECUTOR_CONFIG is a fallback that need NOT equal live. set_roles.py
+        edits the live file only (role_agents + the derived backends/bridge_reviewers
+        via executor_common.apply_role_agents), so the previous DEFAULT==live
+        assertion broke on every role flip (the 2026-05-30 role-flip saga).
+
+        Instead, re-derive from the LIVE role_agents using the same canonical
+        apply_role_agents rule the runtime loader uses and assert the live file
+        already equals that fixed-point. Because the expectations are derived FROM
+        the live role_agents, a set_roles.py live-only flip can never break this
+        test (the derived fields always move with role_agents). The method name is
+        retained for continuity; it now checks live-internal consistency.
+        """
+        live = json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))
+        role_agents = live["role_agents"]
+        assert set(role_agents) == ROLE_AGENT_KEYS, (
+            f"live role_agents keys {sorted(role_agents)} != {sorted(ROLE_AGENT_KEYS)}"
+        )
+        implementer = role_agents["implementer"]
+        reviewer = role_agents["reviewer"]
+
+        # Canonical fixed-point: applying the live role_agents to a copy of the
+        # live config must be a no-op for every materialized field. This ties the
+        # test to the single derivation source (apply_role_agents) so it follows
+        # any future change to the role->field mapping automatically.
+        materialized = apply_role_agents(copy.deepcopy(live), implementer, reviewer)
+        assert materialized["backends"] == live["backends"], (
+            "live backends are not the materialization fixed-point of live role_agents"
+        )
+        assert materialized["bridge_reviewers"] == live["bridge_reviewers"], (
+            "live bridge_reviewers are not the fixed-point of live role_agents"
+        )
+
+        # Explicit per-key consistency for readable diagnostics (same source of
+        # truth: the key sets are imported from executor_common).
+        for key in IMPLEMENTER_BACKEND_KEYS:
+            assert live["backends"][key] == implementer, (
+                f"live backends[{key!r}]={live['backends'].get(key)!r} != "
+                f"implementer {implementer!r}"
+            )
+        for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+            assert live["backends"][key] == reviewer, (
+                f"live backends[{key!r}]={live['backends'].get(key)!r} != "
+                f"reviewer {reviewer!r}"
+            )
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert live["bridge_reviewers"][key] == reviewer, (
+                f"live bridge_reviewers[{key!r}]={live['bridge_reviewers'].get(key)!r} != "
+                f"reviewer {reviewer!r}"
+            )
 
     def test_role_agents_define_supported_implementer_and_reviewer(self):
         live = _load_json_config_role_agents()

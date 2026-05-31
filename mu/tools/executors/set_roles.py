@@ -14,13 +14,22 @@ Usage:
 The derivation rule (role_agents -> backends/bridge_reviewers) is shared with the
 runtime loader via executor_common.apply_role_agents, so the written file is exactly
 the materialization fixed-point the dispatcher would compute at load time.
+
+Contract (A2, FOUNDER_OVERRIDE:role-switch-convergence-2026-05-31): the live
+executor_config.json is the AUTHORITATIVE source of truth for role_agents.
+DEFAULT_EXECUTOR_CONFIG in executor_common.py is only a fallback for keys the live
+file omits and need NOT equal the live file. This CLI is therefore a COMPLETE role
+switch on its own -- it writes role_agents and materializes backends/bridge_reviewers
+into the live file, with no Python edit and no second config path required.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import stat
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -43,6 +52,54 @@ def _repo_root(override: str | None) -> Path:
 
 def _config_path(root: Path) -> Path:
     return root / "mu" / "tools" / "executors" / "executor_config.json"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write *text* to *path* atomically so readers never observe a torn write.
+
+    The live executor_config.json is the AUTHORITATIVE role-switch source and the
+    runtime loader reads it with an unguarded json.loads
+    (executor_common.load_executor_config), so a partial/truncated write would break
+    every later config load. Write to a temp file in the SAME directory, flush+fsync
+    it, then os.replace() onto the target -- an atomic rename on the same filesystem,
+    so a crash mid-switch leaves the complete old file, never invalid JSON.
+
+    Preserve the target's existing permission bits across the swap. os.replace() is a
+    rename, so the installed file keeps the TEMP file's mode, and tempfile.mkstemp()
+    hard-codes 0600 -- a naive replace would silently make the authoritative config
+    owner-only and lock out executor/observability processes running as a different
+    user. Re-apply the prior mode before the rename; if the target does not yet exist,
+    fall back to the umask-aware default a normal create would produce rather than
+    inheriting mkstemp's restrictive 0600.
+    """
+    directory = path.parent
+    try:
+        preserve_mode: int | None = stat.S_IMODE(os.stat(path).st_mode)
+    except FileNotFoundError:
+        preserve_mode = None
+    fd, tmp_name = tempfile.mkstemp(dir=str(directory), prefix=f".{path.name}.", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if preserve_mode is None:
+            # Brand-new target: match what open()+write would have produced under the
+            # active umask instead of mkstemp's restrictive 0600. os.umask() has no
+            # read-only form, so set-and-restore to observe the current value.
+            current_umask = os.umask(0)
+            os.umask(current_umask)
+            preserve_mode = 0o666 & ~current_umask
+        os.chmod(tmp_path, preserve_mode)
+        os.replace(tmp_path, path)
+    except BaseException:
+        # Never leave truncated temp residue behind on a failed switch.
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _valid_agents(config: dict) -> set[str]:
@@ -115,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     apply_role_agents(raw, impl, rev)
-    cfg_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_text(cfg_path, json.dumps(raw, indent=2) + "\n")
     _print_state(raw, impl, rev, changed=True)
     return 0
 
