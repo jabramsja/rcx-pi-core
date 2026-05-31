@@ -14,6 +14,13 @@ Usage:
 The derivation rule (role_agents -> backends/bridge_reviewers) is shared with the
 runtime loader via executor_common.apply_role_agents, so the written file is exactly
 the materialization fixed-point the dispatcher would compute at load time.
+
+Contract (A2, FOUNDER_OVERRIDE:role-switch-convergence-2026-05-31): the live
+executor_config.json is the AUTHORITATIVE source of truth for role_agents.
+DEFAULT_EXECUTOR_CONFIG in executor_common.py is only a fallback for keys the live
+file omits and need NOT equal the live file. This CLI is therefore a COMPLETE role
+switch on its own -- it writes role_agents and materializes backends/bridge_reviewers
+into the live file, with no Python edit and no second config path required.
 """
 from __future__ import annotations
 
@@ -21,6 +28,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -43,6 +51,34 @@ def _repo_root(override: str | None) -> Path:
 
 def _config_path(root: Path) -> Path:
     return root / "mu" / "tools" / "executors" / "executor_config.json"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write *text* to *path* atomically so readers never observe a torn write.
+
+    The live executor_config.json is the AUTHORITATIVE role-switch source and the
+    runtime loader reads it with an unguarded json.loads
+    (executor_common.load_executor_config), so a partial/truncated write would break
+    every later config load. Write to a temp file in the SAME directory, flush+fsync
+    it, then os.replace() onto the target -- an atomic rename on the same filesystem,
+    so a crash mid-switch leaves the complete old file, never invalid JSON.
+    """
+    directory = path.parent
+    fd, tmp_name = tempfile.mkstemp(dir=str(directory), prefix=f".{path.name}.", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        # Never leave truncated temp residue behind on a failed switch.
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _valid_agents(config: dict) -> set[str]:
@@ -115,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     apply_role_agents(raw, impl, rev)
-    cfg_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_text(cfg_path, json.dumps(raw, indent=2) + "\n")
     _print_state(raw, impl, rev, changed=True)
     return 0
 

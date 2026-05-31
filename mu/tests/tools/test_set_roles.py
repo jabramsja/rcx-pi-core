@@ -10,6 +10,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from tests.repo_root import REPO_ROOT
 
 sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "executors"))
@@ -137,3 +139,29 @@ def test_no_shadow_when_env_clear(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "sole source of truth" in out
     assert "SHADOW" not in out
+
+
+def test_write_is_atomic_failed_replace_preserves_original(tmp_path, monkeypatch):
+    """A crash during the atomic replace must leave the authoritative config intact.
+
+    The live executor_config.json is read by the runtime loader with an unguarded
+    json.loads, so set_roles must never leave a torn/truncated file. Simulate a
+    failure at the os.replace step and assert the original file is byte-for-byte
+    preserved and no temp residue is left behind in the config directory.
+    """
+    cfg = _seed_config(tmp_path)
+    before = cfg.read_text()
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("simulated crash during replace")
+
+    monkeypatch.setattr(set_roles.os, "replace", _boom)
+    with pytest.raises(OSError):
+        set_roles.main(
+            ["--implementer", "codex", "--reviewer", "claude", "--repo-root", str(tmp_path)]
+        )
+    # Complete old file, never a torn write.
+    assert cfg.read_text() == before
+    # No truncated temp residue left alongside the authoritative config.
+    leftovers = sorted(p.name for p in cfg.parent.iterdir() if p.name != cfg.name)
+    assert leftovers == [], f"atomic write left temp residue: {leftovers}"
