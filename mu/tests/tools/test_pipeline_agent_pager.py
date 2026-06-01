@@ -79,6 +79,33 @@ def _load_delivery_log(repo_root: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def _load_skip_log(repo_root: Path) -> list[dict]:
+    path = repo_root / pager_mod.SKIP_LOG_PATH
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _ack_codex(repo_root, event, state, *, timeout_s):
+    """Fake codex dispatch that acknowledges immediately.
+
+    Used by route=both tests to isolate the REAL claude leg
+    (``_dispatch_claude``) while keeping codex delivered through the normal
+    delivered/receipt flow. Mirrors ``_dispatch_codex``'s success return so the
+    codex delivered/pending/retry semantics and receipts stay exercised.
+    """
+    return {
+        "acknowledged": True,
+        "ack": {
+            "acknowledged_at": "2026-06-01T00:00:00+00:00",
+            "thread_id": "thread-codex-1",
+            "turn_id": "turn-codex-1",
+            "target": "codex",
+        },
+        "codex_thread_id": "thread-codex-1",
+    }
+
+
 def _write_autoping_state(
     codex_home: Path,
     repo_root: Path,
@@ -1600,6 +1627,12 @@ def test_emit_transition_event_clears_stale_codex_thread_id_when_dispatch_reques
 
 
 def test_claude_ack_requires_zero_exit(tmp_path):
+    # The dedicated monitor session id must be present (and != live) for the
+    # subprocess leg to run at all; a valid monitor exercises exit-code handling.
+    repo = tmp_path / "repo"
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor_path.write_text("sess-monitor-ack", encoding="utf-8")
     event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
         route="claude",
         metadata=None,
@@ -1610,27 +1643,33 @@ def test_claude_ack_requires_zero_exit(tmp_path):
     with patch.object(
         pager_mod.subprocess,
         "run",
-        return_value=subprocess.CompletedProcess(["claude", "-p"], 1, "", "no auth"),
+        return_value=subprocess.CompletedProcess(["claude", "--resume"], 1, "", "no auth"),
     ):
-        failed = pager_mod._dispatch_claude(tmp_path, event, config, timeout_s=5)  # ANTICHEAT_OK
+        failed = pager_mod._dispatch_claude(repo, event, config, timeout_s=5)  # ANTICHEAT_OK
     assert failed["acknowledged"] is False
     assert "exited 1" in failed["error"]
+    assert not failed.get("skipped")
 
     with patch.object(
         pager_mod.subprocess,
         "run",
-        return_value=subprocess.CompletedProcess(["claude", "-p"], 0, "ok", ""),
+        return_value=subprocess.CompletedProcess(["claude", "--resume"], 0, "ok", ""),
     ):
-        succeeded = pager_mod._dispatch_claude(tmp_path, event, config, timeout_s=5)  # ANTICHEAT_OK
+        succeeded = pager_mod._dispatch_claude(repo, event, config, timeout_s=5)  # ANTICHEAT_OK
     assert succeeded["acknowledged"] is True
     assert succeeded["ack"]["target"] == "claude"
+    assert succeeded["ack"]["session_id"] == "sess-monitor-ack"
 
 
-def test_dispatch_claude_argv_uses_resume_when_session_id_present(tmp_path):
+def test_dispatch_claude_resumes_dedicated_monitor_distinct_from_live(tmp_path):
     repo = tmp_path / "repo"
-    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-    session_path.write_text("sess-deterministic-01", encoding="utf-8")
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor_path.write_text("sess-monitor-01", encoding="utf-8")
+    # Live orchestrator id present AND DISTINCT: the resume target must be the
+    # dedicated monitor, never the live orchestrator session.
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.write_text("sess-live-99", encoding="utf-8")
 
     event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
         route="claude",
@@ -1651,125 +1690,21 @@ def test_dispatch_claude_argv_uses_resume_when_session_id_present(tmp_path):
     assert argv == [
         "claude",
         "--resume",
-        "sess-deterministic-01",
+        "sess-monitor-01",
         "-p",
         expected_prompt,
     ]
+    # Never resumes the live orchestrator session.
+    assert "sess-live-99" not in argv
     assert "-c" not in argv
     assert "--continue" not in argv
 
 
-def test_dispatch_claude_argv_is_plain_p_when_session_id_absent(tmp_path):
+def test_dispatch_claude_argv_strips_trailing_newline_on_monitor_session_id(tmp_path):
     repo = tmp_path / "repo"
-    # Deliberately do not create the session-id file — current repo state.
-    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
-        route="claude",
-        metadata=None,
-        **_event_kwargs(),
-    )
-
-    with patch.object(
-        pager_mod.subprocess,
-        "run",
-        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
-    ) as run_mock:
-        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
-
-    assert result["acknowledged"] is True
-    argv = run_mock.call_args.args[0]
-    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
-    # Pins PR #794 bot P1 remediation: argv is deterministic plain `-p`, no -c / --continue / --resume.
-    assert argv == ["claude", "-p", expected_prompt]
-    assert "-c" not in argv
-    assert "--continue" not in argv
-    assert "--resume" not in argv
-
-
-def test_dispatch_claude_argv_falls_back_when_session_id_empty(tmp_path):
-    repo = tmp_path / "repo"
-    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-    session_path.write_text("", encoding="utf-8")
-
-    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
-        route="claude",
-        metadata=None,
-        **_event_kwargs(),
-    )
-
-    with patch.object(
-        pager_mod.subprocess,
-        "run",
-        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
-    ) as run_mock:
-        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
-
-    assert result["acknowledged"] is True
-    argv = run_mock.call_args.args[0]
-    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
-    assert argv == ["claude", "-p", expected_prompt]
-    assert "--resume" not in argv
-    assert "-c" not in argv
-    assert "--continue" not in argv
-
-
-def test_dispatch_claude_argv_falls_back_when_session_id_whitespace_only(tmp_path):
-    repo = tmp_path / "repo"
-    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-    session_path.write_text("  \n\t \n", encoding="utf-8")
-
-    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
-        route="claude",
-        metadata=None,
-        **_event_kwargs(),
-    )
-
-    with patch.object(
-        pager_mod.subprocess,
-        "run",
-        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
-    ) as run_mock:
-        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
-
-    assert result["acknowledged"] is True
-    argv = run_mock.call_args.args[0]
-    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
-    assert argv == ["claude", "-p", expected_prompt]
-    assert "--resume" not in argv
-
-
-def test_dispatch_claude_argv_falls_back_when_session_id_has_internal_whitespace(tmp_path):
-    repo = tmp_path / "repo"
-    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-    session_path.write_text("sess abc\n", encoding="utf-8")
-
-    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
-        route="claude",
-        metadata=None,
-        **_event_kwargs(),
-    )
-
-    with patch.object(
-        pager_mod.subprocess,
-        "run",
-        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
-    ) as run_mock:
-        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
-
-    assert result["acknowledged"] is True
-    argv = run_mock.call_args.args[0]
-    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
-    assert argv == ["claude", "-p", expected_prompt]
-    assert "--resume" not in argv
-
-
-def test_dispatch_claude_argv_strips_trailing_newline_on_session_id(tmp_path):
-    repo = tmp_path / "repo"
-    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-    session_path.write_text("sess-trailing-nl\n", encoding="utf-8")
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor_path.write_text("sess-trailing-nl\n", encoding="utf-8")
 
     event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
         route="claude",
@@ -1796,13 +1731,14 @@ def test_dispatch_claude_argv_strips_trailing_newline_on_session_id(tmp_path):
     ]
 
 
-def test_dispatch_claude_argv_falls_back_when_session_id_file_is_not_utf8(tmp_path):
+def test_dispatch_claude_fails_closed_when_monitor_absent_even_if_live_present(tmp_path):
+    # THE core regression: with the live orchestrator id present but no dedicated
+    # monitor file, the pre-fix code resumed the LIVE session. The locked design
+    # MUST fail closed -- issue no subprocess and never target the live session.
     repo = tmp_path / "repo"
-    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-    # Non-UTF-8 bytes: Path.read_text(encoding='utf-8') raises UnicodeDecodeError,
-    # which is NOT an OSError subclass. Pins bridge-round-1 BLOCKING finding.
-    session_path.write_bytes(b"\xff\xfe")
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    live_path.write_text("sess-live-only", encoding="utf-8")
 
     event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
         route="claude",
@@ -1810,20 +1746,71 @@ def test_dispatch_claude_argv_falls_back_when_session_id_file_is_not_utf8(tmp_pa
         **_event_kwargs(),
     )
 
-    with patch.object(
-        pager_mod.subprocess,
-        "run",
-        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
-    ) as run_mock:
+    with patch.object(pager_mod.subprocess, "run") as run_mock:
         result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
 
-    assert result["acknowledged"] is True
-    argv = run_mock.call_args.args[0]
-    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
-    assert argv == ["claude", "-p", expected_prompt]
-    assert "--resume" not in argv
-    assert "-c" not in argv
-    assert "--continue" not in argv
+    assert result["acknowledged"] is False
+    assert result["skipped"] is True
+    assert result["skip_reason"] == pager_mod.CLAUDE_SKIP_REASON_MONITOR_UNSET
+    assert "error" not in result
+    run_mock.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "monitor_bytes",
+    [
+        b"",            # empty
+        b"  \n\t \n",   # whitespace-only
+        b"sess abc\n",  # internal whitespace
+        b"\xff\xfe",    # non-UTF-8 bytes (UnicodeDecodeError, not OSError)
+    ],
+)
+def test_dispatch_claude_fails_closed_when_monitor_malformed(tmp_path, monitor_bytes):
+    repo = tmp_path / "repo"
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor_path.write_bytes(monitor_bytes)
+    # A live id is also present to prove malformed-monitor never resumes live.
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.write_text("sess-live-present", encoding="utf-8")
+
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="claude",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(pager_mod.subprocess, "run") as run_mock:
+        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is False
+    assert result["skipped"] is True
+    assert result["skip_reason"] == pager_mod.CLAUDE_SKIP_REASON_MONITOR_UNSET
+    run_mock.assert_not_called()
+
+
+def test_dispatch_claude_fails_closed_when_monitor_equals_live(tmp_path):
+    repo = tmp_path / "repo"
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor_path.write_text("sess-collision", encoding="utf-8")
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.write_text("sess-collision", encoding="utf-8")
+
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="claude",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(pager_mod.subprocess, "run") as run_mock:
+        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is False
+    assert result["skipped"] is True
+    assert result["skip_reason"] == pager_mod.CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE
+    # Never pages the live conversation.
+    run_mock.assert_not_called()
 
 
 def test_emit_transition_event_routes_claude_through_real_dispatch_target(tmp_path):
@@ -1831,9 +1818,13 @@ def test_emit_transition_event_routes_claude_through_real_dispatch_target(tmp_pa
     repo.mkdir()
     _write_config(repo, route="claude")
 
-    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-    session_path.write_text("sess-integration-claude-01", encoding="utf-8")
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor_path.write_text("sess-monitor-claude-01", encoding="utf-8")
+    # Distinct live orchestrator id present to prove the resume targets the
+    # dedicated monitor, never the live session.
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.write_text("sess-live-claude-99", encoding="utf-8")
 
     with patch.object(
         pager_mod.subprocess,
@@ -1852,7 +1843,9 @@ def test_emit_transition_event_routes_claude_through_real_dispatch_target(tmp_pa
     entry = state["events"][result["event_id"]]
     assert "claude" in entry["delivered_targets"]
     assert entry["delivered_targets"]["claude"]["target"] == "claude"
+    assert entry["delivered_targets"]["claude"]["session_id"] == "sess-monitor-claude-01"
     assert entry["pending_targets"] == []
+    assert entry.get("skipped_targets", {}) == {}
 
     log_events = _load_log(repo)
     assert len(log_events) == 1
@@ -1861,10 +1854,170 @@ def test_emit_transition_event_routes_claude_through_real_dispatch_target(tmp_pa
     assert argv == [
         "claude",
         "--resume",
-        "sess-integration-claude-01",
+        "sess-monitor-claude-01",
         "-p",
         expected_prompt,
     ]
+    assert "sess-live-claude-99" not in argv
+
+
+def test_both_route_happy_path_delivers_claude_to_dedicated_monitor(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="both")
+    monkeypatch.setenv("RCX_CODEX_HOME", str(tmp_path / "codex-home"))
+
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor_path.write_text("sess-monitor-both", encoding="utf-8")
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.write_text("sess-live-both", encoding="utf-8")
+
+    # Fake codex so it acks through the normal delivered/receipt flow; run the
+    # REAL claude leg (_dispatch_claude) against the dedicated monitor.
+    monkeypatch.setattr(pager_mod, "_dispatch_codex", _ack_codex)
+
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock:
+        result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert result["enabled"] is True
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    # (a) route=both reaches a claude target whose id != the live orchestrator id.
+    assert set(entry["delivered_targets"]) == {"codex", "claude"}
+    assert entry["delivered_targets"]["claude"]["session_id"] == "sess-monitor-both"
+    assert entry["pending_targets"] == []
+    assert entry.get("skipped_targets", {}) == {}
+
+    delivery = _load_delivery_log(repo)
+    assert len([r for r in delivery if r["target"] == "claude"]) == 1
+    assert _load_skip_log(repo) == []
+
+    argv = run_mock.call_args.args[0]
+    assert argv[:3] == ["claude", "--resume", "sess-monitor-both"]
+    assert "sess-live-both" not in argv
+
+
+def test_both_route_fail_closed_records_distinct_skip_and_does_not_retry(
+    tmp_path, monkeypatch
+):
+    # Acceptance (d): EQUALS_LIVE is the genuinely-terminal claude skip and keeps
+    # the unchanged park-in-skipped_targets + durable-skip-receipt + no-retry
+    # behavior. The unset-or-malformed family (missing / empty / internal_ws /
+    # non_utf8) is NO LONGER terminal under this wave -- its retryable, no-receipt
+    # behavior is proven by
+    # test_both_route_monitor_unset_skip_is_retryable_and_writes_no_receipt below.
+    expected_reason = pager_mod.CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="both")
+    monkeypatch.setenv("RCX_CODEX_HOME", str(tmp_path / "codex-home"))
+
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    live_path.write_text("sess-live-x", encoding="utf-8")
+    # equals_live: a dedicated monitor id IS present but collides with the live
+    # orchestrator id -> the claude leg fails closed with a TERMINAL skip.
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor_path.write_text("sess-live-x", encoding="utf-8")
+
+    monkeypatch.setattr(pager_mod, "_dispatch_codex", _ack_codex)
+
+    with patch.object(pager_mod.subprocess, "run") as run_mock:
+        result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+    # No claude --resume issued (codex is faked above subprocess; claude fails closed).
+    run_mock.assert_not_called()
+    event_id = result["event_id"]
+
+    state = _load_state(repo)
+    entry = state["events"][event_id]
+    # codex delivered normally; claude parked as a DISTINCT skip.
+    assert set(entry["delivered_targets"]) == {"codex"}
+    assert "claude" not in entry["delivered_targets"]
+    assert "claude" in entry["skipped_targets"]
+    assert entry["skipped_targets"]["claude"]["skip_reason"] == expected_reason
+    assert entry["pending_targets"] == []
+    assert entry["attempts"]["claude"]["last_skip_reason"] == expected_reason
+
+    # No claude delivery receipt; a distinct skip receipt instead.
+    delivery = _load_delivery_log(repo)
+    assert [r for r in delivery if r["target"] == "claude"] == []
+    skip_receipts = _load_skip_log(repo)
+    assert len(skip_receipts) == 1
+    assert skip_receipts[0]["target"] == "claude"
+    assert skip_receipts[0]["event_id"] == event_id
+    assert skip_receipts[0]["skip_reason"] == expected_reason
+
+    # (e) codex unchanged: codex delivered with a normal delivery receipt.
+    assert len([r for r in delivery if r["target"] == "codex"]) == 1
+
+    # A SECOND dispatch must NOT re-attempt the claude leg (terminal skip) and
+    # must not re-attempt codex either -- neither falsely delivered nor retried.
+    with patch.object(pager_mod.subprocess, "run") as run_mock2:
+        replay = pager_mod.dispatch_pending_events(repo)
+    run_mock2.assert_not_called()
+    assert replay["attempted"] == []
+
+    state2 = _load_state(repo)
+    entry2 = state2["events"][event_id]
+    assert "claude" not in entry2["delivered_targets"]
+    assert "claude" in entry2["skipped_targets"]
+    assert entry2["pending_targets"] == []
+    # Receipts not duplicated on replay.
+    assert len(_load_skip_log(repo)) == 1
+    assert len([r for r in _load_delivery_log(repo) if r["target"] == "claude"]) == 0
+
+
+def test_claude_skip_is_terminal_after_state_rebuild_from_logs(tmp_path, monkeypatch):
+    # Acceptance (d) replay leg: a genuinely-terminal EQUALS_LIVE skip survives a
+    # full state rebuild as terminal. (The unset-or-malformed family is NOT
+    # terminal after rebuild -- see
+    # test_monitor_unset_skip_is_replay_safe_and_not_reterminalized_on_rebuild.)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="both")
+    monkeypatch.setenv("RCX_CODEX_HOME", str(tmp_path / "codex-home"))
+
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    live_path.write_text("sess-live-term", encoding="utf-8")
+    # Dedicated monitor present but EQUALS the live orchestrator id -> claude
+    # fails closed with the TERMINAL EQUALS_LIVE skip (writes a durable receipt).
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor_path.write_text("sess-live-term", encoding="utf-8")
+
+    monkeypatch.setattr(pager_mod, "_dispatch_codex", _ack_codex)
+
+    with patch.object(pager_mod.subprocess, "run") as run_mock:
+        result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+    run_mock.assert_not_called()
+    event_id = result["event_id"]
+    # Sanity: the terminal reason really is EQUALS_LIVE (a durable skip receipt).
+    skip_receipts = _load_skip_log(repo)
+    assert len(skip_receipts) == 1
+    assert skip_receipts[0]["skip_reason"] == pager_mod.CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE
+
+    # Drop the durable state json; force a rebuild purely from append-only logs.
+    (repo / pager_mod.STATE_PATH).unlink()
+
+    with patch.object(pager_mod.subprocess, "run") as run_mock2:
+        replay = pager_mod.dispatch_pending_events(repo)
+    run_mock2.assert_not_called()
+    assert replay["attempted"] == []
+
+    state = _load_state(repo)
+    entry = state["events"][event_id]
+    # The skip receipt rebuilds skipped_targets; the codex receipt rebuilds delivered.
+    assert "claude" in entry["skipped_targets"]
+    assert "claude" not in entry["delivered_targets"]
+    assert set(entry["delivered_targets"]) == {"codex"}
+    assert entry["pending_targets"] == []
 
 
 def test_session_start_hook_writes_orchestrator_session_id_for_pager_read(tmp_path):
@@ -1948,3 +2101,312 @@ def test_codex_exec_resume_env_preserves_rcx_overlay_when_present(monkeypatch):
     assert env["HOME"] == "/tmp/real-home"
     assert env["CODEX_HOME"] == "/tmp/real-codex-home"
     assert env["RCX_CODEX_HOME"] == "/tmp/rcx-overlay"
+
+
+def test_executor_config_default_pager_route_is_codex():
+    """Acceptance (e): the shipped default pager route stays codex on this branch.
+
+    The flip to route=both is deferred to a follow-up wave (Codex bot P1
+    guidance) until a dedicated Claude monitor is actually running, so the
+    writer + retryable-skip landed here can never silently drop a Claude leg.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["pipeline_agent_pager"]["route"] == "codex"
+
+
+def test_session_start_hook_writes_claude_monitor_session_id_when_flag_set(tmp_path):
+    """Acceptance (a): the Work-item-1 writer leg of .claude/hooks/session-start.sh.
+
+    With RCX_CLAUDE_MONITOR=1 the SessionStart hook writes the active session id
+    to the DEDICATED claude_monitor_session_id file (the pager's
+    _read_claude_monitor_session_id resume target), NOT the live
+    orchestrator_session_id. Without the flag the orchestrator behavior is
+    unchanged and no monitor file is produced. Atomic write + fail-open preserved.
+    Exercised end-to-end against the real hook and the real pager readers.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    hook_path = repo_root / ".claude" / "hooks" / "session-start.sh"
+    assert hook_path.exists(), f"hook script missing at {hook_path}"
+
+    session_id = "2f7d3c4a-55e1-4a2b-9c6d-aabbccddeeff"
+    payload = json.dumps({
+        "session_id": session_id,
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+    })
+
+    # (a1) RCX_CLAUDE_MONITOR=1 -> writes claude_monitor_session_id, NOT orchestrator.
+    monitor_root = tmp_path / "monitor"
+    monitor_root.mkdir(parents=True, exist_ok=True)
+    env_monitor = {
+        "PATH": "/usr/bin:/bin:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "CLAUDE_PROJECT_DIR": str(monitor_root),
+        "RCX_CLAUDE_MONITOR": "1",
+    }
+    result = subprocess.run(
+        ["bash", str(hook_path)],
+        input=payload, env=env_monitor,
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    assert result.returncode == 0, f"hook exit={result.returncode} stderr={result.stderr!r}"
+    obs = monitor_root / ".agent_bus" / "observability"
+    monitor_file = obs / "claude_monitor_session_id"
+    orchestrator_file = obs / "orchestrator_session_id"
+    assert monitor_file.exists(), f"monitor writer did not write {monitor_file}"
+    assert monitor_file.read_text().strip() == session_id
+    # The dedicated-monitor writer must NEVER touch the live orchestrator file.
+    assert not orchestrator_file.exists()
+    # The pager resolves the dedicated monitor id end-to-end.
+    resolved_monitor = pager_mod._read_claude_monitor_session_id(monitor_root)  # ANTICHEAT_OK: integration read
+    assert resolved_monitor == session_id
+
+    # (a2) Without the flag -> orchestrator behavior unchanged; no monitor file.
+    orch_root = tmp_path / "orch"
+    orch_root.mkdir(parents=True, exist_ok=True)
+    env_orch = {
+        "PATH": "/usr/bin:/bin:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "CLAUDE_PROJECT_DIR": str(orch_root),
+    }
+    result2 = subprocess.run(
+        ["bash", str(hook_path)],
+        input=payload, env=env_orch,
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    assert result2.returncode == 0, f"hook exit={result2.returncode} stderr={result2.stderr!r}"
+    obs2 = orch_root / ".agent_bus" / "observability"
+    orch_file2 = obs2 / "orchestrator_session_id"
+    assert orch_file2.exists()
+    assert orch_file2.read_text().strip() == session_id
+    assert not (obs2 / "claude_monitor_session_id").exists()
+    resolved_orch = pager_mod._read_orchestrator_session_id(orch_root)  # ANTICHEAT_OK: integration read
+    assert resolved_orch == session_id
+
+
+def test_session_start_hook_writes_monitor_id_even_in_pipeline_owned_session(tmp_path):
+    """Bridge round-1 DEFECT regression: the dedicated-monitor writer leg must
+    NOT be bypassed in pipeline-owned sessions.
+
+    bridge_adapters.py sets RCX_PIPELINE_SESSION=1 for EVERY adapter invocation.
+    The orchestrator writer leg is (correctly) suppressed in such SUB-sessions so
+    a transient sub-session id never clobbers the live orchestrator_session_id.
+    But a DEDICATED monitor (RCX_CLAUDE_MONITOR=1) targets a DISTINCT file and
+    MUST still write it even when RCX_PIPELINE_SESSION=1 -- otherwise the pager's
+    claude leg has no --resume target and route=both would silently drop every
+    Claude leg. This guards the exact interaction the bridge flagged: the early
+    RCX_PIPELINE_SESSION guard must defer to the monitor leg. Exercised
+    end-to-end against the real hook and the real pager reader.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    hook_path = repo_root / ".claude" / "hooks" / "session-start.sh"
+    assert hook_path.exists(), f"hook script missing at {hook_path}"
+
+    session_id = "9a1b2c3d-44e5-4f60-8a7b-0c1d2e3f4a5b"
+    payload = json.dumps({
+        "session_id": session_id,
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+    })
+
+    # (1) RCX_PIPELINE_SESSION=1 AND RCX_CLAUDE_MONITOR=1 -> monitor id STILL
+    # written (the fix). Before the fix the early guard exited first and wrote
+    # nothing, silently starving the pager's claude --resume target.
+    monitor_root = tmp_path / "pipeline_monitor"
+    monitor_root.mkdir(parents=True, exist_ok=True)
+    env_monitor = {
+        "PATH": "/usr/bin:/bin:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "CLAUDE_PROJECT_DIR": str(monitor_root),
+        "RCX_PIPELINE_SESSION": "1",
+        "RCX_CLAUDE_MONITOR": "1",
+    }
+    result = subprocess.run(
+        ["bash", str(hook_path)],
+        input=payload, env=env_monitor,
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    assert result.returncode == 0, f"hook exit={result.returncode} stderr={result.stderr!r}"
+    obs = monitor_root / ".agent_bus" / "observability"
+    monitor_file = obs / "claude_monitor_session_id"
+    assert monitor_file.exists(), (
+        "dedicated-monitor writer was bypassed in a pipeline-owned session "
+        f"(RCX_PIPELINE_SESSION=1); expected {monitor_file} to be written"
+    )
+    assert monitor_file.read_text().strip() == session_id
+    # The dedicated-monitor writer must NEVER touch the live orchestrator file.
+    assert not (obs / "orchestrator_session_id").exists()
+    resolved = pager_mod._read_claude_monitor_session_id(monitor_root)  # ANTICHEAT_OK: integration read
+    assert resolved == session_id
+
+    # (2) RCX_PIPELINE_SESSION=1 WITHOUT the monitor flag -> the orchestrator leg
+    # stays suppressed (unchanged): a pipeline SUB-session writes NEITHER file, so
+    # it can never clobber the live orchestrator id. Proves the fix is narrow and
+    # does not regress the original sub-session suppression.
+    sub_root = tmp_path / "pipeline_sub"
+    sub_root.mkdir(parents=True, exist_ok=True)
+    env_sub = {
+        "PATH": "/usr/bin:/bin:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "CLAUDE_PROJECT_DIR": str(sub_root),
+        "RCX_PIPELINE_SESSION": "1",
+    }
+    result2 = subprocess.run(
+        ["bash", str(hook_path)],
+        input=payload, env=env_sub,
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    assert result2.returncode == 0, f"hook exit={result2.returncode} stderr={result2.stderr!r}"
+    obs2 = sub_root / ".agent_bus" / "observability"
+    assert not (obs2 / "orchestrator_session_id").exists()
+    assert not (obs2 / "claude_monitor_session_id").exists()
+
+
+@pytest.mark.parametrize("setup", ["missing", "empty", "internal_ws", "non_utf8"])
+def test_both_route_monitor_unset_skip_is_retryable_and_writes_no_receipt(
+    tmp_path, monkeypatch, setup
+):
+    """Acceptance (b) live path, across the unset-or-malformed family.
+
+    A claude skip with reason CLAUDE_SKIP_REASON_MONITOR_UNSET (missing / empty /
+    whitespace / non-UTF-8 -- all collapsed into the one family by
+    _read_claude_monitor_session_id) is left in pending_targets (retryable) and
+    writes NO durable skip receipt. Once the Work-item-1 writer lands a clean
+    monitor id, a later dispatch delivers the leg -- proving the route=both
+    silent-drop bug is closed without flipping the route.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="both")
+    monkeypatch.setenv("RCX_CODEX_HOME", str(tmp_path / "codex-home"))
+
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    live_path.write_text("sess-live-x", encoding="utf-8")
+    monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
+    monitor_path.parent.mkdir(parents=True, exist_ok=True)
+    if setup == "missing":
+        pass  # no monitor file at all
+    elif setup == "empty":
+        monitor_path.write_text("", encoding="utf-8")
+    elif setup == "internal_ws":
+        monitor_path.write_text("sess monitor x\n", encoding="utf-8")
+    elif setup == "non_utf8":
+        monitor_path.write_bytes(b"\xff\xfe")
+
+    monkeypatch.setattr(pager_mod, "_dispatch_codex", _ack_codex)
+
+    with patch.object(pager_mod.subprocess, "run") as run_mock:
+        result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+    # claude fails closed BEFORE any subprocess; codex is faked above subprocess.
+    run_mock.assert_not_called()
+    event_id = result["event_id"]
+
+    state = _load_state(repo)
+    entry = state["events"][event_id]
+    # codex delivered normally; the claude UNSET skip is NON-terminal -> pending.
+    assert set(entry["delivered_targets"]) == {"codex"}
+    assert "claude" not in entry.get("skipped_targets", {})
+    assert entry["pending_targets"] == ["claude"]
+    # The reason is recorded as attempt diagnostics, but it does NOT terminalize.
+    assert entry["attempts"]["claude"]["last_skip_reason"] == (
+        pager_mod.CLAUDE_SKIP_REASON_MONITOR_UNSET
+    )
+    # NO durable skip receipt (no terminal trace a rebuild could re-terminalize).
+    assert _load_skip_log(repo) == []
+    # No claude delivery receipt; codex delivered with its normal receipt.
+    assert [r for r in _load_delivery_log(repo) if r["target"] == "claude"] == []
+    assert len([r for r in _load_delivery_log(repo) if r["target"] == "codex"]) == 1
+
+    # RETRYABLE: once a clean dedicated monitor id lands (distinct from live), a
+    # later dispatch delivers the claude leg. The whole family clears at once.
+    monitor_path.write_text("sess-monitor-now", encoding="utf-8")
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock2:
+        pager_mod.dispatch_pending_events(repo)
+    run_mock2.assert_called_once()
+    state2 = _load_state(repo)
+    entry2 = state2["events"][event_id]
+    assert set(entry2["delivered_targets"]) == {"codex", "claude"}
+    assert entry2["delivered_targets"]["claude"]["session_id"] == "sess-monitor-now"
+    assert entry2["pending_targets"] == []
+    assert entry2.get("skipped_targets", {}) == {}
+    # The transient skip never left a skip receipt at any point.
+    assert _load_skip_log(repo) == []
+
+
+def test_monitor_unset_skip_is_replay_safe_and_not_reterminalized_on_rebuild(
+    tmp_path, monkeypatch
+):
+    """Acceptance (c): replay-safety for the transient monitor-unset skip.
+
+    A state rebuild via _reconcile_delivery_state (fresh state + replayed
+    receipts) leaves the claude leg in pending_targets and NOT in skipped_targets
+    -- including the case where a CLAUDE_SKIP_REASON_MONITOR_UNSET skip receipt
+    already exists on disk (an older build may have written one before this fix;
+    it must NOT re-terminalize the leg on rebuild).
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="both")
+    monkeypatch.setenv("RCX_CODEX_HOME", str(tmp_path / "codex-home"))
+
+    live_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    live_path.write_text("sess-live-rebuild", encoding="utf-8")
+    # Dedicated monitor deliberately absent -> claude fails closed (UNSET).
+
+    monkeypatch.setattr(pager_mod, "_dispatch_codex", _ack_codex)
+
+    with patch.object(pager_mod.subprocess, "run") as run_mock:
+        result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+    run_mock.assert_not_called()
+    event_id = result["event_id"]
+    # The live path wrote NO skip receipt for the transient skip.
+    assert _load_skip_log(repo) == []
+
+    # Sub-case 1: fresh state + replayed receipts (no skip receipt on disk). The
+    # claude leg is re-attempted (retryable) and, monitor still absent, stays
+    # pending -- never re-parked in skipped_targets, never writes a receipt.
+    (repo / pager_mod.STATE_PATH).unlink()
+    with patch.object(pager_mod.subprocess, "run") as run_mock2:
+        replay = pager_mod.dispatch_pending_events(repo)
+    run_mock2.assert_not_called()
+    assert [a["target"] for a in replay["attempted"]] == ["claude"]
+    assert replay["attempted"][0]["acknowledged"] is False
+    state = _load_state(repo)
+    entry = state["events"][event_id]
+    assert "claude" not in entry.get("skipped_targets", {})
+    assert set(entry["delivered_targets"]) == {"codex"}
+    assert entry["pending_targets"] == ["claude"]
+    assert _load_skip_log(repo) == []
+
+    # Sub-case 2 (authoritative guard): plant a durable UNSET skip receipt on disk
+    # exactly as an older build would have, then rebuild fresh state directly via
+    # _reconcile_delivery_state. The guard must IGNORE the receipt -> claude stays
+    # pending, NOT re-terminalized in skipped_targets.
+    skip_path = repo / pager_mod.SKIP_LOG_PATH
+    skip_path.parent.mkdir(parents=True, exist_ok=True)
+    skip_path.write_text(
+        json.dumps({
+            "event_id": event_id,
+            "target": "claude",
+            "skip_reason": pager_mod.CLAUDE_SKIP_REASON_MONITOR_UNSET,
+            "recorded_at": "2026-06-01T00:00:01+00:00",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    assert len(_load_skip_log(repo)) == 1  # the planted receipt is on disk
+
+    rebuilt = pager_mod._default_state()  # ANTICHEAT_OK: direct pager state reconciliation test
+    events = pager_mod._load_events_from_log(repo)  # ANTICHEAT_OK: direct pager state reconciliation test
+    pager_mod._reconcile_delivery_state(repo, rebuilt, events)  # ANTICHEAT_OK: direct pager state reconciliation test
+    entry2 = rebuilt["events"][event_id]
+    assert "claude" not in entry2.get("skipped_targets", {})
+    assert set(entry2["delivered_targets"]) == {"codex"}
+    assert entry2["pending_targets"] == ["claude"]
