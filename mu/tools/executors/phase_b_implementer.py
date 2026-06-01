@@ -264,6 +264,13 @@ _MODEL_OVERRIDE_SUPPORT: dict[str, str | None] = {
     "claude": "--model",  # Claude Code CLI supports --model <name>
 }
 DEFAULT_IMPLEMENTER_STALE_TIMEOUT_S = 300.0
+# Bound the post-completion teardown window: once the adapter emits its terminal
+# {"type":"result"} event the model is done, so an alive-but-finished subprocess
+# (e.g. a hung Stop hook or lingering MCP-server child whose background CPU
+# defeats the stale watchdog's process-tree fingerprint) is killed this many
+# seconds later and the already-captured result is returned instead of being
+# discarded as a wall-clock timeout.
+DEFAULT_IMPLEMENTER_POST_RESULT_EXIT_TIMEOUT_S = 120.0
 
 
 def _apply_model_override(
@@ -359,6 +366,16 @@ def invoke_implementer(
     if stale_timeout_s <= 0:
         stale_timeout_s = DEFAULT_IMPLEMENTER_STALE_TIMEOUT_S
     stale_timeout_s = min(float(timeout), stale_timeout_s)
+    raw_post_result_exit = config.get("timeouts", {}).get(
+        "phase_b_implementer_post_result_exit",
+        DEFAULT_IMPLEMENTER_POST_RESULT_EXIT_TIMEOUT_S,
+    )
+    try:
+        post_result_exit_timeout_s = float(raw_post_result_exit)
+    except (TypeError, ValueError):
+        post_result_exit_timeout_s = DEFAULT_IMPLEMENTER_POST_RESULT_EXIT_TIMEOUT_S
+    if post_result_exit_timeout_s <= 0:
+        post_result_exit_timeout_s = DEFAULT_IMPLEMENTER_POST_RESULT_EXIT_TIMEOUT_S
     # Do NOT use zero_output_timeout for the implementer path.
     # claude --print defers all stdout until after the model's final text
     # response — intermediate tool calls (Read, Edit, Bash, etc.) produce
@@ -431,6 +448,7 @@ def invoke_implementer(
             f"[implementer] Invoking {backend} (timeout={adapter_timeout}s, "
             f"stale_timeout={stale_timeout_s}s, "
             f"zero_output_timeout={zero_output_timeout_s}s, "
+            f"post_result_exit_timeout={post_result_exit_timeout_s}s, "
             f"model_override={model_override!r}, applied={model_applied})"
         )
 
@@ -447,6 +465,7 @@ def invoke_implementer(
             raw_output_path=raw_output_path,
             zero_output_timeout_s=zero_output_timeout_s,
             stale_timeout_s=stale_timeout_s,
+            post_result_exit_timeout_s=post_result_exit_timeout_s,
         )
         diagnostics = _adapter_result_diagnostics_from_outputs(
             _read_adapter_raw_output(raw_output_path),

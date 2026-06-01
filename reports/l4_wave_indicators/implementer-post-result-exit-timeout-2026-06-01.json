@@ -1,0 +1,24 @@
+{
+  "wave_id": "implementer-post-result-exit-timeout-2026-06-01",
+  "repeat_run_speedup_ratio": 1.617508,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.280369,
+  "repeat_run_raw_seconds": [
+    0.453499,
+    0.280369
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.453499
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.733868
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-01T16:36:49Z",
+  "collector_version": "2.2.0"
+}
