@@ -42,7 +42,11 @@ from typing import NamedTuple
 
 import pytest
 
-from tools.docs.shared_doc_config import REPO_ROOT, get_governed_folders_as_strings
+from tools.docs.shared_doc_config import (
+    REPO_ROOT,
+    classify_md_path,
+    get_governed_folders_as_strings,
+)
 
 # =============================================================================
 # Strict Governance Configuration (per DocGovernance.v0.md)
@@ -64,7 +68,7 @@ EXEMPT_PATTERNS = [
     r"^archive/",                    # All archived content (docs, roadmap, subprojects)
     r"^tests/archive/",            # Archived tests
     r"^tests/golden/",             # Golden test files
-    r"^\.agent_bus/",              # Bridge runtime artifacts (rendered transcripts)
+    r"^\.agent_bus(-[A-Za-z0-9][A-Za-z0-9_-]*)?/",  # Bridge runtime artifacts (default + namespace-valid parallel-lane buses; suffix mirrors executor AGENT_BUS_NAMESPACE_RE)
     r"^\.scratch/",                # Scratch/temp files (gitignored)
     r"^reports/",                  # Agent review reports (runtime output, not docs)
 ]
@@ -609,3 +613,72 @@ class TestGovernanceMeta:
             header = parse_doc_header(content)
             assert header is not None, "DocGovernance.v0.md needs DOC_STATUS header"
             assert header.doc_type == "REFERENCE", "DocGovernance.v0.md should be REFERENCE"
+
+
+# =============================================================================
+# Lane-Aware Agent-Bus Exemption
+# =============================================================================
+
+class TestAgentBusLaneExemption:
+    """Agent-bus exemption must cover parallel-lane buses, not just .agent_bus/.
+
+    There are two independent exempt-list sources, neither derived from the
+    other, that must agree:
+    - EXEMPT_PATTERNS in this module (consumed by is_exempt)
+    - exempt_patterns in docs_registry.json (consumed by classify_md_path)
+
+    A parallel-lane bus (.agent_bus-<lane>/) accumulates its own generated
+    bridge transcripts under rendered/. If either source matches only the
+    default .agent_bus/, those lane-bus transcripts are treated as
+    unclassified / non-exempt docs — diluting the governance-coverage ratio
+    and blocking parallel-lane commits at the pre-commit supervisor. Both
+    sources must exempt the lane bus while staying anchored to the
+    .agent_bus prefix (no non-bus path may become exempt).
+    """
+
+    def test_default_agent_bus_rendered_is_exempt_in_both_sources(self):
+        """Default .agent_bus/ rendered transcripts stay exempt in both paths."""
+        doc = REPO_ROOT / ".agent_bus" / "rendered" / "phase-a-r1.md"
+        assert is_exempt(doc) is True
+        assert classify_md_path(doc) == "exempt"
+
+    def test_lane_agent_bus_rendered_is_exempt_in_both_sources(self):
+        """Parallel-lane .agent_bus-<lane>/ rendered transcripts are exempt in both paths."""
+        doc = REPO_ROOT / ".agent_bus-lane2" / "rendered" / "phase-a-r1.md"
+        assert is_exempt(doc) is True, (
+            "lane-bus rendered transcript must be exempt via EXEMPT_PATTERNS (is_exempt); "
+            "regressing to a bus-only pattern re-breaks parallel-lane commits"
+        )
+        assert classify_md_path(doc) == "exempt", (
+            "lane-bus rendered transcript must classify as exempt via docs_registry.json; "
+            "regressing to a bus-only pattern re-breaks docs_sync_report / check_docs_consistency.sh"
+        )
+
+    def test_agent_bus_exemption_stays_anchored_to_bus_prefix(self):
+        """A non-bus lookalike must NOT be exempted (pattern stays .agent_bus-anchored)."""
+        doc = REPO_ROOT / ".agent_business" / "rendered" / "note.md"
+        assert is_exempt(doc) is False
+        assert classify_md_path(doc) != "exempt"
+
+    def test_invalid_namespace_lane_bus_is_not_exempt_in_both_sources(self):
+        """A lane suffix the executor would reject must NOT be exempted in either source.
+
+        The exempt suffix mirrors executor_common.AGENT_BUS_NAMESPACE_RE
+        (``^\\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$``): the first character after
+        ``.agent_bus-`` must be alphanumeric. A leading ``-`` or ``_`` is not a
+        valid bus namespace, so its rendered tree is NOT a bus runtime artifact
+        and must stay non-exempt. Regressing the exempt pattern to a permissive
+        ``(-[A-Za-z0-9_-]+)?`` form would exempt these invalid lookalikes and
+        drift the docs-governance exempt set wider than the executor's own
+        valid-bus namespace.
+        """
+        for bad in (".agent_bus--bad", ".agent_bus-_bad"):
+            doc = REPO_ROOT / bad / "rendered" / "note.md"
+            assert is_exempt(doc) is False, (
+                f"{bad}/ is not a valid agent-bus namespace (per AGENT_BUS_NAMESPACE_RE) "
+                "and must not be exempt via EXEMPT_PATTERNS"
+            )
+            assert classify_md_path(doc) != "exempt", (
+                f"{bad}/ is not a valid agent-bus namespace (per AGENT_BUS_NAMESPACE_RE) "
+                "and must not classify as exempt via docs_registry.json"
+            )
