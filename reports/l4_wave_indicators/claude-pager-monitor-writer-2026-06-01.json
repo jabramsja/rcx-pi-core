@@ -1,24 +1,24 @@
 {
   "wave_id": "claude-pager-monitor-writer-2026-06-01",
-  "repeat_run_speedup_ratio": 1.291139,
+  "repeat_run_speedup_ratio": 1.050353,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.260154,
+  "step_growth_slope": 0.229323,
   "repeat_run_raw_seconds": [
-    0.335895,
-    0.260154
+    0.24087,
+    0.229323
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.335895
+      "elapsed_seconds": 0.24087
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.596049
+      "elapsed_seconds": 0.470193
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-06-01T13:05:57Z",
+  "collection_timestamp_utc": "2026-06-01T13:51:31Z",
   "collector_version": "2.2.0"
 }
