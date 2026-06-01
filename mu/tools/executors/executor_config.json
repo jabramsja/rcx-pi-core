@@ -39,6 +39,35 @@
     "enabled": true,
     "route": "codex"
   },
+  "pipeline_monitor": {
+    "lanes": {
+      "lane1": {
+        "bus_dir": ".agent_bus-lane1",
+        "dashboard_port": 8101,
+        "tmux_session": "rcx-pipeline-lane1"
+      },
+      "lane2": {
+        "bus_dir": ".agent_bus-lane2",
+        "dashboard_port": 8102,
+        "tmux_session": "rcx-pipeline-lane2"
+      },
+      "lane3": {
+        "bus_dir": ".agent_bus-lane3",
+        "dashboard_port": 8103,
+        "tmux_session": "rcx-pipeline-lane3"
+      },
+      "lane4": {
+        "bus_dir": ".agent_bus-lane4",
+        "dashboard_port": 8104,
+        "tmux_session": "rcx-pipeline-lane4"
+      },
+      "lane5": {
+        "bus_dir": ".agent_bus-lane5",
+        "dashboard_port": 8105,
+        "tmux_session": "rcx-pipeline-lane5"
+      }
+    }
+  },
   "agent_review_enabled": false,
   "review_depths": {
     "phase_a": "quick",
