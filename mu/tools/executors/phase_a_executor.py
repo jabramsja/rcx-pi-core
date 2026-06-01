@@ -2125,6 +2125,48 @@ def checkpoint_commit_plan(
         return {"error": f"Checkpoint commit failed: {exc}"}
 
 
+def _load_line_ref_checker():
+    """Load the control-packet line-ref checker module (fail closed if missing).
+
+    Loaded by file path (mirroring the executor_common fallback import) so the
+    plan-load pre-flight resolves the checker from the source tree regardless of
+    the caller's cwd or sys.path.
+    """
+    import importlib.util as _ilu
+
+    checker_path = SCRIPT_DIR.parent / "checks" / "check_control_packet_line_refs.py"
+    spec = _ilu.spec_from_file_location("check_control_packet_line_refs", str(checker_path))
+    if spec is None or spec.loader is None:
+        raise PhaseAExecutorError(
+            f"Cannot load control-packet line-ref checker at {checker_path}"
+        )
+    module = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def preflight_control_packet_line_refs(rel_plan_path: str, plan_content: str) -> str | None:
+    """Plan-load pre-flight: reject a packet that cites code by line number.
+
+    Returns a fail-closed error message (offending lines + remediation) when the
+    packet contains an extension-anchored ``<path>.<ext>:<line>`` reference, or
+    None when the packet is clean. Used to fail Phase A closed BEFORE the first
+    bridge round so the author fixes the packet at dispatch time instead of after
+    a multi-minute Codex review cycle. doc-governance already forbids line-number
+    references in docs as a written rule; this mechanizes it at dispatch time.
+    """
+    checker = _load_line_ref_checker()
+    offenses = checker.find_offending_lines(plan_content)
+    if not offenses:
+        return None
+    report = checker.format_offenses(rel_plan_path, offenses)
+    return (
+        f"Control packet {rel_plan_path} cites code by line number "
+        "(rejected at plan-load pre-flight, before bridge review):\n"
+        f"{report}\n\n{checker.REMEDIATION}"
+    )
+
+
 def run_phase_a(
     repo_root: Path,
     plan_name: str,
@@ -2234,6 +2276,24 @@ def run_phase_a(
     review_depth = resolve_review_depth(config, "phase_a")
     agent_timeout = config.get("timeouts", {}).get("agent_review", 900)
     plan_content = plan_path.read_text(encoding="utf-8")
+
+    # Plan-load pre-flight: reject control packets that cite code by line number
+    # (<path>.<ext>:<line>). Fails closed BEFORE SDK review and the first bridge
+    # round so a stale-line-reference packet is caught at dispatch time instead
+    # of after a multi-minute Codex review cycle. No other dispatch/bridge
+    # behavior changes.
+    try:
+        line_ref_error = preflight_control_packet_line_refs(rel_plan_path, plan_content)
+    except PhaseAExecutorError as exc:
+        result["status"] = "error"
+        result["error"] = str(exc)
+        return result
+    if line_ref_error is not None:
+        log("Plan-load pre-flight REJECTED: control packet cites code by line number")
+        result["status"] = "error"
+        result["error"] = line_ref_error
+        return result
+
     defer_agent_review = _plan_is_placeholder_stub(plan_content)
 
     def _run_phase_a_agent_review(log_label: str) -> tuple[bool, str]:
