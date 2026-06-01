@@ -192,6 +192,61 @@ def test_build_commit_handoff_default_tracker_note_includes_tracked_packet(tmp_p
     assert f"Packet: `{packet_path}`" in handoff["tracker_note_text"]
 
 
+def test_validate_tracker_note_rejects_setroles_show_evidence_command():
+    """Guard: a tracker-note evidence_command that reads env-aware EFFECTIVE role
+    state (`set_roles.py --show`) is rejected at build time; a committed-state
+    read is accepted unchanged.
+
+    Regression for the 2026-05-30 standalone NEEDS_PHASE_B footgun where an
+    env-aware evidence_command contradicted the committed-config claim and the
+    pre-commit supervisor rejected the package only after gates 1-10 had passed.
+    """
+    wave_id = "commit-evidence-guard-setroles-show-2026-06-01"
+
+    def _note_with_evidence_command(evidence_command: str) -> str:
+        return (
+            f"- Tracker sync note (2026-06-01, {wave_id}): **TEST evidence-command guard.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            f"evidence_command: `{evidence_command}`. "
+            "evidence_delta: (1) guard rejects env-aware reads. (2) test covers it. "
+            "(3) indicator binds the wave. "
+            "progress_proof_before: no guard. progress_proof_after: guard asserted. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_TYPED_FAIL_CLOSED_OUTCOMES. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py "
+            f"--wave-id {wave_id} --output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+
+    # REJECT: env-aware effective-state read (the exact observed footgun).
+    reject_errors = commit_mod._validate_tracker_note_text(  # ANTICHEAT_OK: locks the set_roles.py --show evidence-command guard
+        tracker_note_text=_note_with_evidence_command(
+            "python3 mu/tools/executors/set_roles.py --show"
+        ),
+        wave_id=wave_id,
+        wave_class="L4_ENABLER",
+        target_gate_id="G8",
+    )
+    assert any("set_roles.py --show" in e for e in reject_errors), reject_errors
+    # The rejection message must name a committed-state-read alternative.
+    assert any(
+        "executor_config.json" in e and "git diff" in e for e in reject_errors
+    ), reject_errors
+
+    # ACCEPT: a committed-state read is unaffected (no guard error; note valid).
+    accept_errors = commit_mod._validate_tracker_note_text(  # ANTICHEAT_OK: locks the committed-state evidence-command accept path
+        tracker_note_text=_note_with_evidence_command(
+            "grep -A2 role_agents mu/tools/executors/executor_config.json"
+        ),
+        wave_id=wave_id,
+        wave_class="L4_ENABLER",
+        target_gate_id="G8",
+    )
+    assert accept_errors == [], accept_errors
+
+
 def test_post_commit_pre_push_dirty_isolation_stashes_and_restores(tmp_path):
     import subprocess
 
