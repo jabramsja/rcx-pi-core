@@ -37,7 +37,7 @@
   "hybrid_recovery_enabled": true,
   "pipeline_agent_pager": {
     "enabled": true,
-    "route": "codex"
+    "route": "both"
   },
   "pipeline_monitor": {
     "lanes": {

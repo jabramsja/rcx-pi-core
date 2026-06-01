@@ -51,6 +51,11 @@ except ImportError:
 OBSERVABILITY_DIR = agent_bus_relpath(None, "observability")
 EVENT_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_events.jsonl"
 DELIVERY_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_delivery_receipts.jsonl"
+# Distinct, append-only log of fail-closed skip receipts. A skip is NEITHER a
+# delivery (it is never written here as a delivery receipt) NOR a retryable
+# error; this log makes the terminal skip durable so it survives a state rebuild
+# (mirror of how delivery receipts rebuild ``delivered_targets``).
+SKIP_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_skip_receipts.jsonl"
 STATE_PATH = OBSERVABILITY_DIR / "pipeline_agent_pager_state.json"
 LOCK_PATH = OBSERVABILITY_DIR / "pipeline_agent_pager.lock"
 AUTOPING_STATE_GLOB = "rcx_autoping_*.json"
@@ -65,6 +70,23 @@ PAUSED_AUTOPING_STATUSES = frozenset({
 # keeping dispatch deterministic even while other Claude subprocesses run
 # concurrently in this repo.
 ORCHESTRATOR_SESSION_ID_PATH = OBSERVABILITY_DIR / "orchestrator_session_id"
+# Single source of truth for the DEDICATED claude-monitor-session-id file path.
+# This is a SIBLING of ``orchestrator_session_id`` but a DISTINCT file holding
+# the session id of a dedicated Claude monitor conversation -- never the live
+# orchestrator session. The pager is read-only here; the writer (the monitor's
+# own session-start, mirror of ``.claude/hooks/session-start.sh``) is out of
+# scope for this enabler wave. The claude pager leg resolves its ``--resume``
+# target ONLY from this file and never falls back to ``orchestrator_session_id``,
+# so ``route=both`` can never resume the live orchestrator conversation. When
+# this file is absent/malformed, or its id equals the live orchestrator session
+# id, the claude leg fails closed (issues no ``claude --resume``).
+CLAUDE_MONITOR_SESSION_ID_PATH = OBSERVABILITY_DIR / "claude_monitor_session_id"
+# Distinct skip markers for the fail-closed claude leg. A skip carries one of
+# these reasons instead of an ``error`` (a transient error stays pending for
+# retry; a skip is terminal and leaves ``pending_targets`` without being marked
+# delivered). Codex never emits these markers.
+CLAUDE_SKIP_REASON_MONITOR_UNSET = "claude_monitor_session_id_unset_or_malformed"
+CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE = "claude_monitor_session_id_equals_live_orchestrator"
 STATE_VERSION = 1
 NOTIFY_ONLY_TARGET = "notify-only"
 ALLOWED_EVENT_TYPES = frozenset({
@@ -494,6 +516,41 @@ def _append_delivery_receipt(
     )
 
 
+def _load_skip_receipts(repo_root: Path) -> list[dict[str, Any]]:
+    return _load_jsonl_records(
+        _observability_path(repo_root, "pipeline_agent_skip_receipts.jsonl"),
+        label="pager skip log",
+    )
+
+
+def _append_skip_receipt(
+    repo_root: Path,
+    *,
+    event_id: str,
+    target: str,
+    skip_reason: str,
+) -> None:
+    """Append a DISTINCT skip receipt (never a delivery receipt).
+
+    A fail-closed leg is terminal: this durable, append-only record lets
+    ``_reconcile_delivery_state`` rebuild ``skipped_targets`` after a state
+    rebuild, exactly as delivery receipts rebuild ``delivered_targets``. It is
+    deliberately written to a SEPARATE log so it can never be mistaken for a
+    delivery (which would falsely mark the target delivered).
+    """
+    receipt = {
+        "event_id": event_id,
+        "target": target,
+        "skip_reason": skip_reason,
+        "recorded_at": _utcnow(),
+    }
+    _append_jsonl_record(
+        _observability_path(repo_root, "pipeline_agent_skip_receipts.jsonl"),
+        receipt,
+        label="pager skip log",
+    )
+
+
 def _canonical_identity_tuple(
     *,
     task_id: str,
@@ -625,6 +682,7 @@ def _ensure_event_state(state: dict[str, Any], event: dict[str, Any]) -> dict[st
             "route": event["route"],
             "requested_targets": list(event["requested_targets"]),
             "delivered_targets": {},
+            "skipped_targets": {},
             "attempts": {},
             "pending_targets": list(event["requested_targets"]),
             "created_at": _utcnow(),
@@ -639,6 +697,7 @@ def _ensure_event_state(state: dict[str, Any], event: dict[str, Any]) -> dict[st
         entry["route"] = event["route"]
         entry["requested_targets"] = merged_targets
         entry.setdefault("delivered_targets", {})
+        entry.setdefault("skipped_targets", {})
         entry.setdefault("attempts", {})
     _refresh_pending_targets(entry)
     return entry
@@ -647,9 +706,13 @@ def _ensure_event_state(state: dict[str, Any], event: dict[str, Any]) -> dict[st
 def _refresh_pending_targets(entry: dict[str, Any]) -> None:
     requested = list(entry.get("requested_targets", []))
     delivered = entry.get("delivered_targets", {})
+    skipped = entry.get("skipped_targets", {})
+    # A target leaves pending if it was delivered OR fail-closed skipped. The
+    # skip subtraction is what keeps a fail-closed claude leg from being retried
+    # indefinitely while never marking it delivered.
     entry["pending_targets"] = [
         target for target in requested
-        if target not in delivered
+        if target not in delivered and target not in skipped
     ]
     entry["updated_at"] = _utcnow()
 
@@ -721,6 +784,27 @@ def _reconcile_delivery_state(
         thread_id = str(receipt.get("codex_thread_id") or "").strip()
         if target == "codex" and thread_id:
             state["codex_thread_id"] = thread_id
+        _refresh_pending_targets(entry)
+
+    for receipt in _load_skip_receipts(repo_root):
+        event_id = str(receipt.get("event_id") or "").strip()
+        target = str(receipt.get("target") or "").strip()
+        skip_reason = str(receipt.get("skip_reason") or "").strip()
+        if not event_id or not target or not skip_reason:
+            raise PipelineAgentPagerError(
+                "pager skip receipt missing event_id, target, or skip_reason"
+            )
+        event = event_map.get(event_id)
+        if event is None:
+            raise PipelineAgentPagerError(
+                f"pager skip receipt references unknown event_id: {event_id}"
+            )
+        entry = _ensure_event_state(state, event)
+        skipped = entry.setdefault("skipped_targets", {})
+        skipped[target] = {
+            "skip_reason": skip_reason,
+            "recorded_at": str(receipt.get("recorded_at") or "").strip(),
+        }
         _refresh_pending_targets(entry)
     autoping_thread_id = _read_latest_autoping_thread_id(repo_root)
     if autoping_thread_id:
@@ -1431,6 +1515,48 @@ def _read_orchestrator_session_id(repo_root: Path) -> str | None:
     return candidate
 
 
+def _read_claude_monitor_session_id(repo_root: Path) -> str | None:
+    """Return the DEDICATED claude-monitor session id for pager ``--resume``.
+
+    Mirrors ``_read_orchestrator_session_id``'s malformed-tolerance discipline
+    exactly, but reads ONLY the dedicated monitor-session-id file (a sibling of
+    ``orchestrator_session_id`` under the observability dir). The monitor file
+    is authored by the claude monitor's own session-start writer; that writer is
+    out of scope for this enabler wave (a separate concern, like the live
+    orchestrator writer), so until it exists this resolver returns ``None`` and
+    the claude pager leg fails closed. There is NO fallback to the live
+    ``orchestrator_session_id`` file: the live orchestrator conversation is never
+    a ``claude --resume`` target. Every absent/malformed case yields ``None``:
+    missing file, OSError, non-UTF-8 bytes, empty, whitespace-only, and a session
+    id containing internal whitespace or newlines.
+    """
+    monitor_path = _observability_path(repo_root, "claude_monitor_session_id")
+    try:
+        raw = monitor_path.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return None
+    except UnicodeDecodeError:
+        print(
+            f"[pipeline_agent_pager] claude_monitor_session_id at {monitor_path} "
+            "is not valid UTF-8; failing closed (no claude --resume)",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    candidate = raw.strip()
+    if not candidate:
+        return None
+    if any(ch.isspace() for ch in candidate):
+        print(
+            f"[pipeline_agent_pager] claude_monitor_session_id at {monitor_path} "
+            "contains internal whitespace; failing closed (no claude --resume)",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    return candidate
+
+
 def _dispatch_claude(
     repo_root: Path,
     event: dict[str, Any],
@@ -1439,11 +1565,27 @@ def _dispatch_claude(
     timeout_s: float,
 ) -> dict[str, Any]:
     claude_bin = os.environ.get("RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN", "claude")
-    session_id = _read_orchestrator_session_id(repo_root)
-    if session_id:
-        command = [claude_bin, "--resume", session_id, "-p", _event_prompt(event)]
-    else:
-        command = [claude_bin, "-p", _event_prompt(event)]
+    monitor_session_id = _read_claude_monitor_session_id(repo_root)
+    if not monitor_session_id:
+        # Fail closed: no dedicated monitor session id (unset / missing /
+        # malformed). NEVER fall back to the live orchestrator session as a
+        # ``--resume`` target. This is a DISTINCT skip, not a retryable error.
+        return {
+            "acknowledged": False,
+            "skipped": True,
+            "skip_reason": CLAUDE_SKIP_REASON_MONITOR_UNSET,
+        }
+    live_session_id = _read_orchestrator_session_id(repo_root)
+    if live_session_id is not None and monitor_session_id == live_session_id:
+        # Equal-to-live guard: the dedicated monitor id must be DISTINCT from the
+        # live orchestrator session. The live id is read for this inequality
+        # check ONLY, never as a resume target. Fail closed.
+        return {
+            "acknowledged": False,
+            "skipped": True,
+            "skip_reason": CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE,
+        }
+    command = [claude_bin, "--resume", monitor_session_id, "-p", _event_prompt(event)]
     try:
         proc = subprocess.run(
             command,
@@ -1477,6 +1619,7 @@ def _dispatch_claude(
             "acknowledged_at": _utcnow(),
             "exit_code": proc.returncode,
             "target": "claude",
+            "session_id": monitor_session_id,
         },
     }
 
@@ -1586,6 +1729,8 @@ def _dispatch_pending_locked(
                 "last_attempt_at": _utcnow(),
             }
             error_text = str(dispatch_result.get("error") or "").strip()
+            skipped = bool(dispatch_result.get("skipped"))
+            skip_reason = str(dispatch_result.get("skip_reason") or "").strip()
             _finish_dispatch_record(
                 state,
                 acknowledged=bool(dispatch_result.get("acknowledged")),
@@ -1595,13 +1740,19 @@ def _dispatch_pending_locked(
                 attempt_record["last_error"] = error_text
             else:
                 attempt_record.pop("last_error", None)
+            if skipped and skip_reason:
+                attempt_record["last_skip_reason"] = skip_reason
+            else:
+                attempt_record.pop("last_skip_reason", None)
             attempt_record.pop("last_receipt_log_warning", None)
+            attempt_record.pop("last_skip_log_warning", None)
             attempts[target] = attempt_record
             if dispatch_result.get("clear_codex_thread_id"):
                 state["codex_thread_id"] = None
             elif dispatch_result.get("codex_thread_id"):
                 state["codex_thread_id"] = dispatch_result["codex_thread_id"]
             receipt_log_warning = ""
+            skip_log_warning = ""
             state_saved = False
             if dispatch_result.get("acknowledged"):
                 delivered = entry.setdefault("delivered_targets", {})
@@ -1620,6 +1771,35 @@ def _dispatch_pending_locked(
                 except Exception as exc:
                     receipt_log_warning = str(exc)
                     attempt_record["last_receipt_log_warning"] = receipt_log_warning
+                    attempts[target] = attempt_record
+                    state_saved = False
+            elif skipped:
+                # Fail-closed claude leg: a DISTINCT skip -- never a delivery and
+                # never a retryable error. Park the target in skipped_targets so
+                # _refresh_pending_targets drops it from pending_targets (it is
+                # neither marked delivered nor left pending for retry), and append
+                # a distinct skip receipt (never a delivery receipt) so the skip
+                # survives a state rebuild. Codex never emits the skip marker, so
+                # this branch is claude-only and leaves the codex delivered /
+                # pending / retry semantics and receipts untouched.
+                skipped_targets = entry.setdefault("skipped_targets", {})
+                skipped_targets[target] = {
+                    "skip_reason": skip_reason,
+                    "skipped_at": _utcnow(),
+                }
+                _refresh_pending_targets(entry)
+                _save_state(repo_root, state)
+                state_saved = True
+                try:
+                    _append_skip_receipt(
+                        repo_root,
+                        event_id=event["event_id"],
+                        target=target,
+                        skip_reason=skip_reason,
+                    )
+                except Exception as exc:
+                    skip_log_warning = str(exc)
+                    attempt_record["last_skip_log_warning"] = skip_log_warning
                     attempts[target] = attempt_record
                     state_saved = False
             _refresh_pending_targets(entry)
