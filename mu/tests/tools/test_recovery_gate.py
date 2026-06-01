@@ -3584,6 +3584,223 @@ class TestOutOfWaveTasksTrackerNoteRecovery:
         ).stdout
         assert self.other_wave in staged_tasks
 
+    def _favorable_needs_phase_b_result(self) -> dict[str, object]:
+        # A FAVORABLE NEEDS_PHASE_B: the supervisor reports it found NO out-of-wave
+        # additions. Every positive substring marker ("out-of-wave", "tasks.md",
+        # "tracker-note", "staged") is present, but the out-of-wave marker is
+        # negated by "contains no proven".
+        payload = {
+            "status": "needs_phase_b",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B: the staged TASKS.md diff "
+                "contains no proven out-of-wave tracker-note additions; the "
+                "staged same-wave tracker note is correct."
+            ],
+        }
+        return {
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": json.dumps(payload),
+            "stderr": "",
+        }
+
+    def _mixed_signal_result(self) -> dict[str, object]:
+        # Aggregate carries BOTH a negated absence phrase AND a genuine,
+        # un-negated out-of-wave tracker-note addition.
+        payload = {
+            "status": "needs_phase_b",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B: the staged TASKS.md diff "
+                "contains no proven out-of-wave tracker-note additions from the "
+                "harness, but git diff --cached -- TASKS.md also reported an "
+                f"added out-of-wave staged TASKS.md tracker note for {self.other_wave}."
+            ],
+        }
+        return {
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": json.dumps(payload),
+            "stderr": "",
+        }
+
+    def test_favorable_needs_phase_b_no_proven_out_of_wave_is_not_classified(self):
+        # (a) False positive: a favorable NEEDS_PHASE_B whose only out-of-wave
+        # marker is negated ("contains no proven out-of-wave ...") must NOT be
+        # classified as the out-of-wave tracker-note class.
+        result = self._favorable_needs_phase_b_result()
+
+        # Proven through the public classifier seam: the favorable NEEDS_PHASE_B
+        # must not route to the out-of-wave class (it falls through to the
+        # generic NEEDS_PHASE_B tier instead).
+        assert (
+            rg_mod.classify_failure(result)
+            != FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        )
+
+    def test_genuine_out_of_wave_tracker_note_addition_still_classified(self):
+        # (b) Genuine positive: an un-negated out-of-wave addition ("reported an
+        # added out-of-wave staged TASKS.md tracker note") -- same gate structure
+        # as (a) but without negation -- must still classify positive. The
+        # contrast with (a) isolates the negation cue as the deciding factor, so
+        # neither test is vacuous.
+        result = self._result()
+
+        # Proven through the public classifier seam: a genuine un-negated
+        # out-of-wave addition must route to the out-of-wave class.
+        assert (
+            rg_mod.classify_failure(result)
+            == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        )
+
+    def test_mixed_signal_out_of_wave_negated_and_genuine_still_classified_and_fixed(
+        self, tmp_path
+    ):
+        # (b') Mixed signal: an aggregate carrying BOTH a negated absence phrase
+        # and a genuine un-negated out-of-wave addition must still classify
+        # positive (precedence invariant) and the auto-fix must remove+restage
+        # the genuine addition. Guards against a blanket-veto regression.
+        mixed = self._mixed_signal_result()
+
+        # Proven through the public classifier seam (precedence invariant): an
+        # aggregate carrying both a negated absence phrase and a genuine
+        # un-negated out-of-wave addition must still route to the out-of-wave
+        # class.
+        assert (
+            rg_mod.classify_failure(mixed)
+            == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        )
+
+        base_tasks = self._init_repo(tmp_path)
+        out_of_wave_line = (
+            f"- Tracker sync note (2026-05-22, {self.other_wave}): "
+            "out-of-wave tracker note.\n"
+        )
+        same_wave_line = (
+            f"- Tracker sync note (2026-05-26, {self.active_wave}): "
+            "same-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(
+            base_tasks + out_of_wave_line + same_wave_line, encoding="utf-8"
+        )
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        recovery = rg_mod.attempt_recovery(tmp_path, mixed, self.active_wave)
+
+        assert recovery["recovered"] is True, recovery
+        assert recovery["tier"] == 2
+        assert recovery["action"] == "remove_out_of_wave_tasks_tracker_note"
+        tasks_text = (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+        assert out_of_wave_line not in tasks_text
+        assert same_wave_line in tasks_text
+        staged_tasks = subprocess.run(
+            ["git", "diff", "--cached", "--", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert self.other_wave not in staged_tasks
+        assert self.active_wave in staged_tasks
+
+    def test_no_out_of_wave_removal_with_plan_path_arms_phase_b_reentry(self, tmp_path):
+        # (c) No-removal branch with a resolvable re-entry target arms Phase-B
+        # re-entry through the same proven resume channel
+        # fix_post_reentry_needs_phase_b uses -- instead of the prior fail-closed
+        # no_out_of_wave_tasks_tracker_addition no-op.
+        base_tasks = self._init_repo(tmp_path)
+        same_wave_line = (
+            f"- Tracker sync note (2026-05-26, {self.active_wave}): "
+            "correct same-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + same_wave_line, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        plan_path = "reports/control_plane/recovery_gate_classifier_fix_2026-06-01.md"
+        payload = {
+            "status": "needs_phase_b",
+            "step": "build_and_run_supervisor",
+            "plan_path": plan_path,
+            "wave_id": self.active_wave,
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B: the staged TASKS.md diff "
+                "contains no proven out-of-wave tracker-note additions."
+            ],
+        }
+        result = {
+            "status": "failed",
+            "executor": "commit_executor",
+            "step": "build_and_run_supervisor",
+            "plan_path": plan_path,
+            "wave_id": self.active_wave,
+            "stdout": json.dumps(payload),
+            "stderr": "",
+        }
+
+        fix = rg_mod.fix_commit_supervisor_out_of_wave_tasks_tracker_note(
+            tmp_path,
+            wave_id=self.active_wave,
+            result=result,
+        )
+
+        assert fix["fixed"] is True, fix
+        assert fix["action"] == "resume_phase_b_reentry"
+
+        state_path = (
+            tmp_path / ".agent_bus" / "executors" / "phase_b_state.json"
+        )
+        assert state_path.exists()
+        checkpoint = json.loads(state_path.read_text(encoding="utf-8"))
+        assert checkpoint["completed_step"] == "needs_phase_b_reentry"
+        assert checkpoint["plan_path"] == plan_path
+        assert checkpoint["wave_id"] == rg_mod.normalize_wave_id(self.active_wave)
+        # The same-wave note must be preserved -- the degrade must not remove it.
+        assert same_wave_line in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+
+    def test_no_out_of_wave_removal_without_plan_path_stays_fail_closed(self, tmp_path):
+        # (c, fallback) No removal AND no resolvable re-entry target: re-entry
+        # cannot be armed without a plan_path, so the explicit fail-closed no-op
+        # is preserved.
+        base_tasks = self._init_repo(tmp_path)
+        same_wave_line = (
+            f"- Tracker sync note (2026-05-26, {self.active_wave}): "
+            "correct same-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + same_wave_line, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        fix = rg_mod.fix_commit_supervisor_out_of_wave_tasks_tracker_note(
+            tmp_path,
+            wave_id=self.active_wave,
+            result=self._result(),
+        )
+
+        assert fix["fixed"] is False
+        assert fix["action"] == "no_out_of_wave_tasks_tracker_addition"
+        assert not (
+            tmp_path / ".agent_bus" / "executors" / "phase_b_state.json"
+        ).exists()
+        assert same_wave_line in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+
 
 class TestCheckStaleNextItemsRetry:
     checker = _REPO_ROOT / "mu" / "tools" / "checks" / "check_stale_next_items.sh"
