@@ -922,6 +922,43 @@ def _looks_like_phase_b_l4_structural_tracker_note_gap(result: dict[str, Any]) -
     return any(marker in signal for marker in structural_note_markers)
 
 
+_OUT_OF_SCOPE_NEGATION_CUE_RE = re.compile(
+    r"\b(?:no proven|contains no|free of|without|not|zero|no)\b"
+)
+_OUT_OF_SCOPE_NEGATION_WINDOW = 32
+
+
+def _has_unnegated_out_of_scope_marker(
+    text_parts: list[str], markers: tuple[str, ...]
+) -> bool:
+    """True when at least one out-of-scope marker occurrence is NOT governed by a
+    negation cue within a bounded preceding window.
+
+    Anchored, not blanket: each occurrence is judged only against the text
+    immediately preceding it (within ``_OUT_OF_SCOPE_NEGATION_WINDOW`` chars) and
+    per text-part, so a negation cue in one clause or part cannot veto a genuine
+    un-negated marker carried by another. Returns False only when every
+    occurrence is negated (or none is present) -- this is what removes the
+    favorable-NEEDS_PHASE_B "no proven out-of-wave tracker-note additions" false
+    positive without dropping genuine mixed-signal positives.
+    """
+    for part in text_parts:
+        if not part:
+            continue
+        lowered = part.lower()
+        for marker in markers:
+            start = 0
+            while True:
+                idx = lowered.find(marker, start)
+                if idx == -1:
+                    break
+                window = lowered[max(0, idx - _OUT_OF_SCOPE_NEGATION_WINDOW):idx]
+                if not _OUT_OF_SCOPE_NEGATION_CUE_RE.search(window):
+                    return True
+                start = idx + len(marker)
+    return False
+
+
 def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[str, Any]) -> bool:
     candidates = _extract_result_candidates(result)
     steps = {
@@ -963,9 +1000,17 @@ def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[st
         "scope drift",
         "unrelated structural tracker note",
     )
-    if "tasks.md" not in signal or not any(
-        marker in signal for marker in out_of_scope_markers
-    ):
+    if "tasks.md" not in signal:
+        return False
+    # Anchored negation (not a blanket aggregate veto): an out-of-scope marker
+    # counts as genuine evidence only when it is NOT governed by a negation cue
+    # in a bounded preceding window, judged per text-part. A favorable
+    # NEEDS_PHASE_B whose detail says it found "no proven out-of-wave
+    # tracker-note additions" must NOT be misclassified; but a genuine
+    # un-negated out-of-wave addition still classifies positive even if a negated
+    # absence phrase co-occurs elsewhere in the aggregate. Return False only when
+    # every out-of-scope occurrence is negated.
+    if not _has_unnegated_out_of_scope_marker(text_parts, out_of_scope_markers):
         return False
     tracker_markers = (
         "tracker note",
@@ -3010,6 +3055,16 @@ def fix_commit_supervisor_out_of_wave_tasks_tracker_note(repo_root: Path, **kw: 
     if parse_errors:
         return _fix_result(False, "unproven_tasks_tracker_diff", "; ".join(parse_errors))
     if not removals:
+        # Nothing to remove: the staged TASKS.md note is the correct same-wave
+        # one (the favorable-NEEDS_PHASE_B case the classifier may still route
+        # here). Instead of failing closed -- which wastes a full
+        # Phase-A->B->commit cycle -- degrade to Phase-B re-entry through the
+        # same proven resume channel fix_post_reentry_needs_phase_b uses, but
+        # only when a re-entry target (plan_path) is resolvable from the same
+        # result the classifier consumed. Without a target, re-entry cannot be
+        # armed, so keep the explicit fail-closed no-op as the fallback.
+        if _extract_plan_path(_merge_result_candidates(result)):
+            return fix_post_reentry_needs_phase_b(repo_root, result=result)
         return _fix_result(
             False,
             "no_out_of_wave_tasks_tracker_addition",
