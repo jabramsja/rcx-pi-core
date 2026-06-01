@@ -6257,6 +6257,70 @@ def _pr_conflicting_fail_closed_response(
     }
 
 
+def _midpoll_conflict_recheck_before_ci_failure(
+    repo_root: Path,
+    pr_number: str,
+    *,
+    midpoll_autoresolve: dict[str, Any] | None,
+    target_branch: str,
+    steps_completed: list[str],
+    log: Any = None,
+) -> dict[str, Any] | None:
+    """Step-14-only mid-poll conflict re-check at the required-checks-not-passed
+    boundary -- the wait stage BETWEEN the registration wait and the expected
+    check-surface wait (both already mid-poll-aware).
+
+    A concurrent lane that merges after the required checks register flips this
+    PR to CONFLICTING/DIRTY/BEHIND; GitHub then cancels/skips the in-flight
+    required workflows, so ``_wait_for_required_checks_to_pass`` reports them as
+    not-passed even though the cause is a conflict, not a real CI break. Without
+    this re-check the caller would mis-emit a ``ci_failure`` (which recovery
+    treats as a genuine test break) instead of the resolvable ``pr_conflicting``
+    class. Mirrors the register-wait + surface-wait re-checks: attempt the SAME
+    auto-resolve once, and fail closed with the SAME envelope when unresolvable.
+
+    Returns:
+      * ``None`` -- not a mid-poll conflict (genuine CI state, or a non-Step-14
+        caller where ``midpoll_autoresolve is None``): the caller emits its
+        normal CI-failure response.
+      * ``{"midpoll_conflict_resolved": True}`` -- a conflict was detected and
+        the base-merge repush cleared it; the caller should re-verify the
+        refreshed check surface (fall through to the surface-pass wait) instead
+        of failing as CI.
+      * a ``_pr_conflicting_fail_closed_response(...)`` envelope -- a conflict
+        was detected but auto-resolve could not clear it; the caller returns it.
+    """
+    if midpoll_autoresolve is None:
+        return None
+    conflict_state = _check_pr_conflict_state(repo_root, pr_number=pr_number, log=log)
+    if conflict_state is None:
+        return None
+    if log is not None:
+        log(
+            f"Step 14 mid-poll: PR #{pr_number} is {conflict_state} when required "
+            "checks read as not-passed (a concurrent lane likely merged and "
+            "cancelled the required workflows); re-firing auto-resolve before "
+            "treating this as a CI failure"
+        )
+    resolve_result = _try_auto_resolve_pr_conflict(
+        repo_root,
+        pr_number=pr_number,
+        base_branch=midpoll_autoresolve["base_branch"],
+        branch_name=midpoll_autoresolve["branch_name"],
+        log=log,
+    )
+    if resolve_result.get("resolved"):
+        return {"midpoll_conflict_resolved": True}
+    return _pr_conflicting_fail_closed_response(
+        pr_number=pr_number,
+        base_branch=midpoll_autoresolve.get("base_branch", ""),
+        target_branch=target_branch,
+        steps_completed=steps_completed,
+        action=resolve_result.get("action", "aborted"),
+        detail=resolve_result.get("detail", "unknown"),
+    )
+
+
 def _wait_for_pr_ci(
     repo_root: Path,
     *,
@@ -6315,20 +6379,34 @@ def _wait_for_pr_ci(
             timeout=COMMIT_CI_VERIFY_TIMEOUT_S,
             log=log,
         ):
-            ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
-            return {
-                "status": "error",
-                "step": "wait_ci",
-                "failure_class": _wait_ci_failure_class(ci_failure),
-                "errors": [
-                    "Required CI checks did not reach green after gh watch returned. "
-                    + str(ci_failure.get("summary", ""))
-                ],
-                "ci_failures": ci_failure.get("failures", []),
-                "ci_checks_output": ci_failure.get("checks_output", ""),
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number,
-            }
+            midpoll = _midpoll_conflict_recheck_before_ci_failure(
+                repo_root,
+                pr_number,
+                midpoll_autoresolve=midpoll_autoresolve,
+                target_branch=target_branch,
+                steps_completed=result["steps_completed"],
+                log=log,
+            )
+            if midpoll is None:
+                ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
+                return {
+                    "status": "error",
+                    "step": "wait_ci",
+                    "failure_class": _wait_ci_failure_class(ci_failure),
+                    "errors": [
+                        "Required CI checks did not reach green after gh watch returned. "
+                        + str(ci_failure.get("summary", ""))
+                    ],
+                    "ci_failures": ci_failure.get("failures", []),
+                    "ci_checks_output": ci_failure.get("checks_output", ""),
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number,
+                }
+            if not midpoll.get("midpoll_conflict_resolved"):
+                return midpoll
+            # Mid-poll conflict resolved: the base-merge repush re-triggered the
+            # cancelled required workflows; fall through to the surface-pass wait,
+            # which re-verifies the refreshed check surface against the new head.
         surface = _wait_for_expected_pr_check_surface_to_pass(
             repo_root,
             pr_number,
@@ -6397,20 +6475,33 @@ def _wait_for_pr_ci(
             timeout=COMMIT_CI_VERIFY_TIMEOUT_S,
             log=log,
         ):
-            ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
-            return {
-                "status": "error",
-                "step": "wait_ci",
-                "failure_class": _wait_ci_failure_class(ci_failure),
-                "errors": [
-                    f"Required CI checks did not reach green after fallback polling: {exc}. "
-                    + str(ci_failure.get("summary", ""))
-                ],
-                "ci_failures": ci_failure.get("failures", []),
-                "ci_checks_output": ci_failure.get("checks_output", ""),
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number,
-            }
+            midpoll = _midpoll_conflict_recheck_before_ci_failure(
+                repo_root,
+                pr_number,
+                midpoll_autoresolve=midpoll_autoresolve,
+                target_branch=target_branch,
+                steps_completed=result["steps_completed"],
+                log=log,
+            )
+            if midpoll is None:
+                ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
+                return {
+                    "status": "error",
+                    "step": "wait_ci",
+                    "failure_class": _wait_ci_failure_class(ci_failure),
+                    "errors": [
+                        f"Required CI checks did not reach green after fallback polling: {exc}. "
+                        + str(ci_failure.get("summary", ""))
+                    ],
+                    "ci_failures": ci_failure.get("failures", []),
+                    "ci_checks_output": ci_failure.get("checks_output", ""),
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number,
+                }
+            if not midpoll.get("midpoll_conflict_resolved"):
+                return midpoll
+            # Mid-poll conflict resolved during the fallback path: fall through to
+            # the surface-pass wait to re-verify the refreshed check surface.
         surface = _wait_for_expected_pr_check_surface_to_pass(
             repo_root,
             pr_number,

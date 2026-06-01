@@ -868,3 +868,191 @@ class TestStep14MidPollSurfaceConflictRecheck:
         assert ["gh", "pr", "checks", "303", "--watch", "--required"] in run_cmds
         assert "Manual recovery required" in response["errors"][0]
         assert "executor.py" in response["errors"][0]
+
+
+class TestMidpollConflictRecheckBeforeCIFailure:
+    """``_midpoll_conflict_recheck_before_ci_failure`` -- the Step-14 mid-poll
+    conflict re-check at the required-checks-not-passed boundary (the wait stage
+    BETWEEN the registration wait and the expected-check-surface wait, both of
+    which were already mid-poll-aware).
+
+    A concurrent lane that merges after the required checks register flips the
+    PR to CONFLICTING/DIRTY and GitHub cancels the in-flight required workflows,
+    so ``_wait_for_required_checks_to_pass`` reports not-passed even though the
+    cause is a conflict, not a CI break. The re-check must (a) be inert for
+    non-Step-14 callers, (b) pass a genuine CI failure through, (c) signal
+    fall-through on a resolved conflict, and (d) fail closed with the SAME
+    ``pr_conflicting`` envelope when the conflict is unresolvable.
+    """
+
+    def test_inert_without_midpoll_context(self, tmp_path):
+        # Non-Step-14 callers pass midpoll_autoresolve=None: the re-check is a
+        # no-op (no conflict probe, no auto-resolve) and returns None so the
+        # caller emits its normal CI-failure response.
+        conflict_calls = {"count": 0}
+        resolve_calls = {"count": 0}
+
+        def fake_conflict(repo_root, *, pr_number, log=None):
+            conflict_calls["count"] += 1
+            return "mergeable=CONFLICTING"
+
+        def fake_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_calls["count"] += 1
+            return {"resolved": True, "action": "tasks_md_resolved", "detail": ""}
+
+        with patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve):
+            out = commit_mod._midpoll_conflict_recheck_before_ci_failure(  # ANTICHEAT_OK: mid-poll required-pass re-check verify
+                tmp_path,
+                "400",
+                midpoll_autoresolve=None,
+                target_branch="wave/none",
+                steps_completed=["git_commit"],
+                log=None,
+            )
+        assert out is None
+        assert conflict_calls["count"] == 0
+        assert resolve_calls["count"] == 0
+
+    def test_no_conflict_returns_none(self, tmp_path):
+        # Required checks not-passed with NO conflict = a genuine CI failure; the
+        # re-check returns None and never attempts auto-resolve.
+        resolve_calls = {"count": 0}
+
+        def fake_conflict(repo_root, *, pr_number, log=None):
+            return None  # not conflicting
+
+        def fake_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_calls["count"] += 1
+            return {"resolved": True, "action": "x", "detail": ""}
+
+        with patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve):
+            out = commit_mod._midpoll_conflict_recheck_before_ci_failure(  # ANTICHEAT_OK: mid-poll required-pass re-check verify
+                tmp_path,
+                "401",
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/a"},
+                target_branch="wave/a",
+                steps_completed=["git_commit"],
+                log=None,
+            )
+        assert out is None
+        assert resolve_calls["count"] == 0  # no resolve attempted when not conflicting
+
+    def test_conflict_resolved_signals_fall_through(self, tmp_path):
+        # Concurrent merge cancelled the checks; auto-resolve clears it -> signal
+        # the caller to fall through to the surface-pass wait (re-verify head).
+        resolve_calls = {"count": 0}
+
+        def fake_conflict(repo_root, *, pr_number, log=None):
+            return "mergeable=CONFLICTING"
+
+        def fake_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_calls["count"] += 1
+            assert base_branch == "dev"
+            assert branch_name == "wave/b"
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev + resolved TASKS.md + pushed",
+            }
+
+        with patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve):
+            out = commit_mod._midpoll_conflict_recheck_before_ci_failure(  # ANTICHEAT_OK: mid-poll required-pass re-check verify
+                tmp_path,
+                "402",
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/b"},
+                target_branch="wave/b",
+                steps_completed=["git_commit"],
+                log=None,
+            )
+        assert out == {"midpoll_conflict_resolved": True}
+        assert resolve_calls["count"] == 1
+
+    def test_conflict_unresolvable_fails_closed(self, tmp_path):
+        # Concurrent merge + a conflict auto-resolve cannot clear: emit the SAME
+        # pr_conflicting fail-closed envelope as the other guards (NOT a generic
+        # ci_failure), so recovery treats it as a resolvable conflict.
+        def fake_conflict(repo_root, *, pr_number, log=None):
+            return "mergeable=CONFLICTING"
+
+        def fake_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            return {
+                "resolved": False,
+                "action": "aborted",
+                "detail": "conflict in non-TASKS.md files: ['executor.py']; manual recovery required",
+            }
+
+        with patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve):
+            out = commit_mod._midpoll_conflict_recheck_before_ci_failure(  # ANTICHEAT_OK: mid-poll required-pass re-check verify
+                tmp_path,
+                "403",
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/c"},
+                target_branch="wave/c",
+                steps_completed=["git_commit"],
+                log=None,
+            )
+        assert out is not None
+        assert out["status"] == "error"
+        assert out["step"] == "wait_ci"
+        assert out["failure_class"] == "pr_conflicting"
+        assert out["auto_resolve_action"] == "aborted"
+        assert "Manual recovery required" in out["errors"][0]
+        assert "executor.py" in out["errors"][0]
+
+    def test_wait_for_pr_ci_required_pass_boundary_fails_closed_on_unresolvable_conflict(
+        self, tmp_path
+    ):
+        # Integration: registration OK + watch returns, but required checks read
+        # not-passed (cancelled by a concurrent merge) AND the PR is conflicting
+        # with an unresolvable conflict -> _wait_for_pr_ci returns pr_conflicting
+        # at the required-pass boundary (distinct from the register + surface
+        # boundaries covered above).
+        resolve_calls = {"count": 0}
+        watch_cmds: list[list[str]] = []
+
+        def fake_run(args, *, cwd, check=True, timeout=120, env=None):
+            watch_cmds.append(list(args))
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        def fake_conflict(repo_root, *, pr_number, log=None):
+            return "mergeable=CONFLICTING"
+
+        def fake_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_calls["count"] += 1
+            return {
+                "resolved": False,
+                "action": "aborted",
+                "detail": "conflict in non-TASKS.md files: ['executor.py']; manual recovery required",
+            }
+
+        result = {"steps_completed": ["git_commit"]}
+        with patch.object(commit_mod, "_wait_for_required_checks_to_register", return_value=None), \
+             patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "_wait_for_required_checks_to_pass", return_value=False), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            response = commit_mod._wait_for_pr_ci(  # ANTICHEAT_OK: mid-poll required-pass fail-closed verify
+                tmp_path,
+                pr_number="404",
+                result=result,
+                continuation_path=tmp_path / "continuation.json",
+                target_branch="wave/d",
+                log=lambda _msg: None,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/d"},
+            )
+
+        assert response is not None
+        assert response["status"] == "error"
+        assert response["step"] == "wait_ci"
+        assert response["failure_class"] == "pr_conflicting"
+        assert response["auto_resolve_action"] == "aborted"
+        assert "wait_ci" not in result["steps_completed"]
+        assert resolve_calls["count"] == 1
+        # The watch DID run (we passed the registration gate), then the
+        # required-pass boundary caught the cancelled-by-conflict checks.
+        assert ["gh", "pr", "checks", "404", "--watch", "--required"] in watch_cmds
+        assert "Manual recovery required" in response["errors"][0]
