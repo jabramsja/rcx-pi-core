@@ -462,6 +462,9 @@ class TestCutoverIntegration:
         assert "Stage 0 micro-match" in marker_reason
         assert "host type/key primitives" in marker_reason
         assert "Tracked separately from match()" in marker_reason
+        assert "Sole production path" not in marker_reason
+        assert "Engine/bootstrap trusted-helper path remains reachable" in marker_reason
+        assert "step_kernel_mu VM cutover" in marker_reason
 
         counts = _patch_stage0_current_path_counters(monkeypatch, cutover_mode)
 

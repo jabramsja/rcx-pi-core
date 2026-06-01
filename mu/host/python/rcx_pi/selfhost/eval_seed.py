@@ -525,8 +525,9 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
 
 @host_builtin(
     "Stage 0 micro-match still depends on host type/key primitives while "
-    "dict traversal is explicit worklist structure. Sole production path "  # Historical marker metadata; current path split is documented above.
-    "(flag removed Wave 4). Tracked separately from match() for ratchet accuracy."
+    "dict traversal is explicit worklist structure. Engine/bootstrap trusted-helper "
+    "path remains reachable after the Wave 4 step_kernel_mu VM cutover. "
+    "Tracked separately from match() for ratchet accuracy."
 )
 def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     """Stage 0 match: worklist-style bindings. Returns NO_MATCH on failure."""

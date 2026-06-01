@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-stage0-decorator-metadata-redo-2026-06-01",
+  "repeat_run_speedup_ratio": 1.280462,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.231151,
+  "repeat_run_raw_seconds": [
+    0.29598,
+    0.231151
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.29598
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.527131
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-01T18:51:55Z",
+  "collector_version": "2.2.0"
+}
