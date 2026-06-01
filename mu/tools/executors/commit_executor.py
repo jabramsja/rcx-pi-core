@@ -4285,6 +4285,25 @@ def _validate_tracker_note_text(
         if literal not in note:
             errors.append(f"tracker_note_text missing required field marker: {literal}")
 
+    # 2026-06-01 (commit-evidence-guard-setroles-show): reject a tracker-note
+    # evidence_command that reads env-AWARE EFFECTIVE role state instead of the
+    # COMMITTED config. The 2026-05-30 standalone NEEDS_PHASE_B footgun paired a
+    # committed-config claim with `python3 mu/tools/executors/set_roles.py --show`,
+    # whose env-aware output (effective reviewer + an env-shadow warning)
+    # contradicted the claim -- so the pre-commit supervisor rejected the package
+    # only AFTER gates 1-10 had already passed, wasting a full supervisor cycle.
+    # This is a NARROW literal-pattern guard scoped to the exact observed footgun
+    # (an evidence_command containing BOTH `set_roles.py` AND `--show`), NOT a
+    # general env-aware-command detector.
+    evidence_command_value = _tracker_marker_value(note, "evidence_command")
+    if "set_roles.py" in evidence_command_value and "--show" in evidence_command_value:
+        errors.append(
+            "tracker_note_text evidence_command reads env-aware EFFECTIVE role "
+            "state (`set_roles.py --show`); use a committed-state read instead "
+            "(e.g. `grep -A2 role_agents mu/tools/executors/executor_config.json` "
+            "or `git diff`) so the evidence matches the committed-config claim"
+        )
+
     return errors
 
 
