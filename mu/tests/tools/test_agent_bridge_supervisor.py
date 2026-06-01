@@ -971,6 +971,157 @@ time.sleep(10.0)
     assert elapsed < 4.0
 
 
+def test_run_adapter_post_result_exit_timeout_kills_lingering_process(tmp_path: Path) -> None:
+    """A finished-but-alive adapter (terminal result emitted, then a hung teardown)
+    is killed shortly after post_result_exit_timeout_s and its captured output is
+    RETURNED — not discarded as a wall-clock timeout/stall. Regression for the #28
+    implementer hang: a lingering MCP-server child accrues background CPU that
+    defeats the stale watchdog's process-tree fingerprint, so the only backstop
+    used to be spec.timeout_s, which raised and threw away the completed result.
+    """
+    lingering_agent = tmp_path / "post_result_lingering_agent.py"
+    lingering_agent.write_text(
+        """\
+import json
+import sys
+import time
+
+sys.stdin.read()
+print(json.dumps({"type": "user", "message": {"content": "warming"}}), flush=True)
+print(json.dumps({"type": "result", "subtype": "success", "result": "implementer done"}), flush=True)
+time.sleep(20.0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("impl prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="claude",
+        cmd=[sys.executable, str(lingering_agent), "--output-format", "stream-json"],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="impl prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="impl",
+        agent_role="implementer",
+        raw_output_path=raw_output_path,
+        post_result_exit_timeout_s=1.0,
+    )
+    elapsed = time.monotonic() - start
+
+    # Killed ~1s after the result event — far below the 20s sleep / 30s backstop.
+    assert elapsed < 8.0
+    # The completed result is preserved in the raw transcript the implementer reads.
+    raw_text = raw_output_path.read_text(encoding="utf-8")
+    assert '"type": "result"' in raw_text
+    assert '"subtype": "success"' in raw_text
+    assert "implementer done" in raw_text
+    # And run_adapter returned (did not raise) with non-empty authoritative output.
+    assert output.strip()
+
+
+def test_run_adapter_post_result_exit_timeout_allows_clean_exit(tmp_path: Path) -> None:
+    """When the adapter emits its terminal result and exits within the grace
+    window, the post-result watchdog does not fire and normal output is returned
+    with no premature kill (happy path is unaffected by the new opt-in timeout)."""
+    clean_agent = tmp_path / "post_result_clean_agent.py"
+    clean_agent.write_text(
+        """\
+import json
+import sys
+
+sys.stdin.read()
+print(json.dumps({"type": "result", "subtype": "success", "result": "clean done"}), flush=True)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("impl prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="claude",
+        cmd=[sys.executable, str(clean_agent), "--output-format", "stream-json"],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="impl prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="impl",
+        agent_role="implementer",
+        raw_output_path=raw_output_path,
+        post_result_exit_timeout_s=5.0,
+    )
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 5.0
+    assert "clean done" in raw_output_path.read_text(encoding="utf-8")
+    assert output.strip()
+
+
+def test_run_adapter_streaming_post_result_exit_timeout_kills_lingering_process(
+    tmp_path: Path,
+) -> None:
+    """Streaming path mirrors the buffered post-result exit-timeout behavior."""
+    lingering_agent = tmp_path / "post_result_lingering_stream_agent.py"
+    lingering_agent.write_text(
+        """\
+import json
+import sys
+import time
+
+sys.stdin.read()
+print(json.dumps({"type": "result", "subtype": "success", "result": "stream done"}), flush=True)
+time.sleep(20.0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("impl prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="claude",
+        cmd=[sys.executable, str(lingering_agent), "--output-format", "stream-json"],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="impl prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="impl",
+        agent_role="implementer",
+        stream=True,
+        raw_output_path=raw_output_path,
+        post_result_exit_timeout_s=1.0,
+    )
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 8.0
+    assert "stream done" in raw_output_path.read_text(encoding="utf-8")
+    assert output.strip()
+
+
 def test_run_adapter_zero_output_watchdog_tracks_stdout_only(tmp_path: Path) -> None:
     stderr_only_agent = tmp_path / "stderr_only_agent.py"
     stderr_only_agent.write_text(

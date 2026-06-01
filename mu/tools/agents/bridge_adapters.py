@@ -400,6 +400,28 @@ def _pid_is_live_non_zombie(pid: int) -> bool:
     return not stat.lstrip().startswith("Z")
 
 
+def _line_is_terminal_result_event(line: str) -> bool:
+    """True if a stdout line is the claude stream-json terminal result event.
+
+    The implementer adapter (claude --print --output-format stream-json) emits a
+    single final ``{"type": "result", ...}`` event after the model's last turn.
+    Observing it lets a caller bound the post-completion teardown window (Stop
+    hooks, MCP server shutdown) so an alive-but-finished subprocess cannot hang
+    past the model's actual completion.  Matches the top-level ``type`` only, so a
+    nested ``tool_result`` payload that merely contains the substring is not a
+    false positive (consistent with
+    phase_b_implementer._extract_adapter_result_envelope).
+    """
+    stripped = line.strip()
+    if '"result"' not in stripped:
+        return False
+    try:
+        payload = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("type") == "result"
+
+
 def _contains_complete_adapter_envelope(text: str) -> bool:
     for pattern, authorized_decisions in (
         (_AGENT_ENVELOPE_RE, _AUTHORIZED_AGENT_DECISIONS),
@@ -777,6 +799,7 @@ def _run_adapter_buffered(
     zero_output_timeout_s: float | None = None,
     stale_timeout_s: float | None = None,
     stop_after_envelope: bool = False,
+    post_result_exit_timeout_s: float | None = None,
 ) -> str:
     """Run adapter with full capture (no streaming), optionally writing to raw file incrementally."""
     raw_fh = None
@@ -812,6 +835,8 @@ def _run_adapter_buffered(
     stderr_buf = io.StringIO()
     stdout_progress = threading.Event()
     envelope_terminated = threading.Event()
+    post_result_killed = threading.Event()
+    result_terminal_seen_at: list[float | None] = [None]
 
     def _stop_after_envelope(line: str, sink: io.StringIO) -> None:
         if (
@@ -834,6 +859,12 @@ def _run_adapter_buffered(
     def _record_stdout_progress(line: str, sink: io.StringIO) -> None:
         stdout_progress.set()
         _stop_after_envelope(line, sink)
+        if (
+            post_result_exit_timeout_s is not None
+            and result_terminal_seen_at[0] is None
+            and _line_is_terminal_result_event(line)
+        ):
+            result_terminal_seen_at[0] = time.monotonic()
 
     stdout_thread = threading.Thread(
         target=_tee_stream,
@@ -890,7 +921,10 @@ def _run_adapter_buffered(
             zero_output_watchdog.daemon = True
             zero_output_watchdog.start()
         deadline = time.monotonic() + spec.timeout_s
-        wait_slice = 0.2 if stop_after_envelope else spec.timeout_s
+        poll_for_post_result = post_result_exit_timeout_s is not None
+        wait_slice = (
+            0.2 if (stop_after_envelope or poll_for_post_result) else spec.timeout_s
+        )
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -907,6 +941,15 @@ def _run_adapter_buffered(
                     or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
                 ):
                     envelope_terminated.set()
+                    _kill_process_group(proc, wait_for_exit=True)
+                    continue
+                if (
+                    poll_for_post_result
+                    and result_terminal_seen_at[0] is not None
+                    and time.monotonic() - result_terminal_seen_at[0]
+                    >= post_result_exit_timeout_s
+                ):
+                    post_result_killed.set()
                     _kill_process_group(proc, wait_for_exit=True)
                     continue
         watchdog.cancel()
@@ -946,7 +989,9 @@ def _run_adapter_buffered(
             f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
         )
 
-    join_timeout = 0.2 if envelope_terminated.is_set() else 5
+    join_timeout = (
+        0.2 if (envelope_terminated.is_set() or post_result_killed.is_set()) else 5
+    )
     stdout_thread.join(timeout=join_timeout)
     stderr_thread.join(timeout=join_timeout)
 
@@ -961,6 +1006,14 @@ def _run_adapter_buffered(
             output = f"{output}\n[stderr]\n{stderr_text}".strip()
         if raw_fh is not None and not stderr_written_raw():
             write_stderr_raw(stderr_text)
+    if post_result_killed.is_set():
+        # The adapter emitted its terminal result event but the process lingered
+        # past post_result_exit_timeout_s (e.g. a hung Stop hook or MCP-server
+        # teardown).  The completed work is already captured, so return it rather
+        # than discarding it as a timeout/stall failure.
+        if raw_fh is not None:
+            raw_fh.close()
+        return output
     if zero_output_timed_out.is_set():
         if raw_fh is not None:
             raw_fh.close()
@@ -1003,6 +1056,7 @@ def _run_adapter_streaming(
     zero_output_timeout_s: float | None = None,
     stale_timeout_s: float | None = None,
     stop_after_envelope: bool = False,
+    post_result_exit_timeout_s: float | None = None,
 ) -> str:
     """Run adapter with live tee to terminal + full capture for raw output file."""
     raw_fh = None
@@ -1038,6 +1092,8 @@ def _run_adapter_streaming(
     stderr_buf = io.StringIO()
     envelope_terminated = threading.Event()
     stdout_progress = threading.Event()
+    post_result_killed = threading.Event()
+    result_terminal_seen_at: list[float | None] = [None]
 
     def _stop_after_envelope(line: str, sink: io.StringIO) -> None:
         if (
@@ -1060,6 +1116,12 @@ def _run_adapter_streaming(
     def _record_stdout_progress(line: str, sink: io.StringIO) -> None:
         stdout_progress.set()
         _stop_after_envelope(line, sink)
+        if (
+            post_result_exit_timeout_s is not None
+            and result_terminal_seen_at[0] is None
+            and _line_is_terminal_result_event(line)
+        ):
+            result_terminal_seen_at[0] = time.monotonic()
 
     stdout_thread = threading.Thread(
         target=_tee_stream,
@@ -1106,7 +1168,10 @@ def _run_adapter_streaming(
             zero_output_watchdog.daemon = True
             zero_output_watchdog.start()
         deadline = time.monotonic() + spec.timeout_s
-        wait_slice = 0.2 if stop_after_envelope else spec.timeout_s
+        poll_for_post_result = post_result_exit_timeout_s is not None
+        wait_slice = (
+            0.2 if (stop_after_envelope or poll_for_post_result) else spec.timeout_s
+        )
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -1123,6 +1188,15 @@ def _run_adapter_streaming(
                     or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
                 ):
                     envelope_terminated.set()
+                    _kill_process_group(proc, wait_for_exit=True)
+                    continue
+                if (
+                    poll_for_post_result
+                    and result_terminal_seen_at[0] is not None
+                    and time.monotonic() - result_terminal_seen_at[0]
+                    >= post_result_exit_timeout_s
+                ):
+                    post_result_killed.set()
                     _kill_process_group(proc, wait_for_exit=True)
                     continue
         if zero_output_watchdog is not None:
@@ -1146,7 +1220,9 @@ def _run_adapter_streaming(
             f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
         ) from exc
 
-    join_timeout = 0.2 if envelope_terminated.is_set() else 5
+    join_timeout = (
+        0.2 if (envelope_terminated.is_set() or post_result_killed.is_set()) else 5
+    )
     stdout_thread.join(timeout=join_timeout)
     stderr_thread.join(timeout=join_timeout)
 
@@ -1161,6 +1237,14 @@ def _run_adapter_streaming(
             output = f"{output}\n[stderr]\n{stderr_text}".strip()
         if raw_fh is not None and not stderr_written_raw():
             write_stderr_raw(stderr_text)
+    if post_result_killed.is_set():
+        # The adapter emitted its terminal result event but the process lingered
+        # past post_result_exit_timeout_s (e.g. a hung Stop hook or MCP-server
+        # teardown).  The completed work is already captured, so return it rather
+        # than discarding it as a timeout/stall failure.
+        if raw_fh is not None:
+            raw_fh.close()
+        return output
     if zero_output_timed_out.is_set():
         if raw_fh is not None:
             raw_fh.close()
@@ -1208,6 +1292,7 @@ def run_adapter(
     zero_output_timeout_s: float | None = None,
     stale_timeout_s: float | None = None,
     stop_after_envelope: bool = False,
+    post_result_exit_timeout_s: float | None = None,
     bus_dir: str | Path | None = None,
 ) -> str:
     if timeout_override_s is not None:
@@ -1216,6 +1301,8 @@ def run_adapter(
         spec = replace(spec, timeout_s=timeout_override_s)
     if stale_timeout_s is not None and stale_timeout_s <= 0:
         raise BridgeAdapterError("stale_timeout_s must be positive")
+    if post_result_exit_timeout_s is not None and post_result_exit_timeout_s <= 0:
+        raise BridgeAdapterError("post_result_exit_timeout_s must be positive")
 
     context = {
         "prompt_file": str(prompt_path),
@@ -1238,6 +1325,7 @@ def run_adapter(
             zero_output_timeout_s,
             stale_timeout_s,
             stop_after_envelope,
+            post_result_exit_timeout_s,
         )
     return _run_adapter_buffered(
         spec,
@@ -1249,4 +1337,5 @@ def run_adapter(
         zero_output_timeout_s,
         stale_timeout_s,
         stop_after_envelope,
+        post_result_exit_timeout_s,
     )
