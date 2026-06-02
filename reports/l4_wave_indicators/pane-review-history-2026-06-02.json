@@ -1,24 +1,24 @@
 {
   "wave_id": "pane-review-history-2026-06-02",
-  "repeat_run_speedup_ratio": 1.21513,
+  "repeat_run_speedup_ratio": 1.503333,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.264751,
+  "step_growth_slope": 0.244957,
   "repeat_run_raw_seconds": [
-    0.321707,
-    0.264751
+    0.368252,
+    0.244957
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.321707
+      "elapsed_seconds": 0.368252
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.586458
+      "elapsed_seconds": 0.613209
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-06-02T20:09:23Z",
+  "collection_timestamp_utc": "2026-06-02T20:59:45Z",
   "collector_version": "2.2.0"
 }

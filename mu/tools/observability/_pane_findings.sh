@@ -195,6 +195,7 @@ render_clean_go_history() {
   # parser). Caller guarantees this runs only on the clean-GO display path.
   local latest_round="$1"
   local rendered_dir="$REPO_ROOT/$BUS_DIR/rendered"
+  local raw_dir="$REPO_ROOT/$BUS_DIR/raw"
   [ -d "$rendered_dir" ] || return 0
 
   # Phase prefix of the latest round (e.g. phase-a- / phase-b-): same-phase only.
@@ -214,11 +215,18 @@ render_clean_go_history() {
   fi
 
   # Same-phase rendered rounds as "<num>\t<round>\t<file>", ordered by round number.
+  # Restrict to the CURRENT bridge chain: a rendered round only counts if its live
+  # raw round dir still exists. Rendered files persist across waves, but round
+  # numbers (rN) restart each wave, so an orphaned phase-?-rN-*.md left over from a
+  # previous Phase B wave would otherwise be pulled in as a bogus "prior round" of
+  # this wave's chain. The raw dir is the same round universe the main render loop
+  # keys off, so requiring it ties the history to the live chain.
   local sorted
   sorted=$(
     for f in "$rendered_dir/${phase_prefix}"*.md; do
       [ -s "$f" ] || continue
       rname="$(basename "$f" .md)"
+      [ -d "$raw_dir/$rname" ] || continue
       rest="${rname#"$phase_prefix"}"
       rest="${rest#reentry-}"
       if [[ "$rest" =~ ^r([0-9]+) ]]; then
