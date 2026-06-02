@@ -40,6 +40,7 @@ from executor_common import (  # noqa: E402  (path insert must precede import)
     apply_role_agents,
     resolve_committed_role_agent,
     resolve_role_agent,
+    sync_bridge_config_agents_from_defaults,
 )
 
 
@@ -173,6 +174,11 @@ def main(argv: list[str] | None = None) -> int:
 
     apply_role_agents(raw, impl, rev)
     _atomic_write_text(cfg_path, json.dumps(raw, indent=2) + "\n")
+    # Re-sync the live bridge_config provider settings (model / effort / display_name)
+    # from bridge_agent_defaults so a role switch cannot leave the bus running a stale
+    # provider. apply_role_agents stays config-dict-only; this is the SEPARATE
+    # repo_root-aware step (set_roles already resolved `root`).
+    sync_bridge_config_agents_from_defaults(root)
     _print_state(raw, impl, rev, changed=True)
     return 0
 
