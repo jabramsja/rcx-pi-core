@@ -1254,6 +1254,107 @@ class TestStandaloneRecoveryTrigger:
         assert recovery_calls == []
 
 
+class TestResumeContinuationRecovery:
+    """``--resume-continuation`` finishes a stranded PR's remaining post-commit steps.
+
+    A stranded PR (already committed, ``COMMIT_GO`` continuation record written,
+    its dispatcher process gone) is recovered by re-invoking the executor with
+    ``--resume-continuation``:
+
+    - with a valid continuation record, the existing commit driver
+      (``run_commit_pipeline``) is invoked to finish the post-commit steps
+      through the normal gates;
+    - with no/invalid record, the flag fails closed (exit non-zero) and takes no
+      completion action (the driver is never invoked).
+    """
+
+    def _run_resume_main(self, tmp_path, continuation):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text(
+            json.dumps(_make_new_schema_handoff(wave_id="resume-continuation-wave")),
+            encoding="utf-8",
+        )
+        pipeline_calls = []
+
+        def fake_run(args, **kwargs):
+            if list(args) == ["git", "rev-parse", "--show-toplevel"]:
+                return subprocess.CompletedProcess(args, 0, f"{repo}\n", "")
+            raise AssertionError(f"unexpected subprocess.run call: {args}")
+
+        def fake_pipeline(handoff, **kwargs):
+            pipeline_calls.append({"handoff": handoff, "kwargs": kwargs})
+            return {
+                "status": "success",
+                "steps_completed": ["validate_inputs", "git_commit", "post_commit"],
+                "pr_number": "4242",
+            }
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=fake_run), \
+             patch.object(
+                 commit_mod,
+                 "_resolve_control_surface_founder_override_token",
+                 return_value="",
+             ), \
+             patch.object(
+                 commit_mod,
+                 "_load_post_commit_continuation",
+                 return_value=continuation,
+             ) as load_record, \
+             patch.object(
+                 commit_mod, "run_commit_pipeline", side_effect=fake_pipeline,
+             ), \
+             patch.object(
+                 sys,
+                 "argv",
+                 [
+                     "commit_executor.py",
+                     "--handoff",
+                     str(handoff_path),
+                     "--resume-continuation",
+                 ],
+             ):
+            exit_code = commit_mod.main()
+
+        return exit_code, pipeline_calls, load_record
+
+    def test_resume_continuation_invokes_driver_when_record_valid(self, tmp_path):
+        continuation = {
+            "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+            "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+            "commit_sha": "a" * 40,
+            "receipt_decision": "COMMIT_GO",
+            "steps_completed": ["validate_inputs", "git_commit"],
+            "target_branch": "jabramsja/resume-continuation-wave",
+        }
+
+        exit_code, pipeline_calls, load_record = self._run_resume_main(
+            tmp_path,
+            continuation,
+        )
+
+        # Valid record: the guard consults the continuation loader and falls
+        # through to the existing driver to finish the remaining steps.
+        assert load_record.called
+        assert len(pipeline_calls) == 1
+        assert exit_code == 0
+
+    def test_resume_continuation_fails_closed_without_record(self, tmp_path):
+        exit_code, pipeline_calls, load_record = self._run_resume_main(
+            tmp_path,
+            None,
+        )
+
+        # No/invalid record: fail closed (exit non-zero) and take no completion
+        # action — the existing driver must never be invoked.
+        assert load_record.called
+        assert pipeline_calls == []
+        assert exit_code == 1
+
+
 class TestSupervisorReceiptIsAuthority:
     """Step 7 preserves the handoff receipt chain and uses step 6 for final authority.
 
