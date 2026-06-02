@@ -9484,6 +9484,186 @@ esac
         assert "REQUEST_CHANGES" not in clean_stdout
         assert "No active Phase A/Phase B bridge rounds" in clean_stdout
 
+    def test_pane_findings_renders_review_arc_on_clean_go(self, tmp_path):
+        # When the latest round converges to a clean GO with zero findings, the
+        # pane must still surface the reviewer's earlier work: a same-phase
+        # "Review arc:" plus the most-recent prior round that had findings.
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        bus = repo_root / ".agent_bus"
+        rendered_dir = bus / "rendered"
+        rendered_dir.mkdir(parents=True, exist_ok=True)
+
+        def _json_envelope(decision: str, blocking_title: str) -> str:
+            # Raw reviewer file format (JSON envelope) — what the main render loop
+            # parses for the latest round.
+            if blocking_title:
+                findings = (
+                    '  "findings": [\n'
+                    '    {"disposition": "blocking", "severity": "high", '
+                    f'"title": "{blocking_title}"}}\n'
+                    "  ]\n"
+                )
+            else:
+                findings = '  "findings": []\n'
+            return (
+                "BEGIN_AGENT_ENVELOPE\n"
+                "{\n"
+                f'  "decision": "{decision}",\n'
+                f'  "summary": "{decision} raw envelope.",\n'
+                + findings
+                + "}\n"
+                "END_AGENT_ENVELOPE\n"
+            )
+
+        def _md_rendered(name: str, decision: str, blocking_title: str) -> str:
+            # Production rendered-round format (markdown) — what the review arc
+            # parses via the existing _markdown_envelope path.
+            lines = [
+                f"# Bridge Job {name}",
+                "",
+                "- Status: DONE",
+                "- Reviewer: codex",
+                "",
+                "## Turns",
+                f"### {name}--r1-reviewer-abcd — reviewer",
+                "- Status: completed",
+                f"- Decision: {decision}",
+                f"- Summary: {decision} rendered summary.",
+            ]
+            if blocking_title:
+                lines.append("- **Findings (1):**")
+                lines.append(f"  1. **DEFECT** (high): {blocking_title}")
+            return "\n".join(lines) + "\n"
+
+        rounds = [
+            ("phase-b-r1-11111111", "REQUEST_CHANGES", "Round 1 blocking defect"),
+            ("phase-b-r2-22222222", "REQUEST_CHANGES", "Round 2 blocking defect"),
+            ("phase-b-r3-33333333", "REQUEST_CHANGES", "Round 3 blocking defect title"),
+            ("phase-b-r4-44444444", "GO", ""),
+        ]
+        for name, decision, title in rounds:
+            raw_dir = bus / "raw" / name
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            (raw_dir / f"{name}--r1-reviewer.txt").write_text(
+                _json_envelope(decision, title), encoding="utf-8"
+            )
+            (rendered_dir / f"{name}.md").write_text(
+                _md_rendered(name, decision, title), encoding="utf-8"
+            )
+        # Age the raw round dirs so r4 is unambiguously the newest (latest) round.
+        for idx, (name, _decision, _title) in enumerate(rounds):
+            self._set_age_seconds(bus / "raw" / name, age_seconds=40 - idx * 10)
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        # Latest round still renders as the clean GO (existing latest-round block).
+        assert "Decision: GO" in clean_stdout
+        # (a) Same-phase review arc, ordered by round number, rendered below it.
+        assert "Review arc:" in clean_stdout
+        assert "r1 REQUEST_CHANGES.1B" in clean_stdout
+        assert "r3 REQUEST_CHANGES.1B" in clean_stdout
+        assert "r4 GO.0B" in clean_stdout
+        # (b) Most-recent prior round with findings, via the existing BLK| render.
+        assert "Last findings (r3, addressed):" in clean_stdout
+        assert "Round 3 blocking defect title" in clean_stdout
+
+    def test_pane_findings_review_arc_renders_commit_go_decision(self, tmp_path):
+        # A clean latest round may converge as COMMIT_GO (not just GO). The review
+        # arc parses the rendered round files via the existing _markdown_envelope,
+        # so that parser must recognize COMMIT_GO — otherwise the arc renders the
+        # decision as "?" (e.g. "r2 ?.0B" instead of "r2 COMMIT_GO.0B").
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        bus = repo_root / ".agent_bus"
+        rendered_dir = bus / "rendered"
+        rendered_dir.mkdir(parents=True, exist_ok=True)
+
+        def _json_envelope(decision: str, blocking_title: str) -> str:
+            if blocking_title:
+                findings = (
+                    '  "findings": [\n'
+                    '    {"disposition": "blocking", "severity": "high", '
+                    f'"title": "{blocking_title}"}}\n'
+                    "  ]\n"
+                )
+            else:
+                findings = '  "findings": []\n'
+            return (
+                "BEGIN_AGENT_ENVELOPE\n"
+                "{\n"
+                f'  "decision": "{decision}",\n'
+                f'  "summary": "{decision} raw envelope.",\n'
+                + findings
+                + "}\n"
+                "END_AGENT_ENVELOPE\n"
+            )
+
+        def _md_rendered(name: str, decision: str, blocking_title: str) -> str:
+            lines = [
+                f"# Bridge Job {name}",
+                "",
+                "## Turns",
+                f"### {name}--r1-reviewer-abcd — reviewer",
+                "- Status: completed",
+                f"- Decision: {decision}",
+                f"- Summary: {decision} rendered summary.",
+            ]
+            if blocking_title:
+                lines.append("- **Findings (1):**")
+                lines.append(f"  1. **DEFECT** (high): {blocking_title}")
+            return "\n".join(lines) + "\n"
+
+        rounds = [
+            ("phase-b-r1-11111111", "REQUEST_CHANGES", "Round 1 blocking defect title"),
+            ("phase-b-r2-22222222", "COMMIT_GO", ""),
+        ]
+        for name, decision, title in rounds:
+            raw_dir = bus / "raw" / name
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            (raw_dir / f"{name}--r1-reviewer.txt").write_text(
+                _json_envelope(decision, title), encoding="utf-8"
+            )
+            (rendered_dir / f"{name}.md").write_text(
+                _md_rendered(name, decision, title), encoding="utf-8"
+            )
+        # Age the raw round dirs so r2 (COMMIT_GO) is unambiguously the latest.
+        for idx, (name, _decision, _title) in enumerate(rounds):
+            self._set_age_seconds(bus / "raw" / name, age_seconds=40 - idx * 10)
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        # Latest round renders as the clean COMMIT_GO (existing latest-round block).
+        assert "Decision: COMMIT_GO" in clean_stdout
+        # The arc resolves the COMMIT_GO decision from the rendered file — not "?".
+        assert "Review arc:" in clean_stdout
+        assert "r2 COMMIT_GO.0B" in clean_stdout
+        assert "r2 ?.0B" not in clean_stdout
+        assert "r1 REQUEST_CHANGES.1B" in clean_stdout
+        # Prior findings round still surfaces via the existing BLK| render.
+        assert "Last findings (r1, addressed):" in clean_stdout
+        assert "Round 1 blocking defect title" in clean_stdout
+
     def test_pane_timeline_detects_live_codex_review_chain(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
