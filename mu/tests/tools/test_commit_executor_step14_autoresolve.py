@@ -649,6 +649,19 @@ class TestStep14MidPollSurfaceConflictRecheck:
     def _passed_surface() -> dict:
         return {"status": "passed", "summary": "expected PR check surface green"}
 
+    @staticmethod
+    def _failed_surface() -> dict:
+        # A concurrent lane that merges first makes GitHub cancel this PR's
+        # pull_request workflows; _summarize_pr_check_surface classifies a
+        # CANCELLED required check as a *failed* surface (conclusion present ->
+        # failing_checks). This is the surface the reorder must re-check for a
+        # conflict BEFORE returning as a CI failure.
+        return {
+            "status": "failed",
+            "summary": "failing PR check(s): test=CANCELLED",
+            "failing_checks": ["test=CANCELLED"],
+        }
+
     def test_midpoll_surface_conflict_aborted_fails_closed(self, tmp_path):
         # Conflict appears AFTER the required checks register and the gh watch
         # returns, but DURING the expected-check-surface wait, and auto-resolve
@@ -868,6 +881,200 @@ class TestStep14MidPollSurfaceConflictRecheck:
         assert ["gh", "pr", "checks", "303", "--watch", "--required"] in run_cmds
         assert "Manual recovery required" in response["errors"][0]
         assert "executor.py" in response["errors"][0]
+
+    def test_midpoll_surface_failed_by_concurrent_merge_rechecks_before_failed_return(
+        self, tmp_path
+    ):
+        # Reorder regression: a concurrent-merge CANCELLED-as-*failed* surface
+        # must hit the mid-poll conflict re-check BEFORE the status=="failed"
+        # early-return. Under the prior ordering the failed-return fired first,
+        # so a cancelled-by-merge surface was returned as a CI failure and the
+        # conflict was never probed. Proves three facets in one place:
+        #   (a) resolvable conflict re-fires auto-resolve and RE-POLLS a fresh
+        #       surface (returns the subsequent passed surface, not a plain
+        #       failed);
+        #   (b) unresolvable conflict fails closed with midpoll_conflict_aborted
+        #       (which _wait_for_pr_ci converts to the pr_conflicting envelope);
+        #   (c) a non-conflict real-CI-failure surface still returns failed,
+        #       with the conflict probed once and auto-resolve never fired.
+
+        # (a) failed (cancelled-by-merge) -> conflict -> resolved=true -> re-poll
+        #     -> green. The FIRST surface is failed, not pending: the old
+        #     ordering would have returned it as a CI failure before any probe.
+        summarize_a = {"count": 0}
+        conflict_a = {"count": 0}
+        resolve_a = {"count": 0}
+
+        def fake_summarize_a(checks):
+            summarize_a["count"] += 1
+            # failed (cancelled-by-merge), then green after the resolve repush.
+            if summarize_a["count"] >= 2:
+                return self._passed_surface()
+            return self._failed_surface()
+
+        def fake_conflict_a(repo_root, *, pr_number, log=None):
+            conflict_a["count"] += 1
+            return "mergeable=CONFLICTING"
+
+        def fake_resolve_a(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_a["count"] += 1
+            assert base_branch == "dev"
+            assert branch_name == "wave/failed-resolvable"
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev + resolved TASKS.md + pushed",
+            }
+
+        with patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize_a), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict_a), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve_a), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            snapshot = commit_mod._wait_for_expected_pr_check_surface_to_pass(  # ANTICHEAT_OK: surface reorder re-check verify
+                tmp_path,
+                pr_number="310",
+                timeout=30,
+                poll_interval=0,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/failed-resolvable"},
+            )
+        # Re-polled a fresh surface after the resolve instead of returning the
+        # stale failed snapshot: the second poll's GREEN surface is what returns.
+        assert snapshot["status"] == "passed"
+        assert snapshot.get("ok") is True
+        assert not snapshot.get("midpoll_conflict_aborted")
+        assert resolve_a["count"] == 1   # re-fired on the FAILED surface
+        assert conflict_a["count"] == 1  # probed once (passed poll returns first)
+        assert summarize_a["count"] == 2  # re-polled after the resolve
+
+        # (b) failed (cancelled-by-merge) -> conflict -> resolved=false -> fail
+        #     closed with the midpoll_conflict_aborted envelope.
+        resolve_b = {"count": 0}
+
+        def fake_summarize_b(checks):
+            return self._failed_surface()
+
+        def fake_conflict_b(repo_root, *, pr_number, log=None):
+            return "mergeable=CONFLICTING"
+
+        def fake_resolve_b(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_b["count"] += 1
+            return {
+                "resolved": False,
+                "action": "aborted",
+                "detail": "conflict in non-TASKS.md files: ['executor.py']; manual recovery required",
+            }
+
+        with patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize_b), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict_b), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve_b), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            snapshot = commit_mod._wait_for_expected_pr_check_surface_to_pass(  # ANTICHEAT_OK: surface reorder fail-closed verify
+                tmp_path,
+                pr_number="311",
+                timeout=30,
+                poll_interval=0,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/failed-unresolvable"},
+            )
+        assert snapshot.get("ok") is False
+        assert snapshot.get("midpoll_conflict_aborted") is True
+        assert snapshot.get("auto_resolve_action") == "aborted"
+        assert resolve_b["count"] == 1
+
+        # (c) failed surface that is a REAL CI break (not conflicting): the
+        #     re-check probes conflict-state, finds none, and the failed
+        #     early-return fires unchanged -- no auto-resolve, still failed.
+        summarize_c = {"count": 0}
+        conflict_c = {"count": 0}
+        resolve_c = {"count": 0}
+
+        def fake_summarize_c(checks):
+            summarize_c["count"] += 1
+            return self._failed_surface()
+
+        def fake_conflict_c(repo_root, *, pr_number, log=None):
+            conflict_c["count"] += 1
+            return None  # not conflicting -> genuine CI failure
+
+        def fake_resolve_c(repo_root, **kw):
+            resolve_c["count"] += 1
+            return {"resolved": True, "action": "x", "detail": ""}
+
+        with patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize_c), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict_c), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve_c), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            snapshot = commit_mod._wait_for_expected_pr_check_surface_to_pass(  # ANTICHEAT_OK: surface reorder non-conflict verify
+                tmp_path,
+                pr_number="312",
+                timeout=30,
+                poll_interval=0,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/real-ci-fail"},
+            )
+        assert snapshot["status"] == "failed"
+        assert snapshot.get("ok") is False
+        assert not snapshot.get("midpoll_conflict_aborted")
+        assert resolve_c["count"] == 0   # never auto-resolved a real CI break
+        assert conflict_c["count"] == 1  # probed once before the failed-return
+        assert summarize_c["count"] == 1  # returned failed on the first poll
+
+    def test_midpoll_surface_conflict_not_probed_after_deadline(self, tmp_path):
+        # Bridge round-1 DEFECT (PR #1059 P2 #2 follow-up): the mid-poll conflict
+        # re-check -- and especially the expensive _try_auto_resolve_pr_conflict
+        # (fetch + merge + push) -- must NOT run once the surface-wait deadline
+        # has already expired. The relocation put the re-check above the
+        # status=="failed" early-return, but it also sat above the timeout check,
+        # so a deadline-reached failed/conflicting surface still probed the
+        # conflict and re-fired auto-resolve AFTER the deadline. The re-check is
+        # now deadline-guarded: a deadline-reached FAILED surface returns WITHOUT
+        # probing the conflict or re-firing auto-resolve, and the failed
+        # early-return still terminates the wait.
+        conflict_calls = {"count": 0}
+        resolve_calls = {"count": 0}
+        # First monotonic() reading computes the deadline; every later reading is
+        # well past it, so the deadline guard short-circuits the conflict block.
+        clock = iter([1000.0])
+
+        def fake_monotonic():
+            return next(clock, 9999.0)
+
+        def fake_summarize(checks):
+            # Concurrent-merge CANCELLED-as-failed surface (would, pre-guard,
+            # have re-fired auto-resolve even though the deadline is already up).
+            return self._failed_surface()
+
+        def fake_conflict(repo_root, *, pr_number, log=None):
+            conflict_calls["count"] += 1
+            return "mergeable=CONFLICTING"
+
+        def fake_resolve(repo_root, **kw):
+            resolve_calls["count"] += 1
+            return {"resolved": True, "action": "tasks_md_resolved", "detail": "x"}
+
+        with patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve), \
+             patch.object(commit_mod.time, "monotonic", side_effect=fake_monotonic), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            snapshot = commit_mod._wait_for_expected_pr_check_surface_to_pass(  # ANTICHEAT_OK: surface deadline-guard verify
+                tmp_path,
+                pr_number="313",
+                timeout=30,
+                poll_interval=0,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/deadline"},
+            )
+        # Deadline already expired before the conflict block: neither the
+        # conflict probe nor auto-resolve ran (the bug ran both after the
+        # deadline), and the failed surface returned -- not the aborted envelope,
+        # not a re-poll.
+        assert conflict_calls["count"] == 0
+        assert resolve_calls["count"] == 0
+        assert snapshot["status"] == "failed"
+        assert snapshot.get("ok") is False
+        assert not snapshot.get("midpoll_conflict_aborted")
 
 
 class TestMidpollConflictRecheckBeforeCIFailure:
