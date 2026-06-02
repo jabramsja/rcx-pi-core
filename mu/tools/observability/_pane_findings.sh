@@ -99,7 +99,7 @@ def _latest_json_envelope(content):
 
 def _markdown_envelope(content):
     sections = list(re.finditer(r"(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)", content))
-    decision_re = re.compile(r"(?m)^\s*-\s*Decision:\s*(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b")
+    decision_re = re.compile(r"(?m)^\s*-\s*Decision:\s*(COMMIT_GO|GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b")
     summary_re = re.compile(r"(?m)^\s*-\s*Summary:\s*(.*)")
     finding_re = re.compile(r"(?m)^\s*\d+\.\s+\*\*(DEFECT|POLICY_BOUND|DOC_ACCURACY)\*\* \(([^)]+)\):\s*(.*)$")
     for section in reversed(sections):
@@ -160,6 +160,114 @@ for finding in non_blocking:
     title = (finding.get("title") or finding.get("description") or "?")[:100]
     print(f"NB|{sev}|{title}")
 PY
+}
+
+render_findings_lines() {
+  # Shared BLK|/NB| finding renderer. Reused by the latest-round block and the
+  # clean-GO review-history block so finding lines format identically. Takes the
+  # parse_agent_envelope_file output (with BLK|/NB| lines) as its only argument.
+  local envelope="$1"
+  echo "$envelope" | grep "^BLK|" | while IFS='|' read -r _ sev title; do
+    case "$sev" in
+      critical) sev_color="$RED" ;;
+      high) sev_color="$RED" ;;
+      medium) sev_color="$YELLOW" ;;
+      *) sev_color="$DIM" ;;
+    esac
+    echo -e "    ${RED}B${RESET} ${sev_color}[$sev]${RESET} $title"
+  done
+  echo "$envelope" | grep "^NB|" | while IFS='|' read -r _ sev title; do
+    case "$sev" in
+      critical|high) sev_color="$YELLOW" ;;
+      medium) sev_color="$YELLOW" ;;
+      *) sev_color="$DIM" ;;
+    esac
+    echo -e "    ${YELLOW}N${RESET} ${sev_color}[$sev]${RESET} $title"
+  done
+}
+
+render_clean_go_history() {
+  # When the latest round is a clean GO/COMMIT_GO with zero findings, the
+  # latest-round block alone reads "GO 0B 0NB" and the reviewer's earlier work
+  # disappears. Re-surface it: (a) a one-line same-phase review arc, and (b) the
+  # blocking/non-blocking titles of the most-recent PRIOR round that had
+  # findings. Same-phase rounds only; reuses parse_agent_envelope_file (no second
+  # parser). Caller guarantees this runs only on the clean-GO display path.
+  local latest_round="$1"
+  local rendered_dir="$REPO_ROOT/$BUS_DIR/rendered"
+  local raw_dir="$REPO_ROOT/$BUS_DIR/raw"
+  [ -d "$rendered_dir" ] || return 0
+
+  # Phase prefix of the latest round (e.g. phase-a- / phase-b-): same-phase only.
+  local phase_prefix=""
+  if [[ "$latest_round" =~ ^(phase-[a-z]-) ]]; then
+    phase_prefix="${BASH_REMATCH[1]}"
+  else
+    return 0
+  fi
+
+  # Round number of the latest round (after the phase prefix and optional reentry-).
+  local latest_num=""
+  local latest_rest="${latest_round#"$phase_prefix"}"
+  latest_rest="${latest_rest#reentry-}"
+  if [[ "$latest_rest" =~ ^r([0-9]+) ]]; then
+    latest_num="${BASH_REMATCH[1]}"
+  fi
+
+  # Same-phase rendered rounds as "<num>\t<round>\t<file>", ordered by round number.
+  # Restrict to the CURRENT bridge chain: a rendered round only counts if its live
+  # raw round dir still exists. Rendered files persist across waves, but round
+  # numbers (rN) restart each wave, so an orphaned phase-?-rN-*.md left over from a
+  # previous Phase B wave would otherwise be pulled in as a bogus "prior round" of
+  # this wave's chain. The raw dir is the same round universe the main render loop
+  # keys off, so requiring it ties the history to the live chain.
+  local sorted
+  sorted=$(
+    for f in "$rendered_dir/${phase_prefix}"*.md; do
+      [ -s "$f" ] || continue
+      rname="$(basename "$f" .md)"
+      [ -d "$raw_dir/$rname" ] || continue
+      rest="${rname#"$phase_prefix"}"
+      rest="${rest#reentry-}"
+      if [[ "$rest" =~ ^r([0-9]+) ]]; then
+        printf '%s\t%s\t%s\n' "${BASH_REMATCH[1]}" "$rname" "$f"
+      fi
+    done | sort -n
+  )
+  [ -n "$sorted" ] || return 0
+
+  # Build the arc and locate the most-recent prior round that had findings.
+  local arc="" last_findings_round="" last_findings_file=""
+  local num rname file env dec blk nb
+  while IFS=$'\t' read -r num rname file; do
+    [ -n "$num" ] || continue
+    env="$(parse_agent_envelope_file "$file" 2>/dev/null)"
+    dec="$(echo "$env" | grep '^DECISION=' | cut -d= -f2-)"
+    blk="$(echo "$env" | grep '^BLOCKING=' | cut -d= -f2-)"
+    nb="$(echo "$env" | grep '^NONBLOCKING=' | cut -d= -f2-)"
+    [ -n "$dec" ] || dec="?"
+    [ -n "$blk" ] || blk=0
+    [ -n "$nb" ] || nb=0
+    if [ -n "$arc" ]; then
+      arc="$arc -> r${num} ${dec}.${blk}B"
+    else
+      arc="r${num} ${dec}.${blk}B"
+    fi
+    # "Prior" = a strictly-earlier round number than the latest, with findings.
+    if [ -n "$latest_num" ] && [ "$num" -lt "$latest_num" ] 2>/dev/null \
+       && [ "$(( ${blk:-0} + ${nb:-0} ))" -gt 0 ] 2>/dev/null; then
+      last_findings_round="$num"
+      last_findings_file="$file"
+    fi
+  done <<< "$sorted"
+
+  [ -n "$arc" ] || return 0
+  echo -e "  ${DIM}Review arc:${RESET} $arc"
+
+  if [ -n "$last_findings_file" ]; then
+    echo -e "  ${DIM}Last findings (r${last_findings_round}, addressed):${RESET}"
+    render_findings_lines "$(parse_agent_envelope_file "$last_findings_file" 2>/dev/null)"
+  fi
 }
 
 parse_meta_envelope_file() {
@@ -527,26 +635,16 @@ while true; do
       echo -e "  ${DIM}$SUMMARY${RESET}"
     fi
 
-    # Show blocking findings
-    echo "$ENVELOPE" | grep "^BLK|" | while IFS='|' read -r _ sev title; do
-      case "$sev" in
-        critical) sev_color="$RED" ;;
-        high) sev_color="$RED" ;;
-        medium) sev_color="$YELLOW" ;;
-        *) sev_color="$DIM" ;;
-      esac
-      echo -e "    ${RED}B${RESET} ${sev_color}[$sev]${RESET} $title"
-    done
+    render_findings_lines "$ENVELOPE"
 
-    # Show non-blocking findings
-    echo "$ENVELOPE" | grep "^NB|" | while IFS='|' read -r _ sev title; do
-      case "$sev" in
-        critical|high) sev_color="$YELLOW" ;;
-        medium) sev_color="$YELLOW" ;;
-        *) sev_color="$DIM" ;;
-      esac
-      echo -e "    ${YELLOW}N${RESET} ${sev_color}[$sev]${RESET} $title"
-    done
+    # Clean-GO review history — ONLY when the latest round passed with zero
+    # findings. Re-surface the same-phase review arc plus the last findings round
+    # so the reviewer's work stays visible after the wave converges. Any other
+    # latest round (non-GO or has-findings) renders exactly as before this block.
+    if { [ "$DECISION" = "GO" ] || [ "$DECISION" = "COMMIT_GO" ]; } \
+       && [ "${BLK_COUNT:-}" = "0" ] && [ "${NB_COUNT:-}" = "0" ]; then
+      render_clean_go_history "$ROUND_NAME"
+    fi
 
     # Only show the latest round — break after first valid one
     break
