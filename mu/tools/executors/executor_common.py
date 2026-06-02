@@ -14,7 +14,9 @@ import os
 import re
 import signal
 import shutil
+import stat
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -663,6 +665,164 @@ def load_bridge_agent_catalog(
             if display_name is not None:
                 catalog.setdefault(name, {})["display_name"] = display_name
     return catalog
+
+
+def _set_bridge_cmd_model(cmd: list[Any], model: str) -> bool:
+    """Overwrite the model token (the value after ``--model`` or ``-m``) in *cmd*.
+
+    Returns True if the token changed. Only the single model value is rewritten; the
+    flag itself and every other cmd arg are left in place. A flag with no following
+    value (trailing position) is ignored rather than indexed out of range.
+    """
+    for index in range(len(cmd) - 1):
+        if cmd[index] in ("--model", "-m"):
+            if cmd[index + 1] == model:
+                return False
+            cmd[index + 1] = model
+            return True
+    return False
+
+
+def _set_bridge_cmd_effort(cmd: list[Any], effort: str) -> bool:
+    """Overwrite the reasoning-effort token in *cmd*.
+
+    Handles both shapes the live bridge_config uses: an explicit ``--effort <value>``
+    flag (Claude) and a ``-c model_reasoning_effort="<value>"`` arg (Codex). Returns
+    True if the token changed; only the effort value is rewritten.
+    """
+    for index in range(len(cmd) - 1):
+        if cmd[index] == "--effort":
+            if cmd[index + 1] == effort:
+                return False
+            cmd[index + 1] = effort
+            return True
+    prefix = "model_reasoning_effort="
+    for index, token in enumerate(cmd):
+        if isinstance(token, str) and token.startswith(prefix):
+            replacement = f'{prefix}"{effort}"'
+            if token == replacement:
+                return False
+            cmd[index] = replacement
+            return True
+    return False
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write *text* to *path* atomically so readers never observe a torn write.
+
+    Runtime loaders read these executor config files (executor_config.json and
+    the live ``.agent_bus/bridge_config.json``) with an unguarded ``json.loads``,
+    so a partial/truncated write would break every later config/adapter load.
+    Write to a temp file in the SAME directory, flush+fsync it, then
+    ``os.replace()`` onto the target -- an atomic rename on the same filesystem,
+    so a crash mid-write leaves the complete old file, never invalid JSON.
+
+    Preserve the target's existing permission bits across the swap: ``os.replace``
+    is a rename, so the installed file would otherwise inherit
+    ``tempfile.mkstemp``'s restrictive 0600 and lock out executor/observability
+    processes running as a different user. Re-apply the prior mode before the
+    rename; for a brand-new target fall back to the umask-aware default a normal
+    create would produce.
+
+    A per-module atomic writer matching the ones in set_roles.py and
+    recovery_gate.py (set_roles uses its own copy for executor_config.json).
+    """
+    directory = path.parent
+    try:
+        preserve_mode: int | None = stat.S_IMODE(os.stat(path).st_mode)
+    except FileNotFoundError:
+        preserve_mode = None
+    fd, tmp_name = tempfile.mkstemp(dir=str(directory), prefix=f".{path.name}.", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if preserve_mode is None:
+            # Brand-new target: match what open()+write would produce under the
+            # active umask instead of mkstemp's restrictive 0600.
+            current_umask = os.umask(0)
+            os.umask(current_umask)
+            preserve_mode = 0o666 & ~current_umask
+        os.chmod(tmp_path, preserve_mode)
+        os.replace(tmp_path, path)
+    except BaseException:
+        # Never leave truncated temp residue behind on a failed write.
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def sync_bridge_config_agents_from_defaults(
+    repo_root: Path,
+    bus_dir: str | Path | None = None,
+) -> Path | None:
+    """Sync bridge_config agents' model / effort / display_name from bridge_agent_defaults.
+
+    Keep ``.agent_bus/bridge_config.json``'s per-agent provider settings aligned with
+    ``executor_config.json``'s ``bridge_agent_defaults`` so the live provider config
+    cannot drift from the committed default (2026-06-02: bridge_config ran the claude
+    implementer on ``claude-opus-4-7`` while ``bridge_agent_defaults.claude`` said
+    ``claude-opus-4-8``).
+
+    Resolve the SINGLE primary bus via :func:`bridge_config_path` (no multi-bus / lane
+    discovery) and mirror :func:`load_bridge_agent_catalog`'s read pattern. For each
+    agent present in BOTH ``bridge_config['agents']`` and ``bridge_agent_defaults``,
+    overwrite ONLY: the model token (after ``--model`` / ``-m`` in ``cmd``), the
+    reasoning-effort token (the ``--effort`` value or the
+    ``model_reasoning_effort="..."`` ``-c`` arg), and ``display_name``. Every other cmd
+    arg, ``timeout_s``, ``mode``, ``prompt_via_stdin``, and ``env`` is left intact, and
+    the file is rewritten only when a field actually changed.
+
+    Graceful no-op (returns ``None``) when ``bridge_config.json`` is absent or
+    unreadable; an agent missing from ``bridge_agent_defaults`` is skipped. Returns the
+    resolved config path when the file was read (whether or not it changed).
+    """
+    config_path = bridge_config_path(repo_root, bus_dir)
+    if not config_path.exists():
+        return None
+    try:
+        loaded = json.loads(config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    agents = loaded.get("agents")
+    if not isinstance(agents, dict):
+        return None
+    defaults = load_executor_config(repo_root).get("bridge_agent_defaults", {})
+    if not isinstance(defaults, dict):
+        return None
+
+    changed = False
+    for name, agent in agents.items():
+        if not isinstance(name, str) or not isinstance(agent, dict):
+            continue
+        default = defaults.get(name)
+        if not isinstance(default, dict):
+            # Agent absent from bridge_agent_defaults -> leave it untouched.
+            continue
+        cmd = agent.get("cmd")
+        if isinstance(cmd, list):
+            model = _nonempty_str(default.get("model"))
+            if model is not None and _set_bridge_cmd_model(cmd, model):
+                changed = True
+            effort = _nonempty_str(default.get("effort")) or _nonempty_str(
+                default.get("reasoning_effort")
+            )
+            if effort is not None and _set_bridge_cmd_effort(cmd, effort):
+                changed = True
+        display_name = _nonempty_str(default.get("display_name"))
+        if display_name is not None and agent.get("display_name") != display_name:
+            agent["display_name"] = display_name
+            changed = True
+
+    if changed:
+        _atomic_write_text(config_path, json.dumps(loaded, indent=2) + "\n")
+    return config_path
 
 
 def bridge_agent_display_name(
