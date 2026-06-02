@@ -1,0 +1,24 @@
+{
+  "wave_id": "theater-allowlist-refresh-2026-06-02",
+  "repeat_run_speedup_ratio": 1.266725,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.278373,
+  "repeat_run_raw_seconds": [
+    0.352622,
+    0.278373
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.352622
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.630995
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-02T13:41:02Z",
+  "collector_version": "2.2.0"
+}
