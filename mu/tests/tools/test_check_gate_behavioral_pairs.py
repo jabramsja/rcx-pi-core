@@ -376,3 +376,138 @@ class TestEdgeCases:
         )
         assert result.returncode == 2, f"Expected exit 2, got {result.returncode}"
         assert "positional" in result.stderr.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestHelperAndValidatorBroadening
+# ---------------------------------------------------------------------------
+
+class TestHelperAndValidatorBroadening:
+    """Detector 1 (same-module helper following, scope-correct + proof-class
+    preserving) and detector 2 (raises-on-failure validators).
+
+    These exercise the full scope-keyed resolution maps via ``scan_file`` on a
+    temp module (not ``classify_method`` in isolation), so helper resolution and
+    per-class scoping are covered end-to-end.
+    """
+
+    def test_bare_name_helper_assertion_is_behavioral(self, tmp_path):
+        """(a) Assertion only inside a same-module bare-name helper that does NOT
+        read source → behavioral (not theater_risk)."""
+        f = tmp_path / "test_bare_helper.py"
+        f.write_text(textwrap.dedent("""\
+            def _check_positive(value):
+                assert value > 0
+
+            class TestThing:
+                def test_uses_bare_helper(self):
+                    _check_positive(compute_value())
+        """))
+        classes = scan_file(f)
+        assert classes["TestThing"]["test_uses_bare_helper"] == "behavioral"
+
+    def test_self_method_source_helper_is_source_lock(self, tmp_path):
+        """(b) ``self._helper`` that reads source (``read_text``) then asserts →
+        source_lock (not behavioral, not theater_risk). Covers the (1a)
+        ast.Attribute/self normalization AND (1b) source-class preservation
+        together — mirrors the real ``_check_js_function_boundary`` case."""
+        f = tmp_path / "test_self_source.py"
+        f.write_text(textwrap.dedent("""\
+            class TestBoundary:
+                def _check_boundary(self, filepath):
+                    text = filepath.read_text()
+                    assert "BOUNDARY" in text
+
+                def test_uses_self_helper(self):
+                    self._check_boundary(SOME_PATH)
+        """))
+        classes = scan_file(f)
+        assert classes["TestBoundary"]["test_uses_self_helper"] == "source_lock"
+
+    def test_validator_only_call_is_behavioral(self, tmp_path):
+        """(c) A test whose only check is a ``validate_bundle()`` call (raises on
+        failure) → behavioral (not theater_risk)."""
+        f = tmp_path / "test_validator.py"
+        f.write_text(textwrap.dedent("""\
+            class TestValidation:
+                def test_valid_bundle(self):
+                    validate_bundle(make_bundle())
+        """))
+        classes = scan_file(f)
+        assert classes["TestValidation"]["test_valid_bundle"] == "behavioral"
+
+    def test_vacuous_assert_true_remains_theater_risk(self, tmp_path):
+        """(d) A genuinely vacuous test (``assert True``) still classifies
+        theater_risk — broadening must not mask real theater."""
+        f = tmp_path / "test_vacuous.py"
+        f.write_text(textwrap.dedent("""\
+            class TestVacuous:
+                def test_nothing_meaningful(self):
+                    assert True  # THEATER_OK: intentional vacuous fixture — this test asserts the classifier STILL flags assert True as theater_risk
+        """))
+        classes = scan_file(f)
+        assert classes["TestVacuous"]["test_nothing_meaningful"] == "theater_risk"
+
+    def test_duplicate_helper_name_resolves_per_class(self, tmp_path):
+        """(e) Two classes each define a SAME-NAMED ``self._helper``: one reads
+        source + asserts, the other does a plain non-source assert. The
+        source-reading class's test → source_lock; the other → behavioral.
+
+        Proves ``self``/``cls`` resolution is class-scoped: a flat global
+        ``{name: FunctionDef}`` map would collapse ``_helper`` to its last
+        definition and misroute one class's proof class (the live
+        ``_js_eval``-across-five-classes hazard)."""
+        f = tmp_path / "test_dup_helper.py"
+        f.write_text(textwrap.dedent("""\
+            class TestReadsSource:
+                def _helper(self, filepath):
+                    text = filepath.read_text()
+                    assert "MARK" in text
+
+                def test_via_helper(self):
+                    self._helper(SOME_PATH)
+
+            class TestPlainAssert:
+                def _helper(self):
+                    assert compute_value() == 42
+
+                def test_via_helper(self):
+                    self._helper()
+        """))
+        classes = scan_file(f)
+        assert classes["TestReadsSource"]["test_via_helper"] == "source_lock"
+        assert classes["TestPlainAssert"]["test_via_helper"] == "behavioral"
+
+    def test_observational_helper_control_flow_compare_stays_theater_risk(self, tmp_path):
+        """(f) Bridge round-2 regression: a purely observational test whose only
+        same-module helpers are plumbing — a timing helper that calls a runtime
+        function plus a stats helper containing a control-flow ``if n >= 20:`` —
+        and that makes NO real assertion must remain theater_risk.
+
+        Helper rescue must not mistake a helper's standalone ``ast.Compare`` for
+        the test's assertion and reclassify an observational performance probe as
+        behavioral. Mirrors the live ``TestTier2IntegrationWorkloads`` suite,
+        which records timing data with no hard CI gating assertion. The runtime
+        call (``step_kernel_mu``) supplies a behavioral signal, but with no
+        assertion/raise/validator the test is still theater_risk — a behavioral
+        signal alone never rescues a test from theater_risk."""
+        f = tmp_path / "test_observational_probe.py"
+        f.write_text(textwrap.dedent("""\
+            def _time_workload(projs, inp):
+                for _ in range(3):
+                    step_kernel_mu(projs, inp)
+                return [0.1, 0.2]
+
+            def _stats(times):
+                n = len(times)
+                p95 = times[-1] if n >= 20 else times[0]
+                return {"p95": p95, "n": n}
+
+            class TestObservationalProbe:
+                def test_workload_timing(self):
+                    times = _time_workload(PROJS, INP)
+                    stats = _stats(times)
+                    print(stats)
+        """))
+        classes = scan_file(f)
+        assert classes["TestObservationalProbe"]["test_workload_timing"] == "theater_risk"

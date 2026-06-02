@@ -58,6 +58,18 @@ BEHAVIORAL_CALLS = frozenset({
 # Theater patterns: assertion nodes that are vacuous.
 THEATER_PATTERNS = {"assert True", "assert 1"}
 
+# Detector 2 — raises-on-failure validators: the call itself IS the assertion
+# (no-exception-is-pass). A bare-name (or self/cls method) call to one of these
+# is a meaningful runtime check, even with no surrounding assert. Seeded from the
+# names in the founder-allowlist defer_reasons; keep this list small and explicit.
+RAISES_ON_FAILURE_VALIDATORS = frozenset({
+    "validate_bundle", "validateBundle", "_validate_template",
+})
+
+# Detector 1 — bound on how far same-module helper calls are followed when
+# gathering proof-class signals (test -> helper -> helper). Cycle-guarded.
+_MAX_HELPER_DEPTH = 2
+
 
 def _extract_call_names(node: ast.AST) -> set[str]:
     """Extract all call target names from an AST node (function/method calls)."""
@@ -75,8 +87,40 @@ def _extract_call_names(node: ast.AST) -> set[str]:
     return names
 
 
-def _has_meaningful_assertion(node: ast.AST) -> bool:
-    """Check if a function body has meaningful assertions (not vacuous)."""
+def _normalize_callee(func: ast.AST) -> tuple[str | None, str | None]:
+    """Recover the candidate helper name + scope kind from a call's ``func`` node.
+
+    Two — and only two — callee forms are normalized (bounds are firm):
+      * bare name      ``foo(...)``        -> ("foo", "bare")   resolve in module map
+      * self/cls method ``self._foo(...)`` -> ("_foo", "method") resolve in own class
+
+    Any other shape (arbitrary attribute receiver, subscript, call-of-call, ...)
+    returns ``(None, None)`` so the caller contributes no helper signal and does
+    not recurse. ``cls`` is treated like ``self`` (classmethod helpers).
+    """
+    if isinstance(func, ast.Name):
+        return func.id, "bare"
+    if isinstance(func, ast.Attribute):
+        if isinstance(func.value, ast.Name) and func.value.id in ("self", "cls"):
+            return func.attr, "method"
+    return None, None
+
+
+def _has_meaningful_assertion(node: ast.AST, strict: bool = False) -> bool:
+    """Check if a function body has meaningful assertions (not vacuous).
+
+    ``strict=True`` is used ONLY when following a same-module *helper* body
+    (detector 1, depth >= 1). In strict mode a bare ``ast.Compare`` is NOT
+    treated as a meaningful assertion: a standalone comparison inside a helper is
+    almost always control flow (``if n >= 20:``, ``if i < limit:``) — plumbing,
+    not a delegated check — and counting it would rescue purely observational
+    tests (timing/stat probes that print results with no gating assertion) by
+    mistaking a helper's loop/branch comparison for the test's assertion. Real
+    ``assert`` statements and ``pytest.raises`` ARE delegated checks and still
+    count in strict mode; only the standalone-``Compare`` heuristic is dropped.
+    ``strict=False`` (the test's OWN body) preserves the exact pre-broadening
+    heuristic.
+    """
     for child in ast.walk(node):
         if isinstance(child, ast.Assert):
             # Check for vacuous: `assert True`, `assert 1`
@@ -89,14 +133,22 @@ def _has_meaningful_assertion(node: ast.AST) -> bool:
             func = child.func
             if isinstance(func, ast.Attribute) and func.attr == "raises":
                 return True
-        # subprocess.run or _run_js_expr with assertion on result
-        if isinstance(child, ast.Compare):
+        # A bare comparison (not inside an assert) is the test's own loose check
+        # only in its OWN body; a helper's standalone Compare is control flow,
+        # never the test's assertion (see strict docstring).
+        if not strict and isinstance(child, ast.Compare):
             return True
     return False
 
 
 def _has_raise_or_subprocess(node: ast.AST) -> bool:
-    """Check if a function calls subprocess or raises."""
+    """Check if a function calls subprocess, raises, or invokes a raises-on-failure validator.
+
+    Detector 2: a call to a recognized raises-on-failure validator
+    (RAISES_ON_FAILURE_VALIDATORS) is itself the assertion — the call passes
+    iff it does not raise. Recognized in the bare-name and self/cls method
+    forms only (same normalization as detector 1).
+    """
     for child in ast.walk(node):
         if isinstance(child, ast.Raise):
             return True
@@ -107,11 +159,25 @@ def _has_raise_or_subprocess(node: ast.AST) -> bool:
                     return True
             if isinstance(func, ast.Name) and func.id == "_run_js_expr":
                 return True
+            # Detector 2: no-exception-is-pass validator call.
+            name, _kind = _normalize_callee(func)
+            if name in RAISES_ON_FAILURE_VALIDATORS:
+                return True
     return False
 
 
-def classify_method(func_node: ast.FunctionDef) -> str:
-    """Classify a test method AST node."""
+def _body_signals(func_node: ast.AST, strict: bool = False) -> tuple[bool, bool, bool, bool]:
+    """Proof-class signals for a function's OWN body only (no recursion).
+
+    Returns ``(has_source, has_behavioral, has_assertion, has_raise_or_subprocess)``.
+    This mirrors the pre-broadening own-body computation exactly, so a function
+    with no resolvable helpers classifies identically to before.
+
+    ``strict`` is forwarded to ``_has_meaningful_assertion``: a caller analyzing a
+    same-module *helper* body (depth >= 1) passes ``strict=True`` so the helper's
+    control-flow ``ast.Compare`` is not mistaken for the test's assertion. The
+    test's own body uses ``strict=False`` (default), matching pre-broadening.
+    """
     call_names = _extract_call_names(func_node)
 
     has_source = bool(call_names & SOURCE_LOCK_CALLS)
@@ -120,14 +186,203 @@ def classify_method(func_node: ast.FunctionDef) -> str:
     if ".read_text()" in func_source or "open(" in func_source:
         has_source = True
 
-    has_behavioral = bool(call_names & BEHAVIORAL_CALLS)
-    # subprocess.run and _run_js_expr are behavioral
-    if _has_raise_or_subprocess(func_node):
-        has_behavioral = True
+    has_ros = _has_raise_or_subprocess(func_node)
+    has_behavioral = bool(call_names & BEHAVIORAL_CALLS) or has_ros
+    has_assertion = _has_meaningful_assertion(func_node, strict=strict)
 
-    has_assertion = _has_meaningful_assertion(func_node)
+    return has_source, has_behavioral, has_assertion, has_ros
 
-    if not has_assertion and not _has_raise_or_subprocess(func_node):
+
+def _build_resolution_maps(
+    tree: ast.AST,
+) -> tuple[dict[str, ast.AST | None], dict[ast.AST, dict[str, ast.AST | None]]]:
+    """Build scope-correct helper-resolution maps for one module.
+
+    Returns ``(module_map, class_method_map)``:
+      * ``module_map``       — ``{name: FunctionDef}`` for MODULE-LEVEL
+        ``FunctionDef``s only (direct module children plus those inside
+        module-level control flow); functions lexically nested inside another
+        function are EXCLUDED. These are the targets of bare-name
+        (``ast.Name``) calls. A bare name in a test (or in a module-level
+        helper) resolves through Python's local→module-global→builtin chain,
+        never to a sibling function's locals, so a nested helper such as one
+        defined inside a ``factory()`` is unreachable by a bare-name call from
+        a different scope and must fail closed. A name defined more than once at
+        module scope maps to ``None`` (ambiguous -> fail-closed, never bound to
+        an arbitrary later definition).
+      * ``class_method_map`` — ``{ClassDef: {method_name: FunctionDef}}``. A
+        ``self``/``cls`` method call resolves ONLY against its own class's map,
+        so duplicate method names across classes (e.g. five ``_js_eval`` methods
+        in five classes) never collide. Duplicate method names WITHIN one class
+        map to ``None`` (fail-closed).
+
+    A single flat ``{name: FunctionDef}`` map is intentionally NOT built: it
+    would collapse same-name methods to the last definition and misroute the
+    proof class.
+    """
+    # Per-class method maps; also record which FunctionDefs are class methods
+    # so they are excluded from the bare-name module map.
+    method_nodes: set[ast.AST] = set()
+    class_method_map: dict[ast.AST, dict[str, ast.AST | None]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            methods: dict[str, ast.AST | None] = {}
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    method_nodes.add(item)
+                    # Duplicate method name within this class -> fail-closed.
+                    methods[item.name] = None if item.name in methods else item
+            class_method_map[node] = methods
+
+    # FunctionDefs lexically nested inside another function are NOT reachable by
+    # a bare-name call from a test's (or another helper's) scope: Python resolves
+    # bare names through local -> module-global -> builtin, never into a sibling
+    # function's locals. Exclude them so a bare-name call to such a name fails
+    # closed instead of binding an unreachable nested helper (e.g. a helper
+    # defined inside a factory()).
+    nested_in_func: set[ast.AST] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for inner in ast.walk(node):
+                if inner is not node and isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    nested_in_func.add(inner)
+
+    # Module map: module-level FunctionDefs only — not class methods and not
+    # functions nested inside another function.
+    module_map: dict[str, ast.AST | None] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node not in method_nodes
+            and node not in nested_in_func
+        ):
+            # Duplicate module-level name -> fail-closed.
+            module_map[node.name] = None if node.name in module_map else node
+
+    return module_map, class_method_map
+
+
+def _resolve_helper(
+    name: str,
+    kind: str | None,
+    module_map: dict[str, ast.AST | None],
+    class_methods: dict[str, ast.AST | None] | None,
+) -> ast.AST | None:
+    """Resolve a normalized callee to a unique helper in its proper scope.
+
+    Bare names resolve against ``module_map``; ``self``/``cls`` methods resolve
+    against the enclosing class's ``class_methods`` ONLY. Returns ``None`` when
+    the name is absent OR ambiguous (mapped to ``None``) — fail-closed, never a
+    same-named helper from another class or a later shadowing definition.
+    """
+    if kind == "bare":
+        return module_map.get(name)
+    if kind == "method":
+        if class_methods is None:
+            return None
+        return class_methods.get(name)
+    return None
+
+
+def _collect_signals(
+    func_node: ast.AST,
+    module_map: dict[str, ast.AST | None],
+    class_methods: dict[str, ast.AST | None] | None,
+    depth: int,
+    visited: frozenset[str],
+) -> tuple[bool, bool, bool, bool]:
+    """OR a function's own-body signals with its same-module helpers' signals.
+
+    Detector 1: follows bare-name and ``self``/``cls`` method calls into their
+    resolved helper bodies (same module only), folding each helper's full
+    proof-class signal set — source_lock signals included, so a source-reading
+    helper keeps its caller classified source_lock — into the result. Bounded by
+    ``_MAX_HELPER_DEPTH`` and cycle-guarded via ``visited``.
+
+    A helper body (depth >= 1) is analyzed with ``strict=True`` assertion
+    semantics: a helper's standalone ``ast.Compare`` is control flow, not a
+    delegated check, so it does NOT rescue an otherwise-observational test from
+    ``theater_risk``. Only real ``assert`` / ``pytest.raises`` / raise /
+    subprocess / validator signals in a helper count. The test's own body
+    (depth 0) keeps the full pre-broadening heuristic.
+
+    Returns ``(has_source, has_behavioral, has_assertion, has_raise_or_subprocess)``.
+    """
+    # Own body uses the full heuristic at depth 0 (the test itself) but the
+    # strict heuristic at depth >= 1 (a helper), so a helper's control-flow
+    # Compare never counts as the test's assertion.
+    has_source, has_behavioral, has_assertion, has_ros = _body_signals(
+        func_node, strict=(depth > 0)
+    )
+
+    if depth >= _MAX_HELPER_DEPTH:
+        return has_source, has_behavioral, has_assertion, has_ros
+
+    for child in ast.walk(func_node):
+        if not isinstance(child, ast.Call):
+            continue
+        name, kind = _normalize_callee(child.func)
+        if name is None or name in visited:
+            continue
+        helper = _resolve_helper(name, kind, module_map, class_methods)
+        if helper is None:
+            continue
+        # Scope tracks the function being entered: a self/cls method recurses
+        # within its own class; a bare-name (module-level) helper has no
+        # enclosing class, so its self/cls calls fail closed.
+        helper_class_methods = class_methods if kind == "method" else None
+        h_src, h_beh, h_assert, h_ros = _collect_signals(
+            helper, module_map, helper_class_methods, depth + 1, visited | {name}
+        )
+        has_source = has_source or h_src
+        has_behavioral = has_behavioral or h_beh
+        has_assertion = has_assertion or h_assert
+        has_ros = has_ros or h_ros
+
+    return has_source, has_behavioral, has_assertion, has_ros
+
+
+def classify_method(
+    func_node: ast.FunctionDef,
+    module_map: dict[str, ast.AST | None] | None = None,
+    class_methods: dict[str, ast.AST | None] | None = None,
+) -> str:
+    """Classify a test method AST node.
+
+    ``module_map`` / ``class_methods`` (from ``_build_resolution_maps``) enable
+    same-module helper following (detector 1). When omitted, only the method's
+    own body is analyzed — identical to the pre-broadening behavior, so direct
+    unit-test calls to ``classify_method(node)`` are unaffected.
+
+    Helper following is a THEATER-RESCUE step, not a reclassifier: it runs ONLY
+    when the test's own body has no meaningful check of its own (would otherwise
+    be ``theater_risk`` — its real assertions/validators live in same-module
+    helpers). A test that already makes a meaningful check in its own body is
+    already correctly classified, so its proof class is NOT re-opened by helper
+    following — this keeps the broadening from flipping the 100+ legitimately
+    ``behavioral`` tests that merely *also* call a source-reading helper. When
+    rescue does run, it folds the helper's FULL signal set (``has_source`` /
+    ``has_behavioral`` / ``has_assertion``); the source/behavioral/hybrid
+    decision ladder below is unchanged.
+    """
+    # Own-body signals first (pre-broadening computation, exact).
+    has_source, has_behavioral, has_assertion, has_ros = _body_signals(func_node)
+
+    # Theater-rescue ONLY: if the own body carries no meaningful check, follow
+    # same-module helpers to recover checks (assertions / validators / source
+    # reads) that live in helper bodies. The fold surfaces the helper's full
+    # proof-class signal set, so a source-reading helper keeps its caller
+    # source_lock.
+    if not has_assertion and not has_ros:
+        has_source, has_behavioral, has_assertion, has_ros = _collect_signals(
+            func_node,
+            module_map if module_map is not None else {},
+            class_methods,
+            depth=0,
+            visited=frozenset({func_node.name}),
+        )
+
+    if not has_assertion and not has_ros:
         return "theater_risk"
 
     if has_source and has_behavioral:
@@ -153,16 +408,20 @@ def scan_file(filepath: Path) -> dict:
     except SyntaxError:
         return {}
 
+    # Scope-correct helper-resolution maps for same-module helper following.
+    module_map, class_method_map = _build_resolution_maps(tree)
+
     classes: dict[str, dict[str, str]] = {}
 
     # Scan class-level test methods
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
+            class_methods = class_method_map.get(node)
             methods: dict[str, str] = {}
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if item.name.startswith("test_"):
-                        methods[item.name] = classify_method(item)
+                        methods[item.name] = classify_method(item, module_map, class_methods)
             if methods:
                 classes[node.name] = methods
 
@@ -171,7 +430,7 @@ def scan_file(filepath: Path) -> dict:
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if node.name.startswith("test_"):
-                module_funcs[node.name] = classify_method(node)
+                module_funcs[node.name] = classify_method(node, module_map, None)
     if module_funcs:
         classes["<module>"] = module_funcs
 
