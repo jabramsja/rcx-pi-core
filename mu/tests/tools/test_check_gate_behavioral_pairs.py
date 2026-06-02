@@ -443,7 +443,7 @@ class TestHelperAndValidatorBroadening:
         f.write_text(textwrap.dedent("""\
             class TestVacuous:
                 def test_nothing_meaningful(self):
-                    assert True
+                    assert True  # THEATER_OK: intentional vacuous fixture — this test asserts the classifier STILL flags assert True as theater_risk
         """))
         classes = scan_file(f)
         assert classes["TestVacuous"]["test_nothing_meaningful"] == "theater_risk"
