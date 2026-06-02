@@ -4477,6 +4477,86 @@ def _load_post_commit_continuation(
     return payload
 
 
+def _load_continuation_for_resume(
+    handoff: dict[str, Any],
+    *,
+    repo_root: Path,
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Load the persisted post-commit continuation record for ``--resume-continuation``.
+
+    Mirrors the continuation-key derivation in the ``_run_commit_pipeline_impl``
+    preamble (founder-override tracker-note append, ``target_branch``,
+    ``handoff_sha``, bus-scoped record path) so this guard's verdict matches what
+    the driver would actually resume from. Returns the continuation payload, or
+    ``None`` when no valid resumable record exists. ``None`` is the fail-closed
+    signal for ``--resume-continuation``: missing/foreign record, HEAD not at the
+    recorded commit, wrong branch, or a worktree dirty outside the recorded
+    isolation.
+
+    Keep this derivation in sync with the ``_run_commit_pipeline_impl``
+    continuation preamble; the driver owns the authoritative load and re-runs it
+    once this guard falls through.
+    """
+    if not isinstance(handoff, dict):
+        return None
+    wave_id = str(handoff.get("wave_id") or "").strip()
+    branch_prefix = str(handoff.get("branch_prefix") or "").strip()
+    if not wave_id or not branch_prefix:
+        return None
+    # Mirror the driver's founder-override tracker-note append so the resume
+    # handoff_sha matches the record the original run wrote (the override is
+    # part of handoff_sha for derived control-surface L4_ENABLER handoffs).
+    founder_override_token = _resolve_control_surface_founder_override_token(
+        {
+            "wave_id": wave_id,
+            "wave_name": wave_id,
+            "tracked_packet": handoff.get("tracked_packet", ""),
+            "tracker_note_text": handoff.get("tracker_note_text", ""),
+        },
+        repo_root,
+        embedded_handoff=handoff,
+        wave_id=wave_id,
+        wave_class=str(handoff.get("wave_class") or ""),
+    )
+    if founder_override_token:
+        tracker_note_text = _append_founder_override_to_tracker_note(
+            handoff.get("tracker_note_text", ""),
+            founder_override_token,
+        )
+        if tracker_note_text != handoff.get("tracker_note_text", ""):
+            handoff = {**handoff, "tracker_note_text": tracker_note_text}
+    explicit_target_branch = handoff.get("target_branch")
+    if isinstance(explicit_target_branch, str) and explicit_target_branch.strip():
+        target_branch = explicit_target_branch.strip()
+    else:
+        target_branch = f"{branch_prefix}/{wave_id}"
+    handoff_sha = _handoff_sha(handoff)
+
+    def _load() -> dict[str, Any] | None:
+        return _load_post_commit_continuation(
+            _continuation_record_path(repo_root, wave_id),
+            repo_root=repo_root,
+            handoff_sha=handoff_sha,
+            target_branch=target_branch,
+            wave_id=wave_id,
+            handoff=handoff,
+        )
+
+    if bus_dir is None:
+        return _load()
+    # Resolve the continuation path under the same bus the driver will use.
+    try:
+        resolve_agent_bus_dir(repo_root, bus_dir)
+    except ExecutorCommonError:
+        return None
+    token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+    try:
+        return _load()
+    finally:
+        _ACTIVE_BUS_DIR.reset(token)
+
+
 def _checkpoint_post_commit_progress(
     result: dict[str, Any],
     *,
@@ -10995,6 +11075,16 @@ def main() -> int:
         help="Standalone mode: sets caller=standalone, relaxes receipt requirements",
     )
     parser.add_argument(
+        "--resume-continuation",
+        action="store_true",
+        help=(
+            "Stranded-PR recovery: finish the remaining post-commit steps for an "
+            "already-committed wave that has a valid COMMIT_GO continuation record, "
+            "driving them through the normal gates. Fails closed (no completion "
+            "action) when no valid continuation record exists for this worktree."
+        ),
+    )
+    parser.add_argument(
         "--skip-supervisor",
         action="store_true",
         help="Disabled: commit execution always requires supervisor receipt validation",
@@ -11068,6 +11158,28 @@ def main() -> int:
             handoff["pre_commit_receipt_path"] = ""
     if args.task_id:
         handoff["task_id"] = args.task_id
+
+    # Stranded-PR recovery: --resume-continuation finishes the remaining
+    # post-commit steps for an already-committed wave. Refuse to act unless a
+    # valid post-commit continuation record exists for this worktree; on a valid
+    # record fall through to the unchanged run_commit_pipeline call below, which
+    # reloads the same record and drives the remaining steps (CI-surface wait,
+    # the normal completion step, and bot-finding auto-defer) through the normal
+    # gates. No privileged path is added; completion uses the standard step.
+    if args.resume_continuation:
+        continuation = _load_continuation_for_resume(
+            handoff,
+            repo_root=repo_root,
+            bus_dir=args.bus_dir,
+        )
+        if continuation is None:
+            print(
+                "[error] --resume-continuation: no valid post-commit continuation "
+                "record for this worktree (not committed, on the wrong branch, "
+                "dirty tree, or missing/foreign record). No completion action taken.",
+                file=sys.stderr,
+            )
+            return 1
 
     result = run_commit_pipeline(
         handoff,
