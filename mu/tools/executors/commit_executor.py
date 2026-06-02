@@ -6095,15 +6095,24 @@ def _wait_for_expected_pr_check_surface_to_pass(
     unchanged. It mirrors ``_wait_for_required_checks_to_register`` for the
     window AFTER the required checks register: a concurrent lane that merges
     before this surface reaches green flips the PR to CONFLICTING/DIRTY/BEHIND,
-    and GitHub then skips/cancels its ``pull_request`` workflows, so the expected
-    surface would never go green and this loop would otherwise spin to
-    ``timeout``. On a fresh transition to a conflicting state (edge-guarded by
+    and GitHub then skips/cancels its ``pull_request`` workflows. A cancelled
+    required check is classified ``failed`` by ``_summarize_pr_check_surface``,
+    so this re-check runs BEFORE the ``status=="failed"`` early-return (and after
+    the ``status=="passed"`` return); otherwise a concurrent-merge cancellation
+    would be returned as a stale CI failure without the conflict ever being
+    probed. On a fresh transition to a conflicting state (edge-guarded by
     ``midpoll_prev_conflicting``) ``_try_auto_resolve_pr_conflict`` is re-fired
     once: on ``resolved=true`` the base-merge repush re-triggers the skipped
-    workflows and polling continues; on ``resolved=false`` the snapshot is
-    returned with a ``midpoll_conflict_aborted`` marker so ``_wait_for_pr_ci``
-    converts it into the SAME structured ``pr_conflicting`` fail-closed envelope
-    the Step-14-START guard emits.
+    workflows and this iteration re-polls a fresh surface (a one-iteration marker
+    skips the failed early-return) instead of returning the stale snapshot; on
+    ``resolved=false`` the snapshot is returned with a ``midpoll_conflict_aborted``
+    marker so ``_wait_for_pr_ci`` converts it into the SAME structured
+    ``pr_conflicting`` fail-closed envelope the Step-14-START guard emits. The
+    timeout/deadline check is evaluated every iteration (including the
+    resolved-conflict iteration) so the wait still terminates at the deadline,
+    and the conflict re-check itself is deadline-guarded so the conflict probe
+    and ``_try_auto_resolve_pr_conflict`` never run once the deadline has
+    already passed.
     """
     deadline = time.monotonic() + timeout
     last_snapshot: dict[str, Any] | None = None
@@ -6142,25 +6151,22 @@ def _wait_for_expected_pr_check_surface_to_pass(
         if snapshot["status"] == "passed":
             snapshot["ok"] = True
             return snapshot
-        if snapshot["status"] == "failed":
-            snapshot["ok"] = False
-            return snapshot
-        if time.monotonic() >= deadline:
-            snapshot["ok"] = False
-            snapshot["timed_out"] = True
-            snapshot["summary"] = (
-                f"expected PR check surface did not reach green within {timeout}s: "
-                + str(snapshot.get("summary", "unknown"))
-            )
-            return snapshot
-        if midpoll_autoresolve is not None:
-            # Step-14 mid-poll conflict re-check (post-registration window).
-            # The required checks already registered, but a concurrent lane
-            # that merges first can flip this PR to CONFLICTING/DIRTY/BEHIND;
-            # GitHub then skips/cancels its pull_request workflows, so the
-            # expected surface would never go green and this loop would spin to
-            # the deadline. Re-fire the SAME auto-resolve the Step-14-START
-            # guard uses, exactly once per detected transition.
+        # Step-14 mid-poll conflict re-check runs BEFORE the status=="failed"
+        # early-return (and after the status=="passed" return). The required
+        # checks already registered, but a concurrent lane that merges first can
+        # flip this PR to CONFLICTING/DIRTY/BEHIND; GitHub then skips/cancels its
+        # pull_request workflows, and a cancelled required check is classified
+        # *failed* by _summarize_pr_check_surface. If this re-check ran after the
+        # failed-return, that concurrent-merge cancellation would be returned as
+        # a stale CI failure without the conflict ever being probed. Re-fire the
+        # SAME auto-resolve the Step-14-START guard uses, exactly once per
+        # detected transition. The re-check is deadline-guarded: once the
+        # surface-wait deadline has passed, the conflict probe and auto-resolve
+        # are skipped so auto-resolve never starts after the deadline has
+        # expired; the failed/timeout early-returns below still terminate the
+        # wait.
+        repoll_after_midpoll_resolve = False
+        if midpoll_autoresolve is not None and time.monotonic() < deadline:
             conflict_state = _check_pr_conflict_state(
                 repo_root, pr_number=pr_number, log=log
             )
@@ -6191,9 +6197,23 @@ def _wait_for_expected_pr_check_surface_to_pass(
                     snapshot["detail"] = resolve_result.get("detail", "unknown")
                     return snapshot
                 # resolved=true: the base-merge repush re-triggers the
-                # previously-skipped workflows; keep polling so the
-                # now-re-registering surface is observed.
+                # previously-skipped workflows. Re-poll a fresh surface THIS
+                # iteration instead of falling into the failed early-return,
+                # which would otherwise re-emit this stale concurrent-merge
+                # CANCELLED snapshot as a CI failure.
+                repoll_after_midpoll_resolve = True
             midpoll_prev_conflicting = currently_conflicting
+        if snapshot["status"] == "failed" and not repoll_after_midpoll_resolve:
+            snapshot["ok"] = False
+            return snapshot
+        if time.monotonic() >= deadline:
+            snapshot["ok"] = False
+            snapshot["timed_out"] = True
+            snapshot["summary"] = (
+                f"expected PR check surface did not reach green within {timeout}s: "
+                + str(snapshot.get("summary", "unknown"))
+            )
+            return snapshot
         if log is not None:
             log(f"Waiting for expected PR check surface: {snapshot['summary']}")
         time.sleep(poll_interval)
