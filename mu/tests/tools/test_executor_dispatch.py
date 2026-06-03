@@ -15042,3 +15042,323 @@ class TestRoutingRecordBuilderBlockerPaths:
         )
         assert errors == []
         assert record["blocker_report_paths"] == []
+
+
+class TestLaneMonitorLifecycle:
+    """Per-lane tmux monitor auto-spawn + auto-clean lifecycle.
+
+    Regression coverage for lane-monitor-autospawn-cleanup-2026-06-03b: the
+    dispatcher auto-spawns a lane wave's tmux monitor at launch and auto-cleans
+    its self-healing owner-loop + tmux session at wave-end, while never touching
+    the MAIN bus, a cross-repo same-lane owner-loop, or the bare rcx-pipeline
+    session.  pipeline_monitor.sh is invoked / process-matched, never modified.
+    """
+
+    # (a) A LANE-bus launch invokes the monitor spawn with
+    #     `pipeline_monitor.sh ... --lane laneN ... start ... --detach`.
+    def test_lane_monitor_spawns_lane_bus_start_detach(self, tmp_path):
+        monitor = dispatch_mod._LaneMonitor(tmp_path, ".agent_bus-lane1")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        with patch.object(dispatch_mod, "_tmux_has_session", return_value=False), \
+             patch.object(dispatch_mod.subprocess, "Popen") as mock_popen:
+            monitor.spawn()
+        assert mock_popen.call_count == 1
+        argv = mock_popen.call_args.args[0]
+        assert argv[0].endswith("pipeline_monitor.sh")
+        assert argv[1:] == [
+            "--bus-dir", ".agent_bus-lane1", "--lane", "lane1", "start", "--detach",
+        ]
+        assert mock_popen.call_args.kwargs["cwd"] == str(tmp_path)
+
+    # (b) A DEFAULT/MAIN bus launch does NOT spawn.
+    def test_lane_monitor_skips_default_main_bus(self, tmp_path):
+        monitor = dispatch_mod._LaneMonitor(tmp_path, ".agent_bus")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        with patch.object(dispatch_mod.subprocess, "Popen") as mock_popen:
+            monitor.spawn()
+        assert mock_popen.call_count == 0
+        assert monitor.is_lane is False
+
+    # (c) The modular subparser launch path ALSO spawns on a lane bus and cleans
+    #     on the exit path (here an exception raised after spawn).
+    def test_lane_monitor_surface_path_spawns_and_cleans(self, tmp_path):
+        args = dispatch_mod.build_surface_parser().parse_args([
+            "phase-b",
+            "--routing-record-json",
+            json.dumps({"decision": "ROUTE_PHASE_B", "wave_name": "lane-monitor-surface"}),
+            "--bus-dir", ".agent_bus-lane1",
+        ])
+        lane_monitor_cls = dispatch_mod._LaneMonitor  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        with patch.object(lane_monitor_cls, "spawn", autospec=True) as mock_spawn, \
+             patch.object(lane_monitor_cls, "cleanup", autospec=True) as mock_cleanup, \
+             patch.object(dispatch_mod, "build_surface_command",
+                          side_effect=RuntimeError("lane-monitor stop after spawn")):
+            with pytest.raises(RuntimeError, match="lane-monitor stop after spawn"):
+                dispatch_mod.run_recoverable_surface_command(
+                    args, repo_root=tmp_path, config={},
+                )
+        assert mock_spawn.call_count == 1
+        spawned = mock_spawn.call_args.args[0]
+        assert spawned.bus_dir == ".agent_bus-lane1"
+        assert spawned.lane == "lane1"
+        assert mock_cleanup.call_count == 1
+
+    # (d) Prefix-collision + cross-repo: a `--lane lane1` cleanup must NOT select
+    #     a `--lane lane10` owner-loop or a same-lane owner-loop in another repo.
+    def test_lane_monitor_owner_loop_match_rejects_prefix_and_cross_repo(self):
+        repo = Path("/repo/x")
+        procs = [
+            (100, "bash /repo/x/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+            (200, "bash /repo/x/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane10 --lane lane10 __owner-loop"),
+            (400, "bash /other/repo/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+        ]
+        pids = dispatch_mod._lane_owner_loop_pids(  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+            procs, repo_root=repo, bus_dir=".agent_bus-lane1", lane="lane1",
+        )
+        assert pids == [100]
+        assert 200 not in pids  # prefix collision guarded by whole-token match
+        assert 400 not in pids  # cross-repo same-lane guarded by repo identity
+
+    # (e) kill-session / has-session use the EXACT (`=name`) target form.
+    def test_lane_monitor_tmux_targets_are_exact(self):
+        with patch.object(dispatch_mod.subprocess, "run") as mock_run:
+            dispatch_mod._tmux_kill_session("rcx-pipeline-lane1")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        assert mock_run.call_args.args[0] == [
+            "tmux", "kill-session", "-t", "=rcx-pipeline-lane1",
+        ]
+        with patch.object(dispatch_mod.subprocess, "run") as mock_run2:
+            mock_run2.return_value = SimpleNamespace(returncode=0)
+            assert dispatch_mod._tmux_has_session("rcx-pipeline-lane1") is True  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        assert mock_run2.call_args.args[0] == [
+            "tmux", "has-session", "-t", "=rcx-pipeline-lane1",
+        ]
+
+    # (f) TERM -> bounded wait -> SIGKILL: the owner-loop's TERM trap does
+    #     cleanup but does NOT exit, so SIGTERM alone leaves it alive.
+    def test_lane_monitor_term_survivor_sigkill_fallback(self):
+        with patch.object(dispatch_mod.os, "kill") as mock_kill, \
+             patch.object(dispatch_mod.time, "sleep") as mock_sleep:
+            # os.kill never raises -> the pid reads as alive after SIGTERM.
+            dispatch_mod._terminate_owner_loops([4321])  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        sent = [(c.args[0], c.args[1]) for c in mock_kill.call_args_list]
+        assert (4321, signal.SIGTERM) in sent
+        assert (4321, signal.SIGKILL) in sent
+        assert sent.index((4321, signal.SIGTERM)) < sent.index((4321, signal.SIGKILL))
+        assert mock_sleep.called
+
+    # (g) Async-start race: an in-flight spawn handle is reaped BEFORE the
+    #     session kill, so no session it creates survives cleanup; idempotent.
+    def test_lane_monitor_cleanup_reaps_in_flight_spawn(self, tmp_path):
+        monitor = dispatch_mod._LaneMonitor(tmp_path, ".agent_bus-lane1")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        order = []
+        proc = MagicMock(spec=subprocess.Popen)
+        proc.poll.return_value = None
+        proc.wait.side_effect = lambda *a, **k: order.append("reap")
+        monitor._spawn_proc = proc  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        with patch.object(dispatch_mod, "_lane_owner_loop_pids", return_value=[]), \
+             patch.object(dispatch_mod, "_ps_command_lines", return_value=[]), \
+             patch.object(dispatch_mod, "_tmux_kill_session",
+                          side_effect=lambda session: order.append(("kill", session))):
+            monitor.cleanup()
+            monitor.cleanup()  # idempotent: the second call is a no-op
+        assert order == ["reap", ("kill", "rcx-pipeline-lane1")]
+        proc.wait.assert_called_once()
+
+    # (h) A lane configured with a non-default tmux_session is probed/cleaned by
+    #     the CONFIGURED name, not the hardcoded rcx-pipeline-laneN.
+    def test_lane_monitor_uses_configured_session_name(self, tmp_path, monkeypatch):
+        config_path = tmp_path / "monitor_config.json"
+        _write_teammate_monitor_config(
+            config_path,
+            lane="lane1",
+            bus_dir=".agent_bus-lane1",
+            dashboard_port=18111,
+            tmux_session="custom-monitor-x",
+        )
+        monkeypatch.setenv("RCX_PIPELINE_MONITOR_CONFIG", str(config_path))
+        monitor = dispatch_mod._LaneMonitor(tmp_path, ".agent_bus-lane1")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        assert monitor.session == "custom-monitor-x"
+        with patch.object(dispatch_mod, "_tmux_has_session", return_value=False) as mock_has, \
+             patch.object(dispatch_mod.subprocess, "Popen"):
+            monitor.spawn()
+        assert mock_has.call_args.args[0] == "custom-monitor-x"
+        with patch.object(dispatch_mod, "_lane_owner_loop_pids", return_value=[]), \
+             patch.object(dispatch_mod, "_ps_command_lines", return_value=[]), \
+             patch.object(dispatch_mod, "_tmux_kill_session") as mock_kill:
+            monitor.cleanup()
+        mock_kill.assert_called_once_with("custom-monitor-x")
+
+    # (i) Hard-safety: a MAIN no-`--lane` owner-loop / bare rcx-pipeline session
+    #     is NEVER selected for kill.
+    def test_lane_monitor_never_kills_main_or_bare_session(self, tmp_path):
+        repo = Path("/repo/x")
+        procs = [
+            (300, "bash /repo/x/tools/observability/pipeline_monitor.sh __owner-loop"),
+            (100, "bash /repo/x/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+        ]
+        pids = dispatch_mod._lane_owner_loop_pids(  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+            procs, repo_root=repo, bus_dir=".agent_bus-lane1", lane="lane1",
+        )
+        assert 300 not in pids  # MAIN owner-loop carries no --lane token
+        assert pids == [100]
+        monitor = dispatch_mod._LaneMonitor(tmp_path, ".agent_bus-lane1")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        assert monitor.session == "rcx-pipeline-lane1"
+        assert monitor.session != dispatch_mod.DEFAULT_TMUX_SESSION
+        with patch.object(dispatch_mod, "_lane_owner_loop_pids", return_value=[]), \
+             patch.object(dispatch_mod, "_ps_command_lines", return_value=[]), \
+             patch.object(dispatch_mod, "_tmux_kill_session") as mock_kill:
+            monitor.cleanup()
+        assert mock_kill.call_count == 1
+        assert mock_kill.call_args.args[0] != dispatch_mod.DEFAULT_TMUX_SESSION
+
+    # (j) The dispatch-loop launch surface ALSO spawns on a lane bus and cleans
+    #     even on the non-fatal `Status: error` exit (second launch surface).
+    def test_lane_monitor_dispatch_loop_spawns_and_cleans_on_error_exit(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _env = _init_git_repo(tmp_path)
+        (repo / ".agent_bus-lane1").mkdir()
+        monkeypatch.setenv("RCX_SKIP_WORKTREE_CHECK", "1")
+        monkeypatch.chdir(repo)
+        lane_monitor_cls = dispatch_mod._LaneMonitor  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        error_result = {
+            "status": "error",
+            "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "message": "post-merge-verify boom",
+        }
+        with patch.object(lane_monitor_cls, "spawn", autospec=True) as mock_spawn, \
+             patch.object(lane_monitor_cls, "cleanup", autospec=True) as mock_cleanup, \
+             patch.object(dispatch_mod, "load_routing_record",
+                          return_value={"decision": "ROUTE_PHASE_B", "wave_name": "lane-loop-test"}), \
+             patch.object(dispatch_mod, "dispatch", return_value=error_result):
+            rc = dispatch_mod.main(
+                ["--bus-dir", ".agent_bus-lane1", "--skip-freshness", "--json"]
+            )
+        assert rc == 1
+        assert mock_spawn.call_count == 1
+        spawned = mock_spawn.call_args.args[0]
+        assert spawned.bus_dir == ".agent_bus-lane1"
+        assert spawned.lane == "lane1"
+        assert mock_cleanup.call_count == 1
+
+    # (k) Bridge round-2 finding #1: pipeline_monitor.sh spawns its owner-loop
+    #     via `bash "$0"`, so a same-repo monitor launched with a RELATIVE script
+    #     path must still be selected for cleanup -- bound to this repo by the
+    #     live process CWD -- while a cross-repo relative owner-loop, an absolute
+    #     path to another repo, and an owner-loop whose CWD cannot be read are
+    #     all left alone (hard-safety outranks best-effort zombie reaping).
+    def test_lane_monitor_matches_relative_owner_loop_bound_by_cwd(self):
+        repo = Path("/repo/x")
+        # Command-string candidate match (mirrors the bridge evidence probe):
+        # relative monitor paths are candidates; an absolute foreign path is not.
+        for rel in (
+            "bash tools/observability/pipeline_monitor.sh "
+            "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop",
+            "bash mu/tools/observability/pipeline_monitor.sh "
+            "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop",
+        ):
+            assert dispatch_mod._command_matches_lane_owner_loop(  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+                rel, repo_root=repo, bus_dir=".agent_bus-lane1", lane="lane1",
+            ) is True
+        assert dispatch_mod._command_matches_lane_owner_loop(  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+            "bash /other/repo/tools/observability/pipeline_monitor.sh "
+            "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop",
+            repo_root=repo, bus_dir=".agent_bus-lane1", lane="lane1",
+        ) is False
+        # pid-level repo binding: a relative owner-loop is selected only when its
+        # live CWD confirms this repo; a cross-repo relative one and one whose
+        # CWD is unknown are both rejected.  Absolute-under-repo needs no CWD.
+        procs = [
+            (510, "bash tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+            (520, "bash mu/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+            (530, "bash tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+            (100, "bash /repo/x/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+        ]
+        cwds = {510: repo, 520: Path("/elsewhere/repo"), 530: None}
+        with patch.object(dispatch_mod, "_pid_cwd",
+                          side_effect=lambda pid: cwds.get(pid)):
+            pids = dispatch_mod._lane_owner_loop_pids(  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+                procs, repo_root=repo, bus_dir=".agent_bus-lane1", lane="lane1",
+            )
+        assert pids == [510, 100]
+        assert 520 not in pids   # cross-repo relative guarded by CWD identity
+        assert 530 not in pids   # unknown CWD -> not killed (hard-safety)
+
+    # (l) Bridge round-2 finding #2: a SIGTERM delivered OUTSIDE an executor
+    #     subprocess window (routing/recovery/post-merge gaps) must still run the
+    #     lane monitor cleanup.  The process-level handler armed by
+    #     _install_wave_end_signal_cleanup converts the signal into the same
+    #     cleanup + SystemExit the in-window _cleanup_for_signal path produces,
+    #     and restores the prior disposition so nothing leaks across in-process
+    #     main() calls.  The MAIN/default bus arms no handler.
+    def test_lane_monitor_signal_cleanup_runs_outside_executor_window(self, tmp_path):
+        monitor = dispatch_mod._LaneMonitor(tmp_path, ".agent_bus-lane1")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        assert monitor.is_lane is True
+        monitor.cleanup = MagicMock()
+        original = signal.getsignal(signal.SIGTERM)
+        token = dispatch_mod._install_wave_end_signal_cleanup(monitor)  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        try:
+            handler = signal.getsignal(signal.SIGTERM)
+            assert callable(handler)
+            assert handler is not original
+            with pytest.raises(SystemExit) as exc:
+                handler(signal.SIGTERM, None)
+            assert exc.value.code == 128 + int(signal.SIGTERM)
+            monitor.cleanup.assert_called_once()
+            # the handler restores the prior disposition before re-raising
+            assert signal.getsignal(signal.SIGTERM) is original
+        finally:
+            dispatch_mod._remove_wave_end_signal_cleanup(token)  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        assert signal.getsignal(signal.SIGTERM) is original
+        # MAIN/default bus: no handler armed, signal state untouched.
+        main_monitor = dispatch_mod._LaneMonitor(tmp_path, ".agent_bus")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        assert main_monitor.is_lane is False
+        before = signal.getsignal(signal.SIGTERM)
+        assert dispatch_mod._install_wave_end_signal_cleanup(main_monitor) is None  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        assert signal.getsignal(signal.SIGTERM) is before
+
+    # (m) Bridge round-2 finding #2 (wiring): the dispatch-loop launch surface
+    #     ARMS the signal handler before entering the wave loop, so a SIGTERM in
+    #     the routing gap (captured here inside load_routing_record, which runs
+    #     OUTSIDE _run_executor_in_group) finds a handler installed -- and the
+    #     prior disposition is restored once main() returns.
+    def test_dispatch_loop_arms_signal_cleanup_in_routing_gap(self, tmp_path, monkeypatch):
+        repo, _env = _init_git_repo(tmp_path)
+        (repo / ".agent_bus-lane1").mkdir()
+        monkeypatch.setenv("RCX_SKIP_WORKTREE_CHECK", "1")
+        monkeypatch.chdir(repo)
+        before = signal.getsignal(signal.SIGTERM)
+        captured = {}
+
+        def fake_routing(*args, **kwargs):
+            # Runs in the routing gap -- outside any executor subprocess window.
+            captured["sigterm"] = signal.getsignal(signal.SIGTERM)
+            return {"decision": "ROUTE_PHASE_B", "wave_name": "lane-sig-wire"}
+
+        lane_monitor_cls = dispatch_mod._LaneMonitor  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        error_result = {
+            "status": "error",
+            "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "message": "stop after routing",
+        }
+        with patch.object(lane_monitor_cls, "spawn", autospec=True), \
+             patch.object(lane_monitor_cls, "cleanup", autospec=True) as mock_cleanup, \
+             patch.object(dispatch_mod, "load_routing_record", side_effect=fake_routing), \
+             patch.object(dispatch_mod, "dispatch", return_value=error_result):
+            rc = dispatch_mod.main(
+                ["--bus-dir", ".agent_bus-lane1", "--skip-freshness", "--json"]
+            )
+        assert rc == 1
+        handler = captured.get("sigterm")
+        assert callable(handler)  # a real handler is armed during the routing gap
+        assert handler not in (signal.SIG_DFL, signal.SIG_IGN, before)
+        mock_cleanup.assert_called_once()  # cleanup still runs on the normal exit
+        assert signal.getsignal(signal.SIGTERM) is before  # restored after main()
