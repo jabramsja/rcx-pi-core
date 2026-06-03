@@ -8958,7 +8958,18 @@ class TestCommitContinuationAndBotFreshness:
                     return completed(cmd, stdout="merge456\n")
                 return completed(cmd, stdout="abc123\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                # The linked dev worktree is on 'dev'; the feature worktree
+                # (repo) is on its own branch. _resolve_post_merge_verify_root's
+                # _worktree_head_branch probe and step-16 cleanup both read this.
+                if cwd == dev_worktree:
+                    return completed(cmd, stdout="dev\n")
                 return completed(cmd, stdout="jabramsja/test-wave-id\n")
+            if cmd[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                # _is_usable_worktree probes the linked worktree's own root.
+                return completed(cmd, stdout=f"{dev_worktree}\n")
+            if cmd[:3] == ["git", "rev-parse", "--git-common-dir"]:
+                # repo and dev_worktree are worktrees of one repo: same common dir.
+                return completed(cmd, stdout=f"{tmp_path}/.git\n")
             if cmd[:4] == ["git", "worktree", "list", "--porcelain"]:
                 stdout = (
                     f"worktree {repo}\n"
@@ -9014,6 +9025,12 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:2] == ["git", "pull"]:
                 raise AssertionError("git pull must not be used in post-merge verify path; use git fetch + git merge --ff-only")
             if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "branch", "-D"]:
+                # Step 16a: delete the merged feature branch from the dev worktree.
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                # Step 16c: no wave-owned stashes to drop.
                 return completed(cmd)
             if cmd[:2] == ["git", "checkout"]:
                 raise AssertionError("post-merge verify should not checkout dev in feature worktree")
@@ -9079,7 +9096,18 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:3] == ["git", "rev-parse", "origin/dev"]:
                 return completed(cmd, stdout="merge789\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                # The linked dev worktree is on 'dev'; the feature worktree
+                # (repo) is on its own branch. _resolve_post_merge_verify_root's
+                # _worktree_head_branch probe and step-16 cleanup both read this.
+                if cwd == dev_worktree:
+                    return completed(cmd, stdout="dev\n")
                 return completed(cmd, stdout="jabramsja/test-wave-id\n")
+            if cmd[:3] == ["git", "rev-parse", "--show-toplevel"]:
+                # _is_usable_worktree probes the linked worktree's own root.
+                return completed(cmd, stdout=f"{dev_worktree}\n")
+            if cmd[:3] == ["git", "rev-parse", "--git-common-dir"]:
+                # repo and dev_worktree are worktrees of one repo: same common dir.
+                return completed(cmd, stdout=f"{tmp_path}/.git\n")
             if cmd[:4] == ["git", "worktree", "list", "--porcelain"]:
                 stdout = (
                     f"worktree {repo}\n"
@@ -9135,6 +9163,12 @@ class TestCommitContinuationAndBotFreshness:
                 raise AssertionError("dirty linked verify root must not run git merge --ff-only")
             if cmd[:2] == ["git", "pull"]:
                 raise AssertionError("git pull must not be used in post-merge verify path; use git fetch + git merge --ff-only")
+            if cmd[:3] == ["git", "branch", "-D"]:
+                # Step 16a: delete the merged feature branch from the dev worktree.
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                # Step 16c: no wave-owned stashes to drop.
+                return completed(cmd)
             if cmd[:2] == ["git", "checkout"]:
                 raise AssertionError("post-merge verify should not checkout dev in feature worktree")
             raise AssertionError(f"unexpected command: {cmd} cwd={cwd}")
