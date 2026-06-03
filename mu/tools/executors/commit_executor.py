@@ -6286,6 +6286,85 @@ def _fetch_pr_check_surface_rollup(repo_root: Path, pr_number: str) -> Any:
     return payload.get("statusCheckRollup", [])
 
 
+def _surface_failure_is_stale_cancellation(snapshot: dict[str, Any]) -> bool:
+    """True iff a ``failed`` surface's failing checks are ALL concurrent-merge
+    ``CANCELLED`` runs of EXPECTED REQUIRED checks -- the stale artifact the
+    post-resolve await waits to be refreshed -- and NOT a genuine failure.
+
+    After a successful mid-poll conflict resolve the base-merge repush
+    re-triggers the previously-skipped REQUIRED ``pull_request`` gate workflows
+    (the ``EXPECTED_PR_CHECK_SURFACE`` set), but until they re-register the
+    surface still shows THEIR concurrent-merge ``CANCELLED`` runs (classified
+    ``failed`` by ``_summarize_pr_check_surface``). Only those required-check
+    cancellations are the stale artifact that is non-terminal while awaiting the
+    refresh.
+
+    Masking is constrained to actual stale REQUIRED checks: inspecting the
+    parsed conclusion text alone is NOT enough, because a ``CANCELLED`` failing
+    check can belong to a refreshed run or an unrelated non-essential check that
+    is NOT one of the required gate workflows. The following failing surfaces are
+    therefore NOT stale cancellations and MUST terminate the wait (return
+    ``False``):
+
+    * ANY non-``CANCELLED`` failing conclusion (``FAILURE``/``ERROR``/
+      ``TIMED_OUT``/``ACTION_REQUIRED``) -- a genuine failure on the refreshed
+      surface is real.
+    * ANY ``CANCELLED`` failing check whose name is NOT in
+      ``EXPECTED_PR_CHECK_SURFACE`` -- a refreshed/unrelated non-required run is
+      never the awaited stale required-check artifact, so its cancellation is
+      surfaced rather than masked.
+
+    Fail-closed: an empty/absent failing set, or a label that cannot be parsed
+    into a ``<name>=<STATE>`` pair, returns ``False`` so an unclassifiable
+    ``failed`` surface is surfaced, never masked.
+    """
+    failing = snapshot.get("failing_checks") or []
+    if not failing:
+        return False
+    for label in failing:
+        # _summarize_pr_check_surface formats each failing check as
+        # "<name>=<STATE>" with STATE upper-cased; the expected check names never
+        # contain "=", so the name is everything before the final "=" and the
+        # conclusion is the segment after it.
+        name, sep, state = str(label).rpartition("=")
+        if not sep:
+            # Unparseable label (no "="): cannot confirm a required-check
+            # cancellation -- fail closed and surface it.
+            return False
+        if state.strip().upper() != "CANCELLED":
+            return False
+        if name.strip() not in EXPECTED_PR_CHECK_SURFACE:
+            # A CANCELLED run of a non-required (unrelated / non-essential /
+            # refreshed auxiliary) check is NOT the stale required-check artifact
+            # the post-resolve await waits on; surface it rather than mask it.
+            return False
+    return True
+
+
+def _surface_shows_refreshed_required_checks(snapshot: dict[str, Any]) -> bool:
+    """True iff the surface positively proves the re-triggered ``pull_request``
+    workflows re-registered after a mid-poll conflict resolve: a non-``failed``
+    surface whose expected required-check set is fully present (empty
+    ``missing_expected_checks``).
+
+    This is the ONLY condition that clears the persistent
+    ``awaiting_refreshed_surface`` post-resolve await. A merely non-``failed``
+    surface is NOT enough: while GitHub processes the resolve repush the rollup
+    can transiently go pending/unavailable or still be missing the expected
+    checks BEFORE the re-triggered runs re-register, and clearing the await on
+    such a transient surface would let the very next stale concurrent-merge
+    ``CANCELLED`` poll (still classified ``failed``) false-fail the wait. A
+    ``failed`` surface is likewise never proof (a stale CANCELLED set is still
+    ``failed``). Fail-closed: an absent/``None`` or non-list
+    ``missing_expected_checks`` returns ``False`` (keep awaiting), so an
+    unclassifiable surface never clears the await early.
+    """
+    if snapshot.get("status") == "failed":
+        return False
+    missing = snapshot.get("missing_expected_checks")
+    return isinstance(missing, list) and not missing
+
+
 def _wait_for_expected_pr_check_surface_to_pass(
     repo_root: Path,
     pr_number: str,
@@ -6311,8 +6390,20 @@ def _wait_for_expected_pr_check_surface_to_pass(
     probed. On a fresh transition to a conflicting state (edge-guarded by
     ``midpoll_prev_conflicting``) ``_try_auto_resolve_pr_conflict`` is re-fired
     once: on ``resolved=true`` the base-merge repush re-triggers the skipped
-    workflows and this iteration re-polls a fresh surface (a one-iteration marker
-    skips the failed early-return) instead of returning the stale snapshot; on
+    workflows, but they take TIME to re-register, so a PERSISTENT
+    ``awaiting_refreshed_surface`` marker (set on the resolve and NOT reset per
+    iteration) keeps a STALE ``failed`` surface -- one whose failing checks are
+    only the concurrent-merge ``CANCELLED`` runs
+    (``_surface_failure_is_stale_cancellation``) -- non-terminal ACROSS
+    iterations until the surface REFRESHES (a non-``failed`` surface shows the
+    full expected required-check set re-registered --
+    ``_surface_shows_refreshed_required_checks``; a transient pending/unavailable
+    or still-missing surface is NOT proof of re-registration and does NOT clear
+    the marker) OR the deadline below elapses. A GENUINE failure on the refreshed surface (any
+    non-``CANCELLED`` failing conclusion) is NOT masked by the marker: the failed
+    early-return still fires immediately so a real CI break is never suppressed
+    until the deadline. This avoids both false-failing while the re-triggered
+    workflows are still registering AND masking a refreshed real failure; on
     ``resolved=false`` the snapshot is returned with a ``midpoll_conflict_aborted``
     marker so ``_wait_for_pr_ci`` converts it into the SAME structured
     ``pr_conflicting`` fail-closed envelope the Step-14-START guard emits. The
@@ -6325,6 +6416,10 @@ def _wait_for_expected_pr_check_surface_to_pass(
     deadline = time.monotonic() + timeout
     last_snapshot: dict[str, Any] | None = None
     midpoll_prev_conflicting = False
+    # Persistent across iterations (NOT a per-iteration one-shot): set on a
+    # successful mid-poll resolve and held until the re-triggered pull_request
+    # workflows re-register (surface no longer "failed") or the deadline elapses.
+    awaiting_refreshed_surface = False
 
     while True:
         try:
@@ -6359,6 +6454,19 @@ def _wait_for_expected_pr_check_surface_to_pass(
         if snapshot["status"] == "passed":
             snapshot["ok"] = True
             return snapshot
+        # Clear the persistent post-resolve await ONLY on positive proof the
+        # re-triggered pull_request workflows re-registered: a non-"failed"
+        # surface whose expected required-check set is fully present
+        # (_surface_shows_refreshed_required_checks). A merely non-"failed" but
+        # pending/unavailable or still-missing surface is NOT such proof -- it can
+        # be a transient GitHub state while the resolve repush is processed, and
+        # clearing the await on it would let the very next stale concurrent-merge
+        # CANCELLED poll (still "failed") false-fail the wait. A genuine CI failure
+        # observed AFTER a real refresh still terminates the wait normally: the
+        # failed early-return below fires for any non-CANCELLED failing conclusion
+        # regardless of the marker.
+        if _surface_shows_refreshed_required_checks(snapshot):
+            awaiting_refreshed_surface = False
         # Step-14 mid-poll conflict re-check runs BEFORE the status=="failed"
         # early-return (and after the status=="passed" return). The required
         # checks already registered, but a concurrent lane that merges first can
@@ -6373,7 +6481,6 @@ def _wait_for_expected_pr_check_surface_to_pass(
         # are skipped so auto-resolve never starts after the deadline has
         # expired; the failed/timeout early-returns below still terminate the
         # wait.
-        repoll_after_midpoll_resolve = False
         if midpoll_autoresolve is not None and time.monotonic() < deadline:
             conflict_state = _check_pr_conflict_state(
                 repo_root, pr_number=pr_number, log=log
@@ -6405,13 +6512,29 @@ def _wait_for_expected_pr_check_surface_to_pass(
                     snapshot["detail"] = resolve_result.get("detail", "unknown")
                     return snapshot
                 # resolved=true: the base-merge repush re-triggers the
-                # previously-skipped workflows. Re-poll a fresh surface THIS
-                # iteration instead of falling into the failed early-return,
-                # which would otherwise re-emit this stale concurrent-merge
-                # CANCELLED snapshot as a CI failure.
-                repoll_after_midpoll_resolve = True
+                # previously-skipped pull_request workflows, but they take TIME
+                # to re-register. PERSIST the awaiting-refreshed-surface marker
+                # ACROSS iterations (not a one-shot re-poll) so a stale "failed"
+                # surface -- the concurrent-merge CANCELLED checks, still the
+                # latest runs until the re-triggered ones register -- stays
+                # non-terminal (ONLY while its failing checks are those CANCELLED
+                # runs; a genuine refreshed failure still terminates below) until
+                # the surface shows the re-registered required checks (cleared
+                # above via _surface_shows_refreshed_required_checks; a transient
+                # pending/unavailable surface does NOT clear it) or the deadline
+                # below elapses, rather than false-failing on the very next
+                # still-"failed" poll.
+                awaiting_refreshed_surface = True
             midpoll_prev_conflicting = currently_conflicting
-        if snapshot["status"] == "failed" and not repoll_after_midpoll_resolve:
+        # The post-resolve await holds a STALE failed surface (failing checks are
+        # only the concurrent-merge CANCELLED runs) non-terminal until it
+        # refreshes or the deadline elapses. A refreshed GENUINE failure (any
+        # non-CANCELLED failing conclusion) is surfaced immediately -- the marker
+        # never masks a real CI break until the deadline.
+        if snapshot["status"] == "failed" and not (
+            awaiting_refreshed_surface
+            and _surface_failure_is_stale_cancellation(snapshot)
+        ):
             snapshot["ok"] = False
             return snapshot
         if time.monotonic() >= deadline:

@@ -662,6 +662,43 @@ class TestStep14MidPollSurfaceConflictRecheck:
             "failing_checks": ["test=CANCELLED"],
         }
 
+    @staticmethod
+    def _refreshed_failed_surface() -> dict:
+        # The re-triggered pull_request workflows DID re-register and ran to a
+        # GENUINE FAILURE conclusion (engine-run-schema=FAILURE) -- a real CI
+        # break on the refreshed surface, NOT a concurrent-merge CANCELLED stale
+        # run. _surface_failure_is_stale_cancellation returns False for this, so
+        # the persistent post-resolve await must NOT mask it: the wait must
+        # terminate as a real failure rather than spin to the deadline.
+        return {
+            "status": "failed",
+            "summary": "failing PR check(s): engine-run-schema=FAILURE",
+            "failing_checks": ["engine-run-schema=FAILURE"],
+        }
+
+    @staticmethod
+    def _unavailable_surface() -> dict:
+        # The transient GitHub state WHILE the resolve repush is still being
+        # processed: the statusCheckRollup is momentarily unavailable / missing
+        # the expected required checks (the shape _wait_for_expected_pr_check_
+        # surface_to_pass builds on a rollup fetch error, and the shape
+        # _summarize_pr_check_surface builds when the re-triggered workflows have
+        # not re-registered yet). status != "failed", but this is NOT proof the
+        # re-triggered pull_request workflows re-registered, so
+        # _surface_shows_refreshed_required_checks must return False for it and
+        # the persistent post-resolve await must NOT clear on it.
+        return {
+            "status": "pending",
+            "summary": (
+                "statusCheckRollup unavailable; missing expected check(s): "
+                + ", ".join(commit_mod.EXPECTED_PR_CHECK_SURFACE)
+            ),
+            "present_checks": [],
+            "missing_expected_checks": list(commit_mod.EXPECTED_PR_CHECK_SURFACE),
+            "pending_checks": ["statusCheckRollup=unavailable"],
+            "failing_checks": [],
+        }
+
     def test_midpoll_surface_conflict_aborted_fails_closed(self, tmp_path):
         # Conflict appears AFTER the required checks register and the gh watch
         # returns, but DURING the expected-check-surface wait, and auto-resolve
@@ -1075,6 +1112,345 @@ class TestStep14MidPollSurfaceConflictRecheck:
         assert snapshot["status"] == "failed"
         assert snapshot.get("ok") is False
         assert not snapshot.get("midpoll_conflict_aborted")
+
+    def test_midpoll_surface_persistent_repoll_until_green_or_deadline(self, tmp_path):
+        # Regression (surface-wait-persistent-repoll): after a successful mid-poll
+        # conflict resolve, the base-merge repush re-triggers the previously
+        # skipped pull_request workflows, but they take TIME to re-register. Until
+        # they do, the surface stays "failed" (the concurrent-merge CANCELLED
+        # checks are still the latest runs). The prior one-iteration marker only
+        # skipped the failed early-return for a SINGLE post-resolve poll, so the
+        # very next still-"failed" poll -- with the conflict already cleared --
+        # returned a FALSE CI failure on a PR whose conflict was already resolved.
+        # The persistent awaiting-refreshed-surface marker must keep re-polling
+        # across MULTIPLE failed iterations until the surface refreshes green
+        # (block a), while the existing deadline check must still bound the wait
+        # and return timed_out if green never arrives (block b).
+
+        # (a) PERSISTENT re-poll: the conflict resolves on the first failed poll,
+        #     then the surface stays "failed" for THREE more polls (re-registering
+        #     workflows) before going green. The wait must NOT false-fail on any
+        #     of the post-resolve failed polls -- it re-polls until green. The
+        #     conflict CLEARS right after the resolve (None on later probes): the
+        #     exact transition the old one-shot marker mishandled (currently
+        #     non-conflicting + still-"failed" surface -> the marker had reset to
+        #     False, so the failed early-return fired on the very next poll).
+        summarize_a = {"count": 0}
+        conflict_a = {"count": 0}
+        resolve_a = {"count": 0}
+
+        def fake_summarize_a(checks):
+            summarize_a["count"] += 1
+            # failed on the resolve poll AND three subsequent re-registering
+            # polls (#1-#4), then green on #5 -- well past "one iteration".
+            if summarize_a["count"] >= 5:
+                return self._passed_surface()
+            return self._failed_surface()
+
+        def fake_conflict_a(repo_root, *, pr_number, log=None):
+            conflict_a["count"] += 1
+            # CONFLICTING on the first probe (drives the single resolve), then
+            # cleared -- so on every later poll currently_conflicting is False.
+            return "mergeable=CONFLICTING" if conflict_a["count"] == 1 else None
+
+        def fake_resolve_a(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_a["count"] += 1
+            assert base_branch == "dev"
+            assert branch_name == "wave/persistent-green"
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev + resolved TASKS.md + pushed",
+            }
+
+        with patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize_a), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict_a), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve_a), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            snapshot = commit_mod._wait_for_expected_pr_check_surface_to_pass(  # ANTICHEAT_OK: persistent repoll verify
+                tmp_path,
+                pr_number="320",
+                timeout=300,
+                poll_interval=0,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/persistent-green"},
+            )
+        # No false failure on the post-resolve failed polls: the wait persistently
+        # re-polled across all four failed surfaces and returned the green one.
+        assert snapshot["status"] == "passed"
+        assert snapshot.get("ok") is True
+        assert not snapshot.get("midpoll_conflict_aborted")
+        assert resolve_a["count"] == 1   # single resolve for the one transition
+        assert conflict_a["count"] == 4  # probed each failed poll; green poll returns first
+        assert summarize_a["count"] == 5  # re-polled persistently, then green
+
+        # (b) BOUNDED by the deadline: the same resolve fires on the first poll
+        #     (still < deadline), but the surface never goes green. The persistent
+        #     marker must NOT mask the deadline -- the wait still terminates and
+        #     returns the timed_out snapshot (NOT a false-green, NOT the aborted
+        #     envelope). The injected clock computes the deadline from the first
+        #     reading, lets the resolve fire on iter 1, then jumps past the
+        #     deadline so iter 2 terminates with the surface still "failed".
+        summarize_b = {"count": 0}
+        conflict_b = {"count": 0}
+        resolve_b = {"count": 0}
+        clock_b = iter([1000.0, 1001.0, 1002.0])
+
+        def fake_monotonic_b():
+            return next(clock_b, 9999.0)
+
+        def fake_summarize_b(checks):
+            summarize_b["count"] += 1
+            return self._failed_surface()
+
+        def fake_conflict_b(repo_root, *, pr_number, log=None):
+            conflict_b["count"] += 1
+            return "mergeable=CONFLICTING" if conflict_b["count"] == 1 else None
+
+        def fake_resolve_b(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_b["count"] += 1
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev + resolved TASKS.md + pushed",
+            }
+
+        with patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize_b), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict_b), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve_b), \
+             patch.object(commit_mod.time, "monotonic", side_effect=fake_monotonic_b), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            snapshot = commit_mod._wait_for_expected_pr_check_surface_to_pass(  # ANTICHEAT_OK: persistent repoll deadline-bound verify
+                tmp_path,
+                pr_number="321",
+                timeout=30,
+                poll_interval=0,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/persistent-deadline"},
+            )
+        # The marker was set (resolve fired on iter 1) yet the deadline still
+        # terminated the wait: timed_out, not a false-green, not the aborted path.
+        assert snapshot.get("ok") is False
+        assert snapshot.get("timed_out") is True
+        assert snapshot["status"] == "failed"
+        assert not snapshot.get("midpoll_conflict_aborted")
+        assert resolve_b["count"] == 1   # resolve fired once before the deadline
+        assert conflict_b["count"] == 1  # iter-2 conflict probe skipped (deadline guard)
+
+    def test_midpoll_surface_persistent_await_terminates_on_refreshed_real_failure(
+        self, tmp_path
+    ):
+        # Bridge round-1 DEFECT (surface-wait-persistent-repoll): the persistent
+        # awaiting-refreshed-surface marker (set on a successful mid-poll resolve)
+        # must NOT mask a refreshed GENUINE CI failure until the deadline. The
+        # prior marker cleared ONLY when status != "failed", so a refreshed
+        # surface that went straight from the stale concurrent-merge CANCELLED
+        # runs to a real FAILURE conclusion -- with NO intermediate pending/pass
+        # poll -- stayed suppressed and false-returned timed_out instead of the
+        # real failure. The await is now non-terminal ONLY while the failing
+        # checks are the CANCELLED stale runs
+        # (_surface_failure_is_stale_cancellation); the FIRST non-CANCELLED
+        # failing conclusion terminates the wait as a real failure immediately.
+        summarize = {"count": 0}
+        conflict = {"count": 0}
+        resolve = {"count": 0}
+        # Generous headroom (deadline = first reading + 300): the wait must
+        # terminate on the refreshed real failure, NOT the deadline. The 9999
+        # tail only fires if a regression re-masks the failure -- then the
+        # deadline check trips and the timed_out assertion fails fast instead of
+        # hanging on the real clock.
+        clock = iter([1000.0, 1001.0, 1002.0, 1003.0])
+
+        def fake_monotonic():
+            return next(clock, 9999.0)
+
+        def fake_summarize(checks):
+            summarize["count"] += 1
+            # poll 1: stale CANCELLED surface (drives the resolve, sets the
+            # marker); poll 2: refreshed surface with a GENUINE FAILURE.
+            if summarize["count"] == 1:
+                return self._failed_surface()
+            return self._refreshed_failed_surface()
+
+        def fake_conflict(repo_root, *, pr_number, log=None):
+            conflict["count"] += 1
+            # CONFLICTING on the first probe (drives the single resolve), then
+            # cleared -- the exact post-resolve transition the marker spans.
+            return "mergeable=CONFLICTING" if conflict["count"] == 1 else None
+
+        def fake_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve["count"] += 1
+            assert base_branch == "dev"
+            assert branch_name == "wave/refreshed-real-failure"
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev + resolved TASKS.md + pushed",
+            }
+
+        with patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve), \
+             patch.object(commit_mod.time, "monotonic", side_effect=fake_monotonic), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            snapshot = commit_mod._wait_for_expected_pr_check_surface_to_pass(  # ANTICHEAT_OK: persistent await real-failure verify
+                tmp_path,
+                pr_number="322",
+                timeout=300,
+                poll_interval=0,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/refreshed-real-failure"},
+            )
+        # The refreshed REAL failure terminated the wait on poll 2 -- NOT masked
+        # to the deadline (no timed_out), NOT the aborted envelope, NOT a green.
+        assert snapshot["status"] == "failed"
+        assert snapshot.get("ok") is False
+        assert not snapshot.get("timed_out")
+        assert not snapshot.get("midpoll_conflict_aborted")
+        assert resolve["count"] == 1   # single resolve set the await marker
+        assert conflict["count"] == 2  # probed poll 1 (CONFLICTING) and poll 2 (cleared)
+        assert summarize["count"] == 2  # terminated on the refreshed real-failure poll
+
+    def test_midpoll_surface_persistent_await_survives_transient_pending_surface(
+        self, tmp_path
+    ):
+        # Bridge round-2 DEFECT (surface-wait-persistent-repoll): the persistent
+        # post-resolve await must NOT be cleared by a TRANSIENT non-"failed"
+        # surface that does not yet show the re-registered required checks. After
+        # a successful mid-poll resolve, GitHub processes the repush and the
+        # rollup can momentarily go pending/unavailable (missing the expected
+        # checks) BEFORE the re-triggered pull_request workflows re-register. The
+        # prior clear -- `if status != "failed": awaiting_refreshed_surface =
+        # False` -- cleared the await on that transient surface, so the very next
+        # stale concurrent-merge CANCELLED poll (still "failed") false-failed the
+        # wait. The await now clears ONLY on positive proof of re-registration
+        # (_surface_shows_refreshed_required_checks: a non-"failed" surface whose
+        # expected required-check set is fully present), so a transient
+        # pending/unavailable surface keeps the await armed across iterations.
+
+        # (a) failed (CANCELLED) -> resolve -> TRANSIENT pending/unavailable
+        #     (missing expected checks, conflict already cleared) -> failed
+        #     (CANCELLED again) -> green. The wait must NOT false-fail on the
+        #     post-transient failed poll: the await survived the transient pending
+        #     surface, so the stale CANCELLED failure stays non-terminal and the
+        #     wait re-polls to green. Under the prior one-`status != "failed"`
+        #     clear this returned a FALSE failure on the post-transient poll.
+        summarize_a = {"count": 0}
+        conflict_a = {"count": 0}
+        resolve_a = {"count": 0}
+
+        def fake_summarize_a(checks):
+            summarize_a["count"] += 1
+            # 1: stale CANCELLED (drives the resolve, sets the await);
+            # 2: transient pending/unavailable (must NOT clear the await);
+            # 3: stale CANCELLED again (must NOT false-fail -- await still armed);
+            # 4: green.
+            if summarize_a["count"] == 1:
+                return self._failed_surface()
+            if summarize_a["count"] == 2:
+                return self._unavailable_surface()
+            if summarize_a["count"] == 3:
+                return self._failed_surface()
+            return self._passed_surface()
+
+        def fake_conflict_a(repo_root, *, pr_number, log=None):
+            conflict_a["count"] += 1
+            # CONFLICTING on the first probe (drives the single resolve), then
+            # cleared -- so it is the persistent await, NOT a re-detected
+            # conflict, that keeps the post-transient stale CANCELLED poll
+            # non-terminal.
+            return "mergeable=CONFLICTING" if conflict_a["count"] == 1 else None
+
+        def fake_resolve_a(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_a["count"] += 1
+            assert base_branch == "dev"
+            assert branch_name == "wave/transient-green"
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev + resolved TASKS.md + pushed",
+            }
+
+        with patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize_a), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict_a), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve_a), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            snapshot = commit_mod._wait_for_expected_pr_check_surface_to_pass(  # ANTICHEAT_OK: persistent await transient-pending verify
+                tmp_path,
+                pr_number="330",
+                timeout=300,
+                poll_interval=0,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/transient-green"},
+            )
+        # The transient pending/unavailable surface did NOT clear the await, so
+        # the post-transient stale CANCELLED poll stayed non-terminal and the wait
+        # re-polled to green -- no false failure.
+        assert snapshot["status"] == "passed"
+        assert snapshot.get("ok") is True
+        assert not snapshot.get("midpoll_conflict_aborted")
+        assert resolve_a["count"] == 1   # single resolve set the await marker
+        assert conflict_a["count"] == 3  # probed polls 1-3; green poll returns first
+        assert summarize_a["count"] == 4  # persisted across the transient, then green
+
+        # (b) BOUNDED by the deadline THROUGH a transient pending surface: the
+        #     resolve fires on poll 1 (still < deadline), poll 2 is the transient
+        #     pending/unavailable surface, poll 3 is stale CANCELLED again, then
+        #     the deadline trips. The await must NOT have been cleared by the
+        #     transient surface (else poll 3 would false-fail BEFORE the deadline)
+        #     AND must NOT mask the deadline -- the wait terminates with the
+        #     timed_out snapshot, not a false-green and not the aborted envelope.
+        summarize_b = {"count": 0}
+        conflict_b = {"count": 0}
+        resolve_b = {"count": 0}
+        # deadline = first reading + 30 = 1030; the resolve fires on iter 1, the
+        # transient pending (iter 2) and the stale CANCELLED (iter 3) stay
+        # non-terminal, then iter 3's deadline check trips (tail 9999 >= 1030).
+        clock_b = iter([1000.0, 1001.0, 1002.0, 1003.0, 1004.0, 1005.0])
+
+        def fake_monotonic_b():
+            return next(clock_b, 9999.0)
+
+        def fake_summarize_b(checks):
+            summarize_b["count"] += 1
+            if summarize_b["count"] == 2:
+                return self._unavailable_surface()
+            return self._failed_surface()
+
+        def fake_conflict_b(repo_root, *, pr_number, log=None):
+            conflict_b["count"] += 1
+            return "mergeable=CONFLICTING" if conflict_b["count"] == 1 else None
+
+        def fake_resolve_b(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_b["count"] += 1
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev + resolved TASKS.md + pushed",
+            }
+
+        with patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize_b), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict_b), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve_b), \
+             patch.object(commit_mod.time, "monotonic", side_effect=fake_monotonic_b), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            snapshot = commit_mod._wait_for_expected_pr_check_surface_to_pass(  # ANTICHEAT_OK: persistent await transient-pending deadline verify
+                tmp_path,
+                pr_number="331",
+                timeout=30,
+                poll_interval=0,
+                midpoll_autoresolve={"base_branch": "dev", "branch_name": "wave/transient-deadline"},
+            )
+        # The transient pending surface did not clear the await (poll 3 did not
+        # false-fail), yet the deadline still terminated the wait: timed_out on the
+        # stale CANCELLED surface, not a false-green, not the aborted envelope.
+        assert snapshot.get("ok") is False
+        assert snapshot.get("timed_out") is True
+        assert snapshot["status"] == "failed"
+        assert not snapshot.get("midpoll_conflict_aborted")
+        assert resolve_b["count"] == 1   # resolve fired once before the deadline
+        assert conflict_b["count"] == 3  # probed polls 1-3 (all < deadline)
 
 
 class TestMidpollConflictRecheckBeforeCIFailure:
