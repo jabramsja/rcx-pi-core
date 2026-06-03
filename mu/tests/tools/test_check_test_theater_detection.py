@@ -7,6 +7,7 @@ have broken patterns and we wouldn't know.
 
 Created based on 7-agent review finding (2026-01-30): security checks had no grounding tests.
 """
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -16,6 +17,7 @@ import pytest
 
 from tests.repo_root import REPO_ROOT
 THEATER_SCRIPT = REPO_ROOT / "tools" / "checks" / "check_test_theater.sh"
+THEATER_LINTER = REPO_ROOT / "tools" / "checks" / "linters" / "check_test_theater.py"
 
 
 def run_theater_check_on_code(code: str) -> subprocess.CompletedProcess:
@@ -266,3 +268,160 @@ class TestTheaterDetectsCommentedAssertions:
         ])
         result = run_theater_check_on_code(code)
         assert result.returncode != 0, "Should fail on commented-out self.assert"  # THEATER_OK: docstring
+
+
+def _run_linter_directly(scan_dir: str) -> subprocess.CompletedProcess:
+    """Invoke the AST linter EXACTLY as check_test_theater.sh invokes it.
+
+    argv[1] is the directory scanned DIRECTLY (walked recursively for
+    ``*.py``), NOT a root under which ``tests/`` + ``mu/tests/`` are
+    re-discovered. This mirrors the wrapper's
+    ``python3 .../check_test_theater.py "$TESTS_DIR"`` call.
+    """
+    return subprocess.run(
+        ["python3", str(THEATER_LINTER), scan_dir],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
+class TestAstLinterVacuousAssertionsAndFailClosed:
+    """Regression for the AST-ified vacuous-assertion check
+    (wave check-test-theater-ast-2026-06-03).
+
+    The six TEXT-based vacuous-assertion greps in check_test_theater.sh were
+    replaced by an AST linter (tools/checks/linters/check_test_theater.py)
+    wired FAIL-CLOSED. These pin the six packet behaviors:
+      (a) a vacuous assertion inside a fixture STRING is clean (BUG #1);
+      (b) a real vacuous assertion is flagged;
+      (c) a trailing THEATER_OK whitelists it;
+      (d) a linter execution failure (exit >=2) FAILS the gate (BUG #2),
+          proven for both the real linter and a silent (no-stdout) failure;
+      (e) the linter scans the passed directory directly + recursively (BUG #3);
+      (f) a target with zero *.py files fails closed (BUG #3 belt-and-suspenders).
+    """
+
+    def test_a_vacuous_assertion_inside_fixture_string_is_clean(self):
+        # The vacuous assertion lives ONLY inside a textwrap.dedent fixture
+        # string (the PR #1065 false positive). The AST linter ignores string
+        # contents, so the gate stays CLEAN with NO THEATER_OK -- the point of
+        # the wave. (The token is split in THIS source so the generated fixture
+        # holds it verbatim while this file does not.)
+        code = "\n".join([
+            "import textwrap",
+            "",
+            "def test_classifier_handles_vacuous_fixture():",
+            "    fixture = textwrap.dedent('''",
+            "        def test_inner():",
+            "            " + "assert " + "True",
+            "    ''')",
+            "    assert 'test_inner' in fixture",
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, (
+            "vacuous assertion inside a fixture string must be CLEAN "
+            f"(BUG #1); gate output:\n{result.stdout}"
+        )
+
+    def test_b_real_vacuous_assertion_is_flagged(self):
+        # A real (top-level) vacuous assertion -- not inside a string -- is
+        # flagged. Token split + THEATER_OK keep THIS source clean; the
+        # generated file gets the bare statement with no whitelist.
+        code = "\n".join([
+            "def test_something():",
+            "    " + "assert " + "True",  # THEATER_OK: generated fixture, not a real assertion
+            "",
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode != 0, "a real vacuous assertion must be flagged"
+        assert "theater" in result.stdout.lower()
+
+    def test_c_trailing_theater_ok_is_skipped(self):
+        # A trailing THEATER_OK on the offending line whitelists it.
+        code = "\n".join([
+            "def test_something():",
+            "    assert True  # THEATER_OK: placeholder for future assertion",
+            "",
+        ])
+        result = run_theater_check_on_code(code)
+        assert result.returncode == 0, "trailing THEATER_OK must whitelist the assertion"
+
+    def test_d_gate_fails_closed_when_real_linter_cannot_scan(self, tmp_path):
+        # BUG #2 (real integration): an unparseable target makes the REAL
+        # linter exit >=2 (could-not-scan), and the REAL wrapper must turn that
+        # into a gate FAILURE -- a scan failure must never silently pass.
+        bad_dir = tmp_path / "bad"
+        bad_dir.mkdir()
+        (bad_dir / "test_broken.py").write_text("def test_x(:\n    pass\n")
+        result = subprocess.run(
+            ["bash", str(THEATER_SCRIPT), str(bad_dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert result.returncode != 0, (
+            "gate must FAIL CLOSED when the linter cannot scan a file "
+            f"(BUG #2); got rc=0:\n{result.stdout}"
+        )
+
+    def test_d2_gate_fails_closed_on_silent_linter_failure(self, tmp_path):
+        # BUG #2 (the exact fail-open): a linter that prints NOTHING to stdout
+        # and exits >=2 (syntax/import/runtime failure) must STILL fail the
+        # gate. The naive `out=$(... || true)` + stdout-presence design would
+        # have swallowed this. A copy of the REAL wrapper is exercised against a
+        # stub linter so the wrapper's own fail-closed wiring is under test.
+        wrapper = tmp_path / "check_test_theater.sh"
+        shutil.copy(THEATER_SCRIPT, wrapper)
+        (tmp_path / "linters").mkdir()
+        (tmp_path / "linters" / "check_test_theater.py").write_text(
+            "import sys\nsys.exit(2)\n"  # prints nothing; exits >=2
+        )
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        (scan_dir / "test_clean.py").write_text(
+            "def test_ok():\n    value = 1 + 1\n    assert value == 2\n"
+        )
+        result = subprocess.run(
+            ["bash", str(wrapper), str(scan_dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert result.returncode != 0, (
+            "gate must FAIL CLOSED when the linter exits >=2 while printing "
+            f"nothing (BUG #2); got rc=0:\n{result.stdout}"
+        )
+
+    def test_e_linter_scans_passed_dir_directly_and_recursively(self, tmp_path):
+        # SCAN-COVERAGE (BUG #3): invoked as the wrapper invokes it
+        # (argv[1] = scan dir), the linter flags a real vacuous assertion
+        # living in a NON-"tests" subdir UNDER that dir. A linter that
+        # re-discovered tests/+mu/tests/ below argv[1] would find nothing in
+        # pkg/; rc==1 proves it scans the passed dir directly and recursively.
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "test_deep.py").write_text(
+            "def test_deep():\n    " + "assert " + "True\n"
+        )
+        result = _run_linter_directly(str(tmp_path))
+        assert result.returncode == 1, (
+            "linter must flag the vacuous assertion under the passed dir "
+            f"(rc==1, proving direct recursive scan); got rc={result.returncode}, "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "test_deep.py" in result.stdout
+
+    def test_f_linter_fails_closed_on_zero_python_files(self, tmp_path):
+        # ZERO-FILES (BUG #3 belt-and-suspenders): a target resolving to zero
+        # *.py files is an EXECUTION ERROR (exit >=2) -- scanning nothing FAILS
+        # closed, never exit 0.
+        (tmp_path / "notes.txt").write_text("no python here\n")
+        result = _run_linter_directly(str(tmp_path))
+        assert result.returncode >= 2, (
+            "linter must fail closed (exit >=2) on zero *.py files; "
+            f"got rc={result.returncode}"
+        )

@@ -42,17 +42,30 @@ check_pattern() {
 # Vacuous assertions (always true)
 # =============================================================================
 
-# assert True (not followed by ==, which tests coercion)
-check_pattern "assert True\s*$|assert True\s*#" "assert True - vacuous assertion"
-
-# assert 1 / assert "string" / assert [] is falsy but assert [1] is truthy
-check_pattern "^\s*assert 1\s*$|^\s*assert 1\s*#" "assert 1 - vacuous assertion"
-
-# assertTrue(True) / assertEqual(True, True)
-check_pattern "assertTrue\s*\(\s*True\s*\)" "assertTrue(True) - tautology"
-check_pattern "assertEqual\s*\(\s*True\s*,\s*True\s*\)" "assertEqual(True, True) - tautology"
-check_pattern "assertEqual\s*\(\s*1\s*,\s*1\s*\)" "assertEqual(1, 1) - tautology"
-check_pattern "assertEqual\s*\(\s*0\s*,\s*0\s*\)" "assertEqual(0, 0) - tautology"
+# AST-based vacuous-assertion scan (replaces six TEXT greps that false-positived
+# on vacuous patterns living inside string-literal test FIXTURES; see
+# check-test-theater-ast-2026-06-03 / FOUNDER_OVERRIDE:check-test-theater-ast-2026-06-03).
+# CLI CONTRACT: the linter scans "$TESTS_DIR" DIRECTLY (argv[1] = the dir to walk
+# recursively); it must NOT treat argv[1] as a root that re-discovers tests/ +
+# mu/tests/ below it (that would scan tests/tests, find nothing, and fail-open).
+# set -e SAFE: the guarded `if` (equivalently `... && rc=0 || rc=$?`) stops a
+# nonzero linter exit from fail-fasting the script before the branch runs. A bare
+# `out=$(...); rc=$?` is FORBIDDEN: under set -e the failing command substitution
+# exits the script and rc=$? / the branch never run.
+if out=$(python3 "$(dirname "$0")/linters/check_test_theater.py" "$TESTS_DIR" 2>&1); then
+    rc=0
+else
+    rc=$?
+fi
+if [ "$rc" -eq 0 ]; then
+    :                                  # rc==0: scanned clean -> continue
+elif [ "$rc" -eq 1 ]; then
+    printf '%s\n' "$out"               # rc==1: real vacuous finding(s)
+    ERRORS=$((ERRORS + 1))             # accumulate, continue
+else
+    printf '%s\n' "$out"               # rc>=2: EXECUTION FAILURE
+    ERRORS=$((ERRORS + 1))             # FAIL CLOSED -- never treat as clean, continue
+fi
 
 # =============================================================================
 # Self-comparison (always equal)
