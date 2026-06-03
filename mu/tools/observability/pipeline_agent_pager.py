@@ -754,6 +754,43 @@ def _coalesced_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [coalesced_by_id[event_id] for event_id in ordered_event_ids]
 
 
+def _drop_transient_monitor_skips(entry: dict[str, Any]) -> None:
+    """Scrub a PERSISTED transient monitor-state skip from a rebuilt entry.
+
+    The two monitor-state skip reasons (``CLAUDE_SKIP_REASON_MONITOR_UNSET`` /
+    ``CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE``) are NEVER terminal: both mean the
+    dedicated monitor is not yet up with a DISTINCT id, and both clear the moment
+    the monitor's session-start lands a clean, distinct id. The live dispatch path
+    no longer parks either reason, but an older build -- or the prior terminal
+    EQUALS_LIVE branch -- may have PERSISTED one directly into the state file's
+    ``skipped_targets``, which ``_load_state`` reloads and ``_ensure_event_state``
+    preserves via ``setdefault``. The skip-receipt guard only stops a REBUILD from
+    a durable receipt; it cannot undo an already-loaded state entry. Drop any such
+    stale entry so ``_refresh_pending_targets`` returns the target to
+    ``pending_targets`` -- retryable once a distinct monitor id exists. Terminal
+    skips (every other reason) are left untouched.
+    """
+    skipped = entry.get("skipped_targets")
+    if not isinstance(skipped, dict) or not skipped:
+        return
+    transient_targets: list[str] = []
+    for target, info in skipped.items():
+        if isinstance(info, dict):
+            reason = str(info.get("skip_reason") or "").strip()
+        else:
+            reason = str(info or "").strip()
+        if reason in {
+            CLAUDE_SKIP_REASON_MONITOR_UNSET,
+            CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE,
+        }:
+            transient_targets.append(target)
+    if not transient_targets:
+        return
+    for target in transient_targets:
+        del skipped[target]
+    _refresh_pending_targets(entry)
+
+
 def _reconcile_delivery_state(
     repo_root: Path,
     state: dict[str, Any],
@@ -799,15 +836,22 @@ def _reconcile_delivery_state(
             raise PipelineAgentPagerError(
                 f"pager skip receipt references unknown event_id: {event_id}"
             )
-        if skip_reason == CLAUDE_SKIP_REASON_MONITOR_UNSET:
-            # Authoritative replay-safety guard: a transient monitor-unset/
-            # malformed skip is NEVER terminal. The live path no longer writes
-            # such receipts, but an older build (before that fix) may have left
-            # one on disk -- do NOT rebuild a skipped_targets entry from it.
-            # Leaving the target out of skipped_targets keeps it in
-            # pending_targets so it retries once the Work-item-1 writer lands a
-            # clean monitor id. This closes the re-terminalize-on-rebuild hole;
-            # every other skip reason rebuilds terminally below, unchanged.
+        if skip_reason in {
+            CLAUDE_SKIP_REASON_MONITOR_UNSET,
+            CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE,
+        }:
+            # Authoritative replay-safety guard: a transient monitor-state skip is
+            # NEVER terminal. Both reasons mean the dedicated monitor is not yet up
+            # with a DISTINCT id -- the id is unset/malformed, or it transiently
+            # equals the live orchestrator id -- and both clear the moment the
+            # monitor's session-start lands a clean, distinct id. The live dispatch
+            # path no longer writes either receipt (both are retryable in
+            # _dispatch_pending_locked), but an older build -- or the prior
+            # terminal EQUALS_LIVE branch -- may have left one on disk; do NOT
+            # rebuild a skipped_targets entry from it. Leaving the target out of
+            # skipped_targets keeps it in pending_targets so it retries once a
+            # distinct monitor id exists. This closes the re-terminalize-on-rebuild
+            # hole; every other skip reason rebuilds terminally below, unchanged.
             continue
         entry = _ensure_event_state(state, event)
         skipped = entry.setdefault("skipped_targets", {})
@@ -816,6 +860,18 @@ def _reconcile_delivery_state(
             "recorded_at": str(receipt.get("recorded_at") or "").strip(),
         }
         _refresh_pending_targets(entry)
+    # State-side mirror of the skip-receipt guard above. The receipt guard stops a
+    # monitor-state skip from being REBUILT from a durable receipt, but an older
+    # build -- or the prior terminal EQUALS_LIVE branch -- may have PERSISTED the
+    # skip directly into the state file's skipped_targets (which _load_state
+    # reloads and _ensure_event_state preserves). Scrub any such stale monitor-
+    # state skip from every rebuilt entry so the claude leg returns to
+    # pending_targets, retryable once a distinct monitor id exists. Without this, a
+    # restart/replay re-terminalizes a page the monitor simply was not ready for
+    # (bridge round-2 NO_GO). Terminal skips (every other reason) are untouched.
+    for entry in state.get("events", {}).values():
+        if isinstance(entry, dict):
+            _drop_transient_monitor_skips(entry)
     autoping_thread_id = _read_latest_autoping_thread_id(repo_root)
     if autoping_thread_id:
         state["codex_thread_id"] = autoping_thread_id
@@ -1783,30 +1839,37 @@ def _dispatch_pending_locked(
                     attempt_record["last_receipt_log_warning"] = receipt_log_warning
                     attempts[target] = attempt_record
                     state_saved = False
-            elif skipped and skip_reason == CLAUDE_SKIP_REASON_MONITOR_UNSET:
-                # TRANSIENT, replay-safe skip (NOT terminal): the dedicated
-                # monitor session id is unset/malformed -- the WHOLE unset-or-
-                # malformed family collapsed by _read_claude_monitor_session_id
-                # into this one reason. The Work-item-1 writer
+            elif skipped and skip_reason in {
+                CLAUDE_SKIP_REASON_MONITOR_UNSET,
+                CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE,
+            }:
+                # TRANSIENT, replay-safe monitor-state skip (NOT terminal). Both
+                # reasons mean the dedicated monitor is not yet up with a DISTINCT
+                # id: MONITOR_UNSET is the whole unset-or-malformed family
+                # collapsed by _read_claude_monitor_session_id into one reason;
+                # MONITOR_EQUALS_LIVE means the monitor id transiently equals the
+                # live orchestrator id. The monitor's session-start writer
                 # (.claude/hooks/session-start.sh under RCX_CLAUDE_MONITOR=1)
-                # clears every member of that family the moment it atomically
-                # lands a clean id, so this skip is genuinely transient. Do NOT
-                # park the target in skipped_targets: _refresh_pending_targets
-                # then leaves it in pending_targets, retryable on a later dispatch
-                # once the monitor file appears. Do NOT append a durable skip
-                # receipt either -- writing no terminal trace is what keeps a
-                # restart/replay from re-terminalizing it (the matching guard in
-                # _reconcile_delivery_state ignores any pre-existing such receipt).
-                # Codex never emits a skip marker, so this branch is claude-only.
-                # Every OTHER skip reason stays terminal in the branch below.
+                # clears BOTH the moment it atomically lands a clean, distinct id,
+                # so either skip is genuinely transient. Do NOT park the target in
+                # skipped_targets: _refresh_pending_targets then leaves it in
+                # pending_targets, retryable on a later dispatch once a distinct
+                # monitor id exists. Do NOT append a durable skip receipt either --
+                # writing no terminal trace is what keeps a restart/replay from
+                # re-terminalizing the page (the matching guard in
+                # _reconcile_delivery_state ignores a pre-existing receipt for
+                # EITHER reason). A page to Claude is therefore never silently or
+                # terminally dropped because the monitor was not yet up with a
+                # distinct id. Codex never emits a skip marker, so this branch is
+                # claude-only. Every OTHER skip reason stays terminal below.
                 _refresh_pending_targets(entry)
                 _save_state(repo_root, state)
                 state_saved = True
             elif skipped:
-                # Genuinely terminal fail-closed claude leg (e.g.
-                # CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE, and any other/future
-                # skip reason): a DISTINCT skip -- never a delivery and never a
-                # retryable error. Park the target in skipped_targets so
+                # Genuinely terminal fail-closed claude leg: any future/other skip
+                # reason that is NOT one of the two transient monitor-state reasons
+                # handled retryably above. A DISTINCT skip -- never a delivery and
+                # never a retryable error. Park the target in skipped_targets so
                 # _refresh_pending_targets drops it from pending_targets (it is
                 # neither marked delivered nor left pending for retry), and append
                 # a distinct skip receipt (never a delivery receipt) so the skip
