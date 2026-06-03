@@ -16261,6 +16261,53 @@ class TestClassifyPrConflictingNegatives:
         }
         assert rg_mod.classify_failure(payload) != FailureClass.PR_CONFLICTING
 
+    def test_pre_push_pytest_failure_with_merge_state_content_is_test_failure(self):
+        """Regression (recovery-classify-prepush-2026-06-02): a pre-push-fast
+        pytest failure whose test CONTENT contains merge-state strings
+        (mergeStateStatus=DIRTY, as on the _resolve_post_merge_verify_root
+        regression observed 2026-06-02) must classify TEST_FAILURE, not
+        PR_CONFLICTING.
+
+        The pre-push pytest/test-failure branch is evaluated BEFORE the broad
+        pr_conflicting substring match, so recovery re-invokes the implementer to
+        fix the failing test instead of running fix_pr_conflicting, finding no PR
+        ('could not determine PR number'), and stranding the wave.
+        """
+        payload = json.dumps({
+            "status": "error",
+            "step": "run_pre_push_script",
+            "errors": [
+                "pre-push-fast failed: L4 execution contract passed\n"
+                "=================================== FAILURES ===================================\n"
+                "FAILED tests/tools/test_post_merge_verify.py::"
+                "TestResolvePostMergeVerifyRoot::"
+                "test_dirty_linked_verify_root_must_not_run_git_merge_ff_only\n"
+                "AssertionError: dirty linked verify root must not run "
+                "git merge --ff-only; got mergeStateStatus=DIRTY\n"
+                "1 failed, 6700 passed, 18 skipped in 283.92s\n"
+                "To bypass (not recommended): git push --no-verify"
+            ],
+        }, indent=2)
+        result = {"status": "failed", "executor": "commit_executor", "stdout": payload}
+        fc = rg_mod.classify_failure(result)
+        assert fc == FailureClass.TEST_FAILURE
+        assert fc != FailureClass.PR_CONFLICTING
+
+    def test_genuine_pr_conflict_non_pre_push_step_still_pr_conflicting(self):
+        """Regression (recovery-classify-prepush-2026-06-02): the pre-push pytest
+        reorder must NOT weaken genuine PR-conflict classification. A real
+        mergeStateStatus=DIRTY / mergeable=CONFLICTING signal from a PR-state
+        check on a NON-pre-push step still classifies PR_CONFLICTING (the guard
+        _looks_like_pre_push_pytest_failure is false for a non-pre-push step, so
+        the substring match still fires).
+        """
+        result = {
+            "status": "error",
+            "step": "ensure_review_clear_and_merge",
+            "stdout": "pr state check: mergeStateStatus=DIRTY mergeable=CONFLICTING for PR #1234",
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.PR_CONFLICTING
+
     def test_shell_nonzero_without_merge_signature_not_pr_conflicting(self):
         """A generic shell non-zero exit without merge signatures must not classify as PR_CONFLICTING."""
         payload = {
