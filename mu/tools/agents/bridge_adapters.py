@@ -1036,6 +1036,17 @@ def _run_adapter_buffered(
         return output
     if raw_fh is not None:
         raw_fh.close()
+    if proc.returncode != 0 and result_terminal_seen_at[0] is not None:
+        # The adapter emitted its terminal result event and then the process
+        # exited non-zero during post-completion teardown (e.g. a .claude Stop
+        # hook that errors/hangs after the implementer's result envelope). The
+        # completed work is already captured, so return it -- the downstream
+        # result-subtype check classifies success vs error -- instead of
+        # discarding it as an "exited N" failure that forces a wasted implementer
+        # re-invoke (#43). result_terminal_seen_at is only armed when
+        # post_result_exit_timeout_s is set (implementer), so reviewer/meta
+        # adapters keep the original raise-on-nonzero-exit behavior.
+        return output
     if proc.returncode != 0:
         snippet = output[-1000:]
         raise BridgeAdapterError(
@@ -1267,6 +1278,17 @@ def _run_adapter_streaming(
         return output
     if raw_fh is not None:
         raw_fh.close()
+    if proc.returncode != 0 and result_terminal_seen_at[0] is not None:
+        # The adapter emitted its terminal result event and then the process
+        # exited non-zero during post-completion teardown (e.g. a .claude Stop
+        # hook that errors/hangs after the implementer's result envelope). The
+        # completed work is already captured, so return it -- the downstream
+        # result-subtype check classifies success vs error -- instead of
+        # discarding it as an "exited N" failure that forces a wasted implementer
+        # re-invoke (#43). result_terminal_seen_at is only armed when
+        # post_result_exit_timeout_s is set (implementer), so reviewer/meta
+        # adapters keep the original raise-on-nonzero-exit behavior.
+        return output
     if proc.returncode != 0:
         snippet = output[-1000:]
         raise BridgeAdapterError(
