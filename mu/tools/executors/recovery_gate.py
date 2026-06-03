@@ -357,11 +357,29 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     stdout_lower = stdout.lower() if isinstance(stdout, str) else ""
     if status_failed and _looks_like_upstream_connectivity_failure(f"{combined_text}\n{reason_text}"):
         return FailureClass.UPSTREAM_CONNECTIVITY
+    # An executor that EXPLICITLY tags a result pr_conflicting -- a deliberate
+    # PR-state signal, not a substring scraped from test output -- is honored
+    # ahead of the pre-push pytest reorder below.
     if (
         result.get("failure_class") == "pr_conflicting"
         or embedded_stdout.get("failure_class") == "pr_conflicting"
         or embedded_stderr.get("failure_class") == "pr_conflicting"
-        or "mergeable=conflicting" in reason_lower
+    ):
+        return FailureClass.PR_CONFLICTING
+
+    l4_signal = f"{reason_lower} {combined_lower}"
+    # A pre-push-fast pytest/test failure is classified TEST_FAILURE BEFORE the
+    # broad pr_conflicting SUBSTRING match: a failing test whose CONTENT mentions
+    # merge-state strings (e.g. the _resolve_post_merge_verify_root regression
+    # asserting on mergeStateStatus=DIRTY) is a test to fix, not a PR conflict --
+    # otherwise fix_pr_conflicting finds no PR and the wave strands. The guard
+    # (_looks_like_pre_push_pytest_failure: a pre-push step or "pre-push-fast
+    # failed" signal PLUS a pytest indicator) keeps a genuine PR conflict on a
+    # non-pre-push step falling through to PR_CONFLICTING below.
+    if status_failed and _looks_like_pre_push_pytest_failure(step_lower, l4_signal):
+        return FailureClass.TEST_FAILURE
+    if (
+        "mergeable=conflicting" in reason_lower
         or "mergeable=conflicting" in combined_lower
         or "mergeable=conflicting" in stdout_lower
         or "mergestatestatus=dirty" in reason_lower
@@ -383,15 +401,12 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     ):
         return FailureClass.PR_MERGE_CONFLICT
 
-    l4_signal = f"{reason_lower} {combined_lower}"
     if _looks_like_git_index_permission_failure(f"{combined_text}\n{reason_text}"):
         return FailureClass.UNCLASSIFIED
     if status_failed and _looks_like_direct_git_index_lock_failure(result):
         return FailureClass.STALE_GIT_INDEX_LOCK
     if status_failed and _looks_like_stale_active_items_failure(l4_signal):
         return FailureClass.STALE_ACTIVE_ITEMS
-    if status_failed and _looks_like_pre_push_pytest_failure(step_lower, l4_signal):
-        return FailureClass.TEST_FAILURE
     if status_failed and (
         "l4 execution contract" in l4_signal
         or "non-structural adjacency cap" in l4_signal
