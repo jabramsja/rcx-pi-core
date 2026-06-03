@@ -18,7 +18,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # mu/tools/executors -> repo root
@@ -3695,6 +3695,391 @@ def dispatch(
         }
 
 
+# ---------------------------------------------------------------------------
+# Lane-monitor lifecycle (auto-spawn at launch, auto-clean at wave-end)
+#
+# A LANE bus is a namespaced agent bus of the form ".agent_bus-<laneN>". The
+# dispatcher auto-spawns that lane's 4-pane tmux monitor once at launch and
+# auto-cleans its self-healing owner-loop process(es) and the exact
+# "rcx-pipeline-<laneN>" tmux session at wave-end (all three behaviors ship
+# together: auto-spawn without auto-clean is worse, because the owner-loop
+# self-heals and recreates the session). The default/main ".agent_bus" is
+# MAIN, not a lane: it already owns its monitor and its bare "rcx-pipeline"
+# session, which are never spawned or cleaned here. pipeline_monitor.sh is
+# INVOKED / process-matched only -- never modified.
+# See reports/control_plane/lane_monitor_autospawn_cleanup_2026-06-03.md.
+# ---------------------------------------------------------------------------
+
+# A lane bus is exactly ".agent_bus-<laneN>"; the captured group is the lane.
+# The default ".agent_bus" (no suffix) does NOT match -> treated as MAIN.
+_LANE_BUS_DIR_RE = re.compile(r"^\.agent_bus-([A-Za-z0-9][A-Za-z0-9_-]*)$")
+
+
+def _lane_monitor_target(bus_dir: str | Path | None) -> tuple[str, str] | None:
+    """Return ``(lane, tmux_session)`` for a LANE bus, else ``None``.
+
+    ``None`` is returned for the default/main ``.agent_bus`` bus (or no bus),
+    which is MAIN and must never be auto-spawned or auto-cleaned, and for any
+    bus_dir that is not a well-formed ``.agent_bus-<laneN>`` lane bus. The
+    session is ``rcx-pipeline-<laneN>``; because ``laneN`` is non-empty by
+    construction it can never collapse to the bare ``rcx-pipeline`` MAIN
+    session. This mirrors the configured ``pipeline_monitor.lanes.*.tmux_session``
+    convention that pipeline_monitor.sh actually creates.
+    """
+    if bus_dir is None:
+        return None
+    name = str(bus_dir).strip().rstrip("/")
+    match = _LANE_BUS_DIR_RE.fullmatch(name)
+    if not match:
+        return None
+    lane = match.group(1)
+    return lane, f"rcx-pipeline-{lane}"
+
+
+def _argv_is_lane_owner_loop(command_line: str, lane: str) -> bool:
+    """Exact whole-token argv match for a lane's monitor owner-loop process.
+
+    Selects ``command_line`` only when it carries a ``--lane`` token whose
+    immediately-following token equals exactly ``lane`` AND an ``__owner-loop``
+    token. This is a token-delimited match, NEVER a substring/prefix test: a
+    bare ``"--lane lane1"`` substring would also match ``"--lane lane10"`` and
+    wrongly select a sibling lane during a lane1 cleanup. The MAIN owner-loop
+    carries no ``--lane`` token, so it can never be selected.
+    """
+    if not lane:
+        return False
+    tokens = command_line.split()
+    if "__owner-loop" not in tokens:
+        return False
+    for index, token in enumerate(tokens):
+        if token == "--lane" and index + 1 < len(tokens) and tokens[index + 1] == lane:
+            return True
+    return False
+
+
+def _monitor_script_paths_for_root(repo_root: Path | str) -> tuple[str, str]:
+    """The two absolute pipeline_monitor.sh paths a same-root owner-loop can carry.
+
+    Mirrors pipeline_monitor.sh's ``owner_command_matches_root``, which accepts a
+    monitor script under either ``<root>/mu/tools/observability`` or
+    ``<root>/tools/observability``. The owner-loop argv embeds the absolute
+    script path because the dispatcher spawns it as
+    ``bash <root>/mu/tools/observability/pipeline_monitor.sh ... __owner-loop``.
+    """
+    root = str(repo_root).rstrip("/")
+    return (
+        f"{root}/mu/tools/observability/pipeline_monitor.sh",
+        f"{root}/tools/observability/pipeline_monitor.sh",
+    )
+
+
+def _argv_belongs_to_repo_root(command_line: str, repo_root: Path | str) -> bool:
+    """True only when an owner-loop argv carries THIS repo root's monitor script.
+
+    A lane owner-loop launched from a different checkout/worktree embeds a
+    different absolute pipeline_monitor.sh path, so this excludes a same-named
+    lane (e.g. ``lane1``) running under another repo root. Mirrors
+    ``owner_command_matches_root`` in pipeline_monitor.sh so the dispatcher and
+    the monitor agree on owner-loop ownership and a cleanup can never reach an
+    unrelated checkout's monitor.
+    """
+    return any(
+        path in command_line
+        for path in _monitor_script_paths_for_root(repo_root)
+    )
+
+
+def _enumerate_owner_loop_processes(repo_root: Path) -> list[tuple[int, str]]:
+    """Return ``(pid, command_line)`` for live owner-loops of THIS repo root.
+
+    Coarse candidate filter only (the process is a pipeline_monitor.sh
+    owner-loop whose argv carries this ``repo_root``'s absolute monitor-script
+    path); the exact lane selection is delegated to ``_argv_is_lane_owner_loop``.
+    Filtering by ``repo_root`` here -- mirroring pipeline_monitor.sh's
+    ``tracked_owner_pids`` -- is what stops a cleanup from reaching a same-named
+    lane owner-loop in a different checkout/worktree. Best-effort: returns an
+    empty list when ``ps`` is unavailable.
+    """
+    try:
+        completed = subprocess.run(
+            ["ps", "-axww", "-o", "pid=,command="],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    processes: list[tuple[int, str]] = []
+    for line in completed.stdout.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        pid_str, command_line = parts
+        if not pid_str.isdigit():
+            continue
+        if "__owner-loop" in command_line and _argv_belongs_to_repo_root(command_line, repo_root):
+            processes.append((int(pid_str), command_line))
+    return processes
+
+
+def _select_lane_owner_loop_pids(
+    processes: list[tuple[int, str]],
+    lane: str,
+    repo_root: Path | str,
+) -> list[int]:
+    """Pick pids whose argv exact-token-matches ``lane``'s owner-loop AND belongs to ``repo_root``.
+
+    The ``repo_root`` guard is defense-in-depth alongside
+    ``_enumerate_owner_loop_processes``: even if a caller passes candidates from
+    another checkout, a same-named lane owner-loop under a different repo root is
+    never selected (it carries a different absolute monitor-script path).
+    """
+    return [
+        pid
+        for pid, command_line in processes
+        if _argv_is_lane_owner_loop(command_line, lane)
+        and _argv_belongs_to_repo_root(command_line, repo_root)
+    ]
+
+
+# tmux resolves a bare ``-t`` target as: exact name, THEN the start of a name,
+# THEN an fnmatch glob -- so a bare "rcx-pipeline-lane1" target also resolves the
+# prefix-colliding sibling "rcx-pipeline-lane10" when lane1 is absent. The "="
+# prefix forces EXACT matching (proven: `tmux has-session -t =rcx-pipeline-lane1`
+# never resolves rcx-pipeline-lane10), so every session probe/kill below is
+# anchored to exactly one session name and can never reach a sibling lane or the
+# bare "rcx-pipeline" MAIN session.
+def _tmux_exact_target(session: str) -> str:
+    """Return the tmux ``=``-anchored exact-match target for ``session``."""
+    return f"={session}"
+
+
+def tmux_has_session(session: str) -> bool:
+    """Return True when a tmux session named exactly ``session`` exists (best-effort).
+
+    Uses the ``=`` exact-match target so an absent ``rcx-pipeline-lane1`` probe
+    never resolves to a prefix-colliding sibling (``rcx-pipeline-lane10``).
+    """
+    try:
+        completed = subprocess.run(
+            ["tmux", "has-session", "-t", _tmux_exact_target(session)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+def tmux_kill_session(session: str) -> None:
+    """Kill the exact tmux session ``session`` (best-effort, idempotent).
+
+    Uses the ``=`` exact-match target so a ``rcx-pipeline-lane1`` cleanup can
+    NEVER kill a prefix-colliding sibling (``rcx-pipeline-lane10``) nor, since
+    ``laneN`` is non-empty, the bare ``rcx-pipeline`` MAIN session.
+    """
+    try:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", _tmux_exact_target(session)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _spawn_lane_monitor(
+    repo_root: Path,
+    bus_dir: str,
+    lane: str,
+    session: str,
+    *,
+    verbose: bool = False,
+) -> subprocess.Popen | None:
+    """Auto-spawn a lane's 4-pane tmux monitor once, idempotently, best-effort.
+
+    Returns the in-flight ``start --detach`` ``Popen`` handle (or ``None`` when
+    the spawn is skipped or errors) so the caller can QUIESCE it before wave-end
+    cleanup. ``pipeline_monitor.sh start --detach`` only returns once it has
+    created the tmux session and verified the owner-loop is live, so waiting on
+    this handle is what closes the race where a fast wave-return runs cleanup,
+    finds nothing yet, and the still-in-flight detached start THEN creates a
+    zombie monitor that nothing cleans (Bridge R3 Finding 1).
+
+    Skips when ``session`` already exists. Otherwise spawns
+    ``pipeline_monitor.sh --bus-dir <bus_dir> --lane <lane> start --detach`` as a
+    detached, non-blocking subprocess. NEVER blocks or fails the dispatch loop:
+    any error is logged (when verbose) and swallowed.
+    """
+    try:
+        if tmux_has_session(session):
+            if verbose:
+                print(f"[dispatch] Lane monitor session {session} already live — skipping spawn")
+            return None
+        monitor_script = Path(repo_root) / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+        command = [
+            "bash",
+            str(monitor_script),
+            "--bus-dir",
+            str(bus_dir),
+            "--lane",
+            lane,
+            "start",
+            "--detach",
+        ]
+        proc = subprocess.Popen(
+            command,
+            cwd=str(repo_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        if verbose:
+            print(f"[dispatch] Auto-spawned lane monitor: lane={lane} session={session} bus={bus_dir}")
+        return proc
+    except Exception as exc:  # best-effort: a monitor-spawn error must never block dispatch
+        if verbose:
+            print(f"[dispatch] Lane monitor spawn skipped ({exc})")
+        return None
+
+
+def _cleanup_lane_monitor(
+    repo_root: Path,
+    bus_dir: str | Path | None,
+    *,
+    verbose: bool = False,
+) -> None:
+    """Auto-clean a lane's owner-loop process(es) and tmux session at wave-end.
+
+    Selects owner-loops by exact whole-token ``--lane <laneN>`` argv match (never
+    a substring/prefix test) and FORCE-terminates each before killing only the
+    exact ``rcx-pipeline-<laneN>`` session. The force-terminate is mandatory, not
+    cosmetic: pipeline_monitor.sh's ``cmd_owner_loop`` traps EXIT/INT/TERM but
+    NEVER exits -- the trap only clears its pid record while the ``while true``
+    loop keeps ticking and recreates the tmux session on its next tick. So a lone
+    SIGTERM leaves the self-healing loop alive to resurrect the very session we
+    are about to kill. ``terminate_process_tree`` escalates SIGTERM -> settle ->
+    untrappable SIGKILL (the same "poll + kill -9 fallback" that
+    pipeline_monitor.sh's ``stop_owner_process`` uses), so each selected
+    owner-loop is provably dead BEFORE the session kill and cannot recreate it.
+    The MAIN no-``--lane`` owner-loop and the bare ``rcx-pipeline`` session can
+    never be selected. No-op for the default/main bus. Best-effort and
+    idempotent: errors are swallowed so the dispatcher exit path is never broken.
+    """
+    target = _lane_monitor_target(bus_dir)
+    if target is None:
+        return
+    lane, session = target
+    try:
+        pids = _select_lane_owner_loop_pids(
+            _enumerate_owner_loop_processes(Path(repo_root)),
+            lane,
+            repo_root,
+        )
+        # Force-kill the self-healing owner-loop(s) FIRST (SIGTERM -> settle ->
+        # untrappable SIGKILL via terminate_process_tree), THEN kill the session.
+        # A surviving owner-loop would otherwise recreate the session on its next
+        # tick, so order and SIGKILL escalation are both load-bearing here.
+        for pid in pids:
+            terminate_process_tree(pid)
+            if verbose:
+                print(f"[dispatch] Auto-cleaned lane monitor owner-loop pid={pid} (lane={lane})")
+        tmux_kill_session(session)
+        if verbose:
+            print(f"[dispatch] Auto-cleaned lane monitor session {session}")
+    except Exception as exc:  # best-effort: cleanup must never crash the dispatcher exit
+        if verbose:
+            print(f"[dispatch] Lane monitor cleanup skipped ({exc})")
+
+
+# ``start --detach`` is time-bounded (its owner lock caps acquisition at
+# ~10s, then session rebuild + owner verification), so quiescing it is bounded
+# too. This ceiling sits comfortably above that worst case so a healthy spawn is
+# never force-terminated; only a genuinely hung start hits the timeout.
+LANE_MONITOR_SPAWN_QUIESCE_TIMEOUT_SECONDS = 30.0
+
+
+def _quiesce_lane_monitor_spawn(
+    spawn_proc: subprocess.Popen | None,
+    *,
+    verbose: bool = False,
+) -> None:
+    """Wait for an in-flight ``start --detach`` to settle before wave-end cleanup.
+
+    Closes the Bridge R3 race (Finding 1): the lane monitor is launched
+    fire-and-forget at wave launch, so a fast wave-return could otherwise run
+    cleanup, enumerate no owner-loop/session yet, and THEN have the still-in-
+    flight detached start create a zombie monitor that nothing cleans. Waiting on
+    the spawn handle -- which only returns once the session + owner-loop exist --
+    guarantees the subsequent cleanup sees and removes them. On the rare timeout
+    (a start hung well past its bounded worst case) the spawn is force-terminated
+    so it can NEVER create the session/owner-loop AFTER cleanup runs; cleanup then
+    removes anything it already created. Best-effort: any error is swallowed so
+    the dispatcher exit path is never broken. No-op when ``spawn_proc`` is None
+    (spawn was skipped because the session was already live, or it errored).
+    """
+    if spawn_proc is None:
+        return
+    try:
+        spawn_proc.wait(timeout=LANE_MONITOR_SPAWN_QUIESCE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            terminate_process_tree(spawn_proc.pid)
+        except Exception:
+            pass
+        if verbose:
+            print("[dispatch] Lane monitor spawn did not settle in time — terminated before cleanup")
+    except Exception:  # best-effort: a quiesce error must never break the exit path
+        pass
+
+
+def _with_lane_monitor_lifecycle(
+    repo_root: Path,
+    bus_dir: str | Path | None,
+    run: Callable[[], int],
+    *,
+    verbose: bool = False,
+) -> int:
+    """Run ``run()`` wrapped in the per-lane monitor lifecycle.
+
+    Auto-spawns the lane's 4-pane tmux monitor once at launch (idempotent,
+    best-effort, non-blocking), then in a ``finally`` QUIESCES the in-flight
+    detached start before auto-cleaning its owner-loop + exact
+    ``rcx-pipeline-<laneN>`` session, so cleanup runs on EVERY exit path: normal
+    return, the ``_cleanup_for_signal`` SystemExit, and an error/exception exit
+    (including the non-fatal post-merge-verify "Status: error" return). The
+    quiesce-before-cleanup ordering is load-bearing: without it a fast wave-return
+    could clean up before the detached start has created anything, after which the
+    start would resurrect a zombie monitor that nothing cleans (Bridge R3
+    Finding 1).
+
+    Both wave-launch entrypoints run the WHOLE wave in a single process: the
+    dispatch loop chains phase-a -> phase-b -> commit via ``dispatch``, and the
+    chained phase-a/phase-b/commit control surface chains them in-process via
+    ``_continue_successful_executor_chain``. So spawn-once / clean-once here
+    introduces no per-surface monitor flicker. No-op for the default/main bus,
+    where ``_lane_monitor_target`` returns None.
+    """
+    target = _lane_monitor_target(bus_dir)
+    spawn_proc: subprocess.Popen | None = None
+    if target is not None:
+        spawn_proc = _spawn_lane_monitor(repo_root, bus_dir, target[0], target[1], verbose=verbose)
+    try:
+        return run()
+    finally:
+        if target is not None:
+            # Quiesce the detached start BEFORE cleanup so a fast wave-return
+            # cannot clean up first and let the start resurrect a zombie monitor
+            # afterward (Bridge R3 Finding 1).
+            _quiesce_lane_monitor_spawn(spawn_proc, verbose=verbose)
+            _cleanup_lane_monitor(repo_root, bus_dir, verbose=verbose)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in SURFACE_COMMANDS:
@@ -3710,10 +4095,23 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root = prepare_phase_a_teammate_lane(args, repo_root)
             if args.surface in {"phase-a", "phase-b", "commit"}:
                 config = load_config()
-                return run_recoverable_surface_command(
-                    args,
-                    repo_root=repo_root,
-                    config=config,
+                # A chained phase-a/phase-b/commit surface launch runs the whole
+                # wave in this process (see _continue_successful_executor_chain),
+                # so it owns the lane-monitor lifecycle exactly like the
+                # dispatch-loop path. Without this wrapper a lane surface launch
+                # silently skipped both auto-spawn and auto-clean. For a phase-a
+                # teammate lane, prepare_phase_a_teammate_lane above has already
+                # rebound args.bus_dir to the lane bus and repo_root to the lane
+                # worktree, so the lifecycle targets the correct lane/worktree.
+                return _with_lane_monitor_lifecycle(
+                    repo_root,
+                    getattr(args, "bus_dir", None),
+                    lambda: run_recoverable_surface_command(
+                        args,
+                        repo_root=repo_root,
+                        config=config,
+                    ),
+                    verbose=getattr(args, "verbose", False),
                 )
             cmd = build_surface_command(args)
             config = load_config()
@@ -3834,6 +4232,31 @@ def main(argv: list[str] | None = None) -> int:
             pass  # Can't detect worktree type — proceed anyway
 
     config = load_config(args.config) if args.config else load_config()
+    # Lane-monitor lifecycle: auto-spawn the lane's 4-pane tmux monitor at
+    # launch and auto-clean its owner-loop + session at wave-end on EVERY exit
+    # path. The same _with_lane_monitor_lifecycle wrapper covers the chained
+    # phase-a/phase-b/commit surface entry (see main()'s surface branch) so both
+    # wave-launch routes share one lifecycle. The default/main ".agent_bus" is
+    # MAIN, not a lane, so the wrapper is a no-op there.
+    return _with_lane_monitor_lifecycle(
+        repo_root,
+        args.bus_dir,
+        lambda: _run_dispatch_loop(args, config, repo_root),
+        verbose=args.verbose,
+    )
+
+
+def _run_dispatch_loop(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    repo_root: Path,
+) -> int:
+    """Run the wave dispatch loop and return the process exit code.
+
+    Extracted verbatim from main() so the lane-monitor lifecycle can wrap the
+    loop in try/finally (see main()) without re-indenting the loop body. See
+    reports/control_plane/lane_monitor_autospawn_cleanup_2026-06-03.md.
+    """
     wave_count = 0
 
     while True:

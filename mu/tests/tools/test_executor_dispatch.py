@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -15008,3 +15009,650 @@ class TestRoutingRecordBuilderBlockerPaths:
         )
         assert errors == []
         assert record["blocker_report_paths"] == []
+
+
+class TestLaneMonitorAutospawnCleanup:
+    """Lane-monitor lifecycle: auto-spawn at launch, auto-clean at wave-end.
+
+    Wave lane-monitor-autospawn-cleanup-2026-06-03. A LANE bus
+    (".agent_bus-<laneN>") gets its 4-pane tmux monitor auto-spawned once at
+    launch and its self-healing owner-loop + exact "rcx-pipeline-<laneN>"
+    session auto-cleaned at wave-end on every exit path. The owner-loop is
+    selected by EXACT whole-token --lane argv match, so cleanup can never reach
+    the MAIN no---lane owner-loop, the bare "rcx-pipeline" session, or a
+    prefix-colliding sibling lane. The default/main ".agent_bus" is MAIN, not a
+    lane, and is never spawned or cleaned.
+    """
+
+    @staticmethod
+    def _routing_file(tmp_path):
+        f = tmp_path / "routing.json"
+        f.write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "lane wave",
+                    "wave_name": "lane-wave",
+                }
+            )
+        )
+        return f
+
+    # ---- lane derivation -------------------------------------------------
+    def test_lane_monitor_target_main_bus_is_never_a_lane(self):
+        assert dispatch_mod._lane_monitor_target(None) is None  # ANTICHEAT_OK: testing lane-bus derivation
+        assert dispatch_mod._lane_monitor_target(".agent_bus") is None  # ANTICHEAT_OK: testing lane-bus derivation
+        assert dispatch_mod._lane_monitor_target(".agent_bus/") is None  # ANTICHEAT_OK: testing lane-bus derivation
+        assert dispatch_mod._lane_monitor_target(".agent_bus-") is None  # ANTICHEAT_OK: testing lane-bus derivation
+
+    def test_lane_monitor_target_resolves_lane_and_session(self):
+        assert dispatch_mod._lane_monitor_target(".agent_bus-lane1") == (  # ANTICHEAT_OK: testing lane-bus derivation
+            "lane1",
+            "rcx-pipeline-lane1",
+        )
+        assert dispatch_mod._lane_monitor_target(".agent_bus-lane10") == (  # ANTICHEAT_OK: testing lane-bus derivation
+            "lane10",
+            "rcx-pipeline-lane10",
+        )
+        _, session = dispatch_mod._lane_monitor_target(".agent_bus-lane1")  # ANTICHEAT_OK: testing lane-bus derivation
+        # Non-empty laneN => the session can never collapse to the bare MAIN one.
+        assert session != "rcx-pipeline"
+
+    # ---- exact whole-token owner-loop match (Work item 3) ----------------
+    def test_owner_loop_token_match_excludes_main_and_sibling(self):
+        main_loop = "bash /wt/mu/tools/observability/pipeline_monitor.sh __owner-loop"
+        lane1 = (
+            "bash /wt/mu/tools/observability/pipeline_monitor.sh "
+            "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"
+        )
+        lane10 = (
+            "bash /wt/mu/tools/observability/pipeline_monitor.sh "
+            "--bus-dir .agent_bus-lane10 --lane lane10 __owner-loop"
+        )
+        assert dispatch_mod._argv_is_lane_owner_loop(lane1, "lane1") is True  # ANTICHEAT_OK: testing token-delimited lane match
+        assert dispatch_mod._argv_is_lane_owner_loop(main_loop, "lane1") is False  # ANTICHEAT_OK: MAIN no---lane owner-loop
+        assert dispatch_mod._argv_is_lane_owner_loop(lane10, "lane1") is False  # ANTICHEAT_OK: prefix-colliding sibling
+        assert dispatch_mod._argv_is_lane_owner_loop(lane10, "lane10") is True  # ANTICHEAT_OK: testing token-delimited lane match
+
+    def test_owner_loop_match_requires_owner_loop_token(self):
+        start_cmd = (
+            "bash /wt/mu/tools/observability/pipeline_monitor.sh "
+            "--bus-dir .agent_bus-lane1 --lane lane1 start --detach"
+        )
+        # A start invocation carries --lane lane1 but is NOT an owner-loop.
+        assert dispatch_mod._argv_is_lane_owner_loop(start_cmd, "lane1") is False  # ANTICHEAT_OK: testing token-delimited lane match
+
+    def test_substring_lane_match_would_collide_but_token_match_does_not(self):
+        # The plan's proven defect: a bare substring test would select the
+        # sibling lane during a lane1 cleanup; the whole-token match must not.
+        lane10_owner = (
+            "bash /wt/mu/tools/observability/pipeline_monitor.sh "
+            "--lane lane10 __owner-loop"
+        )
+        assert "--lane lane1" in lane10_owner  # FORBIDDEN substring WOULD match
+        assert dispatch_mod._argv_is_lane_owner_loop(lane10_owner, "lane1") is False  # ANTICHEAT_OK: token match rejects the collision
+
+    def test_select_lane_owner_loop_pids_picks_only_exact_lane(self):
+        candidates = [
+            (111, "bash /wt/mu/tools/observability/pipeline_monitor.sh __owner-loop"),
+            (
+                222,
+                "bash /wt/mu/tools/observability/pipeline_monitor.sh "
+                "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop",
+            ),
+            (
+                333,
+                "bash /wt/mu/tools/observability/pipeline_monitor.sh "
+                "--bus-dir .agent_bus-lane10 --lane lane10 __owner-loop",
+            ),
+        ]
+        # repo_root "/wt" matches every candidate's absolute monitor path, so
+        # selection is decided purely by the exact whole-token lane match here.
+        assert dispatch_mod._select_lane_owner_loop_pids(candidates, "lane1", "/wt") == [222]  # ANTICHEAT_OK: testing pid selection
+        assert dispatch_mod._select_lane_owner_loop_pids(candidates, "lane10", "/wt") == [333]  # ANTICHEAT_OK: testing pid selection
+
+    # ---- (a) lane-bus launch spawns ; (b) main-bus does not --------------
+    def test_lane_bus_launch_auto_spawns_monitor_detached(self, tmp_path):
+        routing_file = self._routing_file(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        popen = MagicMock()
+        with patch.object(
+            dispatch_mod,
+            "dispatch",
+            return_value={"status": "success", "decision": "ROUTE_PHASE_B", "executor": "phase_b_executor"},
+        ), patch.object(dispatch_mod, "tmux_has_session", return_value=False), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor"
+        ), patch.object(dispatch_mod.subprocess, "Popen", popen), patch.object(
+            dispatch_mod.subprocess, "run", return_value=mock_proc
+        ):
+            exit_code = dispatch_mod.main(
+                ["--routing-record", str(routing_file), "--skip-freshness", "--bus-dir", ".agent_bus-lane1"]
+            )
+        assert exit_code == 0
+        assert popen.call_count == 1
+        cmd = popen.call_args.args[0]
+        assert any("pipeline_monitor.sh" in str(part) for part in cmd)
+        assert cmd[cmd.index("--bus-dir") + 1] == ".agent_bus-lane1"
+        assert cmd[cmd.index("--lane") + 1] == "lane1"
+        assert cmd.index("--lane") < cmd.index("start") < cmd.index("--detach")
+
+    def test_lane_bus_launch_skips_spawn_when_session_already_live(self, tmp_path):
+        routing_file = self._routing_file(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        popen = MagicMock()
+        with patch.object(
+            dispatch_mod,
+            "dispatch",
+            return_value={"status": "success", "decision": "ROUTE_PHASE_B", "executor": "phase_b_executor"},
+        ), patch.object(dispatch_mod, "tmux_has_session", return_value=True), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor"
+        ), patch.object(dispatch_mod.subprocess, "Popen", popen), patch.object(
+            dispatch_mod.subprocess, "run", return_value=mock_proc
+        ):
+            exit_code = dispatch_mod.main(
+                ["--routing-record", str(routing_file), "--skip-freshness", "--bus-dir", ".agent_bus-lane1"]
+            )
+        assert exit_code == 0
+        # Idempotent: an already-live session must not be respawned.
+        popen.assert_not_called()
+
+    def test_main_bus_launch_does_not_spawn_monitor(self, tmp_path):
+        routing_file = self._routing_file(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        popen = MagicMock()
+        with patch.object(
+            dispatch_mod,
+            "dispatch",
+            return_value={"status": "success", "decision": "ROUTE_PHASE_B", "executor": "phase_b_executor"},
+        ), patch.object(dispatch_mod.subprocess, "Popen", popen), patch.object(
+            dispatch_mod.subprocess, "run", return_value=mock_proc
+        ):
+            exit_code = dispatch_mod.main(
+                ["--routing-record", str(routing_file), "--skip-freshness"]
+            )
+        assert exit_code == 0
+        # The default/main .agent_bus is MAIN, not a lane => no auto-spawn.
+        popen.assert_not_called()
+
+    # ---- (c) wave-end cleanup selection ----------------------------------
+    def test_wave_end_cleanup_selects_only_exact_lane_owner_and_session(self, tmp_path):
+        # Candidates carry THIS wave's repo root (tmp_path) so the repo-root
+        # ownership guard passes and selection reduces to the lane-token match.
+        root = str(tmp_path)
+        candidates = [
+            (111, f"bash {root}/mu/tools/observability/pipeline_monitor.sh __owner-loop"),
+            (
+                222,
+                f"bash {root}/mu/tools/observability/pipeline_monitor.sh "
+                "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop",
+            ),
+            (
+                333,
+                f"bash {root}/mu/tools/observability/pipeline_monitor.sh "
+                "--bus-dir .agent_bus-lane10 --lane lane10 __owner-loop",
+            ),
+        ]
+        killed_pids: list[int] = []
+        killed_sessions: list[str] = []
+        with patch.object(
+            dispatch_mod, "_enumerate_owner_loop_processes", return_value=candidates
+        ), patch.object(
+            dispatch_mod, "terminate_process_tree", side_effect=lambda pid, **kw: killed_pids.append(pid)
+        ), patch.object(
+            dispatch_mod, "tmux_kill_session", side_effect=lambda s: killed_sessions.append(s)
+        ):
+            dispatch_mod._cleanup_lane_monitor(tmp_path, ".agent_bus-lane1", verbose=True)  # ANTICHEAT_OK: testing wave-end cleanup selection
+        # Cleanup force-terminates via terminate_process_tree (SIGTERM -> SIGKILL),
+        # never a lone SIGTERM the self-healing owner-loop's trap would survive.
+        assert killed_pids == [222]  # exact lane1 owner-loop only
+        assert 111 not in killed_pids  # (i) MAIN no---lane owner-loop excluded
+        assert 333 not in killed_pids  # (iii) prefix-colliding sibling lane excluded
+        assert killed_sessions == ["rcx-pipeline-lane1"]  # exact lane session
+        assert "rcx-pipeline" not in killed_sessions  # (ii) bare MAIN session never killed
+
+    def test_main_bus_wave_end_cleanup_is_noop(self, tmp_path):
+        enumerate_mock = MagicMock()
+        kill_session_mock = MagicMock()
+        with patch.object(
+            dispatch_mod, "_enumerate_owner_loop_processes", enumerate_mock
+        ), patch.object(dispatch_mod, "tmux_kill_session", kill_session_mock):
+            dispatch_mod._cleanup_lane_monitor(tmp_path, None)  # ANTICHEAT_OK: testing MAIN no-op cleanup
+            dispatch_mod._cleanup_lane_monitor(tmp_path, ".agent_bus")  # ANTICHEAT_OK: testing MAIN no-op cleanup
+        # MAIN must never enumerate or kill anything.
+        enumerate_mock.assert_not_called()
+        kill_session_mock.assert_not_called()
+
+    # ---- cleanup runs on ALL exit paths (try/finally) --------------------
+    def test_lane_wave_cleanup_runs_on_error_exit(self, tmp_path):
+        routing_file = self._routing_file(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        cleanup_calls: list[tuple] = []
+        with patch.object(
+            dispatch_mod,
+            "dispatch",
+            return_value={
+                "status": "error",
+                "decision": "ROUTE_PHASE_B",
+                "executor": "phase_b_executor",
+                "message": "post-merge verify error",
+            },
+        ), patch.object(dispatch_mod, "_spawn_lane_monitor"), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor", side_effect=lambda *a, **k: cleanup_calls.append((a, k))
+        ), patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            exit_code = dispatch_mod.main(
+                ["--routing-record", str(routing_file), "--skip-freshness", "--bus-dir", ".agent_bus-lane1"]
+            )
+        # Non-fatal post-merge-verify "Status: error" exit still cleans up once.
+        assert exit_code == 1
+        assert len(cleanup_calls) == 1
+
+    def test_lane_wave_cleanup_runs_on_signal_raise(self, tmp_path):
+        routing_file = self._routing_file(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        cleanup_calls: list[int] = []
+
+        def _raise_systemexit(*args, **kwargs):
+            # Mirrors _cleanup_for_signal raising SystemExit(128+SIGTERM).
+            raise SystemExit(143)
+
+        with patch.object(dispatch_mod, "dispatch", side_effect=_raise_systemexit), patch.object(
+            dispatch_mod, "_spawn_lane_monitor"
+        ), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor", side_effect=lambda *a, **k: cleanup_calls.append(1)
+        ), patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            with pytest.raises(SystemExit) as excinfo:
+                dispatch_mod.main(
+                    ["--routing-record", str(routing_file), "--skip-freshness", "--bus-dir", ".agent_bus-lane1"]
+                )
+        # The signal-raised exit propagates, but finally ran cleanup first.
+        assert excinfo.value.code == 143
+        assert len(cleanup_calls) == 1
+
+    # ---- Bridge R1 Finding 1: chained surface launch runs the lifecycle --
+    # Previously a phase-a/phase-b/commit control-surface launch on a lane bus
+    # returned through run_recoverable_surface_command BEFORE the lifecycle
+    # wrapper, silently skipping both auto-spawn and auto-clean. The chained
+    # surface runs the whole wave in one process, so it now owns the same
+    # spawn-once/clean-once lifecycle as the dispatch loop.
+    def test_surface_phase_b_lane_bus_spawns_and_cleans(self, tmp_path):
+        events: list[str] = []
+        with patch.object(
+            dispatch_mod, "resolve_repo_root_for_dispatch", return_value=tmp_path
+        ), patch.object(
+            dispatch_mod, "run_recoverable_surface_command", return_value=0
+        ), patch.object(
+            dispatch_mod, "_spawn_lane_monitor", side_effect=lambda *a, **k: events.append(f"spawn:{a[2]}")
+        ), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor", side_effect=lambda *a, **k: events.append("clean")
+        ):
+            rc = dispatch_mod.main(
+                ["phase-b", "--routing-record-json", "{}", "--bus-dir", ".agent_bus-lane1"]
+            )
+        assert rc == 0
+        # Spawned at launch with the derived lane, cleaned at wave-end.
+        assert events == ["spawn:lane1", "clean"]
+
+    def test_surface_phase_a_lane_bus_spawns_and_cleans(self, tmp_path):
+        events: list[str] = []
+        with patch.object(
+            dispatch_mod, "resolve_repo_root_for_dispatch", return_value=tmp_path
+        ), patch.object(
+            dispatch_mod, "prepare_phase_a_teammate_lane", return_value=tmp_path
+        ), patch.object(
+            dispatch_mod, "run_recoverable_surface_command", return_value=0
+        ), patch.object(
+            dispatch_mod, "_spawn_lane_monitor", side_effect=lambda *a, **k: events.append(f"spawn:{a[2]}")
+        ), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor", side_effect=lambda *a, **k: events.append("clean")
+        ):
+            rc = dispatch_mod.main(
+                ["phase-a", "--plan-name", "p", "--bus-dir", ".agent_bus-lane2"]
+            )
+        assert rc == 0
+        assert events == ["spawn:lane2", "clean"]
+
+    def test_surface_main_bus_does_not_run_lane_lifecycle(self, tmp_path):
+        events: list[str] = []
+        with patch.object(
+            dispatch_mod, "resolve_repo_root_for_dispatch", return_value=tmp_path
+        ), patch.object(
+            dispatch_mod, "run_recoverable_surface_command", return_value=0
+        ), patch.object(
+            dispatch_mod, "_spawn_lane_monitor", side_effect=lambda *a, **k: events.append("spawn")
+        ), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor", side_effect=lambda *a, **k: events.append("clean")
+        ):
+            rc = dispatch_mod.main(
+                ["phase-b", "--routing-record-json", "{}", "--bus-dir", ".agent_bus"]
+            )
+        assert rc == 0
+        # Default/main bus on the surface path is MAIN => no lane lifecycle.
+        assert events == []
+
+    def test_surface_lane_cleanup_runs_even_when_surface_raises(self, tmp_path):
+        # try/finally parity: a surface launch that raises mid-wave still cleans.
+        events: list[str] = []
+
+        def _boom(*a, **k):
+            raise RuntimeError("surface blew up")
+
+        with patch.object(
+            dispatch_mod, "resolve_repo_root_for_dispatch", return_value=tmp_path
+        ), patch.object(
+            dispatch_mod, "run_recoverable_surface_command", side_effect=_boom
+        ), patch.object(
+            dispatch_mod, "_spawn_lane_monitor", side_effect=lambda *a, **k: events.append("spawn")
+        ), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor", side_effect=lambda *a, **k: events.append("clean")
+        ):
+            with pytest.raises(RuntimeError):
+                dispatch_mod.main(
+                    ["phase-b", "--routing-record-json", "{}", "--bus-dir", ".agent_bus-lane1"]
+                )
+        # Cleanup still ran despite the exception.
+        assert events == ["spawn", "clean"]
+
+    # ---- Bridge R1 Finding 2: cross-repo-root cleanup safety -------------
+    # Owner-loop selection must also require THIS repo root's absolute monitor
+    # script path, so a same-named lane (e.g. lane1) running in a different
+    # checkout/worktree is never killed by this wave's cleanup.
+    def test_argv_belongs_to_repo_root_matches_only_this_root(self):
+        cmd = (
+            "bash /repoA/mu/tools/observability/pipeline_monitor.sh "
+            "--lane lane1 __owner-loop"
+        )
+        assert dispatch_mod._argv_belongs_to_repo_root(cmd, "/repoA") is True  # ANTICHEAT_OK: testing repo-root ownership
+        assert dispatch_mod._argv_belongs_to_repo_root(cmd, "/repoB") is False  # ANTICHEAT_OK: foreign repo root excluded
+        # A trailing slash on repo_root must not defeat the match.
+        assert dispatch_mod._argv_belongs_to_repo_root(cmd, "/repoA/") is True  # ANTICHEAT_OK: testing repo-root ownership
+        # The alternate "<root>/tools/observability/..." layout is also accepted.
+        alt = (
+            "bash /repoA/tools/observability/pipeline_monitor.sh "
+            "--lane lane1 __owner-loop"
+        )
+        assert dispatch_mod._argv_belongs_to_repo_root(alt, "/repoA") is True  # ANTICHEAT_OK: testing repo-root ownership
+
+    def test_select_excludes_same_lane_owner_loop_in_another_checkout(self):
+        # The exact defect: two checkouts both run a lane1 owner-loop; a lane1
+        # cleanup must only ever select its OWN checkout's pid.
+        candidates = [
+            (101, "bash /repoA/mu/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+            (202, "bash /repoB/mu/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+        ]
+        assert dispatch_mod._select_lane_owner_loop_pids(candidates, "lane1", "/repoA") == [101]  # ANTICHEAT_OK: only this checkout
+        assert dispatch_mod._select_lane_owner_loop_pids(candidates, "lane1", "/repoB") == [202]  # ANTICHEAT_OK: only this checkout
+
+    def test_wave_end_cleanup_excludes_foreign_repo_root_owner_loop(self, tmp_path):
+        # Full cleanup path (select + kill): a foreign-root lane1 owner-loop is
+        # spared even though its --lane token matches exactly.
+        this_root = str(tmp_path)
+        candidates = [
+            (101, f"bash {this_root}/mu/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+            (202, "bash /other/checkout/mu/tools/observability/pipeline_monitor.sh "
+                  "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"),
+        ]
+        killed_pids: list[int] = []
+        with patch.object(
+            dispatch_mod, "_enumerate_owner_loop_processes", return_value=candidates
+        ), patch.object(
+            dispatch_mod, "terminate_process_tree", side_effect=lambda pid, **kw: killed_pids.append(pid)
+        ), patch.object(dispatch_mod, "tmux_kill_session"):
+            dispatch_mod._cleanup_lane_monitor(tmp_path, ".agent_bus-lane1")  # ANTICHEAT_OK: testing cross-root cleanup safety
+        assert killed_pids == [101]  # only this checkout's lane1 owner-loop
+        assert 202 not in killed_pids  # foreign-checkout lane1 owner-loop spared
+
+    # ---- Bridge R2 Finding: cleanup must STOP the self-healing owner-loop ----
+    # The NO_GO defect: pipeline_monitor.sh's cmd_owner_loop traps EXIT/INT/TERM
+    # but NEVER exits, so a lone SIGTERM (the prior cleanup behavior) only fired
+    # the trap and the `while true` loop kept ticking -- recreating the session
+    # on its next tick. Cleanup must force-terminate (SIGTERM -> settle ->
+    # untrappable SIGKILL via terminate_process_tree, mirroring
+    # stop_owner_process's "poll + kill -9 fallback") and must do so BEFORE the
+    # session kill, so nothing survives to resurrect the session.
+    def test_wave_end_cleanup_force_terminates_owner_loop_before_session(self, tmp_path):
+        root = str(tmp_path)
+        candidates = [
+            (
+                222,
+                f"bash {root}/mu/tools/observability/pipeline_monitor.sh "
+                "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop",
+            ),
+        ]
+        events: list[str] = []
+        with patch.object(
+            dispatch_mod, "_enumerate_owner_loop_processes", return_value=candidates
+        ), patch.object(
+            dispatch_mod,
+            "terminate_process_tree",
+            side_effect=lambda pid, **kw: events.append(f"force-terminate:{pid}"),
+        ), patch.object(
+            dispatch_mod,
+            "tmux_kill_session",
+            side_effect=lambda s: events.append(f"kill-session:{s}"),
+        ):
+            dispatch_mod._cleanup_lane_monitor(tmp_path, ".agent_bus-lane1")  # ANTICHEAT_OK: testing force-terminate-before-session-kill
+        # Selected owner-loop is force-terminated (SIGTERM->SIGKILL escalator),
+        # and only AFTER it is dead is the exact session killed. A regression to a
+        # lone os.kill(SIGTERM) would not call terminate_process_tree at all and
+        # would fail this exact-order assertion.
+        assert events == ["force-terminate:222", "kill-session:rcx-pipeline-lane1"]
+
+    def test_lane_cleanup_force_kills_real_trap_guarded_owner_loop(self):
+        # GROUNDING for the Bridge R2 NO_GO ("alive_after_sigterm"): reproduce the
+        # owner-loop's exact trap shape in a REAL process, prove a lone SIGTERM
+        # leaves it alive (the defect a SIGTERM-only cleanup could not fix), then
+        # prove the cleanup's force-terminate -- dispatch_mod.terminate_process_tree,
+        # the SIGTERM->settle->untrappable-SIGKILL escalator the fix now calls --
+        # actually kills it. No mock on the kill path. Traps TERM (kills the inner
+        # sleep) but the `while true` loop never exits -- identical survival to
+        # cmd_owner_loop. "echo READY" runs only AFTER `trap` installs the handler,
+        # so reading that sentinel before signaling closes the race where a SIGTERM
+        # arriving pre-trap would be handled by the default action and kill it.
+        trap_loop = (
+            'trap \'kill "$sp" 2>/dev/null || true\' EXIT INT TERM; '
+            'echo READY; '
+            'while true; do sleep 0.2 & sp=$!; wait "$sp"; done'
+        )
+        proc = subprocess.Popen(
+            ["bash", "-c", trap_loop, "rcx-fake-owner-loop"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            # Block until the trap is installed (sentinel printed). EOF ('') here
+            # would mean the loop died before arming the trap -- a test-setup bug.
+            assert proc.stdout is not None
+            ready = proc.stdout.readline()
+            assert ready.strip() == "READY", f"owner-loop never armed its trap (got {ready!r})"
+            # Defect reproduction: the trap defeats a lone SIGTERM -- still alive.
+            proc.send_signal(signal.SIGTERM)
+            with pytest.raises(subprocess.TimeoutExpired):
+                proc.wait(timeout=1.0)
+            assert proc.poll() is None  # confirms the lone SIGTERM did NOT stop it
+            # The fix's force-terminate escalates to an untrappable SIGKILL.
+            dispatch_mod.terminate_process_tree(proc.pid)
+            proc.wait(timeout=5.0)  # raises TimeoutExpired (test failure) if it survived
+            assert proc.poll() is not None  # provably dead: force-kill worked
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5.0)
+            if proc.stdout is not None:
+                proc.stdout.close()
+
+    # ---- Bridge R3 Finding 1: quiesce the detached start before cleanup ----
+    # The DEFECT: _spawn_lane_monitor fire-and-forgets `start --detach` and the
+    # lifecycle discarded the Popen, so a fast wave-return could run cleanup,
+    # enumerate no owner-loop/session yet, and the still-in-flight start would
+    # THEN create a zombie monitor nothing cleans. The fix retains the spawn
+    # handle and QUIESCES it (waits, bounded) before cleanup.
+    def test_lane_lifecycle_quiesces_spawn_before_cleanup(self, tmp_path):
+        events: list[str] = []
+        spawn_handle = MagicMock()
+        spawn_handle.wait.side_effect = lambda *a, **k: events.append("quiesce-wait")
+        with patch.object(
+            dispatch_mod, "_spawn_lane_monitor", return_value=spawn_handle
+        ), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor", side_effect=lambda *a, **k: events.append("cleanup")
+        ):
+            rc = dispatch_mod._with_lane_monitor_lifecycle(  # ANTICHEAT_OK: testing quiesce-before-cleanup ordering
+                tmp_path, ".agent_bus-lane1", lambda: 0
+            )
+        assert rc == 0
+        # The detached spawn is waited on (quiesced) BEFORE cleanup -- the exact
+        # ordering that closes the race. A regression that dropped the wait would
+        # produce events == ["cleanup"] (or wait after cleanup) and fail here.
+        assert events == ["quiesce-wait", "cleanup"]
+        spawn_handle.wait.assert_called_once()
+        # The wait MUST be bounded, never an unbounded block on a hung start.
+        assert (
+            spawn_handle.wait.call_args.kwargs.get("timeout")
+            == dispatch_mod.LANE_MONITOR_SPAWN_QUIESCE_TIMEOUT_SECONDS
+        )
+
+    def test_lane_lifecycle_terminates_hung_spawn_on_quiesce_timeout(self, tmp_path):
+        events: list[str] = []
+        hung = MagicMock()
+        hung.pid = 4242
+        hung.wait.side_effect = subprocess.TimeoutExpired(cmd="start --detach", timeout=30)
+        with patch.object(
+            dispatch_mod, "_spawn_lane_monitor", return_value=hung
+        ), patch.object(
+            dispatch_mod, "terminate_process_tree", side_effect=lambda pid, **k: events.append(f"term:{pid}")
+        ), patch.object(
+            dispatch_mod, "_cleanup_lane_monitor", side_effect=lambda *a, **k: events.append("cleanup")
+        ):
+            rc = dispatch_mod._with_lane_monitor_lifecycle(  # ANTICHEAT_OK: testing hung-spawn timeout escalation
+                tmp_path, ".agent_bus-lane1", lambda: 0
+            )
+        assert rc == 0
+        # A start hung past the quiesce ceiling is force-terminated BEFORE cleanup
+        # so it can never create the session/owner-loop after cleanup has run.
+        assert events == ["term:4242", "cleanup"]
+
+    def test_quiesce_spawn_is_noop_when_spawn_skipped(self):
+        # When the spawn was skipped (session already live) or errored,
+        # _spawn_lane_monitor returns None; quiesce must be a no-op (nothing to
+        # wait on, nothing to terminate). Cleanup still runs in the lifecycle.
+        with patch.object(dispatch_mod, "terminate_process_tree") as term:
+            dispatch_mod._quiesce_lane_monitor_spawn(None)  # ANTICHEAT_OK: testing None-handle no-op
+        term.assert_not_called()
+
+    def test_lane_lifecycle_waits_for_slow_detached_start_real(self, tmp_path):
+        # GROUNDING for Bridge R3 Finding 1 with a REAL subprocess (no mock on the
+        # wait path): a detached start that only creates its artifact AFTER the
+        # wave has already returned must still be observed by cleanup, because the
+        # lifecycle quiesces the spawn handle first. The old code discarded the
+        # Popen and never waited, so cleanup ran at ~0ms -- before the artifact
+        # existed -- and the detached start then created a zombie nothing cleaned.
+        marker = tmp_path / "session_created.marker"
+        slow_start = subprocess.Popen(
+            ["bash", "-c", 'sleep 0.4; : > "$1"', "_", str(marker)],
+            start_new_session=True,
+        )
+        seen: dict[str, bool] = {}
+
+        def _record_cleanup(*a, **k):
+            seen["marker_exists_at_cleanup"] = marker.exists()
+
+        try:
+            with patch.object(
+                dispatch_mod, "_spawn_lane_monitor", return_value=slow_start
+            ), patch.object(
+                dispatch_mod, "_cleanup_lane_monitor", side_effect=_record_cleanup
+            ):
+                rc = dispatch_mod._with_lane_monitor_lifecycle(  # ANTICHEAT_OK: testing real slow-start quiesce
+                    tmp_path, ".agent_bus-lane1", lambda: 0
+                )
+            assert rc == 0
+            # Wave returned instantly (lambda: 0) yet cleanup saw the artifact the
+            # SLOW detached start created ~0.4s later => the spawn was quiesced.
+            assert seen.get("marker_exists_at_cleanup") is True
+            assert marker.exists()
+        finally:
+            if slow_start.poll() is None:
+                slow_start.kill()
+                slow_start.wait(timeout=5.0)
+
+    # ---- Bridge R3 Finding 2: tmux EXACT-match targets, not prefix-capable ----
+    # The DEFECT: has-session/kill-session used a bare "-t <session>" target.
+    # tmux resolves a bare target as exact, THEN start-of-name, THEN glob, so an
+    # absent "rcx-pipeline-lane1" resolves the sibling "rcx-pipeline-lane10" --
+    # a lane1 probe lies and a lane1 kill destroys lane10. The fix anchors every
+    # target with tmux's "=" exact-match prefix.
+    def test_tmux_has_session_targets_exact_match_not_prefix(self):
+        captured: dict[str, list[str]] = {}
+
+        def _fake_run(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            return SimpleNamespace(returncode=1)
+
+        with patch.object(dispatch_mod.subprocess, "run", side_effect=_fake_run):
+            result = dispatch_mod.tmux_has_session("rcx-pipeline-lane1")  # testing exact-match target
+        assert result is False
+        assert captured["cmd"][:3] == ["tmux", "has-session", "-t"]
+        assert captured["cmd"][3] == "=rcx-pipeline-lane1"
+        # The bare prefix-capable target is the defect and must never be emitted.
+        assert captured["cmd"][3] != "rcx-pipeline-lane1"
+
+    def test_tmux_kill_session_targets_exact_match_not_prefix(self):
+        captured: dict[str, list[str]] = {}
+
+        def _fake_run(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            return SimpleNamespace(returncode=0)
+
+        with patch.object(dispatch_mod.subprocess, "run", side_effect=_fake_run):
+            dispatch_mod.tmux_kill_session("rcx-pipeline-lane1")  # testing exact-match target
+        assert captured["cmd"][:3] == ["tmux", "kill-session", "-t"]
+        assert captured["cmd"][3] == "=rcx-pipeline-lane1"
+        # Never the bare name -- that could kill the sibling rcx-pipeline-lane10.
+        assert captured["cmd"][3] != "rcx-pipeline-lane1"
+
+    def test_tmux_exact_match_spares_prefix_sibling_real_tmux(self, monkeypatch):
+        # GROUNDING for Bridge R3 Finding 2 with a REAL tmux server: the exact
+        # session must resolve, never the prefix-colliding sibling. Isolated to a
+        # private server via TMUX_TMPDIR AND a self-test session prefix, so it can
+        # NEVER touch a real rcx-pipeline-* lane session even if isolation broke.
+        try:
+            subprocess.run(["tmux", "-V"], capture_output=True, check=True)
+        except (OSError, subprocess.SubprocessError):
+            pytest.skip("tmux not available")
+        # A SHORT socket dir under /tmp -- tmux's "$TMUX_TMPDIR/tmux-<uid>/default"
+        # socket path must fit the ~104-byte Unix-socket limit, which pytest's
+        # deep tmp_path blows past on macOS.
+        sock_dir = f"/tmp/rcxmon-{os.getpid()}"
+        os.makedirs(sock_dir, exist_ok=True)
+        monkeypatch.setenv("TMUX_TMPDIR", sock_dir)
+        base = "rcxmon-selftest-lane1"  # exact session of interest
+        sibling = "rcxmon-selftest-lane10"  # collision: base is a prefix of this
+
+        def _tmux(*a):
+            return subprocess.run(["tmux", *a], capture_output=True, text=True)
+
+        _tmux("kill-server")  # guarantee a clean isolated server
+        created = _tmux("new-session", "-d", "-s", sibling, "sleep 300")
+        assert created.returncode == 0, f"setup new-session failed: {created.stderr}"
+        try:
+            # Absent base must NOT resolve to the present sibling (exact match).
+            assert dispatch_mod.tmux_has_session(base) is False
+            assert dispatch_mod.tmux_has_session(sibling) is True
+            # Exact-match kill of the absent base must spare the sibling.
+            dispatch_mod.tmux_kill_session(base)
+            assert dispatch_mod.tmux_has_session(sibling) is True
+            # Exact-match kill of the present sibling removes exactly it.
+            dispatch_mod.tmux_kill_session(sibling)
+            assert dispatch_mod.tmux_has_session(sibling) is False
+        finally:
+            _tmux("kill-server")
+            shutil.rmtree(sock_dir, ignore_errors=True)
