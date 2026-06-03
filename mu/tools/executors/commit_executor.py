@@ -6288,19 +6288,35 @@ def _fetch_pr_check_surface_rollup(repo_root: Path, pr_number: str) -> Any:
 
 def _surface_failure_is_stale_cancellation(snapshot: dict[str, Any]) -> bool:
     """True iff a ``failed`` surface's failing checks are ALL concurrent-merge
-    ``CANCELLED`` runs -- the stale artifact the post-resolve await waits to be
-    refreshed -- and NOT a genuine failure.
+    ``CANCELLED`` runs of EXPECTED REQUIRED checks -- the stale artifact the
+    post-resolve await waits to be refreshed -- and NOT a genuine failure.
 
     After a successful mid-poll conflict resolve the base-merge repush
-    re-triggers the previously-skipped ``pull_request`` workflows, but until they
-    re-register the surface still shows the concurrent-merge ``CANCELLED`` runs
-    (classified ``failed`` by ``_summarize_pr_check_surface``). Those stale
-    cancellations are non-terminal while awaiting the refresh. A genuine failure
-    -- ANY non-``CANCELLED`` failing conclusion (``FAILURE``/``ERROR``/
-    ``TIMED_OUT``/``ACTION_REQUIRED``) -- on the refreshed surface is real and
-    MUST terminate the wait, so it is reported here as NOT a stale cancellation
-    (returns ``False``). Fail-closed: an empty/absent failing set returns
-    ``False`` so an unclassifiable ``failed`` surface is surfaced, never masked.
+    re-triggers the previously-skipped REQUIRED ``pull_request`` gate workflows
+    (the ``EXPECTED_PR_CHECK_SURFACE`` set), but until they re-register the
+    surface still shows THEIR concurrent-merge ``CANCELLED`` runs (classified
+    ``failed`` by ``_summarize_pr_check_surface``). Only those required-check
+    cancellations are the stale artifact that is non-terminal while awaiting the
+    refresh.
+
+    Masking is constrained to actual stale REQUIRED checks: inspecting the
+    parsed conclusion text alone is NOT enough, because a ``CANCELLED`` failing
+    check can belong to a refreshed run or an unrelated non-essential check that
+    is NOT one of the required gate workflows. The following failing surfaces are
+    therefore NOT stale cancellations and MUST terminate the wait (return
+    ``False``):
+
+    * ANY non-``CANCELLED`` failing conclusion (``FAILURE``/``ERROR``/
+      ``TIMED_OUT``/``ACTION_REQUIRED``) -- a genuine failure on the refreshed
+      surface is real.
+    * ANY ``CANCELLED`` failing check whose name is NOT in
+      ``EXPECTED_PR_CHECK_SURFACE`` -- a refreshed/unrelated non-required run is
+      never the awaited stale required-check artifact, so its cancellation is
+      surfaced rather than masked.
+
+    Fail-closed: an empty/absent failing set, or a label that cannot be parsed
+    into a ``<name>=<STATE>`` pair, returns ``False`` so an unclassifiable
+    ``failed`` surface is surfaced, never masked.
     """
     failing = snapshot.get("failing_checks") or []
     if not failing:
@@ -6308,9 +6324,19 @@ def _surface_failure_is_stale_cancellation(snapshot: dict[str, Any]) -> bool:
     for label in failing:
         # _summarize_pr_check_surface formats each failing check as
         # "<name>=<STATE>" with STATE upper-cased; the expected check names never
-        # contain "=", so the conclusion is the segment after the final "=".
-        state = str(label).rsplit("=", 1)[-1].strip().upper()
-        if state != "CANCELLED":
+        # contain "=", so the name is everything before the final "=" and the
+        # conclusion is the segment after it.
+        name, sep, state = str(label).rpartition("=")
+        if not sep:
+            # Unparseable label (no "="): cannot confirm a required-check
+            # cancellation -- fail closed and surface it.
+            return False
+        if state.strip().upper() != "CANCELLED":
+            return False
+        if name.strip() not in EXPECTED_PR_CHECK_SURFACE:
+            # A CANCELLED run of a non-required (unrelated / non-essential /
+            # refreshed auxiliary) check is NOT the stale required-check artifact
+            # the post-resolve await waits on; surface it rather than mask it.
             return False
     return True
 
