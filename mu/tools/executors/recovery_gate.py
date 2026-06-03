@@ -3016,10 +3016,21 @@ def _parse_staged_tasks_tracker_additions(
 
 
 def fix_commit_supervisor_out_of_wave_tasks_tracker_note(repo_root: Path, **kw: Any) -> dict[str, Any]:
-    """Remove only proven out-of-wave staged TASKS.md tracker additions."""
+    """Remove only proven out-of-wave staged TASKS.md tracker additions.
+
+    With ``detect_only=True`` the function performs the SAME staged-diff
+    classification but makes NO changes (no TASKS.md rewrite, no restage, no
+    Phase-B re-entry arming).  ``attempt_recovery`` uses this side-effect-free
+    probe to decide -- BEFORE recovery-status framing and the attempt-budget
+    exhaustion guard -- whether an incidental-text tracker-note classification
+    is really a genuine NEEDS_PHASE_B no-op that must re-route to Phase B
+    re-entry.  The default (``detect_only=False``) path is unchanged: a proven
+    out-of-wave addition is removed+restaged exactly as before.
+    """
     result = kw.get("result", {})
     if not isinstance(result, dict):
         result = {}
+    detect_only = bool(kw.get("detect_only", False))
     active_wave_id = _resolve_active_recovery_wave_id(result, kw.get("wave_id"))
     if not active_wave_id:
         return _fix_result(
@@ -3078,12 +3089,44 @@ def fix_commit_supervisor_out_of_wave_tasks_tracker_note(repo_root: Path, **kw: 
         # only when a re-entry target (plan_path) is resolvable from the same
         # result the classifier consumed. Without a target, re-entry cannot be
         # armed, so keep the explicit fail-closed no-op as the fallback.
-        if _extract_plan_path(_merge_result_candidates(result)):
+        has_reentry_target = bool(_extract_plan_path(_merge_result_candidates(result)))
+        if detect_only:
+            # Side-effect-free probe outcome. Only the true no-op (no resolvable
+            # re-entry target) is the strand attempt_recovery re-routes to
+            # NEEDS_PHASE_B; the plan_path degrade is already a clean Phase-B
+            # re-entry handled by the normal Tier 2 call, so it reports a
+            # distinct, non-reroute action.
+            return _fix_result(
+                False,
+                "no_out_of_wave_tasks_tracker_addition"
+                if not has_reentry_target
+                else "out_of_wave_tracker_reentry_degrade_pending",
+                "detect-only probe: staged TASKS.md diff has no proven "
+                "out-of-wave tracker-note additions"
+                + (
+                    ""
+                    if not has_reentry_target
+                    else "; plan_path re-entry target resolvable"
+                ),
+            )
+        if has_reentry_target:
             return fix_post_reentry_needs_phase_b(repo_root, result=result)
         return _fix_result(
             False,
             "no_out_of_wave_tasks_tracker_addition",
             "staged TASKS.md diff contains no proven out-of-wave tracker-note additions",
+        )
+
+    if detect_only:
+        # Proven out-of-wave additions exist -- the normal Tier 2 auto-fix will
+        # remove+restage them; report removal-pending so attempt_recovery keeps
+        # the tracker-note class (no re-route) WITHOUT performing the removal in
+        # this probe.
+        return _fix_result(
+            False,
+            "out_of_wave_tracker_removal_pending",
+            f"detect-only probe: {len(removals)} proven out-of-wave staged "
+            "TASKS.md tracker addition(s) pending removal",
         )
 
     lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -9204,6 +9247,42 @@ def attempt_recovery(
     # from collapsing into the same (wave_id, "unknown", class) bucket
     # (Bridge R6 Finding 1 fix).
     step = _effective_result_step(result)
+
+    # A GENUINE supervisor NEEDS_PHASE_B can be captured by the incidental-text
+    # out-of-wave tracker-note matcher: classify_failure() runs that matcher
+    # (Tier 2) before the Tier 3 needs_phase_b check and -- being a pure,
+    # repo-less function -- cannot inspect the staged TASKS.md diff that proves
+    # which case it is. Probe the tracker-note auto-fix's classification here in
+    # detect-only (side-effect-free) mode and re-frame the genuine class *before*
+    # the recovery-status framing and the attempt-budget exhaustion guard, so
+    # attempt budgeting, status, the guard, and dispatch all operate under that
+    # class from the start, a spent tracker-note budget never strands the
+    # re-route, and the persisted failure_class/tier match the returned value
+    # (Bridge R2 Findings 1 & 2):
+    #   * no_out_of_wave_tasks_tracker_addition -- no proven out-of-wave staged
+    #     addition AND no resolvable plan_path re-entry target -- re-frames to
+    #     NEEDS_PHASE_B (Tier 3 re-entry diagnoses the genuine finding).
+    #   * out_of_wave_tracker_reentry_degrade_pending -- no proven out-of-wave
+    #     staged addition BUT a resolvable plan_path target -- re-frames to
+    #     POST_REENTRY_NEEDS_PHASE_B, whose Tier 1 fix is the same proven resume
+    #     channel (fix_post_reentry_needs_phase_b) the Tier 2 degrade already
+    #     delegates to; re-framing makes that deterministic Phase-B re-entry seed
+    #     reachable under a fresh budget key even when the tracker-note budget is
+    #     spent, instead of exhausting on the stale tracker-note key before the
+    #     seed runs (Bridge R4 Finding).
+    # A proven removal (removal-pending) keeps the tracker-note class and runs
+    # through the Tier 2 fix unchanged.
+    if fc == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE:
+        _tracker_note_probe = fix_commit_supervisor_out_of_wave_tasks_tracker_note(
+            repo_root, wave_id=wave_id, result=result, detect_only=True
+        )
+        _tracker_note_probe_action = _tracker_note_probe.get("action")
+        if _tracker_note_probe_action == "no_out_of_wave_tasks_tracker_addition":
+            fc = FailureClass.NEEDS_PHASE_B
+            tier = tier_for(fc)
+        elif _tracker_note_probe_action == "out_of_wave_tracker_reentry_degrade_pending":
+            fc = FailureClass.POST_REENTRY_NEEDS_PHASE_B
+            tier = tier_for(fc)
 
     attempts = _load_recovery_log(repo_root)
     prior = _count_prior_attempts(attempts, wave_id, step, fc.value)

@@ -3312,6 +3312,39 @@ class TestTier2FixesMap:
         assert set(rg_mod._TIER2_FIXES.keys()) == expected  # ANTICHEAT_OK
 
 
+def recovery_substrate_path(repo_root: Path, name: str) -> Path:
+    """Absolute path to a recovery-gate substrate file under the default bus.
+
+    recovery_gate persists ``recovery_log.json`` and ``recovery_status.json``
+    under ``<repo_root>.resolve()/.agent_bus/recovery/`` (the default agent
+    bus -- these tests invoke attempt_recovery with no bus override). Tests
+    seed and read that JSON substrate through this public path, so they never
+    reach into recovery_gate's underscore log/status helpers and the
+    private-attr test-integrity gate stays green.
+    """
+    return Path(repo_root).resolve() / ".agent_bus" / "recovery" / name
+
+
+def seed_recovery_log(repo_root: Path, attempts: list[dict[str, object]]) -> None:
+    """Seed prior recovery attempts into the recovery_log.json substrate.
+
+    Writes recovery_gate's on-disk log shape (``{"attempts": [...]}``) so the
+    attempt-budget counter observes the seeded history -- a public
+    file-substrate seam in place of recovery_gate's underscore log writer.
+    """
+    log_path = recovery_substrate_path(repo_root, "recovery_log.json")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        json.dumps({"attempts": attempts}, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def load_recovery_status(repo_root: Path) -> dict[str, object]:
+    """Read the recovery_status.json substrate as a dict (public file seam)."""
+    status_path = recovery_substrate_path(repo_root, "recovery_status.json")
+    return json.loads(status_path.read_text(encoding="utf-8"))
+
+
 class TestOutOfWaveTasksTrackerNoteRecovery:
     active_wave = "recovery-out-of-wave-tasks-note-auto-fix-2026-05-26"
     other_wave = "n3-js-evidence-walker-runtime-authority-parity-2026-05-22"
@@ -3799,6 +3832,395 @@ class TestOutOfWaveTasksTrackerNoteRecovery:
         assert not (
             tmp_path / ".agent_bus" / "executors" / "phase_b_state.json"
         ).exists()
+        assert same_wave_line in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+
+    def test_no_proven_out_of_wave_addition_reroutes_to_needs_phase_b(self, tmp_path):
+        # (d) Orchestration re-route (the 2026-06-03 strand fix): a GENUINE
+        # supervisor NEEDS_PHASE_B that the incidental-text matcher captured into
+        # the out-of-wave tracker-note class -- with NO proven out-of-wave staged
+        # addition and NO resolvable plan_path -- must NOT strand at
+        # tier2_failed/recovered=False. attempt_recovery must re-route the
+        # no_out_of_wave_tasks_tracker_addition no-op to the NEEDS_PHASE_B
+        # (Phase B re-entry) path so the real finding is surfaced for the
+        # implementer (genuine-defect case) / re-dispatched cleanly (false-positive
+        # case). Setup mirrors the fail-closed no-op test, but driven through the
+        # public attempt_recovery seam with run_recovery_loop stubbed.
+        base_tasks = self._init_repo(tmp_path)
+        same_wave_line = (
+            f"- Tracker sync note (2026-05-26, {self.active_wave}): "
+            "correct same-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + same_wave_line, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        # Precondition: the classifier captures this genuine NEEDS_PHASE_B into
+        # the incidental out-of-wave tracker-note class (the bug precondition).
+        assert (
+            rg_mod.classify_failure(self._result())
+            == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        )
+
+        loop_result = {
+            "recovered": True,
+            "exhausted": False,
+            "iterations": 1,
+            "log": [
+                {"action": "delegate_implementer", "detail": "re-entered Phase B"}
+            ],
+        }
+        with patch.object(
+            rg_mod, "run_recovery_loop", return_value=loop_result
+        ) as mock_loop:
+            recovery = rg_mod.attempt_recovery(
+                tmp_path, self._result(), self.active_wave
+            )
+
+        mock_loop.assert_called_once()
+        # The no-op re-routes to NEEDS_PHASE_B (Phase B re-entry) -- not stranded.
+        assert recovery["failure_class"] == FailureClass.NEEDS_PHASE_B.value
+        assert recovery["tier"] == 3
+        assert recovery["action"] == "recovery_loop"
+        assert recovery["recovered"] is True
+        # The re-entry carries the NEEDS_PHASE_B failure class into the loop.
+        loop_call_result = mock_loop.call_args.args[1]
+        assert loop_call_result["failure_class"] == FailureClass.NEEDS_PHASE_B.value
+        # The same-wave note must be preserved -- the re-route must not remove it.
+        assert same_wave_line in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+
+    def test_proven_out_of_wave_addition_still_removed_not_rerouted(self, tmp_path):
+        # (e) No regression to the genuine path: a PROVEN out-of-wave staged
+        # TASKS.md addition is still removed+restaged at Tier 2 and must NOT be
+        # re-routed to NEEDS_PHASE_B (run_recovery_loop must not be invoked). The
+        # contrast with (d) isolates "no proven out-of-wave addition" as the sole
+        # re-route trigger, so neither test is vacuous.
+        base_tasks = self._init_repo(tmp_path)
+        out_of_wave_line = (
+            f"- Tracker sync note (2026-05-22, {self.other_wave}): "
+            "out-of-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + out_of_wave_line, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        with patch.object(rg_mod, "run_recovery_loop") as mock_loop:
+            recovery = rg_mod.attempt_recovery(
+                tmp_path, self._result(), self.active_wave
+            )
+
+        mock_loop.assert_not_called()
+        assert recovery["recovered"] is True, recovery
+        assert recovery["tier"] == 2
+        assert recovery["action"] == "remove_out_of_wave_tasks_tracker_note"
+        assert recovery["failure_class"] == (
+            FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE.value
+        )
+        tasks_text = (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+        assert out_of_wave_line not in tasks_text
+
+    def test_reroute_to_needs_phase_b_honors_max_attempt_exhaustion(self, tmp_path):
+        # (f) Bridge R1 Finding 1 regression: the no_out_of_wave_tasks_tracker_addition
+        # re-route to NEEDS_PHASE_B must obey the SAME max-attempt exhaustion guard the
+        # direct NEEDS_PHASE_B path enforces. Before the fix the re-route counted prior
+        # attempts only under the tracker-note class, so it dispatched run_recovery_loop
+        # even after the needs_phase_b budget was exhausted -- an unbounded Phase B
+        # re-entry. With the needs_phase_b cap already reached for this (wave, step), the
+        # re-route must return the exhausted result WITHOUT invoking run_recovery_loop,
+        # matching the direct path's exhaustion behavior.
+        base_tasks = self._init_repo(tmp_path)
+        same_wave_line = (
+            f"- Tracker sync note (2026-05-26, {self.active_wave}): "
+            "correct same-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + same_wave_line, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        # Precondition: still captured into the incidental tracker-note class.
+        assert (
+            rg_mod.classify_failure(self._result())
+            == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        )
+
+        # Pre-load the needs_phase_b budget to its cap (distinct invocation_ids so
+        # _count_prior_attempts counts them as separate attempts) for the same
+        # (wave, step) the re-route will target.
+        step = json.loads(self._result()["stdout"])["step"]  # public parse == recovery_gate effective step
+        npb = FailureClass.NEEDS_PHASE_B.value
+        max_attempts = rg_mod.MAX_ATTEMPTS_PER_TUPLE
+        prior_attempts = [
+            {
+                "timestamp": f"2026-06-03T00:0{i}:00Z",
+                "wave_id": self.active_wave,
+                "step": step,
+                "failure_class": npb,
+                "tier": 3,
+                "action": "recovery_loop",
+                "outcome": "failed",
+                "duration_s": 0.0,
+                "tokens_used": 0,
+                "detail": f"prior needs_phase_b attempt {i + 1}",
+                "invocation_id": f"inv-needs-phase-b-{i}",
+            }
+            for i in range(max_attempts)
+        ]
+        seed_recovery_log(tmp_path, prior_attempts)
+
+        with patch.object(rg_mod, "run_recovery_loop") as mock_loop:
+            recovery = rg_mod.attempt_recovery(
+                tmp_path, self._result(), self.active_wave
+            )
+
+        # Exhausted -> the loop must NOT be dispatched (the guard tripped), and the
+        # result mirrors the direct NEEDS_PHASE_B exhaustion contract.
+        mock_loop.assert_not_called()
+        assert recovery["recovered"] is False, recovery
+        assert recovery["exhausted"] is True
+        assert recovery["action"] == "exhausted"
+        assert recovery["tier"] == 3
+        assert recovery["failure_class"] == npb
+        # Bridge R2 Finding 2 regression: the rerouted-then-exhausted result
+        # returns tier 3 / needs_phase_b, and the PERSISTED recovery_status.json
+        # must agree. Before the fix the re-route returned tier 3 but persisted
+        # the tier 2 tracker-note framing from _begin_recovery_status; the early
+        # re-frame now frames status as needs_phase_b/tier 3 from the start, so
+        # the exhaustion finalizer records tier3_exhausted under needs_phase_b.
+        persisted = load_recovery_status(tmp_path)
+        assert persisted["failure_class"] == npb
+        assert persisted["tier"] == 3
+        assert persisted["state"] == "tier3_exhausted"
+        assert persisted["recovered"] is False
+        assert persisted["exhausted"] is True
+        # The same-wave note is left untouched by the exhausted re-route.
+        assert same_wave_line in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+
+    def test_tracker_note_exhaustion_does_not_strand_no_op_reroute(self, tmp_path):
+        # (g) Bridge R2 Finding 1 regression: a genuine NEEDS_PHASE_B captured by
+        # the incidental-text tracker-note matcher must re-route to Phase B
+        # re-entry EVEN WHEN the tracker-note attempt budget is already spent.
+        # Before the fix the early exhaustion guard -- keyed on the tracker-note
+        # class -- tripped first, returning exhausted/tier 2 with
+        # run_recovery_loop never called, so the no-op never reached the re-route
+        # and the wave stranded. The early re-frame moves the reclassification
+        # ahead of the exhaustion guard, so the spent tracker-note budget is
+        # irrelevant and the (fresh) needs_phase_b budget governs dispatch.
+        base_tasks = self._init_repo(tmp_path)
+        same_wave_line = (
+            f"- Tracker sync note (2026-05-26, {self.active_wave}): "
+            "correct same-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + same_wave_line, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        # Precondition: still captured into the incidental tracker-note class.
+        assert (
+            rg_mod.classify_failure(self._result())
+            == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        )
+
+        # Pre-load the TRACKER-NOTE budget to its cap (distinct invocation_ids)
+        # for the same (wave, step) -- the budget the early exhaustion guard
+        # consumed, before the fix, to strand the no-op.
+        step = json.loads(self._result()["stdout"])["step"]  # public parse == recovery_gate effective step
+        tracker_class = (
+            FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE.value
+        )
+        max_attempts = rg_mod.MAX_ATTEMPTS_PER_TUPLE
+        prior_attempts = [
+            {
+                "timestamp": f"2026-06-03T01:0{i}:00Z",
+                "wave_id": self.active_wave,
+                "step": step,
+                "failure_class": tracker_class,
+                "tier": 2,
+                "action": "no_out_of_wave_tasks_tracker_addition",
+                "outcome": "failed",
+                "duration_s": 0.0,
+                "tokens_used": 0,
+                "detail": f"prior tracker-note attempt {i + 1}",
+                "invocation_id": f"inv-tracker-note-{i}",
+            }
+            for i in range(max_attempts)
+        ]
+        seed_recovery_log(tmp_path, prior_attempts)
+
+        loop_result = {
+            "recovered": True,
+            "exhausted": False,
+            "iterations": 1,
+            "log": [
+                {"action": "delegate_implementer", "detail": "re-entered Phase B"}
+            ],
+        }
+        with patch.object(
+            rg_mod, "run_recovery_loop", return_value=loop_result
+        ) as mock_loop:
+            recovery = rg_mod.attempt_recovery(
+                tmp_path, self._result(), self.active_wave
+            )
+
+        # The spent tracker-note budget must NOT strand the re-route: it still
+        # dispatches Phase B re-entry under the fresh needs_phase_b budget.
+        mock_loop.assert_called_once()
+        assert recovery["failure_class"] == FailureClass.NEEDS_PHASE_B.value
+        assert recovery["tier"] == 3
+        assert recovery["action"] == "recovery_loop"
+        assert recovery["recovered"] is True
+        # The re-frame carries needs_phase_b into the loop, not the tracker class.
+        loop_call_result = mock_loop.call_args.args[1]
+        assert loop_call_result["failure_class"] == FailureClass.NEEDS_PHASE_B.value
+        # The same-wave note must be preserved -- no removal on the re-route.
+        assert same_wave_line in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+
+    def test_tracker_note_exhaustion_does_not_strand_plan_path_degrade_reentry(
+        self, tmp_path
+    ):
+        # (h) Bridge R4 Finding regression: a genuine NEEDS_PHASE_B captured by
+        # the incidental-text tracker-note matcher that ALSO carries a resolvable
+        # plan_path re-entry target must arm the deterministic Phase-B re-entry
+        # EVEN WHEN the tracker-note attempt budget is already spent. Before the
+        # fix the re-route only caught the no_out_of_wave_tasks_tracker_addition
+        # (no-plan_path) probe action; WITH a plan_path the probe instead reports
+        # out_of_wave_tracker_reentry_degrade_pending, so the re-route never
+        # fired, the early exhaustion guard -- keyed on the spent tracker-note
+        # class -- returned exhausted/tier 2, and phase_b_state.json was never
+        # seeded, stranding the wave. The re-route now re-frames the degrade
+        # probe to POST_REENTRY_NEEDS_PHASE_B (Tier 1) so its proven resume
+        # channel (fix_post_reentry_needs_phase_b) seeds the checkpoint under a
+        # fresh budget key instead of exhausting on the stale tracker-note key.
+        base_tasks = self._init_repo(tmp_path)
+        same_wave_line = (
+            f"- Tracker sync note (2026-05-26, {self.active_wave}): "
+            "correct same-wave tracker note.\n"
+        )
+        (tmp_path / "TASKS.md").write_text(base_tasks + same_wave_line, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        # A miscaptured NEEDS_PHASE_B whose incidental text trips the matcher but
+        # whose STAGED diff has no out-of-wave addition, AND which carries a
+        # resolvable plan_path re-entry target (the degrade arm of the probe).
+        plan_path = "reports/control_plane/recovery_gate_classifier_fix_2026-06-01.md"
+        payload = {
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "plan_path": plan_path,
+            "wave_id": self.active_wave,
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B: git diff --cached -- TASKS.md "
+                f"reported an added out-of-wave staged TASKS.md tracker note for {self.other_wave}."
+            ],
+        }
+        result = {
+            "status": "failed",
+            "executor": "commit_executor",
+            "step": "build_and_run_supervisor",
+            "plan_path": plan_path,
+            "wave_id": self.active_wave,
+            "stdout": json.dumps(payload),
+            "stderr": "",
+        }
+
+        # Precondition 1: the classifier still captures this genuine NEEDS_PHASE_B
+        # into the incidental out-of-wave tracker-note class (the bug precondition).
+        assert (
+            rg_mod.classify_failure(result)
+            == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        )
+        # Precondition 2: the side-effect-free probe reports the plan_path degrade
+        # (NOT the no-plan_path no-op) -- the arm the re-route must newly catch, so
+        # this test is not a duplicate of the no-op re-route regression.
+        probe = rg_mod.fix_commit_supervisor_out_of_wave_tasks_tracker_note(
+            tmp_path, wave_id=self.active_wave, result=result, detect_only=True
+        )
+        assert probe["action"] == "out_of_wave_tracker_reentry_degrade_pending", probe
+
+        # Pre-load the TRACKER-NOTE budget to its cap (distinct invocation_ids) for
+        # the same (wave, step) -- the budget the early exhaustion guard consumed,
+        # before the fix, to strand the degrade.
+        step = payload["step"]
+        tracker_class = (
+            FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE.value
+        )
+        max_attempts = rg_mod.MAX_ATTEMPTS_PER_TUPLE
+        prior_attempts = [
+            {
+                "timestamp": f"2026-06-03T02:0{i}:00Z",
+                "wave_id": self.active_wave,
+                "step": step,
+                "failure_class": tracker_class,
+                "tier": 2,
+                "action": "no_out_of_wave_tasks_tracker_addition",
+                "outcome": "failed",
+                "duration_s": 0.0,
+                "tokens_used": 0,
+                "detail": f"prior tracker-note attempt {i + 1}",
+                "invocation_id": f"inv-degrade-tracker-note-{i}",
+            }
+            for i in range(max_attempts)
+        ]
+        seed_recovery_log(tmp_path, prior_attempts)
+
+        with patch.object(rg_mod, "run_recovery_loop") as mock_loop:
+            recovery = rg_mod.attempt_recovery(tmp_path, result, self.active_wave)
+
+        # The spent tracker-note budget must NOT strand the degrade. It re-frames
+        # to the Tier 1 deterministic Phase-B re-entry under a fresh budget key;
+        # that path is deterministic, so the Tier 3 LLM loop must NOT be invoked.
+        mock_loop.assert_not_called()
+        assert recovery["recovered"] is True, recovery
+        assert recovery["exhausted"] is False
+        assert recovery["tier"] == 1
+        assert recovery["action"] == "resume_phase_b_reentry"
+        assert recovery["failure_class"] == (
+            FailureClass.POST_REENTRY_NEEDS_PHASE_B.value
+        )
+
+        # Re-entry armed: phase_b_state.json seeded with the resolved plan_path.
+        state_path = tmp_path / ".agent_bus" / "executors" / "phase_b_state.json"
+        assert state_path.exists()
+        checkpoint = json.loads(state_path.read_text(encoding="utf-8"))
+        assert checkpoint["completed_step"] == "needs_phase_b_reentry"
+        assert checkpoint["plan_path"] == plan_path
+
+        # Persisted status agrees with the re-framed class/tier (no stale tracker
+        # framing) and records the successful Tier 1 deterministic re-entry.
+        persisted = load_recovery_status(tmp_path)
+        assert persisted["failure_class"] == (
+            FailureClass.POST_REENTRY_NEEDS_PHASE_B.value
+        )
+        assert persisted["tier"] == 1
+        assert persisted["state"] == "tier1_fixed"
+        assert persisted["recovered"] is True
+        assert persisted["exhausted"] is False
+
+        # The same-wave note is left untouched by the deterministic re-entry.
         assert same_wave_line in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
 
 
