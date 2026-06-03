@@ -3918,3 +3918,79 @@ def test_title_similarity_matching() -> None:
     assert bridge.title_similarity("error handling absent", "absent error handling") >= 0.6
     # Different titles should not match
     assert bridge.title_similarity("Missing null check", "Naming convention violation") < 0.6
+
+
+def test_run_adapter_returns_output_when_implementer_exits_nonzero_after_terminal_result(tmp_path: Path) -> None:
+    # #43: the implementer emits its terminal result event, then the process exits
+    # non-zero during post-completion teardown (e.g. a .claude Stop hook that errors
+    # after the result). With post_result_exit_timeout_s armed (implementer), run_adapter
+    # must RETURN the captured output (the downstream result-subtype check then classifies
+    # success/error) instead of raising "exited N" -- which previously forced a wasted
+    # implementer re-invoke.
+    agent = tmp_path / "exit_after_result.py"
+    agent.write_text(
+        "import json, sys\n"
+        "sys.stdin.read()\n"
+        "print(json.dumps({'type': 'system', 'subtype': 'init'}))\n"
+        "print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'completed-work-token'}))\n"
+        "sys.stdout.flush()\n"
+        "sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("p", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="claude",
+        cmd=[sys.executable, str(agent), "--output-format", "stream-json"],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="p",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="impl",
+        agent_role="implementer",
+        raw_output_path=raw_output_path,
+        post_result_exit_timeout_s=60.0,
+    )
+    assert "completed-work-token" in output
+
+
+def test_run_adapter_still_raises_on_nonzero_exit_without_terminal_result(tmp_path: Path) -> None:
+    # No-regression guard for #43: a non-zero exit WITHOUT a terminal result event
+    # (a genuine crash before completion) must still raise, even with
+    # post_result_exit_timeout_s armed.
+    agent = tmp_path / "exit_no_result.py"
+    agent.write_text(
+        "import json, sys\n"
+        "sys.stdin.read()\n"
+        "print(json.dumps({'type': 'system', 'subtype': 'init'}))\n"
+        "sys.stdout.flush()\n"
+        "sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("p", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="claude",
+        cmd=[sys.executable, str(agent), "--output-format", "stream-json"],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+    with pytest.raises(adapters.BridgeAdapterError):
+        adapters.run_adapter(
+            spec,
+            prompt_text="p",
+            prompt_path=prompt_path,
+            repo_root=tmp_path,
+            job_id="job-1",
+            turn_id="impl",
+            agent_role="implementer",
+            raw_output_path=raw_output_path,
+            post_result_exit_timeout_s=60.0,
+        )
