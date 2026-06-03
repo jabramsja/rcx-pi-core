@@ -7064,7 +7064,26 @@ def _attempt_bot_finding_remediation(
                 if report_path.exists():
                     _run(["git", "add", "-f", "--", str(report_path.relative_to(repo_root))],
                          cwd=repo_root, timeout=30)
-                    _run(["git", "commit", "--amend", "--no-edit"], cwd=repo_root, timeout=30)
+                    # Staging the deferred report changes the staged tree, which
+                    # makes any prior receipt stale ("staged content changed since
+                    # review"). Re-mint a fresh receipt for the now-staged report so
+                    # the amend's pre-commit hook sees a matching staged_sha — the
+                    # same mint-before-commit pattern the normal-remediation branch
+                    # (and Step 9) use. Without this the amend's hook rejects the
+                    # commit and the report is silently dropped (the failure below is
+                    # caught non-fatally).
+                    _mint_bot_remediation_receipt(
+                        repo_root=repo_root,
+                        findings_addressed=[
+                            {"path": f.get("path", ""), "body": f.get("body", "")[:200]}
+                            for f in current_findings
+                        ],
+                        scoped_files=[str(report_path.relative_to(repo_root))],
+                        round_num=round_num,
+                        wave_id=wave_id,
+                    )
+                    _run(["git", "commit", "--amend", "--no-edit"], cwd=repo_root,
+                         timeout=30, env=_commit_subprocess_env())
                     _run(["git", "push", "--force-with-lease"], cwd=repo_root, timeout=60)
                     log(f"Step 15: deferred report amended into commit and pushed")
             except subprocess.CalledProcessError as exc:
@@ -7205,7 +7224,7 @@ def _attempt_bot_finding_remediation(
                 f"fix: address bot review findings (round {round_num})\n\n"
                 f"Co-Authored-By: Codex <noreply@openai.com>"
             )
-            _run(["git", "commit", "-m", msg], cwd=repo_root, timeout=60)
+            _run(["git", "commit", "-m", msg], cwd=repo_root, timeout=60, env=_commit_subprocess_env())
             current_head = _run(
                 ["git", "rev-parse", "HEAD"], cwd=repo_root, timeout=10,
             ).stdout.strip()

@@ -5950,6 +5950,203 @@ class TestBotRemediationValidation:
         assert push_indexes, seen_commands
         assert pre_push_indexes[0] < push_indexes[0]
 
+    def _capture_step15_commit_env(self, repo):
+        """Drive Step-15 remediation to the `git commit -m` call and return its env.
+
+        Stops at the bot-remediation commit and returns the ``env`` argument the
+        commit ``_run`` was invoked with -- i.e. the ``_commit_subprocess_env()``
+        value resolved by production at that call site (the regression target).
+        """
+        import subprocess
+
+        # Baseline commit so only the adapter's change is in-scope (sibling tests
+        # do the same; otherwise the seed files show as untracked out-of-scope).
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "baseline"],
+            cwd=repo, check=True, capture_output=True,
+        )
+
+        def write_changes(repo_root):
+            (repo_root / "file.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+        real_run = commit_mod._run  # ANTICHEAT_OK: regression captures the git-commit env arg
+        captured = {}
+
+        def intercept_run(args, cwd, check=True, timeout=120, env=None):
+            command = list(args)
+            if command[:3] == ["git", "commit", "-m"]:
+                captured["commit_env"] = env
+                # Short-circuit after capture so the flow does not push / poll CI.
+                raise subprocess.CalledProcessError(1, command, output="", stderr="captured")
+            return real_run(args, cwd=cwd, check=check, timeout=timeout, env=env)
+
+        with patch.object(
+            commit_mod,
+            "_bridge_adapters",
+            self._fake_bridge_adapters(write_changes),
+        ), patch.object(commit_mod, "_run", side_effect=intercept_run):
+            commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: direct Step 15 remediation regression
+                [{
+                    "path": "file.py",
+                    "body": "P1 update file",
+                    "author": commit_mod.BOT_REVIEW_LOGIN,
+                    "line": 1,
+                }],
+                repo_root=repo,
+                repo_owner="owner",
+                repo_name="repo",
+                pr_number="1036",
+                target_branch="bot-remediation-test",
+                head_sha="old-head",
+                wave_id="bot-remediation-env-test",
+                continuation_path=repo / ".agent_bus" / "meta" / "commit_continuation.json",
+                result=self._base_result(),
+                log=lambda _msg: None,
+            )
+        assert "commit_env" in captured, "Step 15 remediation never reached `git commit -m`"
+        return captured["commit_env"]
+
+    def test_bot_remediation_commit_carries_active_lane_bus_env(self, tmp_path):
+        # Regression (PR #1069 / lane #24): on a NON-DEFAULT (lane) bus the Step-15
+        # remediation commit must run with env=_commit_subprocess_env() so its
+        # pre-commit hook resolves the SAME lane bus the receipt was minted to (else
+        # the hook resolves the default .agent_bus and fails the commit with
+        # 'No pre-commit receipt found'). Mirrors how Step 9 passes step9_env.
+        repo = _setup_repo(tmp_path)
+        lane_bus = commit_mod.agent_bus_relpath(".agent_bus-lane1")
+        token = commit_mod._ACTIVE_BUS_DIR.set(lane_bus)  # ANTICHEAT_OK: activates lane bus authority
+        try:
+            commit_env = self._capture_step15_commit_env(repo)
+            expected_env = commit_mod._commit_subprocess_env()  # ANTICHEAT_OK: regression compares commit env
+            assert commit_env == expected_env
+            assert commit_env is not None
+            assert commit_env.get("RCX_AGENT_BUS_DIR") == str(lane_bus)
+        finally:
+            commit_mod._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: restores bus ContextVar
+
+    def test_bot_remediation_commit_env_none_without_active_bus(self, tmp_path):
+        # No active bus ContextVar: _commit_subprocess_env() returns None, so the
+        # remediation commit env stays None -- unchanged default-bus behavior.
+        repo = _setup_repo(tmp_path)
+        assert commit_mod._active_bus_dir() is None  # ANTICHEAT_OK: regression precondition (default bus)
+        commit_env = self._capture_step15_commit_env(repo)
+        assert commit_env is None
+
+    def _drive_step15_auto_defer_amend(self, repo, *, wave_id, pr_number="1036"):
+        """Drive Step-15 into the auto-defer branch (adapter makes NO changes, a
+        single non-blocking finding) up to the `git commit --amend`, and return a
+        dict with the amend `_run` env and the (passed, message) the amend's
+        pre-commit hook would compute by resolving the bus carried in that env.
+
+        The auto-defer branch is reached only when the worktree is clean after the
+        adapter, so the repo gitignores the bus dirs (as production does) and a
+        baseline commit lands first.
+        """
+        import subprocess
+
+        # Mirror production .gitignore: bus dirs and the .scratch prompt dir are
+        # ignored, so neither minting a receipt into .agent_bus-laneN/meta nor the
+        # remediation prompt file dirties `git status --porcelain` (the clean-tree
+        # gate that selects the auto-defer branch).
+        (repo / ".gitignore").write_text(
+            ".agent_bus/\n.agent_bus-*/\n.scratch/\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "baseline"],
+            cwd=repo, check=True, capture_output=True,
+        )
+
+        # Reproduce the bridge finding: a prior receipt exists for the pre-report
+        # (empty) staged state, so WITHOUT a re-mint it is stale once the report is
+        # staged ("staged content changed since review").
+        commit_mod._mint_bot_remediation_receipt(  # ANTICHEAT_OK: seeds the stale prior receipt
+            repo_root=repo,
+            findings_addressed=[],
+            scoped_files=[],
+            round_num=0,
+            wave_id=wave_id,
+        )
+
+        def fake_auto_defer(repo_root, findings, wave_id_, pr_number_, repo_owner, repo_name, log):
+            # Mirror _auto_defer_bot_findings' on-disk side effect (the report)
+            # without its PR-thread/network calls; the unit under test is the
+            # mint-before-amend that follows, not thread resolution.
+            d = repo_root / "reports" / "deferred" / "non_blocking"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"pr{pr_number_}_bot_auto_deferred_{wave_id_}.md").write_text(
+                "# deferred finding\n", encoding="utf-8")
+
+        real_run = commit_mod._run  # ANTICHEAT_OK: intercepts the amend to verify the receipt the hook would resolve
+        captured = {}
+
+        def intercept_run(args, cwd, check=True, timeout=120, env=None):
+            command = list(args)
+            if command[:3] == ["git", "commit", "--amend"]:
+                captured["amend_env"] = env
+                bus_dir = (env or {}).get("RCX_AGENT_BUS_DIR")
+                # Simulate what the pre-commit hook does: resolve the bus from the
+                # commit env and verify the staged receipt for the staged content.
+                captured["verify"] = meta_bridge_mod.verify_pre_commit_receipt(
+                    Path(cwd), bus_dir=bus_dir,
+                )
+                # Short-circuit before the real amend / force-push.
+                raise subprocess.CalledProcessError(1, command, output="", stderr="captured")
+            return real_run(args, cwd=cwd, check=check, timeout=timeout, env=env)
+
+        with patch.object(
+            commit_mod,
+            "_bridge_adapters",
+            self._fake_bridge_adapters(lambda _repo_root: None),  # adapter makes no changes
+        ), patch.object(
+            commit_mod, "_auto_defer_bot_findings", side_effect=fake_auto_defer,
+        ), patch.object(commit_mod, "_run", side_effect=intercept_run):
+            commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: direct auto-defer amend regression
+                [{
+                    "path": "docs/nit.md",
+                    "body": "P2 minor doc nit",
+                    "author": commit_mod.BOT_REVIEW_LOGIN,
+                    "line": 1,
+                }],
+                repo_root=repo,
+                repo_owner="owner",
+                repo_name="repo",
+                pr_number=pr_number,
+                target_branch="bot-remediation-test",
+                head_sha="old-head",
+                wave_id=wave_id,
+                continuation_path=repo / ".agent_bus" / "meta" / "commit_continuation.json",
+                result=self._base_result(),
+                log=lambda _msg: None,
+            )
+        assert "verify" in captured, "Step 15 auto-defer never reached `git commit --amend`"
+        return captured
+
+    def test_auto_defer_amend_mints_fresh_receipt_for_staged_report(self, tmp_path):
+        # Regression (bridge round 1, finding 1): the Step-15 auto-defer branch
+        # stages the deferred report then `git commit --amend`. It MUST mint a
+        # fresh receipt for the newly staged report first; otherwise the amend's
+        # pre-commit hook resolves the prior receipt as stale ('staged content
+        # changed since review') and the report is silently dropped (the amend
+        # failure is caught non-fatally). On a lane bus the amend env must also
+        # carry RCX_AGENT_BUS_DIR so the hook resolves the SAME lane bus the
+        # receipt was minted to. Without the mint this returns passed=False.
+        repo = _setup_repo(tmp_path)
+        lane_bus = commit_mod.agent_bus_relpath(".agent_bus-lane1")
+        wave_id = "bot-remediation-amend-test"
+        token = commit_mod._ACTIVE_BUS_DIR.set(lane_bus)  # ANTICHEAT_OK: activates lane bus authority
+        try:
+            captured = self._drive_step15_auto_defer_amend(repo, wave_id=wave_id)
+            expected_env = commit_mod._commit_subprocess_env()  # ANTICHEAT_OK: lane bus active here
+        finally:
+            commit_mod._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: restores bus ContextVar
+        passed, message = captured["verify"]
+        assert passed, f"amend receipt must be valid for the staged report, got: {message}"
+        assert captured["amend_env"] == expected_env
+        assert captured["amend_env"] is not None
+        assert captured["amend_env"].get("RCX_AGENT_BUS_DIR") == str(lane_bus)
+
 
 class TestReviewFindingExtraction:
     def _base_pr_data(self, *, head_sha="abc123", latest_reviews=None, review_threads=None, comments=None):
