@@ -1,24 +1,24 @@
 {
   "wave_id": "post-merge-verify-root-validation-2026-06-03",
-  "repeat_run_speedup_ratio": 1.693875,
+  "repeat_run_speedup_ratio": 1.053244,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.257542,
+  "step_growth_slope": 0.238093,
   "repeat_run_raw_seconds": [
-    0.436244,
-    0.257542
+    0.25077,
+    0.238093
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.436244
+      "elapsed_seconds": 0.25077
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.693786
+      "elapsed_seconds": 0.488863
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-06-03T16:11:34Z",
+  "collection_timestamp_utc": "2026-06-03T16:37:19Z",
   "collector_version": "2.2.0"
 }

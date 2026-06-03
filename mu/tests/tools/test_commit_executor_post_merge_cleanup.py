@@ -763,7 +763,7 @@ def test_resolve_verify_root_falls_back_when_linked_worktree_is_stale(tmp_path):
     assert str(wt_path.resolve()) not in wt_list
 
 
-def test_resolve_verify_root_rejects_dead_linked_worktree_inside_enclosing_repo(tmp_path):
+def test_resolve_verify_root_rejects_dead_linked_worktree_inside_enclosing_repo(tmp_path, monkeypatch):
     """Regression (bridge round 1): a dead linked worktree whose `.git` pointer
     was removed but whose DIRECTORY still sits inside an enclosing git repo must
     NOT be returned as the verify root. `git rev-parse --is-inside-work-tree`
@@ -813,12 +813,17 @@ def test_resolve_verify_root_rejects_dead_linked_worktree_inside_enclosing_repo(
     (wt_path / ".git").unlink()
     assert wt_path.is_dir()
     assert not (wt_path / ".git").exists()
-    # Guard precondition: git still lists it (unpruned), so the dead path really
-    # is what _find_linked_worktree_for_branch returns — only the worktree-root
-    # validation stands between it and the verify root.
-    assert (
-        commit_mod._find_linked_worktree_for_branch(inner, "dev")  # ANTICHEAT_OK: testing private helper
-        is not None
+    # Pin _find_linked_worktree_for_branch to hand back the dead path. git's
+    # auto-prune of a .git-less worktree is git-version-dependent (some keep the
+    # unpruned entry, others drop it), so reading real `git worktree list` here
+    # made this test flaky across environments (passed locally, failed in CI).
+    # Pinning isolates the test to the worktree-root VALIDATION under test
+    # (_is_usable_worktree), which deterministically rejects wt_path because
+    # `git rev-parse --show-toplevel` walks UP to OUTER, not wt_path itself.
+    monkeypatch.setattr(
+        commit_mod,
+        "_find_linked_worktree_for_branch",
+        lambda repo_root, branch: wt_path,  # ANTICHEAT_OK: pin private helper for determinism
     )
 
     verify_root = commit_mod._resolve_post_merge_verify_root(  # ANTICHEAT_OK: testing private helper
