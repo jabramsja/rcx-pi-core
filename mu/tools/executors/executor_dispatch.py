@@ -4094,7 +4094,16 @@ class _LaneMonitor:
         verbose: bool = False,
     ) -> None:
         self.repo_root = Path(repo_root) if repo_root is not None else None
-        self.bus_dir = str(bus_dir).strip() if bus_dir else ""
+        # Canonicalize to the bare bus NAME (strip whitespace + any trailing
+        # slash and drop directory components) BEFORE it drives the monitor
+        # lifecycle.  resolve_agent_bus_dir() accepts a trailing slash (e.g.
+        # ".agent_bus-lane1/") and lets the dispatcher proceed, but the raw value
+        # would break both ends of the lifecycle: pipeline_monitor.sh rejects any
+        # "/" in --bus-dir (spawn would fail) and the owner-loop cleanup matches
+        # the --bus-dir token WHOLE (a trailing slash would never match the real
+        # owner-loop, stranding it).  Mirrors the same .name reduction already
+        # used by _lane_name_from_bus_dir / _resolve_lane_tmux_session.
+        self.bus_dir = Path(str(bus_dir).strip().rstrip("/")).name if bus_dir else ""
         self.verbose = verbose
         self.lane = _lane_name_from_bus_dir(self.bus_dir)
         self.session = (
