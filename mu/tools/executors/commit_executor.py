@@ -3245,6 +3245,110 @@ def _find_linked_worktree_for_branch(repo_root: Path, branch: str) -> Path | Non
     return None
 
 
+def _git_common_dir(cwd: Path) -> Path | None:
+    """Resolve the shared git common dir for the repository at `cwd`.
+
+    Every linked worktree of one repository reports the SAME common dir (the
+    primary repo's git dir); an unrelated repository reports its own. This is
+    the identity used to decide whether a path belongs to `repo_root`'s repo.
+    Returns None when `cwd` is not inside any git worktree. `--git-common-dir`
+    is relative to `cwd` in the primary worktree ('.git') and absolute in a
+    linked worktree, so the raw value is re-anchored to `cwd` before resolving.
+    """
+    try:
+        probe = _run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=cwd,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if probe.returncode != 0:
+        return None
+    raw = probe.stdout.strip()
+    if not raw:
+        return None
+    common = Path(raw)
+    if not common.is_absolute():
+        common = cwd / common
+    return common.resolve()
+
+
+def _is_usable_worktree(repo_root: Path, path: Path) -> bool:
+    """Return True only if `path` is a live linked worktree of `repo_root`'s repo.
+
+    Guards `_resolve_post_merge_verify_root` against handing a non-live path to
+    the post-merge verify, where running git in a broken or foreign directory
+    fails AFTER the merge already landed -- surfacing an already-merged PR as
+    Status: error (and, under the dispatcher, a spurious recovery cascade).
+
+    Three independent rejections, each closing a distinct false positive that
+    `_find_linked_worktree_for_branch` (which reads only git's worktree
+    metadata, not on-disk state) would otherwise re-admit:
+      1. dir missing -- a removed worktree (e.g. a pruned nightly-ci-repair
+         worktree). Checked first: `_run` with a missing `cwd` raises before git.
+      2. `--show-toplevel` must resolve back to `path`. `git rev-parse` walks UP
+         to an enclosing repository, so a dead worktree whose `.git` pointer was
+         removed while its directory still sits inside another repo resolves to
+         that ancestor, not to itself -- rejected.
+      3. `path`'s git common dir must equal `repo_root`'s. A foreign, unrelated
+         repository squatting the linked path is its own toplevel (so it passes
+         rejection 2) but reports its own common dir, not repo_root's -- the
+         reused-path false positive the round-2 bridge demonstrated -- rejected.
+    """
+    if not path.is_dir():
+        return False
+    try:
+        toplevel_probe = _run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=path,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if toplevel_probe.returncode != 0:
+        return False
+    toplevel = toplevel_probe.stdout.strip()
+    if not toplevel or Path(toplevel).resolve() != path.resolve():
+        return False
+    repo_common = _git_common_dir(repo_root)
+    path_common = _git_common_dir(path)
+    return repo_common is not None and path_common == repo_common
+
+
+def _worktree_head_branch(path: Path) -> str | None:
+    """Return the branch `path`'s on-disk HEAD points at, or None.
+
+    `_find_linked_worktree_for_branch` reads only git's worktree-list metadata,
+    which records the branch a worktree was REGISTERED on -- not the branch a
+    `cd` into the path actually lands on. When the path's directory has been
+    replaced (e.g. by a symlink to a different same-repo worktree), the metadata
+    still names base_branch while the on-disk HEAD is another branch, so the
+    branch the post-merge verify would really run against must be probed at the
+    path itself. `_is_usable_worktree` proves the path is a live same-repo
+    worktree but is branch-agnostic; this closes the remaining metadata-vs-disk
+    gap. Returns None on a detached HEAD (`--abbrev-ref` yields 'HEAD') or any
+    git failure, so the caller treats an unverifiable branch as a mismatch.
+    """
+    try:
+        probe = _run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=path,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if probe.returncode != 0:
+        return None
+    branch = probe.stdout.strip()
+    if not branch or branch == "HEAD":
+        return None
+    return branch
+
+
 def _resolve_post_merge_verify_root(repo_root: Path, base_branch: str, *, log: Any) -> Path:
     """Choose a safe worktree for post-merge verification of the base branch."""
     current_after = _run(
@@ -3254,12 +3358,36 @@ def _resolve_post_merge_verify_root(repo_root: Path, base_branch: str, *, log: A
     if current_after == base_branch:
         return repo_root
     branch_worktree = _find_linked_worktree_for_branch(repo_root, base_branch)
-    if branch_worktree is not None and branch_worktree != repo_root:
+    if (
+        branch_worktree is not None
+        and branch_worktree != repo_root
+        and _is_usable_worktree(repo_root, branch_worktree)
+        and _worktree_head_branch(branch_worktree) == base_branch
+    ):
         log(
             f"Step 15: using linked {base_branch} worktree for verification: {branch_worktree}"
         )
         return branch_worktree
-    _run(["git", "checkout", base_branch], cwd=repo_root)
+    # No verify-ready linked worktree. An entry can still squat base_branch in
+    # git's metadata — `_find_linked_worktree_for_branch` only ever returns
+    # worktrees git records as checked out on base_branch — which would make a
+    # bare `git checkout base_branch` fail 'already checked out at <path>' and
+    # surface an already-merged PR as Status: error. We reach this fallback when
+    # that recorded entry is NOT verify-ready: its directory is gone, it is a
+    # foreign/dead repo squatting the path, or it is a live same-repo worktree
+    # whose on-disk HEAD is no longer base_branch (metadata spoofed, e.g. the
+    # path replaced by a symlink to another worktree). `git worktree prune`
+    # clears entries whose directory is gone (self-healing that case), but a
+    # directory that still exists is NOT prunable, so prune cannot free
+    # base_branch there. `--ignore-other-worktrees` lets repo_root check out
+    # base_branch regardless: safe because the rejected entry is never our
+    # verify target, and any directory on disk (foreign repo or another
+    # worktree) is left untouched (not removed).
+    _run(["git", "worktree", "prune"], cwd=repo_root, check=False)
+    _run(
+        ["git", "checkout", "--ignore-other-worktrees", base_branch],
+        cwd=repo_root,
+    )
     return repo_root
 
 

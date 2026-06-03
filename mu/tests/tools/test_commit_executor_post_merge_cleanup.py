@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -695,3 +696,245 @@ def test_empty_wave_id_skips_stash_step_without_warning(tmp_path):
     assert outcome["stashes_dropped"] == 0
     # No stash-related warnings
     assert not any("stash" in w for w in outcome["warnings"]), outcome
+
+
+def test_resolve_verify_root_returns_repo_root_when_already_on_base(tmp_path):
+    """Happy path 1 preserved: repo_root already on base_branch is returned
+    as-is without consulting linked worktrees."""
+    repo = _init_repo(tmp_path)  # already on 'dev'
+
+    verify_root = commit_mod._resolve_post_merge_verify_root(  # ANTICHEAT_OK: testing private helper
+        repo, "dev", log=_noop_log,
+    )
+
+    assert verify_root == repo
+
+
+def test_resolve_verify_root_uses_valid_linked_worktree(tmp_path):
+    """Happy path 2 preserved: a live linked worktree checked out on
+    base_branch is returned as the verify root, and repo_root is left on its
+    own branch (not force-checked-out to base)."""
+    repo = _init_repo(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feature-y"], cwd=repo)  # repo off base
+    wt_path = tmp_path / "live_dev_wt"
+    _git(["worktree", "add", str(wt_path), "dev"], cwd=repo)  # live worktree on dev
+
+    verify_root = commit_mod._resolve_post_merge_verify_root(  # ANTICHEAT_OK: testing private helper
+        repo, "dev", log=_noop_log,
+    )
+
+    # Compare resolved paths: git reports the canonical (/private) worktree path
+    # while tmp_path may be the /var symlink form on macOS.
+    assert verify_root.resolve() == wt_path.resolve(), verify_root
+    assert verify_root != repo
+    head = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo).stdout.strip()
+    assert head == "jabramsja/feature-y"
+
+
+def test_resolve_verify_root_falls_back_when_linked_worktree_is_stale(tmp_path):
+    """Regression: a linked base-branch worktree whose directory was removed
+    (observed: a removed nightly-ci-repair worktree) must NOT be returned as
+    the verify root. `_resolve_post_merge_verify_root` prunes the dead metadata
+    and falls back to repo_root checked out on base_branch — instead of handing
+    back the dead path (which made the post-merge verify fail
+    'fatal: not a git repository' and surfaced an already-merged PR as
+    Status: error) or hitting 'already checked out at <dead path>' on the
+    fallback checkout. Mirrors PR #1064/#1065 (standalone) and #1070 (dispatcher).
+    """
+    repo = _init_repo(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feature-x"], cwd=repo)  # repo off base
+    wt_path = tmp_path / "stale_dev_wt"
+    _git(["worktree", "add", str(wt_path), "dev"], cwd=repo)  # worktree on dev (squats base)
+    shutil.rmtree(wt_path)  # dir gone; git metadata still references it → stale
+    assert not wt_path.exists()
+
+    verify_root = commit_mod._resolve_post_merge_verify_root(  # ANTICHEAT_OK: testing private helper
+        repo, "dev", log=_noop_log,
+    )
+
+    # Fell back to repo_root, NOT the dead worktree path.
+    assert verify_root == repo, verify_root
+    assert verify_root != wt_path
+    # repo_root is now actually on base, ready for the ff-only verify.
+    head = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo).stdout.strip()
+    assert head == "dev"
+    # Self-healing: stale worktree metadata was pruned (git reports resolved paths).
+    wt_list = _git(["worktree", "list", "--porcelain"], cwd=repo).stdout
+    assert str(wt_path.resolve()) not in wt_list
+
+
+def test_resolve_verify_root_rejects_dead_linked_worktree_inside_enclosing_repo(tmp_path):
+    """Regression (bridge round 1): a dead linked worktree whose `.git` pointer
+    was removed but whose DIRECTORY still sits inside an enclosing git repo must
+    NOT be returned as the verify root. `git rev-parse --is-inside-work-tree`
+    walks UP to the enclosing repo and returns 0 for the dead path, so a naive
+    probe would re-admit the stale worktree (git still lists it, unpruned, so
+    `_find_linked_worktree_for_branch` hands it back). The resolver must anchor
+    its probe to the worktree-root identity (`--show-toplevel` resolving back to
+    the path), reject the ancestor match, and fall back to repo_root on
+    base_branch. Mirrors the cross-repo false positive the round-1 bridge
+    demonstrated: a temp repo's dead worktree satisfying the probe via an
+    unrelated outer repository.
+    """
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    # Enclosing ("outer") repo — an UNRELATED git repo that contains everything.
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    _git(["init"], cwd=outer, env=env)
+    _git(["checkout", "-b", "main"], cwd=outer, env=env)
+    _git(["config", "user.name", "t"], cwd=outer)
+    _git(["config", "user.email", "t@t"], cwd=outer)
+    (outer / "outer_seed.txt").write_text("outer")
+    _git(["add", "outer_seed.txt"], cwd=outer, env=env)
+    _git(["commit", "-m", "outer-init"], cwd=outer, env=env)
+
+    # Inner repo (the repo_root we resolve against), nested inside outer, off base.
+    inner = outer / "inner"
+    inner.mkdir()
+    _git(["init"], cwd=inner, env=env)
+    _git(["checkout", "-b", "dev"], cwd=inner, env=env)
+    _git(["config", "user.name", "t"], cwd=inner)
+    _git(["config", "user.email", "t@t"], cwd=inner)
+    (inner / "seed.txt").write_text("seed")
+    _git(["add", "seed.txt"], cwd=inner, env=env)
+    _git(["commit", "-m", "inner-init"], cwd=inner, env=env)
+    _git(["checkout", "-b", "jabramsja/feature-z"], cwd=inner, env=env)  # inner OFF base
+
+    # Linked worktree of inner on dev, placed as a sibling of inner under outer,
+    # so walking up from it finds OUTER (an unrelated repo), not inner.
+    wt_path = outer / "dead_wt"
+    _git(["worktree", "add", str(wt_path), "dev"], cwd=inner)
+    # Remove the linked-worktree pointer but leave the directory: the naive
+    # `--is-inside-work-tree` probe now matches the enclosing outer repo.
+    (wt_path / ".git").unlink()
+    assert wt_path.is_dir()
+    assert not (wt_path / ".git").exists()
+    # Guard precondition: git still lists it (unpruned), so the dead path really
+    # is what _find_linked_worktree_for_branch returns — only the worktree-root
+    # validation stands between it and the verify root.
+    assert (
+        commit_mod._find_linked_worktree_for_branch(inner, "dev")  # ANTICHEAT_OK: testing private helper
+        is not None
+    )
+
+    verify_root = commit_mod._resolve_post_merge_verify_root(  # ANTICHEAT_OK: testing private helper
+        inner, "dev", log=_noop_log,
+    )
+
+    # Fell back to repo_root (inner), NOT the dead worktree path that an
+    # enclosing repo would make the naive probe accept.
+    assert verify_root == inner, verify_root
+    assert verify_root != wt_path
+    # repo_root is now actually on base, ready for the ff-only verify.
+    head = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=inner).stdout.strip()
+    assert head == "dev"
+
+
+def test_resolve_verify_root_falls_back_when_linked_worktree_is_foreign_repo(tmp_path):
+    """Regression (bridge round 2): a linked base-branch worktree path that has
+    been REPLACED by an unrelated, independent git repo must NOT be returned as
+    the verify root. The foreign repo is its OWN toplevel, so the round-1
+    `--show-toplevel == path` guard accepts it, and git still lists the unpruned
+    (non-prunable) entry so `_find_linked_worktree_for_branch` hands it back --
+    yet running the post-merge verify there would operate on a foreign HEAD,
+    not base_branch. `_resolve_post_merge_verify_root` must reject it via the
+    same-repository (git common dir) check and fall back to repo_root on
+    base_branch. Because the foreign entry is non-prunable, the fallback uses
+    `git checkout --ignore-other-worktrees` so repo_root still lands on base
+    instead of failing 'already checked out at <foreign path>'. The foreign repo
+    on disk is left untouched.
+    """
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    repo = _init_repo(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feature-foreign"], cwd=repo)  # repo off base
+    wt_path = tmp_path / "foreign_dev_wt"
+    _git(["worktree", "add", str(wt_path), "dev"], cwd=repo)  # linked worktree on dev
+    # Replace the linked worktree with an UNRELATED independent repo at the path.
+    shutil.rmtree(wt_path)
+    wt_path.mkdir()
+    _git(["init"], cwd=wt_path, env=env)
+    _git(["checkout", "-b", "unrelated"], cwd=wt_path, env=env)
+    (wt_path / "foreign.txt").write_text("foreign")
+    _git(["add", "foreign.txt"], cwd=wt_path, env=env)
+    _git(["commit", "-m", "foreign"], cwd=wt_path, env=env)
+
+    # Guard precondition: git still lists the non-prunable entry, so the foreign
+    # path is exactly what _find_linked_worktree_for_branch returns — only the
+    # same-repository validation stands between it and the verify root.
+    found = commit_mod._find_linked_worktree_for_branch(repo, "dev")  # ANTICHEAT_OK: testing private helper
+    assert found is not None and found.resolve() == wt_path.resolve(), found
+
+    verify_root = commit_mod._resolve_post_merge_verify_root(  # ANTICHEAT_OK: testing private helper
+        repo, "dev", log=_noop_log,
+    )
+
+    # Fell back to repo_root, NOT the foreign repo path.
+    assert verify_root == repo, verify_root
+    assert verify_root.resolve() != wt_path.resolve()
+    # repo_root is now actually on base, ready for the ff-only verify.
+    head = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo).stdout.strip()
+    assert head == "dev"
+    # The foreign repo at the path was left untouched (not destroyed).
+    assert wt_path.exists()
+    foreign_head = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=wt_path).stdout.strip()
+    assert foreign_head == "unrelated"
+
+
+def test_resolve_verify_root_rejects_same_repo_worktree_on_wrong_branch(tmp_path):
+    """Regression (bridge round 3): a linked base-branch worktree whose metadata
+    still records it on base_branch but whose DIRECTORY has been replaced by a
+    symlink to a DIFFERENT same-repo worktree (checked out on another branch)
+    must NOT be returned as the verify root. The symlink target is a live,
+    same-repo worktree, so every `_is_usable_worktree` check passes (dir exists,
+    `--show-toplevel` resolves back to the path, same git common dir) -- yet
+    running the post-merge verify there would operate on the OTHER branch's HEAD,
+    not base_branch, verifying the wrong branch after an already-merged PR.
+    `_resolve_post_merge_verify_root` must probe the candidate's on-disk HEAD and,
+    on the base-branch mismatch, fall back to repo_root checked out on
+    base_branch. Closes the metadata-vs-disk gap the round-1/round-2 worktree
+    IDENTITY guards (which never checked the candidate's actual branch) left open.
+    """
+    repo = _init_repo(tmp_path)  # on dev
+    _git(["checkout", "-b", "jabramsja/feature-w"], cwd=repo)  # repo off base
+    dev_wt = tmp_path / "dev_wt"
+    _git(["worktree", "add", str(dev_wt), "dev"], cwd=repo)  # live worktree on dev
+    other_wt = tmp_path / "other_wt"
+    _git(["worktree", "add", "-b", "other", str(other_wt), "dev"], cwd=repo)  # worktree on 'other'
+    # Replace the dev worktree DIRECTORY with a symlink to the 'other' worktree:
+    # git's metadata still lists dev_wt on refs/heads/dev (non-prunable -- the
+    # symlink resolves to a live .git), but cd-ing into dev_wt now lands on the
+    # 'other' branch's HEAD.
+    shutil.rmtree(dev_wt)
+    dev_wt.symlink_to(other_wt)
+
+    # Guard precondition: git still hands back dev_wt for base_branch AND the
+    # round-1/round-2 usability checks still accept it -- so ONLY the on-disk
+    # branch probe stands between the wrong-branch path and the verify root
+    # (otherwise this test would pass vacuously via an earlier rejection).
+    found = commit_mod._find_linked_worktree_for_branch(repo, "dev")  # ANTICHEAT_OK: testing private helper
+    assert found is not None and found.resolve() == other_wt.resolve(), found
+    assert commit_mod._is_usable_worktree(repo, found) is True, found  # ANTICHEAT_OK: testing private helper
+
+    verify_root = commit_mod._resolve_post_merge_verify_root(  # ANTICHEAT_OK: testing private helper
+        repo, "dev", log=_noop_log,
+    )
+
+    # Fell back to repo_root, NOT the wrong-branch ('other') worktree path.
+    assert verify_root == repo, verify_root
+    assert verify_root.resolve() != other_wt.resolve()
+    # repo_root is now actually on base, ready for the ff-only verify.
+    head = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo).stdout.strip()
+    assert head == "dev"
+    # The 'other' worktree on disk was left untouched (not destroyed or moved off
+    # its branch by the fallback checkout, which runs in repo_root only).
+    assert other_wt.exists()
+    other_head = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=other_wt).stdout.strip()
+    assert other_head == "other"
