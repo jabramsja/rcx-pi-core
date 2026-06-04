@@ -19,6 +19,7 @@ Covers:
 from __future__ import annotations
 
 import subprocess
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1639,3 +1640,240 @@ class TestMidpollConflictRecheckBeforeCIFailure:
         # required-pass boundary caught the cancelled-by-conflict checks.
         assert ["gh", "pr", "checks", "404", "--watch", "--required"] in watch_cmds
         assert "Manual recovery required" in response["errors"][0]
+
+
+class TestStep15RemediationMidPollSurfaceConflictRecheck:
+    """Step-15 bot-remediation CI-wait is conflict-aware (#49 parallel-lane
+    stranding).
+
+    Companion to ``TestStep14MidPollSurfaceConflictRecheck`` for the OTHER
+    ``_wait_for_pr_ci`` call site that populates ``midpoll_autoresolve``: the
+    Step-15-remediation CI-wait inside ``_attempt_bot_finding_remediation``. A
+    sibling dispatcher lane that merges DURING the remediation CI poll flips this
+    lane's PR to CONFLICTING/DIRTY; GitHub then skips/cancels its ``pull_request``
+    required checks (a CANCELLED required check is classified ``failed`` by
+    ``_summarize_pr_check_surface``). Before the fix the remediation
+    ``_wait_for_pr_ci`` call omitted ``midpoll_autoresolve``, so the surface-wait
+    conflict re-check was DISABLED and the poll doom-spun to the 900s surface
+    timeout, returning a ci_failure that STRANDED the PR (verified on PR #1075:
+    ~32 surface-wait iterations, zero conflict-handling, dispatcher exit).
+
+    The fix threads ``base_branch`` (from ``_run_post_commit_pipeline``) into
+    ``_attempt_bot_finding_remediation`` and passes
+    ``midpoll_autoresolve={"base_branch": base_branch, "branch_name":
+    target_branch}`` to its ``_wait_for_pr_ci`` call -- built EXACTLY like the
+    Step-14 caller. ``base_branch`` carries the REAL wave base (``dev``); the head
+    ``target_branch`` is the ``branch_name`` ``_try_auto_resolve_pr_conflict``
+    merges INTO. So the remediation surface-wave re-checks
+    ``_check_pr_conflict_state`` and re-fires ``_try_auto_resolve_pr_conflict``
+    once (fetch + merge ``origin/dev`` + repush re-triggers the skipped workflows)
+    instead of doom-polling to timeout.
+
+    This drives the REAL ``_attempt_bot_finding_remediation`` -> REAL
+    ``_wait_for_pr_ci`` -> REAL ``_wait_for_expected_pr_check_surface_to_pass``
+    -> REAL ``_wait_for_bot_review_freshness`` so BOTH fixes are exercised
+    end-to-end:
+
+    * #49 midpoll (round 1): without the threaded ``midpoll_autoresolve`` the
+      surface-wait conflict re-check is inert, ``_try_auto_resolve_pr_conflict``
+      is never fired, and the CANCELLED-as-failed surface returns as a ci_failure
+      (``resolve_calls`` stays 0).
+    * stale-head refresh (round 2): the mid-poll auto-resolve merge+repush
+      advances the PR head past the remediation commit. Unless
+      ``_attempt_bot_finding_remediation`` re-reads HEAD after the CI-wait, the
+      stale ``current_head`` reaches ``_wait_for_bot_review_freshness`` ->
+      ``_assert_expected_pr_head``, which rejects the moved PR head with
+      ``ValueError`` and strands the PR on ``bot_findings_pending``. With the
+      refresh the head matches the PR ``headRefOid`` and remediation returns
+      ``None`` (clean, mergeable).
+    """
+
+    @staticmethod
+    def _failed_surface() -> dict:
+        # Concurrent-merge CANCELLED-as-failed surface: GitHub cancelled the
+        # pull_request required checks when the sibling lane merged first.
+        return {
+            "status": "failed",
+            "summary": "failing PR check(s): test=CANCELLED",
+            "failing_checks": ["test=CANCELLED"],
+        }
+
+    @staticmethod
+    def _passed_surface() -> dict:
+        return {"status": "passed", "summary": "expected PR check surface green"}
+
+    @staticmethod
+    def _fake_bridge_adapters() -> types.SimpleNamespace:
+        # Minimal stand-in for the bridge_adapters module so the remediation loop
+        # reaches its _wait_for_pr_ci call without spawning a real adapter
+        # subprocess. run_adapter is a no-op; the "fix" is modelled by the staged
+        # git-status fake below reporting an in-scope change.
+        adapter = types.SimpleNamespace(
+            name="bot_remediation",
+            cmd=["true"],
+            prompt_via_stdin=False,
+            env={},
+            mode="adapter",
+        )
+        return types.SimpleNamespace(
+            BridgeAdapterError=RuntimeError,
+            load_bridge_config=lambda _path: {},
+            get_adapter=lambda _config, _name: adapter,
+            AdapterSpec=lambda **kw: types.SimpleNamespace(**kw),
+            run_adapter=lambda *a, **kw: None,
+        )
+
+    def test_remediation_ci_wait_rechecks_conflict_and_does_not_strand(self, tmp_path):
+        target_branch = "wave/lane49"
+        base_branch = "dev"
+        # Distinct heads model the mid-poll auto-resolve advancing the PR head:
+        # the remediation commit is pushed at `remediation_head`; then the
+        # _wait_for_pr_ci mid-poll auto-resolve merges origin/dev + repushes,
+        # leaving the PR (and the local worktree HEAD) at `autoresolve_head`.
+        remediation_head = "1111111111111111111111111111111111111111"
+        autoresolve_head = "2222222222222222222222222222222222222222"
+
+        summarize_calls = {"count": 0}
+        conflict_calls = {"count": 0}
+        resolve_calls = {"count": 0}
+        rev_parse_calls = {"count": 0}
+        captured = {}
+        consumed_heads = {}
+
+        def fake_summarize(checks):
+            summarize_calls["count"] += 1
+            # poll 1: concurrent-merge CANCELLED-as-failed surface (the doom-poll
+            # input); poll 2: green, after the auto-resolve repush re-triggered
+            # the skipped pull_request workflows.
+            if summarize_calls["count"] >= 2:
+                return self._passed_surface()
+            return self._failed_surface()
+
+        def fake_conflict(repo_root, *, pr_number, log=None):
+            conflict_calls["count"] += 1
+            return "mergeable=CONFLICTING"
+
+        def fake_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            resolve_calls["count"] += 1
+            captured["base_branch"] = base_branch
+            captured["branch_name"] = branch_name
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev + resolved TASKS.md + pushed",
+            }
+
+        def fake_run(args, *, cwd, check=True, timeout=120, env=None):
+            # Drives _attempt_bot_finding_remediation's git ops + the real
+            # _wait_for_pr_ci `gh pr checks --watch` call.
+            if args[:2] == ["git", "status"]:
+                # Adapter "produced" an in-scope change on the finding path.
+                return subprocess.CompletedProcess(
+                    args, 0, stdout=" M mu/foo.py\n", stderr=""
+                )
+            if args[:2] == ["git", "rev-parse"]:
+                rev_parse_calls["count"] += 1
+                # 1st rev-parse: the just-committed remediation head. 2nd
+                # rev-parse: the post-CI-wait refresh, which on the FIXED code
+                # reads the head the mid-poll auto-resolve merge+repush advanced
+                # the local worktree (and the PR) to.
+                head = (
+                    remediation_head
+                    if rev_parse_calls["count"] == 1
+                    else autoresolve_head
+                )
+                return subprocess.CompletedProcess(args, 0, stdout=head + "\n", stderr="")
+            # git add / commit / push, gh pr checks --watch: all succeed quietly.
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        def fake_request_review(repo_root, *, pr_number, head_sha, continuation_path, log=None):
+            # Capture the head the post-CI current-head bot-review request is
+            # retargeted to -- must be the refreshed autoresolve_head, never the
+            # stale remediation_head.
+            consumed_heads["request"] = head_sha
+            return True
+
+        findings = [{"path": "mu/foo.py", "body": "P2: tidy import", "severity": "P2"}]
+        result = {"steps_completed": ["git_commit"]}
+        cfg = tmp_path / "bridge_config.json"
+        cfg.write_text("{}", encoding="utf-8")
+
+        with patch.object(commit_mod, "_bridge_adapters", self._fake_bridge_adapters()), \
+             patch.object(commit_mod, "bridge_config_path", lambda *a, **k: cfg), \
+             patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "ensure_bot_remediation_tracker_followup",
+                          return_value={"updated": False, "errors": []}), \
+             patch.object(commit_mod, "_run_bot_remediation_staged_test_gate",
+                          return_value={"passed": True}), \
+             patch.object(commit_mod, "_mint_bot_remediation_receipt",
+                          return_value=tmp_path / "bot_receipt.json"), \
+             patch.object(commit_mod, "_checkpoint_post_commit_progress",
+                          lambda *a, **k: None), \
+             patch.object(commit_mod, "_run_bot_remediation_pre_push_guard",
+                          return_value={"passed": True}), \
+             patch.object(commit_mod, "_wait_for_required_checks_to_register",
+                          return_value=None), \
+             patch.object(commit_mod, "_wait_for_required_checks_to_pass",
+                          return_value=True), \
+             patch.object(commit_mod, "_fetch_pr_check_surface_rollup", return_value=[]), \
+             patch.object(commit_mod, "_summarize_pr_check_surface", side_effect=fake_summarize), \
+             patch.object(commit_mod, "_check_pr_conflict_state", side_effect=fake_conflict), \
+             patch.object(commit_mod, "_try_auto_resolve_pr_conflict", side_effect=fake_resolve), \
+             patch.object(commit_mod, "_maybe_request_current_head_bot_review",
+                          side_effect=fake_request_review), \
+             patch.object(commit_mod, "_query_pr_review_state",
+                          return_value={"headRefOid": autoresolve_head}), \
+             patch.object(commit_mod, "_has_fresh_connector_review", return_value=True), \
+             patch.object(commit_mod, "_extract_review_findings",
+                          return_value={"outcome": "clean"}), \
+             patch.object(commit_mod.time, "sleep", lambda _s: None):
+            outcome = commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: remediation CI-wait conflict re-check + stale-head refresh verify
+                findings,
+                repo_root=tmp_path,
+                repo_owner="jabramsja",
+                repo_name="rcx-pi-core",
+                pr_number="1075",
+                target_branch=target_branch,
+                base_branch=base_branch,
+                head_sha="deadbeefcafe",
+                wave_id="step15-remediation-surface-conflict-recheck-2026-06-04",
+                continuation_path=tmp_path / "continuation.json",
+                result=result,
+                log=lambda _m: None,
+            )
+
+        # FIX-CONFIRMING ASSERTIONS -- two independent fixes, each must hold:
+        #
+        # (1) #49 midpoll (round 1): the remediation CI-wait re-checked the
+        # conflict and re-fired the auto-resolve EXACTLY once on the
+        # CANCELLED-as-failed surface, then re-polled green. On the un-fixed call
+        # site (no midpoll_autoresolve) the re-check is inert, resolve_calls stays
+        # 0, and the CANCELLED surface returns as a ci_failure.
+        assert resolve_calls["count"] == 1
+        assert conflict_calls["count"] == 1     # probed once; green poll returns first
+        assert summarize_calls["count"] == 2    # re-polled after the resolve -> green
+        # The bridge-round-1 mapping correction: base_branch carries the REAL
+        # wave base (dev), NEVER the head (target_branch). Mapping the head into
+        # base_branch would make _try_auto_resolve_pr_conflict fetch+merge
+        # origin/<head> into <head> -- a self-merge that never pulls the
+        # sibling-lane base and leaves the CONFLICTING state unresolved.
+        assert captured["base_branch"] == "dev"
+        assert captured["branch_name"] == target_branch
+        #
+        # (2) stale-head refresh (bridge round 2): the mid-poll auto-resolve
+        # merge+repush advanced the PR head past the remediation commit, so after
+        # _wait_for_pr_ci returned None the function re-read HEAD and retargeted
+        # the post-CI current-head bot-review request + freshness wait at the NEW
+        # head. _wait_for_bot_review_freshness runs for REAL here, so its
+        # _assert_expected_pr_head compares the refreshed current_head against the
+        # PR headRefOid: they match, it does NOT raise, and remediation returns
+        # None (PR mergeable, not stranded). On the un-fixed code current_head
+        # stays the stale remediation head, _assert_expected_pr_head rejects the
+        # moved PR head with ValueError, and remediation returns
+        # bot_findings_pending.
+        assert outcome is None, (
+            "remediation must return None (clean, not stranded) after a mid-poll "
+            f"auto-resolve advanced the PR head; got {outcome!r}"
+        )
+        assert rev_parse_calls["count"] == 2    # remediation commit head + post-CI-wait refresh
+        assert consumed_heads["request"] == autoresolve_head
