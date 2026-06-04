@@ -7594,6 +7594,34 @@ def _attempt_bot_finding_remediation(
             ),
         )
         if ci_response is not None:
+            # _wait_for_pr_ci can return two distinct non-None envelopes here:
+            #   1. failure_class == "pr_conflicting" -- a sibling lane merged
+            #      mid-poll and the Step-15 midpoll_autoresolve could not clear
+            #      the conflict (e.g. _try_auto_resolve_pr_conflict aborts on a
+            #      non-TASKS.md conflict). This is the SAME structured fail-closed
+            #      envelope the Step-14 caller receives: an auto-resolvable
+            #      PR-state signal (recovery Tier 2: base-merge + repush), NOT a
+            #      bot finding. Return it verbatim -- exactly like the Step-14
+            #      caller's `if ci_response is not None: return ci_response` -- so
+            #      classify_failure honors failure_class=pr_conflicting. Wrapping
+            #      it into bot_findings_pending would erase failure_class (and
+            #      bot_findings_pending is matched AHEAD of pr_conflicting in
+            #      classify_failure), misrouting recovery to Tier 3 (re-invoke
+            #      implementer), which cannot merge the base branch and strands
+            #      the PR.
+            #   2. any other failure_class (a genuine CI/test break) -- the
+            #      remediation round ran but CI is still red, so the findings are
+            #      still pending; wrap into bot_findings_pending (carrying the
+            #      findings + round count) so recovery re-invokes the implementer
+            #      for another remediation round.
+            if ci_response.get("failure_class") == "pr_conflicting":
+                log(
+                    f"Step 15: remediation round {round_num} CI wait hit an "
+                    f"unresolved concurrent-base conflict; preserving the "
+                    f"pr_conflicting recovery envelope instead of wrapping it as "
+                    f"bot_findings_pending: {ci_response.get('errors', [])}"
+                )
+                return ci_response
             log(f"Step 15: CI did not pass after remediation round {round_num}: {ci_response.get('errors', [])}")
             return {
                 "status": "bot_findings_pending",
