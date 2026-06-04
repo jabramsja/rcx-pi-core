@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import fcntl
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -3509,6 +3510,240 @@ def _dirty_worktree_paths(repo_root: Path) -> set[str]:
         path for path in dirty
         if path and not _is_transient_status_path(path)
     }
+
+
+def _sync_primary_worktree_to_base(
+    repo_root: Path,
+    base_branch: str,
+    *,
+    log: Any,
+) -> dict[str, Any]:
+    """Fast-forward the founder's PRIMARY working copy up to origin/base_branch.
+
+    PULL-ONLY and fully fail-open. The existing post-merge verify-root ff
+    (`_resolve_post_merge_verify_root` + `git merge --ff-only`) only ever
+    advances a worktree that is ALREADY on base_branch; the founder's primary
+    checkout normally rests on a FEATURE branch, so it is never that target and
+    drifts behind base_branch as waves merge. This helper independently
+    identifies the primary worktree (the FIRST non-bare `git worktree list`
+    entry, whose git dir IS the common dir) and brings origin/{base_branch}
+    DOWN into the primary's CURRENT feature branch via `git fetch` +
+    `git merge --ff-only`. It NEVER pushes, NEVER checks out base_branch, and
+    NEVER force/resets -- real merges to base stay on the PR path.
+
+    Every unmet guard or error is a clean SKIP (logged), never an exception out
+    of `_run_post_commit_pipeline`: the PR has already merged and this sync must
+    never regress the pipeline or change the wave Status.
+
+    Guards (any miss -> SKIP):
+      GUARD-A primary is on a FEATURE branch (not base_branch/main/master).
+      GUARD-B primary tree is CLEAN (never clobber founder WIP). The clean check
+              cannot see IGNORED files (it uses `--exclude-standard`), so the
+              ff merge additionally runs `--no-overwrite-ignore` to ABORT rather
+              than silently overwrite locally-ignored founder WIP.
+      GUARD-C primary HEAD is an ANCESTOR of origin/{base_branch} (a real
+              fast-forward; divergent local commits are landed via a PR).
+      GUARD-D a NON-BLOCKING file lock under the common git dir is acquired
+              (concurrent lanes do not race on the primary's index).
+
+    Returns an outcome dict (for observability / test assertions).
+    """
+    outcome: dict[str, Any] = {
+        "synced": False,
+        "skipped": True,
+        "reason": None,
+        "primary": None,
+        "old_sha": None,
+        "new_sha": None,
+    }
+
+    def _skip(reason: str) -> dict[str, Any]:
+        outcome["synced"] = False
+        outcome["skipped"] = True
+        outcome["reason"] = reason
+        log(f"Step 15b: primary worktree base-sync skipped: {reason}")
+        return outcome
+
+    try:
+        # Identify the PRIMARY worktree: the FIRST non-bare `git worktree list`
+        # entry. git always lists the main worktree before any linked worktree.
+        try:
+            worktree_proc = _run(
+                ["git", "worktree", "list", "--porcelain"],
+                cwd=repo_root,
+                check=False,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return _skip(f"git worktree list unavailable: {exc}")
+        if worktree_proc.returncode != 0:
+            return _skip("git worktree list failed")
+        primary_entry = next(
+            (
+                entry
+                for entry in _parse_worktree_list(worktree_proc.stdout)
+                if entry.get("worktree") and entry.get("bare") != "true"
+            ),
+            None,
+        )
+        if primary_entry is None:
+            return _skip("no non-bare primary worktree found")
+        primary = Path(primary_entry["worktree"])
+
+        # Confirm primary identity: its git dir IS the common dir
+        # (`<primary>/.git`). A linked worktree reports the SAME common dir but
+        # lives elsewhere, so only the primary's parent-of-common-dir equals
+        # itself. This makes "we only ever ff the primary" independent of the
+        # verify-root resolver's internals: a DIFFERENT worktree than repo_root.
+        common_dir = _git_common_dir(primary)
+        if common_dir is None or common_dir.parent.resolve() != primary.resolve():
+            return _skip(f"could not confirm primary worktree at {primary}")
+
+        # Read the primary's ON-DISK HEAD branch (not just git's metadata).
+        primary_branch = _worktree_head_branch(primary)
+        if primary_branch is None:
+            return _skip("primary worktree HEAD branch unresolved (detached?)")
+
+        # GUARD-A: never touch a base-branch checkout.
+        if primary_branch in {base_branch, "main", "master"}:
+            return _skip(
+                f"primary worktree on base branch '{primary_branch}'; "
+                "PULL-ONLY helper never syncs a base-branch checkout"
+            )
+
+        # GUARD-B: never clobber founder WIP.
+        if _dirty_worktree_paths(primary):
+            return _skip(f"primary worktree {primary} is dirty; not clobbering WIP")
+
+        # GUARD-D: parallel-lane safety. Take a NON-BLOCKING exclusive lock on a
+        # lockfile under the shared common git dir so concurrent lane waves do
+        # not race on the primary's index. Lock held -> another wave is already
+        # syncing -> SKIP.
+        lock_path = common_dir / "rcx_primary_worktree_sync.lock"
+        lock_handle = None
+        lock_acquired = False
+        try:
+            try:
+                lock_handle = open(lock_path, "w")
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock_acquired = True
+            except OSError:
+                lock_acquired = False
+            if not lock_acquired:
+                return _skip(
+                    "primary worktree sync lock held (another lane is syncing)"
+                )
+
+            # PULL-ONLY: fetch origin/{base_branch} so GUARD-C and the ff see the
+            # just-merged PR. fetch only updates the remote-tracking ref; it
+            # never touches the primary's branch or working tree.
+            fetch_proc = _run(
+                ["git", "fetch", "origin", base_branch],
+                cwd=primary,
+                check=False,
+                timeout=60,
+            )
+            if fetch_proc.returncode != 0:
+                detail = (fetch_proc.stderr or fetch_proc.stdout or "").strip()
+                return _skip(f"fetch origin {base_branch} failed: {detail[:200]}")
+
+            remote_ref = f"origin/{base_branch}"
+            old_sha = _run(
+                ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
+            ).stdout.strip()
+            new_sha = _run(
+                ["git", "rev-parse", remote_ref], cwd=primary, check=False, timeout=30,
+            ).stdout.strip()
+
+            # GUARD-C: primary HEAD must be an ANCESTOR of origin/{base_branch}
+            # (a real fast-forward, no divergent local commits). Else SKIP --
+            # the founder lands those commits via a PR.
+            ancestor_proc = _run(
+                ["git", "merge-base", "--is-ancestor", "HEAD", remote_ref],
+                cwd=primary,
+                check=False,
+                timeout=30,
+            )
+            if ancestor_proc.returncode != 0:
+                return _skip(
+                    f"primary worktree HEAD is not an ancestor of {remote_ref} "
+                    "(divergent local commits; founder lands those via a PR)"
+                )
+
+            if old_sha and new_sha and old_sha == new_sha:
+                outcome["primary"] = str(primary)
+                outcome["old_sha"] = old_sha
+                outcome["new_sha"] = new_sha
+                return _skip(f"primary worktree already current at {new_sha[:8]}")
+
+            # PULL-ONLY ff: bring origin/{base_branch} DOWN into the primary's
+            # CURRENT feature branch. --ff-only is the backstop that refuses any
+            # non-fast-forward; we never push, checkout base, force, or reset.
+            # --no-overwrite-ignore closes the GUARD-B gap for IGNORED founder
+            # WIP: GUARD-B's _dirty_worktree_paths uses `ls-files --others
+            # --exclude-standard`, which excludes ignored files, so a clean-tree
+            # check cannot see them. git merge SILENTLY overwrites ignored files
+            # by default; --no-overwrite-ignore makes it ABORT (non-zero) instead
+            # when the ff would clobber a locally-ignored path, so the
+            # returncode-!=0 SKIP below preserves the founder's ignored WIP.
+            merge_proc = _run(
+                ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
+                cwd=primary,
+                check=False,
+                timeout=60,
+            )
+            if merge_proc.returncode != 0:
+                detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
+                return _skip(
+                    f"ff-only merge of {remote_ref} into '{primary_branch}' "
+                    f"failed: {detail[:200]}"
+                )
+
+            synced_sha = _run(
+                ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
+            ).stdout.strip()
+            outcome["synced"] = True
+            outcome["skipped"] = False
+            outcome["reason"] = None
+            outcome["primary"] = str(primary)
+            outcome["old_sha"] = old_sha
+            outcome["new_sha"] = synced_sha
+            log(
+                f"Step 15b: synced primary worktree {primary} on "
+                f"'{primary_branch}' {(old_sha or '?')[:8]} -> "
+                f"{(synced_sha or '?')[:8]} (ff-only {remote_ref})"
+            )
+            return outcome
+        finally:
+            if lock_handle is not None:
+                if lock_acquired:
+                    try:
+                        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                    except OSError:
+                        pass
+                try:
+                    lock_handle.close()
+                except OSError:
+                    pass
+    except Exception as exc:  # noqa: BLE001 - fail-open: never raise into the pipeline
+        outcome["synced"] = False
+        outcome["skipped"] = True
+        outcome["reason"] = f"error: {exc}"
+        try:
+            log(f"Step 15b: primary worktree base-sync error (skipped): {exc}")
+        except Exception:
+            pass
+        return outcome
+
+
+# Public seam for the PULL-ONLY primary-worktree base sync. The sync is an
+# internal post-merge pipeline step, but its outcome dict is a supported
+# observability surface (the pipeline records it as
+# result["primary_worktree_sync"]). Tests and callers exercise the behavior
+# through this public name instead of reaching past the leading underscore:
+# the private-attr test-integrity policy forbids `ANTICHEAT_OK` bypass comments
+# in tests and requires a real public seam.
+sync_primary_worktree_to_base = _sync_primary_worktree_to_base
 
 
 def _find_stash_ref_by_marker(
@@ -9799,6 +10034,18 @@ def _run_post_commit_pipeline(
                 "errors": [f"Post-merge verify failed: {exc.stderr.strip()}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
+
+    # ── Step 15b: sync the founder's PRIMARY working copy to base ──────
+    # The verify-root ff above only advances a worktree ALREADY on base_branch.
+    # The founder's primary checkout normally rests on a FEATURE branch, so it
+    # is never that target and drifts behind base_branch as waves merge. This
+    # PULL-ONLY, fully fail-open helper brings origin/{base_branch} DOWN into the
+    # primary's current feature branch (fetch + ff-only; never push, checkout
+    # base, force, or reset). It runs BEFORE step 16 cleanup (which may remove
+    # repo_root) and its failure must never affect the already-merged PR.
+    result["primary_worktree_sync"] = _sync_primary_worktree_to_base(
+        repo_root, base_branch, log=log,
+    )
 
     _refresh_post_merge_package_for_next_open_queue(
         repo_root=verify_root,

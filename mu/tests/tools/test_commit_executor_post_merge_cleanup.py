@@ -943,3 +943,285 @@ def test_resolve_verify_root_rejects_same_repo_worktree_on_wrong_branch(tmp_path
     assert other_wt.exists()
     other_head = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=other_wt).stdout.strip()
     assert other_head == "other"
+
+
+# ---------------------------------------------------------------------------
+# _sync_primary_worktree_to_base: PULL-ONLY post-merge sync of the founder's
+# PRIMARY working copy (wave
+# commit-executor-main-repo-postmerge-ffsync-2026-06-04).
+#
+# These tests build a real `origin` remote (an upstream repo) plus a clone that
+# acts as the founder's PRIMARY checkout, then drive the helper directly. They
+# never remove a worktree directory, so they do NOT depend on git-version
+# `git worktree prune` behavior (the 2026-06-03 #37 env-dependent-test lesson):
+# the PRIMARY is always the FIRST non-bare `git worktree list` entry, which is
+# never prunable, so no prune-dependent helper needs mocking here.
+# ---------------------------------------------------------------------------
+
+
+def _git_env() -> dict:
+    return {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+    }
+
+
+def _init_origin_and_primary(tmp_path: Path):
+    """Create an upstream 'origin' on dev@C0 and a clone that is the PRIMARY.
+
+    Returns (upstream, primary, c0_sha, env). The clone's `origin/dev` ref
+    starts at C0; advance the upstream with `_advance_origin_dev` to make the
+    primary's branch fall behind origin/dev.
+    """
+    env = _git_env()
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _git(["init"], cwd=upstream, env=env)
+    _git(["checkout", "-b", "dev"], cwd=upstream, env=env)
+    _git(["config", "user.name", "t"], cwd=upstream)
+    _git(["config", "user.email", "t@t"], cwd=upstream)
+    (upstream / "seed.txt").write_text("seed")
+    _git(["add", "seed.txt"], cwd=upstream, env=env)
+    _git(["commit", "-m", "C0"], cwd=upstream, env=env)
+    c0_sha = _git(["rev-parse", "HEAD"], cwd=upstream, env=env).stdout.strip()
+
+    primary = tmp_path / "main"
+    _git(["clone", str(upstream), str(primary)], cwd=tmp_path, env=env)
+    _git(["config", "user.name", "t"], cwd=primary)
+    _git(["config", "user.email", "t@t"], cwd=primary)
+    return upstream, primary, c0_sha, env
+
+
+def _advance_origin_dev(upstream: Path, env: dict, content: str = "seed-c1") -> str:
+    """Commit a new tip on the upstream's dev branch; return the new sha."""
+    (upstream / "seed.txt").write_text(content)
+    _git(["add", "seed.txt"], cwd=upstream, env=env)
+    _git(["commit", "-m", "C1"], cwd=upstream, env=env)
+    return _git(["rev-parse", "HEAD"], cwd=upstream, env=env).stdout.strip()
+
+
+def test_sync_primary_ffs_feature_branch_behind_base(tmp_path):
+    """(a) A PRIMARY on a feature branch behind origin/dev is ff'd to origin/dev,
+    even when the helper is invoked from a DISTINCT linked worktree (repo_root).
+    Proves the helper targets the PRIMARY (first non-bare worktree), not
+    repo_root."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    # PRIMARY off base, at C0 (no divergent commits).
+    _git(["checkout", "-b", "jabramsja/feat-a"], cwd=primary, env=env)
+    # A DISTINCT linked worktree on its own branch — this is repo_root.
+    linked = tmp_path / "linked_lane"
+    _git(["worktree", "add", "-b", "lane-x", str(linked), "HEAD"], cwd=primary)
+    # origin/dev moves ahead → primary's feature branch is now behind.
+    c1_sha = _advance_origin_dev(upstream, env)
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=linked, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    # PRIMARY feature branch advanced to origin/dev tip via fast-forward.
+    primary_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    assert primary_head == c1_sha, outcome
+    # Still on its FEATURE branch — PULL-ONLY never checks out base.
+    primary_branch = _git(
+        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=primary
+    ).stdout.strip()
+    assert primary_branch == "jabramsja/feat-a"
+    # repo_root (the linked worktree) is the WRONG target and was left untouched.
+    linked_head = _git(["rev-parse", "HEAD"], cwd=linked).stdout.strip()
+    assert linked_head == c0_sha, "linked worktree (repo_root) must NOT be ff'd"
+    linked_branch = _git(
+        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=linked
+    ).stdout.strip()
+    assert linked_branch == "lane-x"
+
+
+def test_sync_primary_skips_dirty_primary(tmp_path):
+    """(b) A dirty PRIMARY is SKIPPED — founder WIP is never clobbered."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-b"], cwd=primary, env=env)
+    feat_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    # Uncommitted edit to a tracked file → dirty tree.
+    (primary / "seed.txt").write_text("founder work in progress")
+    _advance_origin_dev(upstream, env)  # origin/dev ahead → sync WOULD apply if clean
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "dirty" in (outcome["reason"] or ""), outcome
+    # HEAD unchanged and the WIP edit is preserved.
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == feat_head
+    assert (primary / "seed.txt").read_text() == "founder work in progress"
+
+
+def test_sync_primary_skips_divergent_local_commit(tmp_path):
+    """(c) A PRIMARY whose feature branch has a commit NOT in origin/dev is
+    SKIPPED (GUARD-C: not a fast-forward) — the founder lands it via a PR."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-c"], cwd=primary, env=env)
+    # Local commit on the feature branch, never pushed to origin/dev.
+    (primary / "local.txt").write_text("divergent local work")
+    _git(["add", "local.txt"], cwd=primary, env=env)
+    _git(["commit", "-m", "local-only"], cwd=primary, env=env)
+    divergent_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    assert divergent_head != c0_sha
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "ancestor" in (outcome["reason"] or ""), outcome
+    # HEAD unchanged — the divergent local commit is preserved.
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == divergent_head
+
+
+def test_sync_primary_skips_primary_on_base(tmp_path):
+    """(d) A PRIMARY already ON base_branch is SKIPPED (GUARD-A) — the helper
+    never touches a base-branch checkout."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    # primary stays on 'dev' (base) from the clone.
+    assert _git(
+        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=primary
+    ).stdout.strip() == "dev"
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "base branch" in (outcome["reason"] or ""), outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
+
+
+def test_sync_primary_never_raises_on_error_paths(tmp_path):
+    """(e) The helper NEVER raises: a missing repo_root and a repo with no
+    'origin' remote both return a clean SKIP outcome instead of an exception."""
+    # 1. repo_root does not exist → `git worktree list` fails (FileNotFoundError).
+    bogus = tmp_path / "does_not_exist"
+    outcome_missing = commit_mod.sync_primary_worktree_to_base(
+        repo_root=bogus, base_branch="dev", log=_noop_log,
+    )
+    assert outcome_missing["synced"] is False
+    assert outcome_missing["skipped"] is True
+
+    # 2. A real feature-branch primary with NO 'origin' remote → fetch fails.
+    repo = _init_repo(tmp_path)  # on 'dev', no remote
+    _git(["checkout", "-b", "jabramsja/feat-e"], cwd=repo)
+    feat_head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    outcome_no_origin = commit_mod.sync_primary_worktree_to_base(
+        repo_root=repo, base_branch="dev", log=_noop_log,
+    )
+    assert outcome_no_origin["synced"] is False
+    assert outcome_no_origin["skipped"] is True
+    # Nothing destroyed — HEAD intact on the feature branch.
+    assert _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip() == feat_head
+
+
+def test_sync_primary_is_pull_only_no_push_checkout_force_or_reset(tmp_path, monkeypatch):
+    """PULL-ONLY (scoped to the helper): on the happy path the helper reaches the
+    PRIMARY ONLY via `git fetch` + `git merge --ff-only` — never push, never
+    `git checkout` of base, never force, never reset. Proven by capturing every
+    git command the helper issues through the public `subprocess.run` seam
+    (the helper's `_run` wrapper delegates to it with the command list as the
+    first positional arg)."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-p"], cwd=primary, env=env)
+    c1_sha = _advance_origin_dev(upstream, env)
+
+    captured: list[list[str]] = []
+    real_subprocess_run = subprocess.run
+
+    def _spy_run(cmd, *args, **kwargs):
+        if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "git":
+            captured.append(list(cmd))
+        return real_subprocess_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _spy_run)
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+    # Snapshot the helper's git commands NOW: the post-call assertion git ops
+    # below also flow through the still-patched public subprocess.run seam, and
+    # must not pollute the pull-only command audit.
+    helper_git_cmds = [cmd for cmd in captured if cmd and cmd[0] == "git"]
+
+    assert outcome["synced"] is True, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+
+    assert helper_git_cmds, captured
+    for cmd in helper_git_cmds:
+        assert "push" not in cmd, cmd
+        assert "checkout" not in cmd, cmd
+        assert "reset" not in cmd, cmd
+        assert "--force" not in cmd and "-f" not in cmd, cmd
+    # The only `git merge` issued was a fast-forward-only merge of origin/dev.
+    merges = [cmd for cmd in helper_git_cmds if cmd[:2] == ["git", "merge"]]
+    assert merges, helper_git_cmds
+    for cmd in merges:
+        assert "--ff-only" in cmd, cmd
+        assert "origin/dev" in cmd, cmd
+
+
+def test_sync_primary_skips_when_ff_would_overwrite_ignored_founder_wip(tmp_path):
+    """Bridge round 4 (DEFECT): GUARD-B's clean-tree check uses
+    `git ls-files --others --exclude-standard`, which EXCLUDES ignored files, so
+    a primary holding ONLY locally-ignored founder WIP reads as CLEAN. Plain
+    `git merge --ff-only` then SILENTLY overwrites that ignored file when
+    origin/dev force-adds the same path as a tracked file. The helper must run
+    `--no-overwrite-ignore` so the ff ABORTS (non-zero) and the existing
+    returncode-!=0 SKIP preserves the founder's ignored WIP instead of
+    clobbering it (the round-4 repro saw synced=True overwrite 'local ignored
+    WIP' with 'origin tracked content').
+
+    The feature branch is kept a PURE ANCESTOR of origin/dev (so GUARD-C passes)
+    and the file is ignored via `.git/info/exclude` (local-only, no divergent
+    commit), so the test exercises the REAL overwrite path rather than a vacuous
+    earlier SKIP. No worktree directory is removed, so (like the sibling
+    `_sync_primary_*` tests) it does not depend on git-version prune behavior.
+    """
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    # PRIMARY off base at C0 — a pure ancestor of origin/dev (no local commit).
+    _git(["checkout", "-b", "jabramsja/feat-ign"], cwd=primary, env=env)
+    # Ignore `ignored.txt` locally via .git/info/exclude (no commit → the branch
+    # stays an ancestor) and drop founder WIP there. _dirty_worktree_paths uses
+    # `--exclude-standard`, which honors .git/info/exclude, so the tree is CLEAN.
+    (primary / ".git" / "info" / "exclude").write_text(
+        "ignored.txt\n", encoding="utf-8"
+    )
+    (primary / "ignored.txt").write_text("local ignored WIP", encoding="utf-8")
+    # Precondition (the bug's entry condition): the tree reads as CLEAN, so
+    # GUARD-B does NOT skip — only --no-overwrite-ignore stands between the ff and
+    # the founder's ignored WIP.
+    assert _git(["status", "--short"], cwd=primary).stdout.strip() == ""
+    assert _git(
+        ["ls-files", "--others", "--exclude-standard"], cwd=primary
+    ).stdout.strip() == ""
+    # origin/dev advances at C1 and FORCE-ADDS the same path as a TRACKED file.
+    (upstream / "ignored.txt").write_text("origin tracked content", encoding="utf-8")
+    _git(["add", "-f", "ignored.txt"], cwd=upstream, env=env)
+    _git(["commit", "-m", "C1 force-add ignored.txt"], cwd=upstream, env=env)
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    # The ff ABORTED (it would overwrite ignored WIP) → clean SKIP, never synced.
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "overwritten" in (outcome["reason"] or ""), outcome
+    # Founder's ignored WIP is PRESERVED, not clobbered by origin's content.
+    assert (primary / "ignored.txt").read_text() == "local ignored WIP", outcome
+    # HEAD unchanged — still at C0 on the feature branch (no fast-forward applied).
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
+    assert _git(
+        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=primary
+    ).stdout.strip() == "jabramsja/feat-ign"
