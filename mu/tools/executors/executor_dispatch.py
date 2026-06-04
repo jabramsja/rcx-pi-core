@@ -14,9 +14,11 @@ import argparse
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -83,7 +85,9 @@ except ImportError:
 
 try:
     from pipeline_monitor_identity import (
+        DEFAULT_TMUX_SESSION,
         MonitorIdentityError,
+        load_monitor_lanes,
         resolve_monitor_identity,
     )
 except ImportError:
@@ -94,7 +98,9 @@ except ImportError:
     assert _identity_spec.loader is not None
     sys.modules["pipeline_monitor_identity"] = _identity_mod
     _identity_spec.loader.exec_module(_identity_mod)
+    DEFAULT_TMUX_SESSION = _identity_mod.DEFAULT_TMUX_SESSION
     MonitorIdentityError = _identity_mod.MonitorIdentityError
+    load_monitor_lanes = _identity_mod.load_monitor_lanes
     resolve_monitor_identity = _identity_mod.resolve_monitor_identity
 
 try:
@@ -1456,6 +1462,16 @@ def run_recoverable_surface_command(
     original_timeouts = None
     result: dict[str, Any] | None = None
 
+    # Auto-spawn the per-lane tmux monitor for a lane bus launch (no-op for the
+    # MAIN/default bus).  The wave-end cleanup runs in the finally below so it
+    # fires on normal completion, recovery breaks, and the signal/exception
+    # paths alike.
+    monitor = _LaneMonitor(repo_root, bus_dir, verbose=getattr(args, "verbose", False))
+    monitor.spawn()
+    # Arm a process-level signal handler so a SIGTERM landing outside an executor
+    # subprocess window still runs the wave-end cleanup (see main()).
+    _signal_cleanup_token = _install_wave_end_signal_cleanup(monitor)
+
     try:
         while True:
             if result is not None and _is_chained_commit_failure(result):
@@ -1593,6 +1609,8 @@ def run_recoverable_surface_command(
 
         return 1
     finally:
+        _remove_wave_end_signal_cleanup(_signal_cleanup_token)
+        monitor.cleanup()
         if original_timeouts is not None:
             _restore_config_on_disk(
                 repo_root, original_timeouts,
@@ -3695,6 +3713,570 @@ def dispatch(
         }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-lane tmux monitor lifecycle
+#
+# When a wave launches on a namespaced lane bus (.agent_bus-<laneN>), the
+# dispatcher auto-spawns that lane's 4-pane tmux monitor once at launch and
+# auto-cleans the self-healing owner-loop + tmux session at wave-end on every
+# exit path.  The default .agent_bus (MAIN) bus is never a lane and is left
+# untouched.  tools/observability/pipeline_monitor.sh is INVOKED and
+# process-matched here, never modified.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_LANE_BUS_PREFIX = ".agent_bus-"
+_OWNER_LOOP_TOKEN = "__owner-loop"
+# Bounded liveness wait between SIGTERM and SIGKILL for a surviving owner-loop.
+_OWNER_TERM_WAIT_SECONDS = 2.0
+_OWNER_TERM_POLL_SECONDS = 0.1
+# Bounded wait for an in-flight `start --detach` spawn to finish before cleanup.
+_SPAWN_REAP_TIMEOUT_SECONDS = 10.0
+
+
+def _lane_name_from_bus_dir(bus_dir: str | Path | None) -> str | None:
+    """Return the lane suffix for a lane bus, or None for the MAIN/default bus.
+
+    ``.agent_bus-<laneN>`` -> ``"laneN"``.  The default ``.agent_bus`` (or any
+    non-namespaced value) is MAIN, not a lane, and yields ``None`` so no monitor
+    is ever spawned or cleaned for it.
+    """
+    raw = str(bus_dir or "").strip().rstrip("/")
+    if not raw:
+        return None
+    # Only the bus directory name matters; callers pass repo-relative buses like
+    # ".agent_bus-lane1".  Taking the name keeps an absolute bus path from ever
+    # smuggling the MAIN bus past the lane check.
+    name = Path(raw).name
+    if name == ".agent_bus" or not name.startswith(_LANE_BUS_PREFIX):
+        return None
+    suffix = name[len(_LANE_BUS_PREFIX):]
+    return suffix or None
+
+
+def _lane_monitor_script(repo_root: Path) -> Path:
+    """Resolve the pipeline_monitor.sh path to invoke for a lane monitor."""
+    primary = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+    if primary.exists():
+        return primary
+    return repo_root / "tools" / "observability" / "pipeline_monitor.sh"
+
+
+def _resolve_lane_tmux_session(
+    repo_root: Path | None,
+    bus_dir: str | Path | None,
+    lane: str,
+) -> str:
+    """Resolve the configured tmux session name for a lane bus.
+
+    Matches the lane config by bus_dir using the SAME loader the monitor reads
+    (``load_monitor_lanes`` / ``pipeline_monitor.lanes.*.tmux_session``).  Falls
+    back to ``rcx-pipeline-<laneN>`` only when repo_root is unknown, the bus has
+    no configured identity, or the config cannot be read.  NEVER returns the bare
+    ``rcx-pipeline`` MAIN session: a configured value that collapses to it is
+    treated as unconfigured so the namespaced fallback wins (hard-safety).
+    """
+    fallback = f"{DEFAULT_TMUX_SESSION}-{lane}"
+    if repo_root is None:
+        return fallback
+    bus_name = Path(str(bus_dir or "").strip().rstrip("/")).name
+    try:
+        lanes = load_monitor_lanes(Path(repo_root))
+    except Exception:
+        # NEVER raise on a config error — a real lane must stay cleanable.
+        return fallback
+    for config in lanes.values():
+        if str(config.get("bus_dir") or "") != bus_name:
+            continue
+        session = str(config.get("tmux_session") or "").strip()
+        if session and session != DEFAULT_TMUX_SESSION:
+            return session
+        return fallback
+    return fallback
+
+
+def _tmux_has_session(session: str) -> bool:
+    """Return True iff a tmux session with the EXACT name exists.
+
+    Uses the ``=`` exact-match target form so a lane probe never matches a
+    different session by prefix (``rcx-pipeline`` must not match
+    ``rcx-pipeline-lane1``).
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", f"={session}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return False
+    return result.returncode == 0
+
+
+def _tmux_kill_session(session: str) -> None:
+    """Best-effort kill of the EXACT tmux session (never prefix-capable)."""
+    try:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", f"={session}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        pass
+
+
+def _ps_command_lines() -> list[tuple[int, str]]:
+    """Return (pid, command-line) for every visible process, best-effort."""
+    try:
+        result = subprocess.run(
+            ["ps", "-A", "-ww", "-o", "pid=,command="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return []
+    processes: list[tuple[int, str]] = []
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        pid_text, _, command = stripped.partition(" ")
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            continue
+        command = command.strip()
+        if command:
+            processes.append((pid, command))
+    return processes
+
+
+def _command_tokens(command: str) -> list[str]:
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
+
+
+def _tokens_have_adjacent_pair(tokens: list[str], flag: str, value: str) -> bool:
+    """True iff ``flag`` appears immediately followed by exactly ``value``.
+
+    Whole-token matching: ``--lane lane1`` must NOT be considered present in
+    ``--lane lane10`` (a substring scan would false-match the prefix).
+    """
+    for index, token in enumerate(tokens):
+        if token == flag and index + 1 < len(tokens) and tokens[index + 1] == value:
+            return True
+    return False
+
+
+def _lane_owner_loop_command_kind(
+    command: str,
+    *,
+    repo_root: Path,
+    bus_dir: str,
+    lane: str,
+) -> str:
+    """Classify ``command`` as THIS repo+lane's monitor owner-loop.
+
+    Requires ALL of (whole-token / identity-bound):
+
+      * the ``__owner-loop`` token,
+      * ``--lane <laneN>`` as adjacent whole tokens (so ``--lane lane1`` never
+        matches ``--lane lane10``),
+      * ``--bus-dir <bus_dir>`` as adjacent whole tokens,
+      * a ``pipeline_monitor.sh`` script-path token consistent with THIS repo.
+
+    Returns ``"absolute"`` when the command carries an absolute
+    ``pipeline_monitor.sh`` path under repo_root (definitively ours — no further
+    check needed), ``"relative"`` when it carries only a relative monitor path
+    (a candidate whose repo binding must be confirmed by the live process CWD),
+    or ``""`` when it is not this repo+lane's owner-loop.
+
+    This mirrors pipeline_monitor.sh ``owner_process_matches_root``: the monitor
+    spawns its owner-loop via ``bash "$0"``, so ``$0`` is whatever path the
+    monitor was launched with.  An absolute path under ANOTHER repo is a
+    definitive cross-repo signal and never matches (two repos can each run a
+    laneN owner-loop; the other repo's must NOT be killed).  A relative path
+    carries no repo in the command string, so it stays a candidate and the
+    repo binding is confirmed later against the process CWD.  The MAIN
+    owner-loop carries no ``--lane`` token and therefore never matches
+    (hard-safety).
+    """
+    tokens = _command_tokens(command)
+    if _OWNER_LOOP_TOKEN not in tokens:
+        return ""
+    if not _tokens_have_adjacent_pair(tokens, "--lane", lane):
+        return ""
+    if not _tokens_have_adjacent_pair(tokens, "--bus-dir", bus_dir):
+        return ""
+    repo_prefix = str(repo_root).rstrip("/") + os.sep
+    saw_relative = False
+    saw_absolute_foreign = False
+    for token in tokens:
+        if not token.endswith("pipeline_monitor.sh"):
+            continue
+        if os.path.isabs(token):
+            if token.startswith(repo_prefix):
+                return "absolute"  # absolute path under THIS repo — ours
+            saw_absolute_foreign = True  # absolute path to ANOTHER repo
+        else:
+            saw_relative = True
+    # No absolute-under-repo match.  A relative monitor path is a candidate only
+    # when there is no competing absolute path to a foreign repo.
+    if saw_relative and not saw_absolute_foreign:
+        return "relative"
+    return ""
+
+
+def _command_matches_lane_owner_loop(
+    command: str,
+    *,
+    repo_root: Path,
+    bus_dir: str,
+    lane: str,
+) -> bool:
+    """Return True iff ``command`` is a candidate owner-loop for THIS repo+lane.
+
+    Thin bool view of :func:`_lane_owner_loop_command_kind`.  A relative-path
+    owner-loop (``bash "$0"`` with a relative ``$0``) is a candidate here; its
+    repo binding is confirmed against the live process CWD in
+    :func:`_lane_owner_loop_pids`.  An absolute path under another repo is never
+    a candidate (cross-repo hard-safety).
+    """
+    return bool(
+        _lane_owner_loop_command_kind(
+            command, repo_root=repo_root, bus_dir=bus_dir, lane=lane
+        )
+    )
+
+
+def _pid_cwd(pid: int) -> Path | None:
+    """Best-effort resolved working directory of ``pid`` (``/proc`` then
+    ``lsof``), or None when it cannot be determined.
+
+    Mirrors pipeline_monitor.sh ``process_cwd`` / commit_executor ``_process_cwd``
+    so the dispatcher binds a relative-path owner-loop to this repo the same way
+    the monitor does.
+    """
+    proc_cwd = Path("/proc") / str(pid) / "cwd"
+    if proc_cwd.exists():
+        try:
+            return proc_cwd.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return None
+    try:
+        result = subprocess.run(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 and not result.stdout:
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("n") and len(line) > 1:
+            try:
+                return Path(line[1:]).resolve(strict=False)
+            except (OSError, RuntimeError):
+                return None
+    return None
+
+
+def _cwd_under_repo(cwd: Path | None, repo_root: Path) -> bool:
+    """True iff ``cwd`` is repo_root or a path nested under it."""
+    if cwd is None:
+        return False
+    try:
+        root = repo_root.resolve(strict=False)
+    except (OSError, RuntimeError):
+        root = repo_root
+    if cwd == root:
+        return True
+    try:
+        cwd.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _lane_owner_loop_pids(
+    processes: list[tuple[int, str]],
+    *,
+    repo_root: Path,
+    bus_dir: str,
+    lane: str,
+) -> list[int]:
+    """Select owner-loop pids bound to THIS repo_root + bus_dir + lane.
+
+    An owner-loop whose command carries an absolute monitor path under repo_root
+    is selected directly.  One launched via a RELATIVE monitor path (``bash
+    "$0"`` with a relative ``$0`` — e.g. a monitor started from repo-relative
+    ``tools/observability/pipeline_monitor.sh``) is selected only when the live
+    process CWD confirms the repo binding; a cross-repo relative owner-loop is
+    left alone (hard-safety).  When the CWD cannot be read the owner-loop is NOT
+    selected: never killing a possibly-foreign process outranks best-effort
+    zombie reaping, matching pipeline_monitor.sh ``owner_process_matches_root``.
+    """
+    pids: list[int] = []
+    for pid, command in processes:
+        kind = _lane_owner_loop_command_kind(
+            command, repo_root=repo_root, bus_dir=bus_dir, lane=lane
+        )
+        if kind == "absolute":
+            pids.append(pid)
+        elif kind == "relative" and _cwd_under_repo(_pid_cwd(pid), repo_root):
+            pids.append(pid)
+    return pids
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _signal_pid(pid: int, sig: int) -> None:
+    try:
+        os.kill(pid, sig)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def _terminate_owner_loops(pids: list[int]) -> None:
+    """SIGTERM -> bounded liveness wait -> SIGKILL the survivors.
+
+    The owner-loop's TERM trap runs cleanup but does NOT exit, so SIGTERM alone
+    leaves it alive; the SIGKILL fallback is required to actually reap it.
+    """
+    if not pids:
+        return
+    for pid in pids:
+        _signal_pid(pid, signal.SIGTERM)
+    survivors = list(pids)
+    waited = 0.0
+    while waited < _OWNER_TERM_WAIT_SECONDS:
+        survivors = [pid for pid in survivors if _pid_alive(pid)]
+        if not survivors:
+            return
+        time.sleep(_OWNER_TERM_POLL_SECONDS)
+        waited += _OWNER_TERM_POLL_SECONDS
+    for pid in (pid for pid in survivors if _pid_alive(pid)):
+        _signal_pid(pid, signal.SIGKILL)
+
+
+class _LaneMonitor:
+    """Auto-spawn + auto-clean lifecycle for a wave's per-lane tmux monitor.
+
+    A no-op for the MAIN/default bus (``.agent_bus``): only namespaced lane
+    buses (``.agent_bus-<laneN>``) get a monitor.  Spawn is idempotent (skipped
+    when the exact configured session already exists) and best-effort (a spawn
+    error is logged, never raised).  Cleanup runs once on every wave-end exit
+    path and never raises.
+    """
+
+    def __init__(
+        self,
+        repo_root: Path | None,
+        bus_dir: str | Path | None,
+        *,
+        verbose: bool = False,
+    ) -> None:
+        self.repo_root = Path(repo_root) if repo_root is not None else None
+        # Canonicalize to the bare bus NAME (strip whitespace + any trailing
+        # slash and drop directory components) BEFORE it drives the monitor
+        # lifecycle.  resolve_agent_bus_dir() accepts a trailing slash (e.g.
+        # ".agent_bus-lane1/") and lets the dispatcher proceed, but the raw value
+        # would break both ends of the lifecycle: pipeline_monitor.sh rejects any
+        # "/" in --bus-dir (spawn would fail) and the owner-loop cleanup matches
+        # the --bus-dir token WHOLE (a trailing slash would never match the real
+        # owner-loop, stranding it).  Mirrors the same .name reduction already
+        # used by _lane_name_from_bus_dir / _resolve_lane_tmux_session.
+        self.bus_dir = Path(str(bus_dir).strip().rstrip("/")).name if bus_dir else ""
+        self.verbose = verbose
+        self.lane = _lane_name_from_bus_dir(self.bus_dir)
+        self.session = (
+            _resolve_lane_tmux_session(self.repo_root, self.bus_dir, self.lane)
+            if self.lane
+            else ""
+        )
+        self._spawn_proc: subprocess.Popen | None = None
+        self._cleaned = False
+
+    @property
+    def is_lane(self) -> bool:
+        """True only for a namespaced lane bus with a known repo identity."""
+        return bool(self.lane) and self.repo_root is not None
+
+    def _log(self, message: str) -> None:
+        if self.verbose:
+            print(f"[dispatch] {message}")
+
+    def spawn(self) -> None:
+        """Spawn the lane monitor once, idempotently, best-effort."""
+        if not self.is_lane:
+            return
+        try:
+            if _tmux_has_session(self.session):
+                self._log(
+                    f"Lane monitor session already running: {self.session} "
+                    f"(lane={self.lane}); skipping spawn"
+                )
+                return
+            cmd = [
+                str(_lane_monitor_script(self.repo_root)),
+                "--bus-dir",
+                self.bus_dir,
+                "--lane",
+                self.lane,
+                "start",
+                "--detach",
+            ]
+            self._spawn_proc = subprocess.Popen(
+                cmd,
+                cwd=str(self.repo_root),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            self._log(
+                f"Spawned lane monitor: lane={self.lane} bus={self.bus_dir} "
+                f"session={self.session}"
+            )
+        except Exception as exc:  # best-effort: never block/fail the launch
+            self._log(f"Lane monitor spawn failed (continuing): {exc}")
+
+    def _reap_in_flight_spawn(self) -> None:
+        """Close the async-start race so an in-flight ``start --detach`` spawn
+        cannot create the owner-loop/session AFTER cleanup has run."""
+        proc = self._spawn_proc
+        if proc is None:
+            return
+        try:
+            if proc.poll() is None:
+                try:
+                    proc.wait(timeout=_SPAWN_REAP_TIMEOUT_SECONDS)
+                except subprocess.TimeoutExpired:
+                    try:
+                        terminate_process_tree(proc.pid, cwd=self.repo_root)
+                    except Exception:
+                        pass
+                    try:
+                        proc.wait(timeout=1)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        finally:
+            self._spawn_proc = None
+
+    def cleanup(self) -> None:
+        """Idempotently tear down this lane's owner-loop(s) + tmux session."""
+        if not self.is_lane or self._cleaned:
+            return
+        self._cleaned = True
+        try:
+            # 1) Close the async-start race before killing anything, so a
+            #    session/owner-loop created by an in-flight spawn is still caught.
+            self._reap_in_flight_spawn()
+            # 2) Kill the self-healing owner-loop(s) FIRST so they cannot
+            #    resurrect the session after it is killed.
+            pids = _lane_owner_loop_pids(
+                _ps_command_lines(),
+                repo_root=self.repo_root,
+                bus_dir=self.bus_dir,
+                lane=self.lane,
+            )
+            _terminate_owner_loops(pids)
+            # 3) Kill the EXACT tmux session (best-effort).  Hard-safety: never
+            #    target the bare MAIN session even if resolution misbehaved.
+            if self.session and self.session != DEFAULT_TMUX_SESSION:
+                _tmux_kill_session(self.session)
+            self._log(
+                f"Cleaned lane monitor: lane={self.lane} session={self.session} "
+                f"owner_loops={pids}"
+            )
+        except Exception as exc:  # cleanup must never raise
+            self._log(f"Lane monitor cleanup error (ignored): {exc}")
+
+
+def _install_wave_end_signal_cleanup(monitor: "_LaneMonitor") -> dict | None:
+    """Arm a process-level SIGTERM/SIGINT/SIGHUP handler that runs the lane
+    monitor cleanup even when the signal lands OUTSIDE an executor subprocess
+    window (routing/recovery/post-merge gaps).
+
+    Python's default SIGTERM disposition terminates the process WITHOUT running
+    ``finally``, so a signal in those gaps would bypass ``monitor.cleanup()`` and
+    strand the self-healing owner-loop + tmux session.  The only other signal
+    handler — ``_run_executor_in_group._cleanup_for_signal`` — is scoped to the
+    executor subprocess and restores the prior disposition on exit; the two
+    compose because that helper saves and restores whatever handler is installed
+    here.  Returns a token (saved prior dispositions) for
+    :func:`_remove_wave_end_signal_cleanup`, or None when nothing was armed (the
+    MAIN/default bus, or not running on the main thread).
+    """
+    if not monitor.is_lane:
+        return None
+    signums = [signal.SIGINT, signal.SIGTERM]
+    hup = getattr(signal, "SIGHUP", None)
+    if hup is not None:
+        signums.append(hup)
+    try:
+        previous = {sig: signal.getsignal(sig) for sig in signums}
+    except (OSError, ValueError):
+        return None
+
+    def _handler(signum: int, _frame: Any) -> None:
+        # Restore prior dispositions first so a second signal during cleanup
+        # follows normal semantics, then clean up once and re-raise so the
+        # wave-end exit code mirrors the in-window _cleanup_for_signal path.
+        for sig, prev in previous.items():
+            try:
+                signal.signal(sig, prev)
+            except (OSError, ValueError):
+                pass
+        try:
+            monitor.cleanup()
+        finally:
+            if signum == signal.SIGINT:
+                raise KeyboardInterrupt()
+            raise SystemExit(128 + signum)
+
+    installed: dict = {}
+    for sig in signums:
+        try:
+            signal.signal(sig, _handler)
+            installed[sig] = previous[sig]
+        except (OSError, ValueError):
+            # Not the main thread / unsupported — best-effort; the outer finally
+            # still covers normal completion and exception exits.
+            pass
+    return installed or None
+
+
+def _remove_wave_end_signal_cleanup(token: dict | None) -> None:
+    """Restore the dispositions saved by :func:`_install_wave_end_signal_cleanup`."""
+    if not token:
+        return
+    for sig, prev in token.items():
+        try:
+            signal.signal(sig, prev)
+        except (OSError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in SURFACE_COMMANDS:
@@ -3836,130 +4418,70 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config) if args.config else load_config()
     wave_count = 0
 
-    while True:
-        wave_count += 1
-        if args.verbose:
-            print(f"\n[dispatch] === Wave {wave_count}/{args.max_waves if args.loop else 1} ===")
+    monitor = _LaneMonitor(repo_root, args.bus_dir, verbose=args.verbose)
+    monitor.spawn()
+    # Arm a process-level signal handler so a SIGTERM landing in a
+    # routing/recovery/post-merge gap (outside any executor subprocess window)
+    # still runs the wave-end cleanup instead of bypassing the finally below.
+    _signal_cleanup_token = _install_wave_end_signal_cleanup(monitor)
+    try:
+        while True:
+            wave_count += 1
+            if args.verbose:
+                print(f"\n[dispatch] === Wave {wave_count}/{args.max_waves if args.loop else 1} ===")
 
-        # Load routing record
-        if args.routing_record:
-            try:
-                record = json.loads(args.routing_record.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError) as exc:
-                print(f"[error] Cannot load routing record: {exc}", file=sys.stderr)
-                return 1
-        else:
-            try:
-                record = load_routing_record(repo_root, bus_dir=args.bus_dir)
-            except DispatchError:
-                # No routing record — try to create one via post-merge supervisor
-                if args.verbose:
-                    print("[dispatch] No routing record — running post-merge supervisor...")
-                refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
-                if not refreshed or refresh_record is None:
-                    print("[error] No routing record and auto-refresh failed", file=sys.stderr)
+            # Load routing record
+            if args.routing_record:
+                try:
+                    record = json.loads(args.routing_record.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError) as exc:
+                    print(f"[error] Cannot load routing record: {exc}", file=sys.stderr)
                     return 1
-                record = refresh_record
-
-        # Dispatch with retries (while-based so recovery can grant extra attempts)
-        max_attempts = 1 + max(0, args.retries)
-        result = None
-        attempt = 1
-        _recovery_original_timeouts = None
-        while attempt <= max_attempts:
-            # If previous attempt was a chained commit failure (Phase A/B
-            # succeeded but commit failed), retry only the commit executor
-            # instead of re-running the full Phase A→B→commit chain.
-            if result is not None and _is_chained_commit_failure(result):
-                result = _retry_commit_only(
-                    repo_root, config,
-                    verbose=args.verbose,
-                    bus_dir=args.bus_dir,
-                )
             else:
-                result = dispatch(
-                    record,
-                    config=config,
-                    repo_root=repo_root,
-                    routing_record_path=args.routing_record if args.routing_record else None,
-                    skip_freshness=args.skip_freshness,
-                    verbose=args.verbose,
-                    bus_dir=args.bus_dir,
-                )
-            embedded_recovery = result.get("recovery")
-            if isinstance(embedded_recovery, dict) and embedded_recovery.get("recovered"):
-                if args.verbose:
-                    print(
-                        "[dispatch] Phase B recovered in-process — retrying "
-                        "before commit chain"
+                try:
+                    record = load_routing_record(repo_root, bus_dir=args.bus_dir)
+                except DispatchError:
+                    # No routing record — try to create one via post-merge supervisor
+                    if args.verbose:
+                        print("[dispatch] No routing record — running post-merge supervisor...")
+                    refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
+                    if not refreshed or refresh_record is None:
+                        print("[error] No routing record and auto-refresh failed", file=sys.stderr)
+                        return 1
+                    record = refresh_record
+
+            # Dispatch with retries (while-based so recovery can grant extra attempts)
+            max_attempts = 1 + max(0, args.retries)
+            result = None
+            attempt = 1
+            _recovery_original_timeouts = None
+            while attempt <= max_attempts:
+                # If previous attempt was a chained commit failure (Phase A/B
+                # succeeded but commit failed), retry only the commit executor
+                # instead of re-running the full Phase A→B→commit chain.
+                if result is not None and _is_chained_commit_failure(result):
+                    result = _retry_commit_only(
+                        repo_root, config,
+                        verbose=args.verbose,
+                        bus_dir=args.bus_dir,
                     )
-                _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
-                retry_record = _recovered_retry_record(result)
-                if retry_record is not None:
-                    record = retry_record
-                elif not _is_chained_commit_failure(result):
-                    if args.routing_record:
-                        explicit_record = _reload_explicit_routing_record(
-                            args.routing_record,
-                            verbose=args.verbose,
-                        )
-                        if explicit_record is not None:
-                            record = explicit_record
-                    else:
-                        refreshed, refresh_record = _auto_refresh_routing(
-                            repo_root, verbose=args.verbose, bus_dir=args.bus_dir
-                        )
-                        if refreshed and refresh_record is not None:
-                            record = refresh_record
-                continue
-            # Non-retryable dispatch statuses — break immediately
-            if result.get("status") in _NON_RETRYABLE_DISPATCH_STATUSES:
-                break
-            # Terminal executor outcomes (founder-required, max bridge rounds
-            # exhausted) — retrying would re-produce the same result
-            if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
-                if args.verbose:
-                    print("[dispatch] Executor returned terminal outcome — not retrying")
-                _emit_executor_hard_fail_event(
-                    repo_root,
-                    result,
-                    str(record.get("wave_name") or record.get("wave_id") or ""),
-                    record,
-                    bus_dir=args.bus_dir,
-                )
-                break
-            # Recovery gate: classify failure and attempt Tier 1/2 auto-fix
-            # "timeout" is included so PROCESS_TIMEOUT reaches Tier 2 recovery
-            # "bot_findings_pending" is deliberately excluded — classify_failure
-            # returns UNCLASSIFIED (tier 4) for it, which hits the tier>=3
-            # fail-closed break.  Letting it fall through preserves normal
-            # --retries behavior so the executor can re-poll bot review state.
-            if result.get("status") in ("failed", "timeout"):
-                _wave_id = normalize_wave_id(
-                    record.get("wave_name") or record.get("wave_id", ""))
-                recovery = attempt_recovery(repo_root, result, _wave_id, bus_dir=args.bus_dir)
-                result["recovery"] = recovery
-                if args.verbose:
-                    tier = recovery.get('tier')
-                    action = recovery.get('action', '')
-                    print(f"[dispatch] Recovery: class={recovery.get('failure_class')} "
-                          f"tier={tier} recovered={recovery.get('recovered')}")
-                    if recovery.get("recovered") and tier == 2:
-                        print(f"[dispatch] Tier 2 recovery: {action} "
-                              f"— retrying with adjusted parameters")
-                if recovery.get("recovered"):
-                    # Apply Tier 2 env var overrides to config + disk before retry.
-                    # Keep the first in-memory baseline so sequential
-                    # recoveries cannot overwrite the true pre-recovery
-                    # config; merge disk metadata only when a later override
-                    # actually touches executor_config.json.
-                    new_orig = _apply_recovery_overrides(
-                        config, repo_root=repo_root, verbose=args.verbose)
-                    _recovery_original_timeouts = _merge_recovery_original_config(
-                        _recovery_original_timeouts,
-                        new_orig,
+                else:
+                    result = dispatch(
+                        record,
+                        config=config,
+                        repo_root=repo_root,
+                        routing_record_path=args.routing_record if args.routing_record else None,
+                        skip_freshness=args.skip_freshness,
+                        verbose=args.verbose,
+                        bus_dir=args.bus_dir,
                     )
-                    # Recovery succeeded — grant one extra attempt (don't increment counter)
+                embedded_recovery = result.get("recovery")
+                if isinstance(embedded_recovery, dict) and embedded_recovery.get("recovered"):
+                    if args.verbose:
+                        print(
+                            "[dispatch] Phase B recovered in-process — retrying "
+                            "before commit chain"
+                        )
                     _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
                     retry_record = _recovered_retry_record(result)
                     if retry_record is not None:
@@ -3974,27 +4496,19 @@ def main(argv: list[str] | None = None) -> int:
                                 record = explicit_record
                         else:
                             refreshed, refresh_record = _auto_refresh_routing(
-                                repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
+                                repo_root, verbose=args.verbose, bus_dir=args.bus_dir
+                            )
                             if refreshed and refresh_record is not None:
                                 record = refresh_record
-                    continue  # retry dispatch without counting against budget
-                elif recovery.get("exhausted"):
-                    if args.verbose:
-                        print("[dispatch] Recovery exhausted — not retrying")
-                    _emit_executor_hard_fail_event(repo_root, result, _wave_id, record, bus_dir=args.bus_dir)
+                    continue
+                # Non-retryable dispatch statuses — break immediately
+                if result.get("status") in _NON_RETRYABLE_DISPATCH_STATUSES:
                     break
-                else:
-                    # Tier 3/4 non-recovery: fail closed instead of falling
-                    # through to the normal retry loop (Bridge R6 Finding 2).
-                    _rec_tier = recovery.get("tier", 0)
-                    if _rec_tier >= 3:
-                        if args.verbose:
-                            print(f"[dispatch] Tier {_rec_tier} recovery not "
-                                  f"available — failing closed")
-                        _emit_executor_hard_fail_event(repo_root, result, _wave_id, record, bus_dir=args.bus_dir)
-                        break
-            if attempt >= max_attempts:
-                if result.get("status") in ("failed", "timeout"):
+                # Terminal executor outcomes (founder-required, max bridge rounds
+                # exhausted) — retrying would re-produce the same result
+                if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
+                    if args.verbose:
+                        print("[dispatch] Executor returned terminal outcome — not retrying")
                     _emit_executor_hard_fail_event(
                         repo_root,
                         result,
@@ -4002,115 +4516,193 @@ def main(argv: list[str] | None = None) -> int:
                         record,
                         bus_dir=args.bus_dir,
                     )
+                    break
+                # Recovery gate: classify failure and attempt Tier 1/2 auto-fix
+                # "timeout" is included so PROCESS_TIMEOUT reaches Tier 2 recovery
+                # "bot_findings_pending" is deliberately excluded — classify_failure
+                # returns UNCLASSIFIED (tier 4) for it, which hits the tier>=3
+                # fail-closed break.  Letting it fall through preserves normal
+                # --retries behavior so the executor can re-poll bot review state.
+                if result.get("status") in ("failed", "timeout"):
+                    _wave_id = normalize_wave_id(
+                        record.get("wave_name") or record.get("wave_id", ""))
+                    recovery = attempt_recovery(repo_root, result, _wave_id, bus_dir=args.bus_dir)
+                    result["recovery"] = recovery
+                    if args.verbose:
+                        tier = recovery.get('tier')
+                        action = recovery.get('action', '')
+                        print(f"[dispatch] Recovery: class={recovery.get('failure_class')} "
+                              f"tier={tier} recovered={recovery.get('recovered')}")
+                        if recovery.get("recovered") and tier == 2:
+                            print(f"[dispatch] Tier 2 recovery: {action} "
+                                  f"— retrying with adjusted parameters")
+                    if recovery.get("recovered"):
+                        # Apply Tier 2 env var overrides to config + disk before retry.
+                        # Keep the first in-memory baseline so sequential
+                        # recoveries cannot overwrite the true pre-recovery
+                        # config; merge disk metadata only when a later override
+                        # actually touches executor_config.json.
+                        new_orig = _apply_recovery_overrides(
+                            config, repo_root=repo_root, verbose=args.verbose)
+                        _recovery_original_timeouts = _merge_recovery_original_config(
+                            _recovery_original_timeouts,
+                            new_orig,
+                        )
+                        # Recovery succeeded — grant one extra attempt (don't increment counter)
+                        _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
+                        retry_record = _recovered_retry_record(result)
+                        if retry_record is not None:
+                            record = retry_record
+                        elif not _is_chained_commit_failure(result):
+                            if args.routing_record:
+                                explicit_record = _reload_explicit_routing_record(
+                                    args.routing_record,
+                                    verbose=args.verbose,
+                                )
+                                if explicit_record is not None:
+                                    record = explicit_record
+                            else:
+                                refreshed, refresh_record = _auto_refresh_routing(
+                                    repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
+                                if refreshed and refresh_record is not None:
+                                    record = refresh_record
+                        continue  # retry dispatch without counting against budget
+                    elif recovery.get("exhausted"):
+                        if args.verbose:
+                            print("[dispatch] Recovery exhausted — not retrying")
+                        _emit_executor_hard_fail_event(repo_root, result, _wave_id, record, bus_dir=args.bus_dir)
+                        break
+                    else:
+                        # Tier 3/4 non-recovery: fail closed instead of falling
+                        # through to the normal retry loop (Bridge R6 Finding 2).
+                        _rec_tier = recovery.get("tier", 0)
+                        if _rec_tier >= 3:
+                            if args.verbose:
+                                print(f"[dispatch] Tier {_rec_tier} recovery not "
+                                      f"available — failing closed")
+                            _emit_executor_hard_fail_event(repo_root, result, _wave_id, record, bus_dir=args.bus_dir)
+                            break
+                if attempt >= max_attempts:
+                    if result.get("status") in ("failed", "timeout"):
+                        _emit_executor_hard_fail_event(
+                            repo_root,
+                            result,
+                            str(record.get("wave_name") or record.get("wave_id") or ""),
+                            record,
+                            bus_dir=args.bus_dir,
+                        )
+                    break
+                if args.verbose:
+                    print(f"[dispatch] Attempt {attempt}/{max_attempts} failed — retrying...")
+                # Clear Phase B persisted state before retry to prevent stale
+                # resume from skipping required implementer re-entry after a
+                # bridge-fix cycle failure.
+                _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
+                # Only refresh routing if no explicit --routing-record was provided
+                # and this was NOT a chained commit retry (routing is irrelevant
+                # when retrying only the commit step).
+                # Do NOT unlink the existing routing record before refresh — if
+                # refresh fails, the canonical record would be permanently lost.
+                # The supervisor overwrites the file in place on success.
+                if not _is_chained_commit_failure(result):
+                    if args.routing_record:
+                        explicit_record = _reload_explicit_routing_record(
+                            args.routing_record,
+                            verbose=args.verbose,
+                        )
+                        if explicit_record is not None:
+                            record = explicit_record
+                    else:
+                        refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
+                        if refreshed and refresh_record is not None:
+                            record = refresh_record
+                attempt += 1
+
+            # Restore in-memory config after recovery overrides. Disk restore is
+            # metadata-gated; normal recovery keeps executor_config.json read-only.
+            if _recovery_original_timeouts is not None:
+                _restore_config_on_disk(
+                    repo_root, _recovery_original_timeouts,
+                    verbose=args.verbose)
+                config["timeouts"] = _recovery_original_section(
+                    _recovery_original_timeouts, "timeouts"
+                )
+                config["bridge_turn_timeouts"] = _recovery_original_section(
+                    _recovery_original_timeouts, "bridge_turn_timeouts"
+                )
+            # Clean up original-baseline env vars set by fix_process_timeout /
+            # fix_implementer_stale to prevent leakage to --loop waves.
+            for _env_key in list(os.environ):
+                if _env_key.startswith((
+                    "RCX_RECOVERY_ORIGINAL_TIMEOUT_",
+                    "RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_",
+                    PHASE_B_RECOVERY_PLAN_ENV,
+                    PHASE_B_RECOVERY_PLAN_WAVE_ENV,
+                )):
+                    os.environ.pop(_env_key, None)
+            _clear_recovery_override_env()
+
+            if result.get("status") in ("success", "held"):
+                _wave_id = normalize_wave_id(
+                    record.get("wave_name") or record.get("wave_id", "")
+                )
+                clear_stale_recovery_status_on_success(
+                    repo_root,
+                    wave_id=_wave_id,
+                    success_target=result.get("executor") or result.get("step", ""),
+                    bus_dir=args.bus_dir,
+                )
+
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                status = result.get("status", "unknown")
+                decision = result.get("decision", "unknown")
+                executor = result.get("executor", "none")
+                message = result.get("message", result.get("summary", ""))
+                print(f"[dispatch] Status: {status}")
+                print(f"[dispatch] Decision: {decision}")
+                if executor != "none":
+                    print(f"[dispatch] Executor: {executor}")
+                if message:
+                    print(f"[dispatch] {message}")
+                if result.get("stdout"):
+                    print(result["stdout"])
+                if result.get("stderr"):
+                    print(result["stderr"], file=sys.stderr)
+
+            # If not looping, or if the wave failed/stopped, exit
+            if not args.loop:
                 break
+            if result.get("status") != "success":
+                if args.verbose:
+                    print(f"[dispatch] Wave {wave_count} did not succeed ({result.get('status')}), stopping loop")
+                break
+            if wave_count >= args.max_waves:
+                if args.verbose:
+                    print(f"[dispatch] Max waves ({args.max_waves}) reached, stopping loop")
+                break
+
+            # Post-merge: refresh routing for next wave
             if args.verbose:
-                print(f"[dispatch] Attempt {attempt}/{max_attempts} failed — retrying...")
-            # Clear Phase B persisted state before retry to prevent stale
-            # resume from skipping required implementer re-entry after a
-            # bridge-fix cycle failure.
-            _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
-            # Only refresh routing if no explicit --routing-record was provided
-            # and this was NOT a chained commit retry (routing is irrelevant
-            # when retrying only the commit step).
-            # Do NOT unlink the existing routing record before refresh — if
-            # refresh fails, the canonical record would be permanently lost.
-            # The supervisor overwrites the file in place on success.
-            if not _is_chained_commit_failure(result):
-                if args.routing_record:
-                    explicit_record = _reload_explicit_routing_record(
-                        args.routing_record,
-                        verbose=args.verbose,
-                    )
-                    if explicit_record is not None:
-                        record = explicit_record
-                else:
-                    refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
-                    if refreshed and refresh_record is not None:
-                        record = refresh_record
-            attempt += 1
+                print("[dispatch] Wave succeeded — running post-merge supervisor for next wave...")
+            package_path = agent_bus_path(repo_root, args.bus_dir, "meta", POST_MERGE_PACKAGE_NAME)
+            if not package_path.exists():
+                if args.verbose:
+                    print("[dispatch] No post-merge package — cannot loop to next wave")
+                break
+            refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
+            if not refreshed or refresh_record is None:
+                if args.verbose:
+                    print("[dispatch] Post-merge supervisor failed — stopping loop")
+                break
+            # Clear the explicit routing record arg so next iteration loads fresh
+            args.routing_record = None
 
-        # Restore in-memory config after recovery overrides. Disk restore is
-        # metadata-gated; normal recovery keeps executor_config.json read-only.
-        if _recovery_original_timeouts is not None:
-            _restore_config_on_disk(
-                repo_root, _recovery_original_timeouts,
-                verbose=args.verbose)
-            config["timeouts"] = _recovery_original_section(
-                _recovery_original_timeouts, "timeouts"
-            )
-            config["bridge_turn_timeouts"] = _recovery_original_section(
-                _recovery_original_timeouts, "bridge_turn_timeouts"
-            )
-        # Clean up original-baseline env vars set by fix_process_timeout /
-        # fix_implementer_stale to prevent leakage to --loop waves.
-        for _env_key in list(os.environ):
-            if _env_key.startswith((
-                "RCX_RECOVERY_ORIGINAL_TIMEOUT_",
-                "RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_",
-                PHASE_B_RECOVERY_PLAN_ENV,
-                PHASE_B_RECOVERY_PLAN_WAVE_ENV,
-            )):
-                os.environ.pop(_env_key, None)
-        _clear_recovery_override_env()
-
-        if result.get("status") in ("success", "held"):
-            _wave_id = normalize_wave_id(
-                record.get("wave_name") or record.get("wave_id", "")
-            )
-            clear_stale_recovery_status_on_success(
-                repo_root,
-                wave_id=_wave_id,
-                success_target=result.get("executor") or result.get("step", ""),
-                bus_dir=args.bus_dir,
-            )
-
-        if args.json:
-            print(json.dumps(result, indent=2))
-        else:
-            status = result.get("status", "unknown")
-            decision = result.get("decision", "unknown")
-            executor = result.get("executor", "none")
-            message = result.get("message", result.get("summary", ""))
-            print(f"[dispatch] Status: {status}")
-            print(f"[dispatch] Decision: {decision}")
-            if executor != "none":
-                print(f"[dispatch] Executor: {executor}")
-            if message:
-                print(f"[dispatch] {message}")
-            if result.get("stdout"):
-                print(result["stdout"])
-            if result.get("stderr"):
-                print(result["stderr"], file=sys.stderr)
-
-        # If not looping, or if the wave failed/stopped, exit
-        if not args.loop:
-            break
-        if result.get("status") != "success":
-            if args.verbose:
-                print(f"[dispatch] Wave {wave_count} did not succeed ({result.get('status')}), stopping loop")
-            break
-        if wave_count >= args.max_waves:
-            if args.verbose:
-                print(f"[dispatch] Max waves ({args.max_waves}) reached, stopping loop")
-            break
-
-        # Post-merge: refresh routing for next wave
-        if args.verbose:
-            print("[dispatch] Wave succeeded — running post-merge supervisor for next wave...")
-        package_path = agent_bus_path(repo_root, args.bus_dir, "meta", POST_MERGE_PACKAGE_NAME)
-        if not package_path.exists():
-            if args.verbose:
-                print("[dispatch] No post-merge package — cannot loop to next wave")
-            break
-        refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
-        if not refreshed or refresh_record is None:
-            if args.verbose:
-                print("[dispatch] Post-merge supervisor failed — stopping loop")
-            break
-        # Clear the explicit routing record arg so next iteration loads fresh
-        args.routing_record = None
-
-    return 0 if result.get("status") in ("success", "held", "stopped", "not_implemented") else 1
+        return 0 if result.get("status") in ("success", "held", "stopped", "not_implemented") else 1
+    finally:
+        _remove_wave_end_signal_cleanup(_signal_cleanup_token)
+        monitor.cleanup()
 
 
 if __name__ == "__main__":
