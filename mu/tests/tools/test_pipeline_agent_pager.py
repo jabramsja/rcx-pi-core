@@ -2290,17 +2290,29 @@ def test_codex_exec_resume_env_preserves_rcx_overlay_when_present(monkeypatch):
     assert env["RCX_CODEX_HOME"] == "/tmp/rcx-overlay"
 
 
-def test_executor_config_default_pager_route_is_codex():
-    """Acceptance (e): the shipped default pager route stays codex on this branch.
+def test_requested_targets_both_expands_to_codex_and_claude():
+    """Acceptance (e): route=both fans out to BOTH the codex and claude legs."""
+    assert pager_mod._requested_targets("both") == ["codex", "claude"]  # ANTICHEAT_OK: route fan-out contract test
+    assert pager_mod._requested_targets("codex") == ["codex"]  # ANTICHEAT_OK: route fan-out contract test
+    assert pager_mod._requested_targets("claude") == ["claude"]  # ANTICHEAT_OK: route fan-out contract test
 
-    The flip to route=both is deferred to a follow-up wave (Codex bot P1
-    guidance) until a dedicated Claude monitor is actually running, so the
-    writer + retryable-skip landed here can never silently drop a Claude leg.
+
+def test_executor_config_default_pager_route_is_both():
+    """Acceptance (e): the shipped default pager route is flipped to ``both``.
+
+    Wave B activates the dedicated Claude monitor autoping
+    (ensure_claude_autoping.sh -> claude_autoping_watch.py) and flips the route to
+    ``both`` so commit-grade transitions page BOTH Codex and the dedicated Claude
+    monitor. The flip is NOT gated on the monitor being up: Wave A's monitor-absent
+    skip is RETRYABLE (a page emitted before the monitor is up is re-queued, never
+    dropped -- see the monitor-unset/equals-live retryable-skip tests above), so
+    route=both can never silently drop a Claude leg. Monitor health is observable
+    via the claude_autoping state file's ``status`` field.
     """
     repo_root = Path(__file__).resolve().parents[3]
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    assert config["pipeline_agent_pager"]["route"] == "codex"
+    assert config["pipeline_agent_pager"]["route"] == "both"
 
 
 def test_session_start_hook_writes_claude_monitor_session_id_when_flag_set(tmp_path):
