@@ -15362,3 +15362,43 @@ class TestLaneMonitorLifecycle:
         assert handler not in (signal.SIG_DFL, signal.SIG_IGN, before)
         mock_cleanup.assert_called_once()  # cleanup still runs on the normal exit
         assert signal.getsignal(signal.SIGTERM) is before  # restored after main()
+
+    # (n) Defect P2 (codex, PR #1075): a trailing-slash --bus-dir
+    #     (".agent_bus-lane1/") passes resolve_agent_bus_dir() validation, which
+    #     strips the slash -- but the monitor lifecycle must NOT receive it raw.
+    #     pipeline_monitor.sh rejects any "/" in --bus-dir (a raw forward would
+    #     fail the spawn) and the owner-loop cleanup matches the --bus-dir token
+    #     WHOLE (a slash-suffixed value would never match the real owner-loop,
+    #     stranding it).  _LaneMonitor canonicalizes the stored value to the same
+    #     bare bus NAME the resolver produces, so the stored value, the spawn
+    #     forward, and the cleanup owner-loop match ALL use ".agent_bus-lane1".
+    def test_lane_monitor_normalizes_trailing_slash_bus_dir(self, tmp_path):
+        monitor = dispatch_mod._LaneMonitor(tmp_path, ".agent_bus-lane1/")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
+        # stored: the trailing slash is stripped to the canonical bare bus name,
+        # and lane/session derive cleanly from the normalized value.
+        assert monitor.bus_dir == ".agent_bus-lane1"
+        assert monitor.lane == "lane1"
+        assert monitor.session == "rcx-pipeline-lane1"
+        # forwarded: pipeline_monitor.sh receives the slash-stripped --bus-dir
+        # (a raw "/" would be rejected by the monitor and fail the spawn).
+        with patch.object(dispatch_mod, "_tmux_has_session", return_value=False), \
+             patch.object(dispatch_mod.subprocess, "Popen") as mock_popen:
+            monitor.spawn()
+        argv = mock_popen.call_args.args[0]
+        assert argv[0].endswith("pipeline_monitor.sh")
+        assert argv[1:] == [
+            "--bus-dir", ".agent_bus-lane1", "--lane", "lane1", "start", "--detach",
+        ]
+        # cleanup owner-loop match: the live owner-loop carries the normalized
+        # `--bus-dir .agent_bus-lane1` token (that is what the monitor was spawned
+        # with), so the whole-token match selects it via the normalized stored
+        # value.  A raw ".agent_bus-lane1/" would whole-token-miss and strand it.
+        owner_cmd = (
+            f"bash {tmp_path}/tools/observability/pipeline_monitor.sh "
+            "--bus-dir .agent_bus-lane1 --lane lane1 __owner-loop"
+        )
+        with patch.object(dispatch_mod, "_ps_command_lines", return_value=[(700, owner_cmd)]), \
+             patch.object(dispatch_mod, "_terminate_owner_loops") as mock_term, \
+             patch.object(dispatch_mod, "_tmux_kill_session"):
+            monitor.cleanup()
+        assert mock_term.call_args.args[0] == [700]

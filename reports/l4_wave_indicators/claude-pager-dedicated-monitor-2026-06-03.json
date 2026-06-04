@@ -1,0 +1,24 @@
+{
+  "wave_id": "claude-pager-dedicated-monitor-2026-06-03",
+  "repeat_run_speedup_ratio": 1.024656,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.260953,
+  "repeat_run_raw_seconds": [
+    0.267387,
+    0.260953
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.267387
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.52834
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-03T22:41:33Z",
+  "collector_version": "2.2.0"
+}
