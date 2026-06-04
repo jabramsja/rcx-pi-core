@@ -6376,10 +6376,11 @@ def _wait_for_expected_pr_check_surface_to_pass(
 ) -> dict[str, Any]:
     """Poll until the expected PR check surface goes green / fails / times out.
 
-    ``midpoll_autoresolve`` is the Step-14-only mid-poll conflict re-check
-    context (``{"base_branch", "branch_name"}``), defaulting to ``None``
-    (disabled) so the non-Step-14 ``_wait_for_pr_ci`` call sites keep the poll
-    unchanged. It mirrors ``_wait_for_required_checks_to_register`` for the
+    ``midpoll_autoresolve`` is the conflict-aware mid-poll re-check context
+    (``{"base_branch", "branch_name"}``) shared by the Step-14 CI wait and the
+    Step-15 bot-remediation CI wait, defaulting to ``None`` (disabled) so the
+    non-conflict-aware ``_wait_for_pr_ci`` call sites keep the poll unchanged.
+    It mirrors ``_wait_for_required_checks_to_register`` for the
     window AFTER the required checks register: a concurrent lane that merges
     before this surface reaches green flips the PR to CONFLICTING/DIRTY/BEHIND,
     and GitHub then skips/cancels its ``pull_request`` workflows. A cancelled
@@ -6617,9 +6618,10 @@ def _midpoll_conflict_recheck_before_ci_failure(
     steps_completed: list[str],
     log: Any = None,
 ) -> dict[str, Any] | None:
-    """Step-14-only mid-poll conflict re-check at the required-checks-not-passed
-    boundary -- the wait stage BETWEEN the registration wait and the expected
-    check-surface wait (both already mid-poll-aware).
+    """Conflict-aware mid-poll re-check at the required-checks-not-passed
+    boundary (the Step-14 + Step-15-bot-remediation CI waits) -- the wait stage
+    BETWEEN the registration wait and the expected check-surface wait (both
+    already mid-poll-aware).
 
     A concurrent lane that merges after the required checks register flips this
     PR to CONFLICTING/DIRTY/BEHIND; GitHub then cancels/skips the in-flight
@@ -6631,9 +6633,9 @@ def _midpoll_conflict_recheck_before_ci_failure(
     auto-resolve once, and fail closed with the SAME envelope when unresolvable.
 
     Returns:
-      * ``None`` -- not a mid-poll conflict (genuine CI state, or a non-Step-14
-        caller where ``midpoll_autoresolve is None``): the caller emits its
-        normal CI-failure response.
+      * ``None`` -- not a mid-poll conflict (genuine CI state, or a
+        non-conflict-aware caller where ``midpoll_autoresolve is None``): the
+        caller emits its normal CI-failure response.
       * ``{"midpoll_conflict_resolved": True}`` -- a conflict was detected and
         the base-merge repush cleared it; the caller should re-verify the
         refreshed check surface (fall through to the surface-pass wait) instead
@@ -6685,17 +6687,17 @@ def _wait_for_pr_ci(
 ) -> dict[str, Any] | None:
     """Wait for required CI checks and checkpoint `wait_ci` once.
 
-    ``midpoll_autoresolve`` is the Step-14-only mid-poll conflict re-check
-    context threaded into BOTH ``_wait_for_required_checks_to_register`` (the
+    ``midpoll_autoresolve`` is the conflict-aware mid-poll re-check context
+    threaded into BOTH ``_wait_for_required_checks_to_register`` (the
     pre-registration window) AND ``_wait_for_expected_pr_check_surface_to_pass``
     (the post-registration check-surface window), so a concurrent lane that
     merges at ANY point before the surface goes green is caught instead of
-    spinning to the verify timeout. It defaults to ``None`` (disabled); ONLY the
-    Step-14 call site populates it (with ``base_branch`` + the head
-    ``target_branch`` as ``branch_name``). When either wait reports a mid-poll
-    conflict it could not resolve, this converts that signal into the SAME
-    structured ``pr_conflicting`` fail-closed envelope the Step-14-START guard
-    emits.
+    spinning to the verify timeout. It defaults to ``None`` (disabled); the
+    Step-14 CI wait and the Step-15 bot-remediation CI wait populate it (with
+    ``base_branch`` + the head ``target_branch`` as ``branch_name``). When either
+    wait reports a mid-poll conflict it could not resolve, this converts that
+    signal into the SAME structured ``pr_conflicting`` fail-closed envelope the
+    Step-14-START guard emits.
     """
     if log is not None:
         log(f"{step_label}: waiting for CI on PR #{pr_number}...")
@@ -6708,8 +6710,9 @@ def _wait_for_pr_ci(
         )
         if register_signal is not None:
             # Mid-poll CONFLICTING/DIRTY transition that auto-resolve could
-            # not clear (Step-14 only; the three non-Step-14 call sites pass
-            # no context, so the registration wait never returns this signal).
+            # not clear (conflict-aware callers only -- Step-14 + the Step-15
+            # bot-remediation; the two non-conflict-aware call sites pass no
+            # context, so the registration wait never returns this signal).
             # Fail closed with the SAME structured envelope the Step-14-START
             # guard emits -- do NOT proceed into the watch ceiling.
             return _pr_conflicting_fail_closed_response(
@@ -7855,10 +7858,10 @@ def _wait_for_required_checks_to_register(
     present); raises ``TimeoutError`` / ``CalledProcessError`` on the normal
     failure paths exactly as before.
 
-    ``midpoll_autoresolve`` is the Step-14-only mid-poll conflict re-check
-    context (``{"base_branch", "branch_name"}``) and defaults to ``None``
-    (disabled), so the three non-Step-14 ``_wait_for_pr_ci`` call sites keep
-    the registration loop unchanged. When present, each poll iteration (while
+    ``midpoll_autoresolve`` is the conflict-aware mid-poll re-check context
+    (``{"base_branch", "branch_name"}``) and defaults to ``None`` (disabled),
+    so the two non-conflict-aware ``_wait_for_pr_ci`` call sites keep the
+    registration loop unchanged. When present, each poll iteration (while
     no required checks have registered) re-checks ``_check_pr_conflict_state``:
     GitHub silently skips ``pull_request`` workflows on a CONFLICTING/DIRTY
     PR, so a PR that becomes conflicting mid-wait (e.g. a concurrent lane
