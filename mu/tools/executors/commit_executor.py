@@ -7150,6 +7150,7 @@ def _attempt_bot_finding_remediation(
     repo_name: str,
     pr_number: str,
     target_branch: str,
+    base_branch: str | None = None,
     head_sha: str,
     wave_id: str,
     continuation_path: Path,
@@ -7157,6 +7158,16 @@ def _attempt_bot_finding_remediation(
     log: Any,
 ) -> dict[str, Any] | None:
     """Attempt to fix bot findings via bridge adapter.
+
+    ``base_branch`` is the wave's base branch (the same ``base_branch``
+    ``_run_post_commit_pipeline`` threads to the Step-14 caller, i.e.
+    ``handoff['base_branch']`` = ``dev``). It is the branch
+    ``_try_auto_resolve_pr_conflict`` fetches and merges FROM, so it must carry
+    the REAL base, never ``target_branch`` (which is the PR head this function
+    pushes to). It defaults to ``None`` so the existing direct-call sites that do
+    not thread it keep the prior (conflict-recheck disabled) behavior; the live
+    pipeline caller threads it, enabling the Step-15-remediation CI-wait to be
+    conflict-aware exactly like Step-14.
 
     Returns None on success (caller proceeds to merge).
     Returns a response dict on failure (bot_findings_pending or error).
@@ -7566,8 +7577,51 @@ def _attempt_bot_finding_remediation(
             target_branch=target_branch,
             log=log,
             step_label=f"Step 15 remediation round {round_num}",
+            # Make the Step-15-remediation CI-wait conflict-aware, mirroring the
+            # Step-14 caller EXACTLY: a sibling lane that merges during this poll
+            # flips the PR to CONFLICTING/DIRTY/BEHIND, GitHub then skips the
+            # pull_request required checks, and without this the poll doom-spins
+            # to the 900s surface timeout and strands the PR. base_branch = the
+            # wave base (threaded from _run_post_commit_pipeline), the branch
+            # _try_auto_resolve_pr_conflict fetches+merges FROM; branch_name = the
+            # PR head (target_branch) this function already pushes to. Falls back
+            # to None when base_branch was not threaded, leaving non-remediation/
+            # direct-call sites behaviorally unchanged.
+            midpoll_autoresolve=(
+                {"base_branch": base_branch, "branch_name": target_branch}
+                if base_branch
+                else None
+            ),
         )
         if ci_response is not None:
+            # _wait_for_pr_ci can return two distinct non-None envelopes here:
+            #   1. failure_class == "pr_conflicting" -- a sibling lane merged
+            #      mid-poll and the Step-15 midpoll_autoresolve could not clear
+            #      the conflict (e.g. _try_auto_resolve_pr_conflict aborts on a
+            #      non-TASKS.md conflict). This is the SAME structured fail-closed
+            #      envelope the Step-14 caller receives: an auto-resolvable
+            #      PR-state signal (recovery Tier 2: base-merge + repush), NOT a
+            #      bot finding. Return it verbatim -- exactly like the Step-14
+            #      caller's `if ci_response is not None: return ci_response` -- so
+            #      classify_failure honors failure_class=pr_conflicting. Wrapping
+            #      it into bot_findings_pending would erase failure_class (and
+            #      bot_findings_pending is matched AHEAD of pr_conflicting in
+            #      classify_failure), misrouting recovery to Tier 3 (re-invoke
+            #      implementer), which cannot merge the base branch and strands
+            #      the PR.
+            #   2. any other failure_class (a genuine CI/test break) -- the
+            #      remediation round ran but CI is still red, so the findings are
+            #      still pending; wrap into bot_findings_pending (carrying the
+            #      findings + round count) so recovery re-invokes the implementer
+            #      for another remediation round.
+            if ci_response.get("failure_class") == "pr_conflicting":
+                log(
+                    f"Step 15: remediation round {round_num} CI wait hit an "
+                    f"unresolved concurrent-base conflict; preserving the "
+                    f"pr_conflicting recovery envelope instead of wrapping it as "
+                    f"bot_findings_pending: {ci_response.get('errors', [])}"
+                )
+                return ci_response
             log(f"Step 15: CI did not pass after remediation round {round_num}: {ci_response.get('errors', [])}")
             return {
                 "status": "bot_findings_pending",
@@ -7578,6 +7632,33 @@ def _attempt_bot_finding_remediation(
                 "ci_failure": ci_response.get("errors", []),
             }
         log(f"Step 15: CI passed on remediation commit {current_head[:8]}")
+
+        # The Step-15-remediation CI-wait above is conflict-aware
+        # (midpoll_autoresolve, mirroring Step 14): a sibling lane that merges
+        # mid-poll flips this PR to CONFLICTING, and _wait_for_pr_ci's mid-poll
+        # re-check fires _try_auto_resolve_pr_conflict, which merges
+        # origin/{base_branch} into the local worktree and repushes -- ADVANCING
+        # the PR head past the remediation commit captured above. Re-read HEAD so
+        # the post-CI current-head bot-review request + freshness wait (and their
+        # _assert_expected_pr_head guard) and the subsequent finding extraction
+        # all target the REAL new head. Without this refresh a remediation-time
+        # auto-resolve leaves current_head stale, _assert_expected_pr_head rejects
+        # the moved PR head with ValueError, and the PR is stranded on
+        # bot_findings_pending (#49 bridge round 2). When no auto-resolve fired
+        # (the normal path, and every direct base_branch=None call site) HEAD is
+        # unchanged and this is a no-op, so those callers stay behaviorally
+        # unchanged.
+        refreshed_head = _run(
+            ["git", "rev-parse", "HEAD"], cwd=repo_root, timeout=10,
+        ).stdout.strip()
+        if refreshed_head and refreshed_head != current_head:
+            log(
+                f"Step 15: PR head advanced {current_head[:8]} -> "
+                f"{refreshed_head[:8]} after a mid-poll auto-resolve repush; "
+                "retargeting the current-head bot-review request to the new head"
+            )
+            current_head = refreshed_head
+            result["commit_sha"] = current_head
 
         # Request fresh bot review and wait
         try:
@@ -9575,6 +9656,7 @@ def _run_post_commit_pipeline(
             repo_name=repo_name,
             pr_number=pr_number,
             target_branch=target_branch,
+            base_branch=base_branch,
             head_sha=head_sha_before_merge,
             wave_id=handoff["wave_id"],
             continuation_path=continuation_path,
