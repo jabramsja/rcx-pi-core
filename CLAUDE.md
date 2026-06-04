@@ -48,6 +48,7 @@ RCX is a native structural substrate pursuing self-hosting and meta-circularity.
 | `mu/host/python/rcx_pi/selfhost/` | Core implementation (`rcx_pi/` is symlink) |
 | `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) |
 | `mu/tools/executors/` | Executor scripts (Phase A/B/commit automation) |
+| `mu/tools/executors/set_roles.py` | Switch implementer/reviewer LLM (the single role-switch surface). How-to + safety: memory `reference_llm_role_switch` |
 | `mu/docs/core/` | Design specs |
 | `.claude/rules/` | Conditional rules: wave-protocol, agents, workflow, test-classification, l4-contract, doc-governance, memory-protection |
 
