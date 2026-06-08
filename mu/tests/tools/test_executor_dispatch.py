@@ -281,17 +281,21 @@ class TestDispatcherNotImplemented:
 class TestDispatcherConfig:
     """Config loading and defaults."""
 
-    def test_load_default_config(self):
+    def test_load_default_config(self, monkeypatch):
+        # De-brittled: load_config materializes backends/bridge_reviewers from the LIVE
+        # committed executor_config.json role_agents (the authoritative source of truth),
+        # not a pinned DEFAULT snapshot, so a `set_roles` switch to any provider keeps this
+        # green. Env overrides still win (covered by the override tests below); clear them
+        # here so this asserts the committed default loads and derives correctly.
+        monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+        committed = json.loads(
+            (REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json").read_text()
+        )["role_agents"]
+        expected_implementer = committed["implementer"]
+        expected_reviewer = committed["reviewer"]
         config = dispatch_mod.load_config()
-        # De-brittled: defaults derive from canonical DEFAULT_EXECUTOR_CONFIG; env overrides still win.
-        default_role_agents = common_mod.DEFAULT_EXECUTOR_CONFIG["role_agents"]
-        expected_implementer = os.environ.get(
-            "RCX_IMPLEMENTER_AGENT_OVERRIDE", default_role_agents["implementer"]
-        )
-        expected_reviewer = os.environ.get(
-            "RCX_REVIEWER_AGENT_OVERRIDE",
-            os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", default_role_agents["reviewer"]),
-        )
         assert config["role_agents"]["implementer"] == expected_implementer
         assert config["role_agents"]["reviewer"] == expected_reviewer
         assert "backends" in config
@@ -311,21 +315,25 @@ class TestDispatcherConfig:
         assert config["timeouts"]["pre_push_fast"] >= 1800
 
     def test_bridge_reviewer_override_does_not_retarget_implementers(self, monkeypatch):
-        # De-brittled: pick a reviewer override that differs from the default implementer
-        # so the "implementers unaffected" property holds for any configured default.
-        default_impl = common_mod.DEFAULT_EXECUTOR_CONFIG["role_agents"]["implementer"]
-        reviewer_value = "codex" if default_impl != "codex" else "claude"
+        # De-brittled: the baseline implementer comes from the LIVE committed config (with
+        # no implementer override), so the "a reviewer override does not retarget the
+        # implementer backends" property holds for any configured implementer (claude or codex).
         monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+        baseline_impl = dispatch_mod.load_config()["role_agents"]["implementer"]
+        # pick a reviewer override that differs from the baseline implementer so the
+        # "implementers unaffected" property is observable
+        reviewer_value = "codex" if baseline_impl != "codex" else "claude"
         monkeypatch.setenv("RCX_BRIDGE_REVIEWER_OVERRIDE", reviewer_value)
         config = dispatch_mod.load_config()
         assert config["bridge_reviewers"]["phase_a"] == reviewer_value
         assert config["bridge_reviewers"]["phase_b"] == reviewer_value
         assert config["backends"]["post_merge_supervisor"] == reviewer_value
         assert config["backends"]["dialectic_executor"] == reviewer_value
-        assert config["backends"]["phase_a_executor"] == default_impl
-        assert config["backends"]["phase_b_executor"] == default_impl
-        assert config["backends"]["bot_remediation"] == default_impl
+        assert config["backends"]["phase_a_executor"] == baseline_impl
+        assert config["backends"]["phase_b_executor"] == baseline_impl
+        assert config["backends"]["bot_remediation"] == baseline_impl
 
     def test_implementer_override_retargets_only_implementers(self, monkeypatch):
         # De-brittled: pick an implementer override that differs from the default reviewer
