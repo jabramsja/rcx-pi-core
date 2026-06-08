@@ -2611,7 +2611,7 @@ def _run_validation_gates_for_wave_evidence(
     package: dict[str, Any],
     run_validation,
     *,
-    repo_root: Path = REPO_ROOT,
+    repo_root: Path,
 ) -> tuple[list[meta.ValidationResult], bool]:
     with patch.object(meta, "run_validation_command", side_effect=run_validation), \
          patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
@@ -2625,8 +2625,35 @@ def _run_validation_gates_for_wave_evidence(
         )
 
 
+@pytest.fixture
+def wave_evidence_repo(tmp_path):
+    """Per-test isolated git repo for the wave_evidence gate tests.
+
+    Mirrors the isolated pattern proven by
+    ``test_evidence_restore_preserves_unstaged_tracked_and_preexisting_untracked``:
+    a minimal tmp git repo (``git init`` + user config + one committed tracked
+    file) with its OWN repo_root and its OWN meta_bridge.lock. Routing every
+    wave_evidence test through this fixture keeps the supervisor's
+    ``_run_wave_evidence_with_restore`` snapshot/restore + lock off the live
+    REPO_ROOT, so concurrent ``-n auto`` workers never transiently unlink the
+    live ``mu/host/js`` sources nor contend on REPO_ROOT's meta_bridge.lock.
+    ``tmp_path`` is unique per test, so each test gets an independent repo and
+    lock that pytest auto-cleans.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+    tracked = repo / "tracked.txt"
+    tracked.write_text("committed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True, text=True)
+    return repo
+
+
 class TestWaveEvidenceGate:
-    def test_matching_declared_and_provided_shell_command_runs_exact_bash_c_once(self):
+    def test_matching_declared_and_provided_shell_command_runs_exact_bash_c_once(self, wave_evidence_repo):
         command = "ENV_FLAG=1 python3 -c 'print(1)' && echo done"
         package = _make_wave_evidence_package(
             tracker_command=command,
@@ -2641,6 +2668,7 @@ class TestWaveEvidenceGate:
         results, all_passed = _run_validation_gates_for_wave_evidence(
             package,
             mock_run_validation,
+            repo_root=wave_evidence_repo,
         )
 
         evidence_calls = [
@@ -2652,7 +2680,7 @@ class TestWaveEvidenceGate:
         assert gate.passed
         assert all_passed
 
-    def test_tracker_declared_evidence_preserves_marker_text_inside_shell_command(self):
+    def test_tracker_declared_evidence_preserves_marker_text_inside_shell_command(self, wave_evidence_repo):
         command = "true && echo evidence_delta: should_not_be_truncated"
         package = _make_wave_evidence_package(
             tracker_command=command,
@@ -2667,6 +2695,7 @@ class TestWaveEvidenceGate:
         results, all_passed = _run_validation_gates_for_wave_evidence(
             package,
             mock_run_validation,
+            repo_root=wave_evidence_repo,
         )
 
         assert ["bash", "-c", command] in invoked_commands
@@ -2674,7 +2703,7 @@ class TestWaveEvidenceGate:
         assert gate.passed
         assert all_passed
 
-    def test_matching_declared_and_provided_nonzero_forces_needs_phase_b(self, pkg_in_repo):
+    def test_matching_declared_and_provided_nonzero_forces_needs_phase_b(self, pkg_in_repo, wave_evidence_repo):
         command = "echo fail && exit 7"
         package = _make_wave_evidence_package(
             tracker_command=command,
@@ -2689,6 +2718,7 @@ class TestWaveEvidenceGate:
         results, all_passed = _run_validation_gates_for_wave_evidence(
             package,
             mock_run_validation,
+            repo_root=wave_evidence_repo,
         )
 
         gate = next(r for r in results if r.name == "wave_evidence")
@@ -2713,7 +2743,7 @@ class TestWaveEvidenceGate:
         assert response.decision == "NEEDS_PHASE_B"
         assert "wave_evidence failed before commit" in response.summary
 
-    def test_declared_but_omitted_fails_closed_without_evidence_run(self):
+    def test_declared_but_omitted_fails_closed_without_evidence_run(self, wave_evidence_repo):
         command = "echo should-not-run"
         package = _make_wave_evidence_package(
             tracker_command=command,
@@ -2728,6 +2758,7 @@ class TestWaveEvidenceGate:
         results, all_passed = _run_validation_gates_for_wave_evidence(
             package,
             mock_run_validation,
+            repo_root=wave_evidence_repo,
         )
 
         assert ["bash", "-c", command] not in invoked_commands
@@ -2736,7 +2767,7 @@ class TestWaveEvidenceGate:
         assert gate.error == "tracker note declares evidence_command but package omitted it"
         assert not all_passed
 
-    def test_provided_but_not_declared_fails_closed_without_evidence_run(self):
+    def test_provided_but_not_declared_fails_closed_without_evidence_run(self, wave_evidence_repo):
         command = "echo should-not-run"
         package = _make_wave_evidence_package(
             tracker_command=None,
@@ -2751,6 +2782,7 @@ class TestWaveEvidenceGate:
         results, all_passed = _run_validation_gates_for_wave_evidence(
             package,
             mock_run_validation,
+            repo_root=wave_evidence_repo,
         )
 
         assert ["bash", "-c", command] not in invoked_commands
@@ -2759,7 +2791,7 @@ class TestWaveEvidenceGate:
         assert gate.error == "package provided evidence_command but tracker note omitted it"
         assert not all_passed
 
-    def test_provided_but_mismatched_fails_closed_without_evidence_run(self):
+    def test_provided_but_mismatched_fails_closed_without_evidence_run(self, wave_evidence_repo):
         declared = "echo declared"
         provided = "echo provided"
         package = _make_wave_evidence_package(
@@ -2775,6 +2807,7 @@ class TestWaveEvidenceGate:
         results, all_passed = _run_validation_gates_for_wave_evidence(
             package,
             mock_run_validation,
+            repo_root=wave_evidence_repo,
         )
 
         assert ["bash", "-c", declared] not in invoked_commands
@@ -2784,7 +2817,7 @@ class TestWaveEvidenceGate:
         assert gate.error == "package evidence_command does not match tracker-declared evidence_command"
         assert not all_passed
 
-    def test_not_declared_and_not_provided_skips_wave_evidence(self):
+    def test_not_declared_and_not_provided_skips_wave_evidence(self, wave_evidence_repo):
         package = _make_wave_evidence_package(
             tracker_command=None,
             package_command=None,
@@ -2798,13 +2831,14 @@ class TestWaveEvidenceGate:
         results, all_passed = _run_validation_gates_for_wave_evidence(
             package,
             mock_run_validation,
+            repo_root=wave_evidence_repo,
         )
 
         assert not any(cmd[:2] == ["bash", "-c"] for cmd in invoked_commands)
         assert not any(r.name == "wave_evidence" for r in results)
         assert all_passed
 
-    def test_non_control_surface_package_still_runs_wave_evidence(self):
+    def test_non_control_surface_package_still_runs_wave_evidence(self, wave_evidence_repo):
         command = "echo non-control-surface"
         package = _make_wave_evidence_package(
             tracker_command=command,
@@ -2820,6 +2854,7 @@ class TestWaveEvidenceGate:
         results, all_passed = _run_validation_gates_for_wave_evidence(
             package,
             mock_run_validation,
+            repo_root=wave_evidence_repo,
         )
 
         assert ["bash", "-c", command] in invoked_commands
