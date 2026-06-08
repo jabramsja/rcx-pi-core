@@ -1,0 +1,24 @@
+{
+  "wave_id": "ffsync-guard-b-allow-untracked-2026-06-08",
+  "repeat_run_speedup_ratio": 1.087032,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.235856,
+  "repeat_run_raw_seconds": [
+    0.256383,
+    0.235856
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.256383
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.492239
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-08T07:17:14Z",
+  "collector_version": "2.2.0"
+}
