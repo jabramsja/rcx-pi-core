@@ -162,6 +162,7 @@ _STANDALONE_RECOVERY_TERMINAL_STATUSES = frozenset({
 })
 _STANDALONE_RECOVERY_STATUSES = frozenset({
     "bot_findings_pending",
+    "needs_phase_b",
     "pre_push_failed",
     "stage_failed",
     "implementer_error",
@@ -228,6 +229,8 @@ def _should_attempt_standalone_recovery(result: dict[str, Any]) -> bool:
     if status in _STANDALONE_RECOVERY_TERMINAL_STATUSES:
         return False
     if status in _STANDALONE_RECOVERY_STATUSES:
+        return True
+    if str(result.get("failure_class") or "").strip().lower() == "needs_phase_b":
         return True
     step = str(result.get("step", "") or "").strip().lower()
     return status in {"error", "failed", "timeout", "stale"} and (
@@ -1307,15 +1310,102 @@ def _tracker_marker_value(note: str, marker: str) -> str:
         "unblocks_wave_id",
         "unblocks_runtime_blocker",
     ]
-    other_markers = "|".join(re.escape(name) for name in marker_names if name != marker)
     pattern = re.compile(
         rf"(?:^|\s){re.escape(marker)}:\s*"
-        rf"(.+?)(?=\s(?:{other_markers}):|$)"
     )
-    match = pattern.search(note or "")
+    text = note or ""
+    match = pattern.search(text)
     if not match:
         return ""
-    return match.group(1).strip().rstrip()
+    start = match.end()
+    in_inline_code = False
+    for idx in range(start, len(text)):
+        if text[idx] == "`":
+            in_inline_code = not in_inline_code
+            continue
+        if in_inline_code or not text[idx].isspace():
+            continue
+        marker_start = idx + 1
+        if any(
+            text.startswith(f"{name}:", marker_start)
+            for name in marker_names
+            if name != marker
+        ):
+            return text[start:idx].strip().rstrip()
+    return text[start:].strip().rstrip()
+
+
+def _strip_tracker_inline_code(value: str) -> str:
+    text = str(value or "").strip()
+    if text.startswith("`") and text.endswith("`."):
+        return text[1:-2].strip()
+    if text.startswith("`") and text.endswith("`"):
+        return text[1:-1].strip()
+    return text
+
+
+def _tracker_evidence_command_value(note: str) -> str:
+    return _strip_tracker_inline_code(_tracker_marker_value(note, "evidence_command"))
+
+
+def _commit_supervisor_reentry_plan_path(handoff: dict[str, Any]) -> str:
+    tracked_packet = _normalize_repo_relpath(str(handoff.get("tracked_packet") or ""))
+    if tracked_packet:
+        return tracked_packet
+    for field in ("scope_items", "files_to_stage"):
+        value = handoff.get(field)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            candidate = _normalize_repo_relpath(str(item or ""))
+            if candidate.startswith("reports/control_plane/") and candidate.endswith(".md"):
+                return candidate
+    return ""
+
+
+def _commit_supervisor_rejection_result(
+    *,
+    decision: str,
+    summary: str,
+    steps_completed: list[Any],
+    handoff: dict[str, Any],
+    wave_id: str,
+    changed_files: list[str],
+) -> dict[str, Any]:
+    decision_text = str(decision or "UNKNOWN").strip() or "UNKNOWN"
+    summary_text = str(summary or "").strip()
+    message = f"Supervisor returned {decision_text}"
+    if summary_text:
+        message += f": {summary_text}"
+    result: dict[str, Any] = {
+        "status": "error",
+        "step": "build_and_run_supervisor",
+        "errors": [message],
+        "steps_completed": list(steps_completed),
+        "pre_commit_decision": decision_text,
+        "pre_commit_summary": summary_text,
+        "wave_id": wave_id,
+    }
+    if changed_files:
+        result["changed_files"] = sorted(
+            {
+                _normalize_repo_relpath(str(path))
+                for path in changed_files
+                if _normalize_repo_relpath(str(path))
+            }
+        )
+    if decision_text == "NEEDS_PHASE_B":
+        plan_path = _commit_supervisor_reentry_plan_path(handoff)
+        result.update({
+            "failure_class": "needs_phase_b",
+            "resume_after": "needs_phase_b_reentry",
+            "detail": message,
+            "reason": message,
+        })
+        if plan_path:
+            result["plan_path"] = plan_path
+            result["tracked_packet"] = plan_path
+    return result
 
 
 def _refresh_tracker_note_wave_file_count(note: str, file_count: int) -> str:
@@ -10839,6 +10929,10 @@ def _run_commit_pipeline_impl(
                 handoff.get("tracker_note_text", "")
             ):
                 supervisor_founder_override_token = f"FOUNDER_OVERRIDE:{tok}"
+        supervisor_tracker_note_text = str(handoff.get("tracker_note_text") or "")
+        supervisor_evidence_command = _tracker_evidence_command_value(
+            supervisor_tracker_note_text
+        )
 
         supervisor_package = {
             "task_id": handoff["task_id"],
@@ -10855,6 +10949,8 @@ def _run_commit_pipeline_impl(
             "current_judgment": "COMMIT_GO",
             "founder_override_token": supervisor_founder_override_token,
             "wave_class": supervisor_wave_class,
+            "tracker_note_text": supervisor_tracker_note_text,
+            "evidence_command": supervisor_evidence_command,
         }
 
         scratch_dir = repo_root / ".scratch"
@@ -10886,9 +10982,14 @@ def _run_commit_pipeline_impl(
                 summary=f"Pre-commit supervisor completed: {getattr(sup_result, 'decision', 'unknown')}",
             )
             if sup_result.decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
-                return {"status": "error", "step": "build_and_run_supervisor",
-                        "errors": [f"Supervisor returned {sup_result.decision}: {sup_result.summary[:200]}"],
-                        "steps_completed": result["steps_completed"]}
+                return _commit_supervisor_rejection_result(
+                    decision=str(getattr(sup_result, "decision", "") or ""),
+                    summary=str(getattr(sup_result, "summary", "") or ""),
+                    steps_completed=result["steps_completed"],
+                    handoff=handoff,
+                    wave_id=wave_id,
+                    changed_files=changed_files,
+                )
             receipt_path_from_supervisor = sup_result.receipt_path
             receipt_decision = sup_result.decision
 
@@ -11483,7 +11584,7 @@ def _maybe_demote_completed_handoff_state_for_commit_retry(
     handoff: dict[str, Any],
     result: dict[str, Any],
 ) -> None:
-    if str(result.get("status") or "") != "error":
+    if str(result.get("status") or "") not in {"error", "needs_phase_b"}:
         return
     steps_completed = result.get("steps_completed")
     if not isinstance(steps_completed, list):

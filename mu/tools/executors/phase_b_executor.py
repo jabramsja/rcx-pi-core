@@ -4851,6 +4851,22 @@ def _load_commit_executor_for_tracker_sync() -> Any:
         return _commit_mod
 
 
+def _strip_tracker_inline_code(value: str) -> str:
+    text = str(value or "").strip()
+    if text.startswith("`") and text.endswith("`."):
+        return text[1:-2].strip()
+    if text.startswith("`") and text.endswith("`"):
+        return text[1:-1].strip()
+    return text
+
+
+def _tracker_evidence_command_value(tracker_note_text: str) -> str:
+    commit_mod = _load_commit_executor_for_tracker_sync()
+    return _strip_tracker_inline_code(
+        commit_mod._tracker_marker_value(tracker_note_text, "evidence_command")
+    )
+
+
 def _sync_phase_b_tasks_tracker_note(
     repo_root: Path,
     *,
@@ -7464,6 +7480,12 @@ def run_phase_b(
             "evidence_handles": _collect_supervisor_evidence_handles(repo_root, wave_id),
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
+            # Stubs for the early skip-to-reentry NEEDS_PHASE_B package: pre_supervisor_tracker_note
+            # is finalized only on the normal Step-7 path (line ~7759), which this path skips, so it
+            # is not yet bound here. The re-entry refresh later sets the real tracker_note_text +
+            # evidence_command from reentry_pre_supervisor_tracker_note before the supervisor runs.
+            "tracker_note_text": "",
+            "evidence_command": "",
         }
         receipt_path = ""
     else:
@@ -7812,6 +7834,8 @@ def run_phase_b(
             "evidence_handles": _collect_supervisor_evidence_handles(repo_root, wave_id),
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
+            "tracker_note_text": pre_supervisor_tracker_note,
+            "evidence_command": _tracker_evidence_command_value(pre_supervisor_tracker_note),
         }
         if pre_supervisor_founder_override_token:
             supervisor_package["founder_override_token"] = pre_supervisor_founder_override_token
@@ -8702,6 +8726,10 @@ def run_phase_b(
         supervisor_package["evidence_handles"] = _collect_supervisor_evidence_handles(
             repo_root,
             wave_id,
+        )
+        supervisor_package["tracker_note_text"] = reentry_pre_supervisor_tracker_note
+        supervisor_package["evidence_command"] = _tracker_evidence_command_value(
+            reentry_pre_supervisor_tracker_note
         )
         # Refresh blocker acknowledgment (may have changed during re-entry)
         blocking_dir = repo_root / "reports" / "deferred" / "blocking"

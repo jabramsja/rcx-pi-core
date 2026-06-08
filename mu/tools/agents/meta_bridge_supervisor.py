@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -396,6 +397,24 @@ class ValidationResult:
     error: str = ""
 
 
+@dataclass(frozen=True)
+class WorktreePathSnapshot:
+    relpath: str
+    existed: bool
+    kind: str = "absent"
+    payload_path: Path | None = None
+    symlink_target: str = ""
+    mode: int = 0
+
+
+@dataclass(frozen=True)
+class PlainFileSnapshot:
+    path: Path
+    existed: bool
+    payload_path: Path | None = None
+    mode: int = 0
+
+
 @dataclass
 class MetaBridgeResponse:
     status: str  # "success", "error", "partial"
@@ -729,6 +748,69 @@ def _reviewer_package_scope_finding_is_mechanically_refuted(
     return _is_package_scope_drift_text(str(envelope.get("summary", "")))
 
 
+_TRACKER_MARKER_NAMES = [
+    "Class",
+    "target_gate_id",
+    "no_op_proof",
+    "defer_reason_code",
+    "evidence_command",
+    "evidence_delta",
+    "progress_proof_before",
+    "progress_proof_after",
+    "primary_blocker_class",
+    "primary_invariant_id",
+    "indicator_artifact_ref",
+    "indicator_collection_command",
+    "bootstrap_endgame_policy",
+    "boot0_track_id",
+    "boot0_progress_state",
+    "FOUNDER_OVERRIDE",
+    "unblocks_wave_id",
+    "unblocks_runtime_blocker",
+]
+
+
+def _tracker_marker_value(note: str, marker: str) -> str:
+    pattern = re.compile(
+        rf"(?:^|\s){re.escape(marker)}:\s*"
+    )
+    text = note or ""
+    match = pattern.search(text)
+    if not match:
+        return ""
+    start = match.end()
+    in_inline_code = False
+    for idx in range(start, len(text)):
+        if text[idx] == "`":
+            in_inline_code = not in_inline_code
+            continue
+        if in_inline_code or not text[idx].isspace():
+            continue
+        marker_start = idx + 1
+        if any(
+            text.startswith(f"{name}:", marker_start)
+            for name in _TRACKER_MARKER_NAMES
+            if name != marker
+        ):
+            return text[start:idx].strip().rstrip()
+    return text[start:].strip().rstrip()
+
+
+def _strip_tracker_inline_code(value: str) -> str:
+    text = str(value or "").strip()
+    if text.startswith("`") and text.endswith("`."):
+        return text[1:-2].strip()
+    if text.startswith("`") and text.endswith("`"):
+        return text[1:-1].strip()
+    return text
+
+
+def _extract_tracker_note_evidence_command(tracker_note_text: str) -> str:
+    return _strip_tracker_inline_code(
+        _tracker_marker_value(tracker_note_text, "evidence_command")
+    )
+
+
 def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
     """Validate package has all 11 required fields with correct types."""
     # Package must be a JSON object (dict), not an array or primitive
@@ -741,7 +823,13 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
 
     # Validate field types for all 11 required fields
     errors = []
-    _OPTIONAL_PACKAGE_FIELDS = {"fenced_files", "founder_override_token", "wave_class"}
+    _OPTIONAL_PACKAGE_FIELDS = {
+        "evidence_command",
+        "fenced_files",
+        "founder_override_token",
+        "tracker_note_text",
+        "wave_class",
+    }
     unexpected = sorted(set(package.keys()) - REQUIRED_PACKAGE_FIELDS - _OPTIONAL_PACKAGE_FIELDS)
     if unexpected:
         errors.append(f"Unexpected field(s): {unexpected}")
@@ -769,6 +857,12 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
                 f"wave_class '{wc}' not in "
                 "{L4_STRUCTURAL, L4_ENABLER, MAINTENANCE}"
             )
+
+    if "tracker_note_text" in package and not isinstance(package.get("tracker_note_text"), str):
+        errors.append("tracker_note_text must be a string")
+
+    if "evidence_command" in package and not isinstance(package.get("evidence_command"), str):
+        errors.append("evidence_command must be a string")
 
     # Cross-field: a non-empty `founder_override_token` is only authorized
     # when `wave_class` is explicitly one of the non-structural values. This
@@ -1184,6 +1278,303 @@ def run_validation_command(repo_root: Path, command: list[str]) -> tuple[int, st
         return 126, f"[error] failed to execute: {exc}"
 
 
+def _repo_relative_path_from_git(raw_path: str) -> str:
+    relpath = str(raw_path or "").replace("\\", "/")
+    while relpath.startswith("./"):
+        relpath = relpath[2:]
+    if not relpath:
+        raise MetaBridgeError("git listed an empty path")
+    path = Path(relpath)
+    if path.is_absolute() or ".." in path.parts:
+        raise MetaBridgeError(f"git listed unsafe repo path: {raw_path!r}")
+    return relpath
+
+
+def _git_list_paths_z(repo_root: Path, args: list[str]) -> list[str]:
+    raw = git_output(repo_root, args, text=False)
+    paths: list[str] = []
+    seen: set[str] = set()
+    for entry in bytes(raw).split(b"\0"):  # type: ignore[arg-type]
+        if not entry:
+            continue
+        relpath = _repo_relative_path_from_git(
+            entry.decode("utf-8", errors="surrogateescape")
+        )
+        if relpath not in seen:
+            seen.add(relpath)
+            paths.append(relpath)
+    return paths
+
+
+def _snapshot_worktree_path(repo_root: Path, relpath: str, payload_path: Path) -> WorktreePathSnapshot:
+    full_path = repo_root / relpath
+    try:
+        st = os.lstat(full_path)
+    except FileNotFoundError:
+        return WorktreePathSnapshot(relpath=relpath, existed=False)
+
+    mode = st.st_mode & 0o7777
+    if os.path.islink(full_path):
+        return WorktreePathSnapshot(
+            relpath=relpath,
+            existed=True,
+            kind="symlink",
+            symlink_target=os.readlink(full_path),
+            mode=mode,
+        )
+    if full_path.is_file():
+        payload_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(full_path, payload_path)
+        return WorktreePathSnapshot(
+            relpath=relpath,
+            existed=True,
+            kind="file",
+            payload_path=payload_path,
+            mode=mode,
+        )
+    raise MetaBridgeError(f"unsupported worktree path type for evidence snapshot: {relpath}")
+
+
+def _snapshot_worktree_paths(
+    repo_root: Path,
+    relpaths: list[str],
+    snapshot_root: Path,
+    label: str,
+) -> list[WorktreePathSnapshot]:
+    snapshots: list[WorktreePathSnapshot] = []
+    for idx, relpath in enumerate(relpaths):
+        snapshots.append(
+            _snapshot_worktree_path(
+                repo_root,
+                relpath,
+                snapshot_root / label / f"{idx:08d}",
+            )
+        )
+    return snapshots
+
+
+def _snapshot_plain_file(path: Path, payload_path: Path) -> PlainFileSnapshot:
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return PlainFileSnapshot(path=path, existed=False)
+    if os.path.islink(path) or not path.is_file():
+        raise MetaBridgeError(f"unsupported plain file snapshot path: {path}")
+    payload_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(path, payload_path)
+    return PlainFileSnapshot(
+        path=path,
+        existed=True,
+        payload_path=payload_path,
+        mode=st.st_mode & 0o7777,
+    )
+
+
+def _restore_plain_file_snapshot(snapshot: PlainFileSnapshot) -> None:
+    if not snapshot.existed:
+        _remove_worktree_path(snapshot.path)
+        return
+    if snapshot.payload_path is None:
+        raise MetaBridgeError(f"missing plain file snapshot payload: {snapshot.path}")
+    snapshot.path.parent.mkdir(parents=True, exist_ok=True)
+    _remove_worktree_path(snapshot.path)
+    shutil.copyfile(snapshot.payload_path, snapshot.path)
+    os.chmod(snapshot.path, snapshot.mode)
+
+
+def _git_path(repo_root: Path, path_name: str) -> Path:
+    raw_path = str(git_output(repo_root, ["rev-parse", "--git-path", path_name])).strip()
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = repo_root / path
+    return path
+
+
+def _snapshot_git_index(repo_root: Path, snapshot_root: Path) -> list[PlainFileSnapshot]:
+    index_path = _git_path(repo_root, "index")
+    return [
+        _snapshot_plain_file(index_path, snapshot_root / "git" / "index"),
+        _snapshot_plain_file(index_path.with_name(index_path.name + ".lock"), snapshot_root / "git" / "index.lock"),
+    ]
+
+
+def _restore_git_index(snapshots: list[PlainFileSnapshot]) -> None:
+    for snapshot in snapshots:
+        _restore_plain_file_snapshot(snapshot)
+
+
+def _repo_dir_relpaths(repo_root: Path) -> set[str]:
+    relpaths: set[str] = set()
+    for current, dirnames, _filenames in os.walk(repo_root):
+        current_path = Path(current)
+        kept_dirnames: list[str] = []
+        for dirname in dirnames:
+            child = current_path / dirname
+            try:
+                relpath = child.relative_to(repo_root).as_posix()
+            except ValueError:
+                continue
+            if relpath == ".git" or relpath.startswith(".git/"):
+                continue
+            kept_dirnames.append(dirname)
+            relpaths.add(relpath)
+        dirnames[:] = kept_dirnames
+    return relpaths
+
+
+def _remove_created_empty_dirs(repo_root: Path, pre_existing_dirs: set[str]) -> None:
+    current_dirs = _repo_dir_relpaths(repo_root)
+    created_dirs = current_dirs - pre_existing_dirs
+    for relpath in sorted(created_dirs, key=lambda value: value.count("/"), reverse=True):
+        full_path = repo_root / relpath
+        try:
+            full_path.rmdir()
+        except OSError:
+            continue
+
+
+def _remove_worktree_path(path: Path) -> None:
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return
+    if path.is_dir() and not os.path.islink(path):
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def _restore_worktree_snapshots(repo_root: Path, snapshots: list[WorktreePathSnapshot]) -> None:
+    for snapshot in snapshots:
+        full_path = repo_root / snapshot.relpath
+        if not snapshot.existed:
+            _remove_worktree_path(full_path)
+            continue
+
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        _remove_worktree_path(full_path)
+        if snapshot.kind == "file":
+            if snapshot.payload_path is None:
+                raise MetaBridgeError(f"missing file snapshot payload: {snapshot.relpath}")
+            shutil.copyfile(snapshot.payload_path, full_path)
+            os.chmod(full_path, snapshot.mode)
+        elif snapshot.kind == "symlink":
+            os.symlink(snapshot.symlink_target, full_path)
+        else:
+            raise MetaBridgeError(f"unsupported snapshot kind: {snapshot.kind}")
+
+
+def _run_wave_evidence_with_restore_unlocked(repo_root: Path, evidence_command: str) -> tuple[int, str]:
+    pre_evidence_state = compute_repo_state(repo_root)
+    exit_code = 1
+    output = ""
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="meta-wave-evidence-") as tmpdir:
+            snapshot_root = Path(tmpdir)
+            tracked_paths = _git_list_paths_z(repo_root, ["ls-files", "-z"])
+            pre_untracked_paths = _git_list_paths_z(
+                repo_root,
+                ["ls-files", "--others", "--exclude-standard", "-z"],
+            )
+            tracked_snapshots = _snapshot_worktree_paths(
+                repo_root,
+                tracked_paths,
+                snapshot_root,
+                "tracked",
+            )
+            untracked_snapshots = _snapshot_worktree_paths(
+                repo_root,
+                pre_untracked_paths,
+                snapshot_root,
+                "untracked",
+            )
+            pre_untracked_set = set(pre_untracked_paths)
+            pre_existing_dirs = _repo_dir_relpaths(repo_root)
+            git_index_snapshots = _snapshot_git_index(repo_root, snapshot_root)
+
+            restore_errors: list[str] = []
+            try:
+                exit_code, output = run_validation_command(
+                    repo_root,
+                    ["bash", "-c", evidence_command],
+                )
+            finally:
+                try:
+                    _restore_git_index(git_index_snapshots)
+                except Exception as exc:
+                    restore_errors.append(f"index restore failed: {type(exc).__name__}: {exc}")
+
+                try:
+                    _restore_worktree_snapshots(repo_root, tracked_snapshots)
+                except Exception as exc:
+                    restore_errors.append(f"tracked restore failed: {type(exc).__name__}: {exc}")
+
+                try:
+                    post_untracked_paths = set(
+                        _git_list_paths_z(
+                            repo_root,
+                            ["ls-files", "--others", "--exclude-standard", "-z"],
+                        )
+                    )
+                    for relpath in sorted(post_untracked_paths - pre_untracked_set):
+                        _remove_worktree_path(repo_root / relpath)
+                except Exception as exc:
+                    restore_errors.append(
+                        f"evidence-created untracked cleanup failed: {type(exc).__name__}: {exc}"
+                    )
+
+                try:
+                    _restore_worktree_snapshots(repo_root, untracked_snapshots)
+                except Exception as exc:
+                    restore_errors.append(f"untracked restore failed: {type(exc).__name__}: {exc}")
+
+                try:
+                    _remove_created_empty_dirs(repo_root, pre_existing_dirs)
+                except Exception as exc:
+                    restore_errors.append(
+                        f"evidence-created empty-dir cleanup failed: {type(exc).__name__}: {exc}"
+                    )
+
+            if restore_errors:
+                detail = "; ".join(restore_errors)
+                if output:
+                    detail = f"{output[:500]}\n[restore]\n{detail}"
+                return 1, detail
+
+            post_restore_state = compute_repo_state(repo_root)
+            if post_restore_state != pre_evidence_state:
+                detail = (
+                    "evidence restore failed: repo state changed after restore "
+                    f"(before={pre_evidence_state.state_sha[:12]}, "
+                    f"after={post_restore_state.state_sha[:12]})"
+                )
+                if output:
+                    detail = f"{output[:500]}\n[restore]\n{detail}"
+                return 1, detail
+            return exit_code, output
+    except Exception as exc:
+        detail = f"wave evidence failed before trusted receipt: {type(exc).__name__}: {exc}"
+        if output:
+            detail = f"{output[:500]}\n[restore]\n{detail}"
+        return 1, detail
+
+
+def _run_wave_evidence_with_restore(repo_root: Path, evidence_command: str) -> tuple[int, str]:
+    try:
+        with _MetaBridgeLock(meta_bridge_paths(repo_root).lock_path):
+            return _run_wave_evidence_with_restore_unlocked(repo_root, evidence_command)
+    except Exception as exc:
+        return 1, f"wave evidence failed before trusted receipt: {type(exc).__name__}: {exc}"
+
+
+def _failed_wave_evidence_result(validation_results: list[ValidationResult]) -> ValidationResult | None:
+    for result in validation_results:
+        if result.name == "wave_evidence" and not result.passed:
+            return result
+    return None
+
+
 def run_validation_gates(
     repo_root: Path,
     package: dict[str, Any],
@@ -1329,7 +1720,6 @@ def run_validation_gates(
     else:
         results.append(ValidationResult("control_surface_invariants", True))
 
-    # Gate 10: Closeout attestation (control-surface waves must have authorized attestation)
     changed = package.get("changed_files", [])
     att_checker = repo_root / "tools" / "checks" / "check_closeout_attestation.py"
     try:
@@ -1345,6 +1735,68 @@ def run_validation_gates(
     except Exception:
         is_cs_wave = False
         normalized_changed = {p.replace("\\", "/").removeprefix("./") for p in changed}
+
+    wave_evidence_attestation: dict[str, Any] | None = None
+    tracker_note_text = str(package.get("tracker_note_text") or "")
+    declared_evidence_command = _extract_tracker_note_evidence_command(tracker_note_text)
+    transported_evidence = package.get("evidence_command")
+    package_evidence_command = (
+        transported_evidence
+        if isinstance(transported_evidence, str)
+        else ""
+    )
+    package_evidence_present = bool(package_evidence_command.strip())
+    if declared_evidence_command and package_evidence_present:
+        if package_evidence_command == declared_evidence_command:
+            if verbose:
+                print("[meta-bridge] Gate wave_evidence: running tracker-declared evidence...")
+            evidence_exit, evidence_output = _run_wave_evidence_with_restore(
+                repo_root,
+                declared_evidence_command,
+            )
+            evidence_detail = (
+                evidence_output[:500]
+                if evidence_output
+                else ("passed" if evidence_exit == 0 else "failed")
+            )
+            results.append(
+                ValidationResult(
+                    "wave_evidence",
+                    evidence_exit == 0,
+                    evidence_detail,
+                )
+            )
+            wave_evidence_attestation = {
+                "command": f"wave_evidence: {declared_evidence_command}",
+                "exit_code": evidence_exit,
+                "output": evidence_detail,
+            }
+        else:
+            detail = "package evidence_command does not match tracker-declared evidence_command"
+            results.append(ValidationResult("wave_evidence", False, detail))
+            wave_evidence_attestation = {
+                "command": "wave_evidence: tracker/package exact-match",
+                "exit_code": 1,
+                "output": detail,
+            }
+    elif declared_evidence_command:
+        detail = "tracker note declares evidence_command but package omitted it"
+        results.append(ValidationResult("wave_evidence", False, detail))
+        wave_evidence_attestation = {
+            "command": "wave_evidence: tracker/package exact-match",
+            "exit_code": 1,
+            "output": detail,
+        }
+    elif package_evidence_present:
+        detail = "package provided evidence_command but tracker note omitted it"
+        results.append(ValidationResult("wave_evidence", False, detail))
+        wave_evidence_attestation = {
+            "command": "wave_evidence: tracker/package exact-match",
+            "exit_code": 1,
+            "output": detail,
+        }
+
+    # Gate 10: Closeout attestation (control-surface waves must have authorized attestation)
     if is_cs_wave and att_checker.exists():
         try:
             if verbose:
@@ -1357,6 +1809,8 @@ def run_validation_gates(
                     "exit_code": 0 if r.passed else 1,
                     "output": r.error or ("passed" if r.passed else "failed"),
                 })
+            if wave_evidence_attestation is not None:
+                validation_commands_for_att.append(wave_evidence_attestation)
             # Receipt-chain behavioral proof: when receipt-chain files are touched,
             # run the receipt chain end-to-end test to emit a receipt_chain proof
             # that check_closeout_attestation.py requires for GO authorization.
@@ -3214,6 +3668,7 @@ def run_meta_bridge(
 
     passed = [r.name for r in validation_results if r.passed]
     failed = [{"name": r.name, "error": r.error} for r in validation_results if not r.passed]
+    failed_wave_evidence = _failed_wave_evidence_result(validation_results)
 
     # Dry-run: validation-only, no Codex routing
     if dry_run:
@@ -3235,7 +3690,25 @@ def run_meta_bridge(
             request_for_claude="Run without --dry-run for full Codex meta-review and routing decision",
         )
 
-    # Live mode: always send to Codex for routing, even when validations fail.
+    if failed_wave_evidence is not None:
+        detail = failed_wave_evidence.error or "wave_evidence failed"
+        return MetaBridgeResponse(
+            status="partial",
+            decision=Decision.NEEDS_PHASE_B.value,
+            summary=(
+                "wave_evidence failed before commit; routing to Phase B for rework. "
+                f"Detail: {detail}"
+            ),
+            validations_passed=passed,
+            validations_failed=failed,
+            request_for_claude=(
+                "Re-enter Phase B and fix the tracker-declared wave_evidence proof. "
+                f"Failure detail: {detail}"
+            ),
+            reviewed_staged_sha=state_start.staged_sha if state_start else "",
+        )
+
+    # Live mode: send to Codex for routing, even when non-evidence validations fail.
     # Codex decides whether to route to Phase A, Phase B, founder, or error.
     # Commit-capable decisions are blocked when any validation failed.
     with _MetaBridgeLock(paths.lock_path):
@@ -3280,7 +3753,7 @@ def run_meta_bridge(
             recovery_hint="Re-run meta-bridge with fresh package (repo changed during review)",
         )
 
-    # Enforce: commit-capable decisions are impossible when validations failed
+    # Enforce: commit-capable decisions are impossible when validations failed.
     decision = envelope.get("decision", Decision.ERROR_INTERNAL.value)
     if (
         all_passed
