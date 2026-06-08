@@ -1335,17 +1335,64 @@ def _tracker_marker_value(note: str, marker: str) -> str:
     return text[start:].strip().rstrip()
 
 
+# Fail-closed sentinel for a NON-canonical (un-backtick-wrapped) evidence_command.
+# The canonical tracker-note builder (tracker_sync_note.render_tracker_sync_note)
+# ALWAYS backtick-wraps the evidence_command value, so an un-wrapped value is
+# non-canonical. There is no reliable text-only way to tell an embedded
+# ". marker:" inside a shell command from a real next-field boundary, so rather
+# than silently truncating an un-wrapped value at that substring and running a
+# passing prefix (a fail-OPEN), the extractor returns this always-failing command.
+# The #52 pre-commit supervisor RUNS the extracted evidence_command and gates on
+# exit==0, so an always-failing command forces the wave_evidence gate to FAIL ->
+# NEEDS_PHASE_B (fail-CLOSED). A plain empty value is NOT sufficient: the supervisor
+# skips the wave_evidence gate entirely when BOTH the declared and transported
+# evidence_command are empty, which would re-open the hole. Kept byte-identical with
+# the meta_bridge_supervisor copy.
+_NONCANONICAL_EVIDENCE_COMMAND = (
+    "echo 'rcx: un-backtick-wrapped evidence_command is non-canonical and is "
+    "rejected fail-closed (backtick-wrap the value in the tracker note)' >&2; exit 1"
+)
+
+
 def _strip_tracker_inline_code(value: str) -> str:
     text = str(value or "").strip()
     if text.startswith("`") and text.endswith("`."):
         return text[1:-2].strip()
     if text.startswith("`") and text.endswith("`"):
         return text[1:-1].strip()
-    return text
+    # An empty value means the evidence_command marker was absent: stay empty so
+    # the supervisor's "no evidence declared" path is preserved. A NON-empty value
+    # that is NOT backtick-wrapped is a non-canonical evidence_command: fail closed
+    # (return _NONCANONICAL_EVIDENCE_COMMAND) instead of returning a truncated /
+    # un-wrapped value the supervisor would run as a passing prefix.
+    if not text:
+        return ""
+    return _NONCANONICAL_EVIDENCE_COMMAND
 
 
 def _tracker_evidence_command_value(note: str) -> str:
     return _strip_tracker_inline_code(_tracker_marker_value(note, "evidence_command"))
+
+
+# Public test seam. Tracker-note evidence_command extraction is a tested contract
+# shared with meta_bridge_supervisor: the #52 pre-commit supervisor RUNS the
+# extracted evidence_command, so its fail-closed behavior on a non-canonical
+# (un-backtick-wrapped) value is regression-pinned by
+# mu/tests/tools/test_tracker_marker_codespan_extraction.py. These public names
+# delegate to the canonical underscore-prefixed implementations above so the suite
+# can exercise the contract without reaching into a module-private helper (the
+# test-integrity gate forbids private-attr access in tests).
+NONCANONICAL_EVIDENCE_COMMAND = _NONCANONICAL_EVIDENCE_COMMAND
+
+
+def tracker_marker_value(note: str, marker: str) -> str:
+    """Public seam over :func:`_tracker_marker_value`."""
+    return _tracker_marker_value(note, marker)
+
+
+def tracker_evidence_command_value(note: str) -> str:
+    """Public seam over :func:`_tracker_evidence_command_value`."""
+    return _tracker_evidence_command_value(note)
 
 
 def _commit_supervisor_reentry_plan_path(handoff: dict[str, Any]) -> str:
