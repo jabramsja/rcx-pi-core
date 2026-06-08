@@ -7,12 +7,19 @@ Covers:
 4. Worktree distinct path that doesn't exist → worktree step skipped cleanly.
 5. No executor-owned stashes for wave_id → 0 dropped, unrelated stashes preserved.
 6. Worktree removal unlocks branch so branch_deleted succeeds (order matters).
+7. Growth-cap auto-bump: FOUNDER_OVERRIDE-gated CAP_TEST_FILES bump before the
+   Step 8 gate — exact-shortfall bump, fail-closed without override, and no-bump
+   on no-new-test-files / headroom / consolidation, idempotent on retry. Plus the
+   receipt-ordering pin (Step 5e precedes the Step 6 supervisor/receipt) so the
+   bump cannot strand Step 8 with a stale pre-commit receipt.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -1253,3 +1260,433 @@ def test_sync_primary_skips_when_ff_would_overwrite_ignored_founder_wip(tmp_path
     assert _git(
         ["rev-parse", "--abbrev-ref", "HEAD"], cwd=primary
     ).stdout.strip() == "jabramsja/feat-ign"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Growth-cap auto-bump: FOUNDER_OVERRIDE-gated CAP_TEST_FILES bump that runs in
+# commit_executor before the Step 8 pre-commit-doc-check growth-cap gate. A
+# wave that adds a new test file would otherwise trip
+# mu/tests/docs/test_growth_caps.py (CAP_TEST_FILES) and strand the commit.
+# Cases (a)-(e) + a consolidation variant. Every test name contains
+# "growth_cap" so the wave evidence_command (`-k growth_cap`) selects them.
+# ─────────────────────────────────────────────────────────────────────────
+
+GROWTH_CAP_WAVE_ID = "growth-cap-demo-wave-2026-06-08"
+GROWTH_CAP_SEED_COMMENT = (
+    "  # +1 for test_seed.py (seed-wave wave, FOUNDER_OVERRIDE:seed-wave)"
+)
+
+
+def _growth_cap_source(baseline: int, cap: int, cap_comment: str) -> str:
+    """Minimal fixture mirroring the BASELINE/CAP surface the auto-bump reads."""
+    return (
+        '"""Growth cap fixture (mirrors mu/tests/docs/test_growth_caps.py)."""\n'
+        "from __future__ import annotations\n"
+        "\n"
+        f"BASELINE_TEST_FILES = {baseline}\n"
+        f"CAP_TEST_FILES = {cap}{cap_comment}\n"
+    )
+
+
+def _make_capture_log():
+    lines: list[str] = []
+
+    def _log(msg: str) -> None:
+        lines.append(msg)
+
+    return lines, _log
+
+
+def _init_growth_cap_repo(
+    tmp_path: Path,
+    *,
+    baseline: int,
+    cap: int,
+    existing_test_files: list[str],
+    cap_comment: str = GROWTH_CAP_SEED_COMMENT,
+    wave_branch: str = f"jabramsja/{GROWTH_CAP_WAVE_ID}",
+):
+    """Origin on dev carrying a growth-cap fixture + existing test files; clone
+    to a PRIMARY checked out on a wave branch (off dev). Returns (primary, env).
+
+    origin/dev is the merge base the auto-bump compares against, so a staged
+    test file added on the wave branch reads as genuinely new.
+    """
+    env = _git_env()
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _git(["init"], cwd=upstream, env=env)
+    _git(["checkout", "-b", "dev"], cwd=upstream, env=env)
+    _git(["config", "user.name", "t"], cwd=upstream)
+    _git(["config", "user.email", "t@t"], cwd=upstream)
+    caps = upstream / "mu" / "tests" / "docs" / "test_growth_caps.py"
+    caps.parent.mkdir(parents=True, exist_ok=True)
+    caps.write_text(_growth_cap_source(baseline, cap, cap_comment), encoding="utf-8")
+    for rel in existing_test_files:
+        path = upstream / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("def test_placeholder():\n    assert True\n", encoding="utf-8")
+    _git(["add", "-A"], cwd=upstream, env=env)
+    _git(["commit", "-m", "C0 growth-cap seed"], cwd=upstream, env=env)
+    primary = tmp_path / "main"
+    _git(["clone", str(upstream), str(primary)], cwd=tmp_path, env=env)
+    _git(["config", "user.name", "t"], cwd=primary)
+    _git(["config", "user.email", "t@t"], cwd=primary)
+    _git(["checkout", "-b", wave_branch], cwd=primary, env=env)
+    return primary, env
+
+
+def _stage_new_test_file(primary: Path, env: dict, relpath: str) -> None:
+    path = primary / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("def test_new():\n    assert True\n", encoding="utf-8")
+    _git(["add", "--", relpath], cwd=primary, env=env)
+
+
+def _read_growth_cap_values(primary: Path):
+    text = (primary / "mu" / "tests" / "docs" / "test_growth_caps.py").read_text()
+    baseline = int(re.search(r"BASELINE_TEST_FILES = (\d+)", text).group(1))
+    cap = int(re.search(r"CAP_TEST_FILES = (\d+)", text).group(1))
+    return text, baseline, cap
+
+
+def _count_disk_test_files(primary: Path) -> int:
+    return len(list((primary / "mu" / "tests").rglob("test_*.py")))
+
+
+def _growth_cap_staged(primary: Path) -> bool:
+    staged = _git(["diff", "--cached", "--name-only"], cwd=primary).stdout.split()
+    return "mu/tests/docs/test_growth_caps.py" in staged
+
+
+def test_growth_cap_autobump_bumps_by_exact_shortfall_with_founder_override(tmp_path):
+    """(a) FOUNDER_OVERRIDE wave + new test file over the cap (shortfall>0),
+    no prior provenance -> CAP_TEST_FILES bumped by EXACTLY the shortfall,
+    provenance recorded, test_growth_caps.py staged, and the Step 8 gate passes."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+    lines, log = _make_capture_log()
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log,
+    )
+
+    assert outcome["bumped"] is True, outcome
+    # Bump is the cap SHORTFALL, not the raw new-file count (here they coincide).
+    assert outcome["shortfall"] == 1, outcome
+    assert outcome["bump_amount"] == 1, outcome
+    assert outcome["previous_cap"] == 0, outcome
+    assert outcome["new_cap"] == 1, outcome
+    assert outcome["new_test_files"] == ["mu/tests/tools/test_new_feature.py"], outcome
+    text, baseline, cap = _read_growth_cap_values(primary)
+    assert cap == 1, text
+    assert f"FOUNDER_OVERRIDE:{GROWTH_CAP_WAVE_ID}" in text, text
+    assert "test_new_feature.py" in text, text
+    # BASELINE and the rest of the fixture body are untouched.
+    assert "BASELINE_TEST_FILES = 3" in text, text
+    # test_growth_caps.py is staged so the Step 8 gate sees the bumped cap.
+    assert _growth_cap_staged(primary)
+    # The gate now passes — recomputed exactly as test_growth_caps would.
+    assert _count_disk_test_files(primary) <= baseline + cap, (baseline, cap)
+    assert any(
+        f"auto-bumped CAP_TEST_FILES +1 for FOUNDER_OVERRIDE wave {GROWTH_CAP_WAVE_ID}"
+        in m
+        for m in lines
+    ), lines
+
+
+def test_growth_cap_autobump_no_founder_override_does_not_bump(tmp_path):
+    """(b) NO FOUNDER_OVERRIDE + new test file (shortfall>0) -> no bump; the
+    growth-cap gate still strands the commit (fail-closed)."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+    lines, log = _make_capture_log()
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token="", log=log,
+    )
+
+    assert outcome["bumped"] is False, outcome
+    assert outcome["reason"] == "no_founder_override", outcome
+    assert outcome["shortfall"] == 1, outcome
+    text, baseline, cap = _read_growth_cap_values(primary)
+    assert cap == 0, text  # unchanged
+    assert not _growth_cap_staged(primary)
+    # The gate would STILL strand: on-disk count exceeds baseline + cap.
+    assert _count_disk_test_files(primary) > baseline + cap, (baseline, cap)
+
+
+def test_growth_cap_autobump_no_new_test_files_does_not_bump(tmp_path):
+    """(c) No new test files (only a non-test addition) -> no bump."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    # A non-test file addition must NOT trip the test-file detector.
+    note = primary / "mu" / "docs" / "note.md"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("note", encoding="utf-8")
+    _git(["add", "--", "mu/docs/note.md"], cwd=primary, env=env)
+    lines, log = _make_capture_log()
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log,
+    )
+
+    assert outcome["bumped"] is False, outcome
+    assert outcome["reason"] == "no_new_test_files", outcome
+    assert outcome["new_test_files"] == [], outcome
+    _, _, cap = _read_growth_cap_values(primary)
+    assert cap == 0
+    assert not _growth_cap_staged(primary)
+
+
+def test_growth_cap_autobump_is_idempotent_on_second_run(tmp_path):
+    """(d) Idempotency: two runs bump CAP_TEST_FILES once; the second detects
+    the existing same-wave provenance and leaves the cap unchanged with no
+    duplicate provenance comment."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+
+    _, log1 = _make_capture_log()
+    out1 = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log1,
+    )
+    assert out1["bumped"] is True, out1
+    assert out1["new_cap"] == 1, out1
+
+    lines2, log2 = _make_capture_log()
+    out2 = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log2,
+    )
+    assert out2["bumped"] is False, out2
+    assert out2["reason"] == "already_recorded", out2
+
+    text, _, cap = _read_growth_cap_values(primary)
+    assert cap == 1, text  # bumped once, not twice
+    assert text.count(f"FOUNDER_OVERRIDE:{GROWTH_CAP_WAVE_ID}") == 1, text
+    assert any("no bump (idempotent retry)" in m for m in lines2), lines2
+
+
+def test_growth_cap_autobump_headroom_yields_zero_shortfall_no_bump(tmp_path):
+    """(e) FOUNDER_OVERRIDE wave + new test file but the cap already has
+    headroom (projected count <= baseline + cap) -> shortfall <= 0 -> no bump."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=5,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+    lines, log = _make_capture_log()
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log,
+    )
+
+    assert outcome["bumped"] is False, outcome
+    assert outcome["reason"] == "zero_shortfall", outcome
+    assert outcome["shortfall"] == -4, outcome  # 4 - (3 + 5)
+    _, _, cap = _read_growth_cap_values(primary)
+    assert cap == 5  # unchanged
+    assert not _growth_cap_staged(primary)
+    assert any("auto-bump no-op" in m and "shortfall=-4" in m for m in lines), lines
+
+
+def test_growth_cap_autobump_consolidation_yields_zero_shortfall_no_bump(tmp_path):
+    """(e, consolidation variant) Adding a new test file while deleting a
+    sibling in the same wave keeps the count flat -> shortfall == 0 -> no bump,
+    even though a genuinely-new test file IS detected (so a blanket new-file
+    count would have wrongly bumped the cap)."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+    # Consolidate: delete a sibling test file in the same wave (stages the delete).
+    _git(["rm", "--", "mu/tests/test_existing_1.py"], cwd=primary, env=env)
+    lines, log = _make_capture_log()
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log,
+    )
+
+    # The new file IS detected, but the net count is flat -> no bump.
+    assert outcome["new_test_files"] == ["mu/tests/tools/test_new_feature.py"], outcome
+    assert outcome["bumped"] is False, outcome
+    assert outcome["reason"] == "zero_shortfall", outcome
+    assert outcome["shortfall"] == 0, outcome
+    _, _, cap = _read_growth_cap_values(primary)
+    assert cap == 0  # unchanged
+    assert not _growth_cap_staged(primary)
+
+
+def _staged_sha(primary: Path) -> str:
+    """Mirror meta_bridge_supervisor.compute_staged_sha: sha256 of the staged
+    binary diff — the exact content the pre-commit receipt binds to and the
+    Step 8 hook re-verifies."""
+    diff = subprocess.run(
+        ["git", "diff", "--cached", "--binary"],
+        cwd=primary, capture_output=True, check=True,
+    ).stdout
+    return hashlib.sha256(diff).hexdigest()
+
+
+def test_growth_cap_autobump_precedes_supervisor_receipt_in_pipeline():
+    """(f) Finding-#1 regression: the auto-bump call MUST precede the supervisor
+    invocation in _run_commit_pipeline_impl. The supervisor (Step 6) writes the
+    pre-commit receipt bound to the staged SHA; the auto-bump stages
+    test_growth_caps.py, so when it ran AFTER the receipt (the prior Step-7d
+    placement) the Step 8 hook rejected the now-stale receipt and stranded the
+    commit. Pinning the call order prevents reintroducing that ordering bug."""
+    source = commit_mod.commit_pipeline_impl_source()
+    autobump_idx = source.find("_maybe_autobump_growth_cap_for_founder_override(")
+    supervisor_idx = source.find("run_meta_bridge_package(")
+    assert autobump_idx != -1, "growth-cap auto-bump call not found in commit pipeline"
+    assert supervisor_idx != -1, "supervisor (receipt) invocation not found in commit pipeline"
+    assert autobump_idx < supervisor_idx, (
+        "growth-cap auto-bump must run BEFORE the supervisor writes the pre-commit "
+        "receipt; otherwise staging test_growth_caps.py invalidates the receipt and "
+        "Step 8 strands the commit ('staged content changed since review')"
+    )
+
+
+def test_growth_cap_autobump_changes_staged_sha_so_must_precede_receipt(tmp_path):
+    """(g) Finding-#1 regression (behavioral): the auto-bump stages
+    test_growth_caps.py, so it CHANGES the staged SHA the pre-commit receipt
+    binds to. A receipt written before the bump goes stale at the Step 8 hook;
+    one written after stays valid. This is exactly why Step 5e runs before
+    Step 6 (the supervisor/receipt)."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+
+    # SHA a receipt bound to the PRE-bump staged state (the prior Step-7d order).
+    sha_before_bump = _staged_sha(primary)
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=_noop_log,
+    )
+    assert outcome["bumped"] is True, outcome
+    assert _growth_cap_staged(primary)
+
+    # The bump mutated the staged set, so the SHA changed: a receipt bound to
+    # sha_before_bump is now STALE — this reproduces the Step-8 strand of
+    # finding #1 when the bump runs after the receipt.
+    sha_after_bump = _staged_sha(primary)
+    assert sha_after_bump != sha_before_bump, (
+        "auto-bump must change the staged SHA (it stages test_growth_caps.py); "
+        "the receipt-ordering defect is only avoidable by bumping before the receipt"
+    )
+
+    # A receipt bound AFTER the bump (Step 5e -> Step 6 order) stays valid: the
+    # staged SHA is stable until the next staging mutation, so the Step 8 hook's
+    # re-verification of the receipt SHA matches.
+    assert _staged_sha(primary) == sha_after_bump
+
+
+def test_growth_cap_autobump_rolls_back_when_staging_fails(tmp_path, monkeypatch):
+    """(h) Bridge round-3 finding regression: when `git add` of
+    test_growth_caps.py FAILS after the cap bump is written to disk, the bump
+    MUST NOT linger unstaged in the working tree.
+
+    The prior behavior raised, the caller swallowed it as non-fatal, and the
+    pipeline proceeded with a working-tree-only cap edit (cap_contains_bump=True,
+    cap_staged=False, unstaged_cap_diff=True) — a fail-open: the Step 8 gate
+    reads the bumped working-tree file and passes, but the commit omits the bump,
+    and the orphaned provenance comment would make a retry's idempotency guard
+    skip a bump that was never committed.
+
+    The fix rolls the cap file back to its pre-bump content, so the auto-bump is
+    a complete no-op: the Step 8 growth-cap gate falls through to the unmodified
+    (too-low) cap and strands the commit fail-closed, exactly as if no auto-bump
+    had run."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+    cap_path = primary / "mu" / "tests" / "docs" / "test_growth_caps.py"
+    original_cap_text = cap_path.read_text()
+
+    # Fail ONLY the cap-file `git add`; every other subprocess (merge-base
+    # detection, `git diff --cached`) passes through to the real runner, so the
+    # auto-bump reaches the staging step exactly as in production. Capture the
+    # original runner via getattr (not dotted private access) so the patch is
+    # gate-safe, then install the fault by string name.
+    real_run = getattr(commit_mod, "_run")
+
+    def _run_failing_cap_add(args, **kwargs):
+        if args[:2] == ["git", "add"] and commit_mod.GROWTH_CAP_TEST_RELPATH in args:
+            raise subprocess.CalledProcessError(
+                1, args, output="", stderr="simulated git add failure"
+            )
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(commit_mod, "_run", _run_failing_cap_add)
+    lines, log = _make_capture_log()
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log,
+    )
+
+    # The precondition held (a real shortfall of 1) but staging failed -> the
+    # outcome reports NOT bumped, classified as a staging failure (not a raise).
+    assert outcome["bumped"] is False, outcome
+    assert outcome["reason"].startswith("growth_cap_stage_failed"), outcome
+    assert outcome["shortfall"] == 1, outcome
+
+    # CRITICAL: the cap file is rolled back byte-for-byte. No fail-open unstaged
+    # cap edit (refutes cap_contains_bump=True / unstaged_cap_diff=True) and no
+    # orphaned provenance comment for this wave (keeps the retry's idempotency
+    # guard honest).
+    text, _, cap = _read_growth_cap_values(primary)
+    assert cap == 0, text
+    assert text == original_cap_text, text
+    assert f"FOUNDER_OVERRIDE:{GROWTH_CAP_WAVE_ID}" not in text, text
+
+    # test_growth_caps.py is NOT staged, so the Step 8 gate still strands the
+    # commit (on-disk count exceeds baseline + cap) — fail-closed.
+    assert not _growth_cap_staged(primary)
+    assert _count_disk_test_files(primary) > 3 + cap
+
+    # The rollback is surgical: the new test file the wave added stays staged.
+    staged = _git(["diff", "--cached", "--name-only"], cwd=primary).stdout.split()
+    assert "mu/tests/tools/test_new_feature.py" in staged, staged
+
+    # The rollback is logged so a retry is observable.
+    assert any("rolled back" in m and "fail-closed" in m for m in lines), lines
