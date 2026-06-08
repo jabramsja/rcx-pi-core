@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,6 +33,10 @@ _adapters = load_module(
 meta = load_module(
     "meta_bridge_supervisor",
     REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
+)
+commit_mod = load_module(
+    "commit_executor_for_meta_bridge_tests",
+    REPO_ROOT / "mu" / "tools" / "executors" / "commit_executor.py",
 )
 
 
@@ -609,6 +614,13 @@ class TestPreCommitPackageSchema:
         assert not valid
         assert "scope_items[1] must be a string, got dict" in errors
         assert "deferred_items[0] must be a string, got int" in errors
+
+    def test_accepts_tracker_evidence_transport_fields(self):
+        pkg = _make_valid_package()
+        pkg["tracker_note_text"] = "evidence_command: `echo ok`. evidence_delta: ok."
+        pkg["evidence_command"] = "echo ok"
+        valid, errors = meta.validate_package_schema(pkg)
+        assert valid, errors
 
 
 @pytest.fixture
@@ -2551,6 +2563,383 @@ class TestStartupFlowSuppressionGatePath:
         assert all_passed is True
 
 
+def _tracker_note_with_evidence(command: str | None) -> str:
+    evidence_part = (
+        f"evidence_command: `{command}`. "
+        if command is not None
+        else ""
+    )
+    return (
+        "- Tracker sync note (2026-06-05, test-wave): "
+        "**NEXT-CODEX-POST-REDTEAM -- test.**. "
+        "Class: L4_ENABLER. target_gate_id: G8. "
+        "Packet: `reports/control_plane/test.md`. "
+        f"{evidence_part}"
+        "evidence_delta: test. progress_proof_before: before. "
+        "progress_proof_after: after. "
+        "FOUNDER_OVERRIDE:test-wave. primary_blocker_class: INTEGRATION. "
+        "primary_invariant_id: INV_TYPED_FAIL_CLOSED_OUTCOMES. "
+        "indicator_artifact_ref: reports/l4_wave_indicators/test-wave.json. "
+        "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py "
+        "--wave-id test-wave --output reports/l4_wave_indicators/test-wave.json. "
+        "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+        "boot0_track_id: V1. boot0_progress_state: HOLD."
+    )
+
+
+def _make_wave_evidence_package(
+    *,
+    tracker_command: str | None,
+    package_command: str | None,
+    changed_files: list[str] | None = None,
+) -> dict[str, Any]:
+    package = _make_valid_package()
+    package.update({
+        "wave_name": "test-wave",
+        "wave_class": "L4_ENABLER",
+        "changed_files": changed_files or ["docs/test-wave.md"],
+        "tracker_note_text": _tracker_note_with_evidence(tracker_command),
+    })
+    if package_command is not None:
+        package["evidence_command"] = package_command
+    else:
+        package.pop("evidence_command", None)
+    return package
+
+
+def _run_validation_gates_for_wave_evidence(
+    package: dict[str, Any],
+    run_validation,
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> tuple[list[meta.ValidationResult], bool]:
+    with patch.object(meta, "run_validation_command", side_effect=run_validation), \
+         patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
+         patch.object(meta, "check_deferred_blockers", return_value=meta.ValidationResult("deferred_blockers", True)), \
+         patch.object(meta, "check_tasks_authorization", return_value=meta.ValidationResult("tasks_auth", True)):
+        return meta.run_validation_gates(
+            repo_root,
+            package,
+            verbose=False,
+            skip_startup_gates=True,
+        )
+
+
+class TestWaveEvidenceGate:
+    def test_matching_declared_and_provided_shell_command_runs_exact_bash_c_once(self):
+        command = "ENV_FLAG=1 python3 -c 'print(1)' && echo done"
+        package = _make_wave_evidence_package(
+            tracker_command=command,
+            package_command=command,
+        )
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(part) for part in cmd])
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+        )
+
+        evidence_calls = [
+            cmd for cmd in invoked_commands
+            if cmd == ["bash", "-c", command]
+        ]
+        assert evidence_calls == [["bash", "-c", command]]
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert gate.passed
+        assert all_passed
+
+    def test_tracker_declared_evidence_preserves_marker_text_inside_shell_command(self):
+        command = "true && echo evidence_delta: should_not_be_truncated"
+        package = _make_wave_evidence_package(
+            tracker_command=command,
+            package_command=command,
+        )
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(part) for part in cmd])
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+        )
+
+        assert ["bash", "-c", command] in invoked_commands
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert gate.passed
+        assert all_passed
+
+    def test_matching_declared_and_provided_nonzero_forces_needs_phase_b(self, pkg_in_repo):
+        command = "echo fail && exit 7"
+        package = _make_wave_evidence_package(
+            tracker_command=command,
+            package_command=command,
+        )
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            if [str(part) for part in cmd] == ["bash", "-c", command]:
+                return 7, "evidence failed"
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+        )
+
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert not gate.passed
+        assert "evidence failed" in gate.error
+        assert not all_passed
+
+        pkg_path, isolated_paths = pkg_in_repo
+        failed_results = _make_validation_results(
+            passed_names=["dirty_state"],
+            failed_names_errors=[("wave_evidence", "evidence failed")],
+        )
+        with patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(failed_results, False)), \
+             patch.object(meta, "run_meta_review") as mock_review, \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths), \
+             patch.object(meta, "ensure_not_agent_review_mode", return_value=None):
+            response = meta.run_meta_bridge(pkg_path, dry_run=False)
+
+        mock_review.assert_not_called()
+        assert response.status == "partial"
+        assert response.decision == "NEEDS_PHASE_B"
+        assert "wave_evidence failed before commit" in response.summary
+
+    def test_declared_but_omitted_fails_closed_without_evidence_run(self):
+        command = "echo should-not-run"
+        package = _make_wave_evidence_package(
+            tracker_command=command,
+            package_command=None,
+        )
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(part) for part in cmd])
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+        )
+
+        assert ["bash", "-c", command] not in invoked_commands
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert not gate.passed
+        assert gate.error == "tracker note declares evidence_command but package omitted it"
+        assert not all_passed
+
+    def test_provided_but_not_declared_fails_closed_without_evidence_run(self):
+        command = "echo should-not-run"
+        package = _make_wave_evidence_package(
+            tracker_command=None,
+            package_command=command,
+        )
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(part) for part in cmd])
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+        )
+
+        assert ["bash", "-c", command] not in invoked_commands
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert not gate.passed
+        assert gate.error == "package provided evidence_command but tracker note omitted it"
+        assert not all_passed
+
+    def test_provided_but_mismatched_fails_closed_without_evidence_run(self):
+        declared = "echo declared"
+        provided = "echo provided"
+        package = _make_wave_evidence_package(
+            tracker_command=declared,
+            package_command=provided,
+        )
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(part) for part in cmd])
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+        )
+
+        assert ["bash", "-c", declared] not in invoked_commands
+        assert ["bash", "-c", provided] not in invoked_commands
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert not gate.passed
+        assert gate.error == "package evidence_command does not match tracker-declared evidence_command"
+        assert not all_passed
+
+    def test_not_declared_and_not_provided_skips_wave_evidence(self):
+        package = _make_wave_evidence_package(
+            tracker_command=None,
+            package_command=None,
+        )
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(part) for part in cmd])
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+        )
+
+        assert not any(cmd[:2] == ["bash", "-c"] for cmd in invoked_commands)
+        assert not any(r.name == "wave_evidence" for r in results)
+        assert all_passed
+
+    def test_non_control_surface_package_still_runs_wave_evidence(self):
+        command = "echo non-control-surface"
+        package = _make_wave_evidence_package(
+            tracker_command=command,
+            package_command=command,
+            changed_files=["docs/non-control-surface.md"],
+        )
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(part) for part in cmd])
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+        )
+
+        assert ["bash", "-c", command] in invoked_commands
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert gate.passed
+        assert all_passed
+
+    def test_evidence_restore_is_guarded_by_supervisor_lock(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        command = "echo should-not-run"
+        package = _make_wave_evidence_package(
+            tracker_command=command,
+            package_command=command,
+        )
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(part) for part in cmd])
+            return 0, "passed"
+
+        paths = meta.meta_bridge_paths(repo)
+        paths.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fp = open(paths.lock_path, "w")
+        try:
+            fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(meta, "meta_bridge_paths", return_value=paths):
+                results, all_passed = _run_validation_gates_for_wave_evidence(
+                    package,
+                    mock_run_validation,
+                    repo_root=repo,
+                )
+        finally:
+            fcntl.flock(lock_fp, fcntl.LOCK_UN)
+            lock_fp.close()
+
+        assert ["bash", "-c", command] not in invoked_commands
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert not gate.passed
+        assert not all_passed
+        assert "Another meta-bridge supervisor is running" in gate.error
+
+    def test_evidence_restore_preserves_unstaged_tracked_and_preexisting_untracked(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+
+        tracked = repo / "tracked.txt"
+        tracked.write_text("committed\n", encoding="utf-8")
+        subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True, text=True)
+
+        tracked.write_text("preexisting unstaged\n", encoding="utf-8")
+        preexisting = repo / "preexisting.sh"
+        preexisting.write_text("preexisting untracked\n", encoding="utf-8")
+        os.chmod(preexisting, 0o755)
+        target_before = repo / "target-before.txt"
+        target_before.write_text("target before\n", encoding="utf-8")
+        link = repo / "preexisting.link"
+        os.symlink("target-before.txt", link)
+
+        pre_state = meta.compute_repo_state(repo)
+        pre_cached = subprocess.run(
+            ["git", "diff", "--cached", "--binary"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        ).stdout
+        command = "MUTATE=1 sh -c 'echo mutating' && echo done"
+        package = _make_wave_evidence_package(
+            tracker_command=command,
+            package_command=command,
+            changed_files=["docs/non-control-surface.md"],
+        )
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            if [str(part) for part in cmd] == ["bash", "-c", command]:
+                tracked.write_text("evidence changed tracked\n", encoding="utf-8")
+                subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+                (repo / "created-by-evidence.txt").write_text("new\n", encoding="utf-8")
+                (repo / "evidence-empty-dir").mkdir()
+                preexisting.write_text("evidence changed untracked\n", encoding="utf-8")
+                os.chmod(preexisting, 0o644)
+                target_before.unlink()
+                link.unlink()
+                (repo / "target-after.txt").write_text("target after\n", encoding="utf-8")
+                os.symlink("target-after.txt", link)
+                return 0, "evidence mutated worktree"
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+            repo_root=repo,
+        )
+
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert gate.passed
+        assert all_passed
+        post_cached = subprocess.run(
+            ["git", "diff", "--cached", "--binary"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        ).stdout
+        assert post_cached == pre_cached
+        assert tracked.read_text(encoding="utf-8") == "preexisting unstaged\n"
+        assert not (repo / "created-by-evidence.txt").exists()
+        assert not (repo / "evidence-empty-dir").exists()
+        assert preexisting.read_text(encoding="utf-8") == "preexisting untracked\n"
+        assert os.stat(preexisting).st_mode & 0o777 == 0o755
+        assert target_before.read_text(encoding="utf-8") == "target before\n"
+        assert link.is_symlink()
+        assert os.readlink(link) == "target-before.txt"
+        assert not (repo / "target-after.txt").exists()
+        assert meta.compute_repo_state(repo) == pre_state
+
+
 class TestCheckTasksAuthorizationFounderOverride:
     """Gate 8 FOUNDER_OVERRIDE branch: non-structural waves with an
     externally-validated override token may auto-pass Gate 8
@@ -2938,4 +3327,111 @@ class TestCheckTasksAuthorizationFounderOverride:
         assert valid_empty_tok is True, (
             f"empty token + empty wave_class must pass (producer default); "
             f"errors={errors_empty_tok}"
+        )
+
+
+class TestCommitSupervisorNeedsPhaseBRouting:
+    def test_commit_supervisor_needs_phase_b_payload_preserves_full_evidence_detail(self):
+        summary = (
+            "wave_evidence failed before commit; routing to Phase B for rework. "
+            "pytest session starts here\n"
+            + ("x" * 260)
+            + "\nFAILED mu/tests/tools/test_meta_bridge_supervisor.py::test_example "
+            "- assertion details survive"
+        )
+        result = commit_mod._commit_supervisor_rejection_result(  # ANTICHEAT_OK: locks Step 6 NEEDS_PHASE_B routing payload
+            decision="NEEDS_PHASE_B",
+            summary=summary,
+            steps_completed=["validate_inputs", "restore_commit_retry_state"],
+            handoff={
+                "tracked_packet": (
+                    "reports/control_plane/"
+                    "supervisor_run_wave_evidence_trusted_v8_2026-06-05.md"
+                ),
+            },
+            wave_id="supervisor-run-wave-evidence-trusted-v8-2026-06-05",
+            changed_files=["mu/tests/tools/test_meta_bridge_supervisor.py"],
+        )
+
+        assert result["status"] == "error"
+        assert result["failure_class"] == "needs_phase_b"
+        assert result["resume_after"] == "needs_phase_b_reentry"
+        assert result["plan_path"] == (
+            "reports/control_plane/"
+            "supervisor_run_wave_evidence_trusted_v8_2026-06-05.md"
+        )
+        assert result["pre_commit_decision"] == "NEEDS_PHASE_B"
+        assert "assertion details survive" in result["errors"][0]
+        assert "assertion details survive" in result["reason"]
+
+    def test_commit_supervisor_needs_phase_b_is_standalone_recoverable(self):
+        result = commit_mod._commit_supervisor_rejection_result(  # ANTICHEAT_OK: locks Step 6 NEEDS_PHASE_B recovery routing
+            decision="NEEDS_PHASE_B",
+            summary="wave_evidence failed before commit",
+            steps_completed=["restore_commit_retry_state"],
+            handoff={
+                "tracked_packet": (
+                    "reports/control_plane/"
+                    "supervisor_run_wave_evidence_trusted_v8_2026-06-05.md"
+                ),
+            },
+            wave_id="supervisor-run-wave-evidence-trusted-v8-2026-06-05",
+            changed_files=["mu/tests/tools/test_meta_bridge_supervisor.py"],
+        )
+
+        assert commit_mod._should_attempt_standalone_recovery(result)  # ANTICHEAT_OK: recovery classifier guard
+
+    def test_commit_retry_demotion_accepts_needs_phase_b_status_before_git_commit(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+        wave_id = "supervisor-run-wave-evidence-trusted-v8-2026-06-05"
+        packet_rel = "reports/control_plane/supervisor_run_wave_evidence_trusted_v8_2026-06-05.md"
+        packet_path = repo / packet_rel
+        packet_path.parent.mkdir(parents=True)
+        packet_path.write_text(
+            "# Packet\n\n"
+            f"Status: {commit_mod.COMMIT_RETRY_RESTORED_STATUS}\n"
+            f"Wave ID: {wave_id}\n",
+            encoding="utf-8",
+        )
+        tasks_path = repo / "TASKS.md"
+        tasks_path.write_text(
+            "## Ra\n"
+            "  6. **[FOUNDER-ORDERED-REDTEAM-WAVE-EVIDENCE] "
+            f"{commit_mod.COMMIT_RETRY_RESTORED_STATUS} (2026-06-05).** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            f"Wave ID: `{wave_id}`. "
+            f"Packet: `{packet_rel}`.\n",
+            encoding="utf-8",
+        )
+        result = {
+            "status": "needs_phase_b",
+            "step": "build_and_run_supervisor",
+            "errors": ["Supervisor returned NEEDS_PHASE_B: wave_evidence failed"],
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "restore_commit_retry_state",
+            ],
+        }
+
+        commit_mod._maybe_demote_completed_handoff_state_for_commit_retry(  # ANTICHEAT_OK: locks retry-state demotion guard
+            repo_root=repo,
+            handoff={"wave_id": wave_id, "tracked_packet": packet_rel},
+            result=result,
+        )
+
+        assert set(result["commit_retry_state_demotion"]["changed"]) == {
+            packet_rel,
+            "TASKS.md",
+        }
+        assert (
+            f"Status: {commit_mod.COMMIT_RETRY_PENDING_STATUS}"
+            in packet_path.read_text(encoding="utf-8")
+        )
+        assert (
+            f"{commit_mod.COMMIT_RETRY_PENDING_STATUS} / LOCAL EVIDENCE (2026-06-05)"
+            in tasks_path.read_text(encoding="utf-8")
         )
