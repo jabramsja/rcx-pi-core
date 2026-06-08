@@ -748,15 +748,34 @@ def _reviewer_package_scope_finding_is_mechanically_refuted(
     return _is_package_scope_drift_text(str(envelope.get("summary", "")))
 
 
+# Canonical tracker-note marker names. MUST cover every "field:" marker that
+# tracker_sync_note.render_tracker_sync_note can emit (builder order below). A
+# marker omitted here is not recognized as a value boundary, so the PRECEDING
+# marker over-reads past it -- e.g. omitting the L4_STRUCTURAL markers let
+# workload_target swallow ". host_semantics_delta_before: ..." and blank out
+# structural evidence (a fail-open). This list is duplicated verbatim in
+# commit_executor._tracker_marker_value's marker_names; both copies stay in sync,
+# pinned behaviorally by
+# mu/tests/tools/test_tracker_marker_codespan_extraction.py.
 _TRACKER_MARKER_NAMES = [
     "Class",
+    "contract_path",
     "target_gate_id",
+    "Packet",
+    "workload_target",
+    "host_semantics_delta_before",
+    "host_semantics_delta_after",
+    "structural_artifact_ref",
     "no_op_proof",
     "defer_reason_code",
     "evidence_command",
     "evidence_delta",
     "progress_proof_before",
     "progress_proof_after",
+    "post_gate_contract_sweep",
+    "FOUNDER_OVERRIDE",
+    "unblocks_wave_id",
+    "unblocks_runtime_blocker",
     "primary_blocker_class",
     "primary_invariant_id",
     "indicator_artifact_ref",
@@ -764,9 +783,6 @@ _TRACKER_MARKER_NAMES = [
     "bootstrap_endgame_policy",
     "boot0_track_id",
     "boot0_progress_state",
-    "FOUNDER_OVERRIDE",
-    "unblocks_wave_id",
-    "unblocks_runtime_blocker",
 ]
 
 
@@ -779,6 +795,7 @@ def _tracker_marker_value(note: str, marker: str) -> str:
     if not match:
         return ""
     start = match.end()
+    end = len(text)
     in_inline_code = False
     for idx in range(start, len(text)):
         if text[idx] == "`":
@@ -786,14 +803,30 @@ def _tracker_marker_value(note: str, marker: str) -> str:
             continue
         if in_inline_code or not text[idx].isspace():
             continue
+        # Canonical tracker notes join "marker: value" parts with ". " (see
+        # tracker_sync_note.render_tracker_sync_note), so a GENUINE next-marker
+        # boundary is a separator period immediately preceding this whitespace.
+        # Requiring that period prevents truncating an un-backtick-wrapped value
+        # at an embedded marker-name substring such as "--note evidence_delta:foo"
+        # (preceded by a plain space, not the ". " separator).
+        if text[idx - 1] != ".":
+            continue
         marker_start = idx + 1
         if any(
             text.startswith(f"{name}:", marker_start)
             for name in _TRACKER_MARKER_NAMES
             if name != marker
         ):
-            return text[start:idx].strip().rstrip()
-    return text[start:].strip().rstrip()
+            end = idx
+            break
+    value = text[start:end].strip().rstrip()
+    # Drop a single trailing sentence/separator period from an un-backtick-wrapped
+    # value (e.g. "... && echo ok." -> "... && echo ok"). Backtick-wrapped values
+    # end with "`." and keep it for _strip_tracker_inline_code, so their extraction
+    # output is preserved byte-for-byte.
+    if value.endswith(".") and not value.endswith("`."):
+        value = value[:-1].rstrip()
+    return value
 
 
 def _strip_tracker_inline_code(value: str) -> str:
@@ -809,6 +842,22 @@ def _extract_tracker_note_evidence_command(tracker_note_text: str) -> str:
     return _strip_tracker_inline_code(
         _tracker_marker_value(tracker_note_text, "evidence_command")
     )
+
+
+# Public test seam mirroring commit_executor.tracker_marker_value /
+# tracker_evidence_command_value. The codespan regression suite
+# (mu/tests/tools/test_tracker_marker_codespan_extraction.py) pins BOTH
+# duplicated extractors through public names so it need not reach into a
+# module-private helper (the test-integrity gate forbids private-attr access in
+# tests). These delegate to the canonical underscore-prefixed implementations.
+def tracker_marker_value(note: str, marker: str) -> str:
+    """Public seam over :func:`_tracker_marker_value`."""
+    return _tracker_marker_value(note, marker)
+
+
+def extract_tracker_note_evidence_command(tracker_note_text: str) -> str:
+    """Public seam over :func:`_extract_tracker_note_evidence_command`."""
+    return _extract_tracker_note_evidence_command(tracker_note_text)
 
 
 def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
