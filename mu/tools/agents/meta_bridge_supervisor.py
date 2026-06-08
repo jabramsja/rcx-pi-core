@@ -1564,6 +1564,14 @@ def _run_wave_evidence_with_restore(repo_root: Path, evidence_command: str) -> t
     try:
         with _MetaBridgeLock(meta_bridge_paths(repo_root).lock_path):
             return _run_wave_evidence_with_restore_unlocked(repo_root, evidence_command)
+    except MetaBridgeError:
+        # Lock contention: another supervisor already holds meta_bridge.lock. Propagate the
+        # MetaBridgeError so run_meta_bridge_package()'s wait_for_lock_seconds retry loop can
+        # wait and retry, rather than converting it to a failed wave_evidence gate that would
+        # falsely route a healthy wave to NEEDS_PHASE_B (#54 / PR #1082 bot P2).
+        # _run_wave_evidence_with_restore_unlocked handles its own errors and returns
+        # (1, detail) without raising, so the only MetaBridgeError reaching here is the lock.
+        raise
     except Exception as exc:
         return 1, f"wave evidence failed before trusted receipt: {type(exc).__name__}: {exc}"
 

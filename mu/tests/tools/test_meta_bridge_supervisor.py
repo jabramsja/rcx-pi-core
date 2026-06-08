@@ -2847,20 +2847,24 @@ class TestWaveEvidenceGate:
         try:
             fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with patch.object(meta, "meta_bridge_paths", return_value=paths):
-                results, all_passed = _run_validation_gates_for_wave_evidence(
-                    package,
-                    mock_run_validation,
-                    repo_root=repo,
-                )
+                # Lock contention must PROPAGATE as a MetaBridgeError so the caller's
+                # wait_for_lock_seconds retry loop (run_meta_bridge_package) can wait and
+                # retry, NOT become a failed wave_evidence gate that would falsely route a
+                # healthy wave to NEEDS_PHASE_B (#54 / PR #1082 bot P2).
+                with pytest.raises(
+                    meta.MetaBridgeError, match="Another meta-bridge supervisor is running"
+                ):
+                    _run_validation_gates_for_wave_evidence(
+                        package,
+                        mock_run_validation,
+                        repo_root=repo,
+                    )
         finally:
             fcntl.flock(lock_fp, fcntl.LOCK_UN)
             lock_fp.close()
 
+        # The evidence command must not have run — the lock blocked it before run_validation_command.
         assert ["bash", "-c", command] not in invoked_commands
-        gate = next(r for r in results if r.name == "wave_evidence")
-        assert not gate.passed
-        assert not all_passed
-        assert "Another meta-bridge supervisor is running" in gate.error
 
     def test_evidence_restore_preserves_unstaged_tracked_and_preexisting_untracked(self, tmp_path):
         repo = tmp_path / "repo"
