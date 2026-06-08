@@ -1053,10 +1053,38 @@ def test_sync_primary_skips_dirty_primary(tmp_path):
 
     assert outcome["synced"] is False, outcome
     assert outcome["skipped"] is True, outcome
-    assert "dirty" in (outcome["reason"] or ""), outcome
+    assert "tracked WIP" in (outcome["reason"] or ""), outcome
     # HEAD unchanged and the WIP edit is preserved.
     assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == feat_head
     assert (primary / "seed.txt").read_text() == "founder work in progress"
+
+
+def test_sync_primary_ffs_with_untracked_files_present(tmp_path):
+    """(#55) A PRIMARY holding UNTRACKED files (deferred reports / handoffs / scratch)
+    is STILL ff'd. Untracked files are not founder WIP a ff can clobber (git aborts on a
+    path collision; ff-only never touches non-colliding untracked), so GUARD-B must block
+    ONLY on TRACKED dirt. Regression for the main-repo drift the old
+    _dirty_worktree_paths (tracked | untracked) check caused: the auto-sync skipped
+    whenever an untracked deferred report / handoff sat in the primary -- i.e. almost
+    always."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-untracked"], cwd=primary, env=env)
+    # Untracked artifacts in the primary (the normal state: handoffs, deferred notes).
+    (primary / "HANDOFF_FOR_CODEX.md").write_text("handoff")
+    (primary / "scratch_deferred_note.md").write_text("deferred finding")
+    c1_sha = _advance_origin_dev(upstream, env)
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    # ff applied to origin/dev tip despite the untracked files.
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha, outcome
+    # Untracked files preserved (ff-only never touches non-colliding untracked).
+    assert (primary / "HANDOFF_FOR_CODEX.md").read_text() == "handoff"
+    assert (primary / "scratch_deferred_note.md").read_text() == "deferred finding"
 
 
 def test_sync_primary_skips_divergent_local_commit(tmp_path):

@@ -3701,9 +3701,17 @@ def _sync_primary_worktree_to_base(
                 "PULL-ONLY helper never syncs a base-branch checkout"
             )
 
-        # GUARD-B: never clobber founder WIP.
-        if _dirty_worktree_paths(primary):
-            return _skip(f"primary worktree {primary} is dirty; not clobbering WIP")
+        # GUARD-B: never clobber TRACKED founder WIP. Block ONLY on tracked dirt
+        # (staged/unstaged modifications). A `git merge --ff-only` CANNOT silently
+        # clobber UNTRACKED files (git aborts with "untracked working tree files would
+        # be overwritten by merge" on a path collision) or IGNORED files
+        # (--no-overwrite-ignore on the merge below). The old check used
+        # _dirty_worktree_paths (tracked | untracked), so the auto-sync SKIPPED whenever
+        # the primary held ANY untracked file -- a deferred report, handoff, or scratch
+        # artifact -- i.e. almost always, which is why the founder's main repo kept
+        # drifting behind base after standalone/dispatcher merges. (#55)
+        if _tracked_dirty_paths(primary):
+            return _skip(f"primary worktree {primary} has tracked WIP; not clobbering")
 
         # GUARD-D: parallel-lane safety. Take a NON-BLOCKING exclusive lock on a
         # lockfile under the shared common git dir so concurrent lane waves do
