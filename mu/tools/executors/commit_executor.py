@@ -10224,12 +10224,14 @@ def _run_post_commit_pipeline(
 # A wave that adds a NEW test file pushes the repo's test_*.py count over the
 # CAP_TEST_FILES gate (mu/tests/docs/test_growth_caps.py), stranding the commit
 # at Step 8 (pre-commit-doc-check). This automates the founder-authorized
-# recovery — bump CAP_TEST_FILES by exactly the cap SHORTFALL the gate would
-# report — but ONLY for a wave that carries the same FOUNDER_OVERRIDE token
-# Gate 8 already validates. No override -> do nothing (fail-closed; the gate
-# strands the commit exactly as today). The bump never weakens the ratchet: it
-# raises the cap by the minimal increment that makes the gate pass, never the
-# raw new-file count, and never when the cap already covers the count.
+# recovery — bump CAP_TEST_FILES by exactly the cap shortfall the COMMITTED test
+# set implies (the git index, never untracked working-tree strays) — but ONLY for
+# a wave that carries the same FOUNDER_OVERRIDE token Gate 8 already validates. No
+# override -> do nothing (fail-closed; the gate strands the commit exactly as
+# today). The bump never weakens the ratchet: it raises the cap by the minimal
+# increment the committed count requires, never the raw new-file count, never the
+# count of untracked/generated strays, and never when the cap already covers the
+# count.
 
 GROWTH_CAP_TEST_RELPATH = "mu/tests/docs/test_growth_caps.py"
 _GROWTH_CAP_BASELINE_RE = re.compile(r"^BASELINE_TEST_FILES\s*=\s*(\d+)", re.MULTILINE)
@@ -10248,9 +10250,34 @@ def _is_mu_test_file_path(relpath: str) -> bool:
     return name.startswith("test_") and name.endswith(".py")
 
 
-def _count_mu_test_files(repo_root: Path) -> int:
-    """Mirror test_growth_caps._count_test_files (the gate's on-disk measure)."""
-    return len(list((repo_root / "mu" / "tests").rglob("test_*.py")))
+def _count_tracked_mu_test_files(repo_root: Path) -> int:
+    """Count TRACKED (committed + staged) mu/tests/**/test_*.py via the git index.
+
+    Deliberately NOT the Step 8 gate's on-disk rglob. The auto-bump raises a cap
+    value that is written to disk and COMMITTED, so it must reflect only the test
+    files this commit actually carries: the git index (tracked files plus this
+    wave's staged additions, minus staged deletions). The gate's rglob also counts
+    UNTRACKED/generated working-tree strays; folding those into the bump would
+    inflate the shortfall and permanently over-grant the cap for a file the commit
+    never includes — an invariant-weakening cap bypass. Untracked strays therefore
+    never contribute to the bump. If one is present, the disk-based gate simply
+    strands the commit fail-closed (on-disk count > baseline + cap), exactly as any
+    over-cap commit does today; the cap is never silently inflated to cover it.
+
+    Returns 0 on any git failure (fail-safe: a low count yields shortfall <= 0, so
+    the auto-bump no-ops and the unmodified gate stays the sole authority).
+    """
+    proc = _run(
+        ["git", "ls-files", "--", "mu/tests"],
+        cwd=repo_root, check=False, timeout=30,
+    )
+    if proc.returncode != 0:
+        return 0
+    return sum(
+        1
+        for line in proc.stdout.splitlines()
+        if line.strip() and _is_mu_test_file_path(line)
+    )
 
 
 def _resolve_base_merge_base_sha(repo_root: Path, base_branch: str) -> str:
@@ -10348,8 +10375,8 @@ def _maybe_autobump_growth_cap_for_founder_override(
 
     Returns a structured outcome. Mutates mu/tests/docs/test_growth_caps.py and
     stages it ONLY on a genuine bump: a wave that (1) adds >=1 new staged test
-    file absent on the merge base, (2) whose new on-disk test_*.py count exceeds
-    BASELINE_TEST_FILES + CAP_TEST_FILES by a positive shortfall, (3) has no
+    file absent on the merge base, (2) whose committed (git-index) test_*.py count
+    exceeds BASELINE_TEST_FILES + CAP_TEST_FILES by a positive shortfall, (3) has no
     prior same-wave provenance, and (4) carries the FOUNDER_OVERRIDE token Gate 8
     validates. Any other case is a no-op (fail-closed); the gate strands the
     commit exactly as today.
@@ -10375,7 +10402,9 @@ def _maybe_autobump_growth_cap_for_founder_override(
         outcome["reason"] = "no_new_test_files"
         return outcome
 
-    # (2) Compute the cap SHORTFALL the gate would report — NOT the file count.
+    # (2) Compute the cap SHORTFALL from the COMMITTED (git-index) test count —
+    # NOT the on-disk rglob (which would fold in untracked working-tree strays and
+    # permanently over-grant the cap) and NOT the raw new-file count.
     try:
         cap_text = cap_file.read_text(encoding="utf-8")
     except OSError:
@@ -10389,7 +10418,7 @@ def _maybe_autobump_growth_cap_for_founder_override(
     baseline = int(baseline_match.group(1))
     current_cap = int(cap_match.group("value"))
     outcome["previous_cap"] = current_cap
-    projected_count = _count_mu_test_files(repo_root)
+    projected_count = _count_tracked_mu_test_files(repo_root)
     shortfall = projected_count - (baseline + current_cap)
     outcome["shortfall"] = shortfall
 

@@ -130,6 +130,5 @@ growth-cap-autobump-founder-override-2026-06-08
   - `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`
   - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/growth_cap_autobump_founder_override_2026-06-08.md`
-  - `reports/deferred/non_blocking/growth-cap-autobump-founder-override-2026-06-08_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/growth-cap-autobump-founder-override-2026-06-08.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

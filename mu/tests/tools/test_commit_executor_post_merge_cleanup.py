@@ -1547,6 +1547,73 @@ def test_growth_cap_autobump_consolidation_yields_zero_shortfall_no_bump(tmp_pat
     assert not _growth_cap_staged(primary)
 
 
+def test_growth_cap_autobump_ignores_untracked_stray_test_file(tmp_path):
+    """Untracked-stray regression (count boundary): an UNTRACKED
+    mu/tests/test_*.py on disk must NOT contribute to the cap bump. The auto-bump
+    counts the COMMITTED (git-index) test set, so a wave that stages exactly ONE
+    real new test under a valid FOUNDER_OVERRIDE bumps CAP_TEST_FILES by EXACTLY
+    +1 — never +2 for a stray the commit never includes (which would permanently
+    over-grant the cap, an invariant-weakening bypass). The prior on-disk rglob
+    folded the stray in; this pins the boundary tightening to the git index."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    # The wave legitimately stages exactly ONE real new test file.
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+    # A stray UNTRACKED test file sits in the working tree — never staged, never
+    # committed (e.g. a generated/scratch test left behind in the checkout).
+    stray = primary / "mu" / "tests" / "test_untracked_stray.py"
+    stray.write_text("def test_stray():\n    assert True\n", encoding="utf-8")
+    # Precondition: the on-disk rglob (the OLD count, and what the Step 8 gate
+    # measures) sees 5 test files — committed test_growth_caps.py + 2 existing +
+    # the staged new one + the untracked stray — so the OLD disk-based shortfall
+    # would have been 2, i.e. the buggy bump would have been +2 (the defect).
+    assert _count_disk_test_files(primary) == 5
+    assert _count_disk_test_files(primary) - (3 + 0) == 2  # OLD (buggy) shortfall
+    lines, log = _make_capture_log()
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log,
+    )
+
+    # The bump accounts for ONLY the staged file (+1), ignoring the untracked
+    # stray: index count 4 - (baseline 3 + cap 0) = 1, NOT the disk count's 2.
+    assert outcome["bumped"] is True, outcome
+    assert outcome["reason"] == "bumped", outcome
+    assert outcome["shortfall"] == 1, outcome
+    assert outcome["bump_amount"] == 1, outcome
+    assert outcome["previous_cap"] == 0, outcome
+    assert outcome["new_cap"] == 1, outcome
+    # The stray is untracked, so it is never detected as a new staged test file
+    # and never named in the provenance comment.
+    assert outcome["new_test_files"] == ["mu/tests/tools/test_new_feature.py"], outcome
+    text, baseline, cap = _read_growth_cap_values(primary)
+    assert cap == 1, text  # +1, NOT +2
+    assert "test_new_feature.py" in text, text
+    assert "test_untracked_stray.py" not in text, text
+    assert _growth_cap_staged(primary)
+
+    # The untracked stray was left untouched on disk and never staged.
+    assert stray.exists()
+    staged = _git(["diff", "--cached", "--name-only"], cwd=primary).stdout.split()
+    assert "mu/tests/test_untracked_stray.py" not in staged, staged
+
+    # Fail-closed, not fail-open: with the cap bumped by only +1, the disk-based
+    # Step 8 gate (which still counts the stray) sees 5 > baseline + cap (4) and
+    # strands the commit — exactly as any over-cap commit does. The cap was NOT
+    # silently inflated to cover a file the commit never includes.
+    assert _count_disk_test_files(primary) > baseline + cap, (baseline, cap)
+    assert any(
+        f"auto-bumped CAP_TEST_FILES +1 for FOUNDER_OVERRIDE wave {GROWTH_CAP_WAVE_ID}"
+        in m
+        for m in lines
+    ), lines
+
+
 def _staged_sha(primary: Path) -> str:
     """Mirror meta_bridge_supervisor.compute_staged_sha: sha256 of the staged
     binary diff — the exact content the pre-commit receipt binds to and the
