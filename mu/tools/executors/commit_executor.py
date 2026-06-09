@@ -32,6 +32,7 @@ import fcntl
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -10219,6 +10220,329 @@ def _run_post_commit_pipeline(
     return result
 
 
+# ── Growth-cap auto-bump (FOUNDER_OVERRIDE-gated) ─────────────────────────
+# A wave that adds a NEW test file pushes the repo's test_*.py count over the
+# CAP_TEST_FILES gate (mu/tests/docs/test_growth_caps.py), stranding the commit
+# at Step 8 (pre-commit-doc-check). This automates the founder-authorized
+# recovery — bump CAP_TEST_FILES by exactly the cap shortfall the COMMITTED test
+# set implies (the git index, never untracked working-tree strays) — but ONLY for
+# a wave that carries the same FOUNDER_OVERRIDE token Gate 8 already validates. No
+# override -> do nothing (fail-closed; the gate strands the commit exactly as
+# today). The bump never weakens the ratchet: it raises the cap by the minimal
+# increment the committed count requires, never the raw new-file count, never the
+# count of untracked/generated strays, and never when the cap already covers the
+# count.
+
+GROWTH_CAP_TEST_RELPATH = "mu/tests/docs/test_growth_caps.py"
+_GROWTH_CAP_BASELINE_RE = re.compile(r"^BASELINE_TEST_FILES\s*=\s*(\d+)", re.MULTILINE)
+_GROWTH_CAP_VALUE_RE = re.compile(
+    r"^(?P<prefix>CAP_TEST_FILES\s*=\s*)(?P<value>\d+)(?P<rest>[^\n]*)$",
+    re.MULTILINE,
+)
+
+
+def _is_mu_test_file_path(relpath: str) -> bool:
+    """Mirror test_growth_caps rglob('test_*.py') under mu/tests for a relpath."""
+    normalized = _normalize_repo_relpath(relpath)
+    if not normalized.startswith("mu/tests/"):
+        return False
+    name = normalized.rsplit("/", 1)[-1]
+    return name.startswith("test_") and name.endswith(".py")
+
+
+def _count_tracked_mu_test_files(repo_root: Path) -> int:
+    """Count TRACKED (committed + staged) mu/tests/**/test_*.py via the git index.
+
+    Deliberately NOT the Step 8 gate's on-disk rglob. The auto-bump raises a cap
+    value that is written to disk and COMMITTED, so it must reflect only the test
+    files this commit actually carries: the git index (tracked files plus this
+    wave's staged additions, minus staged deletions). The gate's rglob also counts
+    UNTRACKED/generated working-tree strays; folding those into the bump would
+    inflate the shortfall and permanently over-grant the cap for a file the commit
+    never includes — an invariant-weakening cap bypass. Untracked strays therefore
+    never contribute to the bump. If one is present, the disk-based gate simply
+    strands the commit fail-closed (on-disk count > baseline + cap), exactly as any
+    over-cap commit does today; the cap is never silently inflated to cover it.
+
+    Returns 0 on any git failure (fail-safe: a low count yields shortfall <= 0, so
+    the auto-bump no-ops and the unmodified gate stays the sole authority).
+    """
+    proc = _run(
+        ["git", "ls-files", "--", "mu/tests"],
+        cwd=repo_root, check=False, timeout=30,
+    )
+    if proc.returncode != 0:
+        return 0
+    return sum(
+        1
+        for line in proc.stdout.splitlines()
+        if line.strip() and _is_mu_test_file_path(line)
+    )
+
+
+def _resolve_base_merge_base_sha(repo_root: Path, base_branch: str) -> str:
+    """Resolve the merge base of origin/<base> (then <base>) with HEAD."""
+    base = (base_branch or "").strip()
+    if not base:
+        return ""
+    for ref in (f"origin/{base}", base):
+        verify = _run(
+            ["git", "rev-parse", "--verify", "--quiet", ref],
+            cwd=repo_root, check=False, timeout=30,
+        )
+        if verify.returncode != 0 or not verify.stdout.strip():
+            continue
+        merge_base = _run(
+            ["git", "merge-base", ref, "HEAD"],
+            cwd=repo_root, check=False, timeout=30,
+        )
+        if merge_base.returncode == 0 and merge_base.stdout.strip():
+            return merge_base.stdout.strip()
+    return ""
+
+
+def _new_mu_test_files_vs_merge_base(repo_root: Path, base_branch: str) -> list[str]:
+    """Staged mu/tests/**/test_*.py paths ABSENT on the merge base.
+
+    Compares the index against the merge base, so a same-wave retry (where the
+    new file is committed but still absent on the merge base) re-detects it.
+    Returns [] when the merge base cannot be resolved (fail-safe: no bump).
+    """
+    merge_base = _resolve_base_merge_base_sha(repo_root, base_branch)
+    if not merge_base:
+        return []
+    proc = _run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=A", merge_base],
+        cwd=repo_root, check=False, timeout=30,
+    )
+    if proc.returncode != 0:
+        return []
+    added = [
+        _normalize_repo_relpath(line)
+        for line in proc.stdout.splitlines()
+        if line.strip()
+    ]
+    return sorted({path for path in added if _is_mu_test_file_path(path)})
+
+
+def _cap_provenance_records_wave(cap_comment: str, wave_id: str) -> bool:
+    """True when the CAP_TEST_FILES comment already records THIS wave."""
+    if not cap_comment:
+        return False
+    if _extract_same_wave_founder_override_token(cap_comment, wave_id):
+        return True
+    raw = (wave_id or "").strip()
+    return bool(raw) and raw in cap_comment
+
+
+def _restore_growth_cap_file(
+    cap_file: Path, original_text: str, *, log: Any
+) -> bool:
+    """Roll the growth-cap file back to its pre-bump content after a staging failure.
+
+    The auto-bump writes the CAP_TEST_FILES bump to disk BEFORE it stages the
+    file. If staging then fails, the bump must NOT linger unstaged in the working
+    tree: a working-tree-only cap edit would let the Step 8 growth-cap gate pass
+    on a value the commit never includes (fail-open), and would also poison the
+    same-wave idempotency guard on a retry (the unstaged provenance comment would
+    make the next run skip a bump that was never committed). Restoring the
+    original content makes the auto-bump a complete no-op, so the gate falls
+    through to the unmodified (too-low) cap and strands the commit fail-closed.
+
+    Returns True when the original content is back on disk.
+    """
+    try:
+        cap_file.write_text(original_text, encoding="utf-8")
+        return True
+    except OSError as exc:
+        log(
+            f"Step 5e: CRITICAL — could not roll back {GROWTH_CAP_TEST_RELPATH} "
+            f"after a staging failure ({exc}); it may carry an unstaged cap edit "
+            f"that must be reverted manually"
+        )
+        return False
+
+
+def _maybe_autobump_growth_cap_for_founder_override(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    base_branch: str,
+    founder_override_token: str,
+    log: Any,
+) -> dict[str, Any]:
+    """Automate the founder-authorized CAP_TEST_FILES bump before the Step 8 gate.
+
+    Returns a structured outcome. Mutates mu/tests/docs/test_growth_caps.py and
+    stages it ONLY on a genuine bump: a wave that (1) adds >=1 new staged test
+    file absent on the merge base, (2) whose committed (git-index) test_*.py count
+    exceeds BASELINE_TEST_FILES + CAP_TEST_FILES by a positive shortfall, (3) has no
+    prior same-wave provenance, and (4) carries the FOUNDER_OVERRIDE token Gate 8
+    validates. Any other case is a no-op (fail-closed); the gate strands the
+    commit exactly as today.
+    """
+    outcome: dict[str, Any] = {
+        "bumped": False,
+        "shortfall": 0,
+        "bump_amount": 0,
+        "new_test_files": [],
+        "previous_cap": None,
+        "new_cap": None,
+        "reason": "",
+    }
+    cap_file = repo_root / "mu" / "tests" / "docs" / "test_growth_caps.py"
+    if not cap_file.exists():
+        outcome["reason"] = "growth_cap_file_absent"
+        return outcome
+
+    # (1) Detect genuinely-new staged test files (absent on the merge base).
+    new_test_files = _new_mu_test_files_vs_merge_base(repo_root, base_branch)
+    outcome["new_test_files"] = new_test_files
+    if not new_test_files:
+        outcome["reason"] = "no_new_test_files"
+        return outcome
+
+    # (2) Compute the cap SHORTFALL from the COMMITTED (git-index) test count —
+    # NOT the on-disk rglob (which would fold in untracked working-tree strays and
+    # permanently over-grant the cap) and NOT the raw new-file count.
+    try:
+        cap_text = cap_file.read_text(encoding="utf-8")
+    except OSError:
+        outcome["reason"] = "growth_cap_file_unreadable"
+        return outcome
+    baseline_match = _GROWTH_CAP_BASELINE_RE.search(cap_text)
+    cap_match = _GROWTH_CAP_VALUE_RE.search(cap_text)
+    if baseline_match is None or cap_match is None:
+        outcome["reason"] = "growth_cap_constants_unparsed"
+        return outcome
+    baseline = int(baseline_match.group(1))
+    current_cap = int(cap_match.group("value"))
+    outcome["previous_cap"] = current_cap
+    projected_count = _count_tracked_mu_test_files(repo_root)
+    shortfall = projected_count - (baseline + current_cap)
+    outcome["shortfall"] = shortfall
+
+    # (3) Idempotency guard: this wave's provenance is already recorded.
+    cap_comment = cap_match.group("rest")
+    if _cap_provenance_records_wave(cap_comment, wave_id):
+        outcome["reason"] = "already_recorded"
+        log(
+            f"Step 5e: CAP_TEST_FILES already records FOUNDER_OVERRIDE wave "
+            f"{wave_id}; no bump (idempotent retry)"
+        )
+        return outcome
+
+    # (e) Headroom / consolidation: the cap already covers the count.
+    if shortfall <= 0:
+        outcome["reason"] = "zero_shortfall"
+        log(
+            f"Step 5e: CAP_TEST_FILES auto-bump no-op for wave {wave_id} "
+            f"(shortfall={shortfall} <= 0; headroom/consolidation)"
+        )
+        return outcome
+
+    # (5) Fail-closed: a wave with no FOUNDER_OVERRIDE is never auto-bumped.
+    if not (founder_override_token or "").strip():
+        outcome["reason"] = "no_founder_override"
+        log(
+            f"Step 5e: new test file(s) push the count over cap "
+            f"(shortfall={shortfall}) but wave {wave_id} carries no "
+            f"FOUNDER_OVERRIDE; growth-cap gate will strand the commit (fail-closed)"
+        )
+        return outcome
+
+    # (4) FOUNDER_OVERRIDE-gated auto-bump by EXACTLY the shortfall.
+    new_cap = current_cap + shortfall
+    file_desc = ", ".join(Path(path).name for path in new_test_files)
+    provenance = (
+        f"+{shortfall} for {file_desc} "
+        f"({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})"
+    )
+    if "#" in cap_comment:
+        new_rest = f"{cap_comment}; {provenance}"
+    else:
+        new_rest = f"{cap_comment}  # {provenance}"
+    new_line = f"{cap_match.group('prefix')}{new_cap}{new_rest}"
+    new_text = cap_text[: cap_match.start()] + new_line + cap_text[cap_match.end():]
+    try:
+        cap_file.write_text(new_text, encoding="utf-8")
+    except OSError as exc:
+        outcome["reason"] = f"growth_cap_write_failed: {exc}"
+        return outcome
+    # Stage the cap bump so the Step 8 growth-cap gate sees it. If staging fails
+    # for ANY reason — git add raises, or the file is somehow not in the staged
+    # set afterward — the bump MUST NOT linger unstaged in the working tree: a
+    # working-tree-only cap edit would let the gate pass on a value the commit
+    # never includes (fail-open) and would poison the same-wave idempotency guard
+    # on retry. Roll the file back so the bump is a complete no-op and the gate
+    # falls through to the unmodified (too-low) cap and strands the commit
+    # fail-closed, exactly as if no auto-bump had been attempted.
+    try:
+        _run(["git", "add", "--", GROWTH_CAP_TEST_RELPATH], cwd=repo_root)
+        staged = GROWTH_CAP_TEST_RELPATH in _current_staged_diff_paths(repo_root)
+    except Exception as exc:
+        _restore_growth_cap_file(cap_file, cap_text, log=log)
+        outcome["reason"] = f"growth_cap_stage_failed: {exc}"
+        log(
+            f"Step 5e: growth-cap auto-bump rolled back for wave {wave_id} "
+            f"(staging failed: {exc}); cap left unchanged so the Step 8 gate "
+            f"strands the commit (fail-closed)"
+        )
+        return outcome
+    if not staged:
+        _restore_growth_cap_file(cap_file, cap_text, log=log)
+        outcome["reason"] = "growth_cap_not_staged"
+        log(
+            f"Step 5e: growth-cap auto-bump rolled back for wave {wave_id} "
+            f"(cap edit did not stage); cap left unchanged so the Step 8 gate "
+            f"strands the commit (fail-closed)"
+        )
+        return outcome
+    outcome["bumped"] = True
+    outcome["bump_amount"] = shortfall
+    outcome["new_cap"] = new_cap
+    outcome["reason"] = "bumped"
+    log(
+        f"Step 5e: auto-bumped CAP_TEST_FILES +{shortfall} for FOUNDER_OVERRIDE "
+        f"wave {wave_id} ({file_desc})"
+    )
+    return outcome
+
+
+# Public test seams. The growth-cap auto-bump is exercised directly by the
+# regression suite, and its call ORDER in the commit pipeline (auto-bump before
+# the supervisor/receipt) is pinned by static source inspection. These public
+# names delegate to the canonical underscore-prefixed implementations so the
+# suite can exercise the contract without reaching into a module-private helper
+# (the test-integrity gate forbids private-attr access in tests).
+def maybe_autobump_growth_cap_for_founder_override(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    base_branch: str,
+    founder_override_token: str,
+    log: Any,
+) -> dict[str, Any]:
+    """Public seam over :func:`_maybe_autobump_growth_cap_for_founder_override`."""
+    return _maybe_autobump_growth_cap_for_founder_override(
+        repo_root,
+        wave_id=wave_id,
+        base_branch=base_branch,
+        founder_override_token=founder_override_token,
+        log=log,
+    )
+
+
+def commit_pipeline_impl_source() -> str:
+    """Public seam returning the source of :func:`_run_commit_pipeline_impl`.
+
+    The auto-bump call-order regression pins that the bump runs BEFORE the
+    supervisor writes the pre-commit receipt; the test reads this source rather
+    than the private function object.
+    """
+    return inspect.getsource(_run_commit_pipeline_impl)
+
+
 def _run_commit_pipeline_impl(
     handoff: dict[str, Any],
     *,
@@ -10929,6 +11253,30 @@ def _run_commit_pipeline_impl(
             "Step 5d: restored commit-retry packet/task state before "
             "receipt review"
         )
+
+    # ── Step 5e: FOUNDER_OVERRIDE-gated growth-cap auto-bump (pre-receipt) ──
+    # MUST run BEFORE the supervisor (Step 6) writes the pre-commit receipt. The
+    # auto-bump stages test_growth_caps.py, mutating the staged set; the receipt
+    # binds to compute_staged_sha(staged diff) at review time and the Step 8 hook
+    # re-verifies that SHA. Bumping AFTER the receipt (the prior Step-7d
+    # placement) invalidated it and stranded Step 8 ("staged content changed
+    # since review"). Here the bump precedes both the supervisor's changed_files
+    # snapshot (recomputed below from `git diff --cached`, so Gate 1 dirty-state
+    # stays consistent) and the receipt, so Step 8 verification matches. Placed
+    # OUTSIDE the skip_supervisor guard so it also covers the no-supervisor path
+    # (the Step 8 gate runs regardless). No FOUNDER_OVERRIDE -> no bump (the gate
+    # strands the commit exactly as today). An auto-bump error never regresses
+    # the commit path: it falls through to the unmodified Step 8 gate.
+    try:
+        _maybe_autobump_growth_cap_for_founder_override(
+            repo_root,
+            wave_id=wave_id,
+            base_branch=base_branch,
+            founder_override_token=founder_override_token,
+            log=log,
+        )
+    except Exception as exc:
+        log(f"Step 5e: growth-cap auto-bump skipped (non-fatal error: {exc})")
 
     # ── Steps 6-7: supervisor review + receipt validation ───────────
     if not skip_supervisor:

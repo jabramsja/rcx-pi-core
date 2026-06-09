@@ -1,0 +1,24 @@
+{
+  "wave_id": "growth-cap-autobump-founder-override-2026-06-08",
+  "repeat_run_speedup_ratio": 1.373576,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.257308,
+  "repeat_run_raw_seconds": [
+    0.353432,
+    0.257308
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.353432
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.61074
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-09T00:04:53Z",
+  "collector_version": "2.2.0"
+}
