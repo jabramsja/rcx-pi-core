@@ -377,6 +377,36 @@ Purpose: {purpose}
 """
 
 
+def _reconcile_draft_l4_block_from_tracker_note(
+    repo_root: Path,
+    scope: dict[str, str],
+    content: str,
+) -> str:
+    """Single-source the draft's L4-field block from the wave's canonical tracker note.
+
+    When a canonical TASKS.md tracker note already exists for the wave, the
+    packet's L4-field block is derived from it (the tracker note is the source of
+    truth the supervisor/bot read), so the draft cannot declare an L4 value that
+    diverges from the note. When no note exists yet -- create_plan_draft can run
+    before the note is written -- the supplied scope draft is kept verbatim and the
+    commit-path refresh reconciles later. Centralized in commit_executor so the
+    render and refresh paths emit a byte-identical block (one-way dependency: no
+    import cycle). Fail-soft: a missing commit_executor leaves the draft unchanged.
+    """
+    wave_id = str(scope.get("wave_name") or scope.get("wave_id") or "").strip()
+    if not wave_id:
+        return content
+    try:
+        if str(SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPT_DIR))
+        import commit_executor
+    except ImportError:
+        return content
+    return commit_executor.reconcile_packet_l4_fields_block_for_wave(
+        repo_root, wave_id, content
+    )
+
+
 def create_plan_draft(
     repo_root: Path,
     plan_name: str,
@@ -400,6 +430,7 @@ def create_plan_draft(
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     content = _render_plan_draft_content(plan_name, scope, date_str=date_str)
+    content = _reconcile_draft_l4_block_from_tracker_note(repo_root, scope, content)
 
     tracked_path = _tracked_plan_path_from_scope(repo_root, plan_name, scope)
     if tracked_path is not None:
