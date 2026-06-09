@@ -1290,27 +1290,38 @@ def _commit_refresh_packet_path(handoff: dict[str, Any]) -> tuple[str, str | Non
     return "", None
 
 
-def _tracker_marker_value(note: str, marker: str) -> str:
-    marker_names = [
-        "Class",
-        "target_gate_id",
-        "no_op_proof",
-        "defer_reason_code",
-        "evidence_command",
-        "evidence_delta",
-        "progress_proof_before",
-        "progress_proof_after",
-        "primary_blocker_class",
-        "primary_invariant_id",
-        "indicator_artifact_ref",
-        "indicator_collection_command",
-        "bootstrap_endgame_policy",
-        "boot0_track_id",
-        "boot0_progress_state",
-        "FOUNDER_OVERRIDE",
-        "unblocks_wave_id",
-        "unblocks_runtime_blocker",
-    ]
+def _tracker_marker_value(
+    note: str,
+    marker: str,
+    *,
+    marker_names: "tuple[str, ...] | list[str] | None" = None,
+) -> str:
+    # Default boundary set kept byte-for-byte: every existing caller (incl. the
+    # fail-closed evidence_command path and the byte-identical meta_bridge_supervisor
+    # parity contract) passes no marker_names and gets exactly this list. A caller
+    # may pass a wider boundary set (see _BUILDER_TRACKER_MARKER_NAMES) to stop a
+    # value at builder fields absent from this default list.
+    if marker_names is None:
+        marker_names = [
+            "Class",
+            "target_gate_id",
+            "no_op_proof",
+            "defer_reason_code",
+            "evidence_command",
+            "evidence_delta",
+            "progress_proof_before",
+            "progress_proof_after",
+            "primary_blocker_class",
+            "primary_invariant_id",
+            "indicator_artifact_ref",
+            "indicator_collection_command",
+            "bootstrap_endgame_policy",
+            "boot0_track_id",
+            "boot0_progress_state",
+            "FOUNDER_OVERRIDE",
+            "unblocks_wave_id",
+            "unblocks_runtime_blocker",
+        ]
     pattern = re.compile(
         rf"(?:^|\s){re.escape(marker)}:\s*"
     )
@@ -1386,14 +1397,496 @@ def _tracker_evidence_command_value(note: str) -> str:
 NONCANONICAL_EVIDENCE_COMMAND = _NONCANONICAL_EVIDENCE_COMMAND
 
 
-def tracker_marker_value(note: str, marker: str) -> str:
-    """Public seam over :func:`_tracker_marker_value`."""
-    return _tracker_marker_value(note, marker)
+def tracker_marker_value(
+    note: str,
+    marker: str,
+    *,
+    marker_names: "tuple[str, ...] | list[str] | None" = None,
+) -> str:
+    """Public seam over :func:`_tracker_marker_value`.
+
+    ``marker_names`` defaults to None (the canonical boundary set); pass a wider
+    set to stop a value at builder fields the default list omits.
+    """
+    return _tracker_marker_value(note, marker, marker_names=marker_names)
 
 
 def tracker_evidence_command_value(note: str) -> str:
     """Public seam over :func:`_tracker_evidence_command_value`."""
     return _tracker_evidence_command_value(note)
+
+
+# --- Single-source L4-field derivation from the canonical tracker note --------
+#
+# A control-plane packet's L4-field block AUTO-DERIVES from the wave's TASKS.md
+# tracker note so the packet can never declare an L4 value that diverges from the
+# note. The pre-commit supervisor + bot read the TRACKER NOTE as the source of
+# truth, so a packet/note mismatch costs a DOC_ACCURACY / NEEDS_PHASE_B round.
+# Rendering the block straight from the shared tracker-note marker extractor makes
+# "note wins" deterministic: the block is a pure function of the note text, so no
+# independently-supplied value can survive. The renderer lives here -- the module
+# that owns the extractors -- and is called from BOTH render points
+# (phase_a_executor at draft time, refresh_commit_path_packet_truth at commit time)
+# so the two paths emit an identical block. Derivation passes the COMPLETE builder
+# marker set (_BUILDER_TRACKER_MARKER_NAMES) so a value stops at the next builder
+# field even when that field is absent from the default boundary list (the default
+# 2-arg extractor over-captures `target_gate_id` past the un-listed `Packet:`).
+#
+# The field set mirrors tracker_sync_note.TrackerSyncNoteFields exactly -- no more,
+# no less. Each entry maps a packet label to the marker name the canonical builder
+# (tracker_sync_note.render_tracker_sync_note) emits into the note; founder_override
+# is emitted as the bare "FOUNDER_OVERRIDE" marker, hence the label/marker split.
+L4_FIELDS_FROM_TRACKER_START = "<!-- L4_FIELDS_FROM_TRACKER:start -->"
+L4_FIELDS_FROM_TRACKER_END = "<!-- L4_FIELDS_FROM_TRACKER:end -->"
+
+_L4_FIELDS_FROM_TRACKER: tuple[tuple[str, str], ...] = (
+    ("primary_blocker_class", "primary_blocker_class"),
+    ("primary_invariant_id", "primary_invariant_id"),
+    ("indicator_artifact_ref", "indicator_artifact_ref"),
+    ("indicator_collection_command", "indicator_collection_command"),
+    ("target_gate_id", "target_gate_id"),
+    ("evidence_command", "evidence_command"),
+    ("evidence_delta", "evidence_delta"),
+    ("bootstrap_endgame_policy", "bootstrap_endgame_policy"),
+    ("boot0_track_id", "boot0_track_id"),
+    ("boot0_progress_state", "boot0_progress_state"),
+    ("founder_override", "FOUNDER_OVERRIDE"),
+)
+
+
+def _validate_l4_field_labels() -> None:
+    """Fail closed if a packet label is not a real TrackerSyncNoteFields field.
+
+    Reuses tracker_sync_note.TrackerSyncNoteFields as the single definition of
+    WHICH L4-fields exist, so a rename there cannot silently drift this mapping.
+    No-op when tracker_sync_note is unavailable (commit_executor already degrades
+    gracefully when that optional import fails).
+    """
+    if _tracker_sync_note is None:
+        return
+    valid = set(
+        getattr(_tracker_sync_note.TrackerSyncNoteFields, "__dataclass_fields__", {})
+    )
+    if not valid:
+        return
+    unknown = sorted(
+        label for label, _marker in _L4_FIELDS_FROM_TRACKER if label not in valid
+    )
+    if unknown:
+        raise RuntimeError(
+            "L4-field labels absent from tracker_sync_note.TrackerSyncNoteFields: "
+            + ", ".join(unknown)
+        )
+
+
+_validate_l4_field_labels()
+
+
+# Complete set of markers the canonical tracker-note builder
+# (tracker_sync_note.render_tracker_sync_note) can emit. Used as the boundary set
+# when DERIVING the packet L4-field block so a value stops at the NEXT builder
+# field even when that field is absent from the default extractor list. Concretely:
+# render_tracker_sync_note emits `Packet:` immediately after `target_gate_id:` in
+# every packet-bearing note, and `Packet` is not in the default boundary list, so
+# the default extractor over-captures the packet path into target_gate_id; this
+# superset stops it at `Packet:`. A superset only TIGHTENS boundaries for canonical
+# builder output -- every field still ends at the first following builder marker.
+_BUILDER_TRACKER_MARKER_NAMES: tuple[str, ...] = (
+    "Class",
+    "contract_path",
+    "target_gate_id",
+    "Packet",
+    "workload_target",
+    "host_semantics_delta_before",
+    "host_semantics_delta_after",
+    "structural_artifact_ref",
+    "no_op_proof",
+    "defer_reason_code",
+    "evidence_command",
+    "evidence_delta",
+    "progress_proof_before",
+    "progress_proof_after",
+    "post_gate_contract_sweep",
+    "FOUNDER_OVERRIDE",
+    "unblocks_wave_id",
+    "unblocks_runtime_blocker",
+    "primary_blocker_class",
+    "primary_invariant_id",
+    "indicator_artifact_ref",
+    "indicator_collection_command",
+    "bootstrap_endgame_policy",
+    "boot0_track_id",
+    "boot0_progress_state",
+)
+
+
+def derive_l4_fields_from_tracker_note(tracker_note_text: str) -> dict[str, str]:
+    """Parse the packet L4-field set from the canonical tracker note (single source).
+
+    Each value is the output of the shared tracker-note marker extractor (the public
+    :func:`tracker_marker_value` seam) bounded by the COMPLETE builder marker set, so
+    a field the note does not declare yields "" and a field followed by a builder
+    marker absent from the default list (e.g. target_gate_id -> `Packet:`) is NOT
+    over-captured. Returns one entry per label in ``_L4_FIELDS_FROM_TRACKER`` in
+    stable order -- no more, no less than the field set.
+    """
+    note = str(tracker_note_text or "")
+    return {
+        label: tracker_marker_value(note, marker, marker_names=_BUILDER_TRACKER_MARKER_NAMES)
+        for label, marker in _L4_FIELDS_FROM_TRACKER
+    }
+
+
+def render_l4_fields_block_from_tracker_note(tracker_note_text: str) -> str:
+    """Render the machine-owned, note-derived L4-field block for a control packet."""
+    fields = derive_l4_fields_from_tracker_note(tracker_note_text)
+    lines = [
+        L4_FIELDS_FROM_TRACKER_START,
+        "**L4 fields (auto-derived from the canonical TASKS.md tracker note -- "
+        "single source of truth; do not hand-edit):**",
+        "",
+    ]
+    for label, _marker in _L4_FIELDS_FROM_TRACKER:
+        value = fields[label]
+        lines.append(f"- `{label}`: {value}" if value else f"- `{label}`:")
+    lines.append(L4_FIELDS_FROM_TRACKER_END)
+    return "\n".join(lines) + "\n"
+
+
+def _replace_l4_fields_block(packet_text: str, block: str) -> str:
+    """Insert or replace the marker-delimited L4-field block (idempotent)."""
+    start = packet_text.find(L4_FIELDS_FROM_TRACKER_START)
+    end = packet_text.find(L4_FIELDS_FROM_TRACKER_END)
+    if start != -1 and end != -1 and end > start:
+        end += len(L4_FIELDS_FROM_TRACKER_END)
+        trailing_newline = (
+            "\n" if end < len(packet_text) and packet_text[end:end + 1] != "\n" else ""
+        )
+        return (
+            packet_text[:start].rstrip()
+            + "\n\n"
+            + block.rstrip()
+            + trailing_newline
+            + packet_text[end:]
+        )
+    if start != -1 or end != -1:
+        raise ValueError("existing L4_FIELDS_FROM_TRACKER markers are unbalanced")
+    return packet_text.rstrip() + "\n\n" + block
+
+
+def _clean_l4_body_value(value: str) -> str:
+    """Normalize a note-derived L4 value for an inline-code body declaration.
+
+    The tracker-note extractor returns each value carrying the note's trailing
+    sentence period (e.g. ``INTEGRATION.``) and, for the backtick-wrapped markers
+    (evidence_command / post_gate_contract_sweep), the note's surrounding backticks
+    (e.g. ```<cmd>`.``). Strip both so the value drops into a packet's
+    backtick-delimited declaration without a nested backtick or a doubled period.
+    """
+    text = str(value or "").strip()
+    if text.startswith("`") and text.endswith("`."):
+        text = text[1:-2].strip()
+    elif text.startswith("`") and text.endswith("`"):
+        text = text[1:-1].strip()
+    if text.endswith("."):
+        text = text[:-1].rstrip()
+    return text
+
+
+def clean_l4_body_value(value: str) -> str:
+    """Public seam over :func:`_clean_l4_body_value`.
+
+    The packet-L4 regression in ``mu/tests/tools/test_phase_a_executor.py`` asserts
+    the cleaned, body-declaration form of each note-derived value (the form the
+    out-of-block conformer writes), so the suite needs this normalization without
+    reaching into a module-private helper -- the test-integrity gate
+    (``tools/checks/linters/check_private_attr_access.py``) forbids private-attr
+    access in tests. Delegates to the canonical underscore-prefixed implementation
+    above; this is the only normalization contract, so the seam stays a pure pass-through.
+    """
+    return _clean_l4_body_value(value)
+
+
+def _conform_l4_decl_in_text(text: str, field_token: str, clean_value: str) -> str:
+    """Rewrite backtick-delimited ``field_token`` declarations to ``clean_value``.
+
+    Two canonical packet authoring forms carry an L4 field's value inside an
+    inline-code span, so the value extent is unambiguous and the rewrite is safe:
+    ```field: VALUE``` (field and value share one span) and
+    ```field`: `VALUE``` (separate spans). Both are rewritten to
+    the note-derived value; the value's closing backtick bounds the replacement, so a
+    prose mention of the field name (not in declaration form) is never touched, and
+    the original colon spacing is preserved so a no-space token (``FOUNDER_OVERRIDE:``)
+    keeps its shape. The machine-owned block uses ```field`: VALUE`` (plain,
+    unwrapped value), which neither form matches -- and the block region is sliced out
+    before this runs anyway -- so the derived block is never altered here.
+    """
+    escaped = re.escape(field_token)
+    # Form A: `field: VALUE`
+    text = re.sub(
+        rf"`{escaped}:(\s*)[^`\n]*`",
+        lambda m: f"`{field_token}:{m.group(1)}{clean_value}`",
+        text,
+    )
+    # Form B: `field`: `VALUE`
+    text = re.sub(
+        rf"`{escaped}`:(\s*)`[^`\n]*`",
+        lambda m: f"`{field_token}`:{m.group(1)}`{clean_value}`",
+        text,
+    )
+    return text
+
+
+# Substitution counterpart of PACKET_TARGET_GATE_RE (the extractor at module top).
+# A packet may declare the gate as a plain-text header LINE -- "Target gate: G8",
+# "Target Gate: G8", or "target_gate_id: G8", each with an optional list-marker/bold
+# prefix and an optional backtick-wrapped value -- rather than as an inline-code
+# span. _conform_l4_decl_in_text only rewrites inline-code spans, so on its own it
+# lets a divergent plain header survive the refresh (bridge round 3 NO_GO: a packet's
+# "Target gate: G3" header outlived a G8 tracker note while the backtick form
+# conformed). target_gate_id is the one L4-block field with such a dedicated
+# plain-header extractor, so its header is a real, tooling-read drift vector. Group 1
+# captures the label + colon + spacing + optional opening backtick; group 2 the
+# optional closing backtick -- both preserved so only the single safe gate token is
+# rewritten. The within-line whitespace uses [ \t] (never a newline) so the rewrite
+# is strictly line-local, and the recognized forms are exactly those the extractor
+# reads, keeping "what the tooling parses as the gate" and "what the refresh
+# conforms" the same set; a mid-line backtick declaration and prose are never matched.
+_PACKET_TARGET_GATE_HEADER_SUB_RE = re.compile(
+    r"^([ \t]*(?:[-*][ \t]*)?(?:\*\*)?"
+    r"(?:Target Gate|Target gate|target_gate_id)"
+    r"(?:\*\*)?[ \t]*:[ \t]*`?)"
+    r"[A-Za-z0-9][A-Za-z0-9._-]*"
+    r"(`?)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _conform_target_gate_header_in_text(text: str, clean_gate: str) -> str:
+    """Rewrite plain-text ``Target gate:``/``target_gate_id:`` header lines to ``clean_gate``.
+
+    The inline-code conformer (:func:`_conform_l4_decl_in_text`) only rewrites
+    backtick spans; the gate additionally appears as a plain-text packet header that
+    PACKET_TARGET_GATE_RE / :func:`_extract_target_gate_id_from_text` read as the
+    declared gate, so a divergent header is a drift vector it cannot reach. Only the
+    gate token is replaced; the label, colon spacing, and any backticks are kept.
+    """
+    return _PACKET_TARGET_GATE_HEADER_SUB_RE.sub(
+        lambda m: f"{m.group(1)}{clean_gate}{m.group(2)}",
+        text,
+    )
+
+
+# --- Plain / bold list-item L4 declarations (the most common packet form) ------
+#
+# Bridge round 4 DEFECT: the inline-code conformer (_conform_l4_decl_in_text) only
+# rewrites declarations whose value is wrapped in a backtick span; the plain-text
+# packet authoring forms survived. Control packets overwhelmingly declare L4 fields
+# as plain or bold list items, e.g. `- primary_blocker_class: INTEGRATION`,
+# `- **target_gate_id:** G8`, `- indicator_artifact_ref: reports/...json` (a plain
+# value containing periods), `- evidence_command: \`...\`.` (plain label, backtick
+# value), and the compact multi-field line
+# `- bootstrap_endgame_policy: X. boot0_track_id: Y. boot0_progress_state: Z.`. Every
+# such out-of-block declaration is a drift vector the supervisor/bot read, so each is
+# conformed to the note value here. Detection is anchored to a LINE that *begins*
+# (after indent + optional list marker) with an L4 field token, so a prose mention of
+# a field name mid-sentence is never rewritten; on such a line, every grouped field
+# (separated by `. `/`; `) is conformed, and a token inside a backtick span is treated
+# as value text, not a key. The block region is sliced out before this runs, so the
+# machine-owned block (which uses a backtick-wrapped label `- \`field\`: value`, never
+# a plain label) is never matched here either.
+_PLAIN_L4_TOKENS: tuple[str, ...] = tuple(
+    sorted({tok for pair in _L4_FIELDS_FROM_TRACKER for tok in pair}, key=len, reverse=True)
+)
+_PLAIN_L4_TOKEN_ALT = "|".join(re.escape(tok) for tok in _PLAIN_L4_TOKENS)
+# One L4 field declaration "key": an optional bold-open, the field token, an optional
+# bold-close, the colon, and an optional bold-close after the colon -- covering plain
+# (`field:`), `**field:**`, and `**field**:`. The value follows the match end.
+_PLAIN_L4_KEY_RE = re.compile(
+    rf"(?:\*\*)?(?P<field>{_PLAIN_L4_TOKEN_ALT})(?:\*\*)?[ \t]*:(?:\*\*)?"
+)
+# A qualifying line carries only indent + an optional list marker before its first
+# key; this is what distinguishes a declaration list item from a prose line that
+# merely mentions a field name. A mid-word false token match (e.g. `xtarget_gate_id:`)
+# leaves a non-empty, non-marker prefix and so fails this guard.
+_PLAIN_L4_LEAD_PREFIX_RE = re.compile(r"^[ \t]*(?:[-*][ \t]+)?$")
+# Grouping separators that introduce a *subsequent* field on the same line. The
+# compact multi-field authoring forms always separate with a sentence period or a
+# semicolon (optionally after a backtick-closed value), so a following key is only
+# accepted when the text immediately before it ends with one of these; a bare word
+# before a `token:` is prose and is left intact.
+_PLAIN_L4_GROUP_BOUNDARY_CHARS = (".", ";", ",", "`")
+
+
+def _backtick_spans(line: str) -> list[tuple[int, int]]:
+    """Return (open, close) index pairs for the inline-code spans on a single line."""
+    ticks = [i for i, ch in enumerate(line) if ch == "`"]
+    return [(ticks[j], ticks[j + 1]) for j in range(0, len(ticks) - 1, 2)]
+
+
+def _pos_in_backtick_span(pos: int, spans: list[tuple[int, int]]) -> bool:
+    return any(open_i < pos < close_i for open_i, close_i in spans)
+
+
+def _build_clean_l4_lookup(note_values: dict[str, str]) -> dict[str, str]:
+    """Map every field token (label AND marker form) to its cleaned note value."""
+    lookup: dict[str, str] = {}
+    for label, marker in _L4_FIELDS_FROM_TRACKER:
+        clean = _clean_l4_body_value(note_values.get(label, ""))
+        lookup[label] = clean
+        lookup[marker] = clean
+    return lookup
+
+
+def _rewrite_plain_l4_value_region(raw: str, clean_value: str) -> str:
+    """Rewrite one plain/backtick value region to ``clean_value`` (decoration kept).
+
+    ``raw`` is the text from just after a field's colon to the start of the next
+    field on the line (or end of line). The colon spacing, a backtick wrapper, and a
+    trailing separator/sentence punctuation are preserved; only the value core is
+    replaced. An empty value (the note carries nothing to conform to, or the packet
+    declared the field with no value) is returned untouched.
+    """
+    if not clean_value:
+        return raw
+    lead_ws = re.match(r"[ \t]*", raw).group(0)
+    rest = raw[len(lead_ws):]
+    if rest.strip() == "":
+        return raw
+    if rest.startswith("`"):
+        close = rest.find("`", 1)
+        if close == -1:
+            return raw  # malformed inline-code span: leave as authored
+        trailing = rest[close + 1:]
+        return f"{lead_ws}`{clean_value}`{trailing}"
+    trailing_match = re.search(r"[ \t]*[.;,]?[ \t]*$", rest)
+    trailing = trailing_match.group(0) if trailing_match else ""
+    return f"{lead_ws}{clean_value}{trailing}"
+
+
+def _conform_plain_l4_list_item_line(line: str, clean_lookup: dict[str, str]) -> str:
+    """Conform plain/bold L4 declarations on a single qualifying list-item line.
+
+    Returns ``line`` unchanged unless it begins (after indent + optional list marker)
+    with an L4 field token. On a qualifying line, the leading field and every grouped
+    field after a `. `/`; ` separator are rewritten to their note values; a token
+    inside a backtick span, or one not at a grouping separator, is treated as value
+    text rather than a key.
+    """
+    keys = list(_PLAIN_L4_KEY_RE.finditer(line))
+    if not keys:
+        return line
+    spans = _backtick_spans(line)
+    first = keys[0]
+    if _pos_in_backtick_span(first.start(), spans):
+        return line
+    if not _PLAIN_L4_LEAD_PREFIX_RE.fullmatch(line[:first.start()]):
+        return line
+
+    accepted = [first]
+    for key in keys[1:]:
+        if _pos_in_backtick_span(key.start(), spans):
+            continue
+        before = line[:key.start()].rstrip(" \t")
+        if before[-1:] in _PLAIN_L4_GROUP_BOUNDARY_CHARS:
+            accepted.append(key)
+
+    out = [line[:accepted[0].start()]]
+    for i, key in enumerate(accepted):
+        out.append(line[key.start():key.end()])
+        value_end = accepted[i + 1].start() if i + 1 < len(accepted) else len(line)
+        clean_value = clean_lookup.get(key.group("field"), "")
+        out.append(
+            _rewrite_plain_l4_value_region(line[key.end():value_end], clean_value)
+        )
+    return "".join(out)
+
+
+def _conform_out_of_block_l4_decls(packet_text: str, note_values: dict[str, str]) -> str:
+    """Conform out-of-block L4 declarations to the note (note wins).
+
+    The marker block is the machine-owned single source; any OTHER packet declaration
+    of an L4 field is a drift vector, because the pre-commit supervisor + bot read the
+    tracker note as truth and flag a packet that declares a value the note does not.
+    Each such out-of-block declaration is rewritten to the note's value so the packet,
+    not just its block, cannot diverge. Three authoring surfaces are covered: a plain
+    or bold list-item declaration in any field (incl. compact multi-field lines) via
+    :func:`_conform_plain_l4_list_item_line`; a backtick-delimited inline-code span in
+    any field via :func:`_conform_l4_decl_in_text`; and the plain-text ``Target gate:``
+    header form for target_gate_id (the one L4-block field with a dedicated
+    plain-header extractor) via :func:`_conform_target_gate_header_in_text`. The block
+    region is sliced out and left byte-identical. A field the note does not declare
+    (empty value) is left as authored: there is no note value to conform it to, and
+    deleting human-authored content is out of scope for single-source derivation.
+    """
+    clean_lookup = _build_clean_l4_lookup(note_values)
+
+    def _rewrite(segment: str) -> str:
+        # Plain / bold list-item declarations (the most common packet form), conformed
+        # line by line so a prose mention of a field name is never rewritten.
+        segment = "\n".join(
+            _conform_plain_l4_list_item_line(line, clean_lookup)
+            for line in segment.split("\n")
+        )
+        for label, marker in _L4_FIELDS_FROM_TRACKER:
+            clean_value = clean_lookup.get(label, "")
+            if not clean_value:
+                continue
+            for field_token in dict.fromkeys((label, marker)):
+                segment = _conform_l4_decl_in_text(segment, field_token, clean_value)
+            if label == "target_gate_id":
+                # The gate also appears as a plain-text packet header
+                # ("Target gate: G8") that the inline-code conformer above does not
+                # reach; conform it too so the note wins on a divergent header.
+                segment = _conform_target_gate_header_in_text(segment, clean_value)
+        return segment
+
+    start = packet_text.find(L4_FIELDS_FROM_TRACKER_START)
+    end = packet_text.find(L4_FIELDS_FROM_TRACKER_END)
+    if start != -1 and end != -1 and end > start:
+        end += len(L4_FIELDS_FROM_TRACKER_END)
+        return (
+            _rewrite(packet_text[:start])
+            + packet_text[start:end]
+            + _rewrite(packet_text[end:])
+        )
+    return _rewrite(packet_text)
+
+
+def reconcile_packet_l4_fields_block(packet_text: str, tracker_note_text: str) -> str:
+    """Reconcile a packet's L4-field block to the canonical tracker note (note wins).
+
+    The machine-owned block is rendered solely from the note's marker values, and any
+    L4 declaration OUTSIDE the block -- a plain or bold list-item declaration (incl.
+    compact multi-field lines), a backtick-delimited inline-code span, or the
+    plain-text ``Target gate:`` header form for target_gate_id -- is rewritten to the
+    same note-derived value, so no independently-supplied packet value (in the block
+    or in the body) can survive divergence. The reverse never occurs. Idempotent.
+    """
+    note_values = derive_l4_fields_from_tracker_note(tracker_note_text)
+    block = render_l4_fields_block_from_tracker_note(tracker_note_text)
+    reconciled = _replace_l4_fields_block(packet_text, block)
+    return _conform_out_of_block_l4_decls(reconciled, note_values)
+
+
+def reconcile_packet_l4_fields_block_for_wave(
+    repo_root: Path,
+    wave_id: str,
+    packet_text: str,
+) -> str:
+    """Reconcile ``packet_text``'s L4-field block to wave_id's canonical TASKS.md note.
+
+    Returns ``packet_text`` unchanged when no canonical note exists yet -- the
+    initial Phase A ``create_plan_draft`` can run before the note is written, and
+    the commit-path refresh reconciles later. This is the seam phase_a_executor
+    calls so the note-derived block stays centralized in the module that owns the
+    tracker-note marker extractors (one-way dependency: commit_executor does not
+    import phase_a_executor, so there is no import cycle).
+    """
+    note = _extract_existing_canonical_tracker_note_from_tasks(repo_root, str(wave_id or ""))
+    if not note.strip():
+        return packet_text
+    return reconcile_packet_l4_fields_block(packet_text, note)
 
 
 def _commit_supervisor_reentry_plan_path(handoff: dict[str, Any]) -> str:
@@ -2595,6 +3088,11 @@ def refresh_commit_path_packet_truth(
             wave_id=wave_id,
             deferred_paths=deferred_path_candidates,
         )
+        # Single-source the packet's L4-field block from the canonical tracker
+        # note (the #52 supervisor + bot read the note as truth). The settled
+        # tracker_note_text wins on any divergence, establishing the invariant
+        # "at supervisor time, packet L4-fields == tracker note L4-fields".
+        packet_text = reconcile_packet_l4_fields_block(packet_text, tracker_note_text)
         refreshed_text = _replace_commit_path_truth_refresh_block(packet_text, block)
     except ValueError as exc:
         return handoff, [], str(exc)
