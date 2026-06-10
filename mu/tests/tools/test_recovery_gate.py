@@ -11764,6 +11764,320 @@ class TestNeedsPhaseB_Tier3:
         assert checkpoint["baseline_wave_files"] == ["mu/tools/executors/recovery_gate.py"]
         assert checkpoint["bridge_scope_fingerprint"] == result["bridge_scope_fingerprint"]
 
+    def test_fix_post_reentry_needs_phase_b_emits_route_phase_b_retry_record(self, tmp_path):
+        # The recovery must hand the dispatcher an explicit ROUTE_PHASE_B retry
+        # record so the post-recovery routing RESUMES Phase B from the seeded
+        # phase_b_state.json instead of re-running a full ROUTE_PHASE_A cycle.
+        plan_path = "reports/control_plane/pager.md"
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": plan_path,
+            "wave_id": "wave-post-reentry",
+            "bridge_rounds": 4,
+        }
+
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is True, fix
+        assert fix["action"] == "resume_phase_b_reentry"
+        # Mutated onto the caller's result (attempt_recovery passes by reference).
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_B"
+        assert retry_record["wave_name"] == rg_mod.normalize_wave_id("wave-post-reentry")
+        assert retry_record["tracked_packet"] == plan_path
+        assert retry_record["plan_path"] == plan_path
+        candidate = retry_record["next_candidates"][0]
+        assert candidate["tracked_packet"] == plan_path
+        assert candidate["bounded"] is True
+
+    def test_attempt_recovery_post_reentry_emits_route_phase_b_retry_record(self, tmp_path):
+        # End-to-end through the real attempt_recovery: the recovered post_reentry
+        # result carries a ROUTE_PHASE_B retry_record (the dispatcher consumes it
+        # to resume Phase B, not re-route Phase A) while the recovery framing is
+        # unchanged.
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "wave-post-reentry",
+            "bridge_rounds": 6,
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B after reentry convergence. Bridge status drifted"
+            ],
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "wave-post-reentry")
+
+        assert recovery["recovered"] is True
+        assert recovery["action"] == "resume_phase_b_reentry"
+        assert recovery["failure_class"] == "post_reentry_needs_phase_b"
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_B"
+        assert retry_record["next_candidates"][0]["tracked_packet"] == "reports/control_plane/pager.md"
+
+    def test_fix_post_reentry_needs_phase_b_missing_plan_path_fails_safe(self, tmp_path):
+        # An un-resumable post_reentry (no plan_path) MUST surface the failure and
+        # MUST NOT emit a routing retry_record — otherwise the dispatcher would
+        # resume Phase B with no seeded state.
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "wave_id": "wave-post-reentry",
+        }
+
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is False
+        assert fix["action"] == "missing_plan_path"
+        assert "retry_record" not in result
+
+    def test_fix_post_reentry_retry_record_carries_packet_task_id(self, tmp_path, monkeypatch):
+        # Bridge round 2 regression: the ROUTE_PHASE_B retry_record MUST carry the
+        # wave's task_id, or the dispatcher's post-resume handoff-identity check
+        # compares expected=None against the task_id Phase B injects into the
+        # handoff and rejects the commit chain fail-closed.  The authoritative
+        # source is the plan packet's Task header (what validate_inputs and the
+        # Phase B handoff builder both resolve to); it MUST win over the routing
+        # record so a stale routing task_id cannot drift the resumed identity.
+        plan_path = "reports/control_plane/pager.md"
+        meta_dir = tmp_path / ".agent_bus" / "meta"
+        meta_dir.mkdir(parents=True)
+        (meta_dir / "post_merge_routing.json").write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "routing task_id must lose to the packet",
+                    "wave_name": "wave-post-reentry",
+                    "task_id": "[ROUTING-TASK]",
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda repo_root, name: SimpleNamespace(
+                load_plan_packet=lambda root, path: {"task_id": "[PACKET-TASK]"}
+            ),
+        )
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": plan_path,
+            "wave_id": "wave-post-reentry",
+        }
+
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is True
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_B"
+        # Packet Task header wins over the routing record task_id.
+        assert retry_record["task_id"] == "[PACKET-TASK]"
+
+    def test_fix_post_reentry_retry_record_task_id_falls_back_to_routing_record(self, tmp_path):
+        # When the plan packet cannot be parsed in the recovery context (no
+        # phase_b_executor module under tmp repo root), the proven fallback is the
+        # live routing record task_id — the same channel
+        # _phase_b_retry_record_from_routing_record copies via dict(routing_record).
+        plan_path = "reports/control_plane/pager.md"
+        meta_dir = tmp_path / ".agent_bus" / "meta"
+        meta_dir.mkdir(parents=True)
+        (meta_dir / "post_merge_routing.json").write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "post-reentry wave",
+                    "wave_name": "wave-post-reentry",
+                    "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": plan_path,
+            "wave_id": "wave-post-reentry",
+        }
+
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is True
+        assert result["retry_record"]["task_id"] == "[NEXT-CODEX-POST-REDTEAM]"
+
+    def test_fix_post_reentry_retry_record_omits_task_id_when_unresolvable(self, tmp_path):
+        # Best-effort: with no packet, no routing record, and no result task_id,
+        # the retry_record omits task_id rather than aborting the already-seeded
+        # resume or fabricating an identity.  A genuinely un-resolvable identity
+        # then fails safe downstream (validate_inputs / the dispatcher handoff
+        # check), not masked here.  The ROUTE_PHASE_B routing is still emitted.
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "wave-post-reentry",
+        }
+
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is True
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_B"
+        assert "task_id" not in retry_record
+
+    def test_fix_post_reentry_prefers_recovery_wave_id_over_doubled_plan_stem(self, tmp_path):
+        # Bridge round 3 regression: the real Phase B post_reentry result carries
+        # plan_path but NOT wave_id, and control-plane packets are named
+        # "<wave_id>_<date>.md" so Path(plan_path).stem DOUBLES the date.
+        # attempt_recovery passes the single-date routing wave_id as the `wave_id`
+        # kwarg; the recovery MUST use it for both the seeded phase_b_state.json
+        # wave_id and the retry_record wave_name, NOT the doubled stem (which
+        # mismatches Phase B's single-date handoff wave_id and fail-closes the
+        # resume).
+        wave_id = "post-reentry-resume-x-2026-06-10"
+        plan_path = "reports/control_plane/post_reentry_resume_x_2026-06-10_2026-06-10.md"
+        doubled_stem = rg_mod.normalize_wave_id(Path(plan_path).stem)
+        # Precondition: the stem really does double the date (so the assert below
+        # is meaningful, not vacuously true).
+        assert doubled_stem != wave_id
+        assert doubled_stem.endswith("2026-06-10-2026-06-10")
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": plan_path,
+            # NB: no wave_id in the result payload (matches real Phase B output).
+        }
+
+        fix = rg_mod.fix_post_reentry_needs_phase_b(
+            tmp_path, wave_id=wave_id, result=result
+        )
+
+        assert fix["fixed"] is True, fix
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_B"
+        # The retry routes on the single-date routing wave_id, not the doubled stem.
+        assert retry_record["wave_name"] == wave_id
+        assert retry_record["wave_name"] != doubled_stem
+        assert retry_record["next_candidates"][0]["candidate"] == wave_id
+        # The seeded resume state agrees, so the dispatcher's staleness check
+        # (fix_stale_executor_state compares state wave_id vs current) keeps it.
+        state = json.loads(
+            (tmp_path / ".agent_bus" / "executors" / "phase_b_state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert state["wave_id"] == wave_id
+
+    def test_fix_post_reentry_wave_id_kw_wins_over_result_payload_wave_id(self, tmp_path):
+        # The recovery-supplied wave_id (the dispatcher's current routing wave) is
+        # authoritative for the resume identity and MUST win over a divergent
+        # wave_id carried on the failing result payload -- Phase B mints its handoff
+        # wave_id from the routing/declared wave, so the retry_record must match the
+        # kwarg, not a stale result field.
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "stale-result-wave-2026-06-09",
+        }
+
+        fix = rg_mod.fix_post_reentry_needs_phase_b(
+            tmp_path, wave_id="current-routing-wave-2026-06-10", result=result
+        )
+
+        assert fix["fixed"] is True, fix
+        assert result["retry_record"]["wave_name"] == "current-routing-wave-2026-06-10"
+
+    def test_fix_post_reentry_retry_record_carries_freshness_state_sha(self, tmp_path, monkeypatch):
+        # Bridge round 4 regression: the ROUTE_PHASE_B retry_record MUST carry the
+        # dispatcher's freshness identity (state_sha), or the default
+        # skip_freshness=False dispatch rejects it as "has no state_sha" BEFORE
+        # Phase B and the seeded re-entry collapses into a full ROUTE_PHASE_A
+        # re-run.  The stamped value is whatever the current-state resolver
+        # computes (the same source the dispatcher's freshness gate uses).
+        monkeypatch.setattr(
+            rg_mod, "_post_reentry_resume_state_sha", lambda repo_root: "deadbeefstate0sha"
+        )
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "wave-post-reentry",
+        }
+
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is True, fix
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_B"
+        assert retry_record["state_sha"] == "deadbeefstate0sha"
+
+    def test_fix_post_reentry_omits_state_sha_when_unresolvable_but_keeps_route(self, tmp_path, monkeypatch):
+        # Best-effort: when the current state_sha cannot be computed (e.g.
+        # repo_root is not a git repo) the record is emitted WITHOUT state_sha,
+        # NOT fabricated.  It still carries decision=ROUTE_PHASE_B so the
+        # dispatcher's freshness gate fails it CLOSED (surfacing an un-resumable
+        # post_reentry) rather than silently re-running a full ROUTE_PHASE_A.
+        monkeypatch.setattr(
+            rg_mod, "_post_reentry_resume_state_sha", lambda repo_root: ""
+        )
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "wave-post-reentry",
+        }
+
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is True, fix
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_B"
+        assert "state_sha" not in retry_record
+
+    def test_post_reentry_resume_state_sha_matches_compute_repo_state(self, tmp_path):
+        # The recovered retry_record carries the SAME state_sha the dispatcher
+        # freshness gate validates against
+        # (meta_bridge_supervisor.compute_repo_state).  Use a real git repo so the
+        # value is genuine, not mocked.  Driven through the public recovery
+        # entrypoint (fix_post_reentry_needs_phase_b) rather than the private
+        # resolver: the stamped retry_record["state_sha"] IS the resolver's output.
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        }
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True, env=env, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, capture_output=True, check=True)
+        (repo / "seed.txt").write_text("seed\n")
+        subprocess.run(["git", "add", "seed.txt"], cwd=repo, capture_output=True, env=env, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, env=env, check=True)
+
+        meta_mod = load_module(
+            "meta_bridge_supervisor",
+            _EXECUTORS_DIR.parent / "agents" / "meta_bridge_supervisor.py",
+        )
+
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "wave-resume-state-sha",
+        }
+        fix = rg_mod.fix_post_reentry_needs_phase_b(repo, result=result)
+        assert fix["fixed"] is True, fix
+        sha = result["retry_record"]["state_sha"]
+
+        assert sha, "recovery must stamp a state_sha for a real git repo"
+        assert sha == meta_mod.compute_repo_state(repo).state_sha
+
     def test_repo_module_loader_ignores_cached_global_phase_b_module(self, tmp_path, monkeypatch):
         executors_dir = tmp_path / "mu" / "tools" / "executors"
         executors_dir.mkdir(parents=True)
