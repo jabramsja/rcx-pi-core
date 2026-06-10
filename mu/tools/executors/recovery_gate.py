@@ -5693,6 +5693,61 @@ def _is_ignored_hybrid_scratch_cache_path(rel_path: str) -> bool:
     ) is not None
 
 
+def _is_ignored_pycache_bytecode_path(rel_path: str) -> bool:
+    """True for a gitignored CPython bytecode cache regenerated anywhere in the
+    repo: the ``__pycache__`` directory itself or a
+    ``__pycache__/<mod>.cpython-NNN[.opt-N][-tag].pyc`` bytecode file at any
+    depth. The repo .gitignore ignores ``__pycache__/`` and ``*.pyc``; any
+    pytest run a Step-15/tier-3 recovery iteration uses to verify its fix
+    regenerates this bytecode (e.g. under mu/tests/), so it must not be judged
+    "hybrid observed drift escaped declared scope" (which loops the
+    diagnose<->delegate recovery, recovered=False). Generalizes the narrow
+    ``.scratch/__pycache__`` precedent (_is_ignored_hybrid_scratch_cache_path)
+    to every location while staying strictly bytecode-only: real ``.py`` sources
+    and any non-bytecode path -- inside or outside ``__pycache__`` -- are NOT
+    matched and still fail closed.
+
+    This is a path-STRING test only. Whether the on-disk object is genuinely a
+    repo-local cache (vs. a ``__pycache__``/``.pyc`` symlink escaping the
+    worktree) is enforced separately by _validate_ignored_pycache_bytecode_path,
+    mirroring the _is_ignored.../_validate_ignored... split used for .scratch.
+    """
+    return (
+        re.fullmatch(r"(?:.*/)?__pycache__", rel_path) is not None
+        or re.fullmatch(
+            r"(?:.*/)?__pycache__/[^/]+\.cpython-\d+(?:\.opt-\d+)?(?:-[A-Za-z0-9_.-]+)?\.pyc",
+            rel_path,
+        ) is not None
+    )
+
+
+def _validate_ignored_pycache_bytecode_path(
+    repo_root: Path,
+    rel_path: str,
+) -> bool:
+    """Confirm a pycache-shaped ``rel_path`` is genuine repo-local bytecode and
+    not a scope escape wearing a bytecode name. ``_is_ignored_pycache_bytecode_path``
+    matches the path STRING only; a ``__pycache__`` directory or a ``*.pyc`` file
+    can still be a symlink whose target lives OUTSIDE the worktree. Such a symlink
+    must stay observed drift and fail closed, so only a real ``__pycache__``
+    directory or a real ``.pyc`` regular file is exempted -- a symlink (or any
+    other inode type) is not. A path that no longer exists is benign bytecode
+    churn (nothing on disk can escape), matching the ``.scratch`` cache precedent
+    in _validate_ignored_hybrid_scratch_cache_path.
+    """
+    path = repo_root / rel_path
+    snapshot = _absolute_path_snapshot(path)
+    if not snapshot["exists"]:
+        return True
+    expected_realpath = str(path.resolve(strict=False))
+    if re.fullmatch(r"(?:.*/)?__pycache__", rel_path) is not None:
+        if snapshot["type"] != "directory":
+            return False
+    elif snapshot["type"] != "file":
+        return False
+    return snapshot["realpath"] == expected_realpath
+
+
 def _validate_ignored_hybrid_scratch_cache_path(
     repo_root: Path,
     rel_path: str,
@@ -5983,6 +6038,10 @@ def _audit_hybrid_checkpoint(
     out_of_scope = sorted(
         path for path in observed_drift
         if not _hybrid_scope_matches(path, files_in_scope)
+        and not (
+            _is_ignored_pycache_bytecode_path(path)
+            and _validate_ignored_pycache_bytecode_path(repo_root, path)
+        )
     )
     if out_of_scope:
         return False, {
