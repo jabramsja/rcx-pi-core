@@ -1482,6 +1482,21 @@ def _validate_l4_field_labels() -> None:
 _validate_l4_field_labels()
 
 
+# Marker spellings that are authorization TOKENS, not field declarations. The
+# founder_override field's marker slot holds the uppercase same-wave override token
+# ``FOUNDER_OVERRIDE:<wave_id>`` -- a distinct entity commit automation reads to derive
+# the override, which the tracker note does NOT govern (the note's optional
+# founder_override value, when present, fills the lowercase field DECLARATION). When the
+# note OMITS a field, conform-to-absence clears the field-declaration spelling (the
+# lowercase label) but MUST preserve these token spellings, so a packet's canonical
+# ``FOUNDER_OVERRIDE:<wave_id>`` survives a note that carries no override. Derived
+# structurally as the markers whose spelling differs from the field label, so a future
+# label/marker split is classified automatically rather than by a hardcoded name.
+_L4_AUTH_TOKEN_MARKERS: frozenset[str] = frozenset(
+    marker for label, marker in _L4_FIELDS_FROM_TRACKER if marker != label
+)
+
+
 # Complete set of markers the canonical tracker-note builder
 # (tracker_sync_note.render_tracker_sync_note) can emit. Used as the boundary set
 # when DERIVING the packet L4-field block so a value stops at the NEXT builder
@@ -1553,10 +1568,47 @@ def render_l4_fields_block_from_tracker_note(tracker_note_text: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _find_block_marker_line(text: str, marker: str, *, search_from: int = 0) -> int:
+    """Return the offset of ``marker`` standing alone on its own line, or -1.
+
+    A control packet may MENTION a block marker inline in prose -- e.g. a meta-packet
+    documenting the machine-owned ``L4_FIELDS_FROM_TRACKER`` block quotes the start/end
+    delimiters in a backtick-wrapped sentence, so the marker text appears more than
+    once. Only the occurrence that owns its WHOLE line delimits the real machine block
+    (:func:`render_l4_fields_block_from_tracker_note` always emits the start/end markers
+    on their own lines). A raw :meth:`str.find` binds to the FIRST occurrence, so an
+    earlier inline prose mention is mistaken for the block boundary; this returns the
+    first occurrence at or after ``search_from`` whose line holds only the marker
+    (whitespace before and after on the line is allowed; non-whitespace -- a backtick or
+    a word -- means it is an inline mention, not a delimiter). For a packet whose only
+    occurrence IS the own-line block marker the result equals :meth:`str.find`, so the
+    behavior changes only for packets that ALSO mention the marker inline.
+    """
+    idx = text.find(marker, search_from)
+    while idx != -1:
+        line_start = text.rfind("\n", 0, idx) + 1  # 0 when no preceding newline
+        after = idx + len(marker)
+        next_nl = text.find("\n", after)
+        line_end = next_nl if next_nl != -1 else len(text)
+        if text[line_start:idx].strip() == "" and text[after:line_end].strip() == "":
+            return idx
+        idx = text.find(marker, idx + 1)
+    return -1
+
+
 def _replace_l4_fields_block(packet_text: str, block: str) -> str:
-    """Insert or replace the marker-delimited L4-field block (idempotent)."""
-    start = packet_text.find(L4_FIELDS_FROM_TRACKER_START)
-    end = packet_text.find(L4_FIELDS_FROM_TRACKER_END)
+    """Insert or replace the marker-delimited L4-field block (idempotent).
+
+    The markers are located by :func:`_find_block_marker_line` so a packet that also
+    quotes the marker text inline in prose cannot bind the replacement to that prose
+    mention -- only the markers standing alone on their own lines delimit the block.
+    """
+    start = _find_block_marker_line(packet_text, L4_FIELDS_FROM_TRACKER_START)
+    end = _find_block_marker_line(
+        packet_text,
+        L4_FIELDS_FROM_TRACKER_END,
+        search_from=start + 1 if start != -1 else 0,
+    )
     if start != -1 and end != -1 and end > start:
         end += len(L4_FIELDS_FROM_TRACKER_END)
         trailing_newline = (
@@ -1634,6 +1686,28 @@ def _conform_l4_decl_in_text(text: str, field_token: str, clean_value: str) -> s
         lambda m: f"`{field_token}`:{m.group(1)}`{clean_value}`",
         text,
     )
+    return text
+
+
+def _clear_l4_decl_in_text(text: str, field_token: str) -> str:
+    """Clear a stale inline-code declaration of ``field_token`` to the bare-colon form.
+
+    Conform-to-absence counterpart of :func:`_conform_l4_decl_in_text` for a field the
+    note OMITS. The two canonical inline-code declaration forms lose their value,
+    collapsing to the machine block's bare ``- `field`:`` shape (the key is kept, no
+    value, no trailing whitespace): ```field: VALUE``` becomes ```field:``` and
+    ```field`: `VALUE``` becomes ```field`:```. So a stale out-of-block value cannot
+    outlive the note's omission. Only the lowercase field-DECLARATION spelling is ever
+    passed here; the uppercase authorization-token marker (``FOUNDER_OVERRIDE:<wave_id>``)
+    is never cleared -- the case-sensitive token bounds the match, so a no-space token
+    spelling is left untouched. A span already at the bare-colon form is matched and
+    re-emitted unchanged, so a second pass is a no-op.
+    """
+    escaped = re.escape(field_token)
+    # Form A: `field: VALUE` -> `field:`
+    text = re.sub(rf"`{escaped}:[ \t]*[^`\n]*`", f"`{field_token}:`", text)
+    # Form B: `field`: `VALUE` -> `field`:
+    text = re.sub(rf"`{escaped}`:[ \t]*`[^`\n]*`", f"`{field_token}`:", text)
     return text
 
 
@@ -1738,17 +1812,39 @@ def _build_clean_l4_lookup(note_values: dict[str, str]) -> dict[str, str]:
     return lookup
 
 
-def _rewrite_plain_l4_value_region(raw: str, clean_value: str) -> str:
+def _rewrite_plain_l4_value_region(
+    raw: str, clean_value: str, *, clear_on_absence: bool = True,
+) -> str:
     """Rewrite one plain/backtick value region to ``clean_value`` (decoration kept).
 
     ``raw`` is the text from just after a field's colon to the start of the next
     field on the line (or end of line). The colon spacing, a backtick wrapper, and a
     trailing separator/sentence punctuation are preserved; only the value core is
-    replaced. An empty value (the note carries nothing to conform to, or the packet
-    declared the field with no value) is returned untouched.
+    replaced.
+
+    When ``clean_value`` is empty the note OMITS this field, so a value the packet
+    still declares out of block is stale drift relative to the single-source note and
+    is CLEARED (conform-to-absence): the value collapses to the bare colon
+    (``founder_override:``), mirroring how the machine-owned block renders an omitted
+    field as ``- `field`:``. A region that is already empty (the packet declared the
+    field with no value) is returned unchanged, so a second pass is a no-op. The
+    grouped case -- a note-omitted field FOLLOWED by another L4 field on the same line
+    -- is handled by the caller, NOT here: a bare value region still owns the grouping
+    separator that introduces the next field, so collapsing it to the bare colon would
+    leave a ``field:.`` punctuation residue (the orphaned separator). The caller drops
+    that whole stale declaration instead, so this clear path is only ever reached for a
+    last/standalone omitted field.
+
+    ``clear_on_absence`` is False when the matched token is an authorization-token
+    marker (``FOUNDER_OVERRIDE:<wave_id>``): the note does not govern it, so its
+    omission must not blank the value -- the region is left exactly as authored.
     """
     if not clean_value:
-        return raw
+        if not clear_on_absence:
+            return raw  # authorization-token marker: note omission must not blank it
+        if raw.strip() == "":
+            return raw  # nothing declared to clear (idempotent no-op)
+        return ""  # last/standalone omitted field: collapse to the bare colon
     lead_ws = re.match(r"[ \t]*", raw).group(0)
     rest = raw[len(lead_ws):]
     if rest.strip() == "":
@@ -1771,7 +1867,13 @@ def _conform_plain_l4_list_item_line(line: str, clean_lookup: dict[str, str]) ->
     with an L4 field token. On a qualifying line, the leading field and every grouped
     field after a `. `/`; ` separator are rewritten to their note values; a token
     inside a backtick span, or one not at a grouping separator, is treated as value
-    text rather than a key.
+    text rather than a key. A field the note OMITS is conformed to absence: a
+    last/standalone declaration collapses to a bare ``field:``; a declaration FOLLOWED
+    by another grouped L4 field is dropped whole (key + value + its grouping separator)
+    so the line collapses to the surviving fields with no ``field:.`` residue and the
+    next field stays a detected, conformable declaration. An authorization-token marker
+    (``FOUNDER_OVERRIDE:<wave_id>`` in :data:`_L4_AUTH_TOKEN_MARKERS`), which the note
+    does not govern, is left exactly as authored either way.
     """
     keys = list(_PLAIN_L4_KEY_RE.finditer(line))
     if not keys:
@@ -1793,11 +1895,31 @@ def _conform_plain_l4_list_item_line(line: str, clean_lookup: dict[str, str]) ->
 
     out = [line[:accepted[0].start()]]
     for i, key in enumerate(accepted):
+        followed_by_field = i + 1 < len(accepted)
+        value_end = accepted[i + 1].start() if followed_by_field else len(line)
+        field = key.group("field")
+        clean_value = clean_lookup.get(field, "")
+        clearable = field not in _L4_AUTH_TOKEN_MARKERS
+        if followed_by_field and clearable and not clean_value:
+            # The note OMITS this field and another grouped L4 field follows on the
+            # same line. Drop the whole stale declaration -- the key, its value, AND
+            # the grouping separator that introduced the next field (all of which live
+            # in ``line[key.start():value_end]``). The line collapses to the surviving
+            # fields, so there is no orphaned ``field:.`` punctuation residue, and the
+            # next field stays a detected, conformable declaration (its own preceding
+            # separator, if any, is the prior field's and is untouched). Collapsing to a
+            # bare ``field:`` here instead would strand that separator as residue, which
+            # is why this case cannot be handled inside _rewrite_plain_l4_value_region.
+            # A last/standalone omitted field keeps a bare ``field:`` (below); an
+            # authorization-token marker is never clearable, so it is never dropped.
+            continue
         out.append(line[key.start():key.end()])
-        value_end = accepted[i + 1].start() if i + 1 < len(accepted) else len(line)
-        clean_value = clean_lookup.get(key.group("field"), "")
         out.append(
-            _rewrite_plain_l4_value_region(line[key.end():value_end], clean_value)
+            _rewrite_plain_l4_value_region(
+                line[key.end():value_end],
+                clean_value,
+                clear_on_absence=clearable,
+            )
         )
     return "".join(out)
 
@@ -1815,9 +1937,16 @@ def _conform_out_of_block_l4_decls(packet_text: str, note_values: dict[str, str]
     any field via :func:`_conform_l4_decl_in_text`; and the plain-text ``Target gate:``
     header form for target_gate_id (the one L4-block field with a dedicated
     plain-header extractor) via :func:`_conform_target_gate_header_in_text`. The block
-    region is sliced out and left byte-identical. A field the note does not declare
-    (empty value) is left as authored: there is no note value to conform it to, and
-    deleting human-authored content is out of scope for single-source derivation.
+    region is sliced out and left byte-identical. A field the note OMITS (empty value)
+    has any stale out-of-block declaration of its field spelling CLEARED (conform-to-
+    absence) -- the plain/bold list item via :func:`_conform_plain_l4_list_item_line`
+    and the inline-code span via :func:`_clear_l4_decl_in_text`. A standalone declaration
+    collapses to the block's bare ``- `field`:`` form; a plain declaration grouped with a
+    following L4 field on one line is dropped whole so the line collapses to the surviving
+    fields with no ``field:.`` residue. The clear targets the field-DECLARATION spelling
+    (the lowercase label) only, so the uppercase authorization-token marker
+    ``FOUNDER_OVERRIDE:<wave_id>`` (which the note does not govern) is preserved, not
+    blanked, in either the plain or the inline-code authoring form.
     """
     clean_lookup = _build_clean_l4_lookup(note_values)
 
@@ -1831,6 +1960,19 @@ def _conform_out_of_block_l4_decls(packet_text: str, note_values: dict[str, str]
         for label, marker in _L4_FIELDS_FROM_TRACKER:
             clean_value = clean_lookup.get(label, "")
             if not clean_value:
+                # The note OMITS this field. Clear any stale inline-code declaration of
+                # the field-DECLARATION spelling (the lowercase label) to the bare-colon
+                # form (conform-to-absence) -- matching what the plain/bold conformer
+                # above does for list items and what the machine block renders for an
+                # omitted field. The marker spelling is deliberately NOT cleared: for
+                # founder_override the marker is the uppercase authorization token
+                # `FOUNDER_OVERRIDE:<wave_id>` commit automation reads (the note does not
+                # govern it); for every other field the marker equals the label and is
+                # handled by this same call. The plain-text `Target gate:` header is left
+                # to the conform-to-value path below -- target_gate_id is structurally
+                # present in every canonical note, so its absence path is unreachable, and
+                # clearing the header would leave end-of-line trailing whitespace.
+                segment = _clear_l4_decl_in_text(segment, label)
                 continue
             for field_token in dict.fromkeys((label, marker)):
                 segment = _conform_l4_decl_in_text(segment, field_token, clean_value)
@@ -1841,8 +1983,15 @@ def _conform_out_of_block_l4_decls(packet_text: str, note_values: dict[str, str]
                 segment = _conform_target_gate_header_in_text(segment, clean_value)
         return segment
 
-    start = packet_text.find(L4_FIELDS_FROM_TRACKER_START)
-    end = packet_text.find(L4_FIELDS_FROM_TRACKER_END)
+    # Locate the block by the markers that stand alone on their own lines, so the
+    # sliced-out (kept byte-identical) region is the real machine block and not an
+    # inline prose mention of the marker text -- see :func:`_find_block_marker_line`.
+    start = _find_block_marker_line(packet_text, L4_FIELDS_FROM_TRACKER_START)
+    end = _find_block_marker_line(
+        packet_text,
+        L4_FIELDS_FROM_TRACKER_END,
+        search_from=start + 1 if start != -1 else 0,
+    )
     if start != -1 and end != -1 and end > start:
         end += len(L4_FIELDS_FROM_TRACKER_END)
         return (

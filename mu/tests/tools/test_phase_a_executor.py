@@ -404,6 +404,26 @@ def _l4_block_region(packet_text: str) -> str:
     return after_start.split(commit_mod.L4_FIELDS_FROM_TRACKER_END, 1)[0]
 
 
+def _own_line_l4_block(packet_text: str) -> str:
+    """Return the L4 block whose start/end markers each stand alone on their own line.
+
+    Unlike :func:`_l4_block_region` (which splits on the FIRST marker occurrence), this
+    skips an inline prose mention of the marker text -- a meta-packet may quote the
+    delimiters in a backtick-wrapped sentence -- and returns the real machine-owned
+    block, so a test can assert the block the reconciler actually targets.
+    """
+    lines = packet_text.split("\n")
+    start_i = next(
+        i for i, ln in enumerate(lines)
+        if ln == commit_mod.L4_FIELDS_FROM_TRACKER_START
+    )
+    end_i = next(
+        i for i in range(start_i + 1, len(lines))
+        if lines[i] == commit_mod.L4_FIELDS_FROM_TRACKER_END
+    )
+    return "\n".join(lines[start_i:end_i + 1]) + "\n"
+
+
 def _init_git_repo(tmp_path: Path) -> Path:
     """Minimal git repo for the commit-path refresh proof (mirrors pipeline setup)."""
     repo = tmp_path / "repo"
@@ -671,6 +691,169 @@ def test_packet_l4_reconcile_conforms_plain_and_bold_out_of_block_l4_decls():
     assert "We single-source primary_blocker_class from the canonical tracker note." in reconciled
     assert "- Class: L4_ENABLER" in reconciled
     # Idempotent across all plain / bold / multi-field forms.
+    assert commit_mod.reconcile_packet_l4_fields_block(reconciled, note) == reconciled
+
+
+def test_packet_l4_reconcile_clears_stale_omitted_optional_l4_decl():
+    """A stale out-of-block decl of a field the note OMITS is CLEARED (conform-to-absence).
+
+    Deferred PR #1090 bot P2: the canonical L4_ENABLER tracker note omits the optional
+    ``founder_override`` field, yet a packet may still carry a stale out-of-block
+    declaration of it. Because the note is the single source, that leftover is drift the
+    supervisor/bot flag -- so reconcile must CLEAR it to the bare colon (mirroring the
+    block's ``- `founder_override`:`` omitted form), not leave it as authored. This
+    covers BOTH authoring surfaces the reconciler reaches: the plain list item
+    (``- founder_override: old-token``) AND the inline-code span
+    (``- `founder_override: stale-inline```, the exact bot-P2 reproduction, plus the
+    ``- `founder_override`: `...``` two-span form).
+
+    The clear is scoped to the lowercase field-DECLARATION spelling. The uppercase
+    ``FOUNDER_OVERRIDE:<wave>`` same-wave authorization TOKEN is a distinct entity the
+    note does not govern, so it must SURVIVE the note's omission -- in BOTH the plain
+    list-item form (which a conform-to-absence that ignored case would silently blank)
+    and the backtick form. Fields the note DOES declare stay conformed-to-value, non-L4
+    / human content is untouched, the machine-owned block stays byte-identical, and a
+    second pass is a no-op.
+    """
+    note = _canonical_packet_l4_tracker_note(primary_blocker_class="INTEGRATION")
+    derived = commit_mod.derive_l4_fields_from_tracker_note(note)
+    # Premise: the canonical note OMITS the optional founder_override field.
+    assert derived["founder_override"] == ""
+    clean_blocker = commit_mod.clean_l4_body_value(derived["primary_blocker_class"])
+    derived_block = commit_mod.render_l4_fields_block_from_tracker_note(note)
+    packet = (
+        f"# Packet\n\nWave ID: {_PACKET_L4_WAVE}\n\n"
+        "## Grounding / Authorization\n"
+        "- Class: L4_ENABLER\n"                       # non-L4 label: untouched
+        "- primary_blocker_class: DESIGN\n"           # note DECLARES it: conform-to-value
+        "- founder_override: old-token\n"             # plain, note OMITS: stale -> CLEAR
+        "- `founder_override: stale-inline`\n"        # inline-code (bot P2): stale -> CLEAR
+        "- `founder_override`: `stale-formb`\n"       # inline-code two-span: stale -> CLEAR
+        f"- FOUNDER_OVERRIDE:{_PACKET_L4_WAVE}\n"     # plain auth TOKEN: PRESERVE
+        f"- Same-wave override: `FOUNDER_OVERRIDE:{_PACKET_L4_WAVE}`\n"  # backtick TOKEN: PRESERVE
+        "- We single-source founder_override from the canonical note.\n\n"  # prose: untouched
+        + derived_block                               # block already canonical (byte-identity probe)
+    )
+
+    reconciled = commit_mod.reconcile_packet_l4_fields_block(packet, note)
+
+    # Every stale founder_override field declaration -- plain AND inline-code (both
+    # forms) -- is cleared to the bare colon: no value, no trailing whitespace.
+    assert "old-token" not in reconciled       # plain value gone
+    assert "stale-inline" not in reconciled    # inline-code one-span value gone (bot P2)
+    assert "stale-formb" not in reconciled     # inline-code two-span value gone
+    assert "- founder_override:\n" in reconciled        # plain -> bare colon
+    assert "`founder_override:`" in reconciled          # inline-code one-span -> bare colon
+    assert "- founder_override: \n" not in reconciled   # no trailing space (git-diff clean)
+    # The authorization TOKEN survives the note's omission in BOTH forms (note does not
+    # govern it); the plain form is the case that a case-insensitive clear would blank.
+    assert f"- FOUNDER_OVERRIDE:{_PACKET_L4_WAVE}" in reconciled
+    assert f"`FOUNDER_OVERRIDE:{_PACKET_L4_WAVE}`" in reconciled
+    # A field the note declares stays conformed-to-value (existing behavior preserved).
+    assert f"- primary_blocker_class: {clean_blocker}" in reconciled
+    assert "DESIGN" not in reconciled
+    # Non-L4 / human-authored content is untouched.
+    assert "- Class: L4_ENABLER" in reconciled
+    assert "- We single-source founder_override from the canonical note." in reconciled
+    # The machine-owned block region is byte-identical before/after the conform step.
+    assert _l4_block_region(reconciled) == _l4_block_region(packet)
+    # Idempotent: a second pass over already-conformed text is a no-op.
+    assert commit_mod.reconcile_packet_l4_fields_block(reconciled, note) == reconciled
+
+
+def test_packet_l4_reconcile_clears_omitted_field_keeping_grouped_neighbor():
+    """Clearing a note-omitted GROUPED field leaves no residue and keeps the neighbor.
+
+    Deferred re-entry finding on the staged fix: on a compact line where the note OMITS
+    the leading field (founder_override) but DECLARES the next (evidence_command),
+    collapsing the omitted field to a bare colon stranded its grouping separator as a
+    ``founder_override:.`` punctuation residue -- not an actually-empty declaration. The
+    whole stale declaration (key + value + that separator) must instead be DROPPED so
+    the line collapses to the surviving neighbor, which stays a detected, conformed
+    declaration (not frozen by a merged/lost separator). The block stays byte-identical
+    and a second pass is a no-op.
+    """
+    note = _canonical_packet_l4_tracker_note(primary_blocker_class="INTEGRATION")
+    derived = commit_mod.derive_l4_fields_from_tracker_note(note)
+    assert derived["founder_override"] == ""
+    clean_evidence = commit_mod.clean_l4_body_value(derived["evidence_command"])
+    derived_block = commit_mod.render_l4_fields_block_from_tracker_note(note)
+    packet = (
+        f"# Packet\n\nWave ID: {_PACKET_L4_WAVE}\n\n"
+        "## Grounding / Authorization\n"
+        # Compact line: omitted founder_override FOLLOWED BY declared evidence_command.
+        "- founder_override: old-token. evidence_command: `echo WRONG`\n\n"
+        + derived_block
+    )
+
+    reconciled = commit_mod.reconcile_packet_l4_fields_block(packet, note)
+
+    # The omitted leading field's stale value is gone...
+    assert "old-token" not in reconciled
+    # ...with NO punctuation residue: the cleared field must not survive as a
+    # bare-but-non-empty `founder_override:.` (the orphaned grouping separator).
+    assert "founder_override:." not in reconciled
+    assert "founder_override:" not in reconciled.split(derived_block)[0]  # gone from body
+    # The whole stale declaration was dropped, so the line collapses to the declared
+    # neighbor, which leads and stays conformed-to-value (not frozen by a lost separator).
+    assert f"- evidence_command: `{clean_evidence}`" in reconciled
+    assert "echo WRONG" not in reconciled
+    # Block untouched; idempotent.
+    assert _l4_block_region(reconciled) == _l4_block_region(packet)
+    assert commit_mod.reconcile_packet_l4_fields_block(reconciled, note) == reconciled
+
+
+def test_packet_l4_reconcile_binds_to_own_line_block_not_prose_marker_mention():
+    """Reconcile targets the own-line machine block, never an inline prose marker mention.
+
+    Re-entry blocking finding: a meta-packet that DOCUMENTS the machine-owned
+    ``L4_FIELDS_FROM_TRACKER`` block quotes the start/end delimiters inline in a
+    backtick-wrapped prose sentence, so the marker text appears twice -- once in prose,
+    once as the real block. A naive first-``str.find`` bound to the earlier PROSE
+    mention, so :func:`reconcile_packet_l4_fields_block` spliced a derived block into the
+    prose sentence (corrupting it) and left the real block below stale. The marker
+    lookup must instead bind to the marker that stands ALONE on its line: the real block
+    is refreshed to the note, the prose sentence survives verbatim, no duplicate block is
+    inserted, and the pass is idempotent.
+    """
+    note = _canonical_packet_l4_tracker_note(primary_blocker_class="INTEGRATION")
+    canonical_block = commit_mod.render_l4_fields_block_from_tracker_note(note)
+    # A STALE real block (divergent blocker class) proves the real block is REFRESHED,
+    # not merely left in place.
+    stale_block = commit_mod.render_l4_fields_block_from_tracker_note(
+        _canonical_packet_l4_tracker_note(primary_blocker_class="DESIGN")
+    )
+    assert stale_block != canonical_block
+
+    start_marker = commit_mod.L4_FIELDS_FROM_TRACKER_START
+    end_marker = commit_mod.L4_FIELDS_FROM_TRACKER_END
+    # The exact authoring shape that triggered the finding: a work-item sentence that
+    # quotes BOTH delimiters inline, positioned BEFORE the real block.
+    prose = (
+        f"4. Keep the machine-owned block region (between `{start_marker}` and "
+        f"`{end_marker}`) byte-identical; only out-of-block decls are affected.\n"
+    )
+    packet = (
+        f"# Packet\n\nWave ID: {_PACKET_L4_WAVE}\n\n## Work items\n\n"
+        + prose + "\n" + stale_block
+    )
+    # Premise: the inline prose mention precedes the real own-line block (2 of each
+    # marker), so a first-``find`` would bind to the prose marker, not the block.
+    assert packet.count(start_marker) == 2 and packet.count(end_marker) == 2
+    assert packet.find(start_marker) < packet.rfind(start_marker)
+
+    reconciled = commit_mod.reconcile_packet_l4_fields_block(packet, note)
+
+    # The prose sentence survives verbatim -- the discriminator that FAILS when the
+    # replacement binds to the prose marker (which truncates/splices the sentence).
+    assert prose in reconciled
+    # No duplicate block was spliced into the prose: still exactly one inline mention
+    # plus the one real block (2 of each marker, unchanged).
+    assert reconciled.count(start_marker) == 2 and reconciled.count(end_marker) == 2
+    # The own-line machine block was refreshed to the canonical note-derived block.
+    assert _own_line_l4_block(reconciled) == canonical_block
+    assert "DESIGN" not in reconciled  # the stale block value is gone
+    # Idempotent: a second pass over already-conformed text is a no-op.
     assert commit_mod.reconcile_packet_l4_fields_block(reconciled, note) == reconciled
 
 
