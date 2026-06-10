@@ -2623,6 +2623,104 @@ def fix_feature_branch_mismatch(repo_root: Path, **kw: Any) -> dict[str, Any]:
     return _fix_result(True, "create_expected_feature_branch", detail)
 
 
+def _post_reentry_resume_task_id(
+    repo_root: Path,
+    result_payload: dict[str, Any],
+    plan_path: str,
+) -> str:
+    """Resolve the task_id the resumed Phase B handoff will carry.
+
+    The dispatcher validates the resumed Phase B handoff against this recovery's
+    retry_record (executor_dispatch._validate_phase_b_handoff_identity).  On
+    resume, Phase B injects the plan packet's authoritative Task header into the
+    handoff (phase_b_executor injects plan.task_id when the routing record lacks
+    one, and validate_inputs requires routing.task_id == plan.task_id), so a
+    retry_record WITHOUT task_id makes the dispatcher's in-memory record compare
+    expected=None against the handoff's real task_id and the commit chain is
+    rejected fail-closed.  Resolve the SAME value Phase B will use: the plan
+    packet's canonical task_id (the authority validate_inputs compares against),
+    then the live routing record (the proven channel
+    _phase_b_retry_record_from_routing_record copies via dict(routing_record)),
+    then the failing result.  Best-effort: an unreadable source is skipped, not
+    fatal — the already-seeded resume must not be aborted here, and a genuinely
+    un-resolvable identity still fails safe downstream at validate_inputs / the
+    dispatcher handoff-identity check rather than being masked.
+    """
+    # 1) Plan packet's authoritative Task header — the value validate_inputs and
+    #    the Phase B handoff builder both resolve to.
+    try:
+        phase_b_mod = _load_executor_module_from_repo(repo_root, "phase_b_executor")
+        parsed = phase_b_mod.load_plan_packet(repo_root, plan_path)
+        packet_task_id = str(parsed.get("task_id", "") or "").strip()
+        if packet_task_id:
+            return packet_task_id
+    except Exception:
+        pass
+
+    # 2) Live routing record — the proven ROUTE_PHASE_B retry-record source.
+    try:
+        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+        routing_task_id = str(routing_record.get("task_id", "") or "").strip()
+        if routing_task_id:
+            return routing_task_id
+    except Exception:
+        pass
+
+    # 3) Failing result payload (last resort; honored only when present).
+    return str(result_payload.get("task_id", "") or "").strip()
+
+
+def _post_reentry_resume_state_sha(repo_root: Path) -> str:
+    """Resolve the freshness state_sha the resumed Phase B retry_record must carry.
+
+    The dispatcher validates a recovered retry_record with
+    executor_dispatch.validate_routing_record_freshness BEFORE routing it to
+    phase_b_executor (default skip_freshness=False).  That gate's identity is
+    meta_bridge_supervisor.compute_repo_state(repo_root).state_sha -- the SAME
+    source the dispatcher itself imports.  A ROUTE_PHASE_B record built from a
+    bare dict carries no state_sha, so the live retry is rejected as
+    "Routing record has no state_sha -- cannot verify freshness" before Phase B
+    and the seeded re-entry collapses into a full ROUTE_PHASE_A re-run (bridge
+    round 4 finding).  Stamp the current state_sha so the record passes the real
+    freshness gate and reaches phase_b_executor, which consumes the seeded state.
+
+    The recovery has only just seeded phase_b_state.json under .agent_bus, which
+    compute_repo_state excludes as a runtime path, so the seed does not perturb
+    this sha; and the dispatcher applies no tracked-file mutation between this
+    recovery and the retry dispatch (_apply_recovery_overrides is in-memory only
+    for this Tier-1 path), so the value still matches when dispatch validates it.
+
+    Best-effort: when the state cannot be computed (e.g. repo_root is not a git
+    repo) this returns "" and the retry_record is emitted WITHOUT state_sha,
+    which fails CLOSED at the dispatcher freshness gate -- surfacing an
+    un-resumable post_reentry rather than silently weakening the check.
+    """
+    try:
+        from meta_bridge_supervisor import compute_repo_state  # type: ignore
+    except Exception:
+        try:
+            import importlib.util as _ilu
+
+            meta_path = SCRIPT_DIR.parent / "agents" / "meta_bridge_supervisor.py"
+            spec = _ilu.spec_from_file_location("meta_bridge_supervisor", str(meta_path))
+            if spec is None or spec.loader is None:
+                return ""
+            mod = _ilu.module_from_spec(spec)
+            sys.modules["meta_bridge_supervisor"] = mod
+            try:
+                spec.loader.exec_module(mod)
+            except Exception:
+                sys.modules.pop("meta_bridge_supervisor", None)
+                return ""
+            compute_repo_state = mod.compute_repo_state
+        except Exception:
+            return ""
+    try:
+        return str(compute_repo_state(repo_root).state_sha or "")
+    except Exception:
+        return ""
+
+
 def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """Resume the deterministic Phase B re-entry path after a post-reentry veto."""
     result = kw.get("result", {})
@@ -2635,7 +2733,26 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
             "post-reentry NEEDS_PHASE_B result missing plan_path",
         )
 
-    wave_hint = str(result_payload.get("wave_id") or Path(plan_path).stem or "wave-unknown").strip()
+    # Prefer the recovery-supplied wave_id: attempt_recovery passes the dispatcher's
+    # normalized routing wave_id as the `wave_id` kwarg, and Phase B mints its resume
+    # handoff wave_id from the plan packet's declared `Wave ID:` -- the SAME
+    # single-date value the routing wave_id carries.  Deriving the seed/retry_record
+    # wave_id from kw["wave_id"] keeps the dispatcher's
+    # _validate_phase_b_handoff_identity check matching on resume.
+    # Path(plan_path).stem is a LAST-RESORT fallback only: control-plane packets are
+    # named "<wave_id>_<date>.md", so the stem DOUBLES the date
+    # (e.g. ...-2026-06-10-2026-06-10) and mismatches the single-date handoff
+    # wave_id, fail-closing the resume (bridge round 3 finding -- this ignored the
+    # kw and fell straight to the doubled stem).  The real Phase B post_reentry
+    # result sets status/step/plan_path but NOT wave_id, so result_payload's wave_id
+    # is normally absent and only kw["wave_id"] is authoritative.
+    recovery_wave_id = str(kw.get("wave_id") or "").strip()
+    wave_hint = str(
+        recovery_wave_id
+        or result_payload.get("wave_id")
+        or Path(plan_path).stem
+        or "wave-unknown"
+    ).strip()
     bridge_rounds_raw = result_payload.get("bridge_rounds", 0)
     try:
         bridge_rounds = int(bridge_rounds_raw or 0)
@@ -2691,6 +2808,48 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
             "phase_b_state_write_failed",
             f"could not seed {state_path}: {exc}",
         )
+
+    # Route the dispatcher retry to RESUME Phase B from the state just seeded
+    # instead of a disproportionate full ROUTE_PHASE_A re-run.  The dispatcher's
+    # _recovered_retry_record consumes result["retry_record"] in both
+    # post-recovery routing paths and the preserved phase_b_state.json drives the
+    # resume; without an explicit ROUTE_PHASE_B record the dispatcher falls back
+    # to re-running Phase A and discards this seeded re-entry.  Mirrors the proven
+    # retry_record channel fix_handoff_receipt_builder_refresh already uses (this
+    # mutates the caller's result, which attempt_recovery passes by reference).
+    resume_wave_id = resume_state["wave_id"]
+    retry_record: dict[str, Any] = {
+        "decision": "ROUTE_PHASE_B",
+        "wave_name": resume_wave_id,
+        "summary": "Resume Phase B NEEDS_PHASE_B re-entry from recovery-seeded state",
+        "tracked_packet": plan_path,
+        "plan_path": plan_path,
+        "next_candidates": [
+            {
+                "candidate": resume_wave_id,
+                "bounded": True,
+                "tracked_packet": plan_path,
+            }
+        ],
+    }
+    # Carry the wave's task_id so the dispatcher's post-resume handoff-identity
+    # check (executor_dispatch._validate_phase_b_handoff_identity) matches the
+    # task_id Phase B injects into the resumed handoff.  Omitting it makes the
+    # in-memory record compare expected=None against the handoff's real task_id
+    # and the commit chain is rejected fail-closed (bridge round 2 finding).
+    resume_task_id = _post_reentry_resume_task_id(repo_root, result_payload, plan_path)
+    if resume_task_id:
+        retry_record["task_id"] = resume_task_id
+    # Carry the dispatcher's freshness identity (state_sha) so the resumed
+    # ROUTE_PHASE_B record passes validate_routing_record_freshness under the
+    # DEFAULT (skip_freshness=False) dispatch and actually reaches
+    # phase_b_executor.  Without it the live retry is rejected as
+    # "Routing record has no state_sha" before Phase B and the seeded re-entry
+    # collapses into a full ROUTE_PHASE_A re-run (bridge round 4 finding).
+    resume_state_sha = _post_reentry_resume_state_sha(repo_root)
+    if resume_state_sha:
+        retry_record["state_sha"] = resume_state_sha
+    result["retry_record"] = retry_record
 
     return _fix_result(
         True,
@@ -3121,7 +3280,12 @@ def fix_commit_supervisor_out_of_wave_tasks_tracker_note(repo_root: Path, **kw: 
                 ),
             )
         if has_reentry_target:
-            return fix_post_reentry_needs_phase_b(repo_root, result=result)
+            # Forward the recovery-supplied wave_id so the degrade resume seeds the
+            # SAME single-date wave_id the Tier-1 entry does -- the delegate would
+            # otherwise fall back to the doubled-date plan stem (bridge round 3).
+            return fix_post_reentry_needs_phase_b(
+                repo_root, wave_id=kw.get("wave_id", ""), result=result
+            )
         return _fix_result(
             False,
             "no_out_of_wave_tasks_tracker_addition",

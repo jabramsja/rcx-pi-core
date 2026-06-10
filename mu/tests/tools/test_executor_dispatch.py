@@ -13499,6 +13499,380 @@ class TestRecoveryGateWiring:
         mock_clear.assert_called_once()
         mock_refresh.assert_not_called()
 
+    def test_post_reentry_recovery_resumes_phase_b_not_phase_a(self, tmp_path):
+        # Regression: a recovered post_reentry_needs_phase_b must RESUME Phase B
+        # from the seeded phase_b_state.json (ROUTE_PHASE_B) rather than re-run a
+        # full ROUTE_PHASE_A cycle.  The recovery seeds result["retry_record"]
+        # with decision=ROUTE_PHASE_B; the dispatcher must route on it instead of
+        # reloading the ROUTE_PHASE_A routing record.
+        routing_file = tmp_path / "routing.json"
+        routing_file.write_text(
+            json.dumps(
+                {
+                    "status": "open",
+                    "decision": "ROUTE_PHASE_A",
+                    "summary": "post-reentry wave",
+                    "wave_name": "post-reentry-wave",
+                }
+            ),
+            encoding="utf-8",
+        )
+        plan_path = "reports/control_plane/post-reentry-wave.md"
+        post_reentry_failure = {
+            "status": "failed",
+            "decision": "ROUTE_PHASE_A",
+            "executor": "phase_b_executor",
+            "step": "phase_b",
+        }
+        success_result = {
+            "status": "success",
+            "decision": "COMMIT_GO",
+            "executor": "commit_executor",
+        }
+        resume_retry_record = {
+            "decision": "ROUTE_PHASE_B",
+            "wave_name": "post-reentry-wave",
+            "summary": "Resume Phase B NEEDS_PHASE_B re-entry from recovery-seeded state",
+            "tracked_packet": plan_path,
+            "plan_path": plan_path,
+            "next_candidates": [
+                {
+                    "candidate": "post-reentry-wave",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+
+        def fake_recovery(repo_root, result, wave_id, **kwargs):
+            # Mirror fix_post_reentry_needs_phase_b: seed the retry_record onto
+            # the dispatcher's result (passed by reference).
+            result["retry_record"] = resume_retry_record
+            return {
+                "recovered": True,
+                "exhausted": False,
+                "failure_class": "post_reentry_needs_phase_b",
+                "action": "resume_phase_b_reentry",
+                "tier": 1,
+                "detail": "seeded",
+            }
+
+        seen_records: list[dict[str, object]] = []
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+
+        def fake_dispatch(record, **kwargs):
+            seen_records.append(json.loads(json.dumps(record)))
+            return post_reentry_failure if len(seen_records) == 1 else success_result
+
+        with patch.object(dispatch_mod, "dispatch", side_effect=fake_dispatch) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery", side_effect=fake_recovery) as mock_recovery, \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear, \
+             patch.object(dispatch_mod, "_reload_explicit_routing_record") as mock_reload, \
+             patch.object(dispatch_mod, "_auto_refresh_routing") as mock_refresh, \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            exit_code = dispatch_mod.main(self._base_args(routing_file))
+
+        assert exit_code == 0
+        assert mock_dispatch.call_count == 2
+        assert seen_records[0]["decision"] == "ROUTE_PHASE_A"
+        # The retry RESUMES Phase B; it does not re-run Phase A.
+        assert seen_records[1]["decision"] == "ROUTE_PHASE_B"
+        assert seen_records[1]["next_candidates"][0]["tracked_packet"] == plan_path
+        mock_recovery.assert_called_once()
+        # Did NOT fall back to reloading the ROUTE_PHASE_A record / auto-refresh.
+        mock_reload.assert_not_called()
+        mock_refresh.assert_not_called()
+        mock_clear.assert_called_once()
+
+    def test_non_post_reentry_recovery_without_retry_record_keeps_phase_a_fallback(self, tmp_path):
+        # Other recovery classes are unchanged: a recovered failure whose fix
+        # emits no retry_record still falls back to the explicit routing record
+        # (here ROUTE_PHASE_A) — the post_reentry resume routing does not leak.
+        routing_file = tmp_path / "routing.json"
+        routing_file.write_text(
+            json.dumps(
+                {
+                    "status": "open",
+                    "decision": "ROUTE_PHASE_A",
+                    "summary": "ordinary wave",
+                    "wave_name": "ordinary-wave",
+                }
+            ),
+            encoding="utf-8",
+        )
+        fail_result = {
+            "status": "failed",
+            "decision": "ROUTE_PHASE_A",
+            "executor": "phase_a_executor",
+            "stderr": "bridge.lock exists",
+        }
+        success_result = {
+            "status": "success",
+            "decision": "ROUTE_PHASE_A",
+            "executor": "phase_a_executor",
+        }
+        recovery_success = {
+            "recovered": True,
+            "exhausted": False,
+            "failure_class": "stale_bridge_lock",
+            "tier": 1,
+            "action": "truncate_dead_pid_lock",
+            "detail": "fixed",
+        }
+        seen_records: list[dict[str, object]] = []
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+
+        def fake_dispatch(record, **kwargs):
+            seen_records.append(json.loads(json.dumps(record)))
+            return fail_result if len(seen_records) == 1 else success_result
+
+        with patch.object(dispatch_mod, "dispatch", side_effect=fake_dispatch) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery_success), \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry"), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            exit_code = dispatch_mod.main(self._base_args(routing_file))
+
+        assert exit_code == 0
+        assert mock_dispatch.call_count == 2
+        # No retry_record emitted → retry reloads the explicit ROUTE_PHASE_A record.
+        assert seen_records[1]["decision"] == "ROUTE_PHASE_A"
+
+    def test_post_reentry_retry_record_passes_handoff_identity_check(self, tmp_path):
+        # Bridge round 2 regression (faithful to the finding's evidence_cmd):
+        # the retry_record produced by fix_post_reentry_needs_phase_b must satisfy
+        # _validate_phase_b_handoff_identity against the handoff Phase B mints on
+        # resume.  Phase B injects the wave's task_id into that handoff, so a
+        # retry_record WITHOUT task_id makes the dispatcher's in-memory record
+        # compare expected=None and reject the commit chain fail-closed.
+        plan_path = "reports/control_plane/pager.md"
+        meta_dir = tmp_path / ".agent_bus" / "meta"
+        meta_dir.mkdir(parents=True)
+        (meta_dir / "post_merge_routing.json").write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "post-reentry wave",
+                    "wave_name": "wave-post-reentry",
+                    "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": plan_path,
+            "wave_id": "wave-post-reentry",
+        }
+
+        # Real recovery output — the retry_record the dispatcher routes on.
+        fix = recovery_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+        assert fix["fixed"] is True
+        retry_record = result["retry_record"]
+        assert retry_record["task_id"] == "[NEXT-CODEX-POST-REDTEAM]"
+
+        # Phase B mints this handoff on resume (task_id injected from plan/routing).
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True, exist_ok=True)
+        (handoff_dir / "phase_b_handoff.json").write_text(
+            json.dumps(
+                {
+                    "wave_id": dispatch_mod.normalize_wave_id("wave-post-reentry"),
+                    "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        # Public seam: the dispatcher runs _validate_phase_b_handoff_identity on
+        # the commit-packet path before invoking the commit executor.  Carry the
+        # recovered retry_record's IDENTITY fields onto a commit-ready record (a
+        # COMMIT_GO decision carries no bounded routing candidates, which both
+        # matches real commit-path records and isolates the handoff-identity check
+        # from the NEXT-CODEX routing-authority gate; the packet-identity axis is
+        # covered by the doubled-stem test below).  skip_freshness isolates the
+        # identity check.  The recovered task_id matches the minted handoff so the
+        # commit chain proceeds (--handoff passed) instead of failing closed.
+        commit_record = {
+            "decision": "COMMIT_GO",
+            "summary": "resume handoff identity check",
+            "wave_name": retry_record["wave_name"],
+            "task_id": retry_record["task_id"],
+        }
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+            out = dispatch_mod.dispatch(
+                commit_record, repo_root=tmp_path, skip_freshness=True
+            )
+        assert mock_run.called, f"handoff identity rejected the recovered record: {out}"
+        assert "--handoff" in mock_run.call_args[0][0], out
+
+        # Lock the exact pre-fix failure: dropping task_id reproduces the bridge
+        # finding's mismatch (expected None vs the handoff's real task_id) and the
+        # dispatcher fails the commit chain closed.
+        pre_fix_record = {k: v for k, v in commit_record.items() if k != "task_id"}
+        out_pre = dispatch_mod.dispatch(
+            pre_fix_record, repo_root=tmp_path, skip_freshness=True
+        )
+        assert out_pre["status"] == "error"
+        assert "handoff validation failed" in out_pre["message"]
+        assert "task_id mismatch" in out_pre["message"]
+
+    def test_post_reentry_doubled_stem_packet_passes_handoff_identity(self, tmp_path):
+        # Bridge round 3 regression (faithful to the finding's evidence_cmd): the
+        # real Phase B post_reentry result carries plan_path but NOT wave_id, and
+        # control-plane packets are named "<wave_id>_<date>.md" so
+        # Path(plan_path).stem DOUBLES the date.  attempt_recovery passes the
+        # single-date routing wave_id as the `wave_id` kwarg; the recovery MUST use
+        # it for the retry_record wave_name so the dispatcher's
+        # _validate_phase_b_handoff_identity matches Phase B's single-date handoff
+        # wave_id.  Deriving wave_name from the doubled stem (the old fallback)
+        # fail-closes the resume.
+        wave_id = "post-reentry-resume-x-2026-06-10"
+        plan_path = "reports/control_plane/post_reentry_resume_x_2026-06-10_2026-06-10.md"
+        doubled_stem = dispatch_mod.normalize_wave_id(Path(plan_path).stem)
+        assert doubled_stem != dispatch_mod.normalize_wave_id(wave_id)
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": plan_path,
+            # NB: NO wave_id -- matches the real Phase B post_reentry result.
+        }
+
+        # Real recovery output, invoked the way attempt_recovery does (wave_id kw).
+        fix = recovery_mod.fix_post_reentry_needs_phase_b(
+            tmp_path, wave_id=wave_id, result=result
+        )
+        assert fix["fixed"] is True, fix
+        retry_record = result["retry_record"]
+        assert retry_record["wave_name"] == wave_id
+
+        # Phase B mints this handoff on resume with the single-date declared wave_id.
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True, exist_ok=True)
+        (handoff_dir / "phase_b_handoff.json").write_text(
+            json.dumps(
+                {
+                    "wave_id": dispatch_mod.normalize_wave_id(wave_id),
+                    "tracked_packet": plan_path,
+                    "scope_items": [plan_path],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        # Public seam: route the REAL retry_record through dispatch()'s
+        # commit-packet handoff-identity gate (decision swapped to COMMIT_GO,
+        # skip_freshness isolating the identity check).  The single-date wave_name
+        # matches the minted handoff so the commit chain proceeds (--handoff).
+        commit_record = dict(retry_record)
+        commit_record["decision"] = "COMMIT_GO"
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+            out = dispatch_mod.dispatch(
+                commit_record, repo_root=tmp_path, skip_freshness=True
+            )
+        assert mock_run.called, f"handoff identity rejected the recovered record: {out}"
+        assert "--handoff" in mock_run.call_args[0][0], out
+
+        # Lock the exact pre-fix failure: deriving wave_name from the doubled stem
+        # (the old Path(plan_path).stem fallback) reproduces the bridge round 3
+        # mismatch against Phase B's single-date handoff wave_id, failing the
+        # commit chain closed.
+        pre_fix_record = dict(commit_record)
+        pre_fix_record["wave_name"] = doubled_stem
+        out_pre = dispatch_mod.dispatch(
+            pre_fix_record, repo_root=tmp_path, skip_freshness=True
+        )
+        assert out_pre["status"] == "error"
+        assert "handoff validation failed" in out_pre["message"]
+        assert "wave_id mismatch" in out_pre["message"]
+
+    def test_post_reentry_retry_record_passes_real_freshness_gate(self, tmp_path):
+        # Bridge round 4 regression (faithful to the finding's evidence_cmd):
+        # the retry_record fix_post_reentry_needs_phase_b emits MUST pass the
+        # REAL validate_routing_record_freshness gate that the default
+        # (skip_freshness=False) dispatch runs -- not only under --skip-freshness.
+        # A record built from a bare dict carries no state_sha and is rejected
+        # "has no state_sha" BEFORE Phase B; stamping the current repo state_sha
+        # (the same source the dispatcher's gate computes) makes the live retry
+        # fresh so it reaches phase_b_executor and consumes the seeded state.
+        repo, _env = _init_builder_repo(tmp_path)
+        plan_path = "reports/control_plane/seed_packet.md"
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": plan_path,
+            "wave_id": "builder-wave-2026-04-20",
+        }
+
+        fix = recovery_mod.fix_post_reentry_needs_phase_b(repo, result=result)
+
+        assert fix["fixed"] is True, fix
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_B"
+        # The record carries the SAME state_sha the dispatcher freshness gate
+        # computes -- compared against the PUBLIC compute_repo_state seam
+        # (dispatch's _compute_repo_state is just an import alias of it).
+        meta_mod = load_module(
+            "meta_bridge_supervisor",
+            REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
+        )
+        assert retry_record["state_sha"] == meta_mod.compute_repo_state(repo).state_sha
+        fresh, msg = dispatch_mod.validate_routing_record_freshness(retry_record, repo)
+        assert fresh, msg
+
+        # Lock the exact pre-fix failure: drop state_sha and the real gate rejects
+        # it the way the bridge round 4 evidence showed.
+        pre_fix = {k: v for k, v in retry_record.items() if k != "state_sha"}
+        fresh_pre, msg_pre = dispatch_mod.validate_routing_record_freshness(pre_fix, repo)
+        assert fresh_pre is False
+        assert "no state_sha" in msg_pre
+
+    def test_post_reentry_retry_record_reaches_phase_b_under_default_freshness(self, tmp_path):
+        # Bridge round 4 regression: dispatching the recovered retry_record with
+        # the DEFAULT freshness (skip_freshness=False) reaches phase_b_executor
+        # instead of being rejected as stale.  Mirrors the reviewer's evidence_cmd
+        # (dispatch(retry_record, repo_root, skip_freshness=False)) but proves the
+        # live path now RESUMES Phase B.  Only the executor-run boundary is faked;
+        # the freshness gate runs for real.
+        repo, _env = _init_builder_repo(tmp_path)
+        plan_path = "reports/control_plane/seed_packet.md"
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": plan_path,
+            "wave_id": "builder-wave-2026-04-20",
+        }
+        fix = recovery_mod.fix_post_reentry_needs_phase_b(repo, result=result)
+        assert fix["fixed"] is True, fix
+        retry_record = result["retry_record"]
+
+        captured = {}
+
+        def fake_run(args, cwd, timeout):
+            captured["args"] = args
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run), \
+             patch.object(
+                 dispatch_mod,
+                 "_continue_successful_executor_chain",
+                 side_effect=lambda executor_name, *a, **k: {
+                     "status": "success",
+                     "decision": "ROUTE_PHASE_B",
+                     "executor": executor_name,
+                 },
+             ):
+            out = dispatch_mod.dispatch(retry_record, repo_root=repo, skip_freshness=False)
+
+        # NOT rejected as stale at the freshness gate; resumed Phase B for real.
+        assert out["status"] == "success", out
+        assert out["executor"] == "phase_b_executor"
+        assert any("phase_b_executor.py" in str(a) for a in captured["args"])
+
     def test_recovery_exhausted_stops_retry(self, tmp_path):
         """Exhausted recovery breaks the retry loop immediately."""
         routing_file = self._routing_file(tmp_path)
