@@ -1,0 +1,24 @@
+{
+  "wave_id": "recovery-gate-precommit-pytest-pr-conflicting-2026-06-09",
+  "repeat_run_speedup_ratio": 1.431469,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.23534,
+  "repeat_run_raw_seconds": [
+    0.336882,
+    0.23534
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.336882
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.572222
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-10T02:29:03Z",
+  "collector_version": "2.2.0"
+}
