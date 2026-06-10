@@ -1,0 +1,24 @@
+{
+  "wave_id": "recovery-scope-drift-exclude-pyc-bytecode-2026-06-09",
+  "repeat_run_speedup_ratio": 1.848558,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.241056,
+  "repeat_run_raw_seconds": [
+    0.445606,
+    0.241056
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.445606
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.686662
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-10T04:47:06Z",
+  "collector_version": "2.2.0"
+}
