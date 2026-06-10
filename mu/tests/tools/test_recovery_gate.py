@@ -16715,13 +16715,89 @@ class TestClassifyPrConflictingNegatives:
         assert fc == FailureClass.TEST_FAILURE
         assert fc != FailureClass.PR_CONFLICTING
 
+    def test_pre_commit_pytest_failure_with_merge_state_content_is_test_failure(self):
+        """Regression (recovery-gate-precommit-pytest-pr-conflicting-2026-06-09):
+        the #40 pre-push fix, recurring at the SYMMETRIC pre-commit gate.
+
+        commit_executor Step 8 (run_pre_commit_script) runs pre-commit-doc-check
+        plus a targeted pytest. A failing test at that step whose CONTENT contains
+        a merge-state substring (mergeStateStatus=DIRTY, as the
+        _resolve_post_merge_verify_root regression asserts) must classify
+        TEST_FAILURE -- a test to fix -- NOT PR_CONFLICTING. Otherwise
+        fix_pr_conflicting finds no PR (missing_pr_number) and the wave strands.
+
+        Asserts the full symmetric invariant in one anchor:
+          (a) run_pre_commit_script pytest+merge-state -> TEST_FAILURE (the fix);
+          (b) the existing run_pre_push_script case     -> TEST_FAILURE (unchanged);
+          (c) a genuine non-local-gate PR conflict      -> PR_CONFLICTING (unchanged);
+          (d) a NON-pytest pre-commit failure carrying a merge-state substring is
+              NOT reclassified -> PR_CONFLICTING (reclassification stays scoped to
+              the pytest-bearing local gates, per the wave constraint).
+        """
+        # (a) Step-8 pre-commit targeted-pytest failure with a merge-state substring.
+        pre_commit = json.dumps({
+            "status": "error",
+            "step": "run_pre_commit_script",
+            "errors": [
+                "pre-commit-doc-check passed\n"
+                "=================================== FAILURES ===================================\n"
+                "FAILED tests/tools/test_post_merge_verify.py::"
+                "TestResolvePostMergeVerifyRoot::"
+                "test_dirty_linked_verify_root_must_not_run_git_merge_ff_only\n"
+                "AssertionError: dirty linked verify root must not run "
+                "git merge --ff-only; got mergeStateStatus=DIRTY\n"
+                "1 failed, 6700 passed, 18 skipped in 41.07s\n"
+            ],
+        }, indent=2)
+        result_a = {"status": "failed", "executor": "commit_executor", "stdout": pre_commit}
+        fc_a = rg_mod.classify_failure(result_a)
+        assert fc_a == FailureClass.TEST_FAILURE, fc_a
+        assert fc_a != FailureClass.PR_CONFLICTING, fc_a
+
+        # (b) The existing pre-push case is unchanged.
+        pre_push = json.dumps({
+            "status": "error",
+            "step": "run_pre_push_script",
+            "errors": [
+                "pre-push-fast failed: L4 execution contract passed\n"
+                "=================================== FAILURES ===================================\n"
+                "FAILED tests/tools/test_post_merge_verify.py::"
+                "TestResolvePostMergeVerifyRoot::"
+                "test_dirty_linked_verify_root_must_not_run_git_merge_ff_only\n"
+                "AssertionError: got mergeStateStatus=DIRTY\n"
+                "1 failed, 6700 passed, 18 skipped in 283.92s\n"
+            ],
+        }, indent=2)
+        result_b = {"status": "failed", "executor": "commit_executor", "stdout": pre_push}
+        assert rg_mod.classify_failure(result_b) == FailureClass.TEST_FAILURE
+
+        # (c) A genuine PR conflict on a NON-local-gate step (no pytest indicator)
+        #     is unchanged.
+        result_c = {
+            "status": "error",
+            "step": "ensure_review_clear_and_merge",
+            "stdout": "pr state check: mergeStateStatus=DIRTY mergeable=CONFLICTING for PR #1234",
+        }
+        assert rg_mod.classify_failure(result_c) == FailureClass.PR_CONFLICTING
+
+        # (d) A NON-pytest pre-commit failure carrying a merge-state substring must
+        #     NOT be reclassified: the local-gate guard requires a pytest indicator,
+        #     so this still classifies PR_CONFLICTING (reclassification stays scoped
+        #     to the pytest-bearing local gates).
+        result_d = {
+            "status": "error",
+            "step": "run_pre_commit_script",
+            "stdout": "pre-commit-doc-check failed: doc drift; pr state mergeStateStatus=DIRTY",
+        }
+        assert rg_mod.classify_failure(result_d) == FailureClass.PR_CONFLICTING
+
     def test_genuine_pr_conflict_non_pre_push_step_still_pr_conflicting(self):
         """Regression (recovery-classify-prepush-2026-06-02): the pre-push pytest
         reorder must NOT weaken genuine PR-conflict classification. A real
         mergeStateStatus=DIRTY / mergeable=CONFLICTING signal from a PR-state
         check on a NON-pre-push step still classifies PR_CONFLICTING (the guard
-        _looks_like_pre_push_pytest_failure is false for a non-pre-push step, so
-        the substring match still fires).
+        _looks_like_local_gate_pytest_failure is false for a non-local-gate step,
+        so the substring match still fires).
         """
         result = {
             "status": "error",

@@ -368,15 +368,16 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PR_CONFLICTING
 
     l4_signal = f"{reason_lower} {combined_lower}"
-    # A pre-push-fast pytest/test failure is classified TEST_FAILURE BEFORE the
-    # broad pr_conflicting SUBSTRING match: a failing test whose CONTENT mentions
-    # merge-state strings (e.g. the _resolve_post_merge_verify_root regression
-    # asserting on mergeStateStatus=DIRTY) is a test to fix, not a PR conflict --
-    # otherwise fix_pr_conflicting finds no PR and the wave strands. The guard
-    # (_looks_like_pre_push_pytest_failure: a pre-push step or "pre-push-fast
-    # failed" signal PLUS a pytest indicator) keeps a genuine PR conflict on a
-    # non-pre-push step falling through to PR_CONFLICTING below.
-    if status_failed and _looks_like_pre_push_pytest_failure(step_lower, l4_signal):
+    # A local-gate (pre-commit or pre-push) pytest/test failure is classified
+    # TEST_FAILURE BEFORE the broad pr_conflicting SUBSTRING match: a failing test
+    # whose CONTENT mentions merge-state strings (e.g. the
+    # _resolve_post_merge_verify_root regression asserting on mergeStateStatus=DIRTY)
+    # is a test to fix, not a PR conflict -- otherwise fix_pr_conflicting finds no
+    # PR and the wave strands. The guard (_looks_like_local_gate_pytest_failure: a
+    # run_pre_commit_script / run_pre_push_script step or "pre-push-fast failed"
+    # signal PLUS a pytest indicator) keeps a genuine PR conflict on a non-local-gate
+    # step falling through to PR_CONFLICTING below.
+    if status_failed and _looks_like_local_gate_pytest_failure(step_lower, l4_signal):
         return FailureClass.TEST_FAILURE
     if (
         "mergeable=conflicting" in reason_lower
@@ -548,8 +549,18 @@ def _looks_like_handoff_receipt_builder_refresh_failure(signal: str) -> bool:
     return any(hint in lowered for hint in direct_hints)
 
 
-def _looks_like_pre_push_pytest_failure(step_lower: str, signal: str) -> bool:
-    if "run_pre_push_script" not in step_lower and "pre-push-fast failed" not in signal:
+def _looks_like_local_gate_pytest_failure(step_lower: str, signal: str) -> bool:
+    # Local pytest-bearing gates: commit_executor Step 8 (run_pre_commit_script,
+    # a pre-commit-doc-check + targeted pytest gate) and the pre-push-fast gate
+    # (run_pre_push_script, or its "pre-push-fast failed" signal). A failing test
+    # at EITHER local gate -- even one whose content mentions a merge-state string
+    # -- is a test to fix, not a PR conflict. The pytest-indicator requirement
+    # below keeps a genuine non-pytest failure falling through to PR_CONFLICTING.
+    if (
+        "run_pre_commit_script" not in step_lower
+        and "run_pre_push_script" not in step_lower
+        and "pre-push-fast failed" not in signal
+    ):
         return False
     test_path = re.search(r"(?:^|[^A-Za-z0-9_]|\\n)(?:tests|mu/tests)/", signal)
     return bool(
