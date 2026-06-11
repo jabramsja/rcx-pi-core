@@ -37,6 +37,15 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 
 **Canonical L3 truth statement:** RCX achieves L3 Substrate Portability by executing identical structural projections across Python and JavaScript. The evaluation rules are structural data, but execution iteration, resource bounding, and API normalization remain irreducible host-language mechanics.
 
+### Accepted kernel-driver watchdog boundary (locked decision B)
+
+The two residual `@host_iteration` markers — Python `step_kernel_mu` (`mu/host/python/rcx_pi/selfhost/step_mu.py`) and JS `_stepKernelCore` (`mu/host/js/engine/kernel.js`) — are **ACCEPTED-IRREDUCIBLE** at the `max_steps`/`maxSteps` watchdog per the locked decision (B) in the decision packet `reports/control_plane/n3-kernel-driver-max-steps-structural-budget-decision-2026-06-11_2026-06-11.md` (recorded by wave `n3-kernel-driver-watchdog-accepted-boundary-marker-truth-2026-06-11`). This is an instance of the canonical truth statement above: execution iteration and resource bounding remain irreducible host-language mechanics.
+
+- Every no-fuel caller's termination budget is a host numeric bound **by design**: the decision packet's budget-source census classified 33/33 no-fuel caller rows (13 Python + 20 JS) as HOST-COUNT-DETERMINED, 0 as DATA-DETERMINED.
+- The tracked-marker floor of 5 (Python 1 host_iteration + 1 host_builtin; JS 1 host_iteration + 2 host_builtin) is accepted at this frontier.
+- This frontier is **CLOSED as an open reduction** absent a founder-authorized reversal of the locked decision. It must not be re-attempted as an open reduction TODO.
+- Gate: `tests/l4_gates/test_kernel_driver_watchdog_accepted_boundary_gate.py` locks this record, the verbatim runtime marker strings, and the one-host_iteration-per-substrate baseline against silent drift.
+
 ### L3 Seed Categories
 
 | Category | Seeds | JS Loaded | Notes |

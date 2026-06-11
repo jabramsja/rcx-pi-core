@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-kernel-driver-watchdog-accepted-boundary-marker-truth-2026-06-11",
+  "repeat_run_speedup_ratio": 2.057068,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.271992,
+  "repeat_run_raw_seconds": [
+    0.559506,
+    0.271992
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.559506
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.831498
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-11T19:07:49Z",
+  "collector_version": "2.2.0"
+}

@@ -71,11 +71,13 @@ Each bootstrap primitive falls into one of these categories. This is a documenta
 | Primitive | Category | Why This Category |
 |-----------|----------|-------------------|
 | `eval_step` | **Execution primitive** | The irreducible "apply" step — like Forth's NEXT |
-| `max_steps` | **Iteration / clock primitive** | Provides the termination clock — cannot be structural fuel |
+| `max_steps` | **Iteration / clock primitive** | Provides the termination clock — cannot be structural fuel; ACCEPTED-IRREDUCIBLE kernel-driver watchdog boundary (see max_steps note below) |
 | `stack_guard` | **Host resource limit** (host safety constraint) | Python stack is hardware, not Mu data; see note below |
 | `projection_loader` | **I/O & trust primitive** | JSON parsing + integrity verification — file I/O is host-only |
 
 **stack_guard note:** `stack_guard` is a bootstrap primitive (it must exist), but its nature is a **host safety constraint** — it protects against Python's finite call stack, which is a hardware limitation. Unlike `eval_step` (which embodies execution semantics), `stack_guard` embodies a physical resource boundary. It remains in the bootstrap set because removing it would allow crash-by-depth attacks.
+
+**max_steps note (accepted kernel-driver watchdog boundary):** The two residual kernel-driver `@host_iteration` markers behind the `max_steps` termination clock — Python `step_kernel_mu` (`mu/host/python/rcx_pi/selfhost/step_mu.py`) and JS `_stepKernelCore` (`mu/host/js/engine/kernel.js`) — are ACCEPTED-IRREDUCIBLE at the `max_steps`/`maxSteps` watchdog per the locked decision (B) in `reports/control_plane/n3-kernel-driver-max-steps-structural-budget-decision-2026-06-11_2026-06-11.md` (recorded by wave `n3-kernel-driver-watchdog-accepted-boundary-marker-truth-2026-06-11`). Every no-fuel caller's termination budget is a host numeric bound by design (the packet's census: 33/33 rows HOST-COUNT-DETERMINED). Consistent with the taxonomy row above, `max_steps` cannot be structural fuel; this boundary is not an open reduction TODO, and re-attempting the reduction requires a founder-authorized reversal of the locked decision.
 
 ### 1. `eval_step` - Projection Application
 
@@ -408,7 +410,7 @@ RCX's bootstrap is **comparable in minimality** to Forth's NEXT. Both provide:
 |-----------|------------------|--------|
 | `eval_step` | `rcx_pi/selfhost/eval_seed.py:step()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `mu_equal` | `rcx_pi/selfhost/mu_type.py:mu_equal()` | DEMOTED - `# DEMOTED PRIMITIVE` (convenience wrapper around mu_hash_cached, ~30 test sites) |
-| `max_steps` | `rcx_pi/selfhost/step_mu.py:step_kernel_mu()` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
+| `max_steps` | `rcx_pi/selfhost/step_mu.py:step_kernel_mu()` | MARKED - `# BOOTSTRAP_PRIMITIVE`; ACCEPTED-IRREDUCIBLE watchdog boundary (locked decision B — see max_steps note) |
 | `stack_guard` | `rcx_pi/selfhost/mu_type.py:MAX_MU_DEPTH` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 | `projection_loader` | `rcx_pi/selfhost/seed_integrity.py` | MARKED - `# BOOTSTRAP_PRIMITIVE` |
 
