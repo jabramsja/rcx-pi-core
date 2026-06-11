@@ -34,7 +34,6 @@ from executor_common import (  # noqa: E402  (path insert must precede import)
 )
 
 ROLE_AGENT_KEYS = {"implementer", "reviewer"}
-VALID_ROLE_AGENTS = {"claude", "codex"}
 REQUIRED_BRIDGE_AGENT_DEFAULT_KEYS = {
     "claude": {"display_name", "model", "effort"},
     "codex": {"display_name", "model", "reasoning_effort"},
@@ -361,14 +360,35 @@ class TestRoleAgentConfigAlignment:
     def test_role_agents_define_supported_implementer_and_reviewer(self):
         live = _load_json_config_role_agents()
         assert set(live) == ROLE_AGENT_KEYS
-        assert set(live.values()) <= VALID_ROLE_AGENTS
+        # A2 (FOUNDER_OVERRIDE:role-switch-convergence-2026-05-31): valid role agents
+        # are those DEFINED in the live bridge_agent_defaults menu, not a hardcoded
+        # {claude, codex}. Deriving from live makes adding a menu agent (e.g. 'fable')
+        # a config-only change with no test edit.
+        defined_agents = set(_load_json_config_bridge_agent_defaults())
+        assert set(live.values()) <= defined_agents, (
+            f"role_agents values {sorted(live.values())} must be agents defined in "
+            f"the live bridge_agent_defaults menu {sorted(defined_agents)}"
+        )
 
 
 class TestBridgeAgentDefaultConfigAlignment:
     def test_bridge_agent_defaults_match_between_default_and_live_config(self):
+        """A2 (FOUNDER_OVERRIDE:role-switch-convergence-2026-05-31): the live
+        bridge_agent_defaults menu is authoritative and may define MORE agents than
+        DEFAULT_EXECUTOR_CONFIG (e.g. an added 'fable' menu entry). DEFAULT is a
+        fallback SUBSET, so assert live is a SUPERSET of DEFAULT -- every DEFAULT agent
+        present in live with matching provider config -- rather than DEFAULT==live,
+        which broke on every menu addition. The method name is retained for continuity.
+        """
         defaults = _load_default_executor_config_bridge_agent_defaults()
         live = _load_json_config_bridge_agent_defaults()
-        assert defaults == live
+        for agent, cfg in defaults.items():
+            assert agent in live, (
+                f"DEFAULT bridge_agent_defaults agent {agent!r} missing from live menu"
+            )
+            assert live[agent] == cfg, (
+                f"live bridge_agent_defaults[{agent!r}]={live[agent]!r} != DEFAULT {cfg!r}"
+            )
 
     def test_bridge_agent_defaults_define_provider_model_and_effort_switches(self):
         defaults = _load_json_config_bridge_agent_defaults()

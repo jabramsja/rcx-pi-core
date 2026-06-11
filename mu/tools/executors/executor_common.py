@@ -47,6 +47,7 @@ REVIEWER_BRIDGE_KEYS = frozenset({"phase_a", "phase_b"})
 DEFAULT_AGENT_DISPLAY_NAMES = {
     "claude": "Claude Opus 4.8 max",
     "codex": "Codex 5.5 xhigh",
+    "fable": "Claude Fable 5 max",
 }
 
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
