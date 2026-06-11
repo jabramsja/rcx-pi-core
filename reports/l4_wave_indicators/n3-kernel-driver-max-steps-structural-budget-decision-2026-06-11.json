@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-kernel-driver-max-steps-structural-budget-decision-2026-06-11",
+  "repeat_run_speedup_ratio": 1.207073,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.253949,
+  "repeat_run_raw_seconds": [
+    0.306535,
+    0.253949
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.306535
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.560484
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-11T17:25:19Z",
+  "collector_version": "2.2.0"
+}
