@@ -47,6 +47,7 @@ REVIEWER_BRIDGE_KEYS = frozenset({"phase_a", "phase_b"})
 DEFAULT_AGENT_DISPLAY_NAMES = {
     "claude": "Claude Opus 4.8 max",
     "codex": "Codex 5.5 xhigh",
+    "fable": "Claude Fable 5 max",
 }
 
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
@@ -756,6 +757,28 @@ def _atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
+def _load_example_bridge_agents(repo_root: Path) -> dict[str, Any]:
+    """Load adapter shapes from the committed bridge_config example seed.
+
+    Used to seed an adapter that is DECLARED in ``bridge_agent_defaults`` but ABSENT
+    from a pre-existing live ``bridge_config['agents']`` (e.g. a newly-added menu agent
+    such as ``fable`` on a bus created before that agent existed). Without seeding,
+    activating such an agent as a role fails closed at ``get_adapter()`` with a missing
+    adapter. Returns ``{}`` when the example is missing or unreadable.
+    """
+    example = Path(repo_root) / "mu" / "tools" / "agents" / "bridge_config.example.json"
+    if not example.exists():
+        return {}
+    try:
+        loaded = json.loads(example.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    agents = loaded.get("agents") if isinstance(loaded, dict) else None
+    if not isinstance(agents, dict):
+        return {}
+    return {n: a for n, a in agents.items() if isinstance(n, str) and isinstance(a, dict)}
+
+
 def sync_bridge_config_agents_from_defaults(
     repo_root: Path,
     bus_dir: str | Path | None = None,
@@ -776,6 +799,12 @@ def sync_bridge_config_agents_from_defaults(
     ``model_reasoning_effort="..."`` ``-c`` arg), and ``display_name``. Every other cmd
     arg, ``timeout_s``, ``mode``, ``prompt_via_stdin``, and ``env`` is left intact, and
     the file is rewritten only when a field actually changed.
+
+    An agent DECLARED in ``bridge_agent_defaults`` but ABSENT from ``bridge_config``
+    is SEEDED from the committed example (:func:`_load_example_bridge_agents`) before the
+    update pass, so a newly-added menu agent (e.g. ``fable``) is invokable on a
+    pre-existing bus instead of failing closed at ``get_adapter()``; an agent missing
+    from BOTH ``bridge_agent_defaults`` and the example is left untouched.
 
     Graceful no-op (returns ``None``) when ``bridge_config.json`` is absent or
     unreadable; an agent missing from ``bridge_agent_defaults`` is skipped. Returns the
@@ -798,6 +827,23 @@ def sync_bridge_config_agents_from_defaults(
         return None
 
     changed = False
+    # Seed adapters DECLARED in bridge_agent_defaults but ABSENT from this bus's
+    # bridge_config (e.g. a newly-added menu agent such as 'fable' on a bus created
+    # before that agent existed). Without this, activating such an agent as a role
+    # fails closed at get_adapter() with "missing adapter ...". Copy the adapter shape
+    # from the committed example seed; the update loop below then applies the default
+    # model/effort/display. An agent missing from BOTH defaults and the example is left
+    # untouched (the existing get_adapter fail-closed still guards it).
+    example_agents = _load_example_bridge_agents(repo_root)
+    for missing_name, missing_default in defaults.items():
+        if (
+            isinstance(missing_name, str)
+            and isinstance(missing_default, dict)
+            and missing_name not in agents
+            and isinstance(example_agents.get(missing_name), dict)
+        ):
+            agents[missing_name] = copy.deepcopy(example_agents[missing_name])
+            changed = True
     for name, agent in agents.items():
         if not isinstance(name, str) or not isinstance(agent, dict):
             continue

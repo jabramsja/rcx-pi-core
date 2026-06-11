@@ -15,6 +15,14 @@
       "prompt_via_stdin": true,
       "timeout_s": 1200,
       "env": {}
+    },
+    "fable": {
+      "mode": "live",
+      "display_name": "Claude Fable 5 max",
+      "cmd": ["claude", "--print", "--dangerously-skip-permissions", "--model", "claude-fable-5", "--effort", "max", "--verbose", "--output-format", "stream-json", "--max-turns", "50"],
+      "prompt_via_stdin": true,
+      "timeout_s": 900,
+      "env": {}
     }
   }
 }

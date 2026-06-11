@@ -294,3 +294,69 @@ def test_sync_atomic_write_failed_replace_preserves_original(tmp_path, monkeypat
     # No truncated temp residue left alongside bridge_config.json.
     leftovers = sorted(p.name for p in bridge.parent.iterdir() if p.name != bridge.name)
     assert leftovers == [], f"atomic write left temp residue: {leftovers}"
+
+
+def _seed_bridge_example(root: Path, agents: dict) -> Path:
+    ex_dir = root / "mu" / "tools" / "agents"
+    ex_dir.mkdir(parents=True, exist_ok=True)
+    path = ex_dir / "bridge_config.example.json"
+    path.write_text(json.dumps({"agents": agents}, indent=2) + "\n")
+    return path
+
+
+def test_sync_seeds_missing_adapter_from_example(tmp_path):
+    """A menu agent in bridge_agent_defaults + the example seed but ABSENT from a
+    pre-existing bus is seeded into bridge_config so it is invokable (PR #1097 bot P1:
+    activating 'fable' must not fail closed at get_adapter on an older bus).
+    """
+    _seed_executor_config(
+        tmp_path,
+        defaults={
+            "claude": {"display_name": "Claude Opus 4.8 max", "model": "claude-opus-4-8", "effort": "max"},
+            "fable": {"display_name": "Claude Fable 5 max", "model": "claude-fable-5", "effort": "max"},
+        },
+    )
+    _seed_bridge_example(
+        tmp_path,
+        {
+            "claude": {"mode": "live", "display_name": "Claude", "cmd": _claude_cmd(),
+                       "prompt_via_stdin": True, "timeout_s": 900, "env": {}},
+            "fable": {"mode": "live", "display_name": "Claude Fable 5 max",
+                      "cmd": _claude_cmd(model="claude-fable-5", effort="max"),
+                      "prompt_via_stdin": True, "timeout_s": 900, "env": {}},
+        },
+    )
+    bridge = _seed_bridge_config(
+        tmp_path, {"claude": {"mode": "live", "cmd": _claude_cmd(model="claude-opus-4-8")}}
+    )
+    assert "fable" not in json.loads(bridge.read_text())["agents"]
+
+    sync_bridge_config_agents_from_defaults(tmp_path)
+
+    data = json.loads(bridge.read_text())["agents"]
+    assert "fable" in data, "fable adapter not seeded into pre-existing bus from example"
+    cmd = data["fable"]["cmd"]
+    assert cmd[cmd.index("--model") + 1] == "claude-fable-5"
+    assert data["fable"]["display_name"] == "Claude Fable 5 max"
+
+
+def test_sync_does_not_fabricate_adapter_absent_from_example(tmp_path):
+    """An agent in bridge_agent_defaults but NOT in the example seed is left out (the
+    existing get_adapter fail-closed still guards it -- no fabricated adapter).
+    """
+    _seed_executor_config(
+        tmp_path,
+        defaults={
+            "claude": {"display_name": "Claude", "model": "claude-opus-4-8", "effort": "max"},
+            "ghost": {"display_name": "Ghost", "model": "ghost-1", "effort": "max"},
+        },
+    )
+    _seed_bridge_example(tmp_path, {"claude": {"mode": "live", "cmd": _claude_cmd()}})  # no ghost
+    bridge = _seed_bridge_config(
+        tmp_path, {"claude": {"mode": "live", "cmd": _claude_cmd(model="claude-opus-4-8")}}
+    )
+
+    sync_bridge_config_agents_from_defaults(tmp_path)
+
+    data = json.loads(bridge.read_text())["agents"]
+    assert "ghost" not in data, "agent absent from the example seed must not be fabricated"

@@ -1,6 +1,6 @@
 {
   "role_agents": {
-    "implementer": "claude",
+    "implementer": "fable",
     "reviewer": "codex"
   },
   "bridge_agent_defaults": {
@@ -13,14 +13,19 @@
       "display_name": "Codex 5.5 xhigh",
       "model": "gpt-5.5",
       "reasoning_effort": "xhigh"
+    },
+    "fable": {
+      "display_name": "Claude Fable 5 max",
+      "model": "claude-fable-5",
+      "effort": "max"
     }
   },
   "backends": {
     "post_merge_supervisor": "codex",
     "dialectic_executor": "codex",
-    "phase_a_executor": "claude",
-    "phase_b_executor": "claude",
-    "bot_remediation": "claude",
+    "phase_a_executor": "fable",
+    "phase_b_executor": "fable",
+    "bot_remediation": "fable",
     "commit_executor": null
   },
   "bridge_reviewers": {
