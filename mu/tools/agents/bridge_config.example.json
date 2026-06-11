@@ -2,8 +2,8 @@
   "agents": {
     "claude": {
       "mode": "live",
-      "display_name": "Claude Opus 4.7 max",
-      "cmd": ["claude", "--print", "--dangerously-skip-permissions", "--model", "claude-opus-4-7", "--effort", "max", "--verbose", "--output-format", "stream-json", "--max-turns", "50"],
+      "display_name": "Claude Opus 4.8 max",
+      "cmd": ["claude", "--print", "--dangerously-skip-permissions", "--model", "claude-opus-4-8", "--effort", "max", "--verbose", "--output-format", "stream-json", "--max-turns", "100"],
       "prompt_via_stdin": true,
       "timeout_s": 900,
       "env": {}
@@ -19,7 +19,7 @@
     "fable": {
       "mode": "live",
       "display_name": "Claude Fable 5 max",
-      "cmd": ["claude", "--print", "--dangerously-skip-permissions", "--model", "claude-fable-5", "--effort", "max", "--verbose", "--output-format", "stream-json", "--max-turns", "50"],
+      "cmd": ["claude", "--print", "--dangerously-skip-permissions", "--model", "claude-fable-5", "--effort", "max", "--verbose", "--output-format", "stream-json", "--max-turns", "100"],
       "prompt_via_stdin": true,
       "timeout_s": 900,
       "env": {}
