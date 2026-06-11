@@ -360,3 +360,38 @@ def test_sync_does_not_fabricate_adapter_absent_from_example(tmp_path):
 
     data = json.loads(bridge.read_text())["agents"]
     assert "ghost" not in data, "agent absent from the example seed must not be fabricated"
+
+
+def _cmd_max_turns(model: str, max_turns) -> list:
+    return ["claude", "--print", "--dangerously-skip-permissions", "--model", model,
+            "--effort", "max", "--verbose", "--output-format", "stream-json",
+            "--max-turns", str(max_turns)]
+
+
+def test_sync_updates_existing_adapter_max_turns_from_example(tmp_path):
+    """An EXISTING adapter with a stale --max-turns is synced to the example value, not
+    only newly-seeded ones (PR #1098 bot P1: a bus already at --max-turns 50 kept 50, so
+    the fable implementer kept exhausting its budget even after the example said 100).
+    """
+    _seed_executor_config(
+        tmp_path,
+        defaults={"fable": {"display_name": "Claude Fable 5 max", "model": "claude-fable-5", "effort": "max"}},
+    )
+    _seed_bridge_example(
+        tmp_path,
+        {"fable": {"mode": "live", "display_name": "Claude Fable 5 max",
+                   "cmd": _cmd_max_turns("claude-fable-5", 100)}},
+    )
+    # a pre-existing bus adapter still on the stale --max-turns 50
+    bridge = _seed_bridge_config(
+        tmp_path, {"fable": {"mode": "live", "cmd": _cmd_max_turns("claude-fable-5", 50)}}
+    )
+    pre = json.loads(bridge.read_text())["agents"]["fable"]["cmd"]
+    assert pre[pre.index("--max-turns") + 1] == "50"
+
+    sync_bridge_config_agents_from_defaults(tmp_path)
+
+    cmd = json.loads(bridge.read_text())["agents"]["fable"]["cmd"]
+    assert cmd[cmd.index("--max-turns") + 1] == "100", (
+        "existing adapter --max-turns not synced from the example seed"
+    )
