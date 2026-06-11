@@ -30,7 +30,24 @@ resolve_branch_name_for_root() {
 }
 refresh_context() {
   local next_root="" next_branch=""
-  next_root="$(resolve_repo_root)"
+  # Optional autofollow (WI-2B): when RCX_OBS_AUTOFOLLOW_BUS=1, re-resolve the
+  # freshest active (root,bus) pair each refresh and rebind the effective bus so
+  # the default monitor's panes follow the freshest active lane. Fail-safe: empty
+  # or invalid helper output keeps the CURRENT bus (never blank, never error,
+  # validation unchanged). Signal unset = today's behavior exactly.
+  if [ "${RCX_OBS_AUTOFOLLOW_BUS:-}" = "1" ]; then
+    local _af_helper="$SCRIPT_DIR/_resolve_live_root.sh" _af_root="" _af_bus=""
+    if [ -f "$_af_helper" ]; then
+      { IFS= read -r _af_root; IFS= read -r _af_bus; } < <(RCX_AGENT_BUS_DIR="$BUS_DIR" bash "$_af_helper" --emit-pair 2>/dev/null) || true
+    fi
+    if [ -n "$_af_root" ] && { [ "$_af_bus" = ".agent_bus" ] || [[ "$_af_bus" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; }; then
+      BUS_DIR="$_af_bus"
+      export BUS_DIR
+      export RCX_AGENT_BUS_DIR="$_af_bus"
+      next_root="$_af_root"
+    fi
+  fi
+  [ -n "$next_root" ] || next_root="$(resolve_repo_root)"
   [ -n "$next_root" ] || next_root="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
   next_branch="$(resolve_branch_name_for_root "$next_root")"
   if [ "${REPO_ROOT:-}" != "$next_root" ] || [ "${BRANCH_NAME:-}" != "$next_branch" ]; then
@@ -503,6 +520,10 @@ if job is not None:
 PY
 }
 
+# Main-guard the infinite refresh driver so the test can source this script and
+# call refresh_context() in isolation. Running `bash _pane_findings.sh` normally
+# keeps $0 == BASH_SOURCE, so the loop still runs unchanged.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 while true; do
   refresh_context
   # Build output to temp file, only redraw if content changed
@@ -767,3 +788,4 @@ while true; do
 
   sleep 5
 done
+fi

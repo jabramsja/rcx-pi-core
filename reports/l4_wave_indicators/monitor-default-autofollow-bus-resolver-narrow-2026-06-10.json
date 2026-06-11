@@ -1,0 +1,24 @@
+{
+  "wave_id": "monitor-default-autofollow-bus-resolver-narrow-2026-06-10",
+  "repeat_run_speedup_ratio": 1.249669,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.257529,
+  "repeat_run_raw_seconds": [
+    0.321826,
+    0.257529
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.321826
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.579355
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-11T00:15:52Z",
+  "collector_version": "2.2.0"
+}
