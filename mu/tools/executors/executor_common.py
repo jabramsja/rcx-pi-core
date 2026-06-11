@@ -708,6 +708,29 @@ def _set_bridge_cmd_effort(cmd: list[Any], effort: str) -> bool:
     return False
 
 
+def _bridge_cmd_max_turns_value(cmd: list[Any]) -> str | None:
+    """Return the value after ``--max-turns`` in *cmd* (as a string), or None if absent."""
+    for index in range(len(cmd) - 1):
+        if cmd[index] == "--max-turns":
+            return str(cmd[index + 1])
+    return None
+
+
+def _set_bridge_cmd_max_turns(cmd: list[Any], max_turns: str) -> bool:
+    """Overwrite the value after ``--max-turns`` in *cmd*. Returns True if it changed.
+
+    Only the single value token is rewritten; the flag and every other arg are left in
+    place. A ``--max-turns`` flag with no following value (trailing) is ignored.
+    """
+    for index in range(len(cmd) - 1):
+        if cmd[index] == "--max-turns":
+            if str(cmd[index + 1]) == str(max_turns):
+                return False
+            cmd[index + 1] = str(max_turns)
+            return True
+    return False
+
+
 def _atomic_write_text(path: Path, text: str) -> None:
     """Write *text* to *path* atomically so readers never observe a torn write.
 
@@ -861,6 +884,18 @@ def sync_bridge_config_agents_from_defaults(
             )
             if effort is not None and _set_bridge_cmd_effort(cmd, effort):
                 changed = True
+            # Sync --max-turns from the committed example adapter cmd (the canonical
+            # adapter-shape source) so an EXISTING adapter with a stale --max-turns is
+            # updated too, not only newly-seeded ones (PR #1098 bot P1: a bus that already
+            # had fable/claude at --max-turns 50 kept 50 after the sync). model/effort/
+            # display still come from bridge_agent_defaults; the turn budget lives in the
+            # adapter cmd, whose canonical value is the example seed.
+            example_entry = example_agents.get(name)
+            example_cmd = example_entry.get("cmd") if isinstance(example_entry, dict) else None
+            if isinstance(example_cmd, list):
+                example_max_turns = _bridge_cmd_max_turns_value(example_cmd)
+                if example_max_turns is not None and _set_bridge_cmd_max_turns(cmd, example_max_turns):
+                    changed = True
         display_name = _nonempty_str(default.get("display_name"))
         if display_name is not None and agent.get("display_name") != display_name:
             agent["display_name"] = display_name

@@ -23,8 +23,8 @@ Bump the bridge_config.example.json claude and fable implementer adapter cmds fr
 - `indicator_artifact_ref`: reports/l4_wave_indicators/fable-claude-bridge-adapter-max-turns-100-2026-06-11.json.
 - `indicator_collection_command`: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id fable-claude-bridge-adapter-max-turns-100-2026-06-11 --output reports/l4_wave_indicators/fable-claude-bridge-adapter-max-turns-100-2026-06-11.json.
 - `target_gate_id`: G8.
-- `evidence_command`: `grep -q 'max-turns", "100' mu/tools/agents/bridge_config.example.json && ! grep -q 'max-turns", "50' mu/tools/agents/bridge_config.example.json`.
-- `evidence_delta`: bridge_config.example.json claude+fable adapter cmds bumped --max-turns 50->100 and the claude model currented to opus-4-8, so a migration-seeded fable adapter gets the opus turn budget instead of the stale 50..
+- `evidence_command`: `grep -q 'max-turns", "100' mu/tools/agents/bridge_config.example.json && ! grep -q 'max-turns", "50' mu/tools/agents/bridge_config.example.json && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_bridge_config_model_sync.py`.
+- `evidence_delta`: bridge_config.example.json claude+fable --max-turns 50->100, AND sync_bridge_config_agents_from_defaults now updates --max-turns on EXISTING bus adapters from the example (not only newly-seeded ones), so a bus already at 50 is migrated to 100..
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
 - `boot0_progress_state`: HOLD.
@@ -37,15 +37,16 @@ Bump the bridge_config.example.json claude and fable implementer adapter cmds fr
 - Refresh wave: `fable-claude-bridge-adapter-max-turns-100-2026-06-11`
 - Active packet: `reports/control_plane/fable-claude-bridge-adapter-max-turns-100-2026-06-11_2026-06-11.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `fd2e9b6c5c6990881533686664141b8c2bf19d4b77b430c78a6696cff0cd1229`
+- Tracker note sha256: `5246456799061fed9f918fed01a4396e75fcdc7ac5a5aeda543e0bcf8819d7b4`
 - Indicator artifact: `reports/l4_wave_indicators/fable-claude-bridge-adapter-max-turns-100-2026-06-11.json`
-- Evidence command: `grep -q 'max-turns", "100' mu/tools/agents/bridge_config.example.json && ! grep -q 'max-turns", "50' mu/tools/agents/bridge_config.example.json`.
-- Evidence delta: bridge_config.example.json claude+fable adapter cmds bumped --max-turns 50->100 and the claude model currented to opus-4-8, so a migration-seeded fable adapter gets the opus turn budget instead of the stale 50..
+- Evidence command: `grep -q 'max-turns", "100' mu/tools/agents/bridge_config.example.json && ! grep -q 'max-turns", "50' mu/tools/agents/bridge_config.example.json && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_bridge_config_model_sync.py`.
+- Evidence delta: bridge_config.example.json claude+fable --max-turns 50->100, AND sync_bridge_config_agents_from_defaults now updates --max-turns on EXISTING bus adapters from the example (not only newly-seeded ones), so a bus already at 50 is migrated to 100..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/fable-claude-bridge-adapter-max-turns-100-2026-06-11.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tools/agents/bridge_config.example.json`
+  - `mu/tests/tools/test_bridge_config_model_sync.py`
+  - `mu/tools/executors/executor_common.py`
   - `reports/control_plane/fable-claude-bridge-adapter-max-turns-100-2026-06-11_2026-06-11.md`
   - `reports/l4_wave_indicators/fable-claude-bridge-adapter-max-turns-100-2026-06-11.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
