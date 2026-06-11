@@ -1,24 +1,24 @@
 {
   "wave_id": "add-fable5-to-agent-menu-2026-06-11",
-  "repeat_run_speedup_ratio": 1.518528,
+  "repeat_run_speedup_ratio": 1.351367,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.243142,
+  "step_growth_slope": 0.227358,
   "repeat_run_raw_seconds": [
-    0.369218,
-    0.243142
+    0.307244,
+    0.227358
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.369218
+      "elapsed_seconds": 0.307244
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.61236
+      "elapsed_seconds": 0.534602
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-06-11T14:01:37Z",
+  "collection_timestamp_utc": "2026-06-11T14:25:06Z",
   "collector_version": "2.2.0"
 }

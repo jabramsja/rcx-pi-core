@@ -45,10 +45,8 @@ Add a third selectable agent 'fable' (Claude Fable 5, effort max) to the pipelin
   - `indicator`: `reports/l4_wave_indicators/add-fable5-to-agent-menu-2026-06-11.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_executor_config_alignment.py`
-  - `mu/tools/agents/bridge_config.example.json`
+  - `mu/tests/tools/test_bridge_config_model_sync.py`
   - `mu/tools/executors/executor_common.py`
-  - `mu/tools/executors/executor_config.json`
   - `reports/control_plane/add_fable5_to_agent_menu_2026-06-11_2026-06-11.md`
   - `reports/l4_wave_indicators/add-fable5-to-agent-menu-2026-06-11.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
