@@ -8,6 +8,10 @@ STATUS_SCRIPT="$SCRIPT_DIR/pipeline_status.sh"
 BUS_DIR="${RCX_AGENT_BUS_DIR:-.agent_bus}"
 LANE="${RCX_PIPELINE_MONITOR_LANE:-}"
 REQUESTED_LANE="$LANE"
+# EXPLICIT_PIN records whether the caller pinned this monitor with an explicit
+# --bus-dir / --lane. Only the unpinned DEFAULT monitor gets the per-refresh
+# autofollow signal (WI-2); pinned monitors keep their fixed bus.
+EXPLICIT_PIN=0
 while [ $# -gt 0 ]; do
   case "${1:-}" in
     --bus-dir)
@@ -16,6 +20,7 @@ while [ $# -gt 0 ]; do
         exit 2
       fi
       BUS_DIR="${2:-}"
+      EXPLICIT_PIN=1
       shift 2
       ;;
     --lane)
@@ -25,6 +30,7 @@ while [ $# -gt 0 ]; do
       fi
       LANE="${2:-}"
       REQUESTED_LANE="$LANE"
+      EXPLICIT_PIN=1
       shift 2
       ;;
     *)
@@ -112,6 +118,19 @@ if [ -f "$IDENTITY_HELPER" ]; then
 elif identity_requires_config && { [ "$BUS_DIR" != ".agent_bus" ] || [ -n "$LANE" ]; }; then
   echo "ERROR: monitor identity helper missing: $IDENTITY_HELPER" >&2
   exit 2
+fi
+
+# Default-monitor autofollow signal (WI-2). The DEFAULT monitor (no explicit
+# --lane/--bus-dir pin, identity lane "default", bus ".agent_bus") lets panes 2-4
+# auto-follow the freshest active lane bus by re-resolving the (root,bus) pair on
+# every refresh inside the pane scripts (see _pane_*.sh refresh_context +
+# _resolve_live_root.sh --emit-pair). This is an ephemeral launch-time FLAG, not
+# a persisted target/state file, and rebuild_tmux_session does NOT itself resolve
+# the bus (a pane command runs once). Pinned monitors keep their fixed bus.
+# FOUNDER_OVERRIDE: monitor-default-autofollow-bus-resolver-narrow-2026-06-10
+AUTOFOLLOW_BUS_SIGNAL=0
+if [ "$EXPLICIT_PIN" = "0" ] && [ "$IDENTITY_LANE" = "default" ] && [ "$BUS_DIR" = ".agent_bus" ]; then
+  AUTOFOLLOW_BUS_SIGNAL=1
 fi
 
 LIVE_LOG_KEY="$(printf '%s' "$REPO_ROOT" | cksum | awk '{print $1}')"
@@ -709,13 +728,22 @@ rebuild_tmux_session() {
   local pane2_cmd=""
   local pane3_cmd=""
   local pane4_cmd=""
+  # Default-monitor autofollow signal (WI-2): an ephemeral launch-time env var
+  # that ENABLES the per-refresh (root,bus) re-resolution inside the pane refresh
+  # loops. It does NOT bake a dynamic bus into the one-shot pane command (a pane
+  # command runs once); the panes themselves rebind the effective bus each
+  # refresh. Pinned monitors and pane 1 (the live-log watcher) never get it.
+  local autofollow_seed=""
+  if [ "${AUTOFOLLOW_BUS_SIGNAL:-0}" = "1" ]; then
+    autofollow_seed="RCX_OBS_AUTOFOLLOW_BUS=1 "
+  fi
   # Do not pin panes to the launcher worktree. Let each pane re-resolve the
   # freshest active pipeline worktree on every refresh so tmux stays honest
   # when the real run lives in a different linked worktree.
   pane1_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $watcher_q"
-  pane2_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_findings.sh"
-  pane3_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_processes.sh"
-  pane4_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_timeline.sh"
+  pane2_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && ${autofollow_seed}BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_findings.sh"
+  pane3_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && ${autofollow_seed}BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_processes.sh"
+  pane4_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && ${autofollow_seed}BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_timeline.sh"
 
   # Create session
   tmux new-session -d -x "$SESSION_WIDTH" -y "$SESSION_HEIGHT" -s "$SESSION" "$pane1_cmd"
