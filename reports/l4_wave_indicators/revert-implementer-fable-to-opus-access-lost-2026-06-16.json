@@ -1,0 +1,24 @@
+{
+  "wave_id": "revert-implementer-fable-to-opus-access-lost-2026-06-16",
+  "repeat_run_speedup_ratio": 1.700963,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.251594,
+  "repeat_run_raw_seconds": [
+    0.427952,
+    0.251594
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.427952
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.679546
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-16T18:55:22Z",
+  "collector_version": "2.2.0"
+}
