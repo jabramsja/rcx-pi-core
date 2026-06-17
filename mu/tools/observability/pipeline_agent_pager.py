@@ -1624,6 +1624,40 @@ def _read_claude_monitor_session_id(repo_root: Path) -> str | None:
     return candidate
 
 
+def _claude_dispatch_env() -> dict[str, str]:
+    """Environment for the pager's own ``claude`` page-delivery subprocess.
+
+    The pager's ``claude`` child -- whether it ``--resume``s the dedicated
+    monitor or pages DIRECTLY with a fresh ``claude -p`` -- is a TRANSIENT
+    page-delivery process. It is neither the live orchestrator nor a dedicated
+    monitor, so its session id must never be registered anywhere. But a fresh
+    ``claude`` child runs the repo SessionStart hook
+    (``.claude/hooks/session-start.sh``), which by default writes the child's
+    session id into ``orchestrator_session_id`` (or, under
+    ``RCX_CLAUDE_MONITOR=1``, into the sibling ``claude_monitor_session_id``).
+
+    When the pager runs from a process that does NOT already export
+    ``RCX_PIPELINE_SESSION=1`` (a normal pipeline process), that hook would
+    clobber the live ``orchestrator_session_id`` with the throwaway child id.
+    On the ``--resume`` leg it is worse: the hook writes the monitor id INTO
+    ``orchestrator_session_id``, so the next dispatch sees ``monitor == live``
+    (the inequality check in ``_dispatch_claude``) and falls through to a direct
+    page forever, permanently defeating the dedicated-monitor resume.
+
+    Mark the child as a pipeline-owned sub-session (``RCX_PIPELINE_SESSION=1``)
+    AND clear any inherited ``RCX_CLAUDE_MONITOR`` so the child hits the hook's
+    full-suppression guard (``RCX_PIPELINE_SESSION=1`` AND
+    ``RCX_CLAUDE_MONITOR != 1`` -> ``exit 0``, writes nothing). This reuses the
+    SAME suppression contract ``bridge_adapters.py`` already relies on for its
+    adapter sub-sessions; it adds no host-only semantics. The rest of the live
+    environment is inherited so the page keeps the same auth/session context.
+    """
+    env = os.environ.copy()
+    env["RCX_PIPELINE_SESSION"] = "1"
+    env.pop("RCX_CLAUDE_MONITOR", None)
+    return env
+
+
 def _dispatch_claude(
     repo_root: Path,
     event: dict[str, Any],
@@ -1662,6 +1696,10 @@ def _dispatch_claude(
             text=True,
             timeout=timeout_s,
             check=False,
+            # Suppress the child's SessionStart orchestrator/monitor writer so a
+            # transient page-delivery ``claude`` never clobbers the live
+            # ``orchestrator_session_id`` (or ``claude_monitor_session_id``).
+            env=_claude_dispatch_env(),
         )
     except subprocess.TimeoutExpired:
         return {
