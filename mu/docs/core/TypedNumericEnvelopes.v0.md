@@ -1,9 +1,9 @@
 <!--
 DOC_STATUS
 TYPE: DESIGN_SPEC
-LAST_VERIFIED: 2026-03-01
+LAST_VERIFIED: 2026-06-17
 OWNER: RCX Core Team
-FOR_CURRENT_STATE: See STATUS.md and TASKS.md Ra [P6 decided]
+FOR_CURRENT_STATE: See STATUS.md and TASKS.md Ra [P6 reopened 2026-06-17 — superseded by StructuralNumbers.v0.md]
 GROUNDING_TESTS: tests/l4_gates/test_numeric_hash_safety_lock_gate.py
 
 This header enables automated doc drift detection.
@@ -12,10 +12,30 @@ Scope: P6 VECTOR decision packet — typed numeric envelopes for cross-substrate
 
 # P6: Typed Numeric Envelopes — Decision Packet
 
-> **Status:** DECIDED — Option A (NO strict lexical parity) with containment discipline
-> **Decision date:** 2026-03-01 (founder)
+> **Status:** RE-OPENED 2026-06-17 — superseded by `mu/docs/core/StructuralNumbers.v0.md`
+> **Original decision:** DECIDED 2026-03-01 (founder) — Option A (NO strict lexical parity) with containment discipline
 > **Policy lock:** `TestNumericNonLinearPolicyLock` in `tests/l4_gates/test_numeric_hash_safety_lock_gate.py`
 > **Tracker:** TASKS.md Ra section `[P6]`
+
+> **RE-OPEN NOTE (2026-06-17).** P6 is re-opened by **founder direction** (the override
+> authority), NOT by one of the original mechanical promotion triggers below. Those triggers
+> are mixed-int/float-workload specific (#1 is "mixed numeric forms (int + float) in
+> non-linear pattern matching"); the structural-numbers direction is integer-first with no
+> host floats, so the original triggers do not fire as written. The integer-only `RCXEngineNew`
+> seed motivates structural integers but does not by itself constitute the "mixed int + float"
+> trigger. What prompts the reopening is a structural-purity reframing of the whole numeric
+> representation: the Stage0 content-addressed-Mu reduction (replacing `_stage0_match` host
+> scalar type-dispatch with `mu_hash` equality) escalated to founder on 2026-06-17 because a
+> naive collapse trades a host type-check for a `json.dumps`≠`JSON.stringify` float-formatting
+> parity leak. Founder direction: do the BEST STRUCTURAL FIX (production +
+> research-grade, self-hosting / meta-circular, numbers AS Mu, not host semantics), not the
+> easy float-ban. The resolution is **`StructuralNumbers.v0.md`** — binary-positional
+> structural numerals (Coq `positive`/`N`/`Z` shape) with arithmetic/equality as Mu
+> projections, exact rationals + signed-digit reals (no host floats), and a proven-equivalent
+> host-accelerated `int`/`BigInt` codec. Option B's envelope schema (Section 4) was the
+> thinner version of this idea; the full numeral structure + arithmetic-as-projection is the
+> production-grade form. Containment discipline below (integer-only seeds, policy lock
+> enforced) REMAINS in force during the staged migration.
 
 ---
 
