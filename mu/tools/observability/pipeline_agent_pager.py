@@ -79,7 +79,8 @@ ORCHESTRATOR_SESSION_ID_PATH = OBSERVABILITY_DIR / "orchestrator_session_id"
 # target ONLY from this file and never falls back to ``orchestrator_session_id``,
 # so ``route=both`` can never resume the live orchestrator conversation. When
 # this file is absent/malformed, or its id equals the live orchestrator session
-# id, the claude leg fails closed (issues no ``claude --resume``).
+# id, the claude leg issues no ``claude --resume``; it falls back to a DIRECT
+# ``claude -p`` page (a fresh subprocess that never resumes the live orchestrator).
 CLAUDE_MONITOR_SESSION_ID_PATH = OBSERVABILITY_DIR / "claude_monitor_session_id"
 # Distinct skip markers for the fail-closed claude leg. A skip carries one of
 # these reasons instead of an ``error`` (a transient error stays pending for
@@ -1587,14 +1588,14 @@ def _read_claude_monitor_session_id(repo_root: Path) -> str | None:
     Mirrors ``_read_orchestrator_session_id``'s malformed-tolerance discipline
     exactly, but reads ONLY the dedicated monitor-session-id file (a sibling of
     ``orchestrator_session_id`` under the observability dir). The monitor file
-    is authored by the claude monitor's own session-start writer; that writer is
-    out of scope for this enabler wave (a separate concern, like the live
-    orchestrator writer), so until it exists this resolver returns ``None`` and
-    the claude pager leg fails closed. There is NO fallback to the live
+    is authored by the claude monitor's own session-start writer. When no distinct
+    monitor id is available this resolver returns ``None`` and ``_dispatch_claude``
+    falls back to a DIRECT ``claude -p`` page. There is NO fallback to the live
     ``orchestrator_session_id`` file: the live orchestrator conversation is never
-    a ``claude --resume`` target. Every absent/malformed case yields ``None``:
-    missing file, OSError, non-UTF-8 bytes, empty, whitespace-only, and a session
-    id containing internal whitespace or newlines.
+    a ``claude --resume`` target (a direct page resumes nothing). Every
+    absent/malformed case yields ``None``: missing file, OSError, non-UTF-8 bytes,
+    empty, whitespace-only, and a session id containing internal whitespace or
+    newlines.
     """
     monitor_path = _observability_path(repo_root, "claude_monitor_session_id")
     try:
@@ -1623,6 +1624,40 @@ def _read_claude_monitor_session_id(repo_root: Path) -> str | None:
     return candidate
 
 
+def _claude_dispatch_env() -> dict[str, str]:
+    """Environment for the pager's own ``claude`` page-delivery subprocess.
+
+    The pager's ``claude`` child -- whether it ``--resume``s the dedicated
+    monitor or pages DIRECTLY with a fresh ``claude -p`` -- is a TRANSIENT
+    page-delivery process. It is neither the live orchestrator nor a dedicated
+    monitor, so its session id must never be registered anywhere. But a fresh
+    ``claude`` child runs the repo SessionStart hook
+    (``.claude/hooks/session-start.sh``), which by default writes the child's
+    session id into ``orchestrator_session_id`` (or, under
+    ``RCX_CLAUDE_MONITOR=1``, into the sibling ``claude_monitor_session_id``).
+
+    When the pager runs from a process that does NOT already export
+    ``RCX_PIPELINE_SESSION=1`` (a normal pipeline process), that hook would
+    clobber the live ``orchestrator_session_id`` with the throwaway child id.
+    On the ``--resume`` leg it is worse: the hook writes the monitor id INTO
+    ``orchestrator_session_id``, so the next dispatch sees ``monitor == live``
+    (the inequality check in ``_dispatch_claude``) and falls through to a direct
+    page forever, permanently defeating the dedicated-monitor resume.
+
+    Mark the child as a pipeline-owned sub-session (``RCX_PIPELINE_SESSION=1``)
+    AND clear any inherited ``RCX_CLAUDE_MONITOR`` so the child hits the hook's
+    full-suppression guard (``RCX_PIPELINE_SESSION=1`` AND
+    ``RCX_CLAUDE_MONITOR != 1`` -> ``exit 0``, writes nothing). This reuses the
+    SAME suppression contract ``bridge_adapters.py`` already relies on for its
+    adapter sub-sessions; it adds no host-only semantics. The rest of the live
+    environment is inherited so the page keeps the same auth/session context.
+    """
+    env = os.environ.copy()
+    env["RCX_PIPELINE_SESSION"] = "1"
+    env.pop("RCX_CLAUDE_MONITOR", None)
+    return env
+
+
 def _dispatch_claude(
     repo_root: Path,
     event: dict[str, Any],
@@ -1632,26 +1667,27 @@ def _dispatch_claude(
 ) -> dict[str, Any]:
     claude_bin = os.environ.get("RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN", "claude")
     monitor_session_id = _read_claude_monitor_session_id(repo_root)
-    if not monitor_session_id:
-        # Fail closed: no dedicated monitor session id (unset / missing /
-        # malformed). NEVER fall back to the live orchestrator session as a
-        # ``--resume`` target. This is a DISTINCT skip, not a retryable error.
-        return {
-            "acknowledged": False,
-            "skipped": True,
-            "skip_reason": CLAUDE_SKIP_REASON_MONITOR_UNSET,
-        }
-    live_session_id = _read_orchestrator_session_id(repo_root)
-    if live_session_id is not None and monitor_session_id == live_session_id:
-        # Equal-to-live guard: the dedicated monitor id must be DISTINCT from the
-        # live orchestrator session. The live id is read for this inequality
-        # check ONLY, never as a resume target. Fail closed.
-        return {
-            "acknowledged": False,
-            "skipped": True,
-            "skip_reason": CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE,
-        }
-    command = [claude_bin, "--resume", monitor_session_id, "-p", _event_prompt(event)]
+    resume_target: str | None = None
+    if monitor_session_id:
+        live_session_id = _read_orchestrator_session_id(repo_root)
+        if live_session_id is None or monitor_session_id != live_session_id:
+            # A DISTINCT dedicated monitor session is registered (present,
+            # well-formed, and != the live orchestrator id): resume it. The live
+            # orchestrator id is read for this inequality check ONLY, never as a
+            # ``--resume`` target.
+            resume_target = monitor_session_id
+        # else: the dedicated monitor id transiently equals the live orchestrator
+        # id -> fall through to a DIRECT page (never resume the live orchestrator).
+    # No DISTINCT dedicated monitor available (id absent / malformed, or equal to
+    # the live orchestrator id): page Claude DIRECTLY with a fresh ``claude -p``
+    # subprocess. A direct page passes NO ``--resume``, so it can never resume the
+    # live orchestrator session; it restores the pre-refactor direct pipeline page
+    # the dedicated-monitor refactor had turned into a fail-closed skip. The page
+    # is a normal acknowledged delivery (or a retryable error) -- never a skip.
+    if resume_target is not None:
+        command = [claude_bin, "--resume", resume_target, "-p", _event_prompt(event)]
+    else:
+        command = [claude_bin, "-p", _event_prompt(event)]
     try:
         proc = subprocess.run(
             command,
@@ -1660,6 +1696,10 @@ def _dispatch_claude(
             text=True,
             timeout=timeout_s,
             check=False,
+            # Suppress the child's SessionStart orchestrator/monitor writer so a
+            # transient page-delivery ``claude`` never clobbers the live
+            # ``orchestrator_session_id`` (or ``claude_monitor_session_id``).
+            env=_claude_dispatch_env(),
         )
     except subprocess.TimeoutExpired:
         return {
@@ -1679,15 +1719,20 @@ def _dispatch_claude(
                 f"{_excerpt(proc.stderr or proc.stdout)}"
             ),
         }
-    return {
-        "acknowledged": True,
-        "ack": {
-            "acknowledged_at": _utcnow(),
-            "exit_code": proc.returncode,
-            "target": "claude",
-            "session_id": monitor_session_id,
-        },
+    ack: dict[str, Any] = {
+        "acknowledged_at": _utcnow(),
+        "exit_code": proc.returncode,
+        "target": "claude",
     }
+    if resume_target is not None:
+        # Resume of a distinct dedicated monitor: record the resumed session id
+        # (this path is unchanged from before the direct-fallback wave).
+        ack["session_id"] = resume_target
+    else:
+        # Direct ``claude -p`` page: no session was resumed. The ``direct`` mode
+        # marker makes the fallback delivery self-evident in ``delivered_targets``.
+        ack["mode"] = "direct"
+    return {"acknowledged": True, "ack": ack}
 
 
 def _dispatch_notify_only(event: dict[str, Any]) -> dict[str, Any]:
