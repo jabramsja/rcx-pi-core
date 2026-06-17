@@ -84,7 +84,7 @@ StructuralNumbers Stage 2a-i (Python-only add): L4_ENABLER gate proving binary A
 - `indicator_artifact_ref`: reports/l4_wave_indicators/structural-numbers-arith-add-2026-06-17c.json.
 - `indicator_collection_command`: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id structural-numbers-arith-add-2026-06-17c --output reports/l4_wave_indicators/structural-numbers-arith-add-2026-06-17c.json.
 - `target_gate_id`: G8.
-- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_growth_caps.py`.
+- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/l4_gates/test_structural_numbers_add.py`.
 - `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/structural-numbers-arith-add-2026-06-17c_2026-06-17.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
@@ -125,15 +125,15 @@ StructuralNumbers Stage 2a-i (Python-only add): L4_ENABLER gate proving binary A
 - Refresh wave: `structural-numbers-arith-add-2026-06-17c`
 - Active packet: `reports/control_plane/structural-numbers-arith-add-2026-06-17c_2026-06-17.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `cc8c259577776c1d3172556190d5baa42085549d49a6c38ea763e63fc4b32260`
+- Tracker note sha256: `4717c19592dc38483844476a78099545795505d123afb763e440b5f5237b6f73`
 - Indicator artifact: `reports/l4_wave_indicators/structural-numbers-arith-add-2026-06-17c.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_growth_caps.py`.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/l4_gates/test_structural_numbers_add.py`.
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/structural-numbers-arith-add-2026-06-17c_2026-06-17.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/structural-numbers-arith-add-2026-06-17c.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/docs/test_growth_caps.py`
+  - `mu/tests/l4_gates/test_structural_numbers_add.py`
   - `reports/control_plane/structural-numbers-arith-add-2026-06-17c_2026-06-17.md`
   - `reports/l4_wave_indicators/structural-numbers-arith-add-2026-06-17c.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

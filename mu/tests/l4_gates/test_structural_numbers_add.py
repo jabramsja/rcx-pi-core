@@ -37,8 +37,10 @@ Two REAL kernel constraints bound the corpus (documented, not worked around):
 ``run_mu`` → ``step_kernel_mu`` runs ``normalize_for_match`` which inflates every
 dict level ~3× (depth), and each meta-circular VM micro-step re-validates the whole
 state (~0.6s / domain-step). So the corpus is deliberately lean (≤ 8-bit operands,
-~10 cases) and the engine-driving tests are ``@pytest.mark.slow`` per
-``.claude/rules/test-classification.md``. JS cross-substrate parity and
+~10 cases) and the engine-driving tests are ``@pytest.mark.slow`` +
+``@pytest.mark.l4_expensive`` (the run_mu meta-circular cost exceeds the
+green-gate slow-lane 300s timeout, so they run in the slow_tests/nightly lane
+at 900s) per ``.claude/rules/test-classification.md``. JS cross-substrate parity and
 compare/multiply/codec are deferred to follow-up waves.
 
 Wave: structural-numbers-arith-add-2026-06-17c (L4_ENABLER, target gate G8).
@@ -303,6 +305,7 @@ class TestProjectionScaffolding:
 # valid canonical numeral, structurally/​hash-equal to encode(a + b).
 # =============================================================================
 
+@pytest.mark.l4_expensive
 @pytest.mark.slow
 class TestStructuralAddEquivalence:
     """structural_add(a,b) ≡ host_to_structural(to_host(a) + to_host(b))."""
@@ -370,6 +373,7 @@ class TestStructuralAddEquivalence:
 # Carry propagation — explicit spotlight on the cascade cases (same cached runs).
 # =============================================================================
 
+@pytest.mark.l4_expensive
 @pytest.mark.slow
 class TestCarryPropagation:
     """ADD exercises carry end-to-end, including full multi-bit cascades."""
