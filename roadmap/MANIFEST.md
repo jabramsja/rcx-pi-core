@@ -107,7 +107,8 @@ These `mu/docs/core/` documents have DOC_STATUS TYPE = DESIGN_SPEC or IMPLEMENTA
 | [`mu/docs/core/RCXEngine.v0.md`](../mu/docs/core/RCXEngine.v0.md) | DESIGN_SPEC | Engine pipeline |
 | [`mu/docs/core/RCXKernel.v0.md`](../mu/docs/core/RCXKernel.v0.md) | DESIGN_SPEC | Kernel architecture |
 | [`mu/docs/core/RecursiveKernel.v0.md`](../mu/docs/core/RecursiveKernel.v0.md) | DESIGN_SPEC | Recursive kernel |
-| [`mu/docs/core/TypedNumericEnvelopes.v0.md`](../mu/docs/core/TypedNumericEnvelopes.v0.md) | DESIGN_SPEC | P6 VECTOR: cross-substrate int/float lexical parity decision |
+| [`mu/docs/core/TypedNumericEnvelopes.v0.md`](../mu/docs/core/TypedNumericEnvelopes.v0.md) | DESIGN_SPEC | P6 VECTOR: cross-substrate int/float lexical parity decision (REOPENED 2026-06-17 — superseded by StructuralNumbers.v0.md) |
+| [`mu/docs/core/StructuralNumbers.v0.md`](../mu/docs/core/StructuralNumbers.v0.md) | DESIGN_SPEC | Numbers as structural Mu: binary-positional numerals, arithmetic/equality as projections, no host floats (supersedes P6) |
 | [`mu/docs/core/recurrence_v2_design.md`](../mu/docs/core/recurrence_v2_design.md) | IMPLEMENTATION | Recurrence v2 |
 
 ## Agent Infrastructure
