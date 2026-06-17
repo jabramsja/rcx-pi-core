@@ -21,6 +21,9 @@ Read-only design inputs (referenced, NOT modified):
 - `mu/docs/core/StructuralNumbers.v0.md` — defines the binary-positional numeral being gated.
 - The Python and JS substrate content-hash (`mu_hash`) surfaces — invoked read-only by the test to compute content hashes; not changed.
 
+- `reports/deferred/non_blocking/structural-numbers-foundation-gate-2026-06-17_bridge_nonblockers.md`
+  - Same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
+
 ## Work Items
 
 Concrete, bounded tasks derived from the TASKS.md `[NEXT-CODEX-POST-REDTEAM]` tracker note (2026-06-17):
@@ -85,7 +88,7 @@ Routing provenance (next-candidate routed by the post-merge supervisor):
 - `indicator_artifact_ref`: reports/l4_wave_indicators/structural-numbers-foundation-gate-2026-06-17.json.
 - `indicator_collection_command`: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id structural-numbers-foundation-gate-2026-06-17 --output reports/l4_wave_indicators/structural-numbers-foundation-gate-2026-06-17.json.
 - `target_gate_id`: G8.
-- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/l4_gates/test_structural_numbers_foundation.py`.
+- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_growth_caps.py`.
 - `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/structural-numbers-foundation-gate-2026-06-17_2026-06-17.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
@@ -108,21 +111,33 @@ Routing provenance (next-candidate routed by the post-merge supervisor):
   - `reports/l4_wave_indicators/structural-numbers-foundation-gate-2026-06-17.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
 
+<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->
+## Same-Wave Deferred Non-Blocking Authorization
+
+- Refresh wave: `structural-numbers-foundation-gate-2026-06-17`
+- Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
+- Authorized deferred packet(s):
+  - `reports/deferred/non_blocking/structural-numbers-foundation-gate-2026-06-17_bridge_nonblockers.md`
+- Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
+- Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
+<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
+
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
 ## Commit Path Truth Refresh
 
 - Refresh wave: `structural-numbers-foundation-gate-2026-06-17`
 - Active packet: `reports/control_plane/structural-numbers-foundation-gate-2026-06-17_2026-06-17.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `2bb37ee020f1cd24144ea532d9a9defe7aee965c0a4a4a30da6a37696107cf3e`
+- Tracker note sha256: `94fb61d42f4e58a2f2328eb95aed5e18af99653b4920519231cf3f6b55c06594`
 - Indicator artifact: `reports/l4_wave_indicators/structural-numbers-foundation-gate-2026-06-17.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/l4_gates/test_structural_numbers_foundation.py`.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_growth_caps.py`.
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/structural-numbers-foundation-gate-2026-06-17_2026-06-17.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/structural-numbers-foundation-gate-2026-06-17.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/l4_gates/test_structural_numbers_foundation.py`
+  - `mu/tests/docs/test_growth_caps.py`
   - `reports/control_plane/structural-numbers-foundation-gate-2026-06-17_2026-06-17.md`
+  - `reports/deferred/non_blocking/structural-numbers-foundation-gate-2026-06-17_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/structural-numbers-foundation-gate-2026-06-17.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
