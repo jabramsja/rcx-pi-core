@@ -1,0 +1,24 @@
+{
+  "wave_id": "structural-numbers-add-js-parity-2026-06-18",
+  "repeat_run_speedup_ratio": 1.200531,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.243229,
+  "repeat_run_raw_seconds": [
+    0.292004,
+    0.243229
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.292004
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.535233
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-18T06:08:35Z",
+  "collector_version": "2.2.0"
+}
