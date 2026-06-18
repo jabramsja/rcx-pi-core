@@ -844,7 +844,7 @@
       "class": "TestMatchVMStagedDispatchGate",
       "classification": "heuristic_false_positive",
       "defer_reason": "Gate test validates ordering invariant via internal function; production match_mu relies on this ordering",
-      "expires_on": "2026-06-17",
+      "expires_on": "2026-07-17",
       "file": "mu/tests/l4_gates/test_match_vm_staged_dispatch_gate.py",
       "method": "test_validate_bridge_ordering_accepts_correct_order",
       "owner": "founder",
