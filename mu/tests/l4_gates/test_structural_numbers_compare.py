@@ -48,7 +48,7 @@ Two REAL kernel constraints bound the corpus (documented, not worked around):
 ``run_mu`` → ``step_kernel_mu`` runs ``normalize_for_match`` which inflates every
 dict level ~3× (depth), and each meta-circular VM micro-step re-validates the whole
 state (~0.6s / domain-step). So the corpus is deliberately lean (≤ 4-bit operands,
-~18 ``run_mu`` evaluations incl. swaps) and the engine-driving tests are
+~20 ``run_mu`` evaluations incl. swaps) and the engine-driving tests are
 ``@pytest.mark.slow`` + ``@pytest.mark.l4_expensive`` (the run_mu meta-circular cost
 exceeds the green-gate slow-lane 300s timeout, so they run in the slow_tests/nightly
 lane at 900s) per ``.claude/rules/test-classification.md``. JS cross-substrate parity
@@ -238,10 +238,10 @@ COMPARE_PROJECTIONS = build_compare_projections()
 
 # =============================================================================
 # Corpus — lean (engine cost ~0.6s/step), non-negative, covering the mandatory
-# minimum matrix: equality (incl. 0==0), LT/GT symmetry (every unequal pair and
-# its swap), prefix/length differences (incl. length as the most-significant
-# difference), and the first differing bit at multiple depths (LSB, interior, MSB)
-# on equal-length operands.
+# minimum matrix: equality (incl. 0==0), zero-vs-positive dispatch (0 vs +b = LT,
+# +a vs 0 = GT), LT/GT symmetry (every unequal pair and its swap), prefix/length
+# differences (incl. length as the most-significant difference), and the first
+# differing bit at multiple depths (LSB, interior, MSB) on equal-length operands.
 # =============================================================================
 
 # Equal pairs decide EQ — must include the mandatory ``0 == 0``.
@@ -253,6 +253,7 @@ EQ_PAIRS: list[tuple[int, int]] = [
 # Ordered pairs with a > b (each decides GT); the swap (b, a) must decide LT.
 # Annotated by the mandatory-matrix row each covers.
 GT_PAIRS: list[tuple[int, int]] = [
+    (5, 0),       # zero dispatch: +a vs 0 = GT, swap 0 vs +b = LT (only rows driving the two _num-None arms)
     (2, 1),       # length: longer operand (10b) is greater than (1b)
     (4, 3),       # length: 3-bit (100b) greater than 2-bit (11b)
     (8, 7),       # length is the MOST-significant difference: lower bits 000 vs 111 favour 7, 8 still wins
@@ -271,6 +272,10 @@ CORPUS: list[tuple[int, int]] = sorted(
 # Required matrix rows must actually be present (guards against silent corpus drift).
 assert (0, 0) in EQ_PAIRS, "corpus must include 0 == 0 (zero equality)"
 assert any(a == b and a != 0 for a, b in EQ_PAIRS), "corpus must include a nonzero equality"
+assert any(a != 0 and b == 0 for a, b in GT_PAIRS), (
+    "corpus must include positive-vs-zero so run_mu drives both zero-dispatch arms "
+    "(+a vs 0 = GT and its swap 0 vs +b = LT); without it those branches are unverified"
+)
 assert (2, 1) in GT_PAIRS, "corpus must include a length difference where the longer operand is greater"
 assert (8, 7) in GT_PAIRS, "corpus must prove length is the most-significant difference (8 > 7)"
 assert {(9, 8), (10, 8), (12, 8)} <= set(GT_PAIRS), (
@@ -492,6 +497,15 @@ class TestOrderingMatrix:
         for a, b in EQ_PAIRS:
             result, _, _ = results[(a, b)]
             assert result == encode_ord(0), f"COMPARE({a}, {b}) must be EQ, got {result}"
+
+    def test_zero_vs_positive_dispatch(self):
+        """Zero-vs-positive routes through the dedicated dispatch arms (never the bit
+        loop): +a vs 0 = GT and 0 vs +b = LT. These are the only corpus rows that
+        drive the two ``{"_num": None}`` dispatch branches — without them those arms
+        could be deleted or return the wrong tag and the gate would still pass."""
+        results = _cmp_results()
+        assert results[(5, 0)][0] == encode_ord(1), "COMPARE(5, 0) must be GT (+a vs 0)"
+        assert results[(0, 5)][0] == encode_ord(-1), "COMPARE(0, 5) must be LT (0 vs +b)"
 
     def test_lt_gt_symmetry_and_never_eq(self):
         """For each unequal pair, the swap yields the opposite tag — and never EQ."""
