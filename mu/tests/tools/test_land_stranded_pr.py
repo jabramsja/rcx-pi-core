@@ -11,8 +11,9 @@ network. Nothing is marked slow.
 Proves (mapping to the locked packet's TESTS section):
   (a) the EXTENDED ``_try_auto_resolve_pr_conflict`` auto-resolves a TASKS.md
       tracker-note conflict (BOTH notes kept) AND a test_growth_caps.py CAP
-      conflict (per-CAP MAX value + UNION of inline comments), individually AND
-      together;
+      conflict (per-CAP BASE+UNION value covering the merged file count + UNION of
+      inline comments), individually AND together — including the both-sides-add-
+      distinct-files regression that the old MAX-of-totals logic stranded;
   (b) it FAILS CLOSED in BOTH dimensions — (i) FILENAME: a third, unknown file
       in the conflict set (with TASKS.md, and unknown-alone); (ii) CONTENT: a
       non-CAP/non-comment line inside test_growth_caps.py AND a non-tracker-note
@@ -34,6 +35,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -96,6 +98,13 @@ def _write_growth_cap_conflict(repo_root: Path, body: str) -> Path:
     path = cap_dir / "test_growth_caps.py"
     path.write_text(body, encoding="utf-8")
     return path
+
+
+def _parse_cap(text: str, name: str) -> int:
+    """Extract the integer value of a resolved ``CAP_*`` assignment line."""
+    match = re.search(rf"^\s*{re.escape(name)}\s*=\s*(\d+)", text, re.MULTILINE)
+    assert match is not None, f"{name} not found in resolved text:\n{text}"
+    return int(match.group(1))
 
 
 def _make_helper_fake_run(
@@ -170,59 +179,170 @@ class TestIsGrowthCapLineOnly:
         assert not commit_mod._is_growth_cap_line_only(["This is a random line.\n"])  # ANTICHEAT_OK: validator verify
 
 
+# ───────────────────── increment-annotation file counter ─────────────────────
+
+
+class TestAnnotationIncrement:
+    """``annotation_increment`` (public seam over ``_annotation_increment``) —
+    the ``+N`` file count an annotation carries.
+
+    The crux of the base+union fix: a resolved CAP_* sums these over the UNIONed
+    annotations so it covers every distinct file either side added.
+    """
+
+    def test_single_file_increment(self):
+        assert commit_mod.annotation_increment(
+            "+1 for test_x.py (wave, FOUNDER_OVERRIDE:w)"
+        ) == 1
+
+    def test_multi_file_increment(self):
+        assert commit_mod.annotation_increment(
+            "+3 for post-redteam engine-state/scheduler tests (wave)"
+        ) == 3
+
+    def test_leading_whitespace_tolerated(self):
+        assert commit_mod.annotation_increment("  +2 for a.py; b.py") == 2
+
+    def test_non_increment_note_counts_zero(self):
+        # A bare policy remark contributes no file count (degrades to base).
+        assert commit_mod.annotation_increment("base ann") == 0
+        assert commit_mod.annotation_increment("") == 0
+
+
+# ──────────────────── increment-annotation file identity ─────────────────────
+
+
+class TestAnnotationIdentity:
+    """``annotation_identity`` (public seam over ``_annotation_identity``) — the
+    dedup KEY that makes the UNION count DISTINCT files. Same file annotated with
+    different wording on the two sides ⇒ same identity ⇒ counted ONCE (the bridge
+    round-1 over-count fix)."""
+
+    def test_subject_is_the_file_dropping_provenance(self):
+        # The trailing "( … )" provenance is NOT part of the identity.
+        assert commit_mod.annotation_identity(
+            "+1 for test_x.py (wave, FOUNDER_OVERRIDE:w)"
+        ) == "test_x.py"
+
+    def test_same_file_different_provenance_is_one_identity(self):
+        # The crux: two waves/sides annotate the SAME file with DIFFERENT notes —
+        # full strings differ, identity is equal, so the union counts it once.
+        a = commit_mod.annotation_identity("+1 for test_shared.py (same-wave, note-a)")
+        b = commit_mod.annotation_identity("+1 for test_shared.py (same-wave, note-b)")
+        assert a == b == "test_shared.py"
+
+    def test_distinct_files_are_distinct_identities(self):
+        ident = commit_mod.annotation_identity
+        assert ident("+1 for test_a.py (w)") != ident("+1 for test_b.py (w)")
+
+    def test_no_provenance_paren_tolerated(self):
+        assert commit_mod.annotation_identity("+1 for test_x.py") == "test_x.py"
+
+    def test_multi_file_prose_subject_preserved(self):
+        assert commit_mod.annotation_identity(
+            "+3 for post-redteam engine-state/scheduler tests (wave)"
+        ) == "post-redteam engine-state/scheduler tests"
+
+    def test_non_increment_note_keys_on_full_text(self):
+        # No leading "+N" ⇒ keep the whole note as its key, so distinct notes union.
+        assert commit_mod.annotation_identity("base ann") == "base ann"
+
+
 # ────────────────────── growth-cap resolver (pure file) ──────────────────────
 
 
 class TestResolveGrowthCapsConflict:
-    """``_resolve_growth_caps_conflict`` — per-CAP MAX value + UNION comments."""
+    """``resolve_growth_caps_conflict`` (public seam over
+    ``_resolve_growth_caps_conflict``) — per-CAP BASE+UNION value (covers the
+    merged file count, not ``max(totals)``) + UNION of inline comments."""
 
     def test_no_conflict_returns_true_unchanged(self, tmp_path):
         path = tmp_path / "test_growth_caps.py"
         original = "CAP_TEST_FILES = 144  # +1 for a.py\nBASELINE = 190\n"
         path.write_text(original, encoding="utf-8")
-        assert commit_mod._resolve_growth_caps_conflict(path) is True  # ANTICHEAT_OK: resolver verify
+        assert commit_mod.resolve_growth_caps_conflict(path) is True
         assert path.read_text(encoding="utf-8") == original
 
-    def test_single_cap_max_value_union_comments_origin_first(self, tmp_path):
+    def test_single_cap_base_union_value_union_comments_origin_first(self, tmp_path):
+        # Append-only model: a common ancestor documented test_shared.py (base =
+        # 145 - 2 documented = 143 on BOTH sides); HEAD then added test_b.py and
+        # origin added test_a.py — DISTINCT files, both landing the cap at 145. The
+        # merged tree carries shared + a + b, so the resolved cap must be base +
+        # UNION = 143 + 3 = 146 (covers BOTH distinct files), NOT max(145,145)=145
+        # (which would drop one of them — the undercount this fix closes).
         path = tmp_path / "test_growth_caps.py"
         path.write_text(
             "BASELINE_TEST_FILES = 190\n"
             "<<<<<<< HEAD\n"
-            "CAP_TEST_FILES = 145  # base ann; +1 for test_b.py (wave-b)\n"
+            "CAP_TEST_FILES = 145  # +1 for test_shared.py (shared-wave); +1 for test_b.py (wave-b)\n"
             "=======\n"
-            "CAP_TEST_FILES = 146  # base ann; +1 for test_a.py (wave-a)\n"
+            "CAP_TEST_FILES = 145  # +1 for test_shared.py (shared-wave); +1 for test_a.py (wave-a)\n"
             ">>>>>>> origin/dev\n",
             encoding="utf-8",
         )
-        assert commit_mod._resolve_growth_caps_conflict(path) is True  # ANTICHEAT_OK: resolver verify
+        assert commit_mod.resolve_growth_caps_conflict(path) is True
         resolved = path.read_text(encoding="utf-8")
         assert "<<<<<<<" not in resolved and ">>>>>>>" not in resolved
-        # MAX of the two CAP values.
-        assert "CAP_TEST_FILES = 146" in resolved
+        # base (143) + UNION of both sides' added files (3) — COVERS both distinct
+        # files, above max(145, 145) = 145.
+        assert _parse_cap(resolved, "CAP_TEST_FILES") == 146
         # UNION of inline annotations, origin (merged-first) before HEAD, deduped.
         assert resolved.index("+1 for test_a.py") < resolved.index("+1 for test_b.py")
-        assert resolved.count("base ann") == 1
+        assert resolved.count("test_shared.py") == 1
         # Untouched surrounding content preserved.
         assert "BASELINE_TEST_FILES = 190" in resolved
 
-    def test_multiple_caps_in_one_block_per_name_max(self, tmp_path):
+    def test_same_file_different_provenance_counts_once(self, tmp_path):
+        # Bridge round-1 finding-2 regression: BOTH sides added the SAME ONE file
+        # (test_shared.py) but annotated it with DIFFERENT wording — the same wave
+        # re-annotated on the two merge sides. The full annotation STRINGS differ,
+        # but it is ONE file, so the cap must stay 145 (base 144 + union 1), NOT
+        # 146. Deduping the union by full string (then summing +N) double-counted
+        # the one file as +2 — the over-bump this fix closes. The kept annotation
+        # is origin's (merged-first), and the file appears exactly once.
+        path = tmp_path / "test_growth_caps.py"
+        path.write_text(
+            "BASELINE_TEST_FILES = 190\n"
+            "<<<<<<< HEAD\n"
+            "CAP_TEST_FILES = 145  # +1 for test_shared.py (same-wave, note-b)\n"
+            "=======\n"
+            "CAP_TEST_FILES = 145  # +1 for test_shared.py (same-wave, note-a)\n"
+            ">>>>>>> origin/dev\n",
+            encoding="utf-8",
+        )
+        assert commit_mod.resolve_growth_caps_conflict(path) is True
+        resolved = path.read_text(encoding="utf-8")
+        assert "<<<<<<<" not in resolved and ">>>>>>>" not in resolved
+        # ONE file ⇒ 145, never the 146 the full-string-deduped sum produced.
+        assert _parse_cap(resolved, "CAP_TEST_FILES") == 145
+        assert "146" not in resolved
+        # The file is recorded exactly once (origin's note-a kept, merged-first).
+        assert resolved.count("test_shared.py") == 1
+        assert "note-a" in resolved and "note-b" not in resolved
+
+    def test_multiple_caps_in_one_block_per_name_base_union(self, tmp_path):
+        # Two caps in one block, each resolved INDEPENDENTLY to base+union, with
+        # DIFFERENT shapes. CAP_TEST_FILES: both sides added a distinct file (145
+        # each ⇒ base 144 ⇒ 144+2 = 146). CAP_TOOL_SCRIPTS: only HEAD bumped (+1 for
+        # tool_b.sh over the shared base 54); origin kept the ancestor value 54 with
+        # no annotation (base 54) ⇒ 54+1 = 55 = HEAD's value (the one tool it added).
         path = tmp_path / "test_growth_caps.py"
         path.write_text(
             "<<<<<<< HEAD\n"
-            "CAP_TEST_FILES = 145  # +1 b\n"
-            "CAP_TOOL_SCRIPTS = 55  # +1 tool-b\n"
+            "CAP_TEST_FILES = 145  # +1 for test_b.py (wave-b)\n"
+            "CAP_TOOL_SCRIPTS = 55  # +1 for tool_b.sh (wave-b)\n"
             "=======\n"
-            "CAP_TEST_FILES = 146  # +1 a\n"
+            "CAP_TEST_FILES = 145  # +1 for test_a.py (wave-a)\n"
             "CAP_TOOL_SCRIPTS = 54\n"
             ">>>>>>> origin/dev\n",
             encoding="utf-8",
         )
-        assert commit_mod._resolve_growth_caps_conflict(path) is True  # ANTICHEAT_OK: resolver verify
+        assert commit_mod.resolve_growth_caps_conflict(path) is True
         resolved = path.read_text(encoding="utf-8")
-        assert "CAP_TEST_FILES = 146" in resolved  # max(145, 146)
-        assert "CAP_TOOL_SCRIPTS = 55" in resolved  # max(55, 54)
-        assert "+1 a" in resolved and "+1 b" in resolved
-        assert "+1 tool-b" in resolved
+        assert _parse_cap(resolved, "CAP_TEST_FILES") == 146  # base 144 + union 2
+        assert _parse_cap(resolved, "CAP_TOOL_SCRIPTS") == 55  # base 54 + union 1
+        assert "+1 for test_a.py" in resolved and "+1 for test_b.py" in resolved
+        assert "+1 for tool_b.sh" in resolved
 
     def test_rejects_semantic_line_unmodified(self, tmp_path):
         path = tmp_path / "test_growth_caps.py"
@@ -235,7 +355,7 @@ class TestResolveGrowthCapsConflict:
             ">>>>>>> origin/dev\n"
         )
         path.write_text(original, encoding="utf-8")
-        assert commit_mod._resolve_growth_caps_conflict(path) is False  # ANTICHEAT_OK: resolver verify
+        assert commit_mod.resolve_growth_caps_conflict(path) is False
         assert path.read_text(encoding="utf-8") == original  # UNMODIFIED
 
     def test_rejects_baseline_change_unmodified(self, tmp_path):
@@ -248,7 +368,7 @@ class TestResolveGrowthCapsConflict:
             ">>>>>>> origin/dev\n"
         )
         path.write_text(original, encoding="utf-8")
-        assert commit_mod._resolve_growth_caps_conflict(path) is False  # ANTICHEAT_OK: resolver verify
+        assert commit_mod.resolve_growth_caps_conflict(path) is False
         assert path.read_text(encoding="utf-8") == original
 
     def test_rejects_nested_markers(self, tmp_path):
@@ -262,12 +382,12 @@ class TestResolveGrowthCapsConflict:
             ">>>>>>> origin/dev\n",
             encoding="utf-8",
         )
-        assert commit_mod._resolve_growth_caps_conflict(path) is False  # ANTICHEAT_OK: resolver verify
+        assert commit_mod.resolve_growth_caps_conflict(path) is False
 
     def test_rejects_dangling_marker(self, tmp_path):
         path = tmp_path / "test_growth_caps.py"
         path.write_text("<<<<<<< HEAD\nCAP_X = 1\n", encoding="utf-8")
-        assert commit_mod._resolve_growth_caps_conflict(path) is False  # ANTICHEAT_OK: resolver verify
+        assert commit_mod.resolve_growth_caps_conflict(path) is False
 
 
 # ───────────── shared helper end-to-end: (a) resolve + (b) fail-closed ────────
@@ -290,6 +410,9 @@ class TestSharedHelperKnownMechanicalConflicts:
 
     # (a) ── growth-cap alone ────────────────────────────────────────────────
     def test_resolves_growth_cap_conflict_alone(self, tmp_path):
+        # Both sides landed the cap at 145 but added DISTINCT files (base 144 each)
+        # ⇒ base+union resolves to 146, COVERING both — where the old max(145,145)
+        # = 145 would drop one file and strand the bring-current commit.
         cap = _write_growth_cap_conflict(
             tmp_path,
             "<<<<<<< HEAD\n"
@@ -305,9 +428,62 @@ class TestSharedHelperKnownMechanicalConflicts:
         assert result["action"] == "mechanical_conflict_resolved"
         resolved = cap.read_text(encoding="utf-8")
         assert "<<<<<<<" not in resolved
-        assert "CAP_TEST_FILES = 145" in resolved
+        assert _parse_cap(resolved, "CAP_TEST_FILES") == 146  # base 144 + union 2
         assert "+1 for test_a.py" in resolved and "+1 for test_b.py" in resolved
         assert resolved.index("+1 for test_a.py") < resolved.index("+1 for test_b.py")
+
+    # (a) ── REGRESSION: both sides add DISTINCT files ⇒ base+union COVERS the
+    #        merged count where max-of-totals UNDERCOUNTS (the confirmed #1107
+    #        bring-current strand). ──────────────────────────────────────────────
+    def test_both_sides_add_distinct_files_resolves_to_covering_union(self, tmp_path):
+        # Faithful model of landing PR #1107: HEAD (the stranded PR) added the
+        # pager test (+1 over the shared base 142); origin/dev added 3 DISTINCT
+        # structural-numbers tests (+3). After merging dev the worktree carries
+        # BOTH sets, so the cap must cover base + UNION = 142 + (1 + 3) = 146 test
+        # files above baseline 190 — i.e. 336. max(143, 145) = 145 ⇒ 190 + 145 =
+        # 335 ⇒ the growth-cap gate's `assert 336 <= 335` fails ⇒ the bring-current
+        # `git commit` exits 1 ⇒ the op is stranded (the bug). The CAP_TOOL_SCRIPTS
+        # conflict models the same shape: each side added a DISTINCT tool script
+        # (+1 each over a shared base 53) ⇒ 53 + 2 = 55 where max(54, 54) = 54.
+        cap = _write_growth_cap_conflict(
+            tmp_path,
+            "<<<<<<< HEAD\n"
+            "CAP_TEST_FILES = 143  # +1 for test_pager.py (pager-wave)\n"
+            "CAP_TOOL_SCRIPTS = 54  # +1 for tool_head.sh (head-wave)\n"
+            "=======\n"
+            "CAP_TEST_FILES = 145  # +1 for test_sn_add.py (sn-add); "
+            "+1 for test_sn_mul.py (sn-mul); +1 for test_sn_sub.py (sn-sub)\n"
+            "CAP_TOOL_SCRIPTS = 54  # +1 for tool_origin.py (origin-wave)\n"
+            ">>>>>>> origin/dev\n",
+        )
+        fake = _make_helper_fake_run([GROWTH_CAP_RELPATH])
+        with patch.object(commit_mod.subprocess, "run", side_effect=fake):
+            result = self._resolve(tmp_path, [GROWTH_CAP_RELPATH])
+        assert result["resolved"] is True
+        assert result["action"] == "mechanical_conflict_resolved"
+        resolved = cap.read_text(encoding="utf-8")
+        assert "<<<<<<<" not in resolved and ">>>>>>>" not in resolved
+        test_cap = _parse_cap(resolved, "CAP_TEST_FILES")
+        tool_cap = _parse_cap(resolved, "CAP_TOOL_SCRIPTS")
+        # base+union, NOT max-of-totals.
+        assert test_cap == 146, f"CAP_TEST_FILES resolved {test_cap}, want base+union 146"
+        assert tool_cap == 55, f"CAP_TOOL_SCRIPTS resolved {tool_cap}, want base+union 55"
+        # UNION of every side's inline annotation preserved — no file dropped.
+        for fname in (
+            "test_pager.py", "test_sn_add.py", "test_sn_mul.py", "test_sn_sub.py"
+        ):
+            assert fname in resolved, fname
+        for tool in ("tool_head.sh", "tool_origin.py"):
+            assert tool in resolved, tool
+        # The resolved caps PASS the growth-cap gate for the merged tree, where
+        # max-of-totals would FAIL it. Mirrors test_growth_caps.py's
+        # `assert count <= BASELINE + CAP`; 190 / 68 are the #1107-era baselines.
+        baseline_tests, merged_test_count = 190, 336
+        baseline_tools, merged_tool_count = 68, 68 + 55
+        assert merged_test_count <= baseline_tests + test_cap  # base+union PASSES
+        assert baseline_tests + max(143, 145) < merged_test_count  # max-of-totals FAILS
+        assert merged_tool_count <= baseline_tools + tool_cap
+        assert baseline_tools + max(54, 54) < merged_tool_count
 
     # (a) ── TASKS.md alone (both notes kept) ─────────────────────────────────
     def test_resolves_tasks_md_conflict_alone_keeps_both(self, tmp_path):
@@ -343,8 +519,9 @@ class TestSharedHelperKnownMechanicalConflicts:
         )
         cap = _write_growth_cap_conflict(
             tmp_path,
-            "<<<<<<< HEAD\nCAP_TEST_FILES = 145  # +1 b\n"
-            "=======\nCAP_TEST_FILES = 146  # +1 a\n>>>>>>> origin/dev\n",
+            "<<<<<<< HEAD\nCAP_TEST_FILES = 145  # +1 for test_b.py (wave-b)\n"
+            "=======\nCAP_TEST_FILES = 145  # +1 for test_a.py (wave-a)\n"
+            ">>>>>>> origin/dev\n",
         )
         added: list = []
         fake = _make_helper_fake_run(["TASKS.md", GROWTH_CAP_RELPATH], added=added)
@@ -355,7 +532,8 @@ class TestSharedHelperKnownMechanicalConflicts:
         # Both files staged in one add.
         assert added and "TASKS.md" in added[0] and GROWTH_CAP_RELPATH in added[0]
         assert "<<<<<<<" not in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
-        assert "CAP_TEST_FILES = 146" in cap.read_text(encoding="utf-8")
+        # base 144 + union of both distinct files (2) = 146, covering both.
+        assert _parse_cap(cap.read_text(encoding="utf-8"), "CAP_TEST_FILES") == 146
 
     # (b)(i) ── FILENAME GATE: third unknown file alongside TASKS.md ──────────
     def test_fails_closed_unknown_file_with_tasks_md(self, tmp_path):
@@ -516,8 +694,9 @@ class TestMergePhaseReuseAndReConflict:
         # re-conflict instead of stranding it.
         cap = _write_growth_cap_conflict(
             tmp_path,
-            "<<<<<<< HEAD\nCAP_TEST_FILES = 146  # +1 mine\n"
-            "=======\nCAP_TEST_FILES = 147  # +1 theirs\n>>>>>>> origin/dev\n",
+            "<<<<<<< HEAD\nCAP_TEST_FILES = 146  # +1 for test_mine.py (mine-wave)\n"
+            "=======\nCAP_TEST_FILES = 146  # +1 for test_theirs.py (theirs-wave)\n"
+            ">>>>>>> origin/dev\n",
         )
         fake = _make_helper_fake_run([GROWTH_CAP_RELPATH])
         with patch.object(commit_mod.subprocess, "run", side_effect=fake):
@@ -530,7 +709,8 @@ class TestMergePhaseReuseAndReConflict:
             )
         assert result["resolved"] is True
         assert result["action"] == "mechanical_conflict_resolved"
-        assert "CAP_TEST_FILES = 147" in cap.read_text(encoding="utf-8")  # max
+        # base 145 + union of both distinct files (2) = 147, covering both.
+        assert _parse_cap(cap.read_text(encoding="utf-8"), "CAP_TEST_FILES") == 147
 
     def test_step_14_to_16_callers_reinvoke_the_shared_helper(self):
         # Source linkage: the Step-14 pre-CI gate AND the late merge retry both
