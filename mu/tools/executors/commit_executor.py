@@ -6888,6 +6888,293 @@ def _is_tracker_note_only(buf: list[str]) -> bool:
     return True
 
 
+# ── Growth-cap conflict resolution (mechanical CAP_* base+union + comment union) ──
+# A second known-mechanical merge conflict, alongside TASKS.md tracker notes:
+# when two waves each bump a CAP_* growth cap in mu/tests/docs/test_growth_caps.py,
+# the cap line collides every time the base branch advances. Like the TASKS.md
+# resolver, this is gated in TWO layers — the filename gate inside
+# _try_auto_resolve_pr_conflict (the conflicted set must be a subset of the known
+# files) AND this content-level guard (every conflict block on BOTH sides must be
+# purely CAP_* assignment lines, comment lines, and/or blanks). Any other line
+# fails closed WITHOUT modifying the file, exactly as
+# _resolve_tasks_md_tracker_note_conflict does.
+_GROWTH_CAP_ASSIGN_RE = re.compile(
+    r"^[ \t]*CAP_[A-Za-z0-9_]+[ \t]*=[ \t]*\d+[ \t]*(?:#.*)?$"
+)
+_GROWTH_CAP_PARSE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<name>CAP_[A-Za-z0-9_]+)[ \t]*=[ \t]*"
+    r"(?P<value>\d+)[ \t]*(?:#(?P<comment>.*))?$"
+)
+_GROWTH_CAP_COMMENT_RE = re.compile(r"^[ \t]*#.*$")
+# Each per-wave inline annotation is ``+N for <files> (...)``; the leading ``+N``
+# is the file count that wave added above the previous cap.
+_GROWTH_CAP_INCREMENT_RE = re.compile(r"^\+(\d+)\b")
+
+
+def _annotation_increment(annotation: str) -> int:
+    """File-count one inline growth-cap increment annotation contributes.
+
+    Returns ``N`` for a ``+N for …`` annotation, else ``0`` (a non-increment note
+    — e.g. a bare policy remark — contributes no file count). The conflict
+    resolver sums these over the UNIONed annotations so a resolved CAP_* COVERS
+    every distinct file EITHER side added, instead of taking the MAX of either
+    side's total (which silently drops a file one side added that the other lacks
+    — the confirmed ``land_stranded_pr`` bring-current undercount).
+    """
+    match = _GROWTH_CAP_INCREMENT_RE.match(annotation.strip())
+    return int(match.group(1)) if match else 0
+
+
+def _annotation_identity(annotation: str) -> str:
+    """Dedup identity for one inline growth-cap increment annotation.
+
+    Two annotations that name the SAME added file(s) are the SAME increment even
+    when their parenthetical provenance differs (e.g. the same wave re-annotated
+    the cap on the two merge sides). Identity is the ``+N for <subject>`` SUBJECT
+    — the text after ``for`` up to the provenance ``(`` — whitespace-normalized;
+    the leading ``+N`` count and the trailing ``( … )`` provenance are dropped. A
+    non-increment note (no leading ``+N``) keys on its OWN full text, so genuinely
+    distinct notes still union.
+
+    The UNION must dedup by this identity, NOT by the full annotation string: a
+    file BOTH sides added but annotated with different wording (origin's
+    ``+1 for test_x.py (wave, note-a)`` vs HEAD's ``+1 for test_x.py (wave,
+    note-b)``) is two distinct full strings but ONE file. Summing ``+N`` over a
+    full-string-deduped union double-counts that file and over-bumps the cap
+    (e.g. ``+1`` + ``+1`` → ``146`` where the merged tree only grew by one to
+    ``145``). Keying on file identity counts each distinct file ONCE.
+    """
+    stripped = annotation.strip()
+    match = _GROWTH_CAP_INCREMENT_RE.match(stripped)
+    if match is None:
+        return stripped  # non-increment note keys on its own full text
+    rest = stripped[match.end():].lstrip()  # drop the leading "+N"
+    if rest[:4].lower() == "for ":
+        rest = rest[4:].lstrip()  # drop an optional leading "for "
+    paren = rest.find("(")
+    if paren != -1:
+        rest = rest[:paren]  # drop the trailing "( … )" provenance
+    return " ".join(rest.split())  # whitespace-normalized file subject
+
+
+def _is_growth_cap_line_only(buf: list[str]) -> bool:
+    """Every non-blank line in *buf* must be a CAP_* assignment line or a
+    standalone comment line — the only known-mechanical content of a
+    test_growth_caps.py conflict block. Blank lines are allowed.
+
+    Any other line (code, a ``BASELINE_*`` assignment, prose) marks the block as
+    a real semantic conflict, so the caller must fail closed. Mirrors
+    :func:`_is_tracker_note_only`.
+    """
+    for raw in buf:
+        stripped = raw.rstrip("\n")
+        if not stripped.strip():
+            continue
+        if _GROWTH_CAP_ASSIGN_RE.match(stripped) or _GROWTH_CAP_COMMENT_RE.match(
+            stripped
+        ):
+            continue
+        return False
+    return True
+
+
+def _merge_growth_cap_block(
+    origin_buf: list[str], head_buf: list[str]
+) -> list[str] | None:
+    """Merge the two sides of ONE growth-cap conflict block.
+
+    Per-``CAP_*`` BASE+UNION value + UNION of per-wave inline-comment annotations
+    (origin annotations first, then HEAD's not-yet-seen — the same origin-first
+    keep-both order :func:`_resolve_tasks_md_tracker_note_conflict` uses), plus
+    any unioned standalone comment lines. The union dedups by FILE IDENTITY
+    (:func:`_annotation_identity`), NOT by full annotation string, so a file BOTH
+    sides added with different wording counts ONCE — summing ``+N`` over a
+    full-string-deduped union would over-bump the cap by re-counting that file.
+
+    The resolved value COVERS the actual merged file count, NOT ``max(totals)``.
+    Each side's cap = an undocumented BASE (the cap value minus the file counts
+    its own inline ``+N for …`` annotations enumerate) plus that side's documented
+    increments. Because the annotation log is append-only across the shared
+    history, ``cap_value - own_increment_sum`` is the SAME undocumented base on
+    both sides, so the resolved value is that base plus the file count of the
+    UNIONed annotations — base + every distinct file EITHER side added. ``max`` of
+    the two totals instead drops any file one side added that the other lacks
+    (head adds 1, origin adds 3 distinct ⇒ the merged tree needs +4 but ``max``
+    grants only +3), which stranded the bring-current commit at the growth-cap
+    gate (the confirmed PR #1107 ``assert 336 <= 335``). The base is taken as the
+    LARGER of the two per-side bases so a non-append-only history still never
+    resolves BELOW either side's own cap; a side that annotates no files degrades
+    to its full value as base (i.e. ``max`` for that side — the safe floor).
+
+    Returns the merged, newline-terminated lines, or ``None`` if a CAP_* line
+    cannot be parsed (malformed) so the caller fails closed. A resolved value that
+    STILL cannot cover the merged tree (undocumented files unique to each side) is
+    caught downstream WITHOUT new machinery: the bring-current ``git commit``
+    re-runs the growth-cap gate, which fails closed and aborts the merge.
+    """
+    cap_order: list[str] = []
+    cap_anns: dict[str, list[str]] = {}
+    cap_ann_ids: dict[str, set[str]] = {}  # file-identity dedup keys per CAP_*
+    cap_indent: dict[str, str] = {}
+    cap_has_comment: dict[str, bool] = {}
+    cap_bases: dict[str, list[int]] = {}  # per-side (value - own increment sum)
+    comment_lines: list[str] = []
+    seen_comments: set[str] = set()
+    for buf in (origin_buf, head_buf):  # origin (merged-first) before HEAD
+        for raw in buf:
+            stripped = raw.rstrip("\n")
+            if not stripped.strip():
+                continue
+            match = _GROWTH_CAP_PARSE_RE.match(stripped)
+            if match is not None:
+                name = match.group("name")
+                value = int(match.group("value"))
+                if name not in cap_anns:
+                    cap_order.append(name)
+                    cap_anns[name] = []
+                    cap_ann_ids[name] = set()
+                    cap_indent[name] = match.group("indent")
+                    cap_has_comment[name] = False
+                    cap_bases[name] = []
+                comment = match.group("comment")
+                side_increment_sum = 0
+                if comment is not None:
+                    cap_has_comment[name] = True
+                    side_seen_ids: set[str] = set()
+                    for ann in comment.split(";"):
+                        ann = ann.strip()
+                        if not ann:
+                            continue
+                        identity = _annotation_identity(ann)
+                        # This side's own documented increment: count each distinct
+                        # file ONCE even if the side lists it twice, so the per-side
+                        # base (value - increment) stays the true undocumented base.
+                        if identity not in side_seen_ids:
+                            side_seen_ids.add(identity)
+                            side_increment_sum += _annotation_increment(ann)
+                        # UNION across sides, deduped by FILE IDENTITY (not full
+                        # string): a file both sides annotated with different wording
+                        # is one file, counted once below.
+                        if identity not in cap_ann_ids[name]:
+                            cap_ann_ids[name].add(identity)
+                            cap_anns[name].append(ann)
+                # This side's undocumented base = its cap value minus the files its
+                # OWN annotations enumerate. Append-only history ⇒ the same base on
+                # both sides; keeping a per-side list lets us take the safe (larger)
+                # base when the two diverge.
+                cap_bases[name].append(value - side_increment_sum)
+                continue
+            if _GROWTH_CAP_COMMENT_RE.match(stripped):
+                key = stripped.strip()
+                if key not in seen_comments:
+                    seen_comments.add(key)
+                    comment_lines.append(stripped)
+                continue
+            # _is_growth_cap_line_only already filtered to cap/comment/blank, so a
+            # parse miss here means a malformed CAP_* line — fail closed.
+            return None
+    merged: list[str] = []
+    for name in cap_order:
+        indent = cap_indent[name]
+        # base + UNION of both sides' added files (the +N sum over the UNIONed
+        # annotations) — COVERS every distinct file either side added, unlike
+        # max(totals), which drops the files unique to the lower-total side.
+        base = max(cap_bases[name]) if cap_bases[name] else 0
+        union_increment = sum(
+            _annotation_increment(ann) for ann in cap_anns[name]
+        )
+        resolved_value = base + union_increment
+        if cap_has_comment[name] and cap_anns[name]:
+            merged.append(
+                f"{indent}{name} = {resolved_value}  # {'; '.join(cap_anns[name])}\n"
+            )
+        else:
+            merged.append(f"{indent}{name} = {resolved_value}\n")
+    merged.extend(f"{line}\n" for line in comment_lines)
+    return merged
+
+
+def _resolve_growth_caps_conflict(path: Path) -> bool:
+    """Resolve a mu/tests/docs/test_growth_caps.py merge conflict IFF every
+    conflict block on BOTH sides contains only CAP_* assignment lines, comment
+    lines, and/or blanks.
+
+    Rewrites each block as per-``CAP_*`` BASE+UNION value (covering the merged
+    file count, not ``max(totals)``) + UNION of per-wave inline-comment
+    annotations. Returns ``False`` WITHOUT modifying the file on any
+    non-mechanical line or malformed / nested / dangling markers, so the caller
+    aborts the merge. Mirrors :func:`_resolve_tasks_md_tracker_note_conflict`.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if "<<<<<<<" not in text:
+        return True  # no conflict to resolve
+    lines = text.splitlines(keepends=True)
+    new_lines: list[str] = []
+    head_buf: list[str] = []
+    origin_buf: list[str] = []
+    state = "normal"  # 'normal' | 'head' | 'origin'
+    for line in lines:
+        if line.startswith("<<<<<<<"):
+            if state != "normal":
+                return False  # nested / malformed
+            head_buf = []
+            origin_buf = []
+            state = "head"
+            continue
+        if line.startswith("=======") and state == "head":
+            state = "origin"
+            continue
+        if line.startswith(">>>>>>>"):
+            if state != "origin":
+                return False
+            if not _is_growth_cap_line_only(head_buf) or not _is_growth_cap_line_only(
+                origin_buf
+            ):
+                return False
+            merged = _merge_growth_cap_block(origin_buf, head_buf)
+            if merged is None:
+                return False
+            new_lines.extend(merged)
+            state = "normal"
+            continue
+        if state == "head":
+            head_buf.append(line)
+        elif state == "origin":
+            origin_buf.append(line)
+        else:
+            new_lines.append(line)
+    if state != "normal":
+        return False  # dangling conflict marker
+    path.write_text("".join(new_lines), encoding="utf-8")
+    return True
+
+
+# Public test seams. The growth-cap conflict resolver and the two annotation
+# helpers behind its BASE+UNION cap value — the ``+N`` file count an inline
+# annotation carries (:func:`_annotation_increment`) and the file-identity dedup
+# key the cross-side UNION counts by (:func:`_annotation_identity`) — are
+# exercised directly by the stranded-PR-landing regression suite. These public
+# names delegate to the canonical underscore-prefixed implementations above so
+# the suite can exercise the contract without reaching into a module-private
+# helper (the test-integrity gate forbids private-attr access in tests).
+def annotation_increment(annotation: str) -> int:
+    """Public seam over :func:`_annotation_increment`."""
+    return _annotation_increment(annotation)
+
+
+def annotation_identity(annotation: str) -> str:
+    """Public seam over :func:`_annotation_identity`."""
+    return _annotation_identity(annotation)
+
+
+def resolve_growth_caps_conflict(path: Path) -> bool:
+    """Public seam over :func:`_resolve_growth_caps_conflict`."""
+    return _resolve_growth_caps_conflict(path)
+
+
 def _try_auto_resolve_pr_conflict(
     repo_root: Path,
     *,
@@ -6899,15 +7186,30 @@ def _try_auto_resolve_pr_conflict(
     """Attempt automatic merge-base resolution for a stale-base PR.
 
     2026-04-17 learning recipe mechanized: on detection of a conflicting
-    PR, fetch the base branch, merge it in, resolve a TASKS.md tracker-
-    note conflict chronologically if that is the only conflict, commit
-    via ``RCX_SKIP_RECEIPT_CHECK=1``, and push. Any non-TASKS.md
-    conflict, non-tracker-note TASKS.md conflict, or subprocess error
-    aborts the merge and returns an error for the caller to surface.
+    PR, fetch the base branch, merge it in, resolve the KNOWN-MECHANICAL
+    conflicts, commit via ``RCX_SKIP_RECEIPT_CHECK=1``, and push.
+
+    Two-layer fail-closed gate (the filename subset is necessary but NOT
+    sufficient):
+      (i)  FILENAME GATE — the conflicted set must be a NON-EMPTY SUBSET of
+           {``TASKS.md``, ``mu/tests/docs/test_growth_caps.py``}; any other file
+           aborts the merge.
+      (ii) PER-FILE CONTENT-LEVEL GUARD — each conflicted file is dispatched to
+           its own resolver (TASKS.md → tracker-note keep-both;
+           test_growth_caps.py → per-CAP_* BASE+UNION value (covering the merged
+           file count) + UNION of per-wave inline comments). A resolver that finds
+           non-mechanical content in any block returns ``False`` WITHOUT modifying
+           the file, so the merge aborts.
+
+    Any other file (filename gate), a non-mechanical/semantic conflict inside an
+    allowed file (content guard), or a subprocess error aborts the merge and
+    returns an error for the caller to surface. The caller (bring-current AND the
+    Step-14 pre-CI gate / CI-wait midpoll / late merge retry) shares this one path.
 
     Returns a dict:
       resolved: bool — True if no refresh needed OR auto-resolve succeeded + pushed
-      action: str — 'no_action' | 'clean_merge' | 'tasks_md_resolved' | 'aborted'
+      action: str — 'no_action' | 'clean_merge' | 'tasks_md_resolved'
+                    | 'mechanical_conflict_resolved' | 'aborted'
       detail: str — human-readable explanation
     """
     conflict_state = _check_pr_conflict_state(
@@ -6989,29 +7291,53 @@ def _try_auto_resolve_pr_conflict(
     conflicted = [
         line.strip() for line in diff_proc.stdout.splitlines() if line.strip()
     ]
-    if conflicted != ["TASKS.md"]:
+    # Known-mechanical conflict files, each mapped to its content-level resolver.
+    # GROWTH_CAP_TEST_RELPATH is the canonical growth-cap relpath (defined with
+    # the growth-cap auto-bump section); it resolves at call time.
+    content_resolvers = {
+        "TASKS.md": _resolve_tasks_md_tracker_note_conflict,
+        GROWTH_CAP_TEST_RELPATH: _resolve_growth_caps_conflict,
+    }
+    # (i) FILENAME GATE: the conflicted set must be a NON-EMPTY SUBSET of the two
+    # known-mechanical files. A conflict in ANY other file fails closed — the
+    # subset is necessary but NOT sufficient (the per-file content guard below is
+    # the second layer). Generalizes the prior conflicted == ["TASKS.md"] gate.
+    disallowed = [rel for rel in conflicted if rel not in content_resolvers]
+    if not conflicted or disallowed:
         _abort_merge(repo_root, log=log)
         return {
             "resolved": False,
             "action": "aborted",
             "detail": (
-                f"conflict in non-TASKS.md files: {conflicted}; "
-                "manual recovery required"
+                f"conflict in non-TASKS.md/non-growth-cap files: "
+                f"{disallowed or conflicted}; manual recovery required"
             ),
         }
-    if not _resolve_tasks_md_tracker_note_conflict(repo_root / "TASKS.md"):
-        _abort_merge(repo_root, log=log)
-        return {
-            "resolved": False,
-            "action": "aborted",
-            "detail": (
-                "TASKS.md conflict includes non-tracker-note content; "
-                "manual recovery required"
-            ),
-        }
+    # (ii) PER-FILE CONTENT-LEVEL GUARD: dispatch each conflicted file to its own
+    # resolver. Each returns False WITHOUT modifying the file on any non-mechanical
+    # content or malformed markers, so the helper aborts the WHOLE merge — a
+    # semantic conflict INSIDE an allowed file still fails closed.
+    for rel in conflicted:
+        if not content_resolvers[rel](repo_root / rel):
+            _abort_merge(repo_root, log=log)
+            if rel == "TASKS.md":
+                detail = (
+                    "TASKS.md conflict includes non-tracker-note content; "
+                    "manual recovery required"
+                )
+            else:
+                detail = (
+                    f"{rel} conflict includes non-CAP/non-comment content; "
+                    "manual recovery required"
+                )
+            return {
+                "resolved": False,
+                "action": "aborted",
+                "detail": detail,
+            }
     try:
         subprocess.run(
-            ["git", "add", "TASKS.md"],
+            ["git", "add", "--", *conflicted],
             cwd=repo_root,
             check=True,
             timeout=20,
@@ -7031,7 +7357,7 @@ def _try_auto_resolve_pr_conflict(
         return {
             "resolved": False,
             "action": "aborted",
-            "detail": f"TASKS.md resolved but commit failed: {exc}",
+            "detail": f"known-mechanical conflict resolved but commit failed: {exc}",
         }
     push_ok, push_err = _push_branch(repo_root, branch_name)
     if not push_ok:
@@ -7040,18 +7366,27 @@ def _try_auto_resolve_pr_conflict(
             "action": "aborted",
             "detail": f"merge + resolve succeeded but push failed: {push_err}",
         }
+    # Preserve the pre-existing action label for the TASKS.md-only path so the
+    # established Step-14 auto-resolve contract stays green; the growth-cap (or
+    # combined) path reports the generalized mechanical-resolve action.
+    action = (
+        "tasks_md_resolved"
+        if conflicted == ["TASKS.md"]
+        else "mechanical_conflict_resolved"
+    )
     if log is not None:
         log(
             "Step 14 auto-resolve: merged origin/"
             + base_branch
-            + " + resolved TASKS.md tracker-note conflict chronologically + pushed"
+            + f" + resolved known-mechanical conflict(s) {conflicted} + pushed"
         )
     return {
         "resolved": True,
-        "action": "tasks_md_resolved",
+        "action": action,
         "detail": (
-            f"merged origin/{base_branch}, resolved TASKS.md chronologically, "
-            "committed with RCX_SKIP_RECEIPT_CHECK, pushed"
+            f"merged origin/{base_branch}, resolved {conflicted} "
+            "(TASKS.md keep-both / growth-cap base+union), committed with "
+            "RCX_SKIP_RECEIPT_CHECK, pushed"
         ),
     }
 
@@ -10867,6 +11202,419 @@ def _run_post_commit_pipeline(
     return result
 
 
+def _stranded_landing_authority(
+    repo_root: Path,
+    *,
+    pr_number: str,
+    head_ref: str,
+    log: Any = None,
+) -> dict[str, Any]:
+    """Prove the target PR head went through the CANONICAL receipt chain.
+
+    The stranded-PR landing op brings a PR current (a commit + push via the
+    shared helper) and merges it, identifying the PR ONLY by number. Without a
+    gate, that is a PR-number-only push/merge route OUTSIDE the receipt chain:
+    any PR number — including a clean PR never produced by this executor — could
+    drive a commit/push/merge. This gate closes that bypass (the bridge-flagged
+    re-entry finding).
+
+    Authority == an ACTIVE post-commit continuation record — the receipt-chain
+    artifact the executor itself trusts to resume a held/stranded commit. Such a
+    record is written ONLY after Step-6 supervisor receipt validation returned
+    ``COMMIT_GO`` / ``COMMIT_GO_HOLD_PUSH`` and Step-9 committed (see the
+    :func:`_write_continuation_record` call sites), and is CLEARED on a
+    successful merge (:func:`_clear_continuation_record`). A record authorizes
+    THIS landing IFF its recorded ``target_branch`` == the resolved PR head
+    branch AND its ``pr_number`` == the PR being landed AND it carries a GO
+    receipt + a ``git_commit`` step + a non-empty ``commit_sha``.
+
+    This yields exactly the bridge's two fail-closed requirements:
+      * A PR number ALONE cannot push/commit/merge — with no matching ACTIVE
+        record the caller invokes neither the shared helper nor the merge phase.
+      * A CLEAN, non-stranded PR is not landed by this path — a PR never
+        committed through this executor has no record, and one already merged had
+        its record cleared; either way there is no ACTIVE record ⇒ fail closed.
+
+    Matches on the record's CONTENT (``target_branch`` + ``pr_number``), not its
+    filename, so it is robust to the wave_id-vs-branch_prefix keying
+    (``target_branch == f"{branch_prefix}/{wave_id}"`` while the file is keyed by
+    bare ``wave_id``). Returns
+    ``{authorized: bool, detail: str, record: dict|None, path: Path|None}``; the
+    matched ``path`` is threaded back as the merge phase's ``continuation_path``
+    so a successful land CLEARS the SAME record that authorized it (a re-land of
+    the now-merged PR then fails closed).
+    """
+    try:
+        executors_dir = agent_bus_path(repo_root, _active_bus_dir(), "executors")
+        record_paths = sorted(executors_dir.glob("commit_executor_*.json"))
+    except (OSError, ExecutorCommonError):
+        record_paths = []
+    for path in record_paths:
+        payload = _read_continuation_record(path)
+        if payload is None:
+            continue
+        if payload.get("version") != COMMIT_CONTINUATION_VERSION:
+            continue
+        # ACTIVE only — a merged PR had its record cleared (deleted), so a
+        # non-ACTIVE / absent record proves the PR is NOT a stranded in-chain PR.
+        if payload.get("status") != CONTINUATION_ACTIVE_STATUS:
+            continue
+        # GO receipt only — the commit must have passed Step-6 supervisor receipt
+        # validation (the record is never written for a non-GO decision).
+        if payload.get("receipt_decision") not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+            continue
+        if str(payload.get("target_branch") or "") != head_ref:
+            continue
+        if str(payload.get("pr_number") or "") != str(pr_number):
+            continue
+        steps = payload.get("steps_completed")
+        if not isinstance(steps, list) or "git_commit" not in steps:
+            continue
+        commit_sha = str(payload.get("commit_sha") or "").strip()
+        if not commit_sha:
+            continue
+        if log is not None:
+            log(
+                f"land-stranded: receipt-chain authority for PR #{pr_number} on "
+                f"{head_ref} (receipt {payload.get('receipt_decision')}, commit "
+                f"{commit_sha[:8]}, {path.name})"
+            )
+        return {
+            "authorized": True,
+            "detail": (
+                f"active receipt chain proves PR #{pr_number} on {head_ref} was "
+                f"committed through supervisor validation "
+                f"({payload.get('receipt_decision')})"
+            ),
+            "record": payload,
+            "path": path,
+        }
+    return {
+        "authorized": False,
+        "detail": (
+            f"no ACTIVE post-commit receipt chain proves PR #{pr_number} on "
+            f"{head_ref} was committed through supervisor validation "
+            "(COMMIT_GO/COMMIT_GO_HOLD_PUSH); refusing to bring-current, push, or "
+            "merge a PR identified by number alone (a clean non-stranded PR has no "
+            "such record; a merged PR had its record cleared)"
+        ),
+        "record": None,
+        "path": None,
+    }
+
+
+def land_stranded_pr(
+    repo_root: Path,
+    pr_number: str,
+    *,
+    base_branch: str = "dev",
+    log: Any = None,
+) -> dict[str, Any]:
+    """Land an ALREADY-committed, stranded PR through the NORMAL gates.
+
+    Closes the recurring stranded-PR-behind-base treadmill — a committed PR that
+    re-conflicts on the shared ``TASKS.md`` / growth-cap files every time the base
+    branch advances — WITHOUT ``--admin``, force-merge, or hand-resolving review
+    threads. It REUSES the existing merge phase (:func:`_run_post_commit_pipeline`)
+    and the shared conflict helper (:func:`_try_auto_resolve_pr_conflict`); it adds
+    NO transactional/snapshot/rollback machinery.
+
+    Sequence (FAIL CLOSED if any precondition cannot be PROVEN, BEFORE any
+    bring-current merge/commit/push):
+      (i)   resolve the PR head branch name + commit OID from GitHub
+            (``gh pr view <PR#> --json headRefName,headRefOid``);
+      (i-auth) PROVE receipt-chain authority for the PR head BEFORE any worktree
+            mutation (:func:`_stranded_landing_authority`): require an ACTIVE
+            committed-through-supervisor continuation record whose target_branch ==
+            the PR head AND pr_number == this PR. No such record ⇒ FAIL CLOSED with
+            NO fetch/checkout/helper — so a PR number ALONE never pushes/commits/
+            merges and a clean non-stranded PR (no record, or merged so its record
+            was cleared) is not landable by this path;
+      (ii)  fetch the PR head, then PROVE — WITHOUT mutating the worktree — that
+            the OID ``git checkout <headRefName>`` would land on equals
+            ``headRefOid``, so a stale/divergent local branch FAILS CLOSED BEFORE
+            any checkout (the mutating checkout never runs on a mismatch);
+      (ii-auth) bind the receipt chain to the EXACT head OID — the proven-local PR
+            head must EQUAL or DESCEND FROM the receipt-validated ``commit_sha``,
+            so a branch force-pushed to an unrelated commit after its receipt was
+            recorded FAILS CLOSED, still before any checkout;
+      (iii) only once that OID is proven, check out that exact head branch and
+            RE-VERIFY the checked-out branch == ``headRefName`` AND local ``HEAD``
+            OID == ``headRefOid`` (defense in depth) — the shared helper merges
+            ``origin/<base>`` into whatever worktree is current and pushes
+            ``branch_name`` (it does NOT check out itself), so without this
+            on-correct-head proof a literal run could merge the base into the
+            wrong local branch or push a stale branch;
+      (iv)  bring the PR current with ``origin/<base>`` via the EXTENDED shared
+            helper (auto-resolving ONLY the two known mechanical conflicts,
+            fail-closed otherwise);
+      (v)   run the EXISTING Step 14-16 merge phase
+            (:func:`_run_post_commit_pipeline` with Steps 11-13 pre-marked
+            complete), which merges via ``merge_pr.sh`` WITHOUT ``--admin`` and
+            re-invokes the same helper on any mid-gate re-conflict.
+
+    Returns the merge-phase result dict on success, or a fail-closed error dict
+    (``status == "error"``, ``resolved == False``, the shared helper NEVER
+    invoked) when a precondition cannot be proven.
+    """
+
+    def _emit(message: str) -> None:
+        if log is not None:
+            log(message)
+
+    def _fail_closed(step: str, detail: str) -> dict[str, Any]:
+        _emit(f"land-stranded: FAIL CLOSED ({step}): {detail}")
+        return {
+            "status": "error",
+            "step": step,
+            "resolved": False,
+            "pr_number": pr_number,
+            "errors": [detail],
+        }
+
+    pr_number = str(pr_number or "").strip().lstrip("#")
+    if not pr_number.isdigit():
+        return _fail_closed(
+            "resolve_pr_head", f"PR number is not numeric: {pr_number!r}"
+        )
+
+    # (i) Resolve the PR head branch name + commit OID from GitHub. No checkout or
+    # worktree mutation has happened yet, so any failure here leaves the worktree
+    # untouched and the shared helper uninvoked.
+    try:
+        view = _run(
+            ["gh", "pr", "view", pr_number, "--json", "headRefName,headRefOid"],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return _fail_closed("resolve_pr_head", f"gh pr view failed: {exc}")
+    if view.returncode != 0:
+        return _fail_closed(
+            "resolve_pr_head",
+            f"gh pr view exit={view.returncode}: {(view.stderr or '').strip()[:200]}",
+        )
+    try:
+        head_data = json.loads(view.stdout or "{}")
+    except json.JSONDecodeError:
+        return _fail_closed("resolve_pr_head", "malformed gh pr view JSON")
+    head_ref = str(head_data.get("headRefName") or "").strip()
+    head_oid = str(head_data.get("headRefOid") or "").strip()
+    if not head_ref or not head_oid:
+        return _fail_closed(
+            "resolve_pr_head",
+            f"PR #{pr_number} head branch name / OID not resolved from GitHub",
+        )
+
+    # (i-auth) RECEIPT-CHAIN AUTHORITY GATE — prove the PR head went through the
+    # canonical receipt chain BEFORE any worktree mutation. This closes the
+    # bridge-flagged PR-number-only push/merge route: bring-current (iv) commits +
+    # pushes and the merge phase (v) merges, so a PR number ALONE must never reach
+    # them. Require an ACTIVE post-commit continuation record (written only after a
+    # COMMIT_GO/COMMIT_GO_HOLD_PUSH supervisor receipt + commit, cleared on a
+    # successful merge) whose target_branch == this PR head AND pr_number == this
+    # PR. No such record ⇒ FAIL CLOSED here: no fetch, no checkout, no helper, no
+    # push/merge. A clean non-stranded PR (never committed through this executor,
+    # or already merged so its record was cleared) is therefore not landable here.
+    authority = _stranded_landing_authority(
+        repo_root, pr_number=pr_number, head_ref=head_ref, log=log
+    )
+    if not authority.get("authorized"):
+        return _fail_closed(
+            "authority", authority.get("detail") or "no receipt-chain authority"
+        )
+    authorized_commit_sha = str(
+        (authority.get("record") or {}).get("commit_sha") or ""
+    ).strip()
+    authorized_record_path = authority.get("path")
+
+    # (ii) Fetch the PR head. `git fetch` updates ONLY remote-tracking refs /
+    # FETCH_HEAD — it does NOT touch the working tree, the index, or HEAD, so it is
+    # not a worktree mutation. Best-effort (check=False): a head that exists only on
+    # the remote is still checked out via DWIM below once its OID is proven.
+    try:
+        _run(["git", "fetch", "origin", head_ref], cwd=repo_root, check=False, timeout=60)
+    except (subprocess.SubprocessError, OSError) as exc:
+        return _fail_closed("checkout_pr_head", f"git fetch of PR head failed: {exc}")
+
+    # (ii-pre) PROVE the would-be checkout OID matches the resolved head OID BEFORE
+    # any worktree mutation. `git checkout <head_ref>` lands on the LOCAL branch if
+    # one exists (which may be stale/divergent), else DWIM-creates a tracking branch
+    # from the freshly-fetched remote-tracking ref — so resolve the OID checkout
+    # WOULD produce (local first, then origin/<head_ref>) WITHOUT checking out, and
+    # compare it to headRefOid. If it cannot be resolved OR does not match, FAIL
+    # CLOSED here: NO checkout runs, the worktree is NOT mutated, and the shared
+    # helper is NEVER invoked. A stale/divergent local branch is caught BEFORE, not
+    # after, the mutating checkout (the prior code checked out first, then verified,
+    # which mutated the worktree on a mismatch — the defect this proof closes).
+    def _rev_parse_commit(ref: str) -> str:
+        try:
+            proc = _run(
+                ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                cwd=repo_root,
+                check=False,
+                timeout=20,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return ""
+        return proc.stdout.strip() if proc.returncode == 0 else ""
+
+    checkout_target_oid = _rev_parse_commit(head_ref) or _rev_parse_commit(
+        f"origin/{head_ref}"
+    )
+    if not checkout_target_oid:
+        return _fail_closed(
+            "verify_pr_head",
+            f"PR head '{head_ref}' could not be resolved locally after fetch; "
+            "refusing to mutate the worktree",
+        )
+    if checkout_target_oid != head_oid:
+        return _fail_closed(
+            "verify_pr_head",
+            f"would-be checkout OID {checkout_target_oid[:8]} != resolved PR head "
+            f"OID {head_oid[:8]} (stale/divergent local branch); refusing to check "
+            f"it out, merge {base_branch} into it, or push it",
+        )
+
+    # (ii-auth) Bind the receipt chain to the EXACT current head OID: the
+    # proven-local PR head must EQUAL or DESCEND FROM the receipt-validated commit
+    # recorded in the continuation chain. A branch force-pushed to an UNRELATED
+    # commit AFTER its receipt was recorded therefore fails closed here — still
+    # BEFORE any checkout/merge/push. (The authority gate matched the branch + PR
+    # number; this proves the head we are about to land is the one that chain
+    # actually authorized, not a substituted one.) The fetch above made both
+    # commits local; a non-ancestor — returncode != 0, including an unknown object
+    # — fails closed.
+    if authorized_commit_sha and authorized_commit_sha != head_oid:
+        try:
+            is_ancestor = _run(
+                ["git", "merge-base", "--is-ancestor", authorized_commit_sha, head_oid],
+                cwd=repo_root,
+                check=False,
+                timeout=20,
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            return _fail_closed(
+                "authority",
+                f"could not prove PR head descends from receipt-validated commit "
+                f"{authorized_commit_sha[:8]}: {exc}",
+            )
+        if is_ancestor.returncode != 0:
+            return _fail_closed(
+                "authority",
+                f"PR head {head_oid[:8]} does not descend from the receipt-validated "
+                f"commit {authorized_commit_sha[:8]}; refusing to land a head outside "
+                "its recorded receipt chain",
+            )
+
+    # (iii) The target OID is PROVEN to match — only now check out that exact head.
+    try:
+        _run(["git", "checkout", head_ref], cwd=repo_root, check=True, timeout=60)
+    except (subprocess.SubprocessError, OSError) as exc:
+        return _fail_closed(
+            "checkout_pr_head", f"could not check out PR head '{head_ref}': {exc}"
+        )
+
+    # (iii-post) RE-VERIFY the checked-out branch + local HEAD OID match the
+    # resolved PR head (defense in depth against a ref racing between the proof and
+    # the checkout). Any mismatch fails closed — the shared helper is NEVER invoked,
+    # so the base is never merged into the wrong branch and no stale branch is
+    # pushed.
+    try:
+        current_branch = _run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_root,
+            check=True,
+            timeout=20,
+        ).stdout.strip()
+        current_oid = _run(
+            ["git", "rev-parse", "HEAD"], cwd=repo_root, check=True, timeout=20
+        ).stdout.strip()
+    except (subprocess.SubprocessError, OSError) as exc:
+        return _fail_closed(
+            "verify_pr_head", f"could not read local HEAD after checkout: {exc}"
+        )
+    if current_branch != head_ref:
+        return _fail_closed(
+            "verify_pr_head",
+            f"checked-out branch {current_branch!r} != resolved PR head "
+            f"{head_ref!r}; refusing to proceed",
+        )
+    if current_oid != head_oid:
+        return _fail_closed(
+            "verify_pr_head",
+            f"local HEAD {current_oid[:8]} != resolved PR head OID {head_oid[:8]} "
+            f"(stale/divergent local branch); refusing to merge {base_branch} into "
+            f"it or push it",
+        )
+    _emit(
+        f"land-stranded: PR #{pr_number} head verified on {head_ref} "
+        f"@ {head_oid[:8]}; bringing current with origin/{base_branch}"
+    )
+
+    # (iv) Bring-current via the EXTENDED shared helper. Only the two known
+    # mechanical conflicts auto-resolve; anything else surfaces the helper's
+    # structured abort and we fail closed WITHOUT running the merge phase.
+    bring_current = _try_auto_resolve_pr_conflict(
+        repo_root,
+        pr_number=pr_number,
+        base_branch=base_branch,
+        branch_name=head_ref,
+        log=log,
+    )
+    if not bring_current.get("resolved"):
+        result = _fail_closed(
+            "bring_current",
+            f"bring-current failed ({bring_current.get('action')}): "
+            f"{bring_current.get('detail')}",
+        )
+        result["bring_current"] = bring_current
+        return result
+    _emit(
+        f"land-stranded: bring-current {bring_current.get('action')}; "
+        "running Step 14-16 merge phase"
+    )
+
+    # (v) Run the EXISTING Step 14-16 merge phase. Steps 11-13 (pre-push, push,
+    # ensure_pr) are marked complete because the stranded PR is already committed,
+    # pushed, and has an open PR — so _run_post_commit_pipeline skips straight to
+    # Step 14 (CI-wait, which re-invokes the shared helper as its pre-CI gate),
+    # Step 15 (bot-review-wait + sanctioned auto-defer), and Step 16 (merge via
+    # merge_pr.sh, NO --admin). The merge is NOT reimplemented here.
+    handoff: dict[str, Any] = {
+        "wave_id": head_ref,
+        "task_id": f"land-stranded-pr-{pr_number}",
+        "pr_title": "",
+        "pr_body": "",
+        "caller": "land_stranded",
+    }
+    result = {
+        "status": "success",
+        "steps_completed": ["run_pre_push_script", "git_push", "ensure_pr"],
+        "pr_number": pr_number,
+        "merge_sha": None,
+        "bring_current": bring_current,
+    }
+    # Thread the SAME continuation record that authorized this landing (matched on
+    # target_branch + pr_number above) so a successful merge CLEARS it
+    # (_clear_continuation_record) — a re-land of the now-merged PR then fails
+    # closed at the authority gate. authorized_record_path is always set once the
+    # gate authorized; the fallback only guards an unexpected shape.
+    continuation_path = authorized_record_path or _continuation_record_path(
+        repo_root, head_ref
+    )
+    return _run_post_commit_pipeline(
+        handoff=handoff,
+        repo_root=repo_root,
+        result=result,
+        target_branch=head_ref,
+        base_branch=base_branch,
+        continuation_path=continuation_path,
+        log=log if log is not None else (lambda _message: None),
+    )
+
+
 # ── Growth-cap auto-bump (FOUNDER_OVERRIDE-gated) ─────────────────────────
 # A wave that adds a NEW test file pushes the repo's test_*.py count over the
 # CAP_TEST_FILES gate (mu/tests/docs/test_growth_caps.py), stranding the commit
@@ -12853,6 +13601,30 @@ def main() -> int:
         default=None,
         help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)",
     )
+    parser.add_argument(
+        "--land-stranded",
+        type=str,
+        default=None,
+        metavar="PR_NUMBER",
+        help=(
+            "Land an ALREADY-committed, stranded PR (by number) through the "
+            "normal gates: resolve+checkout+VERIFY the PR head OID, PROVE "
+            "receipt-chain authority for it (an ACTIVE committed-through-supervisor "
+            "continuation record for the exact PR head — fail-closed otherwise, so "
+            "a PR number alone never pushes/commits/merges and a clean non-stranded "
+            "PR is not landed), bring it current with the base branch via the "
+            "shared conflict helper (auto-resolving ONLY the known mechanical "
+            "TASKS.md / growth-cap conflicts, fail-closed otherwise), then run the "
+            "existing Step 14-16 merge phase (NO --admin). Does not require "
+            "--handoff/--routing-record, but honors --bus-dir for the receipt chain."
+        ),
+    )
+    parser.add_argument(
+        "--base-branch",
+        type=str,
+        default="dev",
+        help="Base branch for --land-stranded bring-current + merge (default: dev)",
+    )
     args = parser.parse_args()
 
     if args.skip_supervisor:
@@ -12877,6 +13649,51 @@ def main() -> int:
     except subprocess.CalledProcessError:
         print("[error] Not in a git repository", file=sys.stderr)
         return 1
+
+    # Stranded-PR landing op: resolve+checkout+VERIFY the PR head, prove
+    # receipt-chain authority for it, bring it current with the base branch via the
+    # shared conflict helper (known mechanical conflicts only, fail-closed
+    # otherwise), then run the EXISTING Step 14-16 merge phase (NO --admin). Lands
+    # an ALREADY-committed PR by number, so it does NOT require a
+    # handoff/routing-record — but it DOES require an active receipt chain (a
+    # committed-through-supervisor continuation record) for the exact PR head.
+    if args.land_stranded:
+        def _land_log(message: str) -> None:
+            print(f"[land-stranded] {message}", file=sys.stderr, flush=True)
+
+        # Activate the operator-specified bus (same as the normal commit flow) so
+        # the receipt-chain authority gate scans the SAME executors bus the
+        # original wave wrote its continuation record into. Without this, --bus-dir
+        # would be ignored and the gate would fail closed against the default bus.
+        bus_token = None
+        if args.bus_dir is not None:
+            try:
+                resolve_agent_bus_dir(repo_root, args.bus_dir)
+            except ExecutorCommonError as exc:
+                print(f"[land-stranded] Error: invalid --bus-dir: {exc}", file=sys.stderr)
+                return 1
+            bus_token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(args.bus_dir))
+        try:
+            land_result = land_stranded_pr(
+                repo_root,
+                args.land_stranded,
+                base_branch=args.base_branch,
+                log=None if args.json else _land_log,
+            )
+        finally:
+            if bus_token is not None:
+                _ACTIVE_BUS_DIR.reset(bus_token)
+        if args.json:
+            print(json.dumps(land_result, indent=2))
+        else:
+            print(f"[land-stranded] Status: {land_result.get('status', 'unknown')}")
+            if land_result.get("step"):
+                print(f"[land-stranded] Step: {land_result['step']}")
+            if land_result.get("merge_sha"):
+                print(f"[land-stranded] Merge SHA: {str(land_result['merge_sha'])[:8]}")
+            for err in land_result.get("errors", []) or []:
+                print(f"[land-stranded] Error: {err}")
+        return 0 if land_result.get("status") in ("success", "held") else 1
 
     if not args.handoff and not args.routing_record:
         print("[error] Provide --handoff <path> or --routing-record <json>", file=sys.stderr)
