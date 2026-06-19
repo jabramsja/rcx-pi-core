@@ -968,6 +968,37 @@ class TestLoadExecutorConfig:
         assert config["timeouts"]["phase_b_executor"] == 600
         assert config["hybrid_recovery_enabled"] is True
 
+    def test_scoped_role_env_override_ignores_other_repo_roots(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "executor_config.json"
+        config_file.write_text(json.dumps({
+            "role_agents": {"implementer": "claude"},
+        }))
+        other_root = tmp_path.parent / "other-root"
+        monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", "codex")
+        monkeypatch.setenv("RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT", str(other_root))
+
+        config = impl_mod.load_executor_config(tmp_path)
+
+        assert config["role_agents"]["implementer"] == "claude"
+        assert config["backends"]["phase_b_executor"] == "claude"
+
+    def test_scoped_role_env_override_applies_to_matching_repo_root(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "executor_config.json"
+        config_file.write_text(json.dumps({
+            "role_agents": {"implementer": "claude"},
+        }))
+        monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", "codex")
+        monkeypatch.setenv("RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT", str(tmp_path))
+
+        config = impl_mod.load_executor_config(tmp_path)
+
+        assert config["role_agents"]["implementer"] == "codex"
+        assert config["backends"]["phase_b_executor"] == "codex"
+
 
 class TestPrepareCommitHandoff:
     """Test updated handoff schema."""

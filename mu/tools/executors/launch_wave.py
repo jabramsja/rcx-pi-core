@@ -111,10 +111,12 @@ class LaunchWaveError(RuntimeError):
 
 _IMPLEMENTER_AGENT_OVERRIDE_ENV = "RCX_IMPLEMENTER_AGENT_OVERRIDE"
 _REVIEWER_AGENT_OVERRIDE_ENV = "RCX_REVIEWER_AGENT_OVERRIDE"
+_ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV = "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT"
 _PAGER_ROUTE_OVERRIDE_ENV = "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"
 _ALLOWED_PAGER_ROUTES = frozenset({"codex", "claude", "both", "notify-only"})
 _DISPATCHER_OVERRIDE_ENV_KEYS = frozenset(
     {
+        _ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV,
         _PAGER_ROUTE_OVERRIDE_ENV,
         *(
             key
@@ -728,7 +730,7 @@ def dispatcher_environment_overrides(config: WaveConfig) -> dict[str, str]:
     return overrides
 
 
-def dispatcher_child_environment(config: WaveConfig) -> dict[str, str] | None:
+def dispatcher_child_environment(repo_root: Path, config: WaveConfig) -> dict[str, str] | None:
     """Return a sanitized child env when launch-owned override keys matter.
 
     The dispatcher resolves role and pager overrides from environment before
@@ -748,6 +750,8 @@ def dispatcher_child_environment(config: WaveConfig) -> dict[str, str] | None:
     for key in _DISPATCHER_OVERRIDE_ENV_KEYS:
         child_env.pop(key, None)
     child_env.update(env_overrides)
+    if config.implementer_agent or config.reviewer_agent:
+        child_env[_ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV] = str(Path(repo_root).resolve())
     return child_env
 
 
@@ -780,7 +784,7 @@ def maybe_launch_dispatcher(
     if not launch:
         return {"launched": False, "command": cmd, **metadata}
     runner_kwargs: dict[str, Any] = {"cwd": str(repo_root)}
-    child_env = dispatcher_child_environment(config)
+    child_env = dispatcher_child_environment(repo_root, config)
     if child_env is not None:
         runner_kwargs["env"] = child_env
     result = runner(cmd, **runner_kwargs)

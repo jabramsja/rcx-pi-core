@@ -1,24 +1,24 @@
 {
   "wave_id": "pipeline-role-pins-2026-06-19",
-  "repeat_run_speedup_ratio": 1.191155,
+  "repeat_run_speedup_ratio": 1.367749,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.278287,
+  "step_growth_slope": 0.25249,
   "repeat_run_raw_seconds": [
-    0.331483,
-    0.278287
+    0.345343,
+    0.25249
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.331483
+      "elapsed_seconds": 0.345343
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.60977
+      "elapsed_seconds": 0.597833
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-06-19T17:41:03Z",
+  "collection_timestamp_utc": "2026-06-19T18:03:47Z",
   "collector_version": "2.2.0"
 }

@@ -573,6 +573,7 @@ def test_launch_partial_pins_scrub_stale_parent_override_env(wave_repo, monkeypa
     monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", "claude")
     monkeypatch.setenv("RCX_REVIEWER_AGENT_OVERRIDE", "claude")
     monkeypatch.setenv("RCX_BRIDGE_REVIEWER_OVERRIDE", "claude")
+    monkeypatch.setenv("RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT", "/tmp/stale-root")
     monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "claude")
     captured = {}
 
@@ -592,6 +593,7 @@ def test_launch_partial_pins_scrub_stale_parent_override_env(wave_repo, monkeypa
 
     env = captured["kwargs"]["env"]
     assert env["RCX_IMPLEMENTER_AGENT_OVERRIDE"] == "codex"
+    assert env["RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT"] == str(wave_repo.resolve())
     assert "RCX_REVIEWER_AGENT_OVERRIDE" not in env
     assert "RCX_BRIDGE_REVIEWER_OVERRIDE" not in env
     assert "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE" not in env
