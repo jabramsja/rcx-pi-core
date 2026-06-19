@@ -36,6 +36,8 @@ ROLE_AGENT_ENV_VARS = {
         "RCX_BRIDGE_REVIEWER_OVERRIDE",
     ),
 }
+ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV = "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT"
+ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY = "_role_agent_env_overrides_apply"
 IMPLEMENTER_BACKEND_KEYS = frozenset(
     {
         "phase_a_executor",
@@ -528,6 +530,7 @@ def resolve_role_agent(
     role: str,
     *,
     raw_overrides: dict[str, Any] | None = None,
+    use_env_overrides: bool = True,
 ) -> str:
     """Resolve the configured bridge agent for a role family.
 
@@ -543,10 +546,18 @@ def resolve_role_agent(
     default_agent = _nonempty_str(default_role_agents.get(role)) or "codex"
     raw_overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
 
-    for env_name in ROLE_AGENT_ENV_VARS.get(role, ()):
-        candidate = _nonempty_str(os.environ.get(env_name))
-        if candidate is not None:
-            return candidate
+    if (
+        use_env_overrides
+        and config.get(ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY) is False
+        and (not raw_overrides or raw_overrides is config)
+    ):
+        use_env_overrides = False
+
+    if use_env_overrides:
+        for env_name in ROLE_AGENT_ENV_VARS.get(role, ()):
+            candidate = _nonempty_str(os.environ.get(env_name))
+            if candidate is not None:
+                return candidate
 
     explicit = _explicit_role_agent_override(raw_overrides, role)
     if explicit is not None:
@@ -617,20 +628,39 @@ def apply_role_agents(
     return config
 
 
+def _role_agent_env_overrides_apply(repo_root: Path) -> bool:
+    """Return whether role-agent env overrides are scoped to this repo root.
+
+    Unscoped overrides keep the historical behavior. Launch-wave scoped overrides
+    include a root marker so those env vars do not rewrite temporary config roots
+    created by broad commit/pre-push tests.
+    """
+    scope_root = _nonempty_str(os.environ.get(ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV))
+    if scope_root is None:
+        return True
+    try:
+        return Path(scope_root).expanduser().resolve() == Path(repo_root).expanduser().resolve()
+    except OSError:
+        return False
+
+
 def _materialize_role_agents(
     config: dict[str, Any],
     *,
     raw_overrides: dict[str, Any] | None = None,
+    use_env_overrides: bool = True,
 ) -> dict[str, Any]:
     implementer_agent = resolve_role_agent(
         config,
         "implementer",
         raw_overrides=raw_overrides,
+        use_env_overrides=use_env_overrides,
     )
     reviewer_agent = resolve_role_agent(
         config,
         "reviewer",
         raw_overrides=raw_overrides,
+        use_env_overrides=use_env_overrides,
     )
     return apply_role_agents(config, implementer_agent, reviewer_agent)
 
@@ -939,7 +969,7 @@ def configured_role_agents(
     config = config or load_executor_config(repo_root)
     roles: dict[str, dict[str, str]] = {}
     for role in ("implementer", "reviewer"):
-        agent = resolve_role_agent(config, role)
+        agent = resolve_role_agent(config, role, raw_overrides=config, use_env_overrides=False)
         roles[role] = {
             "agent": agent,
             "display_name": bridge_agent_display_name(repo_root, agent, bus_dir),
@@ -965,7 +995,14 @@ def load_executor_config(repo_root: Path) -> dict[str, Any]:
         raw_overrides = json.loads(config_path.read_text(encoding="utf-8"))
         config = merge_executor_config_overrides(raw_overrides)
     apply_recovery_config_env_overrides(config)
-    return _materialize_role_agents(config, raw_overrides=raw_overrides)
+    role_env_overrides_apply = _role_agent_env_overrides_apply(repo_root)
+    materialized = _materialize_role_agents(
+        config,
+        raw_overrides=raw_overrides,
+        use_env_overrides=role_env_overrides_apply,
+    )
+    materialized[ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY] = role_env_overrides_apply
+    return materialized
 
 
 def emit_pipeline_agent_event(

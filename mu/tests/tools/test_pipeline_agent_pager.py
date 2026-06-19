@@ -22,6 +22,7 @@ pager_mod = load_module(
 @pytest.fixture(autouse=True)
 def _isolate_live_codex_thread_id(monkeypatch):
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
 
 
 def _write_config(
@@ -344,6 +345,67 @@ def test_disabled_pager_skips_route_validation(tmp_path):
         "budget_exhausted": False,
     }
     assert not (repo / pager_mod.EVENT_LOG_PATH).exists()
+    assert not (repo / pager_mod.STATE_PATH).exists()
+
+
+def test_pager_route_env_override_precedes_executor_config(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="notify-only")
+    monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "codex")
+    calls: list[str] = []
+
+    def ack_target(repo_root, target, event, state, config, *, timeout_s):
+        calls.append(target)
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-06-01T00:00:00+00:00",
+                "target": target,
+            },
+        }
+
+    monkeypatch.setattr(pager_mod, "_dispatch_target", ack_target)
+
+    result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert result["route"] == "codex"
+    assert calls == ["codex"]
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    assert entry["requested_targets"] == ["codex"]
+    assert set(entry["delivered_targets"]) == {"codex"}
+
+
+def test_explicit_pager_route_precedes_env_override(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="notify-only")
+    monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "codex")
+
+    result = pager_mod.emit_transition_event(
+        repo,
+        route="notify-only",
+        **_event_kwargs(),
+    )
+
+    assert result["route"] == "notify-only"
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    assert entry["requested_targets"] == [pager_mod.NOTIFY_ONLY_TARGET]
+    assert pager_mod.NOTIFY_ONLY_TARGET in entry["delivered_targets"]
+
+
+def test_invalid_pager_route_env_override_fails_closed(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="notify-only")
+    monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "not-a-route")
+
+    with pytest.raises(pager_mod.PipelineAgentPagerError, match="unsupported pager route"):
+        pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert _load_log(repo) == []
     assert not (repo / pager_mod.STATE_PATH).exists()
 
 

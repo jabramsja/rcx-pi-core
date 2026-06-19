@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from dataclasses import MISSING, dataclass, field
@@ -106,6 +107,45 @@ _line_ref = _load_line_ref_checker()
 
 class LaunchWaveError(RuntimeError):
     """Raised when the wave launcher cannot complete a setup step."""
+
+
+_IMPLEMENTER_AGENT_OVERRIDE_ENV = "RCX_IMPLEMENTER_AGENT_OVERRIDE"
+_REVIEWER_AGENT_OVERRIDE_ENV = "RCX_REVIEWER_AGENT_OVERRIDE"
+_ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV = "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT"
+_PAGER_ROUTE_OVERRIDE_ENV = "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"
+_ALLOWED_PAGER_ROUTES = frozenset({"codex", "claude", "both", "notify-only"})
+_DISPATCHER_OVERRIDE_ENV_KEYS = frozenset(
+    {
+        _ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV,
+        _PAGER_ROUTE_OVERRIDE_ENV,
+        *(
+            key
+            for env_keys in _ec.ROLE_AGENT_ENV_VARS.values()
+            for key in env_keys
+        ),
+    }
+)
+
+
+def _agent_pin_valid_names(repo_root: Path | None) -> set[str]:
+    """Return agent ids accepted by launch-time role pins.
+
+    Role env overrides are consumed by executor_common.resolve_role_agent(), which
+    expects bridge-agent ids such as ``codex`` or ``claude``. Keep this validator
+    aligned with set_roles.py: accept configured bridge_agent_defaults plus the
+    repo-known display-name key set, without importing observability code.
+    """
+    names = set(_ec.DEFAULT_AGENT_DISPLAY_NAMES)
+    default_defs = _ec.DEFAULT_EXECUTOR_CONFIG.get("bridge_agent_defaults", {})
+    if isinstance(default_defs, dict):
+        names.update(name for name in default_defs if isinstance(name, str))
+
+    if repo_root is not None:
+        config = _ec.load_executor_config(Path(repo_root))
+        configured_defs = config.get("bridge_agent_defaults", {})
+        if isinstance(configured_defs, dict):
+            names.update(name for name in configured_defs if isinstance(name, str))
+    return names
 
 
 # --------------------------------------------------------------------------- #
@@ -165,6 +205,12 @@ class WaveConfig:
     # Authorization
     founder_override: str = ""  # defaults to wave_id
 
+    # Launch-time role / pager pins. Empty strings preserve the existing
+    # executor_config.json-driven behavior.
+    implementer_agent: str = ""
+    reviewer_agent: str = ""
+    pager_route: str = ""
+
     # Packet body
     scope_summary: str = ""
     scope_items: list[str] = field(default_factory=list)
@@ -200,6 +246,9 @@ class WaveConfig:
                 "would make tracked_packet drift across calendar days and break "
                 "the bounded re-run recovery contract."
             )
+        self.implementer_agent = self.implementer_agent.strip()
+        self.reviewer_agent = self.reviewer_agent.strip()
+        self.pager_route = self.pager_route.strip()
         if not self.founder_override:
             self.founder_override = self.wave_id
         if not self.tracked_packet:
@@ -233,8 +282,14 @@ class WaveConfig:
             raise LaunchWaveError(f"wave-config missing required key(s): {missing}")
         return cls(**data)
 
-    def validate(self) -> list[str]:
+    def validate(
+        self,
+        repo_root: Path | None = None,
+        *,
+        bus_dir: str | Path | None = None,
+    ) -> list[str]:
         """Return a list of config errors (empty = valid)."""
+        del bus_dir  # reserved for future bus-scoped agent catalogs
         errors: list[str] = []
         normalized = _ec.normalize_wave_id(self.wave_id)
         if normalized != self.wave_id:
@@ -257,6 +312,27 @@ class WaveConfig:
             errors.append(
                 "tracked_packet stem must start with the wave_id: "
                 f"expected prefix {expected_prefix!r}"
+            )
+        role_pins = {
+            "implementer_agent": self.implementer_agent,
+            "reviewer_agent": self.reviewer_agent,
+        }
+        if any(role_pins.values()):
+            try:
+                valid_agents = _agent_pin_valid_names(repo_root)
+            except Exception as exc:  # fail closed with the rest of validation
+                errors.append(f"cannot validate role pins from executor config: {exc}")
+                valid_agents = set()
+            for field_name, agent in role_pins.items():
+                if agent and agent not in valid_agents:
+                    errors.append(
+                        f"{field_name} must name a configured bridge agent "
+                        f"(got {agent!r}; valid agents: {sorted(valid_agents)!r})"
+                    )
+        if self.pager_route and self.pager_route not in _ALLOWED_PAGER_ROUTES:
+            errors.append(
+                "pager_route must be one of "
+                f"{sorted(_ALLOWED_PAGER_ROUTES)!r} (got {self.pager_route!r})"
             )
         return errors
 
@@ -642,6 +718,43 @@ def build_dispatch_command(
     return cmd
 
 
+def dispatcher_environment_overrides(config: WaveConfig) -> dict[str, str]:
+    """Return the non-secret dispatcher env overrides requested by this wave."""
+    overrides: dict[str, str] = {}
+    if config.implementer_agent:
+        overrides[_IMPLEMENTER_AGENT_OVERRIDE_ENV] = config.implementer_agent
+    if config.reviewer_agent:
+        overrides[_REVIEWER_AGENT_OVERRIDE_ENV] = config.reviewer_agent
+    if config.pager_route:
+        overrides[_PAGER_ROUTE_OVERRIDE_ENV] = config.pager_route
+    return overrides
+
+
+def dispatcher_child_environment(repo_root: Path, config: WaveConfig) -> dict[str, str] | None:
+    """Return a sanitized child env when launch-owned override keys matter.
+
+    The dispatcher resolves role and pager overrides from environment before
+    executor_config.json. A wave that pins only one role must not accidentally
+    inherit stale parent-process overrides for the unpinned role, pager route, or
+    the legacy reviewer alias. Metadata still records only the wave-requested
+    overrides; this child env is execution plumbing, not an audit dump.
+    """
+    env_overrides = dispatcher_environment_overrides(config)
+    inherited_override_present = any(
+        key in os.environ for key in _DISPATCHER_OVERRIDE_ENV_KEYS
+    )
+    if not env_overrides and not inherited_override_present:
+        return None
+
+    child_env = os.environ.copy()
+    for key in _DISPATCHER_OVERRIDE_ENV_KEYS:
+        child_env.pop(key, None)
+    child_env.update(env_overrides)
+    if config.implementer_agent or config.reviewer_agent:
+        child_env[_ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV] = str(Path(repo_root).resolve())
+    return child_env
+
+
 def maybe_launch_dispatcher(
     repo_root: Path,
     config: WaveConfig,
@@ -662,9 +775,19 @@ def maybe_launch_dispatcher(
     failure converges -- see the bounded re-run recovery contract.)
     """
     cmd = build_dispatch_command(repo_root, config, bus_dir=bus_dir)
+    env_overrides = dispatcher_environment_overrides(config)
+    metadata = (
+        {"environment_overrides": dict(env_overrides)}
+        if env_overrides
+        else {}
+    )
     if not launch:
-        return {"launched": False, "command": cmd}
-    result = runner(cmd, cwd=str(repo_root))
+        return {"launched": False, "command": cmd, **metadata}
+    runner_kwargs: dict[str, Any] = {"cwd": str(repo_root)}
+    child_env = dispatcher_child_environment(repo_root, config)
+    if child_env is not None:
+        runner_kwargs["env"] = child_env
+    result = runner(cmd, **runner_kwargs)
     returncode = getattr(result, "returncode", None)
     if returncode != 0:
         raise LaunchWaveError(
@@ -676,6 +799,7 @@ def maybe_launch_dispatcher(
         "launched": True,
         "command": cmd,
         "returncode": returncode,
+        **metadata,
     }
 
 
@@ -753,11 +877,11 @@ def run_wave_setup(
     re-running with the SAME config (see module docstring for the bounded
     re-run recovery contract).
     """
-    config_errors = config.validate()
+    repo_root = Path(repo_root)
+
+    config_errors = config.validate(repo_root, bus_dir=bus_dir)
     if config_errors:
         raise LaunchWaveError("invalid wave-config: " + "; ".join(config_errors))
-
-    repo_root = Path(repo_root)
 
     # Steps 1-4: artifact-producing (each idempotent under the re-run contract).
     packet_path = setup_packet(repo_root, config)

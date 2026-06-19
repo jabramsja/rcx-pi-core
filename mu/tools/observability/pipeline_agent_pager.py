@@ -123,6 +123,7 @@ ALLOWED_EVENT_TYPES = frozenset({
     "commit_held",
 })
 ALLOWED_ROUTES = frozenset({"codex", "claude", "both", NOTIFY_ONLY_TARGET})
+PAGER_ROUTE_OVERRIDE_ENV = "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"
 
 _PROCESS_LOCKS_GUARD = threading.Lock()
 _PROCESS_LOCKS: dict[str, threading.Lock] = {}
@@ -588,6 +589,14 @@ def _requested_targets(route: str) -> list[str]:
     raise PipelineAgentPagerError(f"unsupported pager route: {route}")
 
 
+def _pipeline_route_override() -> str | None:
+    value = os.environ.get(PAGER_ROUTE_OVERRIDE_ENV)
+    if value is None:
+        return None
+    route_text = str(value or "").strip()
+    return route_text or None
+
+
 def _normalize_artifact_paths(artifact_paths: dict[str, Any] | None) -> dict[str, str]:
     normalized: dict[str, str] = {}
     if not artifact_paths:
@@ -602,7 +611,11 @@ def _normalize_artifact_paths(artifact_paths: dict[str, Any] | None) -> dict[str
 
 
 def _resolve_route(config: dict[str, Any], explicit_route: str | None) -> str:
-    route = explicit_route or config.get("pipeline_agent_pager", {}).get("route", NOTIFY_ONLY_TARGET)
+    route = (
+        explicit_route
+        or _pipeline_route_override()
+        or config.get("pipeline_agent_pager", {}).get("route", NOTIFY_ONLY_TARGET)
+    )
     route_text = str(route or "").strip()
     if route_text not in ALLOWED_ROUTES:
         raise PipelineAgentPagerError(f"unsupported pager route: {route_text!r}")
@@ -610,10 +623,13 @@ def _resolve_route(config: dict[str, Any], explicit_route: str | None) -> str:
 
 
 def _configured_route_text(config: dict[str, Any], explicit_route: str | None) -> str:
-    route = explicit_route if explicit_route is not None else config.get(
-        "pipeline_agent_pager",
-        {},
-    ).get("route", NOTIFY_ONLY_TARGET)
+    if explicit_route is not None:
+        route = explicit_route
+    else:
+        route = _pipeline_route_override() or config.get(
+            "pipeline_agent_pager",
+            {},
+        ).get("route", NOTIFY_ONLY_TARGET)
     route_text = str(route or "").strip()
     return route_text or NOTIFY_ONLY_TARGET
 
