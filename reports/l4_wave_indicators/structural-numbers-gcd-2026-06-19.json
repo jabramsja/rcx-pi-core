@@ -1,0 +1,24 @@
+{
+  "wave_id": "structural-numbers-gcd-2026-06-19",
+  "repeat_run_speedup_ratio": 1.176894,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.268975,
+  "repeat_run_raw_seconds": [
+    0.316555,
+    0.268975
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.316555
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.58553
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-19T18:37:54Z",
+  "collector_version": "2.2.0"
+}

@@ -1,0 +1,66 @@
+{
+  "wave_id": "structural-numbers-gcd-2026-06-19",
+  "title": "NEXT-CODEX-POST-REDTEAM - StructuralNumbers Stage 3 structural GCD as run_mu projections",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "StructuralNumbers Stage 3: express integer GCD as pure RCX projections through run_mu by lifting the landed COMPARE and SUBTRACT projection tables. The engine must use Euclidean subtraction over non-negative N operands with no host gcd, mod, divide, comparison, or subtraction primitive.",
+  "date": "2026-06-19",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/structural-numbers-gcd-2026-06-19.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id structural-numbers-gcd-2026-06-19 --output reports/l4_wave_indicators/structural-numbers-gcd-2026-06-19.json",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_structural_numbers_gcd.py --tb=short && python3 mu/tools/checks/check_host_semantics_ratchet.py",
+  "evidence_delta": "(1) New gate proves integer GCD is expressible as pure RCX projections through run_mu by Euclidean subtraction lifting the landed COMPARE and SUBTRACT tables. (2) The result is structurally and content-hash equal to encode(math.gcd(a,b)) for the lean corpus, with math.gcd oracle-only in mu/tests. (3) net_host_semantic_delta stays 0 and rationals can use structural gcd for lowest-terms reduction in the next wave.",
+  "progress_proof_before": "Stage 3 has structural add, compare, multiply, and subtract gates, but GCD needed for rational reduction has no structural-Mu expression; using host gcd would add forbidden bootstrap host authority.",
+  "progress_proof_after": "Integer GCD runs as run_mu projections by composing landed compare and subtract through lifting, proven equal to math.gcd by canonical structural equality, so rational reduction can proceed without host gcd.",
+  "structural_artifact_ref": "mu/tests/l4_gates/test_structural_numbers_gcd.py",
+  "founder_override": "structural-numbers-gcd-2026-06-19",
+  "scope_summary": "Add a Python-only L4 gate for structural GCD and the required growth-cap tracker update. This wave is gate-only and uses TASKS.md as tracker-sync authority.",
+  "scope_items": [
+    "mu/tests/l4_gates/test_structural_numbers_gcd.py (NEW) -- L4 gate expressing GCD as run_mu projections that lift the landed COMPARE and SUBTRACT tables.",
+    "mu/tests/docs/test_growth_caps.py (MODIFY) -- bump CAP_TEST_FILES plus one with FOUNDER_OVERRIDE:structural-numbers-gcd-2026-06-19.",
+    "reports/l4_wave_indicators/structural-numbers-gcd-2026-06-19.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Create mu/tests/l4_gates/test_structural_numbers_gcd.py implementing the _gcd state machine with zero dispatch, lifted compare dispatch, lifted subtract work slots, and _gcd re-seeding after each strict positive difference.",
+    "Import and lift COMPARE_PROJECTIONS plus _v from the landed compare gate and SUB_PROJECTIONS from the landed subtract gate; do not copy or reimplement their projection logic.",
+    "Use the lean corpus only: gcd pairs (0,0), (5,0), (0,4), (4,2), (6,4), and (6,3), with operands no larger than 6 and at most two Euclidean steps for compute cases.",
+    "Assert canonical structural equality, content-hash equality, valid canonical N numeral shape, stall fixpoint, and decode-to-host as supporting evidence only.",
+    "Mark run_mu engine assertions with pytest.mark.l4_expensive and pytest.mark.slow; any fast guard that transitively references run_mu must carry an in-function # SPEED_OK comment.",
+    "Bump CAP_TEST_FILES plus one in mu/tests/docs/test_growth_caps.py with the wave-specific founder override comment.",
+    "Run the evidence command and collect the L4 indicator artifact."
+  ],
+  "constraints": [
+    "Use the pipeline launcher and dispatcher path before any direct manual implementation or commit path.",
+    "No runtime, substrate, seed, registry, projection seed, JS parity, or production Mu semantic file may change in this wave.",
+    "No new host primitive and no host gcd, mod, divide, comparison, or subtraction in the engine; math.gcd is oracle-only in mu/tests.",
+    "Do not reimplement compare or subtract; lift the already landed projection tables.",
+    "Keep the corpus bounded to operands no larger than 6 and at most two Euclidean steps per compute case.",
+    "JS parity is deferred to a separate follow-up wave."
+  ],
+  "stop_conditions": [
+    "Stop done when the evidence command passes and the indicator artifact is collected.",
+    "Halt as POLICY_BOUND if integer GCD cannot be expressed without host gcd or host mod.",
+    "If the lean corpus exceeds the nightly 900 second budget, reduce corpus only within the packet bounds before escalating.",
+    "If the gate requires touching runtime, substrate, seed, or JS production files, re-scope rather than relaxing the boundary.",
+    "Do not commit without a real handoff artifact and gate-green evidence."
+  ],
+  "acceptance_criteria": [
+    "mu/tests/l4_gates/test_structural_numbers_gcd.py exists and passes for every corpus pair.",
+    "run_mu reduces each _gcd input to encode(math.gcd(a,b)) with canonical structural equality and content-hash equality.",
+    "The result is a valid canonical N numeral and no _gcd, _gcd_cmp, _gcd_sub, _cmp, _cc, or _sub state remains.",
+    "COMPARE and SUBTRACT are mechanically lifted from the landed gate tables, not reimplemented.",
+    "mu/tests/docs/test_growth_caps.py is bumped plus one with FOUNDER_OVERRIDE:structural-numbers-gcd-2026-06-19.",
+    "check_host_semantics_ratchet.py reports no host semantics delta.",
+    "reports/l4_wave_indicators/structural-numbers-gcd-2026-06-19.json is collected."
+  ],
+  "request_for_claude": "Implement the structural GCD gate through the pipeline-owned Phase A and Phase B path only. Keep the wave gate-only, lift the landed COMPARE and SUBTRACT tables, run the configured evidence command, collect the indicator artifact, and do not touch runtime or substrate files.",
+  "authorization_note": "StructuralNumbers program continuation: Stage 3 first, numbers as Mu rather than host semantics. This is the queued GCD prerequisite for exact rationals.",
+  "slow_functions": [
+    "run_mu"
+  ],
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "StructuralNumbers GCD gate through run_mu projections, Python-only, lifting landed compare and subtract.",
+  "tracked_packet": "reports/control_plane/structural-numbers-gcd-2026-06-19_2026-06-19.md"
+}
