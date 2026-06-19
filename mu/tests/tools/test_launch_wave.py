@@ -543,6 +543,141 @@ def test_launch_invokes_runner_when_enabled(wave_repo):
     assert result.launch["returncode"] == 0
 
 
+def test_launch_omitted_pins_preserve_runner_environment_shape(wave_repo, monkeypatch):
+    monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
+    monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
+    monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+    monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
+
+    calls = []
+
+    class _R:
+        returncode = 0
+
+    def runner(cmd, **k):
+        calls.append(k)
+        return _R()
+
+    config = make_config()
+    assert config.implementer_agent == ""
+    assert config.reviewer_agent == ""
+    assert config.pager_route == ""
+
+    result = lw.run_wave_setup(wave_repo, config, launch=True, runner=runner)
+
+    assert calls == [{"cwd": str(wave_repo)}]
+    assert "environment_overrides" not in result.launch
+
+
+def test_launch_partial_pins_scrub_stale_parent_override_env(wave_repo, monkeypatch):
+    monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", "claude")
+    monkeypatch.setenv("RCX_REVIEWER_AGENT_OVERRIDE", "claude")
+    monkeypatch.setenv("RCX_BRIDGE_REVIEWER_OVERRIDE", "claude")
+    monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "claude")
+    captured = {}
+
+    class _R:
+        returncode = 0
+
+    def runner(cmd, **k):
+        captured["kwargs"] = k
+        return _R()
+
+    result = lw.run_wave_setup(
+        wave_repo,
+        make_config(implementer_agent="codex"),
+        launch=True,
+        runner=runner,
+    )
+
+    env = captured["kwargs"]["env"]
+    assert env["RCX_IMPLEMENTER_AGENT_OVERRIDE"] == "codex"
+    assert "RCX_REVIEWER_AGENT_OVERRIDE" not in env
+    assert "RCX_BRIDGE_REVIEWER_OVERRIDE" not in env
+    assert "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE" not in env
+    assert result.launch["environment_overrides"] == {
+        "RCX_IMPLEMENTER_AGENT_OVERRIDE": "codex",
+    }
+
+
+def test_config_accepts_valid_role_and_pager_pins(wave_repo):
+    config = make_config(
+        implementer_agent="codex",
+        reviewer_agent="codex",
+        pager_route="codex",
+    )
+    assert config.validate(wave_repo) == []
+
+
+def test_config_validation_uses_configured_bridge_agent_defaults(wave_repo):
+    config_path = wave_repo / "mu" / "tools" / "executors" / "executor_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "bridge_agent_defaults": {
+                    "localcodex": {
+                        "display_name": "Local Codex",
+                        "model": "gpt-local",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert make_config(implementer_agent="localcodex").validate(wave_repo) == []
+
+
+def test_config_rejects_invalid_role_and_pager_pins(wave_repo):
+    config = make_config(
+        implementer_agent="missing-impl",
+        reviewer_agent="missing-reviewer",
+        pager_route="pager-nowhere",
+    )
+
+    errors = config.validate(wave_repo)
+
+    assert any("implementer_agent" in error for error in errors)
+    assert any("reviewer_agent" in error for error in errors)
+    assert any("pager_route" in error for error in errors)
+
+
+def test_launch_threads_role_and_pager_pins_to_dispatcher_env(wave_repo):
+    captured = {}
+
+    class _R:
+        returncode = 0
+
+    def runner(cmd, **k):
+        captured["cmd"] = cmd
+        captured["kwargs"] = k
+        return _R()
+
+    result = lw.run_wave_setup(
+        wave_repo,
+        make_config(
+            implementer_agent="codex",
+            reviewer_agent="codex",
+            pager_route="codex",
+        ),
+        launch=True,
+        runner=runner,
+    )
+
+    env = captured["kwargs"]["env"]
+    expected = {
+        "RCX_IMPLEMENTER_AGENT_OVERRIDE": "codex",
+        "RCX_REVIEWER_AGENT_OVERRIDE": "codex",
+        "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE": "codex",
+    }
+    for key, value in expected.items():
+        assert env[key] == value
+    assert captured["kwargs"]["cwd"] == str(wave_repo)
+    assert result.launch["environment_overrides"] == expected
+    assert set(result.launch["environment_overrides"]) == set(expected)
+
+
 def test_dispatch_command_targets_dispatcher_routing_mode(wave_repo):
     """The launch argv must be the dispatcher's routing-mode form.
 
