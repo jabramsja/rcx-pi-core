@@ -6888,7 +6888,7 @@ def _is_tracker_note_only(buf: list[str]) -> bool:
     return True
 
 
-# ── Growth-cap conflict resolution (mechanical CAP_* max + comment union) ──
+# ── Growth-cap conflict resolution (mechanical CAP_* base+union + comment union) ──
 # A second known-mechanical merge conflict, alongside TASKS.md tracker notes:
 # when two waves each bump a CAP_* growth cap in mu/tests/docs/test_growth_caps.py,
 # the cap line collides every time the base branch advances. Like the TASKS.md
@@ -6906,6 +6906,55 @@ _GROWTH_CAP_PARSE_RE = re.compile(
     r"(?P<value>\d+)[ \t]*(?:#(?P<comment>.*))?$"
 )
 _GROWTH_CAP_COMMENT_RE = re.compile(r"^[ \t]*#.*$")
+# Each per-wave inline annotation is ``+N for <files> (...)``; the leading ``+N``
+# is the file count that wave added above the previous cap.
+_GROWTH_CAP_INCREMENT_RE = re.compile(r"^\+(\d+)\b")
+
+
+def _annotation_increment(annotation: str) -> int:
+    """File-count one inline growth-cap increment annotation contributes.
+
+    Returns ``N`` for a ``+N for …`` annotation, else ``0`` (a non-increment note
+    — e.g. a bare policy remark — contributes no file count). The conflict
+    resolver sums these over the UNIONed annotations so a resolved CAP_* COVERS
+    every distinct file EITHER side added, instead of taking the MAX of either
+    side's total (which silently drops a file one side added that the other lacks
+    — the confirmed ``land_stranded_pr`` bring-current undercount).
+    """
+    match = _GROWTH_CAP_INCREMENT_RE.match(annotation.strip())
+    return int(match.group(1)) if match else 0
+
+
+def _annotation_identity(annotation: str) -> str:
+    """Dedup identity for one inline growth-cap increment annotation.
+
+    Two annotations that name the SAME added file(s) are the SAME increment even
+    when their parenthetical provenance differs (e.g. the same wave re-annotated
+    the cap on the two merge sides). Identity is the ``+N for <subject>`` SUBJECT
+    — the text after ``for`` up to the provenance ``(`` — whitespace-normalized;
+    the leading ``+N`` count and the trailing ``( … )`` provenance are dropped. A
+    non-increment note (no leading ``+N``) keys on its OWN full text, so genuinely
+    distinct notes still union.
+
+    The UNION must dedup by this identity, NOT by the full annotation string: a
+    file BOTH sides added but annotated with different wording (origin's
+    ``+1 for test_x.py (wave, note-a)`` vs HEAD's ``+1 for test_x.py (wave,
+    note-b)``) is two distinct full strings but ONE file. Summing ``+N`` over a
+    full-string-deduped union double-counts that file and over-bumps the cap
+    (e.g. ``+1`` + ``+1`` → ``146`` where the merged tree only grew by one to
+    ``145``). Keying on file identity counts each distinct file ONCE.
+    """
+    stripped = annotation.strip()
+    match = _GROWTH_CAP_INCREMENT_RE.match(stripped)
+    if match is None:
+        return stripped  # non-increment note keys on its own full text
+    rest = stripped[match.end():].lstrip()  # drop the leading "+N"
+    if rest[:4].lower() == "for ":
+        rest = rest[4:].lstrip()  # drop an optional leading "for "
+    paren = rest.find("(")
+    if paren != -1:
+        rest = rest[:paren]  # drop the trailing "( … )" provenance
+    return " ".join(rest.split())  # whitespace-normalized file subject
 
 
 def _is_growth_cap_line_only(buf: list[str]) -> bool:
@@ -6934,18 +6983,41 @@ def _merge_growth_cap_block(
 ) -> list[str] | None:
     """Merge the two sides of ONE growth-cap conflict block.
 
-    Per-``CAP_*`` MAX value + UNION of per-wave inline-comment annotations
+    Per-``CAP_*`` BASE+UNION value + UNION of per-wave inline-comment annotations
     (origin annotations first, then HEAD's not-yet-seen — the same origin-first
     keep-both order :func:`_resolve_tasks_md_tracker_note_conflict` uses), plus
-    any unioned standalone comment lines. Returns the merged, newline-terminated
-    lines, or ``None`` if a CAP_* line cannot be parsed (malformed) so the caller
-    fails closed.
+    any unioned standalone comment lines. The union dedups by FILE IDENTITY
+    (:func:`_annotation_identity`), NOT by full annotation string, so a file BOTH
+    sides added with different wording counts ONCE — summing ``+N`` over a
+    full-string-deduped union would over-bump the cap by re-counting that file.
+
+    The resolved value COVERS the actual merged file count, NOT ``max(totals)``.
+    Each side's cap = an undocumented BASE (the cap value minus the file counts
+    its own inline ``+N for …`` annotations enumerate) plus that side's documented
+    increments. Because the annotation log is append-only across the shared
+    history, ``cap_value - own_increment_sum`` is the SAME undocumented base on
+    both sides, so the resolved value is that base plus the file count of the
+    UNIONed annotations — base + every distinct file EITHER side added. ``max`` of
+    the two totals instead drops any file one side added that the other lacks
+    (head adds 1, origin adds 3 distinct ⇒ the merged tree needs +4 but ``max``
+    grants only +3), which stranded the bring-current commit at the growth-cap
+    gate (the confirmed PR #1107 ``assert 336 <= 335``). The base is taken as the
+    LARGER of the two per-side bases so a non-append-only history still never
+    resolves BELOW either side's own cap; a side that annotates no files degrades
+    to its full value as base (i.e. ``max`` for that side — the safe floor).
+
+    Returns the merged, newline-terminated lines, or ``None`` if a CAP_* line
+    cannot be parsed (malformed) so the caller fails closed. A resolved value that
+    STILL cannot cover the merged tree (undocumented files unique to each side) is
+    caught downstream WITHOUT new machinery: the bring-current ``git commit``
+    re-runs the growth-cap gate, which fails closed and aborts the merge.
     """
     cap_order: list[str] = []
-    cap_value: dict[str, int] = {}
     cap_anns: dict[str, list[str]] = {}
+    cap_ann_ids: dict[str, set[str]] = {}  # file-identity dedup keys per CAP_*
     cap_indent: dict[str, str] = {}
     cap_has_comment: dict[str, bool] = {}
+    cap_bases: dict[str, list[int]] = {}  # per-side (value - own increment sum)
     comment_lines: list[str] = []
     seen_comments: set[str] = set()
     for buf in (origin_buf, head_buf):  # origin (merged-first) before HEAD
@@ -6957,21 +7029,40 @@ def _merge_growth_cap_block(
             if match is not None:
                 name = match.group("name")
                 value = int(match.group("value"))
-                if name not in cap_value:
+                if name not in cap_anns:
                     cap_order.append(name)
-                    cap_value[name] = value
                     cap_anns[name] = []
+                    cap_ann_ids[name] = set()
                     cap_indent[name] = match.group("indent")
                     cap_has_comment[name] = False
-                else:
-                    cap_value[name] = max(cap_value[name], value)
+                    cap_bases[name] = []
                 comment = match.group("comment")
+                side_increment_sum = 0
                 if comment is not None:
                     cap_has_comment[name] = True
+                    side_seen_ids: set[str] = set()
                     for ann in comment.split(";"):
                         ann = ann.strip()
-                        if ann and ann not in cap_anns[name]:
+                        if not ann:
+                            continue
+                        identity = _annotation_identity(ann)
+                        # This side's own documented increment: count each distinct
+                        # file ONCE even if the side lists it twice, so the per-side
+                        # base (value - increment) stays the true undocumented base.
+                        if identity not in side_seen_ids:
+                            side_seen_ids.add(identity)
+                            side_increment_sum += _annotation_increment(ann)
+                        # UNION across sides, deduped by FILE IDENTITY (not full
+                        # string): a file both sides annotated with different wording
+                        # is one file, counted once below.
+                        if identity not in cap_ann_ids[name]:
+                            cap_ann_ids[name].add(identity)
                             cap_anns[name].append(ann)
+                # This side's undocumented base = its cap value minus the files its
+                # OWN annotations enumerate. Append-only history ⇒ the same base on
+                # both sides; keeping a per-side list lets us take the safe (larger)
+                # base when the two diverge.
+                cap_bases[name].append(value - side_increment_sum)
                 continue
             if _GROWTH_CAP_COMMENT_RE.match(stripped):
                 key = stripped.strip()
@@ -6985,12 +7076,20 @@ def _merge_growth_cap_block(
     merged: list[str] = []
     for name in cap_order:
         indent = cap_indent[name]
+        # base + UNION of both sides' added files (the +N sum over the UNIONed
+        # annotations) — COVERS every distinct file either side added, unlike
+        # max(totals), which drops the files unique to the lower-total side.
+        base = max(cap_bases[name]) if cap_bases[name] else 0
+        union_increment = sum(
+            _annotation_increment(ann) for ann in cap_anns[name]
+        )
+        resolved_value = base + union_increment
         if cap_has_comment[name] and cap_anns[name]:
             merged.append(
-                f"{indent}{name} = {cap_value[name]}  # {'; '.join(cap_anns[name])}\n"
+                f"{indent}{name} = {resolved_value}  # {'; '.join(cap_anns[name])}\n"
             )
         else:
-            merged.append(f"{indent}{name} = {cap_value[name]}\n")
+            merged.append(f"{indent}{name} = {resolved_value}\n")
     merged.extend(f"{line}\n" for line in comment_lines)
     return merged
 
@@ -7000,10 +7099,11 @@ def _resolve_growth_caps_conflict(path: Path) -> bool:
     conflict block on BOTH sides contains only CAP_* assignment lines, comment
     lines, and/or blanks.
 
-    Rewrites each block as per-``CAP_*`` MAX value + UNION of per-wave
-    inline-comment annotations. Returns ``False`` WITHOUT modifying the file on
-    any non-mechanical line or malformed / nested / dangling markers, so the
-    caller aborts the merge. Mirrors :func:`_resolve_tasks_md_tracker_note_conflict`.
+    Rewrites each block as per-``CAP_*`` BASE+UNION value (covering the merged
+    file count, not ``max(totals)``) + UNION of per-wave inline-comment
+    annotations. Returns ``False`` WITHOUT modifying the file on any
+    non-mechanical line or malformed / nested / dangling markers, so the caller
+    aborts the merge. Mirrors :func:`_resolve_tasks_md_tracker_note_conflict`.
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -7052,6 +7152,29 @@ def _resolve_growth_caps_conflict(path: Path) -> bool:
     return True
 
 
+# Public test seams. The growth-cap conflict resolver and the two annotation
+# helpers behind its BASE+UNION cap value — the ``+N`` file count an inline
+# annotation carries (:func:`_annotation_increment`) and the file-identity dedup
+# key the cross-side UNION counts by (:func:`_annotation_identity`) — are
+# exercised directly by the stranded-PR-landing regression suite. These public
+# names delegate to the canonical underscore-prefixed implementations above so
+# the suite can exercise the contract without reaching into a module-private
+# helper (the test-integrity gate forbids private-attr access in tests).
+def annotation_increment(annotation: str) -> int:
+    """Public seam over :func:`_annotation_increment`."""
+    return _annotation_increment(annotation)
+
+
+def annotation_identity(annotation: str) -> str:
+    """Public seam over :func:`_annotation_identity`."""
+    return _annotation_identity(annotation)
+
+
+def resolve_growth_caps_conflict(path: Path) -> bool:
+    """Public seam over :func:`_resolve_growth_caps_conflict`."""
+    return _resolve_growth_caps_conflict(path)
+
+
 def _try_auto_resolve_pr_conflict(
     repo_root: Path,
     *,
@@ -7073,9 +7196,10 @@ def _try_auto_resolve_pr_conflict(
            aborts the merge.
       (ii) PER-FILE CONTENT-LEVEL GUARD — each conflicted file is dispatched to
            its own resolver (TASKS.md → tracker-note keep-both;
-           test_growth_caps.py → per-CAP_* MAX value + UNION of per-wave inline
-           comments). A resolver that finds non-mechanical content in any block
-           returns ``False`` WITHOUT modifying the file, so the merge aborts.
+           test_growth_caps.py → per-CAP_* BASE+UNION value (covering the merged
+           file count) + UNION of per-wave inline comments). A resolver that finds
+           non-mechanical content in any block returns ``False`` WITHOUT modifying
+           the file, so the merge aborts.
 
     Any other file (filename gate), a non-mechanical/semantic conflict inside an
     allowed file (content guard), or a subprocess error aborts the merge and
@@ -7261,7 +7385,7 @@ def _try_auto_resolve_pr_conflict(
         "action": action,
         "detail": (
             f"merged origin/{base_branch}, resolved {conflicted} "
-            "(TASKS.md keep-both / growth-cap max+union), committed with "
+            "(TASKS.md keep-both / growth-cap base+union), committed with "
             "RCX_SKIP_RECEIPT_CHECK, pushed"
         ),
     }
