@@ -48,6 +48,7 @@ from executor_common import (
     agent_bus_path,
     bridge_agent_display_name,
     bridge_config_path,
+    configured_role_agents,
     emit_pipeline_agent_event,
     is_agent_bus_runtime_path,
     load_executor_config,
@@ -55,7 +56,6 @@ from executor_common import (
     packet_status_is_completed,
     read_control_plane_packet_status,
     resolve_agent_bus_dir,
-    resolve_role_agent,
 )
 
 META_DB_NAME = "meta_bridge.db"
@@ -3237,10 +3237,10 @@ def run_post_merge_review(
         )
     except Exception as exc:
         raise MetaBridgeError(f"Bridge config load failed: {exc}") from exc
-    adapter_name = resolve_role_agent(
-        load_executor_config(paths.repo_root),
-        "reviewer",
-    )
+    adapter_name = configured_role_agents(
+        paths.repo_root,
+        bus_dir=_meta_paths_bus_rel(paths),
+    )["reviewer"]["agent"]
     reviewer_label = bridge_agent_display_name(paths.repo_root, adapter_name, _meta_paths_bus_rel(paths))
 
     if verbose:
@@ -3531,10 +3531,10 @@ def run_meta_review(
         paths.repo_root,
         paths.bus_dir.parent / "bridge_config.json",
     )
-    adapter_name = resolve_role_agent(
-        load_executor_config(paths.repo_root),
-        "reviewer",
-    )
+    adapter_name = configured_role_agents(
+        paths.repo_root,
+        bus_dir=_meta_paths_bus_rel(paths),
+    )["reviewer"]["agent"]
     reviewer_label = bridge_agent_display_name(paths.repo_root, adapter_name, _meta_paths_bus_rel(paths))
 
     if verbose:

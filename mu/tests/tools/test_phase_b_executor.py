@@ -983,6 +983,7 @@ class TestLoadExecutorConfig:
 
         assert config["role_agents"]["implementer"] == "claude"
         assert config["backends"]["phase_b_executor"] == "claude"
+        assert common_mod.resolve_role_agent(config, "implementer") == "claude"
 
     def test_scoped_role_env_override_applies_to_matching_repo_root(self, tmp_path, monkeypatch):
         config_dir = tmp_path / "mu" / "tools" / "executors"

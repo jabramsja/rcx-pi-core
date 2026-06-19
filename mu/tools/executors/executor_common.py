@@ -37,6 +37,7 @@ ROLE_AGENT_ENV_VARS = {
     ),
 }
 ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV = "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT"
+ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY = "_role_agent_env_overrides_apply"
 IMPLEMENTER_BACKEND_KEYS = frozenset(
     {
         "phase_a_executor",
@@ -545,6 +546,13 @@ def resolve_role_agent(
     default_agent = _nonempty_str(default_role_agents.get(role)) or "codex"
     raw_overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
 
+    if (
+        use_env_overrides
+        and config.get(ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY) is False
+        and (not raw_overrides or raw_overrides is config)
+    ):
+        use_env_overrides = False
+
     if use_env_overrides:
         for env_name in ROLE_AGENT_ENV_VARS.get(role, ()):
             candidate = _nonempty_str(os.environ.get(env_name))
@@ -987,11 +995,14 @@ def load_executor_config(repo_root: Path) -> dict[str, Any]:
         raw_overrides = json.loads(config_path.read_text(encoding="utf-8"))
         config = merge_executor_config_overrides(raw_overrides)
     apply_recovery_config_env_overrides(config)
-    return _materialize_role_agents(
+    role_env_overrides_apply = _role_agent_env_overrides_apply(repo_root)
+    materialized = _materialize_role_agents(
         config,
         raw_overrides=raw_overrides,
-        use_env_overrides=_role_agent_env_overrides_apply(repo_root),
+        use_env_overrides=role_env_overrides_apply,
     )
+    materialized[ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY] = role_env_overrides_apply
+    return materialized
 
 
 def emit_pipeline_agent_event(
