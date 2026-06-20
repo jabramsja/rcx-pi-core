@@ -1,0 +1,70 @@
+{
+  "wave_id": "structural-numbers-gcd-js-parity-2026-06-19",
+  "title": "NEXT-CODEX-POST-REDTEAM - StructuralNumbers Stage 3 GCD JS parity gate",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "StructuralNumbers Stage 3: prove the landed structural GCD projections run content-addressed-equal across Python run_mu and the JS bootstrap_core path over the same bounded corpus, without adding runtime, substrate, seed, registry, or host semantic authority.",
+  "date": "2026-06-19",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/structural-numbers-gcd-js-parity-2026-06-19.json",
+  "indicator_collection_command": "python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id structural-numbers-gcd-js-parity-2026-06-19 --output reports/l4_wave_indicators/structural-numbers-gcd-js-parity-2026-06-19.json",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_growth_caps.py mu/tests/l4_gates/test_structural_numbers_gcd_js_parity.py",
+  "evidence_delta": "(1) Add a JS parity gate proving the landed structural GCD projections produce content-addressed-equal results through Python run_mu and JS bootstrap_core over the bounded GCD corpus. (2) The gate reuses the existing GCD, compare, subtract, encode/decode, and JS container factory surfaces without runtime/substrate edits. (3) Test-file growth cap is bumped exactly once and the L4 indicator artifact is collected.",
+  "progress_proof_before": "Structural GCD is proven in Python run_mu, but exact-rational reduction still lacks a cross-substrate parity proof for the GCD projection table.",
+  "progress_proof_after": "Structural GCD has an L3 parity gate across Python run_mu and JS bootstrap_core, so rationals can depend on GCD without introducing host-only semantics.",
+  "structural_artifact_ref": "mu/tests/l4_gates/test_structural_numbers_gcd_js_parity.py",
+  "founder_override": "structural-numbers-gcd-js-parity-2026-06-19",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "scope_summary": "Additive gate-only JS parity proof for the already-landed structural GCD projections. This wave may add one test file, update the growth-cap registry, create its control packet/config, and collect the indicator artifact only.",
+  "scope_items": [
+    "mu/tests/l4_gates/test_structural_numbers_gcd_js_parity.py (NEW) -- cross-substrate parity gate for the landed GCD projections.",
+    "mu/tests/docs/test_growth_caps.py (MODIFY) -- bump CAP_TEST_FILES plus one with FOUNDER_OVERRIDE:structural-numbers-gcd-js-parity-2026-06-19.",
+    "reports/l4_wave_indicators/structural-numbers-gcd-js-parity-2026-06-19.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Create mu/tests/l4_gates/test_structural_numbers_gcd_js_parity.py.",
+    "Import the landed GCD_PROJECTIONS and CORPUS from test_structural_numbers_gcd.py and reuse encode/decode/hash helpers from the landed StructuralNumbers gates where appropriate.",
+    "Run the same GCD projections through Python run_mu and JS bootstrap_core via node over the bounded GCD corpus; assert content-addressed equality and decoded math.gcd agreement as oracle-only supporting evidence.",
+    "Use the existing mu/host/js/core/container_factory.js API as a use-only surface for trusted JS Mu construction; do not edit JS runtime or core files.",
+    "Mark run_mu/node parity tests with pytest.mark.l4_expensive and pytest.mark.slow so the gate is excluded from the fast lane.",
+    "Bump CAP_TEST_FILES plus one in mu/tests/docs/test_growth_caps.py with the wave-specific founder override comment.",
+    "Run the evidence command and collect the L4 indicator artifact."
+  ],
+  "constraints": [
+    "Use the launcher and dispatcher path; do not hand-implement or hand-commit this wave.",
+    "No runtime, substrate, seed, registry, projection seed, JS production, or host semantic file may change.",
+    "No host-only canonicalization may be added to force parity; any content-addressed divergence is a real finding.",
+    "Do not reimplement GCD, compare, or subtract projection logic; import and reuse the already-landed GCD table.",
+    "Keep the corpus bounded to the landed GCD corpus.",
+    "Do not touch rationals, Stage 4 design, or Stage 4 cutover in this wave."
+  ],
+  "stop_conditions": [
+    "Stop done when the evidence command passes, host-semantics ratchet stays flat if run, and the indicator artifact is collected.",
+    "Halt as PARITY_DIVERGENCE if Python run_mu and JS bootstrap_core are not content-addressed-equal over the bounded corpus.",
+    "Halt as POLICY_BOUND if the gate requires touching runtime, substrate, seed, registry, JS core, or production semantic files.",
+    "Halt as GROWTH_CAP_STALE if the current test-file cap cannot be bumped exactly once for this new gate file.",
+    "Do not commit without a real handoff artifact and gate-green evidence."
+  ],
+  "acceptance_criteria": [
+    "mu/tests/l4_gates/test_structural_numbers_gcd_js_parity.py exists and passes.",
+    "The gate proves Python run_mu and JS bootstrap_core GCD results are content-addressed-equal for every landed GCD corpus pair.",
+    "Decoded supporting evidence equals math.gcd(a, b) for every corpus pair, with math.gcd used only as a test oracle.",
+    "The run_mu/node parity test carries l4_expensive and slow markers.",
+    "mu/tests/docs/test_growth_caps.py is bumped plus one with FOUNDER_OVERRIDE:structural-numbers-gcd-js-parity-2026-06-19.",
+    "No diff appears under runtime, substrate, seed, registry, JS core, or production Mu semantic paths.",
+    "reports/l4_wave_indicators/structural-numbers-gcd-js-parity-2026-06-19.json is collected."
+  ],
+  "request_for_agent": "Implement the StructuralNumbers GCD JS parity gate through the pipeline-owned Phase A and Phase B path only, using Codex for implementer and reviewer. Keep the wave gate-only, reuse the landed GCD projections, prove Python-vs-JS content-addressed parity over the bounded corpus, run the configured evidence command, collect the indicator artifact, and do not touch runtime/substrate/seed/registry/JS production files.",
+  "authorization_note": "Founder-directed ordered queue from TASKS.md: after structural-numbers-gcd-2026-06-19 lands, run structural-numbers-gcd-js-parity-2026-06-19 before rationals.",
+  "slow_functions": [
+    "run_mu",
+    "node"
+  ],
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "StructuralNumbers GCD JS parity gate, additive test-only, cross-substrate proof.",
+  "tracked_packet": "reports/control_plane/structural-numbers-gcd-js-parity-2026-06-19_2026-06-19.md"
+}
