@@ -555,6 +555,7 @@ def test_launch_invokes_runner_when_enabled(wave_repo):
 def test_launch_omitted_pins_preserve_runner_environment_shape(wave_repo, monkeypatch):
     for key in _DISPATCHER_OVERRIDE_ENV_KEYS_FOR_TEST:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT", str(wave_repo / "parent"))
 
     calls = []
 
