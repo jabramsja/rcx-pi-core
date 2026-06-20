@@ -6,7 +6,9 @@ import sqlite3
 import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 from tests.repo_root import REPO_ROOT
 from mu.tests.tools.module_loader import load_module
 
@@ -354,6 +356,218 @@ def test_attention_required_summary_ignores_running_turn():
     )
 
     assert summary is None
+
+
+def test_idle_no_wave_summary_reports_wave_root_without_job(tmp_path):
+    repo_root = tmp_path / "repo"
+    wave_root = tmp_path / "wave"
+
+    summary = watch_mod._idle_no_wave_summary(  # ANTICHEAT_OK: tool unit test
+        repo_root=repo_root,
+        bus_dir=".agent_bus-alpha",
+        bridge_state={"wave_root": str(wave_root), "job": None},
+    )
+
+    assert summary.startswith("idle/no active wave;")
+    assert "attention required" not in summary
+    assert f"wave_root `{wave_root}`" in summary
+    assert "bus `.agent_bus-alpha`" in summary
+    assert "no foreground action required" in summary
+
+
+def test_idle_no_wave_cycle_replaces_stale_attention_summary_without_launching_tools(
+    tmp_path,
+    monkeypatch,
+):
+    class StopIdleCycle(Exception):
+        pass
+
+    codex_home = tmp_path / "codex-home"
+    state_dir = codex_home / "state"
+    state_dir.mkdir(parents=True)
+    repo_root = (tmp_path / "repo").resolve()
+    repo_root.mkdir()
+    state_path = state_dir / "rcx_autoping_thread-idle.json"
+    summary_path = state_dir / "rcx_autoping_thread-idle_summary.txt"
+    stale_summary = (
+        "attention required: stale executor_hard_fail from a previous wave"
+    )
+    state_path.write_text(
+        json.dumps(
+            {
+                "thread_id": "thread-idle",
+                "status": "attention_required",
+                "last_summary": stale_summary,
+                "summary_path": str(summary_path),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    summary_path.write_text(stale_summary + "\n", encoding="utf-8")
+    args = SimpleNamespace(
+        repo_root=str(repo_root),
+        thread_id="thread-idle",
+        interval=999.0,
+        initial_delay=0.0,
+        ping_timeout=1.0,
+        bus_dir=".agent_bus-codexmode",
+        tmux_session="fake-session",
+        tmux_pane="fake-pane",
+    )
+    sleep_calls: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        if len(sleep_calls) >= 2:
+            raise StopIdleCycle
+
+    def fail_unexpected_tool_launch(*_args, **_kwargs):
+        raise AssertionError("idle_no_wave cycle must not launch external tools")
+
+    monkeypatch.setattr(watch_mod, "_parse_args", lambda: args)
+    monkeypatch.setattr(watch_mod, "_codex_home", lambda: codex_home)
+    monkeypatch.setattr(
+        watch_mod,
+        "_discover_active_wave_root",
+        lambda _repo_root, *, bus_dir: None,
+    )
+    monkeypatch.setattr(
+        watch_mod,
+        "_read_tmux_tail",
+        lambda _pane: [
+            "Last pager wake: executor_hard_fail | stale previous wave failure",
+        ],
+    )
+    monkeypatch.setattr(watch_mod, "_notify_tmux_summary", fail_unexpected_tool_launch)
+    monkeypatch.setattr(watch_mod.subprocess, "Popen", fail_unexpected_tool_launch)
+    monkeypatch.setattr(watch_mod.time, "sleep", fake_sleep)
+
+    with pytest.raises(StopIdleCycle):
+        watch_mod.main()  # ANTICHEAT_OK: bounded watcher-cycle unit test
+
+    durable_summary = summary_path.read_text(encoding="utf-8").strip()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert state["status"] == "idle_no_wave"
+    assert durable_summary == state["last_summary"]
+    assert durable_summary != stale_summary
+    assert durable_summary.startswith("idle/no active wave;")
+    assert "attention required" not in durable_summary
+    assert "executor_hard_fail" not in durable_summary
+    assert str(repo_root) in durable_summary
+    assert ".agent_bus-codexmode" in durable_summary
+    assert state["summary_path"] == str(summary_path)
+    assert state["bridge_state"]["wave_root_missing"] is True
+    assert state["tmux_tail"] == [
+        "Last pager wake: executor_hard_fail | stale previous wave failure",
+    ]
+    assert sleep_calls == [0.0, 999.0]
+
+
+def test_hard_fail_tail_with_active_bridge_job_stays_attention_required(
+    tmp_path,
+    monkeypatch,
+):
+    class StopAttentionCycle(Exception):
+        pass
+
+    codex_home = tmp_path / "codex-home"
+    state_dir = codex_home / "state"
+    state_dir.mkdir(parents=True)
+    repo_root = (tmp_path / "repo").resolve()
+    repo_root.mkdir()
+    wave_root = (tmp_path / "wave").resolve()
+    wave_root.mkdir()
+    state_path = state_dir / "rcx_autoping_thread-hard-fail.json"
+    summary_path = state_dir / "rcx_autoping_thread-hard-fail_summary.txt"
+    stale_summary = "attention required: stale failure from an earlier wave"
+    state_path.write_text(
+        json.dumps(
+            {
+                "thread_id": "thread-hard-fail",
+                "status": "attention_required",
+                "last_summary": stale_summary,
+                "summary_path": str(summary_path),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    summary_path.write_text(stale_summary + "\n", encoding="utf-8")
+    args = SimpleNamespace(
+        repo_root=str(repo_root),
+        thread_id="thread-hard-fail",
+        interval=999.0,
+        initial_delay=0.0,
+        ping_timeout=1.0,
+        bus_dir=".agent_bus-codexmode",
+        tmux_session="fake-session",
+        tmux_pane="fake-pane",
+    )
+    tmux_tail = [
+        "Last pager wake: executor_hard_fail | executor_dispatch/failed",
+    ]
+    notify_calls: list[str] = []
+    sleep_calls: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        if len(sleep_calls) >= 2:
+            raise StopAttentionCycle
+
+    def fail_unexpected_codex_launch(*_args, **_kwargs):
+        raise AssertionError("attention cycle must not launch external Codex")
+
+    monkeypatch.setattr(watch_mod, "_parse_args", lambda: args)
+    monkeypatch.setattr(watch_mod, "_codex_home", lambda: codex_home)
+    monkeypatch.setattr(
+        watch_mod,
+        "_discover_active_wave_root",
+        lambda _repo_root, *, bus_dir: wave_root,
+    )
+    monkeypatch.setattr(
+        watch_mod,
+        "_read_bridge_state",
+        lambda _wave_root, *, bus_dir: {
+            "wave_root": str(wave_root),
+            "bridge_db": str(wave_root / bus_dir / "bridge.db"),
+            "bus_dir": bus_dir,
+            "job": {
+                "job_id": "phase-b-hard-fail",
+                "status": "running",
+            },
+            "turn": None,
+        },
+    )
+    monkeypatch.setattr(watch_mod, "_read_tmux_tail", lambda _pane: tmux_tail)
+    monkeypatch.setattr(
+        watch_mod,
+        "_notify_tmux_summary",
+        lambda _session, summary: notify_calls.append(summary),
+    )
+    monkeypatch.setattr(watch_mod.subprocess, "Popen", fail_unexpected_codex_launch)
+    monkeypatch.setattr(watch_mod.time, "sleep", fake_sleep)
+
+    with pytest.raises(StopAttentionCycle):
+        watch_mod.main()  # ANTICHEAT_OK: bounded watcher-cycle unit test
+
+    durable_summary = summary_path.read_text(encoding="utf-8").strip()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert state["status"] == "attention_required"
+    assert durable_summary == state["last_summary"]
+    assert durable_summary != stale_summary
+    assert durable_summary.startswith("attention required:")
+    assert "executor_hard_fail" in durable_summary
+    assert "phase-b-hard-fail" in durable_summary
+    assert "idle/no active wave" not in durable_summary
+    assert state["bridge_state"]["job"]["job_id"] == "phase-b-hard-fail"
+    assert state["tmux_tail"] == tmux_tail
+    assert notify_calls == [durable_summary]
+    assert sleep_calls == [0.0, 999.0]
 
 
 def test_read_bridge_state_degrades_when_bridge_db_tables_are_missing(tmp_path):
