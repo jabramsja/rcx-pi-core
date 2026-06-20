@@ -1,0 +1,67 @@
+{
+  "wave_id": "primary-ffsync-tracked-wip-preserve-2026-06-20",
+  "title": "NEXT-CODEX-POST-REDTEAM - primary ff-sync tracked WIP preservation",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Permanently harden the post-merge primary worktree fast-forward helper so tracked founder WIP no longer strands the main workspace behind origin/dev while still preserving that WIP deterministically.",
+  "date": "2026-06-20",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/primary-ffsync-tracked-wip-preserve-2026-06-20.json",
+  "indicator_collection_command": "python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id primary-ffsync-tracked-wip-preserve-2026-06-20 --output reports/l4_wave_indicators/primary-ffsync-tracked-wip-preserve-2026-06-20.json",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_post_merge_cleanup.py -k \"sync_primary\" --tb=short && python3 -m py_compile mu/tools/executors/commit_executor.py",
+  "evidence_delta": "(1) Step 15b no longer skips solely because the primary has tracked WIP when the primary HEAD is otherwise a fast-forward ancestor of origin/dev. (2) The helper isolates exact tracked WIP paths in an executor-owned stash before the ff-only merge and records the stash ref/oid/path list in the outcome. (3) The helper restores the stash only when origin/dev did not touch those tracked WIP paths; if paths overlap, it keeps the stash and reports the preservation state instead of creating conflicted founder main state.",
+  "progress_proof_before": "The post-merge primary sync reached Step 15b after PR #1130 but skipped with 'primary worktree ... has tracked WIP; not clobbering', leaving the founder main workspace 0 ahead / 43 behind origin/dev even though the branch was a pure ancestor and could otherwise fast-forward.",
+  "progress_proof_after": "Focused Step 15b regressions prove tracked WIP is preserved in an executor-owned stash, the primary feature branch fast-forwards to origin/dev, non-overlapping WIP is restored, overlapping WIP remains recoverable by explicit stash ref, and the helper still skips divergent local commits, base-branch checkouts, ignored-file overwrite hazards, and non-fast-forward cases.",
+  "structural_artifact_ref": "mu/tools/executors/commit_executor.py",
+  "founder_override": "primary-ffsync-tracked-wip-preserve-2026-06-20",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "scope_summary": "Pipeline hardening only. This wave may modify commit_executor Step 15b primary-worktree sync logic, focused commit-executor post-merge cleanup tests, this control packet/config, TASKS.md via the launcher tracker-note builder, and the generated L4 indicator artifact.",
+  "scope_items": [
+    "mu/tools/executors/commit_executor.py (MODIFY) -- add executor-owned tracked-WIP preservation around primary ff-sync.",
+    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py (MODIFY) -- add focused Step 15b regressions for tracked WIP preservation, clean restore, and overlap preservation.",
+    "reports/control_plane/primary-ffsync-tracked-wip-preserve-2026-06-20_wave_config.json (NEW) -- launcher input for this wave.",
+    "reports/l4_wave_indicators/primary-ffsync-tracked-wip-preserve-2026-06-20.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Move the tracked-dirty decision behind fetch, ancestor, and already-current checks so Step 15b only isolates WIP when a real fast-forward is pending.",
+    "Save exact tracked dirty paths in an executor-owned stash before the ff-only merge, preserving staged and unstaged tracked state while leaving untracked files alone.",
+    "Run the ff-only merge with the existing no-overwrite-ignore protection and keep all existing no-push, no-base-checkout, no-force, no-reset guarantees.",
+    "After a successful ff-only merge, restore the stash when the origin/dev range did not change any stashed path.",
+    "When the origin/dev range overlaps a stashed path, do not apply the stash into primary; leave it recoverable and report stash ref, stash oid, path list, and overlap list in the outcome/log.",
+    "Preserve existing skip behavior for base-branch primary checkouts, divergent local commits, fetch failures, lock contention, and ignored-file overwrite hazards.",
+    "Run the configured evidence command and collect the L4 indicator artifact."
+  ],
+  "constraints": [
+    "Use the launcher and dispatcher path; do not hand-commit this wave.",
+    "Do not modify runtime, substrate, seed, registry, JS production, StructuralNumbers gates, or docs outside the wave packet/config/tracker note.",
+    "Do not use force checkout, reset, rebase, push, or destructive commands in the primary-sync helper.",
+    "Do not hide preserved WIP: outcome fields and logs must expose the stash ref/oid/path list when WIP is isolated or left stashed.",
+    "Do not include untracked files in the tracked-WIP stash; existing untracked-preservation behavior must remain.",
+    "Keep tests focused on real git repos and the public sync_primary_worktree_to_base seam."
+  ],
+  "stop_conditions": [
+    "Stop as DEFECT if tracked WIP cannot be preserved without force/reset/destructive cleanup.",
+    "Stop as POLICY_BOUND if the fix would silently drop or hide founder WIP without a recoverable stash reference.",
+    "Stop as INTEGRATION if the helper cannot distinguish non-overlap from overlap without broad or flaky git behavior.",
+    "Do not proceed to commit without the configured evidence command passing and the indicator artifact collected."
+  ],
+  "acceptance_criteria": [
+    "A primary feature branch behind origin/dev with non-overlapping tracked WIP fast-forwards and restores the tracked WIP with staged/unstaged state preserved.",
+    "A primary feature branch behind origin/dev with overlapping tracked WIP fast-forwards and leaves the WIP recoverable in an executor-owned stash with explicit outcome fields.",
+    "Untracked files still do not block primary ff-sync and are not included in the tracked-WIP stash.",
+    "Divergent local commits, primary-on-base checkouts, fetch failures, lock contention, and ignored-file overwrite hazards still skip safely.",
+    "The helper remains pull-only: no push, no checkout of base, no force, no reset.",
+    "The configured evidence command passes.",
+    "reports/l4_wave_indicators/primary-ffsync-tracked-wip-preserve-2026-06-20.json is collected."
+  ],
+  "request_for_agent": "Implement the permanent Step 15b primary ff-sync tracked-WIP preservation hardening through the pipeline-owned Phase A and Phase B path only, using Codex for implementer and reviewer. Preserve tracked founder WIP with an executor-owned stash, fast-forward primary when ancestry permits, restore only non-overlapping WIP, and leave overlapping WIP recoverable by explicit stash metadata instead of creating conflicted main state.",
+  "authorization_note": "Founder requested a permanent fix after the post-merge primary ff-sync skipped because tracked WIP was present and left main 0 ahead / 43 behind origin/dev. This wave hardens the pipeline instead of manually reconciling main.",
+  "slow_functions": [],
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Pipeline hardening for Step 15b primary worktree ff-sync tracked-WIP preservation.",
+  "tracked_packet": "reports/control_plane/primary-ffsync-tracked-wip-preserve-2026-06-20_2026-06-20.md"
+}
