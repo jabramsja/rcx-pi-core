@@ -1,0 +1,64 @@
+{
+  "wave_id": "active-queue-post-gcd-status-sync-2026-06-20",
+  "title": "Active Queue Post-GCD Status Sync 2026-06-20",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Refresh TASKS.md and STATUS.md after the Codex autoping, structural GCD Python, and structural GCD JS parity waves landed, so the visible autonomous queue points at the next unmerged wave instead of stale completed work.",
+  "date": "2026-06-20",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id active-queue-post-gcd-status-sync-2026-06-20 --output reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id active-queue-post-gcd-status-sync-2026-06-20",
+  "evidence_delta": "(1) TASKS.md marks the already-landed Codex autoping idle-summary refresh, structural GCD Python gate, and structural GCD JS parity gate as completed queue work with direct merge evidence. (2) TASKS.md makes STRUCTURAL-NUMBERS-RATIONALS-2026-06-19 the current next sequential wave, then preserves the Stage 4, Stage 5, and narrow pipeline-fix order. (3) STATUS.md points at this refreshed active queue and packet without changing Phase 8c, debt counts, or runtime/substrate posture.",
+  "progress_proof_before": "On dev at da8e00a5, git log shows PR #1123 codex-autoping-idle-summary-refresh, PR #1126 structural-numbers-gcd, and PR #1127 structural-numbers-gcd-js-parity are merged, while TASKS.md lines 672-678 still list those three items as active queue entries before rationals.",
+  "progress_proof_after": "The visible NOW queue distinguishes completed queue items from remaining queue items, names rationals as the current next wave, and STATUS.md points to the same refreshed packet/TASKS source without duplicating the full queue.",
+  "structural_artifact_ref": "TASKS.md; STATUS.md",
+  "scope_summary": "Docs/control-plane queue cleanup only. Update the active TASKS.md queue and STATUS.md active-next pointer after landed queue items; do not touch runtime, substrate, seed, scheduler, registry, projection, StructuralNumbers implementation tests, role selection, pager/autoping behavior, or tmux scripts.",
+  "scope_items": [
+    "TASKS.md (MODIFY) -- refresh the NOW active Codex autonomous queue so completed items are separated from remaining ordered work and rationals is the current next wave.",
+    "STATUS.md (MODIFY) -- update the last-updated and active NEXT wording to point at this refreshed queue/packet without duplicating the queue.",
+    "reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_wave_config.json (NEW) -- launcher config for this docs/control-plane cleanup.",
+    "reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_2026-06-20.md (GENERATED) -- launcher-created control packet.",
+    "reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Ground the queue update in direct git log evidence for PR #1123, PR #1126, and PR #1127.",
+    "In TASKS.md NOW, keep the active queue concise but split it into completed-in-this-queue and remaining execution order.",
+    "Set STRUCTURAL-NUMBERS-RATIONALS-2026-06-19 as the current next sequential StructuralNumbers wave.",
+    "Preserve the remaining order: Stage 4 design, Stage 4 int-first cutover, Stage 5 ordinal-to-N, pipeline fixes #33, #29, #31, #17, then lower-priority deferred work.",
+    "Preserve the parallelization rule: StructuralNumbers gates remain sequential; narrow pipeline fixes may run in parallel only when file ownership does not overlap and the pipeline owns TASKS.md tracker conflict handling.",
+    "Update STATUS.md to point at this refreshed queue and packet, with Phase 8c/L4 bounded-reduction posture and host-debt counts unchanged."
+  ],
+  "constraints": [
+    "Use launch_wave.py and executor_dispatch for this wave.",
+    "Do not manually implement the TASKS.md/STATUS.md cleanup outside the pipeline after this launcher config is created unless the pipeline fails and the failure is captured as a precise structural follow-up.",
+    "Do not touch runtime, substrate, seed, scheduler, registry, projection, JavaScript parity, StructuralNumbers implementation tests, role_agents, bridge defaults, pager route, autoping watcher code, or tmux scripts.",
+    "Do not launch the rationals implementation wave, Stage 4 waves, Stage 5 wave, or pipeline-fix waves from inside this docs cleanup wave.",
+    "Do not rewrite historical Ra tracker ledgers or compact unrelated TASKS.md history."
+  ],
+  "stop_conditions": [
+    "Stop done when TASKS.md and STATUS.md agree on the refreshed queue, docs consistency and focused docs tests pass, strict staged L4 validation passes, the indicator artifact is collected, and commit/push/PR are handled through the commit executor.",
+    "Halt as DOC_ACCURACY if direct git evidence does not prove PR #1123, PR #1126, and PR #1127 are merged on the branch being updated.",
+    "Halt as NEEDS_RESCOPING if the cleanup requires broader TASKS.md compaction beyond the active queue/status pointer.",
+    "Do not commit without a real tracked source artifact and gate-green evidence."
+  ],
+  "acceptance_criteria": [
+    "TASKS.md no longer presents CODEX-AUTOPING-IDLE-SUMMARY-REFRESH-2026-06-20, STRUCTURAL-NUMBERS-GCD-PYTHON-2026-06-19, or STRUCTURAL-NUMBERS-GCD-JS-PARITY-2026-06-19 as uncompleted active work.",
+    "TASKS.md identifies STRUCTURAL-NUMBERS-RATIONALS-2026-06-19 as the current next sequential wave.",
+    "TASKS.md preserves Stage 4 design, Stage 4 int-first cutover, Stage 5 ordinal-to-N, and pipeline fixes #33/#29/#31/#17 in order.",
+    "TASKS.md keeps the StructuralNumbers sequential rule and the conditional parallel-pipeline rule for non-overlapping pipeline fixes.",
+    "STATUS.md references the refreshed active queue and this packet while leaving Phase 8c/debt truth unchanged.",
+    "No runtime/substrate/seed/parity files are touched."
+  ],
+  "request_for_agent": "Implement a bounded docs truth-sync through the pipeline: refresh TASKS.md and STATUS.md after the landed Codex autoping, structural GCD Python, and structural GCD JS parity waves. Use direct git log merge evidence, mark those items as completed queue work, make rationals the current next sequential wave, preserve the remaining order and parallelization rule, run the configured evidence command, collect the indicator artifact, and keep the diff docs/control-plane only.",
+  "request_for_claude": "Compatibility input only: this queue/status cleanup is to be implemented and reviewed by Codex agents. Do not treat Claude as the active operator for this wave.",
+  "authorization_note": "Founder-directed request on 2026-06-20: autonomously do the queued waves, use parallel pipeline when possible, put the queue in TASKS.md in order, and clean up TASKS.md and STATUS.md after the landed GCD waves.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Docs/control-plane active queue cleanup after landed Codex autoping and GCD waves.",
+  "tracked_packet": "reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_2026-06-20.md"
+}

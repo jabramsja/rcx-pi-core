@@ -558,6 +558,8 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-06-20, launch-wave-root-env-trigger-fix-2026-06-20): **NEXT-CODEX-POST-REDTEAM — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/launch-wave-root-env-trigger-fix-2026-06-20_2026-06-20.md`. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_launch_wave.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/launch-wave-root-env-trigger-fix-2026-06-20_2026-06-20.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for launch-wave-root-env-trigger-fix-2026-06-20 with 6 wave-owned file(s), bridge rounds=1, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:launch-wave-root-env-trigger-fix-2026-06-20. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/launch-wave-root-env-trigger-fix-2026-06-20.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id launch-wave-root-env-trigger-fix-2026-06-20 --output reports/l4_wave_indicators/launch-wave-root-env-trigger-fix-2026-06-20.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 - Tracker sync note (2026-06-20, codex-autoping-idle-summary-refresh-2026-06-20): **chore: continue codex-autoping-idle-summary-refresh-2026-06-20 staged diff.**. Class: MAINTENANCE. target_gate_id: G8. Packet: `reports/control_plane/codex-autoping-idle-summary-refresh-2026-06-20_2026-06-20.md`. no_op_proof: control-surface/docs/test-only wave-owned scope; no runtime/substrate files declared in this handoff. defer_reason_code: PIPELINE_HARDENING. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/codex-autoping-idle-summary-refresh-2026-06-20.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id codex-autoping-idle-summary-refresh-2026-06-20 --output reports/l4_wave_indicators/codex-autoping-idle-summary-refresh-2026-06-20.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD. FOUNDER_OVERRIDE:codex-autoping-idle-summary-refresh-2026-06-20 (standing pipeline-bug-fix authorization per memory feedback_autonomous_executor_fix.md; auto-appended by build_commit_handoff for commit-gate + pre-push adjacency-cap clearance)
 - Tracker sync note (2026-06-20, structural-numbers-gcd-js-parity-2026-06-19): **NEXT-CODEX-POST-REDTEAM — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/structural-numbers-gcd-js-parity-2026-06-19_2026-06-19.md`. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_growth_caps.py mu/tests/l4_gates/test_structural_numbers_gcd_js_parity.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/structural-numbers-gcd-js-parity-2026-06-19_2026-06-19.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for structural-numbers-gcd-js-parity-2026-06-19 with 6 wave-owned file(s), bridge rounds=1, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:structural-numbers-gcd-js-parity-2026-06-19. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/structural-numbers-gcd-js-parity-2026-06-19.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id structural-numbers-gcd-js-parity-2026-06-19 --output reports/l4_wave_indicators/structural-numbers-gcd-js-parity-2026-06-19.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+- Tracker sync note (2026-06-20, active-queue-post-gcd-status-sync-2026-06-20): **Active Queue Post-GCD Status Sync 2026-06-20.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_2026-06-20.md`. structural_artifact_ref: TASKS.md; STATUS.md. evidence_command: `./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id active-queue-post-gcd-status-sync-2026-06-20`. evidence_delta: (1) TASKS.md marks the already-landed Codex autoping idle-summary refresh, structural GCD Python gate, and structural GCD JS parity gate as completed queue work with direct merge evidence. (2) TASKS.md makes STRUCTURAL-NUMBERS-RATIONALS-2026-06-19 the current next sequential wave, then preserves the Stage 4, Stage 5, and narrow pipeline-fix order. (3) STATUS.md points at this refreshed active queue and packet without changing Phase 8c, debt counts, or runtime/substrate posture. progress_proof_before: Direct git log evidence on dev shows PR #1123, PR #1126, and PR #1127 are merged, while the prior active queue still presented those landed items ahead of rationals. progress_proof_after: The visible NOW queue distinguishes completed queue items from remaining queue items, names rationals as the current next wave, and STATUS.md points to the same refreshed packet/TASKS source without duplicating the full queue. FOUNDER_OVERRIDE:active-queue-post-gcd-status-sync-2026-06-20. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id active-queue-post-gcd-status-sync-2026-06-20 --output reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+
 
 
 - Tracker sync follow-up (2026-06-20T01:00:07Z, codex-mode-switch-2026-06-19): same-wave follow-up commit touched tracker-relevant file(s) without phase/task-state change: mu/tools/observability/pipeline_monitor.sh.
@@ -662,39 +664,46 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 ## NOW (normally empty; founder-directed exceptions may pin an active Codex queue)
 
 - **[ACTIVE-CODEX-AUTONOMOUS-QUEUE]** **ORDERED / CURRENT** (2026-06-20,
-  founder-directed queue sync; wave `queue-status-sync-2026-06-20`).
+  founder-directed post-GCD status sync; wave
+  `active-queue-post-gcd-status-sync-2026-06-20`).
   Source: tracked packet
-  `reports/control_plane/queue-status-sync-2026-06-20_2026-06-20.md` and the
-  same-wave tracker sync note above; no separate June 19 handoff source
-  artifact is tracked in this worktree.
-  Canonical execution order for `[NEXT-CODEX-POST-REDTEAM]` autonomous Codex
-  waves:
-  1. **[CODEX-AUTOPING-IDLE-SUMMARY-REFRESH-2026-06-20]** live Codex
-     autoping idle-summary follow-up. Active follow-up only; do not mark it
-     merged until the commit executor completes it.
+  `reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_2026-06-20.md`
+  and the same-wave tracker sync note above. Direct merge evidence on this
+  branch: PR #1123 merged at `92bd15b7`, PR #1126 merged at `ac7ca8ec`, and
+  PR #1127 merged at `da8e00a5`.
+  **Completed in this queue:**
+  1. **[CODEX-AUTOPING-IDLE-SUMMARY-REFRESH-2026-06-20]** landed via PR #1123.
   2. **[STRUCTURAL-NUMBERS-GCD-PYTHON-2026-06-19]** Stage 3 structural gcd
-     Python gate.
-  3. **[STRUCTURAL-NUMBERS-GCD-JS-PARITY-2026-06-19]** Stage 3 gcd
-     JavaScript parity gate.
-  4. **[STRUCTURAL-NUMBERS-RATIONALS-2026-06-19]** Stage 3 exact rationals
-     over reduced numerator/denominator form.
-  5. **[STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19]** Stage 4 design for the
+     Python gate landed via PR #1126.
+  3. **[STRUCTURAL-NUMBERS-GCD-JS-PARITY-2026-06-19]** Stage 3 gcd JavaScript
+     parity gate landed via PR #1127.
+  **Remaining execution order for `[NEXT-CODEX-POST-REDTEAM]`:**
+  1. **[STRUCTURAL-NUMBERS-RATIONALS-2026-06-19]** **CURRENT NEXT** sequential
+     StructuralNumbers wave: Stage 3 exact rationals over reduced
+     numerator/denominator form.
+  2. **[STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19]** Stage 4 design for the
      integer-first numeric boundary.
-  6. **[STRUCTURAL-NUMBERS-STAGE4-INT-FIRST-CUTOVER-2026-06-19]** Stage 4
+  3. **[STRUCTURAL-NUMBERS-STAGE4-INT-FIRST-CUTOVER-2026-06-19]** Stage 4
      int-first cutover after the design packet locks scope.
-  7. **[STRUCTURAL-NUMBERS-STAGE5-ORDINAL-TO-N-2026-06-19]** Stage 5
+  4. **[STRUCTURAL-NUMBERS-STAGE5-ORDINAL-TO-N-2026-06-19]** Stage 5
      von-Neumann-ordinal-to-binary-`N` bridge.
-  8. **[PIPELINE-FIX-33]** narrow pipeline structural fix.
-  9. **[PIPELINE-FIX-29]** narrow pipeline structural fix.
-  10. **[PIPELINE-FIX-31]** narrow pipeline structural fix.
-  11. **[PIPELINE-FIX-17]** narrow pipeline structural fix.
-  12. Lower-priority deferred research/cosmetic items only after the active
-      structural and pipeline-fix queue above clears.
+  5. **[PIPELINE-FIX-33]** narrow pipeline structural fix.
+  6. **[PIPELINE-FIX-29]** narrow pipeline structural fix.
+  7. **[PIPELINE-FIX-31]** narrow pipeline structural fix.
+  8. **[PIPELINE-FIX-17]** narrow pipeline structural fix.
+  9. **[PIPELINE-FIX-34]** recovery Tier 3 bot-finding durable-edit fix:
+     make `bot_findings_pending` recovery require/apply structured edit actions
+     instead of exhausting after meta-envelope-only output. Root evidence:
+     `.agent_bus-active-queue-post-gcd/recovery/recovery_status.json` ended
+     `tier3_exhausted`, and this tracker note still retained the
+     indicator-only evidence command after three recovery attempts.
+  10. Lower-priority deferred research/cosmetic items only after the active
+     structural and pipeline-fix queue above clears.
   **Parallelization rule:** StructuralNumbers gate waves are sequential because
   they share growth-cap/test surfaces and predecessor arithmetic facts. The
-  narrow pipeline fixes `#33`, `#29`, `#31`, and `#17` may run in parallel only
-  when implementation file ownership does not overlap and the pipeline owns any
-  `TASKS.md` tracker conflict handling.
+  narrow pipeline fixes `#33`, `#29`, `#31`, `#17`, and `#34` may run in
+  parallel only when implementation file ownership does not overlap and the
+  pipeline owns any `TASKS.md` tracker conflict handling.
   **Already landed infrastructure:** `pipeline-wave-launcher-builder-2026-06-18`,
   `stranded-pr-landing-op-2026-06-19`,
   `stranded-op-growthcap-union-fix-2026-06-19`,
