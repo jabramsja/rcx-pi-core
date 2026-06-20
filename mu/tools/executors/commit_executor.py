@@ -3422,6 +3422,7 @@ def _run(
     check: bool = True,
     timeout: int = 120,
     env: dict[str, str] | None = None,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a subprocess with sanitized env."""
     run_env = env
@@ -3429,7 +3430,7 @@ def _run(
         run_env = {k: v for k, v in os.environ.items() if not k.startswith("RCX_SKIP_")}
     return subprocess.run(
         args, cwd=cwd, capture_output=True, text=True, check=check,
-        timeout=timeout, env=run_env,
+        timeout=timeout, env=run_env, input=input_text,
     )
 
 
@@ -4375,6 +4376,27 @@ def _stash_primary_sync_tracked_wip(
     }, None
 
 
+def _resolve_primary_sync_stash_record(
+    repo_root: Path,
+    stash_record: dict[str, Any] | None,
+) -> tuple[tuple[str, str] | None, str | None]:
+    """Resolve and validate an executor-owned primary-sync WIP stash."""
+    if not stash_record:
+        return None, None
+    marker = str(stash_record.get("marker") or "")
+    expected_oid = str(stash_record.get("stash_oid") or "")
+    resolved = _find_stash_ref_by_marker(repo_root, marker)
+    if resolved is None:
+        return None, f"primary ff-sync tracked-WIP stash missing for marker {marker}"
+    stash_ref, stash_oid = resolved
+    if expected_oid and stash_oid != expected_oid:
+        return None, (
+            "primary ff-sync tracked-WIP stash object id mismatch: "
+            f"expected {expected_oid}, found {stash_oid}"
+        )
+    return (stash_ref, stash_oid), None
+
+
 def _restore_primary_sync_tracked_wip(
     repo_root: Path,
     stash_record: dict[str, Any] | None,
@@ -4382,19 +4404,15 @@ def _restore_primary_sync_tracked_wip(
     log: Any,
 ) -> str | None:
     """Restore executor-owned primary-sync WIP and fail closed on stash drift."""
-    if not stash_record:
-        return None
-    marker = str(stash_record.get("marker") or "")
-    expected_oid = str(stash_record.get("stash_oid") or "")
-    resolved = _find_stash_ref_by_marker(repo_root, marker)
+    resolved, resolve_error = _resolve_primary_sync_stash_record(
+        repo_root,
+        stash_record,
+    )
+    if resolve_error:
+        return resolve_error
     if resolved is None:
-        return f"primary ff-sync tracked-WIP stash missing for marker {marker}"
-    stash_ref, stash_oid = resolved
-    if expected_oid and stash_oid != expected_oid:
-        return (
-            "primary ff-sync tracked-WIP stash object id mismatch: "
-            f"expected {expected_oid}, found {stash_oid}"
-        )
+        return None
+    stash_ref, _stash_oid = resolved
     pop = _run(
         ["git", "stash", "pop", "--index", stash_ref],
         cwd=repo_root,
@@ -4408,6 +4426,84 @@ def _restore_primary_sync_tracked_wip(
             f"{detail[:200] or pop.returncode}"
         )
     log(f"Step 15b: restored tracked primary WIP from {stash_ref}")
+    return None
+
+
+def _restore_primary_sync_tracked_wip_paths(
+    repo_root: Path,
+    stash_record: dict[str, Any] | None,
+    paths: list[str],
+    *,
+    log: Any,
+) -> str | None:
+    """Restore selected tracked WIP paths from an executor-owned stash."""
+    restore_paths = sorted(path for path in dict.fromkeys(paths) if path)
+    if not restore_paths:
+        return None
+    resolved, resolve_error = _resolve_primary_sync_stash_record(repo_root, stash_record)
+    if resolve_error:
+        return resolve_error
+    if resolved is None:
+        return None
+    stash_ref, stash_oid = resolved
+    # Stash commits keep HEAD at ^1, the saved index at ^2, and the saved
+    # worktree as the stash tree. Applying both deltas mirrors `stash pop
+    # --index` for only these paths.
+    patch_steps = [
+        (
+            f"{stash_oid}^1",
+            f"{stash_oid}^2",
+            ["--index", "--binary"],
+            "staged",
+        ),
+        (
+            f"{stash_oid}^2",
+            stash_oid,
+            ["--binary"],
+            "unstaged",
+        ),
+    ]
+    for before_ref, after_ref, apply_args, label in patch_steps:
+        diff = _run(
+            [
+                "git",
+                "diff",
+                "--binary",
+                "--no-ext-diff",
+                before_ref,
+                after_ref,
+                "--",
+                *restore_paths,
+            ],
+            cwd=repo_root,
+            check=False,
+            timeout=60,
+        )
+        if diff.returncode != 0:
+            detail = (diff.stderr or diff.stdout or "").strip()
+            return (
+                f"git diff for {label} tracked-WIP restore failed: "
+                f"{detail[:200] or diff.returncode}"
+            )
+        if not diff.stdout:
+            continue
+        apply = _run(
+            ["git", "apply", *apply_args],
+            cwd=repo_root,
+            check=False,
+            timeout=120,
+            input_text=diff.stdout,
+        )
+        if apply.returncode != 0:
+            detail = (apply.stderr or apply.stdout or "").strip()
+            return (
+                f"git apply for {label} tracked-WIP restore failed: "
+                f"{detail[:200] or apply.returncode}"
+            )
+    log(
+        "Step 15b: restored non-overlapping tracked primary WIP from "
+        f"{stash_ref} for path(s): {', '.join(restore_paths)}"
+    )
     return None
 
 
@@ -4658,6 +4754,25 @@ def _sync_primary_worktree_to_base(
             outcome["new_sha"] = synced_sha
             if stash_record is not None:
                 if overlap_paths:
+                    non_overlap_paths = sorted(
+                        set(tracked_wip_paths) - set(overlap_paths)
+                    )
+                    if non_overlap_paths:
+                        restore_error = _restore_primary_sync_tracked_wip_paths(
+                            primary,
+                            stash_record,
+                            non_overlap_paths,
+                            log=log,
+                        )
+                        if restore_error:
+                            outcome["tracked_wip_restore_error"] = restore_error
+                            log(
+                                "Step 15b: non-overlapping tracked primary WIP "
+                                f"remains in {stash_record['stash_ref']} after "
+                                f"successful ff; restore failed: {restore_error}"
+                            )
+                        else:
+                            outcome["tracked_wip_restored"] = True
                     outcome["tracked_wip_left_stashed"] = True
                     log(
                         "Step 15b: left overlapping tracked primary WIP in "
