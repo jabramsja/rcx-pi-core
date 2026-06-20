@@ -37,6 +37,15 @@ import executor_common as ec  # noqa: E402  (public seam for the routing-record 
 # --------------------------------------------------------------------------- #
 
 _NOTE_HEADER_RE = re.compile(r"^- Tracker sync note \([^,]+,\s*([^)]+)\):", re.MULTILINE)
+_DISPATCHER_OVERRIDE_ENV_KEYS_FOR_TEST = (
+    ec.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV,
+    "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE",
+    *(
+        key
+        for env_keys in ec.ROLE_AGENT_ENV_VARS.values()
+        for key in env_keys
+    ),
+)
 
 
 def _git(repo, *args):
@@ -544,10 +553,8 @@ def test_launch_invokes_runner_when_enabled(wave_repo):
 
 
 def test_launch_omitted_pins_preserve_runner_environment_shape(wave_repo, monkeypatch):
-    monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
-    monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
-    monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
-    monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
+    for key in _DISPATCHER_OVERRIDE_ENV_KEYS_FOR_TEST:
+        monkeypatch.delenv(key, raising=False)
 
     calls = []
 

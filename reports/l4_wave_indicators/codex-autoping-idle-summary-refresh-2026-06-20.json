@@ -1,24 +1,24 @@
 {
   "wave_id": "codex-autoping-idle-summary-refresh-2026-06-20",
-  "repeat_run_speedup_ratio": 1.220465,
+  "repeat_run_speedup_ratio": 1.049613,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.273613,
+  "step_growth_slope": 0.238203,
   "repeat_run_raw_seconds": [
-    0.333935,
-    0.273613
+    0.250021,
+    0.238203
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.333935
+      "elapsed_seconds": 0.250021
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.607548
+      "elapsed_seconds": 0.488224
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-06-20T04:33:02Z",
+  "collection_timestamp_utc": "2026-06-20T05:04:15Z",
   "collector_version": "2.2.0"
 }
