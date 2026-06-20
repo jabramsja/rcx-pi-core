@@ -221,7 +221,7 @@ def test_dry_run_reports_exact_actions_without_writing_or_launching(tmp_path):
     )
 
     assert report.ok
-    assert report.config_changed is True
+    assert report.config_changed is False
     assert report.state_changed is True
     assert report.skipped_pager_targets == [
         {
@@ -238,6 +238,7 @@ def test_dry_run_reports_exact_actions_without_writing_or_launching(tmp_path):
     assert not (repo_root / ".agent_bus" / "observability" / "orchestrator_mode.json").exists()
     rendered = switch.render_report(report, dry_run=True)
     assert "DRY-RUN orchestrator_mode=codex" in rendered
+    assert "effective_pager_route=codex" in rendered
     assert "--orchestrator-mode codex" in rendered
     assert "ensure_codex_autoping.sh" in rendered
     assert "gpt-local" in rendered
@@ -268,7 +269,7 @@ def test_apply_writes_route_skips_stale_targets_restarts_surfaces_and_preserves_
 
     assert report.ok
     config = _read_config(repo_root)
-    assert config["pipeline_agent_pager"]["route"] == "codex"
+    assert config["pipeline_agent_pager"]["route"] == "both"
     assert config["role_agents"] == {"implementer": "claude", "reviewer": "claude"}
     assert config["backends"]["phase_b_executor"] == "claude"
     assert config["bridge_reviewers"] == {"phase_a": "claude", "phase_b": "claude"}

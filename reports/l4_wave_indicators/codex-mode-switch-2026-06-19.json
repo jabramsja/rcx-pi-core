@@ -1,24 +1,24 @@
 {
   "wave_id": "codex-mode-switch-2026-06-19",
-  "repeat_run_speedup_ratio": 1.157884,
+  "repeat_run_speedup_ratio": 1.018809,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.257328,
+  "step_growth_slope": 0.271727,
   "repeat_run_raw_seconds": [
-    0.297956,
-    0.257328
+    0.276838,
+    0.271727
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.297956
+      "elapsed_seconds": 0.276838
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.555284
+      "elapsed_seconds": 0.548565
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-06-20T00:19:32Z",
+  "collection_timestamp_utc": "2026-06-20T00:45:50Z",
   "collector_version": "2.2.0"
 }

@@ -3,7 +3,7 @@
 
 This command owns only the operator-facing orchestration surface:
 
-* ``pipeline_agent_pager.route`` in ``executor_config.json``;
+* bus-local ``orchestrator_mode.json`` used by the pager as the effective route;
 * stale pending pager targets for the opposite orchestrator;
 * selected Codex/Claude autoping restart and opposite autoping stop;
 * tmux monitor rebuild for the selected root/bus/session.
@@ -57,6 +57,7 @@ from pipeline_agent_pager import (  # noqa: E402
     _load_state as pager_load_state,
     _refresh_pending_targets as pager_refresh_pending_targets,
     _save_state as pager_save_state,
+    _resolve_route as pager_resolve_route,
 )
 
 
@@ -257,16 +258,12 @@ def _set_pager_route(
     *,
     dry_run: bool,
 ) -> bool:
+    del mode, dry_run
     config = _load_raw_executor_config(repo_root)
     pager = config.setdefault("pipeline_agent_pager", {})
     if not isinstance(pager, dict):
         raise OrchestratorModeError("pipeline_agent_pager must be a JSON object")
-    if pager.get("route") == mode:
-        return False
-    pager["route"] = mode
-    if not dry_run:
-        _atomic_write_text(_config_path(repo_root), json.dumps(config, indent=2) + "\n")
-    return True
+    return False
 
 
 def _role_agent_visibility(repo_root: Path, bus_dir: str) -> dict[str, dict[str, str]]:
@@ -1416,10 +1413,13 @@ def verify_state(
     warnings: list[str] = []
 
     config = load_executor_config(repo_root)
-    pager = config.get("pipeline_agent_pager", {})
-    route = pager.get("route") if isinstance(pager, dict) else None
+    token = PAGER_ACTIVE_BUS_DIR.set(normalize_agent_bus_dir(bus_dir))
+    try:
+        route = pager_resolve_route(repo_root, config, None)
+    finally:
+        PAGER_ACTIVE_BUS_DIR.reset(token)
     if route != mode:
-        failures.append(f"pager route is {route!r}, expected {mode!r}")
+        failures.append(f"effective pager route is {route!r}, expected {mode!r}")
 
     state = _read_json(_orchestrator_state_path(repo_root, bus_dir), {})
     if not isinstance(state, dict) or state.get("mode") != mode:
@@ -1692,7 +1692,7 @@ def render_report(report: SwitchReport, *, dry_run: bool) -> str:
     lines: list[str] = []
     prefix = "DRY-RUN" if dry_run else "APPLIED"
     lines.append(f"{prefix} orchestrator_mode={report.mode}")
-    lines.append(f"  pager_route={report.mode}")
+    lines.append(f"  effective_pager_route={report.mode}")
     lines.append(f"  repo_root={report.repo_root}")
     lines.append(f"  bus_dir={report.bus_dir}")
     lines.append(f"  tmux_session={report.tmux_session}")

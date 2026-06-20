@@ -685,10 +685,32 @@ tracked_owner_pids() {
   fi
 }
 
+owner_pid_is_tracked() {
+  local pid="$1" current=""
+  current="$(current_owner_pid 2>/dev/null || true)"
+  if [ -n "$current" ] && [ "$current" = "$pid" ]; then
+    return 0
+  fi
+  [ -f "$(owner_registry_file "$pid")" ]
+}
+
 process_table_owner_pids() {
   ps -Ao pid=,command= 2>/dev/null \
     | awk '/pipeline_monitor[.]sh/ && /__owner-loop/ { print $1 }' \
     || true
+}
+
+owner_process_shares_worktree_parent() {
+  local pid="$1" expected_root="" expected_parent="" cmd=""
+  expected_root="$(owner_expected_root)"
+  expected_parent="$(dirname "$expected_root")"
+  cmd="$(process_command_line "$pid")"
+  case "$cmd" in
+    *"$expected_parent"/*/mu/tools/observability/pipeline_monitor.sh*__owner-loop*|*"$expected_parent"/*/tools/observability/pipeline_monitor.sh*__owner-loop*)
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 owner_process_targets_session() {
@@ -708,7 +730,10 @@ owner_process_targets_session() {
     return 1
   fi
   if [ "$SESSION" = "rcx-pipeline" ]; then
-    return 0
+    owner_pid_is_tracked "$pid" && return 0
+    owner_process_matches_root "$pid" "$(owner_expected_root)" && return 0
+    owner_process_shares_worktree_parent "$pid"
+    return $?
   fi
   owner_process_matches_bus "$pid" "$BUS_DIR"
 }
