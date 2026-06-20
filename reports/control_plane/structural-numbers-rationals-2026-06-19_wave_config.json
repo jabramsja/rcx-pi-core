@@ -1,0 +1,74 @@
+{
+  "wave_id": "structural-numbers-rationals-2026-06-19",
+  "title": "NEXT-CODEX-POST-REDTEAM - StructuralNumbers Stage 3 exact rational reduction gate",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "StructuralNumbers Stage 3: prove exact rational representation as `{num: Z, den: positive}` reduced to lowest terms by composing the landed structural GCD projections and bounded exact quotient projections, with no host floats and no runtime, substrate, seed, registry, or production semantic edits.",
+  "date": "2026-06-19",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/structural-numbers-rationals-2026-06-19.json",
+  "indicator_collection_command": "python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id structural-numbers-rationals-2026-06-19 --output reports/l4_wave_indicators/structural-numbers-rationals-2026-06-19.json",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_growth_caps.py mu/tests/l4_gates/test_structural_numbers_rationals.py && python3 mu/tools/checks/check_host_semantics_ratchet.py --json",
+  "evidence_delta": "(1) Add a bounded L4 gate proving exact rational normalization as `{num: Z, den: positive}` with denominator strictly positive and numerator preserving sign. (2) The gate composes the landed StructuralNumbers codec, compare/subtract/add machinery as needed, and GCD_PROJECTIONS from the GCD wave rather than adding runtime or host numeric semantics. (3) Host division, floats, and host gcd stay oracle-only outside the engine; the L4 indicator artifact is collected.",
+  "progress_proof_before": "TASKS.md marks rationals as the current next StructuralNumbers wave after structural GCD and GCD JS parity landed; the design spec requires rationals reduced by structural gcd, but no gate yet proves reduced rational envelopes.",
+  "progress_proof_after": "A bounded gate proves reduced exact rational envelopes can be produced from StructuralNumbers integer projections without host floats or new runtime authority, unblocking the Stage 4 integer-first numeric boundary design.",
+  "structural_artifact_ref": "mu/tests/l4_gates/test_structural_numbers_rationals.py",
+  "founder_override": "structural-numbers-rationals-2026-06-19",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "scope_summary": "Additive gate-only exact-rationals proof over the landed StructuralNumbers projection stack. This wave may add one L4 gate file, update the growth-cap registry, create its control packet/config, update TASKS.md through the launcher tracker-note builder, and collect the indicator artifact only.",
+  "scope_items": [
+    "mu/tests/l4_gates/test_structural_numbers_rationals.py (NEW) -- bounded exact-rational normalization gate over `{num: Z, den: positive}`.",
+    "mu/tests/docs/test_growth_caps.py (MODIFY) -- bump CAP_TEST_FILES plus one with FOUNDER_OVERRIDE:structural-numbers-rationals-2026-06-19.",
+    "reports/l4_wave_indicators/structural-numbers-rationals-2026-06-19.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Create mu/tests/l4_gates/test_structural_numbers_rationals.py.",
+    "Define the test-local rational envelope shape exactly as StructuralNumbers.v0.md specifies: `{num: Z, den: positive}`, with zero encoded as numerator zero and denominator one.",
+    "Import and compose the landed StructuralNumbers codec helpers and GCD_PROJECTIONS; reuse landed compare, subtract, and add/multiply helpers where bounded exact quotient machinery is needed.",
+    "Use a lean bounded corpus that covers zero numerator, already-reduced positive fractions, reducible positive fractions, reducible negative numerators, denominator-to-one results, and improper fractions.",
+    "Assert canonical reduced form by structural equality and content-hash equality against oracle-built envelopes, with host arithmetic used only to build expected test oracles outside the engine.",
+    "Prove denominator positivity and canonical numerator shape; reject or visibly stall zero denominators rather than minting an invalid rational.",
+    "Mark run_mu engine assertions with pytest.mark.l4_expensive and pytest.mark.slow; any fast guard that transitively references run_mu must carry an in-function # SPEED_OK comment.",
+    "Bump CAP_TEST_FILES plus one in mu/tests/docs/test_growth_caps.py with the wave-specific founder override comment.",
+    "Run the evidence command and collect the L4 indicator artifact."
+  ],
+  "constraints": [
+    "Use the launcher and dispatcher path; do not hand-implement or hand-commit this wave.",
+    "No runtime, substrate, seed, registry, projection seed, JS production, or host semantic file may change.",
+    "No host floats anywhere in the wave. Host integer arithmetic, math.gcd, or division may appear only as test oracle scaffolding outside the engine path.",
+    "Do not add a production rational seed or boundary codec in this wave; this is a bounded L4 gate over the existing structural-number projection stack.",
+    "Do not reimplement landed GCD, compare, subtract, add, multiply, or codec projection logic when importing and lifting them is sufficient.",
+    "Keep the corpus bounded to small operands already compatible with the landed Stage 3 performance envelope.",
+    "Do not touch Stage 4 design, Stage 4 int-first cutover, Stage 5 ordinal bridge, or pipeline-fix waves."
+  ],
+  "stop_conditions": [
+    "Stop done when the evidence command passes, host-semantics ratchet stays flat, and the indicator artifact is collected.",
+    "Halt as POLICY_BOUND if rational reduction cannot be expressed without host floats, runtime edits, production seed edits, or host-only semantic authority.",
+    "Halt as STRUCTURAL_GAP if the bounded reducer requires a full structural division surface larger than this gate can honestly prove; record the exact missing primitive rather than forcing host division into the engine.",
+    "Halt as GROWTH_CAP_STALE if the current test-file cap cannot be bumped exactly once for this new gate file.",
+    "Do not commit without a real handoff artifact and gate-green evidence."
+  ],
+  "acceptance_criteria": [
+    "mu/tests/l4_gates/test_structural_numbers_rationals.py exists and passes.",
+    "The gate proves every normalized result has shape `{num: Z, den: positive}` with denominator one for zero numerator.",
+    "The reducer composes landed structural GCD rather than using host gcd in the engine path.",
+    "Every corpus item reduces to lowest terms and is structurally/content-hash equal to the oracle envelope.",
+    "Zero denominator is rejected or stalls visibly; it must not produce a valid rational envelope.",
+    "The run_mu tests carry l4_expensive and slow markers plus # SPEED_OK annotations where required.",
+    "mu/tests/docs/test_growth_caps.py is bumped plus one with FOUNDER_OVERRIDE:structural-numbers-rationals-2026-06-19.",
+    "No diff appears under runtime, substrate, seed, registry, JS core, or production Mu semantic paths.",
+    "reports/l4_wave_indicators/structural-numbers-rationals-2026-06-19.json is collected."
+  ],
+  "request_for_agent": "Implement the StructuralNumbers exact rationals gate through the pipeline-owned Phase A and Phase B path only, using Codex for implementer and reviewer. Keep the wave gate-only, compose the landed StructuralNumbers integer/GCD projection stack, prove bounded reduced `{num: Z, den: positive}` rational envelopes, run the configured evidence command, collect the indicator artifact, and do not touch runtime/substrate/seed/registry/JS production files.",
+  "authorization_note": "Founder-directed ordered queue from TASKS.md: after structural-numbers-gcd-js-parity-2026-06-19 lands, run structural-numbers-rationals-2026-06-19 before Stage 4 design.",
+  "slow_functions": [
+    "run_mu"
+  ],
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "StructuralNumbers exact rationals gate, additive test-only, composing landed integer and GCD projections.",
+  "tracked_packet": "reports/control_plane/structural-numbers-rationals-2026-06-19_2026-06-19.md"
+}
