@@ -1,0 +1,60 @@
+{
+  "wave_id": "codex-autoping-idle-summary-refresh-2026-06-20",
+  "title": "Codex Autoping Idle Summary Refresh 2026-06-20",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Fix the Codex autoping watcher so an idle-no-wave state refreshes the durable summary text instead of leaving a stale attention-required message from an earlier wave.",
+  "date": "2026-06-20",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/codex-autoping-idle-summary-refresh-2026-06-20.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id codex-autoping-idle-summary-refresh-2026-06-20 --output reports/l4_wave_indicators/codex-autoping-idle-summary-refresh-2026-06-20.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_codex_autoping_watch.py --tb=short && python3 -m py_compile mu/tools/session/codex_autoping_watch.py && python3 mu/tools/checks/check_host_semantics_ratchet.py --json",
+  "evidence_delta": "(1) The idle-no-wave autoping watcher state writes a neutral durable summary that matches the structured JSON state and selected repo/bus, so tmux AUTO-PING cannot continue displaying an old attention-required failure after the live state is idle. (2) Regression coverage proves the idle branch rewrites a stale summary without launching real Codex, Claude, or tmux. (3) The change is Codex autoping control-plane only and does not touch runtime, substrate, seed, scheduler, registry, projection, or JS parity semantics.",
+  "progress_proof_before": "After PR #1122 merged and the deterministic Codex orchestrator switch verified, the live autoping JSON reported status idle_no_wave for the selected clean dev worktree and .agent_bus-codexmode, but the durable summary text still displayed an old attention-required executor_hard_fail from the removed lane4 worktree because the idle branch updated JSON state without writing summary_path.",
+  "progress_proof_after": "The Codex autoping watcher updates both structured JSON state and durable summary text when no active wave/job exists, making the AUTO-PING pane and startup summary agree with the actual idle state after a successful switch or completed wave.",
+  "structural_artifact_ref": "mu/tools/session/codex_autoping_watch.py",
+  "scope_summary": "Pipeline/operator tooling only: Codex autoping watcher idle-state summary refresh. Do not touch runtime, substrate, seed, StructuralNumbers, arithmetic gates, JS parity, implementer/reviewer role selection, pager route selection, or tmux layout behavior beyond any direct test harness needed for this watcher branch.",
+  "scope_items": [
+    "mu/tools/session/codex_autoping_watch.py (MODIFY) -- write a neutral durable summary when the watcher reaches idle_no_wave.",
+    "mu/tests/tools/test_codex_autoping_watch.py (MODIFY) -- add or extend fake-state regression coverage for stale summary replacement in the idle branch.",
+    "reports/l4_wave_indicators/codex-autoping-idle-summary-refresh-2026-06-20.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Add a deterministic idle summary string for the Codex autoping watcher that includes enough context to distinguish idle/no-wave from attention-required.",
+    "Write that summary to summary_path before or with the idle_no_wave state update, and record last_summary consistently in the state payload.",
+    "Add focused tests that start from a stale attention-required summary and prove the idle branch replaces it without launching real Codex, Claude, or tmux.",
+    "Run the configured evidence command and collect the indicator artifact."
+  ],
+  "constraints": [
+    "Use the pipeline launcher and dispatcher path for this wave.",
+    "Do not manually edit generated packet/tracker/routing surfaces outside the launcher/builder path.",
+    "Do not launch real Codex, Claude, or persistent tmux windows in tests.",
+    "Do not alter orchestrator mode, role_agents, bridge_agent_defaults, or pager route defaults in this wave.",
+    "Do not touch runtime, substrate, seed, registry, projection seed, JS parity, or StructuralNumbers files."
+  ],
+  "stop_conditions": [
+    "Stop done when idle_no_wave writes an accurate durable summary, regression coverage passes, the evidence command passes, the indicator artifact is collected, and commit/push/PR are handled through the commit executor.",
+    "Halt as NEEDS_RESCOPING if summary freshness requires redesigning the autoping runner or tmux pane renderer rather than the watcher idle branch.",
+    "Halt as POLICY_BOUND if the fix requires hidden Codex state mutation beyond the watcher-owned state/summary files.",
+    "Do not commit without a real handoff artifact and gate-green evidence."
+  ],
+  "acceptance_criteria": [
+    "A watcher cycle with no active wave/job writes a neutral idle summary to summary_path.",
+    "The idle summary replaces a stale attention-required summary from a previous wave.",
+    "The JSON state for idle_no_wave records last_summary consistently with the durable summary file.",
+    "The summary includes the selected repo root or bus context, so the operator can tell which watcher is idle.",
+    "Existing attention_required summary behavior remains unchanged.",
+    "Tests pass without real Codex, Claude, or tmux."
+  ],
+  "request_for_agent": "Implement the smallest structural Codex autoping watcher fix: idle_no_wave must write a neutral durable summary and state last_summary so AUTO-PING and startup surfaces cannot display stale attention-required text after the watcher is idle. Add fake-state regression coverage in test_codex_autoping_watch.py, run the configured evidence command, collect the indicator artifact, and keep runtime/substrate/role/pager/tmux-selection files out of scope.",
+  "request_for_claude": "Compatibility input only: implement the Codex autoping idle summary refresh with Codex as implementer/reviewer. Do not treat Claude as the active operator for this wave.",
+  "authorization_note": "Founder-directed autonomous queue continuation after codex-mode switch closeout: the operator identified a live stale-summary defect in the Codex autoping surface and directed autonomous wave execution instead of manual reporting.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Codex autoping watcher idle summary refresh for stale attention-required summary after completed/successful waves.",
+  "tracked_packet": "reports/control_plane/codex-autoping-idle-summary-refresh-2026-06-20_2026-06-20.md"
+}
