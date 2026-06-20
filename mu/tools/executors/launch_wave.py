@@ -125,6 +125,9 @@ _DISPATCHER_OVERRIDE_ENV_KEYS = frozenset(
         ),
     }
 )
+_DISPATCHER_OVERRIDE_TRIGGER_ENV_KEYS = (
+    _DISPATCHER_OVERRIDE_ENV_KEYS - {_ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV}
+)
 
 
 def _agent_pin_valid_names(repo_root: Path | None) -> set[str]:
@@ -744,12 +747,14 @@ def dispatcher_child_environment(repo_root: Path, config: WaveConfig) -> dict[st
     The dispatcher resolves role and pager overrides from environment before
     executor_config.json. A wave that pins only one role must not accidentally
     inherit stale parent-process overrides for the unpinned role, pager route, or
-    the legacy reviewer alias. Metadata still records only the wave-requested
-    overrides; this child env is execution plumbing, not an audit dump.
+    the legacy reviewer alias. The role-override repo root scopes those keys but
+    is not itself a launch override trigger. Metadata still records only the
+    wave-requested overrides; this child env is execution plumbing, not an audit
+    dump.
     """
     env_overrides = dispatcher_environment_overrides(config)
     inherited_override_present = any(
-        key in os.environ for key in _DISPATCHER_OVERRIDE_ENV_KEYS
+        key in os.environ for key in _DISPATCHER_OVERRIDE_TRIGGER_ENV_KEYS
     )
     if not env_overrides and not inherited_override_present:
         return None

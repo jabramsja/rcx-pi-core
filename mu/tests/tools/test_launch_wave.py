@@ -548,6 +548,7 @@ def test_launch_omitted_pins_preserve_runner_environment_shape(wave_repo, monkey
     monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
     monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
     monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
+    monkeypatch.setenv("RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT", str(wave_repo / "parent"))
 
     calls = []
 
