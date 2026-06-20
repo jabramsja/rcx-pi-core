@@ -472,3 +472,70 @@ def test_run_forever_returns_on_idle_when_bounded(tmp_path, monkeypatch):
 
     # No events queued -> a single idle cycle returns immediately (no hang).
     receiver.run_forever(max_idle_cycles=1)
+
+
+# --------------------------------------------------------------------------- #
+# Persistent failure must NOT tight-loop (bridge round 2 regression)
+# --------------------------------------------------------------------------- #
+
+
+def test_run_until_empty_attempts_each_failing_event_once(tmp_path, monkeypatch):
+    # A persistently failing event is attempted EXACTLY once per drain call
+    # (honoring the "at most once per call" contract): once the drain head comes
+    # back around to it, the pass stops instead of re-delivering.
+    recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=7))
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "POISON", "transition_key": "PTK"})
+
+    results = receiver.run_until_empty()
+
+    assert recorder.call_count == 1, (
+        f"failing event attempted {recorder.call_count}x in one drain (expected 1)"
+    )
+    assert [result["status"] for result in results] == ["requeued"]
+    assert "POISON" in receiver.queued_event_ids()
+    assert receiver.delivered_event_ids() == set()
+
+
+def test_run_forever_backs_off_on_persistent_failure_no_tight_loop(tmp_path, monkeypatch):
+    # Bridge round 2 regression: a persistently failing event must NOT spin the
+    # poll loop. With a large poll interval the daemon attempts the poison once,
+    # then PARKS in an interruptible backoff -- it does not rapidly retry on the
+    # fail-open re-queue (the pre-fix behavior racked up hundreds of attempts).
+    first_attempt = threading.Event()
+
+    def factory():
+        first_attempt.set()
+        return FakeProc(exit_code=7)
+
+    recorder = _install_popen(monkeypatch, factory)
+    receiver = _receiver(tmp_path, poll_interval_s=999.0)
+    receiver.enqueue({"event_id": "POISON"})
+
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=receiver.run_forever, kwargs={"stop_event": stop_event}
+    )
+    thread.start()
+    try:
+        # The daemon makes its first (failing) attempt, then must enter backoff.
+        assert first_attempt.wait(timeout=5.0), "daemon never attempted delivery"
+        # Give a tight loop (the pre-fix bug) a generous window to rack up calls;
+        # with the fix the daemon is parked in stop_event.wait, so it stays ~1.
+        time.sleep(0.3)
+        calls_during_backoff = recorder.call_count
+    finally:
+        stop_event.set()
+        thread.join(timeout=5.0)
+
+    # Prompt, clean shutdown: the interruptible backoff woke on stop_event...
+    assert not thread.is_alive(), "run_forever did not stop promptly on stop_event"
+    # ...and there was NO tight loop: a single persistent failure was retried at
+    # most a couple of times across the backoff window (not hundreds).
+    assert calls_during_backoff <= 3, (
+        f"persistent failure tight-looped the daemon: "
+        f"{calls_during_backoff} delivery attempts during backoff"
+    )
+    # The poison event is failed-open (still queued), never delivered.
+    assert "POISON" in receiver.queued_event_ids()
+    assert receiver.delivered_event_ids() == set()

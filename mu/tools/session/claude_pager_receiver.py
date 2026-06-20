@@ -70,6 +70,15 @@ DEFAULT_POLL_INTERVAL_S = 5.0
 CLAUDE_BIN_ENV = "RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN"
 PROCESS_GROUP_GRACE_S = 5.0
 
+# A drain cycle made "progress" only if at least one event left the queue durably
+# this cycle (delivered, or dropped as a duplicate / unreadable). A cycle that
+# only re-queued persistently-failing events is NOT progress -- ``run_forever``
+# backs off for the poll interval instead of retrying immediately, so a poison
+# event can never tight-loop the daemon.
+_DRAIN_PROGRESS_STATUSES = frozenset(
+    {"delivered", "duplicate_delivered", "dropped_unreadable"}
+)
+
 
 class ClaudePagerReceiverError(RuntimeError):
     """Raised when receiver inbox/delivery handling fails."""
@@ -271,12 +280,18 @@ class ClaudePagerReceiver:
 
     # -- delivery (single-flight) --------------------------------------------
 
-    def deliver_once(self) -> dict[str, Any]:
+    def deliver_once(self, *, skip_keys: "set[str] | None" = None) -> dict[str, Any]:
         """Deliver the oldest queued event (single-flight), if any.
 
         Returns a status dict. ``idle`` when the queue is empty. On exit-0 a
         receipt is written and the entry removed (``delivered``); on timeout or
         non-zero exit the entry is re-queued fail-open (``requeued``).
+
+        ``skip_keys`` lets a single drain pass (``run_until_empty``) avoid
+        re-attempting an event it has already tried this pass: if the oldest
+        queued event's idempotency keys intersect ``skip_keys`` the call returns
+        ``exhausted`` WITHOUT spawning a delivery, so a persistently-failing
+        event is attempted at most once per drain.
         """
         with self._delivery_guard():
             with self._queue_guard():
@@ -293,6 +308,12 @@ class ClaudePagerReceiver:
                     # Terminal idempotency: a duplicate is dropped, never re-delivered.
                     queue_path.unlink(missing_ok=True)
                     return {"status": "duplicate_delivered", "event_id": event_id}
+                if skip_keys and (event_keys(event) & skip_keys):
+                    # The oldest queued event was already attempted (and re-queued)
+                    # this drain pass -> only persistently-failing events remain.
+                    # Report ``exhausted`` so ``run_until_empty`` stops WITHOUT a
+                    # second delivery (honors "attempted at most once per call").
+                    return {"status": "exhausted", "event_id": event_id}
             # Dispatch OUTSIDE the queue lock (but still single-flight) so a slow
             # delivery never blocks concurrent enqueues' quick-ack.
             result = self._dispatch(event)
@@ -310,6 +331,9 @@ class ClaudePagerReceiver:
                 return {
                     "status": "requeued",
                     "event_id": event_id,
+                    # Full idempotency key-set so a single drain pass can dedup and
+                    # avoid re-attempting this event (see ``run_until_empty``).
+                    "keys": sorted(event_keys(event)),
                     "timed_out": bool(result.get("timed_out")),
                     "error": str(result.get("error") or ""),
                 }
@@ -317,23 +341,28 @@ class ClaudePagerReceiver:
     def run_until_empty(self, max_iterations: int = 10_000) -> list[dict[str, Any]]:
         """Drain deliverable events once. Stops when only failing events remain.
 
-        A re-queued (persistently failing) event is attempted at most once per
-        call; once every remaining event has been re-queued the drain stops, so a
-        poison entry can never spin this into an unbounded loop.
+        Each queued event is attempted AT MOST ONCE per call: a re-queued
+        (persistently failing) event is recorded by its idempotency key-set, and
+        when the drain head comes back around to an already-attempted event the
+        pass stops (``deliver_once`` reports ``exhausted``). A poison entry can
+        therefore never spin this into an unbounded -- or even repeated -- loop
+        within a single call.
         """
         results: list[dict[str, Any]] = []
-        attempted_requeued: set[str] = set()
+        attempted: set[str] = set()
         for _ in range(max_iterations):
-            result = self.deliver_once()
+            result = self.deliver_once(skip_keys=attempted)
             status = result.get("status")
-            if status == "idle":
+            if status in ("idle", "exhausted"):
                 break
             results.append(result)
             if status == "requeued":
-                event_id = str(result.get("event_id") or "")
-                if event_id in attempted_requeued:
+                keys = result.get("keys") or []
+                if not keys:
+                    # No resolvable idempotency key -> cannot dedup this event;
+                    # stop rather than risk re-attempting it in a tight loop.
                     break
-                attempted_requeued.add(event_id)
+                attempted.update(keys)
         return results
 
     def run_forever(
@@ -341,20 +370,39 @@ class ClaudePagerReceiver:
         *,
         stop_event: "threading.Event | None" = None,
         max_idle_cycles: int | None = None,
+        poll_interval_s: float | None = None,
     ) -> None:
-        """Poll loop: drain, then sleep when idle. (Not wired in Wave 1.)"""
-        idle_cycles = 0
+        """Poll loop: drain, then back off when a cycle makes no durable progress.
+
+        "Progress" means at least one event left the queue durably this cycle
+        (delivered / duplicate-dropped / unreadable-dropped). A cycle that only
+        re-queued persistently-failing events is NOT progress: the loop backs off
+        for the poll interval instead of immediately retrying, so a poison event
+        can never tight-loop the daemon. The backoff is interruptible by
+        ``stop_event`` so shutdown stays prompt even with a long poll interval.
+        ``poll_interval_s`` optionally overrides the receiver's configured cadence
+        for this run. (Not wired in Wave 1.)
+        """
+        interval = self.poll_interval_s if poll_interval_s is None else float(poll_interval_s)
+        no_progress_cycles = 0
         while True:
             if stop_event is not None and stop_event.is_set():
                 return
             results = self.run_until_empty()
-            if results:
-                idle_cycles = 0
+            if any(result.get("status") in _DRAIN_PROGRESS_STATUSES for result in results):
+                # The queue advanced this cycle -> keep draining immediately.
+                no_progress_cycles = 0
                 continue
-            idle_cycles += 1
-            if max_idle_cycles is not None and idle_cycles >= max_idle_cycles:
+            # Idle, or only persistently-failing requeues this cycle: back off so
+            # a poison event retries at the poll cadence, never in a tight loop.
+            no_progress_cycles += 1
+            if max_idle_cycles is not None and no_progress_cycles >= max_idle_cycles:
                 return
-            time.sleep(self.poll_interval_s)
+            if stop_event is not None:
+                if stop_event.wait(interval):
+                    return
+            else:
+                time.sleep(interval)
 
     # -- internals ------------------------------------------------------------
 
