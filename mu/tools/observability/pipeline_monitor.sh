@@ -695,7 +695,7 @@ owner_pid_is_tracked() {
 }
 
 process_table_owner_pids() {
-  ps -Ao pid=,command= 2>/dev/null \
+  ps -Aww -o pid=,command= 2>/dev/null \
     | awk '/pipeline_monitor[.]sh/ && /__owner-loop/ { print $1 }' \
     || true
 }
@@ -720,7 +720,10 @@ owner_process_targets_session() {
   padded=" $cmd "
   case "$padded" in
     *" --tmux-session $SESSION "*|*" --tmux-session=$SESSION "*)
-      return 0
+      owner_pid_is_tracked "$pid" && return 0
+      owner_process_matches_root "$pid" "$(owner_expected_root)" && return 0
+      owner_process_shares_worktree_parent "$pid"
+      return $?
       ;;
     *" --tmux-session "*|*" --tmux-session="*)
       return 1

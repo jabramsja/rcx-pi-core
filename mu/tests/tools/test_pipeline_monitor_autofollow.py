@@ -696,10 +696,13 @@ exit 0
 
 
 def test_orchestrator_monitor_replaces_untracked_wrong_root_owner(tmp_path):
-    repo = tmp_path / "repo"
-    wrong_root = tmp_path / "wrong-root"
-    repo.mkdir()
-    wrong_root.mkdir()
+    long_parent = tmp_path / "long-command-path-for-ps-owner-discovery" / (
+        "nested-owner-root-segment-" * 4
+    )
+    repo = long_parent / "repo"
+    wrong_root = long_parent / "wrong-root"
+    repo.mkdir(parents=True)
+    wrong_root.mkdir(parents=True)
     _install(repo, "pipeline_monitor.sh")
     wrong_script = wrong_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
     wrong_script.parent.mkdir(parents=True)
