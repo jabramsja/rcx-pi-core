@@ -58,6 +58,7 @@ DELIVERY_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_delivery_receipts.jsonl"
 SKIP_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_skip_receipts.jsonl"
 STATE_PATH = OBSERVABILITY_DIR / "pipeline_agent_pager_state.json"
 LOCK_PATH = OBSERVABILITY_DIR / "pipeline_agent_pager.lock"
+ORCHESTRATOR_MODE_PATH = OBSERVABILITY_DIR / "orchestrator_mode.json"
 AUTOPING_STATE_GLOB = "rcx_autoping_*.json"
 PAUSED_AUTOPING_STATUSES = frozenset({
     "context_exhausted",
@@ -597,6 +598,24 @@ def _pipeline_route_override() -> str | None:
     return route_text or None
 
 
+def _orchestrator_mode_route(repo_root: Path) -> str | None:
+    state_path = _observability_path(repo_root, "orchestrator_mode.json")
+    if not state_path.exists():
+        return None
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise PipelineAgentPagerError(f"orchestrator mode state unreadable: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise PipelineAgentPagerError("orchestrator mode state must be a JSON object")
+    mode = str(payload.get("mode") or "").strip()
+    if not mode:
+        return None
+    if mode not in {"codex", "claude"}:
+        raise PipelineAgentPagerError(f"unsupported orchestrator mode route: {mode!r}")
+    return mode
+
+
 def _normalize_artifact_paths(artifact_paths: dict[str, Any] | None) -> dict[str, str]:
     normalized: dict[str, str] = {}
     if not artifact_paths:
@@ -610,10 +629,11 @@ def _normalize_artifact_paths(artifact_paths: dict[str, Any] | None) -> dict[str
     return normalized
 
 
-def _resolve_route(config: dict[str, Any], explicit_route: str | None) -> str:
+def _resolve_route(repo_root: Path, config: dict[str, Any], explicit_route: str | None) -> str:
     route = (
         explicit_route
         or _pipeline_route_override()
+        or _orchestrator_mode_route(repo_root)
         or config.get("pipeline_agent_pager", {}).get("route", NOTIFY_ONLY_TARGET)
     )
     route_text = str(route or "").strip()
@@ -622,11 +642,11 @@ def _resolve_route(config: dict[str, Any], explicit_route: str | None) -> str:
     return route_text
 
 
-def _configured_route_text(config: dict[str, Any], explicit_route: str | None) -> str:
+def _configured_route_text(repo_root: Path, config: dict[str, Any], explicit_route: str | None) -> str:
     if explicit_route is not None:
         route = explicit_route
     else:
-        route = _pipeline_route_override() or config.get(
+        route = _pipeline_route_override() or _orchestrator_mode_route(repo_root) or config.get(
             "pipeline_agent_pager",
             {},
         ).get("route", NOTIFY_ONLY_TARGET)
@@ -2030,12 +2050,12 @@ def emit_transition_event(
         if not _pager_enabled(config):
             return {
                 "enabled": False,
-                "route": _configured_route_text(config, route),
+                "route": _configured_route_text(repo_root, config, route),
                 "event_id": None,
                 "attempted": [],
                 "budget_exhausted": False,
             }
-        resolved_route = _resolve_route(config, route)
+        resolved_route = _resolve_route(repo_root, config, route)
         event = _build_event_record(
             event_type=event_type,
             wave_id=wave_id,

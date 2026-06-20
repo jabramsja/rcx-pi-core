@@ -610,9 +610,9 @@ def _supervisor_reason_text(parsed: dict[str, Any]) -> str:
     error_detail = str(parsed.get("error_detail", "") or "").strip()
     if error_detail and error_detail != summary:
         parts.append(f"detail: {error_detail}")
-    request_for_claude = str(parsed.get("request_for_claude", "") or "").strip()
-    if request_for_claude and request_for_claude not in parts:
-        parts.append(f"next: {request_for_claude}")
+    request_for_agent = str(parsed.get("request_for_agent") or parsed.get("request_for_claude", "") or "").strip()
+    if request_for_agent and request_for_agent not in parts:
+        parts.append(f"next: {request_for_agent}")
     return " | ".join(parts)
 
 
@@ -1538,7 +1538,7 @@ def _phase_b_declares_structural_runtime_intent(
     if routing_record:
         text_parts.extend(
             str(routing_record.get(key) or "")
-            for key in ("summary", "request_for_claude", "wave_class")
+            for key in ("summary", "request_for_agent", "request_for_claude", "wave_class")
         )
     text = " ".join(text_parts).lower().replace("`", "")
     return (
@@ -4194,6 +4194,7 @@ def run_pre_commit_supervisor(
                 "summary": result.summary,
                 "status": result.status,
                 "findings": result.findings,
+                "request_for_agent": result.request_for_claude,
                 "request_for_claude": result.request_for_claude,
                 "error_code": result.error_code,
                 "error_detail": result.error_detail,
@@ -5429,7 +5430,7 @@ def _derive_planless_context(
     """
     wave_id = routing_record.get("wave_name") or routing_record.get("wave_id", "")
     summary = routing_record.get("summary", "")
-    request = routing_record.get("request_for_claude", "")
+    request = routing_record.get("request_for_agent") or routing_record.get("request_for_claude", "")
     candidates = routing_record.get("next_candidates", [])
 
     errors: list[str] = []

@@ -46,12 +46,6 @@ IMPLEMENTER_BACKEND_KEYS = frozenset(
     }
 )
 REVIEWER_BRIDGE_KEYS = frozenset({"phase_a", "phase_b"})
-DEFAULT_AGENT_DISPLAY_NAMES = {
-    "claude": "Claude Opus 4.8 max",
-    "codex": "Codex 5.5 xhigh",
-    "fable": "Claude Fable 5 max",
-}
-
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "role_agents": {
         "implementer": "claude",
@@ -120,6 +114,14 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "phase_b": 10,
         "dialectic": 3,
     },
+}
+
+DEFAULT_AGENT_DISPLAY_NAMES = {
+    name: str(data.get("display_name")).strip()
+    for name, data in DEFAULT_EXECUTOR_CONFIG.get("bridge_agent_defaults", {}).items()
+    if isinstance(name, str)
+    and isinstance(data, dict)
+    and str(data.get("display_name") or "").strip()
 }
 
 REVIEW_OVERRIDE_BACKEND_KEYS = frozenset(
@@ -1372,6 +1374,7 @@ def build_post_merge_routing_record(
     tracked_packet: str,
     request_for_claude: str,
     summary: str,
+    request_for_agent: str = "",
     decision: str = "ROUTE_PHASE_A",
     merged_pr: int | None = None,
     merge_sha: str | None = None,
@@ -1395,7 +1398,8 @@ def build_post_merge_routing_record(
 
     Validation:
       - required non-empty strings: wave_name, task_id, tracked_packet,
-        request_for_claude, summary
+        request_for_agent (or deprecated request_for_claude compatibility input),
+        summary
       - decision in POST_MERGE_AUTHORIZED_DECISIONS (lazy-imported)
       - tracked_packet passes _validate_tracked_packet_for_builder
       - explicit tracked_packet Wave ID, when present, matches wave_name
@@ -1408,8 +1412,15 @@ def build_post_merge_routing_record(
         errors.append("wave_name is required (non-empty string)")
     if not isinstance(task_id, str) or not task_id.strip():
         errors.append("task_id is required (non-empty string)")
-    if not isinstance(request_for_claude, str) or not request_for_claude.strip():
-        errors.append("request_for_claude is required (non-empty string)")
+    request_text = ""
+    if isinstance(request_for_agent, str) and request_for_agent.strip():
+        request_text = request_for_agent.strip()
+    elif isinstance(request_for_claude, str) and request_for_claude.strip():
+        request_text = request_for_claude.strip()
+    if not request_text:
+        errors.append(
+            "request_for_agent is required (or deprecated request_for_claude compatibility input)"
+        )
     if not isinstance(summary, str) or not summary.strip():
         errors.append("summary is required (non-empty string)")
 
@@ -1486,7 +1497,10 @@ def build_post_merge_routing_record(
     record: dict[str, Any] = {
         "decision": decision,
         "summary": summary,
-        "request_for_claude": request_for_claude,
+        "request_for_agent": request_text,
+        # Deprecated compatibility output for old parsers. Do not use this as
+        # operator-facing truth; request_for_agent is the neutral request field.
+        "request_for_claude": request_text,
         "wave_name": wave_name,
         "task_id": task_id,
         "merged_pr": merged_pr,
@@ -1515,6 +1529,7 @@ def build_and_write_routing_record(
     tracked_packet: str,
     request_for_claude: str,
     summary: str,
+    request_for_agent: str = "",
     decision: str = "ROUTE_PHASE_A",
     merged_pr: int | None = None,
     merge_sha: str | None = None,
@@ -1540,6 +1555,7 @@ def build_and_write_routing_record(
         task_id=task_id,
         tracked_packet=tracked_packet,
         request_for_claude=request_for_claude,
+        request_for_agent=request_for_agent,
         summary=summary,
         decision=decision,
         merged_pr=merged_pr,

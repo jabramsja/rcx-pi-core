@@ -27,6 +27,7 @@ def _seed_config(root: Path) -> Path:
             {
                 "role_agents": {"implementer": "claude", "reviewer": "claude"},
                 "bridge_agent_defaults": {"claude": {}, "codex": {}},
+                "pipeline_agent_pager": {"enabled": True, "route": "codex"},
                 "backends": {
                     "post_merge_supervisor": "codex",
                     "dialectic_executor": "codex",
@@ -81,6 +82,36 @@ def test_switch_both_directions(tmp_path):
     assert data["backends"]["phase_b_executor"] == "codex"
     assert data["backends"]["post_merge_supervisor"] == "claude"
     assert data["bridge_reviewers"] == {"phase_a": "claude", "phase_b": "claude"}
+
+
+def test_role_switch_preserves_orchestrator_mode_surfaces(tmp_path):
+    cfg = _seed_config(tmp_path)
+    state_path = tmp_path / ".agent_bus" / "observability" / "orchestrator_mode.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "mode": "codex",
+                "repo_root": str(tmp_path),
+                "bus_dir": ".agent_bus",
+                "tmux_session": "rcx-codex",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    before_state = state_path.read_text(encoding="utf-8")
+
+    rc = set_roles.main(
+        ["--implementer", "codex", "--reviewer", "claude", "--repo-root", str(tmp_path)]
+    )
+
+    assert rc == 0
+    data = json.loads(cfg.read_text())
+    assert data["role_agents"] == {"implementer": "codex", "reviewer": "claude"}
+    assert data["pipeline_agent_pager"] == {"enabled": True, "route": "codex"}
+    assert state_path.read_text(encoding="utf-8") == before_state
 
 
 def test_idempotent(tmp_path):

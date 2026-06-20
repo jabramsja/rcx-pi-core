@@ -108,6 +108,27 @@ PY
   done <<< "$output"
 }
 
+bridge_agent_display_name_for_agent() {
+  local agent="$1" root="${2:-$REPO_ROOT}" bus="${3:-$BUS_DIR}" output=""
+  [ -n "$agent" ] || return 1
+  output="$(python3 - "$root" "$bus" "$agent" <<'PY' 2>/dev/null
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+bus_dir = sys.argv[2]
+agent = sys.argv[3]
+sys.path.insert(0, str(repo_root / "mu" / "tools" / "executors"))
+try:
+    from executor_common import bridge_agent_status_name
+    print(bridge_agent_status_name(repo_root, agent, bus_dir))
+except Exception:
+    print(agent.replace("_", " ").title().split()[0])
+PY
+)"
+  [ -n "$output" ] && printf '%s\n' "$output" || printf '%s\n' "$agent"
+}
+
 fmt_time() {
   # Convert epoch to HH:MM
   if [ -n "$1" ] && [ "$1" -gt 0 ] 2>/dev/null; then
@@ -126,13 +147,16 @@ pid_cwd() {
 
 pgrep_limited() {
   local pattern="$1"
-  pgrep -f "$pattern" 2>/dev/null | tail -n "$PROCESS_SCAN_LIMIT"
+  # Do not cap before repo-root filtering. A machine can have many global
+  # Codex/Claude processes, and the relevant bridge worker may be later in the
+  # process list. Callers filter by repo root before rendering rows.
+  pgrep -f "$pattern" 2>/dev/null
 }
 
 is_control_plane_resume_command() {
   local cmd="$1"
   case "$cmd" in
-    *"Autonomous WorkingRCX pipeline watchdog tick."*|*"WorkingRCX pipeline pager wakeup."*)
+    *"Autonomous WorkingRCX pipeline watchdog tick."*|*"WorkingRCX pipeline pager wakeup."*|*"WorkingRCX dedicated Claude monitor keepalive tick."*)
       return 0
       ;;
   esac
@@ -140,7 +164,7 @@ is_control_plane_resume_command() {
 }
 
 repo_has_process() {
-  local pattern="$1" pid cmd cwd
+  local pattern="$1" pid cmd
   while IFS= read -r pid; do
     [ -z "$pid" ] && continue
     cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
@@ -154,15 +178,9 @@ repo_has_process() {
     esac
     is_control_plane_resume_command "$cmd" && continue
     command_matches_live_keyword "$pattern" "$cmd" || continue
-    case "$cmd" in
-      *"$REPO_ROOT"* )
-        return 0
-        ;;
-    esac
-    cwd="$(pid_cwd "$pid")"
-    if [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ]; then
-      return 0
-    fi
+    pid_matches_repo_root "$pid" || continue
+    pid_matches_selected_bus_dir "$pid" || continue
+    return 0
   done < <(pgrep_limited "$pattern")
   return 1
 }
@@ -233,6 +251,72 @@ bridge_agent_name_for_command() {
   return 1
 }
 
+pid_matches_repo_root() {
+  local pid="$1" cmd="" cwd=""
+  cmd="$(pid_command "$pid")"
+  case "$cmd" in
+    *"$REPO_ROOT"*) return 0 ;;
+  esac
+  cwd="$(pid_cwd "$pid")"
+  [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ]
+}
+
+command_bus_markers() {
+  python3 - "$1" <<'PY' 2>/dev/null
+from __future__ import annotations
+
+import re
+import shlex
+import sys
+
+command = sys.argv[1]
+markers: list[str] = []
+try:
+    tokens = shlex.split(command)
+except ValueError:
+    tokens = command.split()
+for index, token in enumerate(tokens):
+    if token == "--bus-dir" and index + 1 < len(tokens):
+        markers.append(tokens[index + 1])
+    elif token.startswith("--bus-dir="):
+        markers.append(token.split("=", 1)[1])
+pattern = re.compile(
+    r"(?<![A-Za-z0-9_-])(?P<bus>\.agent_bus(?:-[A-Za-z0-9][A-Za-z0-9_-]*)?)"
+    r"(?=$|[/'\"\s:=])"
+)
+for match in pattern.finditer(command):
+    marker = match.group("bus")
+    if marker not in markers:
+        markers.append(marker)
+for marker in markers:
+    print(marker)
+PY
+}
+
+pid_matches_selected_bus_dir() {
+  local pid="$1" current="$1" depth=0 parent="" cmd="" marker="" saw_marker=0
+  while [ "$depth" -lt 8 ]; do
+    if [ -z "$current" ]; then
+      [ "$saw_marker" = "1" ] || [ "$BUS_DIR" = ".agent_bus" ]
+      return $?
+    fi
+    cmd="$(pid_command "$current")"
+    while IFS= read -r marker; do
+      [ -z "$marker" ] && continue
+      saw_marker=1
+      [ "$marker" = "$BUS_DIR" ] || return 1
+    done < <(command_bus_markers "$cmd")
+    parent="$(pid_ppid "$current")"
+    if [ -z "$parent" ] || [ "$parent" = "1" ]; then
+      [ "$saw_marker" = "1" ] || [ "$BUS_DIR" = ".agent_bus" ]
+      return $?
+    fi
+    current="$parent"
+    depth=$((depth + 1))
+  done
+  [ "$saw_marker" = "1" ] || [ "$BUS_DIR" = ".agent_bus" ]
+}
+
 pid_has_ancestor_matching() {
   local pid="$1" pattern="$2" depth=0 parent="" cmd=""
   while [ "$depth" -lt 8 ]; do
@@ -250,7 +334,7 @@ pid_has_ancestor_matching() {
 }
 
 repo_has_bridge_role() {
-  local wanted_role="$1" pid="" cmd="" cwd=""
+  local wanted_role="$1" pid="" cmd=""
   while IFS= read -r pid; do
     [ -z "$pid" ] && continue
     cmd="$(pid_command "$pid")"
@@ -261,22 +345,43 @@ repo_has_bridge_role() {
     esac
     is_control_plane_resume_command "$cmd" && continue
     bridge_agent_name_for_command "$cmd" >/dev/null || continue
-    if [ "$wanted_role" = "review" ] && pid_has_ancestor_matching "$pid" 'bridge_supervisor\.py review|meta_bridge_supervisor'; then
-      case "$cmd" in
-        *"$REPO_ROOT"*) return 0 ;;
-      esac
-      cwd="$(pid_cwd "$pid")"
-      [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ] || continue
+    if [ "$wanted_role" = "review" ] && pid_has_ancestor_matching "$pid" 'bridge_supervisor\.py([[:space:]][^[:space:]]+)*[[:space:]]review([[:space:]]|$)|meta_bridge_supervisor'; then
+      pid_matches_repo_root "$pid" || continue
+      pid_matches_selected_bus_dir "$pid" || continue
       return 0
     fi
     if [ "$wanted_role" = "implement" ] && pid_has_ancestor_matching "$pid" 'phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py'; then
-      case "$cmd" in
-        *"$REPO_ROOT"*) return 0 ;;
-      esac
-      cwd="$(pid_cwd "$pid")"
-      [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ] || continue
+      pid_matches_repo_root "$pid" || continue
+      pid_matches_selected_bus_dir "$pid" || continue
       return 0
     fi
+  done < <(pgrep_limited "codex.*exec|claude.*--print")
+  return 1
+}
+
+repo_bridge_agent_for_role() {
+  local wanted_role="$1" pid="" cmd="" agent=""
+  while IFS= read -r pid; do
+    [ -z "$pid" ] && continue
+    cmd="$(pid_command "$pid")"
+    case "$cmd" in
+      *"tail -f "*|*"rcx_log_watcher.sh"*|*/_pane_*.sh*|*"pipeline_monitor.sh"*|"bash -c "*|*/bash\ -c\ *|"tee "*)
+        continue
+        ;;
+    esac
+    is_control_plane_resume_command "$cmd" && continue
+    agent="$(bridge_agent_name_for_command "$cmd" 2>/dev/null || true)"
+    [ -n "$agent" ] || continue
+    if [ "$wanted_role" = "review" ] && ! pid_has_ancestor_matching "$pid" 'bridge_supervisor\.py([[:space:]][^[:space:]]+)*[[:space:]]review([[:space:]]|$)|meta_bridge_supervisor'; then
+      continue
+    fi
+    if [ "$wanted_role" = "implement" ] && ! pid_has_ancestor_matching "$pid" 'phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py'; then
+      continue
+    fi
+    pid_matches_repo_root "$pid" || continue
+    pid_matches_selected_bus_dir "$pid" || continue
+    printf '%s\n' "$agent"
+    return 0
   done < <(pgrep_limited "codex.*exec|claude.*--print")
   return 1
 }
@@ -842,10 +947,12 @@ PY
   echo ""
   now=$(date '+%H:%M')
   # Figure out what's happening right now
-  if repo_has_bridge_role "review"; then
-    echo -e "  ${DIM}${now}${RESET}  ${YELLOW}← ${REVIEWER_SHORT} reviewing now${RESET}"
-  elif repo_has_bridge_role "implement"; then
-    echo -e "  ${DIM}${now}${RESET}  ${PURPLE}← ${IMPLEMENTER_SHORT} implementing now${RESET}"
+  review_agent="$(repo_bridge_agent_for_role "review" 2>/dev/null || true)"
+  impl_agent="$(repo_bridge_agent_for_role "implement" 2>/dev/null || true)"
+  if [ -n "$review_agent" ]; then
+    echo -e "  ${DIM}${now}${RESET}  ${YELLOW}← $(bridge_agent_display_name_for_agent "$review_agent") reviewing now${RESET}"
+  elif [ -n "$impl_agent" ]; then
+    echo -e "  ${DIM}${now}${RESET}  ${PURPLE}← $(bridge_agent_display_name_for_agent "$impl_agent") implementing now${RESET}"
   elif repo_has_process "run_review.py"; then
     echo -e "  ${DIM}${now}${RESET}  ${CYAN}← SDK review agents checking this worktree now${RESET}"
   elif repo_has_any_process "phase_a_executor" "phase_b_executor" "commit_executor" "executor_dispatch"; then

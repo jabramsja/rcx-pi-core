@@ -109,6 +109,38 @@ PY
   done <<< "$output"
 }
 
+bridge_agent_display_name_for_agent() {
+  local agent="$1" root="${2:-$REPO_ROOT}" bus="${3:-$BUS_DIR}" output=""
+  [ -n "$agent" ] || return 1
+  output="$(python3 - "$root" "$bus" "$agent" <<'PY' 2>/dev/null
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+bus_dir = sys.argv[2]
+agent = sys.argv[3]
+sys.path.insert(0, str(repo_root / "mu" / "tools" / "executors"))
+try:
+    from executor_common import bridge_agent_display_name
+    print(bridge_agent_display_name(repo_root, agent, bus_dir))
+except Exception:
+    print(agent.replace("_", " ").title())
+PY
+)"
+  [ -n "$output" ] && printf '%s\n' "$output" || printf '%s\n' "$agent"
+}
+
+merge_display_label() {
+  local current="$1" next="$2"
+  if [ -z "$current" ]; then
+    printf '%s\n' "$next"
+  elif [ "$current" = "$next" ]; then
+    printf '%s\n' "$current"
+  else
+    printf '%s\n' "Mixed bridge agents"
+  fi
+}
+
 pane_max_lines() {
   local lines="${RCX_PANE_MAX_LINES:-}"
   if ! [[ "$lines" =~ ^[0-9]+$ ]] || [ "$lines" -lt 12 ]; then
@@ -334,7 +366,7 @@ command_matches_live_keyword() {
 is_control_plane_resume_command() {
   local cmd="$1"
   case "$cmd" in
-    *"Autonomous WorkingRCX pipeline watchdog tick."*|*"WorkingRCX pipeline pager wakeup."*)
+    *"Autonomous WorkingRCX pipeline watchdog tick."*|*"WorkingRCX pipeline pager wakeup."*|*"WorkingRCX dedicated Claude monitor keepalive tick."*)
       return 0
       ;;
   esac
@@ -359,6 +391,7 @@ find_live_pid() {
     esac
     is_control_plane_resume_command "$cmd" && continue
     pid_matches_repo_root "$pid" || continue
+    pid_matches_selected_bus_dir "$pid" || continue
     if command_matches_live_keyword "$kw" "$cmd"; then
       printf "%s\n" "$pid"
       return 0
@@ -380,6 +413,62 @@ pid_matches_repo_root() {
   esac
   cwd="$(pid_cwd "$pid")"
   [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ]
+}
+
+command_bus_markers() {
+  python3 - "$1" <<'PY' 2>/dev/null
+from __future__ import annotations
+
+import re
+import shlex
+import sys
+
+command = sys.argv[1]
+markers: list[str] = []
+try:
+    tokens = shlex.split(command)
+except ValueError:
+    tokens = command.split()
+for index, token in enumerate(tokens):
+    if token == "--bus-dir" and index + 1 < len(tokens):
+        markers.append(tokens[index + 1])
+    elif token.startswith("--bus-dir="):
+        markers.append(token.split("=", 1)[1])
+pattern = re.compile(
+    r"(?<![A-Za-z0-9_-])(?P<bus>\.agent_bus(?:-[A-Za-z0-9][A-Za-z0-9_-]*)?)"
+    r"(?=$|[/'\"\s:=])"
+)
+for match in pattern.finditer(command):
+    marker = match.group("bus")
+    if marker not in markers:
+        markers.append(marker)
+for marker in markers:
+    print(marker)
+PY
+}
+
+pid_matches_selected_bus_dir() {
+  local pid="$1" current="$1" depth=0 parent="" cmd="" marker="" saw_marker=0
+  while [ "$depth" -lt 8 ]; do
+    if [ -z "$current" ]; then
+      [ "$saw_marker" = "1" ] || [ "$BUS_DIR" = ".agent_bus" ]
+      return $?
+    fi
+    cmd="$(pid_command "$current")"
+    while IFS= read -r marker; do
+      [ -z "$marker" ] && continue
+      saw_marker=1
+      [ "$marker" = "$BUS_DIR" ] || return 1
+    done < <(command_bus_markers "$cmd")
+    parent="$(pid_ppid "$current")"
+    if [ -z "$parent" ] || [ "$parent" = "1" ]; then
+      [ "$saw_marker" = "1" ] || [ "$BUS_DIR" = ".agent_bus" ]
+      return $?
+    fi
+    current="$parent"
+    depth=$((depth + 1))
+  done
+  [ "$saw_marker" = "1" ] || [ "$BUS_DIR" = ".agent_bus" ]
 }
 
 pid_ppid() {
@@ -577,7 +666,7 @@ pid_has_ancestor_matching() {
 
 bridge_role_for_pid() {
   local pid="$1"
-  if pid_has_ancestor_matching "$pid" 'bridge_supervisor\.py review|meta_bridge_supervisor'; then
+  if pid_has_ancestor_matching "$pid" 'bridge_supervisor\.py([[:space:]][^[:space:]]+)*[[:space:]]review([[:space:]]|$)|meta_bridge_supervisor'; then
     printf '%s\n' "review"
     return 0
   fi
@@ -657,13 +746,16 @@ while true; do
   codex_review_pids=""
   codex_review_count=0
   codex_review_start=""
+  codex_review_display=""
   codex_impl_pids=""
   codex_impl_count=0
   codex_impl_start=""
+  codex_impl_display=""
   codex_unknown_pids=""
   codex_unknown_count=0
   codex_unknown_start=""
-  if [ "$FAST_ONESHOT" != "1" ]; then
+  codex_unknown_display=""
+  if [ "$FAST_ONESHOT" != "1" ] || [ "${RCX_PANE_ENABLE_PROCESS_SCAN:-0}" = "1" ]; then
     while IFS= read -r pid; do
       [ -z "$pid" ] && continue
       cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
@@ -671,29 +763,35 @@ while true; do
         "bash -c "*|*/bash\ -c\ *|"tee "*) continue ;;
       esac
       is_control_plane_resume_command "$cmd" && continue
-      bridge_agent_name_for_command "$cmd" >/dev/null || continue
+      agent="$(bridge_agent_name_for_command "$cmd" 2>/dev/null || true)"
+      [ -n "$agent" ] || continue
       pid_matches_repo_root "$pid" || continue
+      pid_matches_selected_bus_dir "$pid" || continue
       role="$(bridge_role_for_pid "$pid")"
       s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
       started_ts=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
+      display="$(bridge_agent_display_name_for_agent "$agent")"
       case "$role" in
         review)
           codex_review_pids="${codex_review_pids}${pid} "
           codex_review_count=$((codex_review_count + 1))
           [ -z "$codex_review_start" ] && codex_review_start="$started_ts"
+          codex_review_display="$(merge_display_label "$codex_review_display" "$display")"
           ;;
         implement)
           codex_impl_pids="${codex_impl_pids}${pid} "
           codex_impl_count=$((codex_impl_count + 1))
           [ -z "$codex_impl_start" ] && codex_impl_start="$started_ts"
+          codex_impl_display="$(merge_display_label "$codex_impl_display" "$display")"
           ;;
         *)
           codex_unknown_pids="${codex_unknown_pids}${pid} "
           codex_unknown_count=$((codex_unknown_count + 1))
           [ -z "$codex_unknown_start" ] && codex_unknown_start="$started_ts"
+          codex_unknown_display="$(merge_display_label "$codex_unknown_display" "$display")"
           ;;
       esac
-    done < <(pgrep -f "codex.*exec|claude.*--print" 2>/dev/null | head -5 || true)
+    done < <(pgrep -f "codex.*exec|claude.*--print" 2>/dev/null || true)
   fi
   if [ "$codex_review_count" -gt 0 ]; then
     if [ "$worker_lines" -eq 0 ]; then
@@ -702,7 +800,7 @@ while true; do
     fi
     worker_lines=$((worker_lines + 1))
     echo -e ""
-    echo -e "  ${YELLOW}REVIEWING${RESET}  $REVIEWER_DISPLAY"
+    echo -e "  ${YELLOW}REVIEWING${RESET}  ${codex_review_display:-$REVIEWER_DISPLAY}"
     echo -e "  ${DIM}$codex_review_count process(es)$([ -n "$codex_review_start" ] && echo " · $(elapsed_str "$codex_review_start")") | PIDs: ${codex_review_pids%% }${RESET}"
     echo -e "  ${DIM}Checking implementation for bugs, security issues,${RESET}"
     echo -e "  ${DIM}protocol violations, and code quality.${RESET}"
@@ -714,7 +812,7 @@ while true; do
     fi
     worker_lines=$((worker_lines + 1))
     echo -e ""
-    echo -e "  ${PURPLE}IMPLEMENTING${RESET}  $IMPLEMENTER_DISPLAY"
+    echo -e "  ${PURPLE}IMPLEMENTING${RESET}  ${codex_impl_display:-$IMPLEMENTER_DISPLAY}"
     echo -e "  ${DIM}$codex_impl_count process(es)$([ -n "$codex_impl_start" ] && echo " · $(elapsed_str "$codex_impl_start")") | PIDs: ${codex_impl_pids%% }${RESET}"
     echo -e "  ${DIM}Writing code changes based on the current fix plan.${RESET}"
   fi
@@ -725,7 +823,7 @@ while true; do
     fi
     worker_lines=$((worker_lines + 1))
     echo -e ""
-    echo -e "  ${CYAN}WORKING${RESET}  Bridge agent subprocess"
+    echo -e "  ${CYAN}WORKING${RESET}  ${codex_unknown_display:-Bridge agent subprocess}"
     echo -e "  ${DIM}$codex_unknown_count process(es)$([ -n "$codex_unknown_start" ] && echo " · $(elapsed_str "$codex_unknown_start")") | PIDs: ${codex_unknown_pids%% }${RESET}"
     echo -e "  ${DIM}Role could not be inferred from the current parent chain.${RESET}"
   fi

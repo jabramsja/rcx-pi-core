@@ -377,6 +377,37 @@ def test_pager_route_env_override_precedes_executor_config(tmp_path, monkeypatch
     assert set(entry["delivered_targets"]) == {"codex"}
 
 
+def test_bus_local_orchestrator_mode_precedes_executor_config_route(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="both")
+    state_path = repo / pager_mod.ORCHESTRATOR_MODE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps({"mode": "codex"}) + "\n", encoding="utf-8")
+    calls: list[str] = []
+
+    def ack_target(repo_root, target, event, state, config, *, timeout_s):
+        calls.append(target)
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-06-01T00:00:00+00:00",
+                "target": target,
+            },
+        }
+
+    monkeypatch.setattr(pager_mod, "_dispatch_target", ack_target)
+
+    result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert result["route"] == "codex"
+    assert calls == ["codex"]
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    assert entry["requested_targets"] == ["codex"]
+    assert set(entry["delivered_targets"]) == {"codex"}
+
+
 def test_explicit_pager_route_precedes_env_override(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

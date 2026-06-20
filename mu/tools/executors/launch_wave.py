@@ -218,6 +218,9 @@ class WaveConfig:
     constraints: list[str] = field(default_factory=list)
     stop_conditions: list[str] = field(default_factory=list)
     acceptance_criteria: list[str] = field(default_factory=list)
+    request_for_agent: str = ""
+    # Deprecated compatibility input only. Operator-facing surfaces should use
+    # request_for_agent; this field remains parse-only until old callers migrate.
     request_for_claude: str = ""
     authorization_note: str = ""
     # Slow kernel functions this wave's tests touch (drives the run_mu # SPEED_OK
@@ -249,14 +252,18 @@ class WaveConfig:
         self.implementer_agent = self.implementer_agent.strip()
         self.reviewer_agent = self.reviewer_agent.strip()
         self.pager_route = self.pager_route.strip()
+        self.request_for_agent = self.request_for_agent.strip()
+        self.request_for_claude = self.request_for_claude.strip()
         if not self.founder_override:
             self.founder_override = self.wave_id
         if not self.tracked_packet:
             self.tracked_packet = (
                 f"reports/control_plane/{self.wave_id}_{self.date}.md"
             )
+        if not self.request_for_agent:
+            self.request_for_agent = self.request_for_claude or self.purpose
         if not self.request_for_claude:
-            self.request_for_claude = self.purpose
+            self.request_for_claude = self.request_for_agent
         if not self.routing_summary:
             self.routing_summary = self.purpose
         if not self.scope_summary:
@@ -567,6 +574,7 @@ def setup_routing_record(
         task_id=config.task_id,
         tracked_packet=config.tracked_packet,
         request_for_claude=config.request_for_claude,
+        request_for_agent=config.request_for_agent,
         summary=config.routing_summary,
         decision=config.routing_decision,
         repo_root=repo_root,

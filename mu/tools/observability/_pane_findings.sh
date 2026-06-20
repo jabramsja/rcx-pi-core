@@ -319,7 +319,7 @@ print(f"SUMMARY={(env.get('summary', '') or '')[:120]}")
 findings = env.get("findings", []) or []
 if findings:
     print(f"FINDING={((findings[0].get('title', '') or '')[:120])}")
-request = (env.get("request_for_claude", "") or "")[:120]
+request = (env.get("request_for_agent") or env.get("request_for_claude", "") or "")[:120]
 if request:
     print(f"NEXT={request}")
 PY

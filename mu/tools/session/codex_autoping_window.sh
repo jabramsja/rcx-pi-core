@@ -97,8 +97,21 @@ LOG_DIR="${RCX_CODEX_HOME:-$HOME/.codex}/log/autoping"
 STATE_PATH="$STATE_DIR/rcx_autoping_${THREAD_SLUG}.json"
 SUMMARY_PATH="$STATE_DIR/rcx_autoping_${THREAD_SLUG}_summary.txt"
 RUNNER_LOG="$LOG_DIR/rcx_autoping_${THREAD_SLUG}.runner.log"
-WATCH_SCRIPT="$REPO/tools/session/codex_autoping_watch.py"
-RENDER_SCRIPT="$REPO/tools/session/render_codex_autoping_status.py"
+
+resolve_session_script() {
+    local name="$1"
+    local candidate=""
+    for candidate in "$REPO/mu/tools/session/$name" "$REPO/tools/session/$name"; do
+        if [ -f "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    printf '%s\n' "$REPO/mu/tools/session/$name"
+}
+
+WATCH_SCRIPT="$(resolve_session_script codex_autoping_watch.py)"
+RENDER_SCRIPT="$(resolve_session_script render_codex_autoping_status.py)"
 
 mkdir -p "$STATE_DIR" "$LOG_DIR"
 touch "$SUMMARY_PATH"

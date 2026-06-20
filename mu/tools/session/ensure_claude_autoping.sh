@@ -147,7 +147,19 @@ if [ -z "$SESSION_ID" ]; then
     exit 0
 fi
 
-WATCH_SCRIPT="$REPO/tools/session/claude_autoping_watch.py"
+resolve_session_script() {
+    local name="$1"
+    local candidate=""
+    for candidate in "$REPO/mu/tools/session/$name" "$REPO/tools/session/$name"; do
+        if [ -f "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    printf '%s\n' "$REPO/mu/tools/session/$name"
+}
+
+WATCH_SCRIPT="$(resolve_session_script claude_autoping_watch.py)"
 if [ ! -f "$WATCH_SCRIPT" ]; then
     echo "Claude autoping: missing watcher script at $WATCH_SCRIPT"
     exit 1
