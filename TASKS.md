@@ -705,10 +705,12 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   4. **[WIP-PRESERVATION-DIRTY-WORKTREE-RECOVERY-2026-06-20]** preserve and
      reconcile all important WIP before any rebase/sync/cleanup: main
      `WorkingRCX` dirty docs/pager/config work; lane1 Stage0 staged work;
-     lane3 observability work; and shared stashes. Current preservation
-     snapshot is `.rcx_wip_preservation/20260620T171515Z`, including binary
-     staged/unstaged diffs, untracked file copies, HEAD bundles, and stash
-     patches/bundle.
+     lane3 observability work; and shared stashes. First create and track a
+     concrete preservation snapshot under `.rcx_wip_preservation/<timestamp>/`
+     before treating it as the source for staged/unstaged diffs, untracked file
+     copies, HEAD bundles, or stash patches/bundle. No concrete preservation
+     snapshot is current in this branch/worktree until the corresponding
+     artifact is added and this queue item is updated to point at it.
   5. **[STAGE0-CONTENT-ADDRESSED-TYPEDISPATCH-DECISION-RECOVERY-2026-06-20]**
      resolve the blocked `n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16`
      lane before committing or rebasing its staged implementation. Current
