@@ -570,6 +570,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-06-20, active-queue-wip-preservation-sync-2026-06-20): **docs: refresh active queue with WIP preservation work.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/active-queue-wip-preservation-sync-2026-06-20_2026-06-20.md`. evidence_command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id active-queue-wip-preservation-sync-2026-06-20 --output reports/l4_wave_indicators/active-queue-wip-preservation-sync-2026-06-20.json`. evidence_delta: (1) Routed commit handoff scopes 5 wave-owned file(s). (2) No wave-owned pytest module was staged in this ad hoc handoff, so indicator collection is the mechanical evidence surface. (3) Indicator artifact binds the wave to reports/l4_wave_indicators/active-queue-wip-preservation-sync-2026-06-20.json.. progress_proof_before: The routed commit handoff had not yet been bound to a contract-complete tracker note, so downstream L4 governance could fail during pre-push.. progress_proof_after: The routed commit handoff for active-queue-wip-preservation-sync-2026-06-20 is now bound to 5 wave-owned file(s), 0 wave-owned test module(s), and a canonical indicator artifact.. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/active-queue-wip-preservation-sync-2026-06-20.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id active-queue-wip-preservation-sync-2026-06-20 --output reports/l4_wave_indicators/active-queue-wip-preservation-sync-2026-06-20.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD. FOUNDER_OVERRIDE:active-queue-wip-preservation-sync-2026-06-20 (standing pipeline-bug-fix authorization per memory feedback_autonomous_executor_fix.md; auto-appended by build_commit_handoff for commit-gate + pre-push adjacency-cap clearance)
 - Tracker sync note (2026-06-20, pipeline-impl-claude-max-2026-06-20): **NEXT-CODEX-POST-REDTEAM -- pipeline-impl-claude-max: commit role_agents implementer codex->claude (reviewer stays codex) via the set_roles.py builder. Committed implementer = Claude Opus 4.8 max, reviewer = Codex 5.5 xhigh; derived backends phase_a/phase_b/bot_remediation -> claude, post_merge_supervisor/dialectic + bridge_reviewers stay codex; commit_executor stays null. De-brittled dispatcher-config tests derive from the live config so the flip does not break them (1015 config tests pass), and the per-render tmux labels update live. Scope = mu/tools/executors/executor_config.json.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/pipeline-impl-claude-max-2026-06-20_2026-06-20.md`. evidence_command: `python3 -c "import json,sys; d=json.load(open('mu/tools/executors/executor_config.json'))['role_agents']; sys.exit(0 if d=={'implementer':'claude','reviewer':'codex'} else 1)"`. evidence_delta: Flips role_agents implementer codex->claude (reviewer stays codex) via the set_roles builder, which materializes the derived backends + bridge_reviewers. Verified: 1015 config/role tests pass with the committed claude/codex config (the de-brittle derives expected roles from the live config), and configured_role_agents returns implementer display_name 'Claude Opus 4.8 max' + reviewer 'Codex 5.5 xhigh' (the values the tmux/dashboard panes render). Evidence reads the committed config file, not env-aware set_roles --show.. progress_proof_before: Committed implementer = codex (Codex 5.5 xhigh); founder requests implementer = claude (Claude Opus 4.8 max) with reviewer staying codex.. progress_proof_after: Committed implementer = claude (Claude Opus 4.8 max), reviewer = codex (Codex 5.5 xhigh); the tmux/dashboard implementer/reviewer labels read accordingly on the next render cycle.. FOUNDER_OVERRIDE:pipeline-impl-claude-max-2026-06-20. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_TYPED_FAIL_CLOSED_OUTCOMES. indicator_artifact_ref: reports/l4_wave_indicators/pipeline-impl-claude-max-2026-06-20.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id pipeline-impl-claude-max-2026-06-20 --output reports/l4_wave_indicators/pipeline-impl-claude-max-2026-06-20.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 - Tracker sync note (2026-06-20, pipeline-fix-33-bridge-config-autoseed-2026-06-20): **NEXT-CODEX-POST-REDTEAM — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/pipeline-fix-33-bridge-config-autoseed-2026-06-20_2026-06-20.md`. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_launch_wave.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/pipeline-fix-33-bridge-config-autoseed-2026-06-20_2026-06-20.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for pipeline-fix-33-bridge-config-autoseed-2026-06-20 with 5 wave-owned file(s), bridge rounds=1, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:pipeline-fix-33-bridge-config-autoseed-2026-06-20. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/pipeline-fix-33-bridge-config-autoseed-2026-06-20.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id pipeline-fix-33-bridge-config-autoseed-2026-06-20 --output reports/l4_wave_indicators/pipeline-fix-33-bridge-config-autoseed-2026-06-20.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+- Tracker sync note (2026-06-20, structural-numbers-stage4-design-2026-06-19): **NEXT-CODEX-POST-REDTEAM — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/structural-numbers-stage4-design-2026-06-19_2026-06-20.md`. evidence_command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id structural-numbers-stage4-design-2026-06-19 --output reports/l4_wave_indicators/structural-numbers-stage4-design-2026-06-19.json`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/structural-numbers-stage4-design-2026-06-19_2026-06-20.md. (2) Commit handoff carries 4 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface.. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for structural-numbers-stage4-design-2026-06-19 with 4 wave-owned file(s), bridge rounds=2, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:structural-numbers-stage4-design-2026-06-19. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/structural-numbers-stage4-design-2026-06-19.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id structural-numbers-stage4-design-2026-06-19 --output reports/l4_wave_indicators/structural-numbers-stage4-design-2026-06-19.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 
 
 - Tracker sync follow-up (2026-06-20T17:13:55Z, primary-ffsync-tracked-wip-preserve-2026-06-20): same-wave follow-up commit touched tracker-relevant file(s) without phase/task-state change: mu/tools/executors/commit_executor.py.
@@ -697,15 +698,18 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   6. **[PRIMARY-FFSYNC-TRACKED-WIP-PRESERVE-2026-06-20]** commit executor
      primary-worktree fast-forward now preserves tracked WIP instead of
      skipping or clobbering; landed via PR #1131.
+  7. **[STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19]** Stage 4 integer-first
+     matcher-cutover design (design-only) locked in this wave; the deliverable
+     is the 2026-06-20 tracker sync note above plus the Stage 4 design section
+     in `StructuralNumbers.v0.md`. Merge evidence attaches on this wave's own
+     PR, as with the items above.
   **Remaining execution order for `[NEXT-CODEX-POST-REDTEAM]`:**
-  1. **[STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19]** **CURRENT NEXT**
-     sequential StructuralNumbers wave: Stage 4 design for the
-     integer-first numeric boundary.
-  2. **[STRUCTURAL-NUMBERS-STAGE4-INT-FIRST-CUTOVER-2026-06-19]** Stage 4
-     int-first cutover after the design packet locks scope.
-  3. **[STRUCTURAL-NUMBERS-STAGE5-ORDINAL-TO-N-2026-06-19]** Stage 5
+  1. **[STRUCTURAL-NUMBERS-STAGE4-INT-FIRST-CUTOVER-2026-06-19]** **CURRENT
+     NEXT** Stage 4 int-first cutover now that the design packet has locked
+     scope (completed item above).
+  2. **[STRUCTURAL-NUMBERS-STAGE5-ORDINAL-TO-N-2026-06-19]** Stage 5
      von-Neumann-ordinal-to-binary-`N` bridge.
-  4. **[WIP-PRESERVATION-DIRTY-WORKTREE-RECOVERY-2026-06-20]** preserve and
+  3. **[WIP-PRESERVATION-DIRTY-WORKTREE-RECOVERY-2026-06-20]** preserve and
      reconcile all important WIP before any rebase/sync/cleanup: main
      `WorkingRCX` dirty docs/pager/config work; lane1 Stage0 staged work;
      lane3 observability work; and shared stashes. First create and track a
@@ -714,30 +718,30 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
      copies, HEAD bundles, or stash patches/bundle. No concrete preservation
      snapshot is current in this branch/worktree until the corresponding
      artifact is added and this queue item is updated to point at it.
-  5. **[STAGE0-CONTENT-ADDRESSED-TYPEDISPATCH-DECISION-RECOVERY-2026-06-20]**
+  4. **[STAGE0-CONTENT-ADDRESSED-TYPEDISPATCH-DECISION-RECOVERY-2026-06-20]**
      resolve the blocked `n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16`
      lane before committing or rebasing its staged implementation. Current
      blocker: the branch's blocking report says Python needs an input-side
      raw-list fail-close to preserve behavior/parity, while the current P7W4
      fence forbids the analogous `list` token.
-  6. **[PIPELINE-EASY-SWITCH-PROPAGATION-2026-06-20]** harden the easy switch
+  5. **[PIPELINE-EASY-SWITCH-PROPAGATION-2026-06-20]** harden the easy switch
      so orchestrator, implementer, reviewer, pager, autoping, and tmux state
      are durable across `launch_wave.py`, routing records, Phase B handoffs,
      `commit_executor.py`, and dashboards. Root evidence: wave configs can pin
      `pager_route: codex`, but current commit handoffs do not carry
      `pager_route`/role pins, so direct commit executor fallbacks can still use
      committed `executor_config.json` defaults.
-  7. **[PIPELINE-FIX-33]** narrow pipeline structural fix.
-  8. **[PIPELINE-FIX-29]** narrow pipeline structural fix.
-  9. **[PIPELINE-FIX-31]** narrow pipeline structural fix.
-  10. **[PIPELINE-FIX-17]** narrow pipeline structural fix.
-  11. **[PIPELINE-FIX-34]** recovery Tier 3 bot-finding durable-edit fix:
+  6. **[PIPELINE-FIX-33]** narrow pipeline structural fix.
+  7. **[PIPELINE-FIX-29]** narrow pipeline structural fix.
+  8. **[PIPELINE-FIX-31]** narrow pipeline structural fix.
+  9. **[PIPELINE-FIX-17]** narrow pipeline structural fix.
+  10. **[PIPELINE-FIX-34]** recovery Tier 3 bot-finding durable-edit fix:
      make `bot_findings_pending` recovery require/apply structured edit actions
      instead of exhausting after meta-envelope-only output. Root evidence:
      `.agent_bus-active-queue-post-gcd/recovery/recovery_status.json` ended
      `tier3_exhausted`, and this tracker note still retained the
      indicator-only evidence command after three recovery attempts.
-  12. Lower-priority deferred research/cosmetic items only after the active
+  11. Lower-priority deferred research/cosmetic items only after the active
      structural and pipeline-fix queue above clears.
   **Parallelization rule:** StructuralNumbers gate waves are sequential because
   they share growth-cap/test surfaces and predecessor arithmetic facts; Stage0

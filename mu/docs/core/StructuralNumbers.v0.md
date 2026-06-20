@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: DESIGN_SPEC
-LAST_VERIFIED: 2026-06-17
+LAST_VERIFIED: 2026-06-20
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py, mu/tests/l4_gates/ (StructuralNumbers gates, added per staged program)
@@ -47,8 +47,8 @@ type-dispatch (`isinstance`/`typeof`). That is host semantics, not Mu.
 are RCX projections — exactly as every mature self-hosting / meta-circular / proof
 system represents them (Coq `positive`/`N`/`Z`, Scheme's exact numeric tower, Agda/Idris
 inductive `Nat` compiled to GMP, Smalltalk's `Integer` object hierarchy). This makes
-RCX's number domain parity-safe by construction, removes the last host type-dispatch
-from the Stage0 matcher, and unifies the runtime's numbers with the `RCXEngineNew`
+RCX's number domain parity-safe by construction, removes the host numeric type-dispatch
+from the Stage0 matcher (the residual non-numeric and structural dispatch is scoped in §9), and unifies the runtime's numbers with the `RCXEngineNew`
 engine's emergent von Neumann ordinals.
 
 This is a research+production design, so it is held to both bars: **structural honesty**
@@ -172,7 +172,8 @@ structural form that fits.
   into projections; the structural numeral is ordinary Mu. The only host touch is the §7
   boundary codec, which is the *same class* of boundary scaffolding RCX already sanctions
   for `mu_hash` and JSON parsing (not a kernel primitive) — and it strictly *reduces* net
-  host authority (it removes the `_stage0_match` scalar type-dispatch).
+  host authority (it removes the `_stage0_match` numeric scalar type-dispatch; the full
+  `@host_builtin` marker-clear scope, and why numeric removal alone is net-delta-0, are §9).
 - **Cross-substrate parity (`INV_CROSS_SUBSTRATE_PARITY`).** The structural form is
   substrate-independent; the accelerator uses Python `int` / JS `BigInt`, both exact
   arbitrary-precision (command-verified: `2^70` identical on both) — no float, no
@@ -254,8 +255,9 @@ Each stage is a separate pipeline wave with its own gate; later stages depend on
 3. **Rationals (+ optional reals).** `rational.v1.json` (`{num, den}` reduced) and, if a
    workload needs it, `real_stream.v1.json` (signed-digit streams).
 4. **Matcher cutover.** Replace the `_stage0_match` / `stage0Match` scalar type-dispatch
-   with structural matching over numerals; clear the `@host_builtin` scalar marker (a real
-   reduction, not net-delta-0); correct `NorthStarSemantics.v0.md` §B.
+   with structural matching over numerals and correct `NorthStarSemantics.v0.md` §B. The
+   detailed design — the `@host_builtin` marker-clear scope (and why numeric removal alone
+   is net-delta-0), cross-substrate parity, and the Stage 0-lane reconciliation — is §9.
 5. **Engine isomorphism.** `ord_to_N` / `N_to_ord` projections + the isomorphism gate;
    demonstrate `RCXEngineNew` running on structural runtime numbers.
 
@@ -266,7 +268,179 @@ production-grade form.
 
 ---
 
-## 9. References
+## 9. Stage 4 design: integer-first matcher cutover
+
+**Scope.** This section is the bounded, design-only specification for the §8 Stage 4
+matcher cutover, authored after Stages 1–3 (foundation, codec, add, compare, multiply,
+subtract, gcd, exact rationals) landed. It specifies *what* the cutover must do; it does
+**not** implement it. Implementation is the separate next wave (`STAGE4-INT-FIRST-CUTOVER`),
+which owns every runtime, seed, projection, JS-production, and `NorthStarSemantics.v0.md`
+edit named below. Nothing in this section changes runtime behavior.
+
+### 9.1 The exact dispatch being replaced (both substrates)
+
+In Python `_stage0_match` (`mu/host/python/rcx_pi/selfhost/eval_seed.py`), after the
+variable and `None` cases, scalar patterns are dispatched through four host type-checks —
+`isinstance(pattern, bool)`, `isinstance(pattern, int)`, `isinstance(pattern, float)`,
+`isinstance(pattern, str)` — before the structural `isinstance(pattern, dict)` branch. The
+JS mirror `stage0Match` (`mu/host/js/core/bootstrap_core.js`) collapses the four into a
+single `typeof pattern !== 'object'` primitive branch (leaf compared with `===`) ahead of
+its object branch. These scalar branches are the residual `@host_builtin` type-dispatch
+named in §2.1; the `None`, variable, and dict branches are not scalar host-type semantics
+and are outside the cutover's removal set.
+
+Grounded leaf reality (kernel-relevant seeds): **float leaves are absent** — the float
+branch is already dead on the seed path, exactly as the raw-list branch was before P7W4
+removed it; **integer leaves are few and enumerable** — the constants the matcher/substitutor
+touch are the `id: 0` guards in `fix.v1.json` and the `max_steps: 100`, `tau_step: 1`,
+`engine_iteration: 0` constants in `rcx_engine.v1.json`; **boolean and string leaves are
+pervasive** (operator tags, motif names, flags). This asymmetry drives the honest scope in
+§9.3.
+
+### 9.2 The cutover: structural matching over numerals (integer-first)
+
+Numbers become the landed binary-positional numerals (`{"_num": …}` over
+`xI`/`xO`/`xH`/`neg`/`null`, §3.1) and are matched by the **existing structural dict
+branch** — the worklist already walks `{"_num": {…}}` key-by-key, binds `{"var": …}` sites
+inside a numeral, and compares `null` leaves via the `None` branch. The cutover therefore:
+
+1. **Removes the `int` and `float` scalar branches** from `_stage0_match`, and narrows the
+   JS `typeof pattern !== 'object'` branch so numerals (now objects) route to the object
+   branch.
+2. **Migrates the enumerable integer leaves** in `fix.v1.json` / `rcx_engine.v1.json` to
+   numeral form in the *same* wave, so no host integer is left for the removed branch to
+   match. (Computed integers use the §7 codec; the static seed leaves are migrated directly
+   because they are a small enumerable set.)
+3. **Adds an input-domain invariant gate** — "no host `int`/`float` leaf reaches the
+   matcher" — the numeric analogue of P7W4's seed-no-raw-array assertion, so the removed
+   branches stay dead-by-construction (a stray host scalar falls through to `NO_MATCH`, the
+   same fail-closed behavior P7W4 relies on).
+
+This is integer-first with no host floats: floats are forbidden (§3.4), so the float branch
+is removed as dead code and never reintroduced.
+
+### 9.3 Clearing `@host_builtin`: real reduction vs. net-delta-0 (honest scope)
+
+The `@host_builtin` decorator on `_stage0_match` is justified by *host type/key primitives*
+across **all** of its branches, not the scalar branches alone: it also covers the
+`isinstance(_, dict)` type-check, the `.keys()` view comparison, and the `mu_hash_cached(…)`
+authority call used for non-linear binding. The host-authority inventory records this as the
+`builtin:isinstance` and `authority_call:mu_hash_cached` signals.
+
+**Consequence (the finding the cutover wave must not paper over):** removing only the
+`int`+`float` branches leaves `isinstance` in use (bool/str/dict) and `mu_hash_cached`
+unchanged, so the `builtin:isinstance` signal, the `authority_call` signal, and the decorator
+itself all remain. On the marker ratchet (which counts `@host_*` decorators) and on the
+host-authority inventory (which counts these coarse signals), **integer-first alone is
+net-delta-0** — by itself it does not "clear the scalar marker."
+
+A *real* reduction (the §8.4 requirement) therefore needs the fuller scope:
+
+- fold the remaining scalar leaves to structure — `bool` to a structural two-constructor
+  motif and `str` to a structural codepoint sequence (both expressible as Mu, both
+  parity-safe) — removing all four scalar branches; and
+- replace the host `isinstance(_, dict)` / `.keys()` type-and-key dispatch with structural
+  tag dispatch, so the matcher no longer depends on host type/key primitives and the
+  `@host_builtin` decorator can be **reclassified BOUNDARY** — exactly the move P7W4 already
+  made for `match()` / `substitute()`.
+
+Crucially, **none of this requires a new host primitive** (the structuralizations are Mu;
+the tag dispatch is structural), so this is *not* a POLICY_BOUND halt under the North Star
+boundary — it is a scoping decision. Recommendation: scope the cutover to clear the whole
+scalar type-dispatch with the parity-safe **numeric** piece leading; if it is held strictly
+to numbers-only, classify it honestly (an enabler step recording a host-type-*semantics*
+reduction via a finer evidence metric) rather than asserting a marker-count decrease the
+ratchet will read as zero.
+
+### 9.4 The `NorthStarSemantics.v0.md` §B correction (specified here, applied in the cutover wave)
+
+§B ("Zero Canonicalization") is stale and must be corrected. Command-reproduced facts:
+`json.dumps(0.0) == "0.0"` but `json.dumps(-0.0) == "-0.0"`, so the **data** hash
+`mu_hash_cached(+0.0)` does **not** equal `mu_hash_cached(-0.0)` in Python — §B's policy
+("core identity and hash operations canonicalize `+0`/`-0`"), its constraints 1–2, and its
+"Current implementation" paragraph (which credits `json.dumps` with the canonicalization)
+are all false for the data hash. The accurate canonicalizer is §B.1's **control** hash
+(`mu_hash_control`), which intentionally int-casts integer-valued and signed-zero floats;
+§B.1 is correct and stays.
+
+The correction the cutover wave applies to §B (not this wave — `NorthStarSemantics.v0.md`
+is out of scope here): (1) retract the claim that the data hash canonicalizes signed zero,
+and state that canonicalization lives only in the control-channel hash (§B.1); (2) record
+that the data path must **not** canonicalize `-0 → +0` — that needs a host primitive and was
+bridge-rejected (see the Stage 0 signed-zero finding), so opposite-sign zeros correctly
+`NO_MATCH` in both substrates, which is parity-safe; (3) note that under structural numbers
+the question is **moot for the numeric domain** — signed zero is not a representable integer
+(`0 = {"_num": null}` is unique; `N0`/`Z0` carry no sign) and floats are forbidden, so no
+`-0` numeral exists. Any residual zero-canonicalization concern is confined to non-numeric
+host-float boundary inputs, which §3.4 already places out of scope.
+
+### 9.5 Cross-substrate parity preservation
+
+The cutover is parity-safe by construction and must be gated as such:
+
+- **No host float ever enters a hash.** Numerals are `xI`/`xO`/`xH`/`neg`/`null` dicts; the
+  data hash over them is byte-identical across substrates (the Stage 1–3 cross-substrate
+  parity harness already shows add/compare/codec/multiply numerals hashing byte-identically
+  in Python `run_mu` and JS `bootstrap_core`). The cutover extends that harness to assert
+  Python and JS produce **identical match bindings** on numeral patterns/inputs.
+- **The structural dict branch is already parity-identical** (same worklist traversal and
+  key comparison in both substrates), so routing numbers through it preserves parity.
+- **The `json.dumps` ≠ `JSON.stringify` float leak disappears.** Today
+  `match([x, x], [1.0, 1])` can diverge because `json.dumps(42.0) == "42.0"` while
+  `JSON.stringify(42.0) == "42"` (and `JSON.stringify(-0) == "0"` while Python keeps
+  `-0.0`); with floats forbidden and `1` represented as the single numeral
+  `{"_num": {"xH": null}}`, the divergent inputs cannot exist.
+- **The non-linear binding rationale becomes moot for numbers.** The current comment in both
+  substrates keeps the *data* hash (not the control hash) specifically to preserve the host
+  int/float type distinction; once numbers are numerals there is no host int/float leaf to
+  distinguish, and the numeral's data hash is parity-safe. The cutover updates that comment
+  to reflect the new invariant.
+
+### 9.6 Reconciliation with the blocked Stage 0 content-addressed-Mu typedispatch reduction lane
+
+The blocked lane `n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16` targets
+the *same* scalar type-dispatch but by a different mechanism: replace the
+`isinstance`/`typeof` scalar branches with **content-addressed (`mu_hash`) equality** — keep
+host scalars as data and compare them by hash. Its Phase A blocker is a contradiction:
+collapsing the typed scalar branches into one generic "hash both sides" path removes the
+per-type structural guards, so to keep Python/JS behavior and parity the lane's blocking
+report says Python needs an **input-side raw-list fail-close**; but the P7W4 fence
+(`tests/l4_gates/test_p7w4_structural_reduction_gate.py`, which forbids any
+`isinstance(_, list)` token in `_stage0_match`) makes that fail-close illegal.
+
+How Stage 4 relates (this wave states the relationship; it does **not** resolve or touch the
+lane):
+
+- **For numbers, Stage 4 supersedes the lane.** The numeral route clears the numeric scalar
+  dispatch *without* collapsing to a generic hash path and *without* widening the matcher's
+  input domain: numbers become dicts and ride the existing dict-only structural branch,
+  which already honors P7W4's "dicts only, structural traversal" invariant. No raw-list
+  fail-close is needed, so the raw-list ↔ P7W4 contradiction never arises for the numeric
+  portion. The contradiction is a symptom of the hash-collapse *mechanism*, not of the
+  shared *goal*.
+- **For bool/str, Stage 4 (integer-first) does not subsume the lane.** Those scalars are out
+  of this stage. If they are later folded to structure (§9.3), the content-addressed collapse
+  becomes unnecessary for them too and the lane is fully superseded; if instead they remain
+  host scalars, the lane's hash-equality route stays the candidate for *their* dispatch and
+  its raw-list ↔ P7W4 contradiction must be resolved on its own merits (tracked as the Stage 0
+  decision/recovery item in TASKS.md).
+- **Sequencing.** Land the integer-first numeric cutover before resolving the Stage 0 lane.
+  Doing so shrinks the lane's remaining scope to bool/str and demonstrates the structural
+  migration route as the preferred, contradiction-free alternative to hash-collapse — which
+  may retire the lane's raw-list fail-close requirement entirely if the program commits to
+  structuralizing bool/str rather than hash-collapsing them.
+
+### 9.7 Design-only boundary
+
+This wave produces design content only. The cutover wave owns: the `_stage0_match` /
+`stage0Match` branch removal, the seed integer-leaf migration, the input-domain invariant
+gate, the bool/str + dict/key structuralization that makes the marker clear real, the
+cross-substrate matcher-parity gate, the non-linear-binding comment update, and the
+`NorthStarSemantics.v0.md` §B rewrite. None of those files are modified here.
+
+---
+
+## 10. References
 
 **Precedents.** Coq `BinNums` (`positive`/`N`/`Z`, binary for computation) ·
 Agda built-ins (`BUILTIN NATURAL` → GMP; log-n vs n space) · Idris erasure (`Nat` → GMP) ·
