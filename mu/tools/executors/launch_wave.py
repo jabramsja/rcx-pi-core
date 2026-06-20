@@ -595,10 +595,28 @@ def setup_bridge_config(
     *,
     bus_dir: str | Path | None = None,
 ) -> Path | None:
-    """Step 4: converge the live bridge_config with the committed defaults.
+    """Step 4: seed a fresh bus from the default, then converge with the defaults.
 
-    Graceful no-op (returns None) ONLY when no bridge_config.json exists. When the
-    file IS present it must be a well-formed bridge_config (a JSON object with an
+    First call :func:`executor_common.ensure_bridge_config_path` -- the existing
+    seeder -- so a FRESH namespaced bus (whose ``bridge_config.json`` is absent
+    because bus directories are git-ignored) is populated from the canonical
+    default bridge_config when a trusted source exists; THEN run the existing
+    validate-and-sync path unchanged. This removes the per-wave manual pre-seed
+    (a hand ``ensure_bridge_config_path`` + sync) the orchestrator used to run
+    before every launch on a fresh worktree (PIPELINE-FIX-33). Forgetting it ran
+    the wave bus without the configured implementer/reviewer adapters.
+
+    The seeder preserves the fail-closed contract by construction: it copies ONLY
+    when the active config is ABSENT and a trusted source exists, and it
+    SHORT-CIRCUITS (no copy) on an already-present file. So:
+      * absent + trusted source  -> seeded, then validated + synced;
+      * absent + NO trusted source -> still absent -> graceful no-op (None);
+      * present-but-malformed -> NOT overwritten by the seeder (it short-circuits
+        on the existing file) -> still reaches the fail-closed parse check below.
+
+    Graceful no-op (returns None) ONLY when no bridge_config.json exists AND no
+    trusted seed source is available to create one. When the file IS present (or
+    was just seeded) it must be a well-formed bridge_config (a JSON object with an
     ``agents`` object) and the sync must actually process it; otherwise this FAILS
     CLOSED with :class:`LaunchWaveError`.
 
@@ -611,9 +629,16 @@ def setup_bridge_config(
     no-op-equivalent (the bounded re-run recovery contract still holds: fix the
     file and re-run the same config).
     """
-    config_path = _ec.bridge_config_path(repo_root, bus_dir)
+    # Auto-seed a fresh namespaced bus from the canonical default BEFORE the
+    # present/absent branch (PIPELINE-FIX-33). ensure_bridge_config_path copies the
+    # trusted default bridge_config into the active bus ONLY when it is absent and a
+    # trusted source exists, and returns the same path bridge_config_path would; it
+    # short-circuits on an already-present file, so a present-but-malformed config is
+    # never overwritten here and still reaches the fail-closed parse check below.
+    config_path = _ec.ensure_bridge_config_path(repo_root, bus_dir)
     if not config_path.exists():
-        # Genuinely absent: nothing to converge -> graceful no-op (safe to re-run).
+        # Genuinely absent (no trusted seed source): nothing to converge ->
+        # graceful no-op (safe to re-run).
         return None
 
     # Present file: it MUST parse as a bridge_config object, or we fail closed
