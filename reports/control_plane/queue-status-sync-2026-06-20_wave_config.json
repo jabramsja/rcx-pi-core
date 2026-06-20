@@ -1,0 +1,63 @@
+{
+  "wave_id": "queue-status-sync-2026-06-20",
+  "title": "Queue Status Sync 2026-06-20",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Reconcile TASKS.md and STATUS.md with the same-wave tracked queue source and the current Codex control-plane state, preserving the canonical task order for autonomous pipeline execution.",
+  "date": "2026-06-20",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/queue-status-sync-2026-06-20.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id queue-status-sync-2026-06-20 --output reports/l4_wave_indicators/queue-status-sync-2026-06-20.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id queue-status-sync-2026-06-20",
+  "evidence_delta": "(1) TASKS.md carries an ordered, current autonomous queue grounded in the same-wave tracked packet reports/control_plane/queue-status-sync-2026-06-20_2026-06-20.md, the same-wave TASKS tracker note, and the 2026-06-20 founder-directed queue sync recorded there. (2) STATUS.md points to that current queue and reflects the active control-plane status without duplicating the full operational queue. (3) The cleanup is docs/control-plane only and preserves historical tracker ledgers and runtime/substrate semantics.",
+  "progress_proof_before": "No separate June 19 handoff source artifact is tracked in this worktree; before this sync, the current autonomous sequence was discoverable only through live control-plane context plus broad TASKS/STATUS pointers, not a tracked active queue source.",
+  "progress_proof_after": "TASKS.md has a concise ordered active queue for Codex autonomous execution, STATUS.md references that queue as current active NEXT work, and both files keep historical Ra/NEXT/VECTOR/SINK governance intact.",
+  "structural_artifact_ref": "TASKS.md; STATUS.md",
+  "scope_summary": "Docs/control-plane truth sync only: update active queue ordering and status pointers. Do not alter runtime, substrate, seed, scheduler, registry, projection, StructuralNumbers implementation, role selection code, pager/autoping code, or tmux behavior.",
+  "scope_items": [
+    "TASKS.md (MODIFY) -- add or refresh a concise ordered active queue under NOW/NEXT for Codex autonomous execution, based on the same-wave tracked packet, TASKS tracker note, and current 2026-06-20 follow-up.",
+    "STATUS.md (MODIFY) -- update the active NEXT pointer/last-updated wording to match the queue source of truth without duplicating the full queue.",
+    "reports/control_plane/queue-status-sync-2026-06-20_2026-06-20.md (GENERATED) -- launcher-created control packet.",
+    "reports/l4_wave_indicators/queue-status-sync-2026-06-20.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Insert an ordered active queue that starts with the live Codex autoping idle-summary follow-up, then the StructuralNumbers Stage 3 sequence, then Stage 4 design/cutover, then Stage 5, then the narrow pipeline structural-fix queue, then lower-priority deferred research/cosmetic items.",
+    "Record the parallelization rule: StructuralNumbers gate waves are sequential because of shared growth-cap surfaces; narrow pipeline-fix waves may run in parallel only when implementation files differ and TASKS.md tracker conflicts are handled by the pipeline.",
+    "Mark already completed June 19 infrastructure items as landed, including launch_wave.py builder, stranded-PR landing op, growth-cap union fix, pager quick-ack receiver, and Codex orchestrator/mode switch.",
+    "Keep historical tracker ledgers and archived Ra notes intact; do not mass-rewrite old history.",
+    "Update STATUS.md to reference the refreshed active queue and current Phase 8c/L4 bounded-reduction posture without changing debt counts unless mechanically revalidated by existing docs tests."
+  ],
+  "constraints": [
+    "Use launch_wave.py and executor_dispatch for this wave.",
+    "Do not manually implement the queue cleanup outside the pipeline after this launcher config is created.",
+    "Do not touch runtime, substrate, seed, scheduler, registry, projection, JavaScript parity, StructuralNumbers implementation tests, role_agents, bridge defaults, pager route, autoping watcher code, or tmux scripts.",
+    "Do not delete or rewrite historical tracker notes in the Ra ledger.",
+    "Do not claim the active autoping follow-up is merged unless the commit executor has completed it.",
+    "Do not launch StructuralNumbers gcd or pipeline-fix implementation waves from inside this docs cleanup wave."
+  ],
+  "stop_conditions": [
+    "Stop done when TASKS.md and STATUS.md agree on current queue ordering, docs consistency and focused docs tests pass, strict staged L4 validation passes, the indicator artifact is collected, and commit/push/PR are handled through the commit executor.",
+    "Halt as NEEDS_RESCOPING if cleanup requires large-scale TASKS.md compaction beyond active queue/status truth.",
+    "Halt as DOC_ACCURACY if current repo truth contradicts the tracked queue source in this packet and TASKS.md.",
+    "Do not commit without a real tracked source artifact and gate-green evidence."
+  ],
+  "acceptance_criteria": [
+    "TASKS.md contains a short ordered active queue visible from the NOW/NEXT area.",
+    "The queue includes the active Codex autoping idle-summary follow-up, StructuralNumbers gcd Python, gcd JS parity, rationals, Stage 4 design, Stage 4 int-first cutover, Stage 5 ordinal-to-N, and pipeline fixes #33/#29/#31/#17 in an explicit order.",
+    "The queue records that #33/#29/#31/#17 are narrow pipeline structural fixes and that parallel execution is allowed only when file ownership does not conflict.",
+    "STATUS.md points to the refreshed TASKS.md queue and remains consistent with Phase 8c and host-debt truth.",
+    "Historical tracker content remains intact except for the same-wave tracker note generated by the builder.",
+    "No runtime/substrate/seed/parity files are touched."
+  ],
+  "request_for_agent": "Implement a bounded docs truth-sync: refresh TASKS.md and STATUS.md so the current autonomous queue from the same-wave tracked packet, TASKS tracker note, and live 2026-06-20 Codex follow-up is visible, ordered, and marked with parallelization constraints. Preserve historical tracker ledgers, do not touch runtime/substrate code, run the configured evidence command, collect the indicator artifact, and keep the wave docs/control-plane only.",
+  "request_for_claude": "Compatibility input only: this queue/status cleanup is to be implemented and reviewed by Codex agents. Do not treat Claude as the active operator for this wave.",
+  "authorization_note": "Founder-directed request on 2026-06-20: autonomously do the queued waves, use parallel pipeline when possible, put them in TASKS.md in order, and clean up TASKS.md and STATUS.md.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Docs/control-plane queue and status truth sync for autonomous Codex wave execution.",
+  "tracked_packet": "reports/control_plane/queue-status-sync-2026-06-20_2026-06-20.md"
+}
