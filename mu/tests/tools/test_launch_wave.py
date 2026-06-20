@@ -509,6 +509,103 @@ def test_rerun_recovers_after_malformed_bridge_config_fixed(wave_repo):
     assert _artifact_counts(wave_repo, config.wave_id) == (1, 1, 1)
 
 
+def test_setup_bridge_config_auto_seeds_fresh_namespaced_bus(wave_repo):
+    """PIPELINE-FIX-33: a fresh namespaced bus with NO bridge_config is seeded from
+    the canonical default bus, then synced -- no manual pre-seed needed.
+
+    Before this fix, launching a wave on a fresh worktree required the orchestrator
+    to hand-run ensure_bridge_config_path + sync first, because setup_bridge_config
+    no-op'd over the absent namespaced config. Now setup_bridge_config seeds it from
+    the trusted same-repo default and returns the namespaced path with agents present.
+    """
+    # Trusted seed source: the canonical default-bus bridge_config.
+    default_bus = wave_repo / ".agent_bus"
+    default_bus.mkdir(exist_ok=True)
+    (default_bus / "bridge_config.json").write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "claude": {
+                        "cmd": ["claude", "--model", "seed-model"],
+                        "display_name": "Claude",
+                        "mode": "review",
+                    }
+                }
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    namespaced = ec.bridge_config_path(wave_repo, ".agent_bus-x7")
+    assert not namespaced.exists()  # fresh bus: no bridge_config of its own yet
+
+    result = lw.setup_bridge_config(wave_repo, bus_dir=".agent_bus-x7")
+
+    # Seeded into the namespaced bus and synced -> returns that bus's path with the
+    # configured agent present (no manual ensure+sync pre-step was needed).
+    assert result == namespaced
+    assert namespaced.exists()
+    seeded = json.loads(namespaced.read_text(encoding="utf-8"))
+    assert isinstance(seeded.get("agents"), dict)
+    assert "claude" in seeded["agents"]
+
+    # A second run over the now-healthy seeded config converges (no-op-equivalent):
+    # the seeder short-circuits on the present file and the sync stays idempotent.
+    result2 = lw.setup_bridge_config(wave_repo, bus_dir=".agent_bus-x7")
+    assert result2 == namespaced
+    assert "claude" in json.loads(namespaced.read_text(encoding="utf-8"))["agents"]
+
+
+def test_setup_bridge_config_auto_seed_does_not_overwrite_present_malformed(wave_repo):
+    """The auto-seed must NOT weaken the present-but-malformed fail-closed.
+
+    Even with a valid trusted seed source available, a PRESENT-but-malformed
+    bridge_config on the active bus is left untouched (the seeder short-circuits on
+    an existing file) and still fails the setup closed -- it is never silently
+    overwritten or 'repaired' by the seed.
+    """
+    # A valid trusted seed source exists on the default bus...
+    default_bus = wave_repo / ".agent_bus"
+    default_bus.mkdir(exist_ok=True)
+    (default_bus / "bridge_config.json").write_text(
+        json.dumps(
+            {"agents": {"claude": {"cmd": ["claude"], "display_name": "C",
+                                   "mode": "review"}}},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    # ...but the active namespaced bus already has a MALFORMED bridge_config.
+    namespaced = ec.bridge_config_path(wave_repo, ".agent_bus-x7")
+    namespaced.parent.mkdir(parents=True, exist_ok=True)
+    namespaced.write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(lw.LaunchWaveError) as exc:
+        lw.setup_bridge_config(wave_repo, bus_dir=".agent_bus-x7")
+    msg = str(exc.value)
+    assert "bridge_config" in msg
+    assert "malformed" in msg or "unreadable" in msg
+
+    # The malformed file was NOT overwritten by the seed (left byte-identical).
+    assert namespaced.read_text(encoding="utf-8") == "{not valid json"
+
+
+def test_setup_bridge_config_noop_when_no_seed_source_on_namespaced_bus(wave_repo):
+    """Genuine no-source case still no-ops on a fresh namespaced bus.
+
+    With NO trusted seed source available (no default-bus bridge_config and no other
+    source), the seeder copies nothing, so setup_bridge_config returns None and
+    creates no file -- and re-running stays a no-op.
+    """
+    namespaced = ec.bridge_config_path(wave_repo, ".agent_bus-x7")
+    assert not namespaced.exists()
+
+    assert lw.setup_bridge_config(wave_repo, bus_dir=".agent_bus-x7") is None
+    assert not namespaced.exists()  # the seeder created nothing
+    assert lw.setup_bridge_config(wave_repo, bus_dir=".agent_bus-x7") is None
+
+
 # --------------------------------------------------------------------------- #
 # Optional dispatcher launch                                                  #
 # --------------------------------------------------------------------------- #
