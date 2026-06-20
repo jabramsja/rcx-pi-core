@@ -7581,6 +7581,7 @@ class TestObservabilityNoiseFilters:
         with (
             patch.object(dash_mod, "ps_lines", return_value=lines),
             patch.object(dash_mod, "pid_start", return_value=123.0),
+            patch.object(dash_mod, "pid_cwd", return_value=dash_mod.REPO_ROOT),
             patch.object(dash_mod, "pid_has_ancestor_matching", side_effect=fake_ancestor),
         ):
             rendered = dash_mod.render()
@@ -7601,6 +7602,7 @@ class TestObservabilityNoiseFilters:
 
         with (
             patch.object(web_mod, "pid_start", return_value=456.0),
+            patch.object(web_mod, "pid_cwd", return_value=web_mod.REPO_ROOT),
             patch.object(web_mod, "pid_has_ancestor_matching", side_effect=fake_ancestor),
         ):
             subs = web_mod.detect_subs(lines)

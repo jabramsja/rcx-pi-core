@@ -607,6 +607,10 @@ def _completed_candidate_stop_result(
             f"Refresh the post-merge routing record to the next open packet. Completed: {packets}"
         ),
         "completed_candidates": completed,
+        "request_for_agent": (
+            "Refresh post-merge routing from the canonical open queue before "
+            "retrying dispatcher; do not rerun completed packets."
+        ),
         "request_for_claude": (
             "Refresh post-merge routing from the canonical open queue before "
             "retrying dispatcher; do not rerun completed packets."
@@ -658,6 +662,10 @@ def _tracked_packet_wave_conflict_result(
         "message": (
             "Refusing to dispatch a bounded candidate whose tracked_packet "
             "declares a different Wave ID. " + "; ".join(conflicts)
+        ),
+        "request_for_agent": (
+            "Regenerate routing against the correct same-wave packet, or update "
+            "the packet identity through a bounded Phase A packet before dispatch."
         ),
         "request_for_claude": (
             "Regenerate routing against the correct same-wave packet, or update "
@@ -746,6 +754,11 @@ def _missing_next_codex_tracker_authority_result(
             "without a same-wave TASKS.md queue entry or tracker note for the "
             "exact wave/packet pair: " + "; ".join(missing)
         ),
+        "request_for_agent": (
+            "Create or repair the same-wave TASKS.md authority for the packet, "
+            "or regenerate routing to a packet that already has same-wave "
+            "TASKS.md authority; do not run Phase A from an orphan packet path."
+        ),
         "request_for_claude": (
             "Create or repair the same-wave TASKS.md authority for the packet, "
             "or regenerate routing to a packet that already has same-wave "
@@ -794,6 +807,10 @@ def _empty_tracker_update_hold_result(
             "UPDATE_TRACKER_ONLY was held because the routing record has no "
             "tracker_note_text, files_to_stage, force_add_files, tracked_packet, "
             "or candidate files. Refusing to synthesize a TASKS.md-only handoff."
+        ),
+        "request_for_agent": (
+            "Refresh post-merge routing to an open packet or provide explicit "
+            "tracker update scope before dispatching UPDATE_TRACKER_ONLY."
         ),
         "request_for_claude": (
             "Refresh post-merge routing to an open packet or provide explicit "
@@ -959,6 +976,11 @@ def _phase_b_tracker_gate_result(
             f"not contain the exact wave/packet pair: wave_id={normalized_wave!r}, "
             f"packet={packet!r}."
         ),
+        "request_for_agent": (
+            "Add or repair the same-wave TASKS.md tracker entry for the locked "
+            "packet, then resume Phase B from that packet. Do not bypass the "
+            "packet's tracker precondition."
+        ),
         "request_for_claude": (
             "Add or repair the same-wave TASKS.md tracker entry for the locked "
             "packet, then resume Phase B from that packet. Do not bypass the "
@@ -981,10 +1003,15 @@ def _surface_record_for_chain(
     }
     if args.surface == "phase-a":
         summary = str(getattr(args, "summary", "") or "").strip()
-        request = str(getattr(args, "request_for_claude", "") or "").strip()
+        request = str(
+            getattr(args, "request_for_agent", "")
+            or getattr(args, "request_for_claude", "")
+            or ""
+        ).strip()
         if summary:
             record["summary"] = summary
         if request:
+            record["request_for_agent"] = request
             record["request_for_claude"] = request
         record["next_candidates"] = [
             {
@@ -1067,7 +1094,11 @@ def _phase_a_surface_record_for_persistence(
     persisted = dict(record)
     persisted["decision"] = str(persisted.get("decision") or "ROUTE_PHASE_A")
     persisted["summary"] = str(persisted.get("summary") or "")
-    persisted["request_for_claude"] = str(persisted.get("request_for_claude") or "")
+    request_text = str(
+        persisted.get("request_for_agent") or persisted.get("request_for_claude") or ""
+    )
+    persisted["request_for_agent"] = request_text
+    persisted["request_for_claude"] = request_text
     wave_name = str(persisted.get("wave_name") or persisted.get("wave_id") or "").strip()
     if wave_name and not isinstance(persisted.get("next_candidates"), list):
         persisted["next_candidates"] = [{"candidate": wave_name, "bounded": True}]
@@ -1121,9 +1152,18 @@ def build_surface_parser() -> argparse.ArgumentParser:
         help="Short Phase A scope summary. Used to seed the routing context passed to phase_a_executor.",
     )
     phase_a.add_argument(
-        "--request-for-claude",
+        "--request-for-agent",
+        dest="request_for_agent",
         default="",
         help="Detailed Phase A request. Used to seed the routing context passed to phase_a_executor.",
+    )
+    # Deprecated compatibility input: parse old scripts without advertising a
+    # Claude-named operator surface.
+    phase_a.add_argument(
+        "--request-for-claude",
+        dest="request_for_agent",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     phase_a.add_argument("--max-rounds", type=int, default=15)
     phase_a.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
@@ -3197,6 +3237,7 @@ def _refresh_canonical_routing_record_state(
         task_id=str(record.get("task_id") or ""),
         tracked_packet=tracked_packet,
         request_for_claude=str(record.get("request_for_claude") or ""),
+        request_for_agent=str(record.get("request_for_agent") or ""),
         summary=str(record.get("summary") or ""),
         decision=str(record.get("decision") or ""),
         merged_pr=record.get("merged_pr") if isinstance(record.get("merged_pr"), int) else None,
@@ -3300,7 +3341,8 @@ def dispatch(
             "status": "stopped",
             "decision": decision,
             "summary": record.get("summary", ""),
-            "request_for_claude": record.get("request_for_claude", ""),
+            "request_for_agent": record.get("request_for_agent") or record.get("request_for_claude", ""),
+            "request_for_claude": record.get("request_for_agent") or record.get("request_for_claude", ""),
             "message": f"Routing stopped: {decision}. Requires founder/triage intervention.",
         }
 
@@ -3455,11 +3497,13 @@ def dispatch(
             decision = record.get("decision", "")
             # Re-check stop tokens after refresh
             if decision in STOP_TOKENS:
+                request_text = record.get("request_for_agent") or record.get("request_for_claude", "")
                 return {
                     "status": "stopped",
                     "decision": decision,
                     "summary": record.get("summary", ""),
-                    "request_for_claude": record.get("request_for_claude", ""),
+                    "request_for_agent": request_text,
+                    "request_for_claude": request_text,
                     "message": f"Routing stopped after refresh: {decision}. "
                                f"Requires founder/triage intervention.",
                 }

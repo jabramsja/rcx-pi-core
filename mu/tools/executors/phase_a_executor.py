@@ -221,7 +221,8 @@ def extract_plan_scope(routing_record: dict[str, Any]) -> dict[str, str]:
     """Extract planning scope from the routing record and bounded candidate."""
     candidate = _first_bounded_next_candidate(routing_record)
     candidate_request = str(
-        candidate.get("request_for_claude")
+        candidate.get("request_for_agent")
+        or candidate.get("request_for_claude")
         or candidate.get("request")
         or ""
     )
@@ -229,7 +230,7 @@ def extract_plan_scope(routing_record: dict[str, Any]) -> dict[str, str]:
     candidate_name = str(candidate.get("candidate") or "").strip()
 
     request = _append_distinct_context(
-        str(routing_record.get("request_for_claude", "") or ""),
+        str(routing_record.get("request_for_agent") or routing_record.get("request_for_claude", "") or ""),
         "Routed next-candidate request",
         candidate_request,
     )

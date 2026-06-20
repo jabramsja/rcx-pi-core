@@ -1061,6 +1061,51 @@ def test_run_meta_review_threads_timeout_and_watchdogs_into_adapter(pkg_in_repo)
     assert "zero_output_timeout_s" not in kwargs or kwargs["zero_output_timeout_s"] is None
 
 
+def test_run_meta_review_ignores_scoped_reviewer_env_for_other_repo(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    cfg_dir = repo_root / "mu" / "tools" / "executors"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "executor_config.json").write_text(
+        json.dumps(
+            {
+                "role_agents": {"implementer": "codex", "reviewer": "codex"},
+                "bridge_agent_defaults": {"codex": {}, "claude": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    bus_dir = tmp_path / "bus"
+    bus_dir.mkdir()
+    paths = meta.MetaBridgePaths(
+        repo_root=repo_root,
+        bus_dir=bus_dir,
+        db_path=bus_dir / "meta_bridge.db",
+        lock_path=bus_dir / "meta_bridge.lock",
+    )
+    monkeypatch.setenv("RCX_REVIEWER_AGENT_OVERRIDE", "claude")
+    monkeypatch.setenv("RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT", str(tmp_path / "other"))
+    package = _make_valid_package()
+    validation_results = _make_validation_results(["dirty_state"], [])
+    envelope = (
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "COMMIT_GO", "summary": "ok", "findings": [], "request_for_claude": "Proceed"}\n'
+        "END_META_ENVELOPE\n"
+    )
+    selected: list[str] = []
+
+    def fake_get_adapter(config, name):
+        selected.append(name)
+        return MagicMock(name=name)
+
+    with patch.object(meta, "load_bridge_config_with_worktree_heal_at", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", side_effect=fake_get_adapter), \
+         patch.object(meta, "run_adapter", return_value=envelope):
+        parsed = meta.run_meta_review(paths, package, validation_results, timeout_s=90)
+
+    assert parsed["decision"] == "COMMIT_GO"
+    assert selected == ["codex"]
+
+
 def test_run_meta_review_sanitizes_slash_task_ids_for_prompt_paths(pkg_in_repo):
     pkg_path, isolated_paths = pkg_in_repo
     validation_results = _make_validation_results(["dirty_state"], [])
@@ -1301,6 +1346,70 @@ def test_run_post_merge_review_threads_timeout_and_watchdogs_into_adapter(tmp_pa
     assert kwargs["stale_timeout_s"] == 75
     assert kwargs["stop_after_envelope"] is True
     assert "zero_output_timeout_s" not in kwargs or kwargs["zero_output_timeout_s"] is None
+
+
+def test_run_post_merge_review_ignores_scoped_reviewer_env_for_other_repo(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    cfg_dir = repo_root / "mu" / "tools" / "executors"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "executor_config.json").write_text(
+        json.dumps(
+            {
+                "role_agents": {"implementer": "codex", "reviewer": "codex"},
+                "bridge_agent_defaults": {"codex": {}, "claude": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    bus_dir = tmp_path / "meta_bus"
+    bus_dir.mkdir()
+    paths = meta.MetaBridgePaths(
+        repo_root=repo_root,
+        bus_dir=bus_dir,
+        db_path=bus_dir / "meta_bridge.db",
+        lock_path=bus_dir / "meta_bridge.lock",
+    )
+    package = {
+        "task_id": "[POST-MERGE]",
+        "wave_name": "wave",
+        "lane": "hooks/agents/bridge control-surface",
+        "merged_pr": 1,
+        "merge_sha": "abc1234",
+        "rollout_packet_path": "reports/control_plane/post_merge_supervisor_plan_2026-03-21.md",
+        "deferred_items": [],
+        "next_candidates": [],
+        "tracker_state_summary": "stable",
+        "blocker_report_paths": [],
+    }
+    validation_results = _make_validation_results(["gate1"], [])
+    envelope = (
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "CONTINUE_DIALECTIC", "summary": "ok", "findings": [], "request_for_claude": "Continue"}\n'
+        "END_META_ENVELOPE\n"
+    )
+    selected: list[str] = []
+    monkeypatch.setenv("RCX_REVIEWER_AGENT_OVERRIDE", "claude")
+    monkeypatch.setenv("RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT", str(tmp_path / "other"))
+
+    def fake_get_adapter(config, name):
+        selected.append(name)
+        return MagicMock(name=name)
+
+    with patch.object(meta, "build_post_merge_prompt", return_value="prompt"), \
+         patch.object(meta, "load_bridge_config_with_worktree_heal_at", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", side_effect=fake_get_adapter), \
+         patch.object(meta, "run_adapter", return_value=envelope):
+        parsed = meta.run_post_merge_review(
+            paths,
+            package,
+            validation_results,
+            derived_files=["TASKS.md"],
+            rollout_order="1. Continue",
+            timeout_s=75,
+        )
+
+    assert parsed["decision"] == "CONTINUE_DIALECTIC"
+    assert selected == ["codex"]
 
 
 def test_post_merge_prompt_requires_silent_bootstrap_read(tmp_path):

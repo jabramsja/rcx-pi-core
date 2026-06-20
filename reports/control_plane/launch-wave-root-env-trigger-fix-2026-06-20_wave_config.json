@@ -1,0 +1,58 @@
+{
+  "wave_id": "launch-wave-root-env-trigger-fix-2026-06-20",
+  "title": "Launch Wave Root Env Trigger Fix 2026-06-20",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Fix launch_wave dispatcher child environment selection so RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT alone scopes inherited overrides but does not create an env-bearing runner call when no role or pager override is present.",
+  "date": "2026-06-20",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/launch-wave-root-env-trigger-fix-2026-06-20.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id launch-wave-root-env-trigger-fix-2026-06-20 --output reports/l4_wave_indicators/launch-wave-root-env-trigger-fix-2026-06-20.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_launch_wave.py::test_launch_omitted_pins_preserve_runner_environment_shape mu/tests/tools/test_launch_wave.py::test_launch_partial_pins_scrub_stale_parent_override_env --tb=short && python3 tools/checks/linters/check_private_attr_access.py . mu/tests/tools/test_launch_wave.py && python3 mu/tools/checks/check_host_semantics_ratchet.py --json",
+  "evidence_delta": "(1) launch_wave distinguishes role/pager override trigger keys from the root scoping key, so RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT alone cannot force an env-bearing dispatcher launch. (2) The root scoping key is still scrubbed whenever a child env is needed for real inherited role/pager overrides. (3) Focused launcher tests cover omitted pins with a root-only parent env and partial pins that must still scrub stale parent overrides.",
+  "progress_proof_before": "Pre-push failed repeatedly in unrelated waves because test_launch_omitted_pins_preserve_runner_environment_shape expected runner kwargs without env, while launch_wave treated RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT alone as an inherited override trigger and passed a large child env into the runner.",
+  "progress_proof_after": "A root-only parent scope variable no longer changes launch runner kwargs for omitted pins, while real role/pager overrides still trigger sanitized child env propagation.",
+  "structural_artifact_ref": "mu/tools/executors/launch_wave.py; mu/tests/tools/test_launch_wave.py",
+  "scope_summary": "Pipeline launcher/control-plane test fix only. Do not touch runtime, substrate, seed, scheduler, registry, projection, StructuralNumbers, autoping watcher behavior, pager route semantics, role agent config defaults, or tmux scripts.",
+  "scope_items": [
+    "mu/tools/executors/launch_wave.py (MODIFY) -- separate trigger override keys from the root-only scoping key while preserving child-env scrubbing.",
+    "mu/tests/tools/test_launch_wave.py (MODIFY) -- add or adjust focused regression coverage for omitted pins under RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT-only parent env.",
+    "reports/control_plane/launch-wave-root-env-trigger-fix-2026-06-20_2026-06-20.md (GENERATED) -- launcher-created control packet.",
+    "reports/l4_wave_indicators/launch-wave-root-env-trigger-fix-2026-06-20.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Update dispatcher_child_environment trigger logic so it ignores RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT when deciding whether a child env is needed.",
+    "Keep RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT in the scrubbed key set when a child env is needed for actual role or pager override keys.",
+    "Extend launch_wave tests so omitted pins plus a root-only parent env preserve runner kwargs as cwd-only.",
+    "Run the configured evidence command and collect the indicator artifact."
+  ],
+  "constraints": [
+    "Use launch_wave.py and executor_dispatch for this wave.",
+    "Do not change role_agents, bridge_agent_defaults, pager route defaults, orchestrator mode, or model config.",
+    "Do not change autoping watcher code in this wave.",
+    "Do not touch runtime, substrate, seed, registry, projection, JavaScript parity, or StructuralNumbers files.",
+    "Do not relax private-attribute test-integrity checks."
+  ],
+  "stop_conditions": [
+    "Stop done when the focused launch_wave tests pass, private-attr checker passes for the touched test file, host semantics ratchet passes, the indicator artifact is collected, and commit/push/PR are handled through the commit executor.",
+    "Halt as NEEDS_RESCOPING if the fix requires redesigning role-agent config resolution or pager routing rather than launch_wave child-env trigger selection.",
+    "Halt as POLICY_BOUND if a proposed fix weakens private-attribute test-integrity checks or bypasses pre-push validation."
+  ],
+  "acceptance_criteria": [
+    "With no implementer/reviewer/pager pins and only RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT inherited, run_wave_setup(..., launch=True) calls the runner with cwd only.",
+    "With actual inherited role or pager override env keys, launch_wave still creates a sanitized child env and removes stale parent override keys.",
+    "No private launch_wave module attributes are accessed from tests.",
+    "No runtime/substrate/seed/parity files are touched."
+  ],
+  "request_for_agent": "Implement the narrow launch_wave root-env trigger fix: RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT alone must not cause dispatcher_child_environment to return a child env for omitted pins, but it must still be scrubbed whenever actual role or pager override keys require a child env. Add focused public-behavior tests without private attribute access, run the configured evidence command, collect the indicator artifact, and keep scope limited to launcher/control-plane tests.",
+  "request_for_claude": "Compatibility input only: this launch_wave control-plane fix is to be implemented and reviewed by Codex agents. Do not treat Claude as the active operator for this wave.",
+  "authorization_note": "Founder-directed autonomous pipeline hardening: when the docs queue and autoping waves exposed the launch_wave root-only env trigger failure, split the repair into a deterministic structural pipeline wave instead of manually smuggling it through unrelated packets.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Pipeline launcher root-only env trigger repair.",
+  "tracked_packet": "reports/control_plane/launch-wave-root-env-trigger-fix-2026-06-20_2026-06-20.md"
+}

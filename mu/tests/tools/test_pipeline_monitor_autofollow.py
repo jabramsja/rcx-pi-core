@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -558,6 +559,314 @@ def test_b2_pinned_monitor_panes_have_no_autofollow_signal(tmp_path, pin_args):
             assert "RCX_OBS_AUTOFOLLOW_BUS" not in command, command
             # Pinned monitors keep their explicit fixed bus.
             assert "BUS_DIR=.agent_bus-alpha " in command, command
+
+
+def test_orchestrator_mode_launch_can_override_tmux_session_for_selected_bus(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    log_lines = _start_and_capture(
+        tmp_path,
+        repo,
+        "--bus-dir",
+        ".agent_bus-alpha",
+        "--tmux-session",
+        "rcx-selected",
+        "--orchestrator-mode",
+        "claude",
+        install_identity=True,
+        lane_config={
+            "alpha": {
+                "bus_dir": ".agent_bus-alpha",
+                "dashboard_port": 8101,
+                "tmux_session": "rcx-pipeline-alpha",
+            }
+        },
+    )
+
+    assert any(
+        line.startswith("new-session ") and " -s rcx-selected " in f" {line} "
+        for line in log_lines
+    ), "\n".join(log_lines)
+    for pane_script in ("_pane_findings.sh", "_pane_processes.sh", "_pane_timeline.sh"):
+        commands = _pane_command_lines(log_lines, pane_script)
+        assert commands, f"no pane command captured for {pane_script}"
+        for command in commands:
+            assert "BUS_DIR=.agent_bus-alpha " in command, command
+            assert "RCX_AGENT_BUS_DIR=.agent_bus-alpha " in command, command
+            assert "RCX_OBS_AUTOFOLLOW_BUS" not in command, command
+
+
+def test_orchestrator_mode_launch_allows_unconfigured_named_bus_with_tmux_session(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    log_lines = _start_and_capture(
+        tmp_path,
+        repo,
+        "--bus-dir",
+        ".agent_bus-codexmode",
+        "--tmux-session",
+        "rcx-selected",
+        "--orchestrator-mode",
+        "codex",
+        install_identity=True,
+    )
+
+    assert any(
+        line.startswith("new-session ") and " -s rcx-selected " in f" {line} "
+        for line in log_lines
+    ), "\n".join(log_lines)
+    for pane_script in ("_pane_findings.sh", "_pane_processes.sh", "_pane_timeline.sh"):
+        commands = _pane_command_lines(log_lines, pane_script)
+        assert commands, f"no pane command captured for {pane_script}"
+        for command in commands:
+            assert "BUS_DIR=.agent_bus-codexmode " in command, command
+            assert "RCX_AGENT_BUS_DIR=.agent_bus-codexmode " in command, command
+            assert "RCX_OBS_AUTOFOLLOW_BUS" not in command, command
+
+
+def test_orchestrator_monitor_uses_mu_codex_autoping_launcher_for_selected_bus(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _install(repo, "pipeline_monitor.sh")
+    _install(repo, "pipeline_monitor_identity.py")
+    session_dir = repo / "mu" / "tools" / "session"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    autoping_log = tmp_path / "autoping.log"
+    _write_exec(
+        session_dir / "ensure_codex_autoping.sh",
+        f"""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> {str(autoping_log)!r}
+exit 0
+""",
+    )
+    git_bin = _fake_git_dir(tmp_path, show_toplevel=str(repo), branch="jabramsja/test-wave")
+    tmux_log = tmp_path / "tmux.log"
+    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log)
+    env = os.environ | {
+        "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+        "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
+        "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        "CODEX_THREAD_ID": "thread-selected",
+    }
+    monitor = repo / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+    try:
+        result = subprocess.run(
+            [
+                "bash",
+                str(monitor),
+                "--bus-dir",
+                ".agent_bus-codexmode",
+                "--tmux-session",
+                "rcx-selected",
+                "--orchestrator-mode",
+                "codex",
+                "start",
+                "--detach",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_S,
+        )
+
+        assert result.returncode == 0, result.stderr
+        autoping_text = autoping_log.read_text(encoding="utf-8")
+        assert "--repo " + str(repo) in autoping_text
+        assert "--thread-id thread-selected" in autoping_text
+        assert "--bus-dir .agent_bus-codexmode" in autoping_text
+        assert "--tmux-session rcx-selected" in autoping_text
+    finally:
+        subprocess.run(
+            [
+                "bash",
+                str(monitor),
+                "--bus-dir",
+                ".agent_bus-codexmode",
+                "--tmux-session",
+                "rcx-selected",
+                "stop",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_S,
+        )
+
+
+def test_orchestrator_monitor_replaces_untracked_wrong_root_owner(tmp_path):
+    long_parent = tmp_path / "long-command-path-for-ps-owner-discovery" / (
+        "nested-owner-root-segment-" * 4
+    )
+    repo = long_parent / "repo"
+    wrong_root = long_parent / "wrong-root"
+    repo.mkdir(parents=True)
+    wrong_root.mkdir(parents=True)
+    _install(repo, "pipeline_monitor.sh")
+    wrong_script = wrong_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+    wrong_script.parent.mkdir(parents=True)
+    _write_exec(
+        wrong_script,
+        """#!/usr/bin/env bash
+trap 'exit 0' TERM INT
+while true; do sleep 30 & wait $!; done
+""",
+    )
+    git_bin = _fake_git_dir(tmp_path, show_toplevel=str(repo), branch="jabramsja/test-wave")
+    tmux_log = tmp_path / "tmux.log"
+    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log)
+    state_dir = tmp_path / "monitor-state"
+    env = os.environ | {
+        "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+        "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
+        "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+    }
+    wrong_owner = subprocess.Popen(
+        ["bash", str(wrong_script), "__owner-loop"],
+        cwd=wrong_root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    monitor = repo / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+
+    try:
+        result = subprocess.run(
+            ["bash", str(monitor), "start", "--detach"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_S,
+        )
+
+        assert result.returncode == 0, result.stderr
+        wrong_owner.wait(timeout=5)
+        assert (state_dir / "owner.root").read_text(encoding="utf-8").strip() == str(repo)
+    finally:
+        subprocess.run(
+            ["bash", str(monitor), "stop"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_S,
+        )
+        if wrong_owner.poll() is None:
+            wrong_owner.terminate()
+            try:
+                wrong_owner.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                wrong_owner.kill()
+                wrong_owner.wait(timeout=5)
+
+
+def test_orchestrator_monitor_replaces_same_session_wrong_bus_owner(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _install(repo, "pipeline_monitor.sh")
+    _install(repo, "pipeline_monitor_identity.py")
+    git_bin = _fake_git_dir(tmp_path, show_toplevel=str(repo), branch="jabramsja/test-wave")
+    tmux_log = tmp_path / "tmux.log"
+    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log)
+    state_dir = tmp_path / "monitor-state"
+    env = os.environ | {
+        "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+        "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
+        "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+    }
+    monitor = repo / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+    wrong_owner = subprocess.Popen(
+        [
+            "bash",
+            str(monitor),
+            "--bus-dir",
+            ".agent_bus-stale",
+            "--tmux-session",
+            "rcx-selected",
+            "__owner-loop",
+        ],
+        cwd=repo,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=env,
+    )
+
+    try:
+        owner_pid_file = state_dir / "owner.pid"
+        for _ in range(80):
+            if (
+                owner_pid_file.exists()
+                and owner_pid_file.read_text(encoding="utf-8").strip() == str(wrong_owner.pid)
+            ):
+                break
+            if wrong_owner.poll() is not None:
+                pytest.fail(f"wrong-bus owner exited early with {wrong_owner.returncode}")
+            time.sleep(0.05)
+        else:
+            pytest.fail("wrong-bus owner did not register itself")
+
+        for _ in range(80):
+            if tmux_log.exists() and "BUS_DIR=.agent_bus-stale " in tmux_log.read_text(
+                encoding="utf-8"
+            ):
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("wrong-bus owner did not build the stale tmux session")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(monitor),
+                "--bus-dir",
+                ".agent_bus-codexmode",
+                "--tmux-session",
+                "rcx-selected",
+                "start",
+                "--detach",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_S,
+        )
+
+        assert result.returncode == 0, result.stderr
+        wrong_owner.wait(timeout=5)
+        current_owner = owner_pid_file.read_text(encoding="utf-8").strip()
+        assert current_owner != str(wrong_owner.pid)
+        owner_record = state_dir / "owners" / f"{current_owner}.pid"
+        assert "bus_dir=.agent_bus-codexmode" in owner_record.read_text(encoding="utf-8")
+        tmux_text = tmux_log.read_text(encoding="utf-8")
+        assert "kill-session -t rcx-selected" in tmux_text
+        assert "BUS_DIR=.agent_bus-codexmode " in tmux_text
+        assert "RCX_AGENT_BUS_DIR=.agent_bus-codexmode " in tmux_text
+    finally:
+        subprocess.run(
+            [
+                "bash",
+                str(monitor),
+                "--bus-dir",
+                ".agent_bus-codexmode",
+                "--tmux-session",
+                "rcx-selected",
+                "stop",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_S,
+        )
+        if wrong_owner.poll() is None:
+            wrong_owner.terminate()
+            try:
+                wrong_owner.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                wrong_owner.kill()
+                wrong_owner.wait(timeout=5)
 
 
 # ───────────────────────── pane refresh-loop rebinding ─────────────────────────

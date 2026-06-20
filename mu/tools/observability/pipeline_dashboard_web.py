@@ -7,6 +7,7 @@ import http.server
 import json
 import os
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -27,17 +28,25 @@ if str(EXECUTORS_DIR) not in sys.path:
 OBSERVABILITY_DIR = REPO_ROOT / "mu" / "tools" / "observability"
 if str(OBSERVABILITY_DIR) not in sys.path:
     sys.path.insert(0, str(OBSERVABILITY_DIR))
-DEFAULT_AGENT_DISPLAY_NAMES = {
-    "claude": "Claude Opus 4.7 max",
-    "codex": "Codex 5.5 xhigh",
-}
-
 
 def _fallback_bridge_agent_display_name(
     repo_root: Path,
     agent_name: str,
     bus_dir: str | Path | None = None,
 ) -> str:
+    defaults_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    try:
+        defaults_payload = json.loads(defaults_path.read_text(encoding="utf-8"))
+        display_name = (
+            defaults_payload.get("bridge_agent_defaults", {})
+            .get(agent_name, {})
+            .get("display_name", "")
+            .strip()
+        )
+        if display_name:
+            return display_name
+    except Exception:
+        pass
     config_path = repo_root / Path(str(bus_dir or ".agent_bus")) / "bridge_config.json"
     try:
         payload = json.loads(config_path.read_text(encoding="utf-8"))
@@ -51,7 +60,7 @@ def _fallback_bridge_agent_display_name(
             return display_name
     except Exception:
         pass
-    return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
+    return agent_name.replace("_", " ").title()
 
 
 def _fallback_configured_role_agents(
@@ -221,6 +230,76 @@ def pid_command(pid):
     return ""
 
 
+def pid_cwd(pid) -> Path | None:
+    try:
+        r = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            for line in r.stdout.splitlines():
+                if line.startswith("n") and line[1:]:
+                    return Path(line[1:]).resolve()
+    except Exception:
+        pass
+    try:
+        return Path(f"/proc/{pid}/cwd").resolve()
+    except Exception:
+        return None
+
+
+def _selected_bus_dir() -> str:
+    return str(ACTIVE_BUS_DIR or DEFAULT_BUS_DIR)
+
+
+def _command_bus_markers(command: str) -> list[str]:
+    markers: list[str] = []
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    for index, token in enumerate(tokens):
+        if token == "--bus-dir" and index + 1 < len(tokens):
+            markers.append(tokens[index + 1])
+        elif token.startswith("--bus-dir="):
+            markers.append(token.split("=", 1)[1])
+    pattern = re.compile(
+        r"(?<![A-Za-z0-9_-])(?P<bus>\.agent_bus(?:-[A-Za-z0-9][A-Za-z0-9_-]*)?)"
+        r"(?=$|[/'\"\s:=])"
+    )
+    for match in pattern.finditer(command):
+        marker = match.group("bus")
+        if marker not in markers:
+            markers.append(marker)
+    return markers
+
+
+def pid_matches_repo_root(pid: int, command_line: str = "") -> bool:
+    repo_root = Path(REPO_ROOT).resolve()
+    if str(repo_root) in command_line:
+        return True
+    cwd = pid_cwd(pid)
+    return cwd == repo_root
+
+
+def pid_matches_selected_bus_dir(pid: int, command_line: str = "", max_depth: int = 8) -> bool:
+    selected = _selected_bus_dir()
+    current = pid
+    saw_marker = False
+    for depth in range(max_depth):
+        command = command_line if depth == 0 else pid_command(current)
+        for marker in _command_bus_markers(command or ""):
+            saw_marker = True
+            if marker != selected:
+                return False
+        parent = pid_ppid(current)
+        if not parent or parent == 1:
+            return saw_marker or selected == DEFAULT_BUS_DIR
+        current = parent
+    return saw_marker or selected == DEFAULT_BUS_DIR
+
+
+def pid_matches_active_identity(pid: int, command_line: str = "") -> bool:
+    return pid_matches_repo_root(pid, command_line) and pid_matches_selected_bus_dir(pid, command_line)
+
+
 def pid_has_ancestor_matching(pid, pattern, max_depth=8):
     current = pid
     for _ in range(max_depth):
@@ -236,7 +315,7 @@ def pid_has_ancestor_matching(pid, pattern, max_depth=8):
 def bridge_role_for_pid(pid):
     if pid_has_ancestor_matching(pid, r"recovery_gate\.py"):
         return "recovery"
-    if pid_has_ancestor_matching(pid, r"bridge_supervisor\.py review|meta_bridge_supervisor"):
+    if pid_has_ancestor_matching(pid, r"bridge_supervisor\.py(?:\s+\S+)*\s+review(?:\s|$)|meta_bridge_supervisor"):
         return "reviewer"
     if pid_has_ancestor_matching(pid, r"phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py"):
         return "implementer"
@@ -265,6 +344,7 @@ def _is_observability_noise(line):
         or "pipeline_monitor.sh" in lowered
         or "autonomous workingrcx pipeline watchdog tick." in lowered
         or "workingrcx pipeline pager wakeup." in lowered
+        or "workingrcx dedicated claude monitor keepalive tick." in lowered
     )
 
 
@@ -290,6 +370,8 @@ def detect_subs(lines):
         agent_name = _bridge_agent_name_for_command(l)
         if agent_name:
             pid = int(l.split()[1])
+            if not pid_matches_active_identity(pid, l):
+                continue
             role = bridge_role_for_pid(pid)
             subs.append({
                 "agent": agent_name,

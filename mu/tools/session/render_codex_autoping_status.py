@@ -77,6 +77,8 @@ def main() -> int:
     print(f"last_dispatched_at: {_stringify(state.get('last_dispatched_at'))}")
     print(f"last_completed_at: {_stringify(state.get('last_completed_at'))}")
     print(f"last_exit_code: {_stringify(state.get('last_exit_code'))}")
+    print(f"repo_root: {_stringify(state.get('repo_root'))}")
+    print(f"bus_dir: {_stringify(state.get('bus_dir'))}")
     print(f"active_pid: {_stringify(state.get('active_pid'))}")
     print(f"active_log: {_stringify(state.get('active_log'))}")
     print(f"state_path: {state_path}")

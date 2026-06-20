@@ -8,6 +8,8 @@ STATUS_SCRIPT="$SCRIPT_DIR/pipeline_status.sh"
 BUS_DIR="${RCX_AGENT_BUS_DIR:-.agent_bus}"
 LANE="${RCX_PIPELINE_MONITOR_LANE:-}"
 REQUESTED_LANE="$LANE"
+TMUX_SESSION_OVERRIDE=""
+ORCHESTRATOR_MODE="${RCX_ORCHESTRATOR_MODE:-}"
 # EXPLICIT_PIN records whether the caller pinned this monitor with an explicit
 # --bus-dir / --lane. Only the unpinned DEFAULT monitor gets the per-refresh
 # autofollow signal (WI-2); pinned monitors keep their fixed bus.
@@ -31,6 +33,22 @@ while [ $# -gt 0 ]; do
       LANE="${2:-}"
       REQUESTED_LANE="$LANE"
       EXPLICIT_PIN=1
+      shift 2
+      ;;
+    --tmux-session)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --tmux-session requires a value" >&2
+        exit 2
+      fi
+      TMUX_SESSION_OVERRIDE="${2:-}"
+      shift 2
+      ;;
+    --orchestrator-mode)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --orchestrator-mode requires a value" >&2
+        exit 2
+      fi
+      ORCHESTRATOR_MODE="${2:-}"
       shift 2
       ;;
     *)
@@ -78,6 +96,9 @@ IDENTITY_LANE="default"
 IDENTITY_HELPER="$SCRIPT_DIR/pipeline_monitor_identity.py"
 
 identity_requires_config() {
+  if [ -n "$TMUX_SESSION_OVERRIDE" ] && [ -z "$LANE" ]; then
+    return 1
+  fi
   case "$COMMAND" in
     start|stop|attach) return 0 ;;
     *) [ -n "$LANE" ] ;;
@@ -119,6 +140,17 @@ elif identity_requires_config && { [ "$BUS_DIR" != ".agent_bus" ] || [ -n "$LANE
   echo "ERROR: monitor identity helper missing: $IDENTITY_HELPER" >&2
   exit 2
 fi
+if [ -n "$TMUX_SESSION_OVERRIDE" ]; then
+  SESSION="$TMUX_SESSION_OVERRIDE"
+fi
+if [[ ! "$SESSION" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ ]]; then
+  echo "ERROR: invalid --tmux-session: $SESSION" >&2
+  exit 2
+fi
+if [ -n "$ORCHESTRATOR_MODE" ] && [ "$ORCHESTRATOR_MODE" != "codex" ] && [ "$ORCHESTRATOR_MODE" != "claude" ]; then
+  echo "ERROR: --orchestrator-mode must be codex or claude" >&2
+  exit 2
+fi
 
 # Default-monitor autofollow signal (WI-2). The DEFAULT monitor (no explicit
 # --lane/--bus-dir pin, identity lane "default", bus ".agent_bus") lets panes 2-4
@@ -153,6 +185,7 @@ EXPECTED_PANE_4="PANE 4 · SESSION TIMELINE"
 usage() {
   cat <<'EOF'
 Usage: pipeline_monitor.sh [--bus-dir .agent_bus[-id]] [--lane name] <command> [options]
+       pipeline_monitor.sh [--tmux-session name] [--orchestrator-mode codex|claude] <command>
 
 Dashboard:
   start [--detach]         Launch tmux monitoring session
@@ -410,6 +443,17 @@ normalize_path() {
   ) || printf '%s\n' "$path"
 }
 
+resolve_session_script() {
+  local name="$1" candidate=""
+  for candidate in "$REPO_ROOT/mu/tools/session/$name" "$REPO_ROOT/tools/session/$name"; do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s\n' "$REPO_ROOT/mu/tools/session/$name"
+}
+
 ensure_state_dir() {
   mkdir -p "$STATE_DIR"
 }
@@ -484,6 +528,19 @@ owner_record_root() {
   return 1
 }
 
+owner_command_bus_dir() {
+  local cmd="$1" bus_value=""
+  bus_value="$(printf '%s\n' "$cmd" | sed -n 's/.*--bus-dir=\([^[:space:]]*\).*/\1/p' | head -1)"
+  if [ -z "$bus_value" ]; then
+    bus_value="$(printf '%s\n' "$cmd" | sed -n 's/.*--bus-dir[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' | head -1)"
+  fi
+  if [ -n "$bus_value" ]; then
+    printf '%s\n' "$bus_value"
+  else
+    printf '%s\n' ".agent_bus"
+  fi
+}
+
 owner_command_matches_root() {
   local cmd="$1" expected_root="$2"
   case "$cmd" in
@@ -534,10 +591,26 @@ owner_process_matches_root() {
   return 1
 }
 
+owner_process_matches_bus() {
+  local pid="$1" expected_bus="$2" cmd="" actual_bus=""
+  owner_process_has_monitor_command "$pid" || return 1
+  cmd="$(process_command_line "$pid")"
+  actual_bus="$(owner_command_bus_dir "$cmd")"
+  [ "$actual_bus" = "$expected_bus" ]
+}
+
 owner_process_verified() {
   local pid="$1" expected_root=""
   expected_root="$(owner_expected_root)"
   owner_process_matches_root "$pid" "$expected_root"
+}
+
+owner_process_matches_target() {
+  local pid="$1" expected_root=""
+  expected_root="$(owner_expected_root)"
+  owner_process_targets_session "$pid" || return 1
+  owner_process_matches_root "$pid" "$expected_root" || return 1
+  owner_process_matches_bus "$pid" "$BUS_DIR"
 }
 
 clear_owner_pid_record() {
@@ -555,7 +628,7 @@ owner_is_live() {
   if [ -z "$pid" ]; then
     return 1
   fi
-  if owner_process_verified "$pid"; then
+  if owner_process_matches_target "$pid"; then
     return 0
   fi
   clear_owner_pid_record "$pid"
@@ -573,6 +646,7 @@ record_owner_pid() {
     printf 'session=%s\n' "$SESSION"
     printf 'bus_dir=%s\n' "$BUS_DIR"
     printf 'lane=%s\n' "$IDENTITY_LANE"
+    printf 'orchestrator_mode=%s\n' "$ORCHESTRATOR_MODE"
   } > "$(owner_registry_file "$pid")"
 }
 
@@ -609,6 +683,69 @@ tracked_owner_pids() {
       [ -n "$entry_pid" ] && printf '%s\n' "$entry_pid"
     done
   fi
+}
+
+owner_pid_is_tracked() {
+  local pid="$1" current=""
+  current="$(current_owner_pid 2>/dev/null || true)"
+  if [ -n "$current" ] && [ "$current" = "$pid" ]; then
+    return 0
+  fi
+  [ -f "$(owner_registry_file "$pid")" ]
+}
+
+process_table_owner_pids() {
+  ps -Aww -o pid=,command= 2>/dev/null \
+    | awk '/pipeline_monitor[.]sh/ && /__owner-loop/ { print $1 }' \
+    || true
+}
+
+owner_process_shares_worktree_parent() {
+  local pid="$1" expected_root="" expected_parent="" cmd=""
+  expected_root="$(owner_expected_root)"
+  expected_parent="$(dirname "$expected_root")"
+  cmd="$(process_command_line "$pid")"
+  case "$cmd" in
+    *"$expected_parent"/*/mu/tools/observability/pipeline_monitor.sh*__owner-loop*|*"$expected_parent"/*/tools/observability/pipeline_monitor.sh*__owner-loop*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+owner_process_targets_session() {
+  local pid="$1" cmd="" padded=""
+  owner_process_has_monitor_command "$pid" || return 1
+  cmd="$(process_command_line "$pid")"
+  padded=" $cmd "
+  case "$padded" in
+    *" --tmux-session $SESSION "*|*" --tmux-session=$SESSION "*)
+      owner_pid_is_tracked "$pid" && return 0
+      owner_process_matches_root "$pid" "$(owner_expected_root)" && return 0
+      owner_process_shares_worktree_parent "$pid"
+      return $?
+      ;;
+    *" --tmux-session "*|*" --tmux-session="*)
+      return 1
+      ;;
+  esac
+  if [ -n "$TMUX_SESSION_OVERRIDE" ]; then
+    return 1
+  fi
+  if [ "$SESSION" = "rcx-pipeline" ]; then
+    owner_pid_is_tracked "$pid" && return 0
+    owner_process_matches_root "$pid" "$(owner_expected_root)" && return 0
+    owner_process_shares_worktree_parent "$pid"
+    return $?
+  fi
+  owner_process_matches_bus "$pid" "$BUS_DIR"
+}
+
+candidate_owner_pids() {
+  {
+    tracked_owner_pids
+    process_table_owner_pids
+  } | awk 'NF && !seen[$0]++ { print $0 }' 2>/dev/null || true
 }
 
 acquire_owner_lock() {
@@ -794,19 +931,19 @@ ensure_tmux_session() {
   rebuild_tmux_session "$repo_root"
 }
 
-stop_wrong_root_owner_processes() {
-  local owner_pids="" pid="" live_remaining=0 expected_root=""
-  expected_root="$(owner_expected_root)"
-  owner_pids="$(tracked_owner_pids | awk 'NF && !seen[$0]++ { print $0 }' 2>/dev/null || true)"
+stop_mismatched_owner_processes() {
+  local owner_pids="" pid="" live_remaining=0 killed_mismatched=0
+  owner_pids="$(candidate_owner_pids)"
   for pid in $owner_pids; do
-    if owner_process_has_monitor_command "$pid" && ! owner_process_matches_root "$pid" "$expected_root"; then
+    if owner_process_targets_session "$pid" && ! owner_process_matches_target "$pid"; then
       kill "$pid" 2>/dev/null || true
+      killed_mismatched=1
     fi
   done
   for _ in $(seq 1 20); do
     live_remaining=0
     for pid in $owner_pids; do
-      if owner_process_has_monitor_command "$pid" && ! owner_process_matches_root "$pid" "$expected_root"; then
+      if owner_process_targets_session "$pid" && ! owner_process_matches_target "$pid"; then
         live_remaining=1
         break
       fi
@@ -817,20 +954,24 @@ stop_wrong_root_owner_processes() {
     sleep 0.1
   done
   for pid in $owner_pids; do
-    if owner_process_has_monitor_command "$pid" && ! owner_process_matches_root "$pid" "$expected_root"; then
+    if owner_process_targets_session "$pid" && ! owner_process_matches_target "$pid"; then
       kill -9 "$pid" 2>/dev/null || true
+      killed_mismatched=1
     fi
     if ! owner_process_has_monitor_command "$pid"; then
       clear_owner_pid_record "$pid"
     fi
   done
+  if [ "$killed_mismatched" -eq 1 ]; then
+    tmux kill-session -t "$SESSION" 2>/dev/null || true
+  fi
 }
 
 ensure_owner_running() {
   local owner_pid="" owner_args=()
   acquire_owner_lock || return 1
   prune_stale_owner_state
-  stop_wrong_root_owner_processes
+  stop_mismatched_owner_processes
   prune_stale_owner_state
   if owner_is_live; then
     release_owner_lock
@@ -842,6 +983,12 @@ ensure_owner_running() {
   fi
   if [ -n "$REQUESTED_LANE" ]; then
     owner_args+=(--lane "$REQUESTED_LANE")
+  fi
+  if [ -n "$TMUX_SESSION_OVERRIDE" ] || [ "$SESSION" != "rcx-pipeline" ]; then
+    owner_args+=(--tmux-session "$SESSION")
+  fi
+  if [ -n "$ORCHESTRATOR_MODE" ]; then
+    owner_args+=(--orchestrator-mode "$ORCHESTRATOR_MODE")
   fi
   if [ "${#owner_args[@]}" -gt 0 ]; then
     RCX_PIPELINE_MONITOR_STATE_DIR="$STATE_DIR" \
@@ -855,7 +1002,7 @@ ensure_owner_running() {
   owner_pid="$!"
   record_owner_pid "$owner_pid"
   for _ in $(seq 1 20); do
-    if owner_process_verified "$owner_pid"; then
+    if owner_process_matches_target "$owner_pid"; then
       release_owner_lock
       return 0
     fi
@@ -870,16 +1017,16 @@ ensure_owner_running() {
 stop_owner_process() {
   local owner_pids="" pid="" live_remaining=0
   prune_stale_owner_state
-  owner_pids="$(tracked_owner_pids | awk 'NF && !seen[$0]++ { print $0 }' 2>/dev/null || true)"
+  owner_pids="$(candidate_owner_pids)"
   for pid in $owner_pids; do
-    if owner_process_has_monitor_command "$pid"; then
+    if owner_process_targets_session "$pid"; then
       kill "$pid" 2>/dev/null || true
     fi
   done
   for _ in $(seq 1 20); do
     live_remaining=0
     for pid in $owner_pids; do
-      if owner_process_has_monitor_command "$pid"; then
+      if owner_process_targets_session "$pid"; then
         live_remaining=1
         break
       fi
@@ -890,7 +1037,7 @@ stop_owner_process() {
     sleep 0.1
   done
   for pid in $owner_pids; do
-    if owner_process_has_monitor_command "$pid"; then
+    if owner_process_targets_session "$pid"; then
       kill -9 "$pid" 2>/dev/null || true
     fi
   done
@@ -910,7 +1057,7 @@ ensure_tmux_session_under_owner_lock() {
 
 ensure_codex_autoping_health() {
   local mode="${1:-ensure}" autoping_launcher="" thread_id=""
-  autoping_launcher="$REPO_ROOT/tools/session/ensure_codex_autoping.sh"
+  autoping_launcher="$(resolve_session_script ensure_codex_autoping.sh)"
   thread_id="$(current_codex_autoping_thread)"
   if [ -z "$thread_id" ] || [ ! -x "$autoping_launcher" ]; then
     return 0
@@ -930,16 +1077,63 @@ ensure_codex_autoping_health() {
   fi
 }
 
+ensure_claude_autoping_health() {
+  local mode="${1:-ensure}" autoping_launcher=""
+  autoping_launcher="$REPO_ROOT/mu/tools/session/ensure_claude_autoping.sh"
+  if [ ! -x "$autoping_launcher" ]; then
+    autoping_launcher="$REPO_ROOT/tools/session/ensure_claude_autoping.sh"
+  fi
+  [ -x "$autoping_launcher" ] || return 0
+  local autoping_args=(
+    --repo "$REPO_ROOT"
+    --bus-dir "$BUS_DIR"
+  )
+  if [ "$mode" = "force" ]; then
+    autoping_args+=(--force-restart)
+  fi
+  if ! "$autoping_launcher" "${autoping_args[@]}" >/dev/null 2>&1; then
+    echo "WARN: failed to ensure Claude autoping health" >&2
+  fi
+}
+
+current_orchestrator_mode() {
+  if [ -n "$ORCHESTRATOR_MODE" ]; then
+    printf '%s\n' "$ORCHESTRATOR_MODE"
+    return 0
+  fi
+  local state_path="$BUS_PATH/observability/orchestrator_mode.json"
+  if [ -f "$state_path" ]; then
+    python3 - "$state_path" <<'PY' 2>/dev/null
+import json, sys
+from pathlib import Path
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+mode = str(payload.get("mode") or "").strip()
+if mode in {"codex", "claude"}:
+    print(mode)
+PY
+    return 0
+  fi
+  printf '%s\n' "codex"
+}
+
 cmd_owner_tick() {
+  local mode=""
+  mode="$(current_orchestrator_mode)"
   ensure_tmux_session_under_owner_lock
-  ensure_codex_autoping_health
+  case "$mode" in
+    claude) ensure_claude_autoping_health ;;
+    *) ensure_codex_autoping_health ;;
+  esac
 }
 
 cmd_owner_loop() {
   local sleep_pid="" owner_pid=""
   ensure_state_dir
   owner_pid="$(current_owner_pid 2>/dev/null || true)"
-  if [ -n "$owner_pid" ] && [ "$owner_pid" != "$$" ] && owner_process_verified "$owner_pid"; then
+  if [ -n "$owner_pid" ] && [ "$owner_pid" != "$$" ] && owner_process_matches_target "$owner_pid"; then
     exit 0
   fi
   record_owner_pid "$$"
@@ -975,7 +1169,10 @@ cmd_start() {
   ensure_owner_running
   ensure_tmux_session_under_owner_lock
 
-  ensure_codex_autoping_health force
+  case "$(current_orchestrator_mode)" in
+    claude) ensure_claude_autoping_health force ;;
+    *) ensure_codex_autoping_health force ;;
+  esac
 
   echo "Pipeline monitor started (session: $SESSION)"
   echo "Lane identity: lane=$IDENTITY_LANE bus=$BUS_PATH dashboard=http://127.0.0.1:$DASHBOARD_PORT"

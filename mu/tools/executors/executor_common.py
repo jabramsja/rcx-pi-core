@@ -36,6 +36,8 @@ ROLE_AGENT_ENV_VARS = {
         "RCX_BRIDGE_REVIEWER_OVERRIDE",
     ),
 }
+ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV = "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT"
+ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY = "_role_agent_env_overrides_apply"
 IMPLEMENTER_BACKEND_KEYS = frozenset(
     {
         "phase_a_executor",
@@ -44,12 +46,6 @@ IMPLEMENTER_BACKEND_KEYS = frozenset(
     }
 )
 REVIEWER_BRIDGE_KEYS = frozenset({"phase_a", "phase_b"})
-DEFAULT_AGENT_DISPLAY_NAMES = {
-    "claude": "Claude Opus 4.8 max",
-    "codex": "Codex 5.5 xhigh",
-    "fable": "Claude Fable 5 max",
-}
-
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "role_agents": {
         "implementer": "claude",
@@ -118,6 +114,14 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "phase_b": 10,
         "dialectic": 3,
     },
+}
+
+DEFAULT_AGENT_DISPLAY_NAMES = {
+    name: str(data.get("display_name")).strip()
+    for name, data in DEFAULT_EXECUTOR_CONFIG.get("bridge_agent_defaults", {}).items()
+    if isinstance(name, str)
+    and isinstance(data, dict)
+    and str(data.get("display_name") or "").strip()
 }
 
 REVIEW_OVERRIDE_BACKEND_KEYS = frozenset(
@@ -528,6 +532,7 @@ def resolve_role_agent(
     role: str,
     *,
     raw_overrides: dict[str, Any] | None = None,
+    use_env_overrides: bool = True,
 ) -> str:
     """Resolve the configured bridge agent for a role family.
 
@@ -543,10 +548,18 @@ def resolve_role_agent(
     default_agent = _nonempty_str(default_role_agents.get(role)) or "codex"
     raw_overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
 
-    for env_name in ROLE_AGENT_ENV_VARS.get(role, ()):
-        candidate = _nonempty_str(os.environ.get(env_name))
-        if candidate is not None:
-            return candidate
+    if (
+        use_env_overrides
+        and config.get(ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY) is False
+        and (not raw_overrides or raw_overrides is config)
+    ):
+        use_env_overrides = False
+
+    if use_env_overrides:
+        for env_name in ROLE_AGENT_ENV_VARS.get(role, ()):
+            candidate = _nonempty_str(os.environ.get(env_name))
+            if candidate is not None:
+                return candidate
 
     explicit = _explicit_role_agent_override(raw_overrides, role)
     if explicit is not None:
@@ -617,20 +630,39 @@ def apply_role_agents(
     return config
 
 
+def _role_agent_env_overrides_apply(repo_root: Path) -> bool:
+    """Return whether role-agent env overrides are scoped to this repo root.
+
+    Unscoped overrides keep the historical behavior. Launch-wave scoped overrides
+    include a root marker so those env vars do not rewrite temporary config roots
+    created by broad commit/pre-push tests.
+    """
+    scope_root = _nonempty_str(os.environ.get(ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV))
+    if scope_root is None:
+        return True
+    try:
+        return Path(scope_root).expanduser().resolve() == Path(repo_root).expanduser().resolve()
+    except OSError:
+        return False
+
+
 def _materialize_role_agents(
     config: dict[str, Any],
     *,
     raw_overrides: dict[str, Any] | None = None,
+    use_env_overrides: bool = True,
 ) -> dict[str, Any]:
     implementer_agent = resolve_role_agent(
         config,
         "implementer",
         raw_overrides=raw_overrides,
+        use_env_overrides=use_env_overrides,
     )
     reviewer_agent = resolve_role_agent(
         config,
         "reviewer",
         raw_overrides=raw_overrides,
+        use_env_overrides=use_env_overrides,
     )
     return apply_role_agents(config, implementer_agent, reviewer_agent)
 
@@ -939,7 +971,7 @@ def configured_role_agents(
     config = config or load_executor_config(repo_root)
     roles: dict[str, dict[str, str]] = {}
     for role in ("implementer", "reviewer"):
-        agent = resolve_role_agent(config, role)
+        agent = resolve_role_agent(config, role, raw_overrides=config, use_env_overrides=False)
         roles[role] = {
             "agent": agent,
             "display_name": bridge_agent_display_name(repo_root, agent, bus_dir),
@@ -965,7 +997,14 @@ def load_executor_config(repo_root: Path) -> dict[str, Any]:
         raw_overrides = json.loads(config_path.read_text(encoding="utf-8"))
         config = merge_executor_config_overrides(raw_overrides)
     apply_recovery_config_env_overrides(config)
-    return _materialize_role_agents(config, raw_overrides=raw_overrides)
+    role_env_overrides_apply = _role_agent_env_overrides_apply(repo_root)
+    materialized = _materialize_role_agents(
+        config,
+        raw_overrides=raw_overrides,
+        use_env_overrides=role_env_overrides_apply,
+    )
+    materialized[ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY] = role_env_overrides_apply
+    return materialized
 
 
 def emit_pipeline_agent_event(
@@ -1335,6 +1374,7 @@ def build_post_merge_routing_record(
     tracked_packet: str,
     request_for_claude: str,
     summary: str,
+    request_for_agent: str = "",
     decision: str = "ROUTE_PHASE_A",
     merged_pr: int | None = None,
     merge_sha: str | None = None,
@@ -1358,7 +1398,8 @@ def build_post_merge_routing_record(
 
     Validation:
       - required non-empty strings: wave_name, task_id, tracked_packet,
-        request_for_claude, summary
+        request_for_agent (or deprecated request_for_claude compatibility input),
+        summary
       - decision in POST_MERGE_AUTHORIZED_DECISIONS (lazy-imported)
       - tracked_packet passes _validate_tracked_packet_for_builder
       - explicit tracked_packet Wave ID, when present, matches wave_name
@@ -1371,8 +1412,15 @@ def build_post_merge_routing_record(
         errors.append("wave_name is required (non-empty string)")
     if not isinstance(task_id, str) or not task_id.strip():
         errors.append("task_id is required (non-empty string)")
-    if not isinstance(request_for_claude, str) or not request_for_claude.strip():
-        errors.append("request_for_claude is required (non-empty string)")
+    request_text = ""
+    if isinstance(request_for_agent, str) and request_for_agent.strip():
+        request_text = request_for_agent.strip()
+    elif isinstance(request_for_claude, str) and request_for_claude.strip():
+        request_text = request_for_claude.strip()
+    if not request_text:
+        errors.append(
+            "request_for_agent is required (or deprecated request_for_claude compatibility input)"
+        )
     if not isinstance(summary, str) or not summary.strip():
         errors.append("summary is required (non-empty string)")
 
@@ -1449,7 +1497,10 @@ def build_post_merge_routing_record(
     record: dict[str, Any] = {
         "decision": decision,
         "summary": summary,
-        "request_for_claude": request_for_claude,
+        "request_for_agent": request_text,
+        # Deprecated compatibility output for old parsers. Do not use this as
+        # operator-facing truth; request_for_agent is the neutral request field.
+        "request_for_claude": request_text,
         "wave_name": wave_name,
         "task_id": task_id,
         "merged_pr": merged_pr,
@@ -1478,6 +1529,7 @@ def build_and_write_routing_record(
     tracked_packet: str,
     request_for_claude: str,
     summary: str,
+    request_for_agent: str = "",
     decision: str = "ROUTE_PHASE_A",
     merged_pr: int | None = None,
     merge_sha: str | None = None,
@@ -1503,6 +1555,7 @@ def build_and_write_routing_record(
         task_id=task_id,
         tracked_packet=tracked_packet,
         request_for_claude=request_for_claude,
+        request_for_agent=request_for_agent,
         summary=summary,
         decision=decision,
         merged_pr=merged_pr,

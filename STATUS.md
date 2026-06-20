@@ -49,7 +49,7 @@ NAME: Structural Selection Parity (L1-L3 COMPLETE)
 
 See [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchitecture.v0.md)
 
-**L4 current state:** full L4 completion remains in SINK, but bounded reduction work is active. VM cutover is ACTIVE. P7 Meta-Circular Reduction Chain complete (all 33 projections via Stage0 VM). See architecture doc for full chain details.
+**L4 current state:** full L4 completion remains in SINK, but bounded reduction work is active. VM cutover is ACTIVE. P7 Meta-Circular Reduction Chain complete (all 33 projections via Stage0 VM). The current autonomous execution order is tracked in `TASKS.md` under the active Codex queue; this file does not duplicate that queue. See architecture doc for full chain details.
 
 **Key facts (summary):**
 - 13 JS-loaded seed files run on both Python and JavaScript
@@ -161,6 +161,6 @@ Current Exhaustion Layer: META_CIRCULAR
 - Debt marker history: [`archive/status_debt_history.md`](archive/status_debt_history.md)
 - L3/L4 architecture details: [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchitecture.v0.md)
 
-**Last updated:** 2026-05-19 (N3 list-to-linked boundary demotion — tracked marker floor 7→5)
-**Next milestone:** Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET). Canonical authorization remains TASKS.md.
-**Active NEXT items:** See TASKS.md.
+**Last updated:** 2026-06-20 (queue-status-sync-2026-06-20 — active Codex queue pointer refreshed from the same-wave tracked packet/TASKS tracker note; Phase 8c/L4 bounded-reduction posture and debt counts unchanged by this docs-only sync)
+**Next milestone:** Continue the ordered active queue in TASKS.md; Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET). Canonical authorization remains TASKS.md.
+**Active NEXT items:** See `TASKS.md` NOW / active Codex autonomous queue; packet source is `reports/control_plane/queue-status-sync-2026-06-20_2026-06-20.md`.

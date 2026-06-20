@@ -6,6 +6,7 @@ import glob as _glob
 import json
 import os
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -18,11 +19,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 EXECUTORS_DIR = REPO_ROOT / "mu" / "tools" / "executors"
 if str(EXECUTORS_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTORS_DIR))
-DEFAULT_AGENT_DISPLAY_NAMES = {
-    "claude": "Claude Opus 4.7 max",
-    "codex": "Codex 5.5 xhigh",
-}
-
 try:
     from executor_common import (
         ExecutorCommonError,
@@ -69,6 +65,19 @@ except Exception:
         agent_name: str,
         bus_dir: str | Path | None = None,
     ) -> str:
+        config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            display_name = (
+                config.get("bridge_agent_defaults", {})
+                .get(agent_name, {})
+                .get("display_name", "")
+                .strip()
+            )
+            if display_name:
+                return display_name
+        except Exception:
+            pass
         config_path = bridge_config_path(repo_root, bus_dir)
         try:
             payload = json.loads(config_path.read_text(encoding="utf-8"))
@@ -82,7 +91,7 @@ except Exception:
                 return display_name
         except Exception:
             pass
-        return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
+        return agent_name.replace("_", " ").title()
 
     def load_routing_record(repo_root: Path, bus_dir: str | Path | None = None) -> dict[str, Any]:
         raise ExecutorCommonError(f"Routing record not available for {repo_root}")
@@ -161,6 +170,79 @@ def pid_command(pid):
     return ""
 
 
+def pid_cwd(pid) -> Path | None:
+    try:
+        r = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            for line in r.stdout.splitlines():
+                if line.startswith("n") and line[1:]:
+                    return Path(line[1:]).resolve()
+    except Exception:
+        pass
+    try:
+        return Path(f"/proc/{pid}/cwd").resolve()
+    except Exception:
+        return None
+
+
+def _selected_bus_dir() -> str:
+    try:
+        return str(agent_bus_relpath(ACTIVE_BUS_DIR))
+    except Exception:
+        return ".agent_bus"
+
+
+def _command_bus_markers(command: str) -> list[str]:
+    markers: list[str] = []
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    for index, token in enumerate(tokens):
+        if token == "--bus-dir" and index + 1 < len(tokens):
+            markers.append(tokens[index + 1])
+        elif token.startswith("--bus-dir="):
+            markers.append(token.split("=", 1)[1])
+    pattern = re.compile(
+        r"(?<![A-Za-z0-9_-])(?P<bus>\.agent_bus(?:-[A-Za-z0-9][A-Za-z0-9_-]*)?)"
+        r"(?=$|[/'\"\s:=])"
+    )
+    for match in pattern.finditer(command):
+        marker = match.group("bus")
+        if marker not in markers:
+            markers.append(marker)
+    return markers
+
+
+def pid_matches_repo_root(pid: int, command_line: str = "") -> bool:
+    repo_root = Path(REPO_ROOT).resolve()
+    if str(repo_root) in command_line:
+        return True
+    cwd = pid_cwd(pid)
+    return cwd == repo_root
+
+
+def pid_matches_selected_bus_dir(pid: int, command_line: str = "", max_depth: int = 8) -> bool:
+    selected = _selected_bus_dir()
+    current = pid
+    saw_marker = False
+    for depth in range(max_depth):
+        command = command_line if depth == 0 else pid_command(current)
+        for marker in _command_bus_markers(command or ""):
+            saw_marker = True
+            if marker != selected:
+                return False
+        parent = pid_ppid(current)
+        if not parent or parent == 1:
+            return saw_marker or selected == ".agent_bus"
+        current = parent
+    return saw_marker or selected == ".agent_bus"
+
+
+def pid_matches_active_identity(pid: int, command_line: str = "") -> bool:
+    return pid_matches_repo_root(pid, command_line) and pid_matches_selected_bus_dir(pid, command_line)
+
+
 def pid_has_ancestor_matching(pid, pattern, max_depth=8):
     current = pid
     for _ in range(max_depth):
@@ -176,7 +258,7 @@ def pid_has_ancestor_matching(pid, pattern, max_depth=8):
 def bridge_role_for_pid(pid):
     if pid_has_ancestor_matching(pid, r"recovery_gate\.py"):
         return "recovery"
-    if pid_has_ancestor_matching(pid, r"bridge_supervisor\.py review|meta_bridge_supervisor"):
+    if pid_has_ancestor_matching(pid, r"bridge_supervisor\.py(?:\s+\S+)*\s+review(?:\s|$)|meta_bridge_supervisor"):
         return "review"
     if pid_has_ancestor_matching(pid, r"phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py"):
         return "implement"
@@ -708,6 +790,7 @@ def _is_observability_noise(line: str) -> bool:
         or "pipeline_monitor.sh" in lowered
         or "autonomous workingrcx pipeline watchdog tick." in lowered
         or "workingrcx pipeline pager wakeup." in lowered
+        or "workingrcx dedicated claude monitor keepalive tick." in lowered
     )
 
 
@@ -732,6 +815,8 @@ def detect_subs(lines):
         agent_name = _bridge_agent_name_for_command(l)
         if agent_name:
             pid = int(l.split()[1])
+            if not pid_matches_active_identity(pid, l):
+                continue
             role = bridge_role_for_pid(pid)
             subs.append((f"{agent_name}-{role}", pid, pid_start(pid)))
         elif "run_review.py" in l:
@@ -993,7 +1078,12 @@ def _latest_meta_non_go_candidate(
         finding_title = _excerpt(finding.get("title", ""))
         if finding_title:
             break
-    reason = finding_title or _excerpt(env.get("request_for_claude", "")) or _excerpt(env.get("summary", ""))
+    reason = (
+        finding_title
+        or _excerpt(env.get("request_for_agent", ""))
+        or _excerpt(env.get("request_for_claude", ""))
+        or _excerpt(env.get("summary", ""))
+    )
     return {
         "category": "meta_needs_phase_b",
         "decision": decision,
