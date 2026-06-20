@@ -3422,6 +3422,7 @@ def _run(
     check: bool = True,
     timeout: int = 120,
     env: dict[str, str] | None = None,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a subprocess with sanitized env."""
     run_env = env
@@ -3429,7 +3430,7 @@ def _run(
         run_env = {k: v for k, v in os.environ.items() if not k.startswith("RCX_SKIP_")}
     return subprocess.run(
         args, cwd=cwd, capture_output=True, text=True, check=check,
-        timeout=timeout, env=run_env,
+        timeout=timeout, env=run_env, input=input_text,
     )
 
 
@@ -4297,6 +4298,215 @@ def _dirty_worktree_paths(repo_root: Path) -> set[str]:
     }
 
 
+def _primary_sync_changed_paths_in_range(
+    repo_root: Path,
+    old_sha: str,
+    new_sha: str,
+    paths: list[str],
+) -> tuple[set[str], str | None]:
+    """Return stashed paths touched by the pending ff range."""
+    if not paths:
+        return set(), None
+    proc = _run(
+        ["git", "diff", "--name-only", old_sha, new_sha, "--", *paths],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        return set(), (
+            "could not compare primary sync range against tracked WIP paths: "
+            f"{detail[:200] or proc.returncode}"
+        )
+    changed = {
+        path.strip()
+        for path in proc.stdout.splitlines()
+        if path.strip()
+    }
+    return changed & set(paths), None
+
+
+def _stash_primary_sync_tracked_wip(
+    repo_root: Path,
+    paths: list[str],
+    *,
+    log: Any,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Isolate exact tracked dirty paths before primary ff-sync."""
+    if not paths:
+        return None, None
+    current_tracked = _tracked_dirty_paths(repo_root)
+    missing_paths = sorted(set(paths) - current_tracked)
+    if missing_paths:
+        return None, (
+            "primary tracked WIP paths changed before stash creation: "
+            + ", ".join(missing_paths)
+        )
+
+    marker = f"commit_executor:primary_ffsync_tracked_wip:{uuid.uuid4().hex}"
+    result = _run(
+        ["git", "stash", "push", "-m", marker, "--", *paths],
+        cwd=repo_root,
+        check=False,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return None, (
+            "git stash push failed before primary ff-sync: "
+            f"{detail[:200] or result.returncode}"
+        )
+    stash_ref = _find_stash_ref_by_marker(repo_root, marker)
+    if stash_ref is None:
+        return None, (
+            "git stash push reported saved changes before primary ff-sync, "
+            "but the created stash ref could not be found"
+        )
+    ref, oid = stash_ref
+    log(
+        "Step 15b: isolated tracked primary WIP in "
+        f"{ref} ({oid}) for path(s): {', '.join(paths)}"
+    )
+    return {
+        "marker": marker,
+        "stash_ref": ref,
+        "stash_oid": oid,
+        "paths": list(paths),
+    }, None
+
+
+def _resolve_primary_sync_stash_record(
+    repo_root: Path,
+    stash_record: dict[str, Any] | None,
+) -> tuple[tuple[str, str] | None, str | None]:
+    """Resolve and validate an executor-owned primary-sync WIP stash."""
+    if not stash_record:
+        return None, None
+    marker = str(stash_record.get("marker") or "")
+    expected_oid = str(stash_record.get("stash_oid") or "")
+    resolved = _find_stash_ref_by_marker(repo_root, marker)
+    if resolved is None:
+        return None, f"primary ff-sync tracked-WIP stash missing for marker {marker}"
+    stash_ref, stash_oid = resolved
+    if expected_oid and stash_oid != expected_oid:
+        return None, (
+            "primary ff-sync tracked-WIP stash object id mismatch: "
+            f"expected {expected_oid}, found {stash_oid}"
+        )
+    return (stash_ref, stash_oid), None
+
+
+def _restore_primary_sync_tracked_wip(
+    repo_root: Path,
+    stash_record: dict[str, Any] | None,
+    *,
+    log: Any,
+) -> str | None:
+    """Restore executor-owned primary-sync WIP and fail closed on stash drift."""
+    resolved, resolve_error = _resolve_primary_sync_stash_record(
+        repo_root,
+        stash_record,
+    )
+    if resolve_error:
+        return resolve_error
+    if resolved is None:
+        return None
+    stash_ref, _stash_oid = resolved
+    pop = _run(
+        ["git", "stash", "pop", "--index", stash_ref],
+        cwd=repo_root,
+        check=False,
+        timeout=120,
+    )
+    if pop.returncode != 0:
+        detail = (pop.stderr or pop.stdout or "").strip()
+        return (
+            f"git stash pop --index {stash_ref} failed after primary ff-sync: "
+            f"{detail[:200] or pop.returncode}"
+        )
+    log(f"Step 15b: restored tracked primary WIP from {stash_ref}")
+    return None
+
+
+def _restore_primary_sync_tracked_wip_paths(
+    repo_root: Path,
+    stash_record: dict[str, Any] | None,
+    paths: list[str],
+    *,
+    log: Any,
+) -> str | None:
+    """Restore selected tracked WIP paths from an executor-owned stash."""
+    restore_paths = sorted(path for path in dict.fromkeys(paths) if path)
+    if not restore_paths:
+        return None
+    resolved, resolve_error = _resolve_primary_sync_stash_record(repo_root, stash_record)
+    if resolve_error:
+        return resolve_error
+    if resolved is None:
+        return None
+    stash_ref, stash_oid = resolved
+    # Stash commits keep HEAD at ^1, the saved index at ^2, and the saved
+    # worktree as the stash tree. Applying both deltas mirrors `stash pop
+    # --index` for only these paths.
+    patch_steps = [
+        (
+            f"{stash_oid}^1",
+            f"{stash_oid}^2",
+            ["--index", "--binary"],
+            "staged",
+        ),
+        (
+            f"{stash_oid}^2",
+            stash_oid,
+            ["--binary"],
+            "unstaged",
+        ),
+    ]
+    for before_ref, after_ref, apply_args, label in patch_steps:
+        diff = _run(
+            [
+                "git",
+                "diff",
+                "--binary",
+                "--no-ext-diff",
+                before_ref,
+                after_ref,
+                "--",
+                *restore_paths,
+            ],
+            cwd=repo_root,
+            check=False,
+            timeout=60,
+        )
+        if diff.returncode != 0:
+            detail = (diff.stderr or diff.stdout or "").strip()
+            return (
+                f"git diff for {label} tracked-WIP restore failed: "
+                f"{detail[:200] or diff.returncode}"
+            )
+        if not diff.stdout:
+            continue
+        apply = _run(
+            ["git", "apply", *apply_args],
+            cwd=repo_root,
+            check=False,
+            timeout=120,
+            input_text=diff.stdout,
+        )
+        if apply.returncode != 0:
+            detail = (apply.stderr or apply.stdout or "").strip()
+            return (
+                f"git apply for {label} tracked-WIP restore failed: "
+                f"{detail[:200] or apply.returncode}"
+            )
+    log(
+        "Step 15b: restored non-overlapping tracked primary WIP from "
+        f"{stash_ref} for path(s): {', '.join(restore_paths)}"
+    )
+    return None
+
+
 def _sync_primary_worktree_to_base(
     repo_root: Path,
     base_branch: str,
@@ -4322,10 +4532,12 @@ def _sync_primary_worktree_to_base(
 
     Guards (any miss -> SKIP):
       GUARD-A primary is on a FEATURE branch (not base_branch/main/master).
-      GUARD-B primary tree is CLEAN (never clobber founder WIP). The clean check
-              cannot see IGNORED files (it uses `--exclude-standard`), so the
-              ff merge additionally runs `--no-overwrite-ignore` to ABORT rather
-              than silently overwrite locally-ignored founder WIP.
+      GUARD-B tracked founder WIP is isolated only after fetch, ancestry, and
+              already-current checks prove a real ff is pending. Non-overlapping
+              tracked WIP is restored after the ff; overlapping WIP is left in an
+              executor-owned stash and reported. The ff merge additionally runs
+              `--no-overwrite-ignore` to ABORT rather than silently overwrite
+              locally-ignored founder WIP.
       GUARD-C primary HEAD is an ANCESTOR of origin/{base_branch} (a real
               fast-forward; divergent local commits are landed via a PR).
       GUARD-D a NON-BLOCKING file lock under the common git dir is acquired
@@ -4340,6 +4552,14 @@ def _sync_primary_worktree_to_base(
         "primary": None,
         "old_sha": None,
         "new_sha": None,
+        "tracked_wip_paths": [],
+        "tracked_wip_stash_marker": None,
+        "tracked_wip_stash_ref": None,
+        "tracked_wip_stash_oid": None,
+        "tracked_wip_overlap_paths": [],
+        "tracked_wip_restored": False,
+        "tracked_wip_left_stashed": False,
+        "tracked_wip_restore_error": None,
     }
 
     def _skip(reason: str) -> dict[str, Any]:
@@ -4395,18 +4615,6 @@ def _sync_primary_worktree_to_base(
                 f"primary worktree on base branch '{primary_branch}'; "
                 "PULL-ONLY helper never syncs a base-branch checkout"
             )
-
-        # GUARD-B: never clobber TRACKED founder WIP. Block ONLY on tracked dirt
-        # (staged/unstaged modifications). A `git merge --ff-only` CANNOT silently
-        # clobber UNTRACKED files (git aborts with "untracked working tree files would
-        # be overwritten by merge" on a path collision) or IGNORED files
-        # (--no-overwrite-ignore on the merge below). The old check used
-        # _dirty_worktree_paths (tracked | untracked), so the auto-sync SKIPPED whenever
-        # the primary held ANY untracked file -- a deferred report, handoff, or scratch
-        # artifact -- i.e. almost always, which is why the founder's main repo kept
-        # drifting behind base after standalone/dispatcher merges. (#55)
-        if _tracked_dirty_paths(primary):
-            return _skip(f"primary worktree {primary} has tracked WIP; not clobbering")
 
         # GUARD-D: parallel-lane safety. Take a NON-BLOCKING exclusive lock on a
         # lockfile under the shared common git dir so concurrent lane waves do
@@ -4469,6 +4677,33 @@ def _sync_primary_worktree_to_base(
                 outcome["new_sha"] = new_sha
                 return _skip(f"primary worktree already current at {new_sha[:8]}")
 
+            tracked_wip_paths = sorted(_tracked_dirty_paths(primary))
+            stash_record: dict[str, Any] | None = None
+            overlap_paths: list[str] = []
+            if tracked_wip_paths:
+                overlap_set, overlap_error = _primary_sync_changed_paths_in_range(
+                    primary,
+                    old_sha,
+                    new_sha,
+                    tracked_wip_paths,
+                )
+                if overlap_error:
+                    return _skip(overlap_error)
+                overlap_paths = sorted(overlap_set)
+                stash_record, stash_error = _stash_primary_sync_tracked_wip(
+                    primary,
+                    tracked_wip_paths,
+                    log=log,
+                )
+                if stash_error:
+                    return _skip(stash_error)
+                if stash_record is not None:
+                    outcome["tracked_wip_paths"] = list(tracked_wip_paths)
+                    outcome["tracked_wip_stash_marker"] = stash_record["marker"]
+                    outcome["tracked_wip_stash_ref"] = stash_record["stash_ref"]
+                    outcome["tracked_wip_stash_oid"] = stash_record["stash_oid"]
+                    outcome["tracked_wip_overlap_paths"] = list(overlap_paths)
+
             # PULL-ONLY ff: bring origin/{base_branch} DOWN into the primary's
             # CURRENT feature branch. --ff-only is the backstop that refuses any
             # non-fast-forward; we never push, checkout base, force, or reset.
@@ -4487,6 +4722,22 @@ def _sync_primary_worktree_to_base(
             )
             if merge_proc.returncode != 0:
                 detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
+                if stash_record is not None:
+                    restore_error = _restore_primary_sync_tracked_wip(
+                        primary,
+                        stash_record,
+                        log=log,
+                    )
+                    if restore_error:
+                        outcome["tracked_wip_left_stashed"] = True
+                        outcome["tracked_wip_restore_error"] = restore_error
+                        log(
+                            "Step 15b: tracked primary WIP remains in "
+                            f"{stash_record['stash_ref']} after ff failure; "
+                            f"restore failed: {restore_error}"
+                        )
+                    else:
+                        outcome["tracked_wip_restored"] = True
                 return _skip(
                     f"ff-only merge of {remote_ref} into '{primary_branch}' "
                     f"failed: {detail[:200]}"
@@ -4501,6 +4752,50 @@ def _sync_primary_worktree_to_base(
             outcome["primary"] = str(primary)
             outcome["old_sha"] = old_sha
             outcome["new_sha"] = synced_sha
+            if stash_record is not None:
+                if overlap_paths:
+                    non_overlap_paths = sorted(
+                        set(tracked_wip_paths) - set(overlap_paths)
+                    )
+                    if non_overlap_paths:
+                        restore_error = _restore_primary_sync_tracked_wip_paths(
+                            primary,
+                            stash_record,
+                            non_overlap_paths,
+                            log=log,
+                        )
+                        if restore_error:
+                            outcome["tracked_wip_restore_error"] = restore_error
+                            log(
+                                "Step 15b: non-overlapping tracked primary WIP "
+                                f"remains in {stash_record['stash_ref']} after "
+                                f"successful ff; restore failed: {restore_error}"
+                            )
+                        else:
+                            outcome["tracked_wip_restored"] = True
+                    outcome["tracked_wip_left_stashed"] = True
+                    log(
+                        "Step 15b: left overlapping tracked primary WIP in "
+                        f"{stash_record['stash_ref']} ({stash_record['stash_oid']}); "
+                        f"path(s): {', '.join(tracked_wip_paths)}; "
+                        f"overlap(s): {', '.join(overlap_paths)}"
+                    )
+                else:
+                    restore_error = _restore_primary_sync_tracked_wip(
+                        primary,
+                        stash_record,
+                        log=log,
+                    )
+                    if restore_error:
+                        outcome["tracked_wip_left_stashed"] = True
+                        outcome["tracked_wip_restore_error"] = restore_error
+                        log(
+                            "Step 15b: tracked primary WIP remains in "
+                            f"{stash_record['stash_ref']} after successful ff; "
+                            f"restore failed: {restore_error}"
+                        )
+                    else:
+                        outcome["tracked_wip_restored"] = True
             log(
                 f"Step 15b: synced primary worktree {primary} on "
                 f"'{primary_branch}' {(old_sha or '?')[:8]} -> "

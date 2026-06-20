@@ -1008,6 +1008,19 @@ def _advance_origin_dev(upstream: Path, env: dict, content: str = "seed-c1") -> 
     return _git(["rev-parse", "HEAD"], cwd=upstream, env=env).stdout.strip()
 
 
+def _advance_origin_dev_add_file(
+    upstream: Path,
+    env: dict,
+    path: str = "origin_only.txt",
+    content: str = "origin-only\n",
+) -> str:
+    """Commit a new non-overlapping file on upstream dev; return the new sha."""
+    (upstream / path).write_text(content)
+    _git(["add", path], cwd=upstream, env=env)
+    _git(["commit", "-m", f"C1 add {path}"], cwd=upstream, env=env)
+    return _git(["rev-parse", "HEAD"], cwd=upstream, env=env).stdout.strip()
+
+
 def test_sync_primary_ffs_feature_branch_behind_base(tmp_path):
     """(a) A PRIMARY on a feature branch behind origin/dev is ff'd to origin/dev,
     even when the helper is invoked from a DISTINCT linked worktree (repo_root).
@@ -1045,14 +1058,102 @@ def test_sync_primary_ffs_feature_branch_behind_base(tmp_path):
     assert linked_branch == "lane-x"
 
 
-def test_sync_primary_skips_dirty_primary(tmp_path):
-    """(b) A dirty PRIMARY is SKIPPED — founder WIP is never clobbered."""
+def test_sync_primary_restores_non_overlapping_tracked_wip(tmp_path):
+    """Tracked founder WIP is stashed only when a real ff is pending, then
+    restored with staged and unstaged state when origin/dev did not touch those
+    paths."""
     upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "jabramsja/feat-b"], cwd=primary, env=env)
-    feat_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
-    # Uncommitted edit to a tracked file → dirty tree.
-    (primary / "seed.txt").write_text("founder work in progress")
-    _advance_origin_dev(upstream, env)  # origin/dev ahead → sync WOULD apply if clean
+    # Staged + unstaged tracked WIP on seed.txt.
+    (primary / "seed.txt").write_text("staged founder WIP\n")
+    _git(["add", "seed.txt"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("unstaged founder WIP\n")
+    # Untracked scratch must remain in the worktree and must not enter the
+    # tracked-WIP stash.
+    (primary / "scratch.txt").write_text("untracked scratch\n")
+    c1_sha = _advance_origin_dev_add_file(upstream, env)
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert outcome["tracked_wip_paths"] == ["seed.txt"], outcome
+    assert outcome["tracked_wip_stash_marker"], outcome
+    assert outcome["tracked_wip_stash_ref"], outcome
+    assert outcome["tracked_wip_stash_oid"], outcome
+    assert outcome["tracked_wip_overlap_paths"] == [], outcome
+    assert outcome["tracked_wip_restored"] is True, outcome
+    assert outcome["tracked_wip_left_stashed"] is False, outcome
+    assert outcome["tracked_wip_restore_error"] is None, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    assert _git(["show", ":seed.txt"], cwd=primary).stdout == "staged founder WIP\n"
+    assert (primary / "seed.txt").read_text() == "unstaged founder WIP\n"
+    assert (primary / "scratch.txt").read_text() == "untracked scratch\n"
+    status_lines = set(_git(["status", "--short"], cwd=primary).stdout.splitlines())
+    assert "MM seed.txt" in status_lines
+    assert "?? scratch.txt" in status_lines
+    assert "commit_executor:primary_ffsync_tracked_wip" not in _git(
+        ["stash", "list"], cwd=primary
+    ).stdout
+
+
+def test_sync_primary_leaves_overlapping_tracked_wip_stashed(tmp_path):
+    """If origin/dev touches a tracked WIP path, the helper still ff-syncs but
+    leaves the WIP recoverable in an executor-owned stash with explicit
+    metadata instead of applying a conflicted stash into the primary worktree."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-overlap"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("staged founder WIP\n")
+    _git(["add", "seed.txt"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("unstaged founder WIP\n")
+    (primary / "scratch.txt").write_text("untracked scratch\n")
+    c1_sha = _advance_origin_dev(upstream, env, content="origin seed c1\n")
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert outcome["tracked_wip_paths"] == ["seed.txt"], outcome
+    assert outcome["tracked_wip_overlap_paths"] == ["seed.txt"], outcome
+    assert outcome["tracked_wip_stash_marker"], outcome
+    assert outcome["tracked_wip_stash_ref"], outcome
+    assert outcome["tracked_wip_stash_oid"], outcome
+    assert outcome["tracked_wip_restored"] is False, outcome
+    assert outcome["tracked_wip_left_stashed"] is True, outcome
+    assert outcome["tracked_wip_restore_error"] is None, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    assert (primary / "seed.txt").read_text() == "origin seed c1\n"
+    assert (primary / "scratch.txt").read_text() == "untracked scratch\n"
+    status_lines = set(_git(["status", "--short"], cwd=primary).stdout.splitlines())
+    assert "?? scratch.txt" in status_lines
+    assert all("seed.txt" not in line for line in status_lines)
+
+    stash_ref = outcome["tracked_wip_stash_ref"]
+    assert _git(["show", f"{stash_ref}:seed.txt"], cwd=primary).stdout == (
+        "unstaged founder WIP\n"
+    )
+    assert _git(["show", f"{stash_ref}^2:seed.txt"], cwd=primary).stdout == (
+        "staged founder WIP\n"
+    )
+    stash_paths = set(
+        _git(
+            ["stash", "show", "--name-only", stash_ref],
+            cwd=primary,
+        ).stdout.splitlines()
+    )
+    assert "seed.txt" in stash_paths
+    assert "scratch.txt" not in stash_paths
+
+
+def test_sync_primary_skips_already_current_before_stashing_tracked_wip(tmp_path):
+    """Tracked WIP on an already-current primary is not isolated in a stash."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-current"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("founder work in progress\n")
 
     outcome = commit_mod.sync_primary_worktree_to_base(
         repo_root=primary, base_branch="dev", log=_noop_log,
@@ -1060,10 +1161,12 @@ def test_sync_primary_skips_dirty_primary(tmp_path):
 
     assert outcome["synced"] is False, outcome
     assert outcome["skipped"] is True, outcome
-    assert "tracked WIP" in (outcome["reason"] or ""), outcome
-    # HEAD unchanged and the WIP edit is preserved.
-    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == feat_head
-    assert (primary / "seed.txt").read_text() == "founder work in progress"
+    assert "already current" in (outcome["reason"] or ""), outcome
+    assert outcome["tracked_wip_paths"] == [], outcome
+    assert outcome["tracked_wip_stash_ref"] is None, outcome
+    assert _git(["stash", "list"], cwd=primary).stdout.strip() == ""
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
+    assert (primary / "seed.txt").read_text() == "founder work in progress\n"
 
 
 def test_sync_primary_ffs_with_untracked_files_present(tmp_path):
@@ -1151,13 +1254,18 @@ def test_sync_primary_never_raises_on_error_paths(tmp_path):
     repo = _init_repo(tmp_path)  # on 'dev', no remote
     _git(["checkout", "-b", "jabramsja/feat-e"], cwd=repo)
     feat_head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    (repo / "seed.txt").write_text("dirty before failed fetch\n")
     outcome_no_origin = commit_mod.sync_primary_worktree_to_base(
         repo_root=repo, base_branch="dev", log=_noop_log,
     )
     assert outcome_no_origin["synced"] is False
     assert outcome_no_origin["skipped"] is True
+    assert "fetch origin dev failed" in (outcome_no_origin["reason"] or "")
+    assert outcome_no_origin["tracked_wip_paths"] == []
+    assert _git(["stash", "list"], cwd=repo).stdout.strip() == ""
     # Nothing destroyed — HEAD intact on the feature branch.
     assert _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip() == feat_head
+    assert (repo / "seed.txt").read_text() == "dirty before failed fetch\n"
 
 
 def test_sync_primary_is_pull_only_no_push_checkout_force_or_reset(tmp_path, monkeypatch):
