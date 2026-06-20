@@ -46,7 +46,7 @@ Files and surfaces in scope:
 
 ## Validation gates
 
-- evidence_command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id active-queue-post-gcd-status-sync-2026-06-20 --output reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json`
+- evidence_command: `./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id active-queue-post-gcd-status-sync-2026-06-20`
 
 ## Acceptance criteria
 
@@ -90,8 +90,8 @@ FOUNDER_OVERRIDE:active-queue-post-gcd-status-sync-2026-06-20
 - `indicator_artifact_ref`: reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json.
 - `indicator_collection_command`: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id active-queue-post-gcd-status-sync-2026-06-20 --output reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json.
 - `target_gate_id`: G8.
-- `evidence_command`: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id active-queue-post-gcd-status-sync-2026-06-20 --output reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json`.
-- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_2026-06-20.md. (2) Commit handoff carries 5 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
+- `evidence_command`: `./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id active-queue-post-gcd-status-sync-2026-06-20`.
+- `evidence_delta`: (1) TASKS.md marks the already-landed Codex autoping idle-summary refresh, structural GCD Python gate, and structural GCD JS parity gate as completed queue work with direct merge evidence. (2) TASKS.md makes STRUCTURAL-NUMBERS-RATIONALS-2026-06-19 the current next sequential wave, then preserves the Stage 4, Stage 5, and narrow pipeline-fix order. (3) STATUS.md points at this refreshed active queue and packet without changing Phase 8c, debt counts, or runtime/substrate posture.
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
 - `boot0_progress_state`: HOLD.
@@ -104,16 +104,14 @@ FOUNDER_OVERRIDE:active-queue-post-gcd-status-sync-2026-06-20
 - Refresh wave: `active-queue-post-gcd-status-sync-2026-06-20`
 - Active packet: `reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_2026-06-20.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `3c0631a027956a38cd6f582beff62ffae8a79ee92d1b4b8712377c46969a934d`
+- Tracker note sha256: `845475f3856d087fdb2f41b59d6db4eb1817282eeeb1dd164d8a1e41ddd42cb0`
 - Indicator artifact: `reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json`
-- Evidence command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id active-queue-post-gcd-status-sync-2026-06-20 --output reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_2026-06-20.md. (2) Commit handoff carries 5 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
+- Evidence command: `./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id active-queue-post-gcd-status-sync-2026-06-20`.
+- Evidence delta: (1) TASKS.md marks the already-landed Codex autoping idle-summary refresh, structural GCD Python gate, and structural GCD JS parity gate as completed queue work with direct merge evidence. (2) TASKS.md makes STRUCTURAL-NUMBERS-RATIONALS-2026-06-19 the current next sequential wave, then preserves the Stage 4, Stage 5, and narrow pipeline-fix order. (3) STATUS.md points at this refreshed active queue and packet without changing Phase 8c, debt counts, or runtime/substrate posture.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json`
 - Current staged files:
-  - `STATUS.md`
   - `TASKS.md`
   - `reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_2026-06-20.md`
-  - `reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_wave_config.json`
   - `reports/l4_wave_indicators/active-queue-post-gcd-status-sync-2026-06-20.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
