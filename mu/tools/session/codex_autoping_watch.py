@@ -426,6 +426,28 @@ def _attention_required_summary(
     )
 
 
+def _idle_no_wave_summary(
+    *,
+    repo_root: Path,
+    bus_dir: str,
+    bridge_state: dict[str, object],
+) -> str:
+    wave_root = bridge_state.get("wave_root")
+    if wave_root:
+        reason = "no latest bridge job"
+        context_name = "wave_root"
+        context_value = str(wave_root)
+    else:
+        reason = "no active wave root"
+        context_name = "repo_root"
+        context_value = str(repo_root)
+    return _clip_summary(
+        "idle/no active wave; no foreground action required: "
+        f"{reason} using bus `{bus_dir}` for {context_name} `{context_value}`",
+        limit=500,
+    )
+
+
 def _strip_message_preamble(text: str) -> str:
     cleaned = text.replace("\r", "\n").strip()
     if cleaned.startswith("Contract active: founder XML + repo protocol in force."):
@@ -909,8 +931,14 @@ def main() -> int:
         bridge_state = _read_bridge_state(wave_root, bus_dir=bus_dir)
         tmux_tail = _read_tmux_tail(args.tmux_pane)
         bridge_signature = _bridge_state_signature(bridge_state, tmux_tail)
-        attention_summary = _attention_required_summary(bridge_state, tmux_tail)
+
         if wave_root is None or bridge_state.get("job") is None:
+            idle_summary = _idle_no_wave_summary(
+                repo_root=repo_root,
+                bus_dir=bus_dir,
+                bridge_state=bridge_state,
+            )
+            _write_text(summary_path, idle_summary + "\n")
             _write_state(
                 state_path,
                 {
@@ -923,6 +951,9 @@ def main() -> int:
                     "active_mode": None,
                     "last_exit_code": None,
                     "wave_root": str(wave_root) if wave_root else None,
+                    "last_idle_at": _now(),
+                    "last_bridge_signature": bridge_signature,
+                    "last_summary": idle_summary,
                     "summary_path": str(summary_path),
                     "bridge_state": bridge_state,
                     "tmux_tail": tmux_tail,
@@ -931,6 +962,7 @@ def main() -> int:
             time.sleep(args.interval)
             continue
 
+        attention_summary = _attention_required_summary(bridge_state, tmux_tail)
         if attention_summary:
             _write_text(summary_path, attention_summary + "\n")
             _notify_tmux_summary(args.tmux_session, attention_summary)
