@@ -161,6 +161,6 @@ Current Exhaustion Layer: META_CIRCULAR
 - Debt marker history: [`archive/status_debt_history.md`](archive/status_debt_history.md)
 - L3/L4 architecture details: [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchitecture.v0.md)
 
-**Last updated:** 2026-06-20 (active-queue-post-gcd-status-sync-2026-06-20 — active Codex queue pointer refreshed after PR #1123, PR #1126, and PR #1127 landed; Phase 8c/L4 bounded-reduction posture and debt counts unchanged by this docs-only sync)
-**Next milestone:** Continue the ordered active queue in TASKS.md with `STRUCTURAL-NUMBERS-RATIONALS-2026-06-19` as the current next sequential wave; Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET). Canonical authorization remains TASKS.md.
-**Active NEXT items:** See `TASKS.md` NOW / active Codex autonomous queue; packet source is `reports/control_plane/active-queue-post-gcd-status-sync-2026-06-20_2026-06-20.md`.
+**Last updated:** 2026-06-20 (active-queue-wip-preservation-sync-2026-06-20 — active Codex queue pointer refreshed after PR #1129, PR #1130, and PR #1131 landed; WIP preservation, Stage0 blocked reduction recovery, and easy-switch propagation are explicitly queued; Phase 8c/L4 bounded-reduction posture and debt counts unchanged by this docs-only sync)
+**Next milestone:** Continue the ordered active queue in TASKS.md with `STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19` as the current next sequential StructuralNumbers wave; Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET). Canonical authorization remains TASKS.md.
+**Active NEXT items:** See `TASKS.md` NOW / active Codex autonomous queue; packet source is `reports/control_plane/active-queue-wip-preservation-sync-2026-06-20_2026-06-20.md`.

@@ -1,0 +1,64 @@
+{
+  "wave_id": "active-queue-wip-preservation-sync-2026-06-20",
+  "title": "Active Queue WIP Preservation Sync 2026-06-20",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Refresh the visible autonomous TASKS.md queue after PR #1129, PR #1130, and PR #1131 landed, and make WIP preservation, dirty-worktree recovery, Stage0 blocked reduction, StructuralNumbers next steps, and easy-switch propagation explicit queued work rather than session memory.",
+  "date": "2026-06-20",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/active-queue-wip-preservation-sync-2026-06-20.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id active-queue-wip-preservation-sync-2026-06-20 --output reports/l4_wave_indicators/active-queue-wip-preservation-sync-2026-06-20.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id active-queue-wip-preservation-sync-2026-06-20",
+  "evidence_delta": "(1) TASKS.md moves StructuralNumbers rationals into completed queue work using PR #1129 merge evidence and sets Stage 4 design as the next sequential StructuralNumbers wave. (2) TASKS.md explicitly queues the easy-switch propagation fix, WIP preservation/dirty-worktree recovery, Stage0 blocked reduction decision/recovery, and remaining pipeline structural fixes. (3) STATUS.md points at this refreshed queue without changing Phase 8c/L4 bounded-reduction posture or debt counts.",
+  "progress_proof_before": "Direct repo evidence after PR #1131 shows dev at e1894d64 with PR #1129, PR #1130, and PR #1131 merged, while TASKS.md still calls STRUCTURAL-NUMBERS-RATIONALS-2026-06-19 CURRENT NEXT and does not list the discovered easy-switch handoff propagation gap, WIP preservation follow-up, or Stage0 contradiction recovery in the visible autonomous queue.",
+  "progress_proof_after": "The visible NOW queue distinguishes landed StructuralNumbers and pipeline prerequisites from remaining work, names Stage 4 design as current next, and explicitly preserves the WIP/Stage0/easy-switch work as queued items with preservation snapshot evidence.",
+  "structural_artifact_ref": "TASKS.md; STATUS.md; reports/control_plane/active-queue-wip-preservation-sync-2026-06-20_wave_config.json",
+  "scope_summary": "Docs/control-plane queue cleanup only. Update TASKS.md and STATUS.md so current work, preserved WIP, and discovered pipeline follow-ups are visible and ordered. Do not touch runtime, substrate, Stage0 implementation code, StructuralNumbers implementation tests, role/pager code, autoping, tmux scripts, or dirty WIP worktrees in this wave.",
+  "scope_items": [
+    "TASKS.md (MODIFY) -- refresh the NOW active Codex autonomous queue with completed StructuralNumbers rationals, Stage 4 design as current next, WIP preservation, Stage0 contradiction recovery, easy-switch propagation, and pipeline fix backlog.",
+    "STATUS.md (MODIFY) -- update the last-updated / next-milestone pointer to this queue packet while leaving Phase 8c and debt-count truth unchanged.",
+    "reports/control_plane/active-queue-wip-preservation-sync-2026-06-20_wave_config.json (NEW) -- launcher config for this docs/control-plane cleanup.",
+    "reports/control_plane/active-queue-wip-preservation-sync-2026-06-20_2026-06-20.md (GENERATED) -- launcher-created control packet.",
+    "reports/l4_wave_indicators/active-queue-wip-preservation-sync-2026-06-20.json (GENERATED) -- same-wave L4 indicator artifact."
+  ],
+  "work_items": [
+    "Ground completed work in direct merge evidence: PR #1129 structural-numbers-rationals, PR #1130 phase-b blocking convergence hardening, and PR #1131 primary ff-sync tracked-WIP preservation.",
+    "Move STRUCTURAL-NUMBERS-RATIONALS-2026-06-19 from remaining work to completed queue work and set STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19 as CURRENT NEXT.",
+    "Add explicit queued WIP-preservation work: preserve main dirty worktree, lane1 Stage0 staged work, lane3 observability work, stash contents, and the local preservation snapshot path before any rebase/sync/cleanup.",
+    "Add explicit queued Stage0 recovery work: resolve the n3-stage0-content-addressed-mu-typedispatch Phase A contradiction before committing or rebasing its staged implementation.",
+    "Add explicit queued easy-switch hardening: propagate orchestrator/implementer/reviewer/pager/autoping/tmux switch state through launch_wave, routing, Phase B handoff, commit_executor, and dashboards instead of relying on process env.",
+    "Preserve the remaining pipeline fix order and parallelization rule, including that StructuralNumbers gate waves are sequential while non-overlapping pipeline fixes may use parallel waves."
+  ],
+  "constraints": [
+    "Use launch_wave.py for packet/tracker setup.",
+    "Do not edit or normalize dirty WIP worktrees in this docs sync wave.",
+    "Do not commit, stash, rebase, reset, or clean the Stage0 lane from this wave.",
+    "Do not touch runtime, substrate, seed, scheduler, registry, projection, Stage0 implementation, StructuralNumbers implementation tests, role agent config, pager route code, autoping watcher code, or tmux scripts.",
+    "Do not claim Stage0 or dirty-worktree recovery is complete; this wave only makes the queued work visible and preservation-bound.",
+    "Do not launch the Stage 4, Stage0 recovery, or easy-switch implementation waves from inside this docs cleanup wave."
+  ],
+  "stop_conditions": [
+    "Stop done when TASKS.md and STATUS.md agree on the refreshed queue, docs consistency and focused docs tests pass, strict staged L4 validation passes, the indicator artifact is collected, and follow-up implementation waves remain queued.",
+    "Halt as DOC_ACCURACY if direct git evidence does not prove PR #1129, PR #1130, and PR #1131 are merged on the branch being updated.",
+    "Halt as WIP_RISK if the edit requires mutating dirty WIP lanes or reordering Stage0 staged files.",
+    "Do not commit without a real tracked source artifact and gate-green evidence."
+  ],
+  "acceptance_criteria": [
+    "TASKS.md marks STRUCTURAL-NUMBERS-RATIONALS-2026-06-19 as landed and names STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19 as CURRENT NEXT.",
+    "TASKS.md explicitly lists WIP preservation / dirty-worktree recovery, Stage0 blocked reduction decision/recovery, easy-switch propagation, and pipeline fix backlog as remaining work.",
+    "TASKS.md preserves the StructuralNumbers sequential rule and conditional parallel-pipeline rule.",
+    "STATUS.md references this refreshed queue and packet while leaving Phase 8c/debt truth unchanged.",
+    "No runtime/substrate/seed/parity files are touched."
+  ],
+  "request_for_agent": "Implement a bounded docs truth-sync through the pipeline: refresh TASKS.md and STATUS.md after PR #1129/#1130/#1131, make WIP preservation and Stage0/easy-switch follow-ups visible in the active queue, keep the diff docs/control-plane only, run the configured evidence command, and do not mutate dirty WIP worktrees.",
+  "request_for_claude": "Compatibility input only: this queue/status cleanup is to be implemented and reviewed by Codex agents. Do not treat Claude as the active operator for this wave.",
+  "authorization_note": "Founder-directed request on 2026-06-20: put WIP issues, Stage0 reduction, StructuralNumbers progress, commit/dirty-worktree fixes, and future easy-switch hardening in TASKS.md so the autonomous queue remains explicit.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Docs/control-plane active queue cleanup for WIP preservation, Stage0, StructuralNumbers, and easy-switch follow-ups.",
+  "tracked_packet": "reports/control_plane/active-queue-wip-preservation-sync-2026-06-20_2026-06-20.md"
+}
