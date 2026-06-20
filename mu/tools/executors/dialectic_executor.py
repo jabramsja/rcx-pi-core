@@ -109,7 +109,7 @@ Round {round_number} of {max_rounds}.
 ## Routing Context
 
 Summary: {routing_record.get('summary', '')}
-Request: {routing_record.get('request_for_claude', '')}
+Request: {routing_record.get('request_for_agent') or routing_record.get('request_for_claude', '')}
 
 ## Rollout Context (first 2000 chars)
 

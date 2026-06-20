@@ -125,12 +125,24 @@ if [ -z "$THREAD_ID" ]; then
     exit 0
 fi
 
-WATCH_SCRIPT="$REPO/tools/session/codex_autoping_watch.py"
+resolve_session_script() {
+    local name="$1"
+    local candidate=""
+    for candidate in "$REPO/mu/tools/session/$name" "$REPO/tools/session/$name"; do
+        if [ -f "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    printf '%s\n' "$REPO/mu/tools/session/$name"
+}
+
+WATCH_SCRIPT="$(resolve_session_script codex_autoping_watch.py)"
 if [ ! -f "$WATCH_SCRIPT" ]; then
     echo "Codex autoping: missing watcher script at $WATCH_SCRIPT"
     exit 1
 fi
-WINDOW_SCRIPT="$REPO/tools/session/codex_autoping_window.sh"
+WINDOW_SCRIPT="$(resolve_session_script codex_autoping_window.sh)"
 if [ ! -f "$WINDOW_SCRIPT" ]; then
     echo "Codex autoping: missing tmux window script at $WINDOW_SCRIPT"
     exit 1
@@ -239,9 +251,13 @@ fi
 
 tmux_session_active=0
 tmux_autoping_window_present=0
+autoping_window_ids() {
+    tmux list-windows -t "$TMUX_SESSION" -F '#{window_id} #{window_name}' 2>/dev/null \
+        | awk '$2 == "AUTO-PING" { print $1 }'
+}
 if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     tmux_session_active=1
-    if tmux list-windows -t "$TMUX_SESSION" -F '#W' 2>/dev/null | grep -qx 'AUTO-PING'; then
+    if autoping_window_ids | grep -q .; then
         tmux_autoping_window_present=1
     fi
 fi
@@ -330,10 +346,12 @@ WINDOW_CMD_STRING="${WINDOW_CMD_STRING% }"
 
 if [ "$tmux_session_active" -eq 1 ]; then
     if [ "$tmux_autoping_window_present" -eq 1 ]; then
-        tmux respawn-window -k -t "$TMUX_SESSION:AUTO-PING" "$WINDOW_CMD_STRING"
-    else
-        tmux new-window -d -t "$TMUX_SESSION" -n "AUTO-PING" "$WINDOW_CMD_STRING"
+        while IFS= read -r window_id; do
+            [ -n "$window_id" ] || continue
+            tmux kill-window -t "$window_id" 2>/dev/null || true
+        done < <(autoping_window_ids)
     fi
+    tmux new-window -d -t "$TMUX_SESSION" -n "AUTO-PING" "$WINDOW_CMD_STRING"
     echo "Codex autoping: ACTIVE in tmux-managed AUTO-PING window for thread $THREAD_ID"
 else
     nohup "${CMD[@]}" >"$RUNNER_LOG" 2>&1 </dev/null &

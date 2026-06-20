@@ -11616,22 +11616,31 @@ def land_stranded_pr(
 
 
 # ── Growth-cap auto-bump (FOUNDER_OVERRIDE-gated) ─────────────────────────
-# A wave that adds a NEW test file pushes the repo's test_*.py count over the
-# CAP_TEST_FILES gate (mu/tests/docs/test_growth_caps.py), stranding the commit
-# at Step 8 (pre-commit-doc-check). This automates the founder-authorized
-# recovery — bump CAP_TEST_FILES by exactly the cap shortfall the COMMITTED test
-# set implies (the git index, never untracked working-tree strays) — but ONLY for
-# a wave that carries the same FOUNDER_OVERRIDE token Gate 8 already validates. No
-# override -> do nothing (fail-closed; the gate strands the commit exactly as
-# today). The bump never weakens the ratchet: it raises the cap by the minimal
-# increment the committed count requires, never the raw new-file count, never the
-# count of untracked/generated strays, and never when the cap already covers the
-# count.
+# A wave that adds a NEW test file or tool script can push the repo over the
+# CAP_TEST_FILES / CAP_TOOL_SCRIPTS gates (mu/tests/docs/test_growth_caps.py),
+# stranding the commit at Step 8 (pre-commit-doc-check). This automates the
+# founder-authorized recovery — bump the relevant CAP_* value by exactly the cap
+# shortfall the COMMITTED set implies (the git index, never untracked working-tree
+# strays) — but ONLY for a wave that carries the same FOUNDER_OVERRIDE token Gate
+# 8 already validates. No override -> do nothing (fail-closed; the gate strands
+# the commit exactly as today). The bump never weakens the ratchet: it raises the
+# cap by the minimal increment the committed count requires, never the raw
+# new-file count, never the count of untracked/generated strays, and never when
+# the cap already covers the count.
 
 GROWTH_CAP_TEST_RELPATH = "mu/tests/docs/test_growth_caps.py"
-_GROWTH_CAP_BASELINE_RE = re.compile(r"^BASELINE_TEST_FILES\s*=\s*(\d+)", re.MULTILINE)
-_GROWTH_CAP_VALUE_RE = re.compile(
+_GROWTH_CAP_TEST_BASELINE_RE = re.compile(
+    r"^BASELINE_TEST_FILES\s*=\s*(\d+)", re.MULTILINE
+)
+_GROWTH_CAP_TOOL_BASELINE_RE = re.compile(
+    r"^BASELINE_TOOL_SCRIPTS\s*=\s*(\d+)", re.MULTILINE
+)
+_GROWTH_CAP_TEST_VALUE_RE = re.compile(
     r"^(?P<prefix>CAP_TEST_FILES\s*=\s*)(?P<value>\d+)(?P<rest>[^\n]*)$",
+    re.MULTILINE,
+)
+_GROWTH_CAP_TOOL_VALUE_RE = re.compile(
+    r"^(?P<prefix>CAP_TOOL_SCRIPTS\s*=\s*)(?P<value>\d+)(?P<rest>[^\n]*)$",
     re.MULTILINE,
 )
 
@@ -11643,6 +11652,14 @@ def _is_mu_test_file_path(relpath: str) -> bool:
         return False
     name = normalized.rsplit("/", 1)[-1]
     return name.startswith("test_") and name.endswith(".py")
+
+
+def _is_mu_tool_script_path(relpath: str) -> bool:
+    """Mirror test_growth_caps rglob('*.py') + rglob('*.sh') under mu/tools."""
+    normalized = _normalize_repo_relpath(relpath)
+    if not normalized.startswith("mu/tools/"):
+        return False
+    return normalized.endswith((".py", ".sh"))
 
 
 def _count_tracked_mu_test_files(repo_root: Path) -> int:
@@ -11672,6 +11689,21 @@ def _count_tracked_mu_test_files(repo_root: Path) -> int:
         1
         for line in proc.stdout.splitlines()
         if line.strip() and _is_mu_test_file_path(line)
+    )
+
+
+def _count_tracked_mu_tool_scripts(repo_root: Path) -> int:
+    """Count TRACKED (committed + staged) mu/tools/**/*.{py,sh} via the git index."""
+    proc = _run(
+        ["git", "ls-files", "--", "mu/tools"],
+        cwd=repo_root, check=False, timeout=30,
+    )
+    if proc.returncode != 0:
+        return 0
+    return sum(
+        1
+        for line in proc.stdout.splitlines()
+        if line.strip() and _is_mu_tool_script_path(line)
     )
 
 
@@ -11720,8 +11752,27 @@ def _new_mu_test_files_vs_merge_base(repo_root: Path, base_branch: str) -> list[
     return sorted({path for path in added if _is_mu_test_file_path(path)})
 
 
+def _new_mu_tool_scripts_vs_merge_base(repo_root: Path, base_branch: str) -> list[str]:
+    """Staged mu/tools/**/*.{py,sh} paths ABSENT on the merge base."""
+    merge_base = _resolve_base_merge_base_sha(repo_root, base_branch)
+    if not merge_base:
+        return []
+    proc = _run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=A", merge_base],
+        cwd=repo_root, check=False, timeout=30,
+    )
+    if proc.returncode != 0:
+        return []
+    added = [
+        _normalize_repo_relpath(line)
+        for line in proc.stdout.splitlines()
+        if line.strip()
+    ]
+    return sorted({path for path in added if _is_mu_tool_script_path(path)})
+
+
 def _cap_provenance_records_wave(cap_comment: str, wave_id: str) -> bool:
-    """True when the CAP_TEST_FILES comment already records THIS wave."""
+    """True when a CAP_* comment already records THIS wave."""
     if not cap_comment:
         return False
     if _extract_same_wave_founder_override_token(cap_comment, wave_id):
@@ -11766,23 +11817,25 @@ def _maybe_autobump_growth_cap_for_founder_override(
     founder_override_token: str,
     log: Any,
 ) -> dict[str, Any]:
-    """Automate the founder-authorized CAP_TEST_FILES bump before the Step 8 gate.
+    """Automate founder-authorized CAP_TEST_FILES/CAP_TOOL_SCRIPTS bumps.
 
     Returns a structured outcome. Mutates mu/tests/docs/test_growth_caps.py and
-    stages it ONLY on a genuine bump: a wave that (1) adds >=1 new staged test
-    file absent on the merge base, (2) whose committed (git-index) test_*.py count
-    exceeds BASELINE_TEST_FILES + CAP_TEST_FILES by a positive shortfall, (3) has no
-    prior same-wave provenance, and (4) carries the FOUNDER_OVERRIDE token Gate 8
-    validates. Any other case is a no-op (fail-closed); the gate strands the
-    commit exactly as today.
+    stages it ONLY on a genuine bump: a wave that (1) adds >=1 new staged file
+    for a governed growth cap absent on the merge base, (2) whose committed
+    (git-index) count exceeds the relevant baseline + cap by a positive shortfall,
+    (3) has no prior same-wave provenance on that cap, and (4) carries the
+    FOUNDER_OVERRIDE token Gate 8 validates. Any other case is a no-op
+    (fail-closed); the gate strands the commit exactly as today.
     """
     outcome: dict[str, Any] = {
         "bumped": False,
         "shortfall": 0,
         "bump_amount": 0,
         "new_test_files": [],
+        "new_tool_scripts": [],
         "previous_cap": None,
         "new_cap": None,
+        "cap_bumps": {},
         "reason": "",
     }
     cap_file = repo_root / "mu" / "tests" / "docs" / "test_growth_caps.py"
@@ -11790,79 +11843,172 @@ def _maybe_autobump_growth_cap_for_founder_override(
         outcome["reason"] = "growth_cap_file_absent"
         return outcome
 
-    # (1) Detect genuinely-new staged test files (absent on the merge base).
+    # (1) Detect genuinely-new staged governed files (absent on the merge base).
     new_test_files = _new_mu_test_files_vs_merge_base(repo_root, base_branch)
+    new_tool_scripts = _new_mu_tool_scripts_vs_merge_base(repo_root, base_branch)
     outcome["new_test_files"] = new_test_files
-    if not new_test_files:
+    outcome["new_tool_scripts"] = new_tool_scripts
+    if not new_test_files and not new_tool_scripts:
+        # Preserve the legacy reason for existing tests/callers. There are no
+        # governed additions of any type here.
         outcome["reason"] = "no_new_test_files"
         return outcome
 
-    # (2) Compute the cap SHORTFALL from the COMMITTED (git-index) test count —
-    # NOT the on-disk rglob (which would fold in untracked working-tree strays and
-    # permanently over-grant the cap) and NOT the raw new-file count.
+    # (2) Compute cap SHORTFALLS from COMMITTED (git-index) counts — NOT on-disk
+    # rglob counts (which would fold in untracked working-tree strays and
+    # permanently over-grant a cap) and NOT raw new-file counts.
     try:
         cap_text = cap_file.read_text(encoding="utf-8")
     except OSError:
         outcome["reason"] = "growth_cap_file_unreadable"
         return outcome
-    baseline_match = _GROWTH_CAP_BASELINE_RE.search(cap_text)
-    cap_match = _GROWTH_CAP_VALUE_RE.search(cap_text)
-    if baseline_match is None or cap_match is None:
-        outcome["reason"] = "growth_cap_constants_unparsed"
-        return outcome
-    baseline = int(baseline_match.group(1))
-    current_cap = int(cap_match.group("value"))
-    outcome["previous_cap"] = current_cap
-    projected_count = _count_tracked_mu_test_files(repo_root)
-    shortfall = projected_count - (baseline + current_cap)
-    outcome["shortfall"] = shortfall
 
-    # (3) Idempotency guard: this wave's provenance is already recorded.
-    cap_comment = cap_match.group("rest")
-    if _cap_provenance_records_wave(cap_comment, wave_id):
-        outcome["reason"] = "already_recorded"
-        log(
-            f"Step 5e: CAP_TEST_FILES already records FOUNDER_OVERRIDE wave "
-            f"{wave_id}; no bump (idempotent retry)"
+    target_specs = [
+        {
+            "cap_name": "CAP_TEST_FILES",
+            "baseline_re": _GROWTH_CAP_TEST_BASELINE_RE,
+            "cap_re": _GROWTH_CAP_TEST_VALUE_RE,
+            "new_paths": new_test_files,
+            "projected_count": _count_tracked_mu_test_files(repo_root),
+            "noun": "test file(s)",
+        },
+        {
+            "cap_name": "CAP_TOOL_SCRIPTS",
+            "baseline_re": _GROWTH_CAP_TOOL_BASELINE_RE,
+            "cap_re": _GROWTH_CAP_TOOL_VALUE_RE,
+            "new_paths": new_tool_scripts,
+            "projected_count": _count_tracked_mu_tool_scripts(repo_root),
+            "noun": "tool script(s)",
+        },
+    ]
+    bump_edits: list[dict[str, Any]] = []
+    target_reasons: list[str] = []
+
+    for spec in target_specs:
+        new_paths = list(spec["new_paths"])
+        if not new_paths:
+            continue
+        cap_name = str(spec["cap_name"])
+        baseline_match = spec["baseline_re"].search(cap_text)
+        cap_match = spec["cap_re"].search(cap_text)
+        if baseline_match is None or cap_match is None:
+            outcome["reason"] = "growth_cap_constants_unparsed"
+            return outcome
+        baseline = int(baseline_match.group(1))
+        current_cap = int(cap_match.group("value"))
+        projected_count = int(spec["projected_count"])
+        shortfall = projected_count - (baseline + current_cap)
+        cap_comment = cap_match.group("rest")
+        target_outcome = {
+            "bumped": False,
+            "shortfall": shortfall,
+            "bump_amount": 0,
+            "new_paths": new_paths,
+            "previous_cap": current_cap,
+            "new_cap": None,
+            "reason": "",
+        }
+        outcome["cap_bumps"][cap_name] = target_outcome
+        if outcome["previous_cap"] is None or cap_name == "CAP_TEST_FILES":
+            outcome["previous_cap"] = current_cap
+            outcome["shortfall"] = shortfall
+
+        # (3) Idempotency guard: this wave's provenance is already recorded on
+        # this cap. Continue, because another cap in the same file may still need
+        # a first-time bump on a retry.
+        if _cap_provenance_records_wave(cap_comment, wave_id):
+            target_outcome["reason"] = "already_recorded"
+            target_reasons.append("already_recorded")
+            log(
+                f"Step 5e: {cap_name} already records FOUNDER_OVERRIDE wave "
+                f"{wave_id}; no bump (idempotent retry)"
+            )
+            continue
+
+        # (4) Headroom / consolidation: this cap already covers the count.
+        if shortfall <= 0:
+            target_outcome["reason"] = "zero_shortfall"
+            target_reasons.append("zero_shortfall")
+            log(
+                f"Step 5e: {cap_name} auto-bump no-op for wave {wave_id} "
+                f"(shortfall={shortfall} <= 0; headroom/consolidation)"
+            )
+            continue
+
+        # (5) Fail-closed: a wave with no FOUNDER_OVERRIDE is never auto-bumped.
+        if not (founder_override_token or "").strip():
+            outcome["reason"] = "no_founder_override"
+            target_outcome["reason"] = "no_founder_override"
+            log(
+                f"Step 5e: new {spec['noun']} push {cap_name} over cap "
+                f"(shortfall={shortfall}) but wave {wave_id} carries no "
+                f"FOUNDER_OVERRIDE; growth-cap gate will strand the commit "
+                f"(fail-closed)"
+            )
+            return outcome
+
+        new_cap = current_cap + shortfall
+        target_outcome["bumped"] = True
+        target_outcome["bump_amount"] = shortfall
+        target_outcome["new_cap"] = new_cap
+        target_outcome["reason"] = "bumped"
+        if not outcome["bumped"]:
+            outcome["new_cap"] = new_cap
+        outcome["bumped"] = True
+        outcome["bump_amount"] += shortfall
+        target_reasons.append("bumped")
+        bump_edits.append(
+            {
+                "cap_name": cap_name,
+                "cap_match": cap_match,
+                "cap_comment": cap_comment,
+                "new_cap": new_cap,
+                "shortfall": shortfall,
+                "file_desc": ", ".join(Path(path).name for path in new_paths),
+            }
         )
+
+    if not bump_edits:
+        if target_reasons and all(reason == "already_recorded" for reason in target_reasons):
+            outcome["reason"] = "already_recorded"
+        elif "zero_shortfall" in target_reasons:
+            outcome["reason"] = "zero_shortfall"
+        elif target_reasons:
+            outcome["reason"] = target_reasons[0]
+        else:
+            outcome["reason"] = "no_new_test_files"
         return outcome
 
-    # (e) Headroom / consolidation: the cap already covers the count.
-    if shortfall <= 0:
-        outcome["reason"] = "zero_shortfall"
-        log(
-            f"Step 5e: CAP_TEST_FILES auto-bump no-op for wave {wave_id} "
-            f"(shortfall={shortfall} <= 0; headroom/consolidation)"
+    def _clear_pending_growth_cap_bumps(reason: str) -> None:
+        outcome["bumped"] = False
+        outcome["bump_amount"] = 0
+        outcome["new_cap"] = None
+        for target in outcome["cap_bumps"].values():
+            if isinstance(target, dict) and target.get("reason") == "bumped":
+                target["bumped"] = False
+                target["bump_amount"] = 0
+                target["new_cap"] = None
+                target["reason"] = reason
+
+    new_text = cap_text
+    for edit in sorted(bump_edits, key=lambda item: item["cap_match"].start(), reverse=True):
+        cap_match = edit["cap_match"]
+        cap_comment = edit["cap_comment"]
+        provenance = (
+            f"+{edit['shortfall']} for {edit['file_desc']} "
+            f"({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})"
         )
-        return outcome
-
-    # (5) Fail-closed: a wave with no FOUNDER_OVERRIDE is never auto-bumped.
-    if not (founder_override_token or "").strip():
-        outcome["reason"] = "no_founder_override"
-        log(
-            f"Step 5e: new test file(s) push the count over cap "
-            f"(shortfall={shortfall}) but wave {wave_id} carries no "
-            f"FOUNDER_OVERRIDE; growth-cap gate will strand the commit (fail-closed)"
-        )
-        return outcome
-
-    # (4) FOUNDER_OVERRIDE-gated auto-bump by EXACTLY the shortfall.
-    new_cap = current_cap + shortfall
-    file_desc = ", ".join(Path(path).name for path in new_test_files)
-    provenance = (
-        f"+{shortfall} for {file_desc} "
-        f"({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})"
-    )
-    if "#" in cap_comment:
-        new_rest = f"{cap_comment}; {provenance}"
-    else:
-        new_rest = f"{cap_comment}  # {provenance}"
-    new_line = f"{cap_match.group('prefix')}{new_cap}{new_rest}"
-    new_text = cap_text[: cap_match.start()] + new_line + cap_text[cap_match.end():]
+        if "#" in cap_comment:
+            new_rest = f"{cap_comment}; {provenance}"
+        else:
+            new_rest = f"{cap_comment}  # {provenance}"
+        new_line = f"{cap_match.group('prefix')}{edit['new_cap']}{new_rest}"
+        new_text = new_text[: cap_match.start()] + new_line + new_text[cap_match.end():]
     try:
         cap_file.write_text(new_text, encoding="utf-8")
     except OSError as exc:
         outcome["reason"] = f"growth_cap_write_failed: {exc}"
+        _clear_pending_growth_cap_bumps("growth_cap_write_failed")
         return outcome
     # Stage the cap bump so the Step 8 growth-cap gate sees it. If staging fails
     # for ANY reason — git add raises, or the file is somehow not in the staged
@@ -11878,6 +12024,7 @@ def _maybe_autobump_growth_cap_for_founder_override(
     except Exception as exc:
         _restore_growth_cap_file(cap_file, cap_text, log=log)
         outcome["reason"] = f"growth_cap_stage_failed: {exc}"
+        _clear_pending_growth_cap_bumps("growth_cap_stage_failed")
         log(
             f"Step 5e: growth-cap auto-bump rolled back for wave {wave_id} "
             f"(staging failed: {exc}); cap left unchanged so the Step 8 gate "
@@ -11887,20 +12034,19 @@ def _maybe_autobump_growth_cap_for_founder_override(
     if not staged:
         _restore_growth_cap_file(cap_file, cap_text, log=log)
         outcome["reason"] = "growth_cap_not_staged"
+        _clear_pending_growth_cap_bumps("growth_cap_not_staged")
         log(
             f"Step 5e: growth-cap auto-bump rolled back for wave {wave_id} "
             f"(cap edit did not stage); cap left unchanged so the Step 8 gate "
             f"strands the commit (fail-closed)"
         )
         return outcome
-    outcome["bumped"] = True
-    outcome["bump_amount"] = shortfall
-    outcome["new_cap"] = new_cap
     outcome["reason"] = "bumped"
-    log(
-        f"Step 5e: auto-bumped CAP_TEST_FILES +{shortfall} for FOUNDER_OVERRIDE "
-        f"wave {wave_id} ({file_desc})"
-    )
+    for edit in bump_edits:
+        log(
+            f"Step 5e: auto-bumped {edit['cap_name']} +{edit['shortfall']} "
+            f"for FOUNDER_OVERRIDE wave {wave_id} ({edit['file_desc']})"
+        )
     return outcome
 
 

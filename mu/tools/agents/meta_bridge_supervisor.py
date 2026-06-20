@@ -424,10 +424,17 @@ class MetaBridgeResponse:
     validations_failed: list[dict[str, str]] = field(default_factory=list)
     findings: list[dict[str, Any]] = field(default_factory=list)
     request_for_claude: str = ""
+    request_for_agent: str = ""
     error_code: str = ""
     error_detail: str = ""
     recovery_hint: str = ""
     reviewed_staged_sha: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.request_for_agent and self.request_for_claude:
+            self.request_for_agent = self.request_for_claude
+        elif not self.request_for_claude and self.request_for_agent:
+            self.request_for_claude = self.request_for_agent
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -439,6 +446,7 @@ class MetaBridgeResponse:
             d["validations_passed"] = self.validations_passed
             d["validations_failed"] = self.validations_failed
             d["findings"] = self.findings
+            d["request_for_agent"] = self.request_for_agent
             d["request_for_claude"] = self.request_for_claude
             if self.reviewed_staged_sha:
                 d["reviewed_staged_sha"] = self.reviewed_staged_sha
@@ -3185,11 +3193,15 @@ def write_post_merge_routing_record(
     """Write state-bound routing decision record (not a receipt — no blocking enforcement)."""
     state = compute_repo_state(repo_root)
 
+    request_text = response.request_for_agent or response.request_for_claude
     record = {
         "decision": response.decision,
         "summary": response.summary,
         "findings": response.findings,
-        "request_for_claude": response.request_for_claude,
+        "request_for_agent": request_text,
+        # Deprecated compatibility output for old parsers. Do not use this as
+        # operator-facing truth; request_for_agent is the neutral request field.
+        "request_for_claude": request_text,
         "merged_pr": package.get("merged_pr"),
         "merge_sha": package.get("merge_sha"),
         "head_sha": state.head_sha,
@@ -3491,6 +3503,7 @@ def run_post_merge_bridge(
         validations_failed=failed,
         findings=envelope.get("findings", []),
         request_for_claude=envelope.get("request_for_claude", ""),
+        request_for_agent=envelope.get("request_for_agent", ""),
     )
 
     # Write state-bound routing record — fail closed (invariant 5: state-binding)
@@ -4040,8 +4053,8 @@ def main() -> int:
             print("Validations failed:")
             for f in response.validations_failed:
                 print(f"  - {f['name']}: {f['error']}")
-        if response.request_for_claude:
-            print(f"Request for Claude: {response.request_for_claude}")
+        if response.request_for_agent:
+            print(f"Request for Agent: {response.request_for_agent}")
     if args.verbose and receipt is not None:
         print(f"[meta-bridge] Pre-commit receipt written: {receipt}")
 

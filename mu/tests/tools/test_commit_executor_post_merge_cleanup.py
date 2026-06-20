@@ -1277,15 +1277,29 @@ GROWTH_CAP_SEED_COMMENT = (
 )
 
 
-def _growth_cap_source(baseline: int, cap: int, cap_comment: str) -> str:
+def _growth_cap_source(
+    baseline: int,
+    cap: int,
+    cap_comment: str,
+    *,
+    tool_baseline: int | None = None,
+    tool_cap: int | None = None,
+    tool_comment: str = "",
+) -> str:
     """Minimal fixture mirroring the BASELINE/CAP surface the auto-bump reads."""
-    return (
+    source = (
         '"""Growth cap fixture (mirrors mu/tests/docs/test_growth_caps.py)."""\n'
         "from __future__ import annotations\n"
         "\n"
         f"BASELINE_TEST_FILES = {baseline}\n"
         f"CAP_TEST_FILES = {cap}{cap_comment}\n"
     )
+    if tool_baseline is not None and tool_cap is not None:
+        source += (
+            f"BASELINE_TOOL_SCRIPTS = {tool_baseline}\n"
+            f"CAP_TOOL_SCRIPTS = {tool_cap}{tool_comment}\n"
+        )
+    return source
 
 
 def _make_capture_log():
@@ -1303,7 +1317,11 @@ def _init_growth_cap_repo(
     baseline: int,
     cap: int,
     existing_test_files: list[str],
+    existing_tool_scripts: list[str] | None = None,
     cap_comment: str = GROWTH_CAP_SEED_COMMENT,
+    tool_baseline: int | None = None,
+    tool_cap: int | None = None,
+    tool_comment: str = "",
     wave_branch: str = f"jabramsja/{GROWTH_CAP_WAVE_ID}",
 ):
     """Origin on dev carrying a growth-cap fixture + existing test files; clone
@@ -1321,11 +1339,25 @@ def _init_growth_cap_repo(
     _git(["config", "user.email", "t@t"], cwd=upstream)
     caps = upstream / "mu" / "tests" / "docs" / "test_growth_caps.py"
     caps.parent.mkdir(parents=True, exist_ok=True)
-    caps.write_text(_growth_cap_source(baseline, cap, cap_comment), encoding="utf-8")
+    caps.write_text(
+        _growth_cap_source(
+            baseline,
+            cap,
+            cap_comment,
+            tool_baseline=tool_baseline,
+            tool_cap=tool_cap,
+            tool_comment=tool_comment,
+        ),
+        encoding="utf-8",
+    )
     for rel in existing_test_files:
         path = upstream / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("def test_placeholder():\n    assert True\n", encoding="utf-8")
+    for rel in existing_tool_scripts or []:
+        path = upstream / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     _git(["add", "-A"], cwd=upstream, env=env)
     _git(["commit", "-m", "C0 growth-cap seed"], cwd=upstream, env=env)
     primary = tmp_path / "main"
@@ -1343,6 +1375,13 @@ def _stage_new_test_file(primary: Path, env: dict, relpath: str) -> None:
     _git(["add", "--", relpath], cwd=primary, env=env)
 
 
+def _stage_new_tool_script(primary: Path, env: dict, relpath: str) -> None:
+    path = primary / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    _git(["add", "--", relpath], cwd=primary, env=env)
+
+
 def _read_growth_cap_values(primary: Path):
     text = (primary / "mu" / "tests" / "docs" / "test_growth_caps.py").read_text()
     baseline = int(re.search(r"BASELINE_TEST_FILES = (\d+)", text).group(1))
@@ -1350,8 +1389,20 @@ def _read_growth_cap_values(primary: Path):
     return text, baseline, cap
 
 
+def _read_tool_growth_cap_values(primary: Path):
+    text = (primary / "mu" / "tests" / "docs" / "test_growth_caps.py").read_text()
+    baseline = int(re.search(r"BASELINE_TOOL_SCRIPTS = (\d+)", text).group(1))
+    cap = int(re.search(r"CAP_TOOL_SCRIPTS = (\d+)", text).group(1))
+    return text, baseline, cap
+
+
 def _count_disk_test_files(primary: Path) -> int:
     return len(list((primary / "mu" / "tests").rglob("test_*.py")))
+
+
+def _count_disk_tool_scripts(primary: Path) -> int:
+    tools_dir = primary / "mu" / "tools"
+    return len(list(tools_dir.rglob("*.py"))) + len(list(tools_dir.rglob("*.sh")))
 
 
 def _growth_cap_staged(primary: Path) -> bool:
@@ -1454,6 +1505,88 @@ def test_growth_cap_autobump_no_new_test_files_does_not_bump(tmp_path):
     _, _, cap = _read_growth_cap_values(primary)
     assert cap == 0
     assert not _growth_cap_staged(primary)
+
+
+def test_growth_cap_autobump_tool_script_bumps_by_exact_shortfall_with_founder_override(tmp_path):
+    """A FOUNDER_OVERRIDE wave that adds a new mu/tools script over
+    CAP_TOOL_SCRIPTS gets the same pre-receipt cap-bump handling as test files."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path,
+        baseline=3,
+        cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+        tool_baseline=0,
+        tool_cap=0,
+    )
+    _stage_new_tool_script(primary, env, "mu/tools/session/new_switch.sh")
+    lines, log = _make_capture_log()
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log,
+    )
+
+    assert outcome["bumped"] is True, outcome
+    assert outcome["new_tool_scripts"] == ["mu/tools/session/new_switch.sh"], outcome
+    assert outcome["cap_bumps"]["CAP_TOOL_SCRIPTS"]["shortfall"] == 1, outcome
+    assert outcome["cap_bumps"]["CAP_TOOL_SCRIPTS"]["bump_amount"] == 1, outcome
+    text, baseline, cap = _read_tool_growth_cap_values(primary)
+    assert cap == 1, text
+    assert f"FOUNDER_OVERRIDE:{GROWTH_CAP_WAVE_ID}" in text, text
+    assert "new_switch.sh" in text, text
+    assert _growth_cap_staged(primary)
+    assert _count_disk_tool_scripts(primary) <= baseline + cap, (baseline, cap)
+    assert any(
+        f"auto-bumped CAP_TOOL_SCRIPTS +1 for FOUNDER_OVERRIDE wave {GROWTH_CAP_WAVE_ID}"
+        in m
+        for m in lines
+    ), lines
+
+
+def test_growth_cap_autobump_recorded_test_cap_still_bumps_tool_script(tmp_path):
+    """A same-wave retry must not let recorded CAP_TEST_FILES provenance hide a
+    still-missing CAP_TOOL_SCRIPTS bump in the same growth-cap file."""
+    recorded_test_comment = (
+        f"  # +1 for test_new_feature.py ({GROWTH_CAP_WAVE_ID} wave, "
+        f"FOUNDER_OVERRIDE:{GROWTH_CAP_WAVE_ID})"
+    )
+    primary, env = _init_growth_cap_repo(
+        tmp_path,
+        baseline=3,
+        cap=1,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+        cap_comment=recorded_test_comment,
+        tool_baseline=0,
+        tool_cap=0,
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+    _stage_new_tool_script(primary, env, "mu/tools/session/new_switch.sh")
+    lines, log = _make_capture_log()
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary, wave_id=GROWTH_CAP_WAVE_ID, base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID, log=log,
+    )
+
+    assert outcome["bumped"] is True, outcome
+    assert outcome["cap_bumps"]["CAP_TEST_FILES"]["reason"] == "already_recorded", outcome
+    assert outcome["cap_bumps"]["CAP_TOOL_SCRIPTS"]["reason"] == "bumped", outcome
+    test_text, _, test_cap = _read_growth_cap_values(primary)
+    assert test_cap == 1, test_text
+    tool_text, _, tool_cap = _read_tool_growth_cap_values(primary)
+    assert tool_cap == 1, tool_text
+    assert "new_switch.sh" in tool_text, tool_text
+    assert _growth_cap_staged(primary)
+    assert any("CAP_TEST_FILES already records" in m for m in lines), lines
+    assert any(
+        f"auto-bumped CAP_TOOL_SCRIPTS +1 for FOUNDER_OVERRIDE wave {GROWTH_CAP_WAVE_ID}"
+        in m
+        for m in lines
+    ), lines
 
 
 def test_growth_cap_autobump_is_idempotent_on_second_run(tmp_path):

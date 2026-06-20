@@ -39,6 +39,44 @@ requires it and the SDK runner is available. Do not substitute `run_review.py`
 for dispatcher, Phase B, pre-commit supervisor, or commit executor in Codex
 sessions.
 
+### Operator Orchestrator Mode vs Pipeline Roles
+
+The active main-session orchestrator is selected separately from the pipeline
+implementer/reviewer roles.
+
+Use the orchestrator switch when changing which main session owns pager wakeups,
+tmux monitor refresh, and autoping:
+
+```bash
+python3 mu/tools/session/set_orchestrator_mode.py --mode codex --repo-root "$PWD" --bus-dir .agent_bus --tmux-session rcx-pipeline --apply
+python3 mu/tools/session/set_orchestrator_mode.py --mode claude --repo-root "$PWD" --bus-dir .agent_bus --tmux-session rcx-pipeline --apply
+python3 mu/tools/session/set_orchestrator_mode.py --mode codex --repo-root "$PWD" --bus-dir .agent_bus --tmux-session rcx-pipeline --verify
+```
+
+The switch writes `pipeline_agent_pager.route`, terminally skips stale pending
+pager targets for the opposite orchestrator, stops the opposite autoping surface,
+starts the selected Codex or Claude autoping surface, and rebuilds the selected
+tmux monitor. Dry-run/show mode reports the exact changes and commands without
+writing files or starting processes.
+
+Use the role switch only when changing who implements or reviews pipeline work:
+
+```bash
+python3 mu/tools/executors/set_roles.py --implementer codex --reviewer claude
+python3 mu/tools/executors/set_roles.py --implementer claude --reviewer codex
+```
+
+`set_roles.py` writes `role_agents` plus derived `backends` and
+`bridge_reviewers`; it does not change orchestrator mode, pager route, tmux, or
+autoping state. `set_orchestrator_mode.py` does not write `role_agents`,
+`backends`, or `bridge_reviewers`.
+
+Provider display/model/effort metadata for Codex and Claude lives in one
+registry: `mu/tools/executors/executor_config.json` under
+`bridge_agent_defaults`. Update that JSON registry when model names, effort
+levels, or display labels change so launcher output, tmux labels, and
+orchestrator verification stay aligned.
+
 ## Tool Overview
 
 Two complementary systems exist for running agents:
