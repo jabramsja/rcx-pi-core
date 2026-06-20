@@ -1,0 +1,66 @@
+{
+  "wave_id": "phase-b-blocking-finding-convergence-hardening-2026-06-20",
+  "title": "NEXT-CODEX-POST-REDTEAM - Phase B blocking finding convergence hardening",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Harden Phase B so a reviewer NO_GO or REQUEST_CHANGES finding classified as blocking can never be persisted or resumed as deferred non-blocking bridge convergence, and so post-Phase-A control-packet line-reference drift is checked before final pytest, supervisor, or commit handoff.",
+  "date": "2026-06-20",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/phase-b-blocking-finding-convergence-hardening-2026-06-20.json",
+  "indicator_collection_command": "python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id phase-b-blocking-finding-convergence-hardening-2026-06-20 --output reports/l4_wave_indicators/phase-b-blocking-finding-convergence-hardening-2026-06-20.json",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_phase_b_executor.py -k \"blocking_finding_convergence or line_ref\" --tb=short && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_check_control_packet_line_refs.py --tb=short && python3 -m py_compile mu/tools/executors/phase_b_executor.py",
+  "evidence_delta": "(1) Phase B rejects or re-routes any bridge_converged checkpoint whose deferred/non-blocking finding state contains an effective blocking finding. (2) A NO_GO or REQUEST_CHANGES bridge review with blocking findings cannot advance to final pytest, supervisor, or commit handoff without a successful bridge-fix implementer pass and a fresh bridge review. (3) Phase B runs the existing control-packet line-ref lint on the governing packet after bridge convergence and before final pytest/supervisor, catching post-Phase-A packet drift.",
+  "progress_proof_before": "During structural-numbers-rationals-2026-06-19, the round-4 rendered bridge review recorded Decision: NO_GO for a POLICY_BOUND control-packet line-reference finding, while Phase B still advanced to final pytest/COMMIT_GO after operator doc-only unblock; this exposed a missing deterministic guard between reviewer blocking truth, deferred non-blocking state, and bridge_converged finalization.",
+  "progress_proof_after": "Focused Phase B regressions prove that blocking reviewer findings and control-packet line-reference lint failures cannot be silently carried into bridge_converged, final pytest, supervisor, or commit handoff.",
+  "structural_artifact_ref": "mu/tests/tools/test_phase_b_executor.py",
+  "founder_override": "phase-b-blocking-finding-convergence-hardening-2026-06-20",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "scope_summary": "Pipeline hardening only. This wave may modify Phase B executor logic, focused Phase B executor tests, this control packet/config, TASKS.md via the launcher tracker-note builder, and the generated L4 indicator artifact.",
+  "scope_items": [
+    "mu/tools/executors/phase_b_executor.py (MODIFY) -- enforce fail-closed bridge convergence and pre-finalization packet lint.",
+    "mu/tests/tools/test_phase_b_executor.py (MODIFY) -- add regressions for blocking-finding state contradictions and post-bridge control-packet line-ref drift.",
+    "reports/control_plane/phase-b-blocking-finding-convergence-hardening-2026-06-20_wave_config.json (NEW) -- launcher input for this wave.",
+    "reports/l4_wave_indicators/phase-b-blocking-finding-convergence-hardening-2026-06-20.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Add a deterministic guard in Phase B before bridge_converged finalization that reclassifies or validates accumulated deferred/non-blocking findings and fails closed if any effective disposition is blocking.",
+    "Ensure REQUEST_CHANGES or NO_GO bridge reviews with blocking findings checkpoint bridge_fix_pending and invoke the implementer, and cannot continue to final pytest, supervisor, or commit handoff without a subsequent clean bridge review.",
+    "Add a pre-finalization control-packet line-reference lint using the existing checker logic for reports/control_plane packets after bridge convergence and before final pytest/supervisor.",
+    "Add focused regressions proving a saved bridge_converged state containing a blocking finding in all_non_blocking does not resume to commit_ready.",
+    "Add focused regressions proving post-bridge governing-packet line-reference drift halts or routes as blocking before final pytest/supervisor.",
+    "Keep the fix in pipeline/control-plane tooling only; do not touch runtime, substrate, seed, JS production, or structural-number test semantics.",
+    "Run the evidence command and collect the L4 indicator artifact."
+  ],
+  "constraints": [
+    "Use the launcher and dispatcher path; do not hand-commit this wave.",
+    "Do not modify runtime, substrate, seed, registry, JS production, StructuralNumbers gates, or merged rational-wave artifacts except through test fixtures.",
+    "Do not weaken reviewer finding classification, severity floors, or governance downgrade rules.",
+    "Do not remove the ability to defer genuine non-blocking DOC_ACCURACY or POLICY_BOUND findings.",
+    "Do not add a second line-ref checker; reuse tools/checks/check_control_packet_line_refs.py or its existing callable logic.",
+    "Keep tests focused and deterministic; avoid broad end-to-end pipeline runs inside unit tests."
+  ],
+  "stop_conditions": [
+    "Stop as DEFECT if Phase B cannot distinguish effective blocking findings from deferred non-blocking findings without changing reviewer schema.",
+    "Stop as POLICY_BOUND if the fix would make current non-blocking DOC_ACCURACY deferral impossible.",
+    "Stop as INTEGRATION if the line-ref lint cannot be applied to post-Phase-A control packets without duplicating checker logic.",
+    "Do not proceed to commit without the configured evidence command passing and the indicator artifact collected."
+  ],
+  "acceptance_criteria": [
+    "A bridge_converged resume state with any effective blocking finding in all_non_blocking cannot reach commit_ready.",
+    "A NO_GO or REQUEST_CHANGES bridge review with blocking findings takes the bridge-fix path or fails closed at max rounds; it never becomes deferred-only convergence.",
+    "A control packet with a post-bridge code file:line reference is rejected before final pytest, supervisor, or commit handoff.",
+    "Existing genuine non-blocking finding deferral remains supported.",
+    "The configured evidence command passes.",
+    "reports/l4_wave_indicators/phase-b-blocking-finding-convergence-hardening-2026-06-20.json is collected."
+  ],
+  "request_for_agent": "Implement the Phase B blocking-finding convergence hardening through the pipeline-owned Phase A and Phase B path only, using Codex for implementer and reviewer. Preserve non-blocking deferral for genuine non-blocking findings, but fail closed when any effective blocking finding or post-Phase-A control-packet line-ref drift would otherwise reach bridge_converged, final pytest, supervisor, or commit handoff.",
+  "authorization_note": "Follow-up automation packet required by the structural-numbers-rationals-2026-06-19 closeout: the operator performed a bounded manual doc-only unblock after a round-4 NO_GO control-packet line-ref finding was not routed through a deterministic bridge-fix path.",
+  "slow_functions": [],
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Pipeline hardening for Phase B blocking-finding convergence and post-bridge control-packet line-ref lint.",
+  "tracked_packet": "reports/control_plane/phase-b-blocking-finding-convergence-hardening-2026-06-20_2026-06-20.md"
+}

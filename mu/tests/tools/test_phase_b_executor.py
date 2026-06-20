@@ -6171,8 +6171,8 @@ class TestFindingDisposition:
     """Bridge findings with disposition field are correctly classified.
 
     Classification contract (shared via executor_common.py):
-    1. Explicit disposition field — use as-is.
-    2. Critical/high severity — fail closed to blocking unless disposition is explicit.
+    1. Critical/high severity — fail closed to blocking.
+    2. Explicit disposition field — use as-is when valid.
     3. Keyword match against title/summary (BLOCKING_KEYWORDS / NON_BLOCKING_KEYWORDS).
     4. Medium/low severity without blocking keyword — non_blocking.
     5. Fail-closed default — blocking.
@@ -6346,6 +6346,19 @@ class TestGovernanceDowngrade:
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0, "POLICY_BOUND on reports/ should be non-blocking"
         assert len(non_blocking) == 1
+
+    def test_blocking_finding_convergence_honors_explicit_blocking_governance_finding(self):
+        """Explicit reviewer blocking classification overrides governance default deferral."""
+        findings = [{
+            "title": "Control packet cites stale code line",
+            "class": "POLICY_BOUND",
+            "severity": "medium",
+            "file": "reports/control_plane/example.md",
+            "disposition": "blocking",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 1
+        assert len(non_blocking) == 0
 
     def test_policy_bound_on_code_file_stays_blocking(self):
         """POLICY_BOUND on actual code file stays blocking — not governance."""
@@ -9755,6 +9768,173 @@ class TestResumeNeedsPhaseB:
         # Implementer was NOT called (skipped on resume from bridge_converged)
         assert mock_impl.invoke_implementer.call_count == 0
         run_sdk_agents.assert_not_called()
+
+    def test_blocking_finding_convergence_resume_rejects_blocker_in_all_non_blocking(self, tmp_path):
+        """A saved bridge_converged state cannot hide a blocker in all_non_blocking."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        (repo / "f.py").write_text("print('ok')\n")
+        bridge_scope_fingerprint = pb_mod._bridge_scope_fingerprint(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            ["f.py"],
+        )
+
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        (state_dir / "phase_b_state.json").write_text(json.dumps({
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "bridge_converged",
+            "wave_id": "plan",
+            "bridge_rounds": 1,
+            "bridge_scope_fingerprint": bridge_scope_fingerprint,
+            "deferred_packet_path": None,
+            "implementer_changed": ["f.py"],
+            "executor_created": [],
+            "all_non_blocking": [{
+                "title": "Control packet line-reference finding was classified blocking",
+                "class": "POLICY_BOUND",
+                "severity": "medium",
+                "file": "reports/control_plane/plan.md",
+                "disposition": "blocking",
+            }],
+        }))
+
+        mock_impl = _make_mock_impl()
+        supervisor = MagicMock(return_value={
+            "exit_code": 0,
+            "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+            "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+        })
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "blocking_finding_convergence"
+        assert "blocking finding" in result["errors"][0]
+        supervisor.assert_not_called()
+        assert mock_impl.invoke_implementer.call_count == 0
+
+    def test_blocking_finding_convergence_request_changes_invokes_bridge_fix_before_commit_ready(self, tmp_path):
+        """REQUEST_CHANGES with an explicit blocker takes the bridge-fix path before finalization."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            "Wave ID: plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [NEXT-CODEX-POST-REDTEAM]\n"
+            "Class: L4_ENABLER\n"
+            "Target gate: G8\n",
+            encoding="utf-8",
+        )
+        blocking_finding = {
+            "title": "Control packet line-reference finding",
+            "class": "POLICY_BOUND",
+            "severity": "medium",
+            "file": plan_path,
+            "disposition": "blocking",
+        }
+        bridge_results = iter([
+            {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "", "decision": "REQUEST_CHANGES", "job_id": "r1"},
+            {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "r2"},
+        ])
+        raw_blocker = (
+            "BEGIN_AGENT_ENVELOPE\n"
+            + json.dumps({"findings": [blocking_finding]})
+            + "\nEND_AGENT_ENVELOPE\n"
+        )
+        bridge_material = iter([
+            ("rendered blocker", [raw_blocker]),
+            ("", []),
+        ])
+        wave_owned = [plan_path, "mu/tools/executors/phase_b_executor.py"]
+        mock_impl = _make_mock_impl()
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value={
+                 **_VALID_ROUTING_RECORD,
+                 "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                 "wave_name": "plan",
+                 "wave_class": "L4_ENABLER",
+                 "target_gate_id": "G8",
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=wave_owned), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_owned), \
+             patch.object(pb_mod, "_read_bridge_review_material", side_effect=lambda *_a, **_kw: next(bridge_material)), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=lambda *_a, **_kw: next(bridge_results)), \
+             patch.object(pb_mod, "_select_pytest_gate_files", return_value=[]), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=3)
+
+        assert result["status"] == "commit_ready", result
+        assert mock_impl.invoke_implementer.call_count >= 2
+
+    def test_line_ref_lint_rejects_post_bridge_packet_drift_before_final_pytest(self, tmp_path):
+        """Post-bridge control-packet file:line drift blocks before final pytest/supervisor."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        test_path = "mu/tests/tools/test_line_ref_example.py"
+        (repo / plan_path).write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        (repo / test_path).write_text("def test_ok():\n    assert True\n")
+        mock_impl = _make_mock_impl()
+        final_pytest = MagicMock(return_value={
+            "passed": True, "exit_code": 0, "stdout": "", "stderr": "",
+        })
+        supervisor = MagicMock(return_value={
+            "exit_code": 0,
+            "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+            "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+        })
+
+        def bridge_go_with_packet_drift(*_args, **_kwargs):
+            (repo / plan_path).write_text(
+                "# Plan\nPhase-A-Lock: LOCKED\nSee mu/tools/executors/phase_b_executor.py:42.\n",
+                encoding="utf-8",
+            )
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1"}
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=[plan_path, test_path]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=[plan_path, test_path]), \
+             patch.object(pb_mod, "_read_bridge_review_material", return_value=("", [])), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_go_with_packet_drift), \
+             patch.object(pb_mod, "_select_pytest_gate_files", return_value=[test_path]), \
+             patch.object(pb_mod, "_run_pytest_on_files", side_effect=final_pytest), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=2)
+
+        assert result["status"] == "error"
+        assert result["step"] == "control_packet_line_ref_lint"
+        assert "phase_b_executor.py:42" in result["errors"][0]
+        final_pytest.assert_not_called()
+        supervisor.assert_not_called()
 
     def test_resume_from_bridge_converged_rehydrates_dirty_baseline_into_package(self, tmp_path):
         """Legacy saved state without baseline tracking must still rebuild an honest supervisor package."""

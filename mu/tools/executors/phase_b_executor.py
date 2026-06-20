@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -160,11 +161,11 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     Returns (disposition, reason) tuple for logging/auditability.
 
     Priority:
-    1. Severity 'critical'/'high' — always blocking unless an explicit valid
-       disposition is present.
+    1. Severity 'critical'/'high' — always blocking.
     2. Explicit 'disposition' field — use only if valid.
-    3. Medium/low severity — non-blocking UNLESS blocking keyword match.
-    4. No severity — keyword match, then fail-closed blocking.
+    3. Medium/low governance/doc-only findings — non-blocking by default.
+    4. Medium/low severity — non-blocking UNLESS blocking keyword match.
+    5. No severity — keyword match, then fail-closed blocking.
     """
     severity = (finding.get("severity") or "").lower()
     disposition = finding.get("disposition")
@@ -187,9 +188,15 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
             return "blocking", "high severity overrides explicit non_blocking disposition"
         return "blocking", "high severity (always blocking)"
 
+    if disposition is not None:
+        if disposition in ALLOWED_FINDING_DISPOSITIONS:
+            return disposition, "explicit disposition field"
+        return "blocking", f"invalid disposition {disposition!r} (fail-closed)"
+
     # Governance/doc-only findings: DOC_ACCURACY or POLICY_BOUND on governance
     # paths are editorial, not runtime risks. Downgrade to non-blocking for
-    # medium/low severity only — critical/high already handled above as blocking.
+    # medium/low severity only when the reviewer did not give an explicit
+    # disposition — critical/high and explicit blocking are handled above.
     _GOV_CLASSES = {"POLICY_BOUND", "DOC_ACCURACY"}
     _GOV_PATH_PREFIXES = ("reports/", "TASKS.md", ".claude/", "CHANGELOG.md", "STATUS.md")
     finding_file = str(finding.get("file") or "")
@@ -200,11 +207,6 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
             f"{severity} {finding_class} on governance/doc path — "
             f"downgraded to non-blocking (file: {finding_file})"
         )
-
-    if disposition is not None:
-        if disposition in ALLOWED_FINDING_DISPOSITIONS:
-            return disposition, "explicit disposition field"
-        return "blocking", f"invalid disposition {disposition!r} (fail-closed)"
 
     # Build searchable text from title + summary
     text = " ".join(filter(None, [
@@ -303,6 +305,117 @@ def _classify_findings(
             del finding_history[k]
 
     return blocking, non_blocking
+
+
+def _blocking_findings_in_deferred_convergence(
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return accumulated deferred findings whose effective disposition blocks.
+
+    This intentionally reuses the normal Phase B finding disposition logic at
+    the bridge-converged boundary so a stale or malformed saved state cannot
+    resume into final pytest/supervisor with a blocker hidden in
+    ``all_non_blocking``.
+    """
+    blocking: list[dict[str, Any]] = []
+    for index, finding in enumerate(findings, start=1):
+        if not isinstance(finding, dict):
+            blocking.append({
+                "title": f"Malformed deferred finding at index {index}",
+                "severity": "critical",
+                "disposition": "blocking",
+                "detail": "all_non_blocking contained a non-object finding payload",
+            })
+            continue
+        disposition, reason = _disposition_for_finding(finding)
+        if disposition == "blocking":
+            annotated = dict(finding)
+            annotated["effective_disposition"] = disposition
+            annotated["effective_disposition_reason"] = reason
+            blocking.append(annotated)
+    return blocking
+
+
+def _control_packet_line_ref_checker_path(repo_root: Path) -> Path:
+    """Return the existing control-packet line-ref checker path."""
+    repo_candidate = repo_root / "tools" / "checks" / "check_control_packet_line_refs.py"
+    if repo_candidate.exists():
+        return repo_candidate
+    source_candidate = SCRIPT_DIR.parents[2] / "tools" / "checks" / "check_control_packet_line_refs.py"
+    return source_candidate
+
+
+def _load_control_packet_line_ref_checker(repo_root: Path) -> Any:
+    """Load tools/checks/check_control_packet_line_refs.py for callable reuse."""
+    checker_path = _control_packet_line_ref_checker_path(repo_root)
+    if not checker_path.exists():
+        raise PhaseBExecutorError(
+            f"control-packet line-ref checker not found: {checker_path}"
+        )
+    spec = importlib.util.spec_from_file_location(
+        "phase_b_control_packet_line_ref_checker",
+        str(checker_path),
+    )
+    if spec is None or spec.loader is None:
+        raise PhaseBExecutorError(
+            f"control-packet line-ref checker cannot be loaded: {checker_path}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _control_packet_line_ref_lint_error(
+    repo_root: Path,
+    *,
+    plan_path: str,
+    changed_files: list[str],
+) -> str | None:
+    """Return an error string when changed control packets cite code by line."""
+    packet_paths: set[str] = set()
+
+    def add_packet_path(raw_path: str) -> None:
+        rel_path = str(raw_path or "").strip()
+        if (
+            rel_path
+            and not rel_path.startswith("<")
+            and rel_path.startswith("reports/control_plane/")
+            and rel_path.endswith(".md")
+        ):
+            packet_paths.add(rel_path)
+
+    add_packet_path(plan_path)
+    for rel_path in changed_files:
+        add_packet_path(rel_path)
+    if not packet_paths:
+        return None
+
+    try:
+        checker = _load_control_packet_line_ref_checker(repo_root)
+    except PhaseBExecutorError as exc:
+        return str(exc)
+
+    reports: list[str] = []
+    for rel_path in sorted(packet_paths):
+        packet = repo_root / rel_path
+        try:
+            offenses = checker.scan_path(packet)
+        except OSError as exc:
+            return f"{rel_path}: cannot read for control-packet line-ref lint: {exc}"
+        if offenses:
+            reports.append(checker.format_offenses(rel_path, offenses))
+    if not reports:
+        return None
+    remediation = getattr(
+        checker,
+        "REMEDIATION",
+        "Cite code by function name instead of file:line.",
+    )
+    return (
+        "pre-finalization control-packet line-ref lint failed:\n"
+        + "\n".join(reports)
+        + f"\n\n{remediation}"
+    )
 
 
 def _write_deferred_packet(
@@ -7373,6 +7486,31 @@ def run_phase_b(
         _clear_state(repo_root)
         return result
 
+    blocking_deferred_findings = _blocking_findings_in_deferred_convergence(all_non_blocking)
+    if blocking_deferred_findings:
+        result["status"] = "error"
+        result["step"] = "blocking_finding_convergence"
+        result["errors"] = [
+            "Bridge convergence state contains effective blocking finding(s) "
+            "inside deferred/non-blocking findings; refusing to proceed to "
+            "final pytest, supervisor, or commit handoff."
+        ]
+        result["blocking_findings"] = blocking_deferred_findings
+        _clear_state(repo_root)
+        return result
+
+    line_ref_error = _control_packet_line_ref_lint_error(
+        repo_root,
+        plan_path=plan_path,
+        changed_files=changed_files,
+    )
+    if line_ref_error is not None:
+        result["status"] = "error"
+        result["step"] = "control_packet_line_ref_lint"
+        result["errors"] = [line_ref_error]
+        _clear_state(repo_root)
+        return result
+
     # Persist state after bridge convergence unless a stricter private-attr
     # remediation checkpoint is already the active resume authority.
     if not (
@@ -7502,6 +7640,17 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        line_ref_error = _control_packet_line_ref_lint_error(
+            repo_root,
+            plan_path=plan_path,
+            changed_files=changed_files,
+        )
+        if line_ref_error is not None:
+            result["status"] = "error"
+            result["step"] = "control_packet_line_ref_lint"
+            result["errors"] = [line_ref_error]
+            _clear_state(repo_root)
+            return result
         changed_files, private_attr_error, private_attr_remediated = _run_private_attr_gate_with_remediation(
             changed_files,
             reentry=False,
@@ -7515,6 +7664,17 @@ def run_phase_b(
             )
             if private_attr_bridge_error is not None:
                 return private_attr_bridge_error
+            line_ref_error = _control_packet_line_ref_lint_error(
+                repo_root,
+                plan_path=plan_path,
+                changed_files=changed_files,
+            )
+            if line_ref_error is not None:
+                result["status"] = "error"
+                result["step"] = "control_packet_line_ref_lint"
+                result["errors"] = [line_ref_error]
+                _clear_state(repo_root)
+                return result
         final_test_files = _select_pytest_gate_files(changed_files, repo_root)
         if final_test_files:
             log(f"Final pytest gate: running {len(final_test_files)} test file(s)...")
@@ -8447,6 +8607,19 @@ def run_phase_b(
             _clear_state(repo_root)
             return result
 
+        blocking_deferred_findings = _blocking_findings_in_deferred_convergence(all_non_blocking)
+        if blocking_deferred_findings:
+            result["status"] = "error"
+            result["step"] = "blocking_finding_convergence"
+            result["errors"] = [
+                "Re-entry bridge convergence state contains effective blocking "
+                "finding(s) inside deferred/non-blocking findings; refusing to "
+                "proceed to final pytest, supervisor, or commit handoff."
+            ]
+            result["blocking_findings"] = blocking_deferred_findings
+            _clear_state(repo_root)
+            return result
+
         # R7-3: mechanical pytest gate for re-entry path (mirrors initial path)
         changed_files = _collect_wave_owned_files(
             repo_root,
@@ -8456,6 +8629,17 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        line_ref_error = _control_packet_line_ref_lint_error(
+            repo_root,
+            plan_path=plan_path,
+            changed_files=changed_files,
+        )
+        if line_ref_error is not None:
+            result["status"] = "error"
+            result["step"] = "control_packet_line_ref_lint"
+            result["errors"] = [line_ref_error]
+            _clear_state(repo_root)
+            return result
         changed_files, private_attr_error, private_attr_remediated = _run_private_attr_gate_with_remediation(
             changed_files,
             reentry=True,
@@ -8471,6 +8655,17 @@ def run_phase_b(
             if private_attr_bridge_error is not None:
                 _clear_state(repo_root)
                 return private_attr_bridge_error
+            line_ref_error = _control_packet_line_ref_lint_error(
+                repo_root,
+                plan_path=plan_path,
+                changed_files=changed_files,
+            )
+            if line_ref_error is not None:
+                result["status"] = "error"
+                result["step"] = "control_packet_line_ref_lint"
+                result["errors"] = [line_ref_error]
+                _clear_state(repo_root)
+                return result
         reentry_test_files = _select_pytest_gate_files(changed_files, repo_root)
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
