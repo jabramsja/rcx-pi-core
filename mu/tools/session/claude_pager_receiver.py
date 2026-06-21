@@ -20,18 +20,29 @@ What it provides (the behaviors locked by
 2. Serialized, single-flight delivery. ``deliver_once`` holds a SEPARATE delivery
    lock for the whole call, so at most one ``claude`` child is ever in flight.
 
-3. Fresh ``claude -p`` delivery, run asynchronously, NEVER ``--resume``. The
-   delivery argv is always ``[claude_bin, "-p", prompt]`` -- a direct page that
-   resumes no session.
+3. Codex-parity delivery (resolved at delivery time by the pager's
+   ``resolve_claude_page_delivery``). When a DEDICATED monitor session id is set,
+   DISTINCT from the live orchestrator, and resumable, the page is delivered INTO
+   that persistent warm monitor: ``[claude_bin, "--resume", <monitor>, "-p",
+   prompt]`` -- the same warm monitor the autoping watcher keeps, mirroring how the
+   codex leg issues each turn into the shared autoping thread. Otherwise (monitor
+   unset/malformed, monitor == live orchestrator, or a resume FAILURE) the page is a
+   fresh, resume-less ``[claude_bin, "-p", prompt]`` -- the live orchestrator is
+   NEVER resumed, and a resume failure falls back to a fresh page so no page is lost.
 
 4. ~120s per-delivery timeout plus a process-group reaper. The child runs in its
    own session/process-group (``start_new_session=True``); on timeout the whole
    group is killed (``os.killpg``) via ``_terminate_process_group``.
 
-5. Delivery environment via ``pipeline_agent_pager._claude_dispatch_env`` -- marks
-   the child a pipeline-owned sub-session and clears ``RCX_CLAUDE_MONITOR`` so the
-   transient page never clobbers ``orchestrator_session_id`` /
-   ``claude_monitor_session_id``.
+5. Delivery environment per leg. A FRESH page uses
+   ``pipeline_agent_pager._claude_dispatch_env`` -- marks the child a pipeline-owned
+   sub-session and CLEARS ``RCX_CLAUDE_MONITOR`` so the transient page never clobbers
+   ``orchestrator_session_id`` / ``claude_monitor_session_id``. A RESUME page uses
+   ``pipeline_agent_pager._claude_monitor_resume_env`` -- SETS ``RCX_CLAUDE_MONITOR=1``
+   so the resumed monitor's SessionStart re-writes its OWN
+   ``claude_monitor_session_id`` (idempotent) and never clobbers
+   ``orchestrator_session_id``. Both envs are borrowed from the pager (returned in the
+   delivery plan), not reimplemented here.
 
 6. Exit-0 -> durable receipt; non-zero exit or timeout -> fail-open re-queue (the
    event is re-written to the back of the queue and is never lost).
@@ -186,15 +197,45 @@ def _load_claude_dispatch_env():
     return module._claude_dispatch_env
 
 
+def _load_resolve_claude_page_delivery():
+    """Resolve ``pipeline_agent_pager.resolve_claude_page_delivery`` (READ-ONLY reuse).
+
+    Same import discipline as ``_load_claude_dispatch_env``: a normal import first,
+    then a by-path load of the sibling observability module. The pager owns the
+    resume-vs-fresh decision and the never-resume-the-live-orchestrator guard
+    (codex-parity); the receiver borrows this PURE resolver and calls it at delivery
+    time with its own ``repo_root`` + ``bus_dir``. Nothing in the pager module is
+    mutated and no daemon is started.
+    """
+    try:
+        from pipeline_agent_pager import resolve_claude_page_delivery as fn  # type: ignore
+        return fn
+    except Exception:
+        pass
+    import importlib.util as _ilu
+
+    pager_path = SCRIPT_DIR.parent / "observability" / "pipeline_agent_pager.py"
+    spec = _ilu.spec_from_file_location("pipeline_agent_pager", str(pager_path))
+    if spec is None or spec.loader is None:
+        raise ClaudePagerReceiverError(f"cannot load pipeline_agent_pager from {pager_path}")
+    module = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.resolve_claude_page_delivery
+
+
 _CLAUDE_DISPATCH_ENV = _load_claude_dispatch_env()
+_RESOLVE_CLAUDE_PAGE_DELIVERY = _load_resolve_claude_page_delivery()
 
 
 def delivery_env() -> dict[str, str]:
-    """Environment for the delivery subprocess.
+    """Environment for a FRESH (resume-less) delivery subprocess.
 
     Thin public wrapper over the pager's ``_claude_dispatch_env`` so the
     session-id-clobber-prevention contract (sets ``RCX_PIPELINE_SESSION=1``,
     clears ``RCX_CLAUDE_MONITOR``) is reused verbatim rather than reimplemented.
+    The resume-the-monitor leg uses the pager's ``_claude_monitor_resume_env``
+    (``RCX_CLAUDE_MONITOR=1``) instead, returned inside the delivery plan from
+    ``resolve_claude_page_delivery``.
     """
     return _CLAUDE_DISPATCH_ENV()
 
@@ -219,7 +260,14 @@ def event_keys(event: dict[str, Any]) -> set[str]:
 
 
 class ClaudePagerReceiver:
-    """File-queue inbox + serialized fresh-``claude -p`` delivery (dormant)."""
+    """File-queue inbox + serialized single-flight delivery.
+
+    Delivery is codex-parity: a page is delivered INTO the persistent dedicated
+    monitor (``claude --resume <monitor>``) when one is configured + distinct from
+    the live orchestrator + resumable, else a fresh, resume-less ``claude -p`` (the
+    resume-vs-fresh decision is the pager's ``resolve_claude_page_delivery``, applied
+    at delivery time; the live orchestrator is never resumed).
+    """
 
     def __init__(
         self,
@@ -274,8 +322,21 @@ class ClaudePagerReceiver:
             if str(record.get("event_id") or "").strip()
         }
 
-    def delivery_command(self, event: dict[str, Any]) -> list[str]:
-        """Delivery argv: always a fresh ``claude -p`` page -- NEVER ``--resume``."""
+    def delivery_command(
+        self, event: dict[str, Any], *, resume_session_id: str | None = None
+    ) -> list[str]:
+        """Delivery argv.
+
+        When ``resume_session_id`` is a non-empty id, the page is delivered INTO that
+        persistent session: ``claude --resume <id> -p <prompt>`` (codex-parity -- the
+        page becomes a turn in the warm dedicated monitor). Otherwise it is a fresh,
+        resume-less ``claude -p`` page. The resume target is resolved by the pager's
+        ``resolve_claude_page_delivery`` at delivery time (NEVER the live orchestrator);
+        this method only builds the argv from the resolved decision.
+        """
+        resume_id = str(resume_session_id or "").strip()
+        if resume_id:
+            return [self.claude_bin, "--resume", resume_id, "-p", self._event_prompt(event)]
         return [self.claude_bin, "-p", self._event_prompt(event)]
 
     # -- enqueue (the quick-ack) ---------------------------------------------
@@ -615,7 +676,7 @@ class ClaudePagerReceiver:
 
     def _event_prompt(self, event: dict[str, Any]) -> str:
         lines = [
-            "WorkingRCX pipeline quick-ack page (direct, fresh claude -p).",
+            "WorkingRCX pipeline quick-ack page.",
             f"event_id: {str(event.get('event_id') or '').strip()}",
             f"transition_key: {str(event.get('transition_key') or '').strip()}",
             f"event_type: {str(event.get('event_type') or '').strip()}",
@@ -632,8 +693,59 @@ class ClaudePagerReceiver:
         ]
         return "\n".join(lines)
 
-    def _dispatch(self, event: dict[str, Any]) -> dict[str, Any]:
-        command = self.delivery_command(event)
+    def _resolve_delivery_plan(self) -> dict[str, Any]:
+        """Resolve the delivery target (resume-the-monitor vs fresh) at DELIVERY time.
+
+        Borrows the pager's ``resolve_claude_page_delivery`` so the resume-vs-fresh
+        decision AND the never-resume-the-live-orchestrator guard are computed from the
+        SAME session-id files and logic the pager owns, evaluated against THIS receiver's
+        ``repo_root`` + ``bus_dir`` at the moment of delivery (the detached drain
+        subprocess has no ContextVar bus set, so the explicit ``bus_dir`` is required).
+
+        Returns ``{"mode": "resume", "monitor_session_id": <id>, "env": <resume env>}``
+        ONLY when the resolver clearly elects a resume with a well-formed monitor id and
+        a delivery env; EVERYTHING else (unset / equals-live / malformed / any resolution
+        error) degrades to ``{"mode": "fresh", "monitor_session_id": None, "env":
+        delivery_env()}``. Fail-open and never-resume-live by construction: a fresh page
+        is the safe default, so a flaky resolver can never resume the wrong session or
+        lose a page.
+        """
+        try:
+            plan = _RESOLVE_CLAUDE_PAGE_DELIVERY(self.repo_root, bus_dir=self.bus_dir)
+            if (
+                isinstance(plan, dict)
+                and plan.get("mode") == "resume"
+                and str(plan.get("monitor_session_id") or "").strip()
+                and isinstance(plan.get("env"), dict)
+            ):
+                return {
+                    "mode": "resume",
+                    "monitor_session_id": str(plan["monitor_session_id"]).strip(),
+                    "env": plan["env"],
+                }
+        except Exception:
+            # Fail-open: any resolver error -> fresh, resume-less page.
+            pass
+        return {"mode": "fresh", "monitor_session_id": None, "env": delivery_env()}
+
+    def _run_delivery(
+        self,
+        event: dict[str, Any],
+        *,
+        command: list[str],
+        env: dict[str, str],
+        mode: str,
+        monitor_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Launch ONE ``claude`` page child and reap it (shared by the resume + fresh legs).
+
+        Single source of the subprocess + ~120s timeout + process-group reaper behavior:
+        the child runs in its own session/process-group (``start_new_session=True``) so a
+        timeout reaps the whole group via ``_terminate_process_group``. Returns the
+        ``{delivered, ack|error, timed_out}`` shape ``deliver_once`` already consumes. On
+        exit-0 the ack carries ``mode`` (``"resume"`` or ``"direct"``) and, for a resume,
+        the ``monitor_session_id`` it paged into.
+        """
         log_path = self._delivery_log_path(event)
         try:
             with log_path.open("w", encoding="utf-8") as sink:
@@ -646,8 +758,7 @@ class ClaudePagerReceiver:
                     text=True,
                     # Own session/process-group so a timeout reaps the whole group.
                     start_new_session=True,
-                    # Reuse the pager's clobber-safe delivery env (no session-id clobber).
-                    env=delivery_env(),
+                    env=env,
                 )
         except OSError as exc:
             return {"delivered": False, "error": f"claude pager delivery launch failed: {exc}"}
@@ -674,25 +785,83 @@ class ClaudePagerReceiver:
                     + (f": {detail}" if detail else "")
                 ),
             }
-        return {
-            "delivered": True,
-            "ack": {
-                "acknowledged_at": _utcnow(),
-                "exit_code": exit_code,
-                "target": "claude",
-                # Fresh page resumes nothing -> self-evident ``direct`` mode marker.
-                "mode": "direct",
-                "pid": proc.pid,
-                "log_path": str(log_path),
-            },
+        ack = {
+            "acknowledged_at": _utcnow(),
+            "exit_code": exit_code,
+            "target": "claude",
+            "mode": mode,
+            "pid": proc.pid,
+            "log_path": str(log_path),
         }
+        resume_id = str(monitor_session_id or "").strip()
+        if resume_id:
+            ack["monitor_session_id"] = resume_id
+        return {"delivered": True, "ack": ack}
+
+    def _dispatch(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Deliver one page: resume the warm monitor when configured, else a fresh page.
+
+        Codex-parity: page INTO the persistent dedicated monitor
+        (``claude --resume <claude_monitor_session_id>``) when the resolver elects a
+        resume (monitor set + distinct from the live orchestrator + resumable), mirroring
+        how the codex leg issues each turn into the shared autoping thread. On a resume
+        FAILURE (stale/dead monitor -- the claude mirror of codex's stale-thread case)
+        FALL BACK to a fresh, resume-less ``claude -p`` page in the SAME delivery, so no
+        page is lost and the live orchestrator is never resumed. When the resolver elects
+        fresh (MONITOR_UNSET / MONITOR_EQUALS_LIVE / resolution error) a single fresh page
+        is delivered. Every leg reuses ``_run_delivery`` (same timeout + reaper), and the
+        whole call stays under ``deliver_once``'s single delivery lock, so at most one
+        ``claude`` child is ever in flight.
+        """
+        plan = self._resolve_delivery_plan()
+        if plan["mode"] == "resume":
+            monitor_id = plan["monitor_session_id"]
+            result = self._run_delivery(
+                event,
+                command=self.delivery_command(event, resume_session_id=monitor_id),
+                env=plan["env"],
+                mode="resume",
+                monitor_session_id=monitor_id,
+            )
+            if result.get("delivered"):
+                return result
+            # Resume failed (stale/dead monitor): fall back to a fresh page so the page is
+            # still delivered. Mirrors codex starting a NEW thread on a stale-thread error
+            # -- the page is never dropped because the dedicated monitor was unusable.
+            fresh = self._run_delivery(
+                event,
+                command=self.delivery_command(event),
+                env=delivery_env(),
+                mode="direct",
+            )
+            if fresh.get("delivered"):
+                fresh["ack"]["resume_fallback_from"] = monitor_id
+            else:
+                fresh["error"] = (
+                    f"claude --resume {monitor_id} failed "
+                    f"({_excerpt(str(result.get('error') or ''))}); "
+                    f"fresh page fallback also failed "
+                    f"({_excerpt(str(fresh.get('error') or ''))})"
+                )
+                if result.get("timed_out") or fresh.get("timed_out"):
+                    fresh["timed_out"] = True
+            return fresh
+        # Fresh leg (MONITOR_UNSET / MONITOR_EQUALS_LIVE / resolution error).
+        return self._run_delivery(
+            event,
+            command=self.delivery_command(event),
+            env=plan["env"],
+            mode="direct",
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Dormant Claude quick-ack pager receiver (Wave 1; not wired into the "
-            "pipeline). Drains a per-bus file-queue via fresh `claude -p` pages."
+            "Claude quick-ack pager receiver. Drains a per-bus file-queue, "
+            "delivering each page INTO the persistent dedicated monitor "
+            "(`claude --resume <monitor>`) when one is configured + distinct from "
+            "the live orchestrator, else a fresh `claude -p` page."
         )
     )
     parser.add_argument("--repo-root", default=".", help="Repo root (default: cwd).")

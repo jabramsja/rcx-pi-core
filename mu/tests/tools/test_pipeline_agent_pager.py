@@ -1853,14 +1853,19 @@ def test_dispatch_claude_enqueues_to_receiver_and_returns_accepted_async(tmp_pat
     assert receiver.delivered_event_ids() == set()
 
 
-def test_dispatch_claude_never_resumes_and_reads_no_monitor_session(tmp_path, monkeypatch):
-    """No-monitor-resume invariant: the leg never resumes any session.
+def test_dispatch_claude_enqueue_leg_reads_no_session_id_resolution_is_delivery_time(
+    tmp_path, monkeypatch
+):
+    """Ack-budget discipline: the ENQUEUE leg does NO session-id file I/O.
 
-    The dropped path resumed a dedicated monitor (``claude --resume`` of
-    claude_monitor_session_id). Wave 2 removes that entirely: _dispatch_claude must
-    neither read the monitor/orchestrator session-id files nor pass ``--resume``.
-    Even with a well-formed dedicated monitor id AND a distinct live id present (the
-    exact setup that used to trigger a resume), the leg simply enqueues.
+    Codex-parity moved the resume-vs-fresh decision (and the never-resume-the-live-
+    orchestrator guard) to DELIVERY time, inside the receiver
+    (``resolve_claude_page_delivery``); it is NOT done in the ack-budget-critical
+    ``_dispatch_claude`` enqueue leg. So even with a well-formed dedicated monitor id
+    AND a distinct live id present, ``_dispatch_claude`` neither reads the
+    monitor/orchestrator session-id files nor spawns a turn -- it simply enqueues and
+    quick-acks. The actual resume-the-monitor delivery (``claude --resume <monitor>``)
+    and the fresh fallbacks are locked in test_claude_pager_receiver.py.
     """
     repo = tmp_path / "repo"
     monitor_path = repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH
@@ -1870,10 +1875,10 @@ def test_dispatch_claude_never_resumes_and_reads_no_monitor_session(tmp_path, mo
     live_path.write_text("sess-live-distinct", encoding="utf-8")
 
     def _boom_monitor(*_a, **_k):
-        raise AssertionError("claude leg must not read the monitor session id")
+        raise AssertionError("ENQUEUE leg must not read the monitor session id")
 
     def _boom_live(*_a, **_k):
-        raise AssertionError("claude leg must not read the orchestrator session id")
+        raise AssertionError("ENQUEUE leg must not read the orchestrator session id")
 
     monkeypatch.setattr(pager_mod, "_read_claude_monitor_session_id", _boom_monitor)
     monkeypatch.setattr(pager_mod, "_read_orchestrator_session_id", _boom_live)
@@ -1886,14 +1891,143 @@ def test_dispatch_claude_never_resumes_and_reads_no_monitor_session(tmp_path, mo
     with patch.object(
         pager_mod.subprocess,
         "run",
-        side_effect=AssertionError("claude leg must not spawn a blocking turn / resume"),
+        side_effect=AssertionError("claude ENQUEUE leg must not spawn a blocking turn / resume"),
     ):
         result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
 
     assert result["accepted_async"] is True
-    # The receiver delivers later via a fresh, resume-less ``claude -p`` -- its argv
-    # contract (never ``--resume``) is locked in test_claude_pager_receiver.py.
+    # The receiver resolves the target and delivers later (resume-the-monitor or fresh) --
+    # its argv contract is locked in test_claude_pager_receiver.py.
     assert _receiver(repo).queued_event_ids() == [event["event_id"]]
+
+
+# --------------------------------------------------------------------------- #
+# resolve_claude_page_delivery -- codex-parity delivery-target resolver
+# (the pager owns this; the receiver borrows + calls it at delivery time)
+# --------------------------------------------------------------------------- #
+
+
+def _write_pager_session_ids(repo, *, monitor=None, live=None):
+    obs = repo / pager_mod.OBSERVABILITY_DIR
+    obs.mkdir(parents=True, exist_ok=True)
+    if monitor is not None:
+        (repo / pager_mod.CLAUDE_MONITOR_SESSION_ID_PATH).write_text(monitor + "\n", encoding="utf-8")
+    if live is not None:
+        (repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH).write_text(live + "\n", encoding="utf-8")
+
+
+def test_resolve_claude_page_delivery_resumes_when_monitor_set_and_distinct(tmp_path):
+    """Monitor set + distinct from live -> resume INTO the monitor (RCX_CLAUDE_MONITOR=1)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_pager_session_ids(repo, monitor="sess-monitor", live="sess-live-distinct")
+
+    plan = pager_mod.resolve_claude_page_delivery(repo, bus_dir=".agent_bus")  # ANTICHEAT_OK: resolver contract
+
+    assert plan["mode"] == "resume"
+    assert plan["monitor_session_id"] == "sess-monitor"
+    assert plan["skip_reason"] == ""
+    # Resume env never clobbers orchestrator_session_id (RCX_CLAUDE_MONITOR=1 + pipeline flag).
+    assert plan["env"]["RCX_CLAUDE_MONITOR"] == "1"
+    assert plan["env"]["RCX_PIPELINE_SESSION"] == "1"
+
+
+def test_resolve_claude_page_delivery_fresh_when_monitor_unset(tmp_path):
+    """No monitor file -> MONITOR_UNSET -> fresh page (RCX_CLAUDE_MONITOR cleared)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / pager_mod.OBSERVABILITY_DIR).mkdir(parents=True, exist_ok=True)
+
+    plan = pager_mod.resolve_claude_page_delivery(repo, bus_dir=".agent_bus")  # ANTICHEAT_OK: resolver contract
+
+    assert plan["mode"] == "fresh"
+    assert plan["monitor_session_id"] is None
+    assert plan["skip_reason"] == pager_mod.CLAUDE_SKIP_REASON_MONITOR_UNSET
+    assert "RCX_CLAUDE_MONITOR" not in plan["env"]
+    assert plan["env"]["RCX_PIPELINE_SESSION"] == "1"
+
+
+def test_resolve_claude_page_delivery_fresh_when_monitor_equals_live(tmp_path):
+    """Monitor == live orchestrator -> MONITOR_EQUALS_LIVE -> fresh (never resume live)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_pager_session_ids(repo, monitor="sess-same", live="sess-same")
+
+    plan = pager_mod.resolve_claude_page_delivery(repo, bus_dir=".agent_bus")  # ANTICHEAT_OK: resolver contract
+
+    assert plan["mode"] == "fresh"
+    assert plan["monitor_session_id"] is None
+    assert plan["skip_reason"] == pager_mod.CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE
+    assert "RCX_CLAUDE_MONITOR" not in plan["env"]
+
+
+def test_resolve_claude_page_delivery_fresh_when_monitor_malformed(tmp_path):
+    """A malformed monitor id (internal whitespace) collapses to MONITOR_UNSET -> fresh."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_pager_session_ids(repo, monitor="sess monitor", live="sess-live")
+
+    plan = pager_mod.resolve_claude_page_delivery(repo, bus_dir=".agent_bus")  # ANTICHEAT_OK: resolver contract
+
+    assert plan["mode"] == "fresh"
+    assert plan["skip_reason"] == pager_mod.CLAUDE_SKIP_REASON_MONITOR_UNSET
+
+
+def test_resolve_claude_page_delivery_fail_open_fresh_on_read_error(tmp_path, monkeypatch):
+    """Any resolution error fails OPEN to a fresh page -- never a resume, no page lost."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_pager_session_ids(repo, monitor="sess-monitor", live="sess-live")
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("bus path validation blew up")
+
+    monkeypatch.setattr(pager_mod, "_read_claude_monitor_session_id", _boom)
+
+    plan = pager_mod.resolve_claude_page_delivery(repo, bus_dir=".agent_bus")  # ANTICHEAT_OK: resolver contract
+
+    assert plan["mode"] == "fresh"
+    assert plan["monitor_session_id"] is None
+    assert "RCX_CLAUDE_MONITOR" not in plan["env"]
+
+
+def test_claude_monitor_resume_env_sets_monitor_and_pipeline_flags(monkeypatch):
+    """The resume env sets BOTH flags so the resumed monitor re-writes only its OWN id.
+
+    With RCX_PIPELINE_SESSION=1 AND RCX_CLAUDE_MONITOR=1 the SessionStart hook skips the
+    orchestrator-suppression guard and writes claude_monitor_session_id (idempotent),
+    NEVER orchestrator_session_id -- even if the ambient env had the monitor flag unset.
+    """
+    monkeypatch.delenv("RCX_CLAUDE_MONITOR", raising=False)
+    monkeypatch.setenv("RCX_PIPELINE_SESSION", "")
+
+    env = pager_mod._claude_monitor_resume_env()  # ANTICHEAT_OK: env contract
+
+    assert env["RCX_CLAUDE_MONITOR"] == "1"
+    assert env["RCX_PIPELINE_SESSION"] == "1"
+
+
+def test_session_id_readers_accept_explicit_bus_dir(tmp_path):
+    """The session-id readers accept an explicit bus_dir (delivery-time resolution seam).
+
+    The receiver's detached drain subprocess has no ContextVar bus set, so it passes its
+    own bus_dir; the explicit kwarg must resolve the SAME file the default (ContextVar)
+    path does for the default bus.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_pager_session_ids(repo, monitor="sess-monitor", live="sess-live")
+
+    assert (
+        pager_mod._read_claude_monitor_session_id(repo, bus_dir=".agent_bus")  # ANTICHEAT_OK: reader contract
+        == "sess-monitor"
+        == pager_mod._read_claude_monitor_session_id(repo)  # ANTICHEAT_OK: reader contract (default bus)
+    )
+    assert (
+        pager_mod._read_orchestrator_session_id(repo, bus_dir=".agent_bus")  # ANTICHEAT_OK: reader contract
+        == "sess-live"
+        == pager_mod._read_orchestrator_session_id(repo)  # ANTICHEAT_OK: reader contract (default bus)
+    )
 
 
 def test_dispatch_claude_enqueue_is_idempotent_across_redispatch(tmp_path):
@@ -2732,11 +2866,14 @@ def test_session_start_hook_writes_monitor_id_even_in_pipeline_owned_session(tmp
 
 
 def test_both_route_claude_leg_enqueues_regardless_of_monitor_state(tmp_path, monkeypatch):
-    """Wave-2 contract: the claude leg's behavior no longer depends on the dedicated
-    monitor session id at all. With a well-formed, distinct dedicated monitor id
-    present (the exact setup the dropped path used to resume), route=both still
-    quick-acks claude by ENQUEUEING to the receiver -- no ``--resume``, no blocking
-    turn -- and leaves it pending until the async receipt. Codex is unaffected.
+    """The ENQUEUE leg is monitor-independent: it always quick-acks by enqueueing.
+
+    The dedicated monitor session id drives the DELIVERY decision (resume-the-monitor
+    vs fresh) inside the receiver, NOT the enqueue leg. With a well-formed, distinct
+    dedicated monitor id present, route=both still quick-acks claude by ENQUEUEING to
+    the receiver -- no ``--resume`` and no blocking turn at enqueue time -- and leaves
+    it pending until the async receipt. The resume-the-monitor delivery itself is
+    exercised in test_claude_pager_receiver.py. Codex is unaffected.
     """
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -76,12 +76,13 @@ ORCHESTRATOR_SESSION_ID_PATH = OBSERVABILITY_DIR / "orchestrator_session_id"
 # the session id of a dedicated Claude monitor conversation -- never the live
 # orchestrator session. The pager is read-only here; the writer (the monitor's
 # own session-start, mirror of ``.claude/hooks/session-start.sh``) is out of
-# scope for this enabler wave. The claude pager leg resolves its ``--resume``
-# target ONLY from this file and never falls back to ``orchestrator_session_id``,
-# so ``route=both`` can never resume the live orchestrator conversation. When
-# this file is absent/malformed, or its id equals the live orchestrator session
-# id, the claude leg issues no ``claude --resume``; it falls back to a DIRECT
-# ``claude -p`` page (a fresh subprocess that never resumes the live orchestrator).
+# scope for this enabler wave. ``resolve_claude_page_delivery`` (called by the
+# claude receiver at DELIVERY time, codex-parity) resolves its ``--resume`` target
+# ONLY from this file and never falls back to ``orchestrator_session_id``, so
+# ``route=both`` can never resume the live orchestrator conversation. When this
+# file is absent/malformed, or its id equals the live orchestrator session id, the
+# claude leg issues no ``claude --resume``; it pages with a DIRECT, resume-less
+# ``claude -p`` (a fresh subprocess that never resumes the live orchestrator).
 CLAUDE_MONITOR_SESSION_ID_PATH = OBSERVABILITY_DIR / "claude_monitor_session_id"
 # Distinct skip markers for the fail-closed claude leg. A skip carries one of
 # these reasons instead of an ``error`` (a transient error stays pending for
@@ -1692,7 +1693,7 @@ def _dispatch_codex(
     }
 
 
-def _read_orchestrator_session_id(repo_root: Path) -> str | None:
+def _read_orchestrator_session_id(repo_root: Path, *, bus_dir: str | Path | None = None) -> str | None:
     """Return the orchestrator session id for pager ``--resume`` dispatch.
 
     The orchestrator-session-id file is authored by the
@@ -1704,8 +1705,13 @@ def _read_orchestrator_session_id(repo_root: Path) -> str | None:
     or newlines — or a file whose bytes are not valid UTF-8 — is treated as
     malformed: a single fallback note is emitted to stderr and ``None`` is
     returned so the caller falls back to plain ``claude -p`` dispatch.
+
+    ``bus_dir`` selects the active bus explicitly (default: the ContextVar bus),
+    so the claude receiver can resolve the live-orchestrator id against the SAME
+    repo/bus it is delivering for, at delivery time, without relying on a
+    ContextVar that is not set inside the detached drain subprocess.
     """
-    session_path = _observability_path(repo_root, "orchestrator_session_id")
+    session_path = _observability_path(repo_root, "orchestrator_session_id", bus_dir=bus_dir)
     try:
         raw = session_path.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
@@ -1732,22 +1738,27 @@ def _read_orchestrator_session_id(repo_root: Path) -> str | None:
     return candidate
 
 
-def _read_claude_monitor_session_id(repo_root: Path) -> str | None:
+def _read_claude_monitor_session_id(repo_root: Path, *, bus_dir: str | Path | None = None) -> str | None:
     """Return the DEDICATED claude-monitor session id for pager ``--resume``.
 
     Mirrors ``_read_orchestrator_session_id``'s malformed-tolerance discipline
     exactly, but reads ONLY the dedicated monitor-session-id file (a sibling of
     ``orchestrator_session_id`` under the observability dir). The monitor file
     is authored by the claude monitor's own session-start writer. When no distinct
-    monitor id is available this resolver returns ``None`` and ``_dispatch_claude``
-    falls back to a DIRECT ``claude -p`` page. There is NO fallback to the live
-    ``orchestrator_session_id`` file: the live orchestrator conversation is never
-    a ``claude --resume`` target (a direct page resumes nothing). Every
+    monitor id is available this resolver returns ``None`` and the claude page is
+    delivered with a fresh, resume-less ``claude -p`` page. There is NO fallback to
+    the live ``orchestrator_session_id`` file: the live orchestrator conversation is
+    never a ``claude --resume`` target (a direct page resumes nothing). Every
     absent/malformed case yields ``None``: missing file, OSError, non-UTF-8 bytes,
     empty, whitespace-only, and a session id containing internal whitespace or
     newlines.
+
+    ``bus_dir`` selects the active bus explicitly (default: the ContextVar bus),
+    so the claude receiver can resolve the monitor id against the SAME repo/bus it
+    is delivering for, at delivery time -- the detached drain subprocess has no
+    ContextVar bus set, so it passes its own ``bus_dir`` here.
     """
-    monitor_path = _observability_path(repo_root, "claude_monitor_session_id")
+    monitor_path = _observability_path(repo_root, "claude_monitor_session_id", bus_dir=bus_dir)
     try:
         raw = monitor_path.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
@@ -1775,13 +1786,14 @@ def _read_claude_monitor_session_id(repo_root: Path) -> str | None:
 
 
 def _claude_dispatch_env() -> dict[str, str]:
-    """Environment for the pager's own ``claude`` page-delivery subprocess.
+    """Environment for the pager's FRESH (resume-less) ``claude -p`` page delivery.
 
-    The pager's ``claude`` child -- whether it ``--resume``s the dedicated
-    monitor or pages DIRECTLY with a fresh ``claude -p`` -- is a TRANSIENT
-    page-delivery process. It is neither the live orchestrator nor a dedicated
-    monitor, so its session id must never be registered anywhere. But a fresh
-    ``claude`` child runs the repo SessionStart hook
+    This is the clobber-safe env for a DIRECT page (no ``--resume``); the
+    resume-the-monitor leg uses ``_claude_monitor_resume_env`` instead. The
+    pager's fresh ``claude`` child is a TRANSIENT page-delivery process. It is
+    neither the live orchestrator nor a dedicated monitor, so its session id must
+    never be registered anywhere. But a fresh ``claude`` child runs the repo
+    SessionStart hook
     (``.claude/hooks/session-start.sh``), which by default writes the child's
     session id into ``orchestrator_session_id`` (or, under
     ``RCX_CLAUDE_MONITOR=1``, into the sibling ``claude_monitor_session_id``).
@@ -1808,6 +1820,103 @@ def _claude_dispatch_env() -> dict[str, str]:
     return env
 
 
+def _claude_monitor_resume_env() -> dict[str, str]:
+    """Environment for the pager's ``claude --resume <monitor>`` page delivery.
+
+    Identical to ``_claude_dispatch_env`` (marks the child a pipeline-owned
+    sub-session via ``RCX_PIPELINE_SESSION=1``) EXCEPT it SETS
+    ``RCX_CLAUDE_MONITOR=1`` instead of clearing it. With BOTH vars set, the
+    resumed monitor's SessionStart hook (``.claude/hooks/session-start.sh``) skips
+    the orchestrator-suppression guard (which fires only when
+    ``RCX_PIPELINE_SESSION=1`` AND ``RCX_CLAUDE_MONITOR != 1``) and writes the
+    session id into the DEDICATED ``claude_monitor_session_id`` file -- NEVER
+    ``orchestrator_session_id``. Because ``claude --resume`` reuses the SAME
+    session id, that write re-writes the monitor's OWN id (idempotent). This is
+    what lets the pager page INTO the persistent monitor (codex-parity: each page
+    is a turn in the SAME warm monitor the autoping watcher keeps) without ever
+    clobbering the live orchestrator session id (the watcher self-collision class).
+    The rest of the live environment is inherited so the page keeps the same
+    auth/session context.
+    """
+    env = os.environ.copy()
+    env["RCX_PIPELINE_SESSION"] = "1"
+    env["RCX_CLAUDE_MONITOR"] = "1"
+    return env
+
+
+def resolve_claude_page_delivery(
+    repo_root: Path,
+    *,
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Resolve the claude page's delivery target at DELIVERY time (codex-parity).
+
+    Mirrors the codex pager's shared-thread model: deliver the page INTO the
+    persistent dedicated monitor (``claude --resume <claude_monitor_session_id>``)
+    when that monitor id is SET (well-formed) AND DISTINCT from the live
+    orchestrator session id -- the SAME monitor the autoping watcher keeps warm,
+    exactly as ``_dispatch_codex`` issues each turn into the shared autoping
+    thread. Otherwise page with a fresh, resume-less ``claude -p`` (the dedicated
+    monitor is not yet up with a distinct id). The live orchestrator session is
+    NEVER a ``claude --resume`` target: when the monitor id is unset/malformed
+    (``MONITOR_UNSET``) or equals the live orchestrator id (``MONITOR_EQUALS_LIVE``)
+    the result is a fresh page -- the claude mirror of the codex leg's
+    paused/foreign-thread skip.
+
+    The claude receiver borrows this resolver and calls it at delivery time (from
+    the detached drain subprocess) with its own ``repo_root`` + ``bus_dir``, so the
+    resume-vs-fresh decision and the never-resume-the-live-orchestrator guard are
+    evaluated against the freshest session-id files at the moment the ``claude``
+    child is launched -- not at enqueue time, where the ids could go stale.
+
+    Returns a plan dict consumed by the receiver:
+      ``{"mode": "resume"|"fresh",
+         "monitor_session_id": <id>|None,
+         "skip_reason": ""|CLAUDE_SKIP_REASON_MONITOR_UNSET
+                          |CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE,
+         "env": <delivery env>}``
+    ``env`` is ``_claude_monitor_resume_env`` (``RCX_CLAUDE_MONITOR=1``,
+    no-clobber) for the resume mode, else the fresh clobber-safe
+    ``_claude_dispatch_env``. Fail-open: any read/resolution error yields a fresh
+    plan (NEVER a resume), so no page is lost and the live orchestrator is never
+    resumed. This function performs no delivery and starts no subprocess; the
+    receiver owns the actual ``claude`` launch + the resume-failure fresh fallback.
+    """
+    try:
+        monitor_id = _read_claude_monitor_session_id(repo_root, bus_dir=bus_dir)
+    except Exception:
+        # Fail-open: an unexpected resolution error (e.g. a bus-path validation
+        # failure) must never resume anything -- degrade to a fresh page.
+        monitor_id = None
+    if not monitor_id:
+        return {
+            "mode": "fresh",
+            "monitor_session_id": None,
+            "skip_reason": CLAUDE_SKIP_REASON_MONITOR_UNSET,
+            "env": _claude_dispatch_env(),
+        }
+    try:
+        live_id = _read_orchestrator_session_id(repo_root, bus_dir=bus_dir)
+    except Exception:
+        live_id = None
+    if live_id is not None and monitor_id == live_id:
+        # The dedicated monitor id transiently equals the live orchestrator id:
+        # NEVER resume the live orchestrator (codex's paused/foreign-thread skip
+        # parity). Page fresh until the monitor lands a distinct id.
+        return {
+            "mode": "fresh",
+            "monitor_session_id": None,
+            "skip_reason": CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE,
+            "env": _claude_dispatch_env(),
+        }
+    return {
+        "mode": "resume",
+        "monitor_session_id": monitor_id,
+        "skip_reason": "",
+        "env": _claude_monitor_resume_env(),
+    }
+
+
 def _dispatch_claude(
     repo_root: Path,
     event: dict[str, Any],
@@ -1828,12 +1937,19 @@ def _dispatch_claude(
 
     1. ENQUEUE the page (durably queued -- the quick-ack).
     2. ENSURE a bounded, detached drain pass is running (``receiver.ensure_draining``):
-       a single ``run_until_empty`` child that delivers via a fresh, resume-less
-       ``claude -p`` and exits. Because the event is durably queued BEFORE the pass is
-       started, that pass is guaranteed to observe it -- there is NO never-drained-queue
-       window. The drain-ensure adds NO open-ended daemon lifecycle (no owner-loop /
-       session-rebuild / restart-supervision) -- just start-if-not-running plus the
-       receiver's existing per-delivery reaper.
+       a single ``run_until_empty`` child that delivers the page and exits. At DELIVERY
+       time the receiver resolves the target via ``resolve_claude_page_delivery`` and,
+       for codex-parity, pages INTO the persistent dedicated monitor
+       (``claude --resume <claude_monitor_session_id>`` -- the SAME warm monitor the
+       autoping watcher keeps, mirroring how ``_dispatch_codex`` issues each turn into
+       the shared autoping thread) when that monitor is set + distinct from the live
+       orchestrator + resumable; otherwise it pages with a fresh, resume-less
+       ``claude -p`` (and falls back to a fresh page if the resume fails). Because the
+       event is durably queued BEFORE the pass is started, that pass is guaranteed to
+       observe it -- there is NO never-drained-queue window. The drain-ensure adds NO
+       open-ended daemon lifecycle (no owner-loop / session-rebuild /
+       restart-supervision) -- just start-if-not-running plus the receiver's existing
+       per-delivery reaper.
 
     Two-phase state: this leg returns ``accepted_async`` (NOT ``acknowledged``), so the
     dispatch loop never takes the synchronous ``acknowledged -> delivered_targets[claude]``
@@ -1847,12 +1963,15 @@ def _dispatch_claude(
     Fail-open: if the page cannot be ENQUEUED or the drain cannot be ENSURED, the leg
     returns a normal retryable error (``acknowledged`` False) and leaves the target pending
     -- it NEVER marks accepted for a queue that may not drain, and never skips, so no page
-    is lost. The monitor-resume path is gone entirely, so this leg can never resume the
-    live orchestrator (or any) session, and it reads neither the monitor nor the
-    orchestrator session-id file; the receiver always pages with a fresh, resume-less
-    ``claude -p``. ``config`` / ``timeout_s`` are retained only for the ``_dispatch_target``
-    contract -- the enqueue and the drain-spawn are fast local operations that need no
-    per-turn budget.
+    is lost. This ENQUEUE leg itself reads NEITHER the monitor NOR the orchestrator
+    session-id file and never resumes anything: the resume-vs-fresh decision and the
+    never-resume-the-live-orchestrator guard are evaluated at DELIVERY time, inside the
+    receiver, via ``resolve_claude_page_delivery`` (which fails open to a fresh page on
+    ``MONITOR_UNSET`` / ``MONITOR_EQUALS_LIVE`` and the receiver falls back to a fresh page
+    on a resume failure). Keeping this ack-budget-critical leg free of session-id file I/O
+    is deliberate. ``config`` / ``timeout_s`` are retained only for the
+    ``_dispatch_target`` contract -- the enqueue and the drain-spawn are fast local
+    operations that need no per-turn budget.
     """
     # Phase 1: durably ENQUEUE the page (the receiver's atomic enqueue is the quick-ack).
     try:
