@@ -481,6 +481,91 @@ def _load_delivery_receipts(repo_root: Path) -> list[dict[str, Any]]:
     )
 
 
+def _load_claude_pager_receiver_cls() -> Any:
+    """Resolve ``claude_pager_receiver.ClaudePagerReceiver`` (READ-ONLY reuse).
+
+    Mirror of the receiver's own ``_load_claude_dispatch_env`` import discipline:
+    try a normal import, then fall back to a by-path load of the sibling session
+    module. The wave-1 receiver is consumed AS-IS -- Wave 2 does not modify it
+    (Option B: the pager PULLS the receiver's ``delivered.jsonl``; the receiver
+    never pushes into the pager's own receipt log).
+    """
+    try:
+        from claude_pager_receiver import ClaudePagerReceiver  # type: ignore
+        return ClaudePagerReceiver
+    except Exception:
+        pass
+    import importlib.util as _ilu
+
+    receiver_path = SCRIPT_DIR.parent / "session" / "claude_pager_receiver.py"
+    spec = _ilu.spec_from_file_location("claude_pager_receiver", str(receiver_path))
+    if spec is None or spec.loader is None:
+        raise PipelineAgentPagerError(
+            f"cannot load claude_pager_receiver from {receiver_path}"
+        )
+    module = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ClaudePagerReceiver
+
+
+def _claude_pager_receiver(repo_root: Path) -> Any:
+    """Construct a ``ClaudePagerReceiver`` bound to the pager's ACTIVE bus.
+
+    Same ``repo_root`` + bus name the pager uses everywhere else, so the
+    receiver's queue and its ``delivered.jsonl`` live under the SAME ``.agent_bus``
+    that ``_dispatch_claude`` enqueues into and that the reconcile receipt-bridge
+    reads. The receiver computes the on-disk paths itself, so enqueue and reconcile
+    can never drift on the path format.
+    """
+    receiver_cls = _load_claude_pager_receiver_cls()
+    bus_name = agent_bus_relpath(_active_bus_dir()).name
+    return receiver_cls(repo_root, bus_dir=bus_name)
+
+
+def _load_claude_receiver_receipts(repo_root: Path) -> list[dict[str, Any]]:
+    """READ-ONLY, fail-open read of the receiver's exit-0 delivery receipts.
+
+    The wave-1 receiver writes one JSON line per exit-0 success to its
+    ``claude_pager_receiver/delivered.jsonl`` (schema
+    ``{event_id, transition_key, ack, recorded_at}``; every record is a claude
+    exit-0 success -- there is no ``target`` field). This consumes that file
+    AS-IS:
+
+    * an absent or unreadable file yields ``[]`` (fail-open: claude stays
+      pending), exactly as today's missing-receipt case left the target pending;
+    * a malformed / non-dict line is SKIPPED, never raised and never
+      quarantined/rewritten -- unlike ``_load_jsonl_records`` (the pager's own log
+      reader), which rewrites a corrupt tail. Rewriting here would MUTATE the
+      receiver's own file and could race its appends, violating the
+      consume-as-is / receiver-unmodified contract (Option B).
+
+    Tolerance of unknown/foreign ``event_id``s is the caller's job (the reconcile
+    bridge skips entries it does not recognize); this reader only parses.
+    """
+    try:
+        path = Path(_claude_pager_receiver(repo_root).receipts_path)
+    except Exception:
+        return []
+    if not path.exists():
+        return []
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    records: list[dict[str, Any]] = []
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            record = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
 def _append_jsonl_record(path: Path, payload: dict[str, Any], *, label: str) -> None:
     records = _load_jsonl_records(path, label=label)
     records.append(payload)
@@ -909,6 +994,32 @@ def _reconcile_delivery_state(
     for entry in state.get("events", {}).values():
         if isinstance(entry, dict):
             _drop_transient_monitor_skips(entry)
+    # Receipt bridge (Option B -- the pager PULLS, Wave 2). The wave-1
+    # claude_pager_receiver delivers claude pages asynchronously and writes its
+    # OWN exit-0 success receipts to claude_pager_receiver/delivered.jsonl. This
+    # is the ONLY writer of delivered_targets["claude"] for the quick-ack leg: for
+    # each receiver receipt whose event_id matches a KNOWN pager event, promote
+    # claude to delivered. Unlike the pager-native delivery-receipt path above, an
+    # unknown/foreign event_id is SKIPPED, never raised -- the receiver's queue is
+    # not authored per-pager-event and may legitimately hold ids this state has
+    # not (yet) seen. Idempotent: delivered["claude"] is re-ASSIGNED the same ack
+    # across reconciles. Fail-open: an absent/unreadable receiver file promotes
+    # nothing (claude stays pending). The receiver schema/module is consumed AS-IS.
+    for receipt in _load_claude_receiver_receipts(repo_root):
+        receiver_event_id = str(receipt.get("event_id") or "").strip()
+        ack = receipt.get("ack")
+        if not receiver_event_id or not isinstance(ack, dict):
+            continue
+        event = event_map.get(receiver_event_id)
+        if event is None:
+            # Foreign/unknown receiver entry -> tolerate (skip), do NOT raise the
+            # way the pager-native receipt path does: the receiver file is not
+            # per-pager-event authored.
+            continue
+        entry = _ensure_event_state(state, event)
+        delivered = entry.setdefault("delivered_targets", {})
+        delivered["claude"] = ack
+        _refresh_pending_targets(entry)
     autoping_thread_id = _read_latest_autoping_thread_id(repo_root)
     if autoping_thread_id:
         state["codex_thread_id"] = autoping_thread_id
@@ -1701,74 +1812,60 @@ def _dispatch_claude(
     *,
     timeout_s: float,
 ) -> dict[str, Any]:
-    claude_bin = os.environ.get("RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN", "claude")
-    monitor_session_id = _read_claude_monitor_session_id(repo_root)
-    resume_target: str | None = None
-    if monitor_session_id:
-        live_session_id = _read_orchestrator_session_id(repo_root)
-        if live_session_id is None or monitor_session_id != live_session_id:
-            # A DISTINCT dedicated monitor session is registered (present,
-            # well-formed, and != the live orchestrator id): resume it. The live
-            # orchestrator id is read for this inequality check ONLY, never as a
-            # ``--resume`` target.
-            resume_target = monitor_session_id
-        # else: the dedicated monitor id transiently equals the live orchestrator
-        # id -> fall through to a DIRECT page (never resume the live orchestrator).
-    # No DISTINCT dedicated monitor available (id absent / malformed, or equal to
-    # the live orchestrator id): page Claude DIRECTLY with a fresh ``claude -p``
-    # subprocess. A direct page passes NO ``--resume``, so it can never resume the
-    # live orchestrator session; it restores the pre-refactor direct pipeline page
-    # the dedicated-monitor refactor had turned into a fail-closed skip. The page
-    # is a normal acknowledged delivery (or a retryable error) -- never a skip.
-    if resume_target is not None:
-        command = [claude_bin, "--resume", resume_target, "-p", _event_prompt(event)]
-    else:
-        command = [claude_bin, "-p", _event_prompt(event)]
+    """Quick-ack: ENQUEUE the page to the wave-1 receiver and return immediately.
+
+    Wave 2 re-points the claude leg off the blocking full-turn path. The old leg
+    ran a whole ``claude`` turn (resume-the-dedicated-monitor, or a fresh
+    ``claude -p``) SYNCHRONOUSLY under the ~10-20s pager ack budget, so it was
+    killed on every dispatch and claude pages never delivered. Now the leg simply
+    ENQUEUES the event into the wave-1 ``claude_pager_receiver`` file-queue: the
+    receiver's atomic enqueue IS the quick-ack (it returns as soon as the event is
+    durably queued). The receiver then delivers asynchronously via its OWN fresh,
+    resume-less ``claude -p`` and, on exit 0, writes a durable receipt to its
+    ``delivered.jsonl``.
+
+    Two-phase state: this leg returns ``accepted_async`` (NOT ``acknowledged``),
+    so the dispatch loop never takes the synchronous
+    ``acknowledged -> delivered_targets[claude]`` write. ``delivered_targets``
+    gains ``claude`` ONLY via the reconcile receipt-bridge that consumes the
+    receiver's exit-0 ``delivered.jsonl`` (see ``_reconcile_delivery_state``). The
+    target therefore stays in ``pending_targets`` here; a later dispatch
+    re-enqueues idempotently (the receiver dedups by ``event_id`` /
+    ``transition_key``) until the async receipt promotes it. That is the
+    re-queue-on-failure behavior, and it is exactly why we do NOT mark delivered
+    on enqueue: marking delivered here would let the receipt rebuild mask an async
+    turn that never actually exited 0.
+
+    Fail-open: if the receiver/queue is unavailable the target is left pending
+    (retryable on a later dispatch), exactly as a transient error was before --
+    no page is lost. The monitor-resume path is gone entirely, so this leg can
+    never resume the live orchestrator (or any) session; the receiver always pages
+    with a fresh, resume-less ``claude -p``. ``config`` / ``timeout_s`` are
+    retained only for the ``_dispatch_target`` contract -- the enqueue is a fast
+    local file write that needs no per-turn budget.
+    """
     try:
-        proc = subprocess.run(
-            command,
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            check=False,
-            # Suppress the child's SessionStart orchestrator/monitor writer so a
-            # transient page-delivery ``claude`` never clobbers the live
-            # ``orchestrator_session_id`` (or ``claude_monitor_session_id``).
-            env=_claude_dispatch_env(),
-        )
-    except subprocess.TimeoutExpired:
+        receiver = _claude_pager_receiver(repo_root)
+        enqueue_result = receiver.enqueue(event)
+    except Exception as exc:
+        # Fail-open: receiver/queue unavailable -> leave the target pending
+        # (retryable). Never raise, never mark delivered, never skip -- identical
+        # in effect to the old transient-error path, so there is no regression.
         return {
             "acknowledged": False,
-            "error": f"claude pager submission timed out after {timeout_s:.3g}s",
+            "error": f"claude pager enqueue failed: {_excerpt(str(exc))}",
         }
-    except OSError as exc:
-        return {
-            "acknowledged": False,
-            "error": f"claude pager submission failed: {exc}",
-        }
-    if proc.returncode != 0:
-        return {
-            "acknowledged": False,
-            "error": (
-                f"claude pager submission exited {proc.returncode}: "
-                f"{_excerpt(proc.stderr or proc.stdout)}"
-            ),
-        }
-    ack: dict[str, Any] = {
-        "acknowledged_at": _utcnow(),
-        "exit_code": proc.returncode,
-        "target": "claude",
+    # The event is now durably known to the receiver (newly queued, or already
+    # queued/already delivered -- all idempotent acceptances). Quick-ack it as
+    # accepted_async: this is NOT a synchronous delivery, so the dispatch loop
+    # must not write delivered_targets[claude] from it; only the reconcile
+    # receipt-bridge promotes claude, on the receiver's exit-0 receipt.
+    enqueue_status = str(enqueue_result.get("status") or "").strip()
+    return {
+        "accepted_async": True,
+        "enqueue_status": enqueue_status,
+        "accepted_at": _utcnow(),
     }
-    if resume_target is not None:
-        # Resume of a distinct dedicated monitor: record the resumed session id
-        # (this path is unchanged from before the direct-fallback wave).
-        ack["session_id"] = resume_target
-    else:
-        # Direct ``claude -p`` page: no session was resumed. The ``direct`` mode
-        # marker makes the fallback delivery self-evident in ``delivered_targets``.
-        ack["mode"] = "direct"
-    return {"acknowledged": True, "ack": ack}
 
 
 def _dispatch_notify_only(event: dict[str, Any]) -> dict[str, Any]:
@@ -1920,6 +2017,29 @@ def _dispatch_pending_locked(
                     attempt_record["last_receipt_log_warning"] = receipt_log_warning
                     attempts[target] = attempt_record
                     state_saved = False
+            elif dispatch_result.get("accepted_async"):
+                # Quick-ack two-phase state (Wave 2 claude leg). The page was
+                # durably ENQUEUED to the wave-1 receiver but is NOT delivered yet:
+                # the target stays in pending_targets and is NOT marked delivered
+                # here. Only the reconcile receipt-bridge promotes claude to
+                # delivered_targets, on the receiver's exit-0 receipt. A later
+                # dispatch re-enqueues idempotently (the receiver dedups by
+                # event_id) -- the re-queue-on-failure behavior -- which is
+                # harmless while the async delivery is in flight. This is NEVER a
+                # delivery receipt and NEVER a skip; it leaves no terminal trace,
+                # so a failed async turn re-queues rather than being masked as
+                # delivered. Codex never returns accepted_async, so this branch is
+                # claude-only and leaves the codex legs untouched.
+                attempt_record["last_accepted_async_at"] = _utcnow()
+                enqueue_status = str(dispatch_result.get("enqueue_status") or "").strip()
+                if enqueue_status:
+                    attempt_record["last_enqueue_status"] = enqueue_status
+                else:
+                    attempt_record.pop("last_enqueue_status", None)
+                attempts[target] = attempt_record
+                _refresh_pending_targets(entry)
+                _save_state(repo_root, state)
+                state_saved = True
             elif skipped and skip_reason in {
                 CLAUDE_SKIP_REASON_MONITOR_UNSET,
                 CLAUDE_SKIP_REASON_MONITOR_EQUALS_LIVE,

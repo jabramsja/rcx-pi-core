@@ -1,0 +1,24 @@
+{
+  "wave_id": "pager-claude-quickack-receiver-w2-2026-06-20",
+  "repeat_run_speedup_ratio": 1.560298,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.271427,
+  "repeat_run_raw_seconds": [
+    0.423507,
+    0.271427
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.423507
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.694934
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-21T00:54:14Z",
+  "collector_version": "2.2.0"
+}
