@@ -582,6 +582,11 @@ def setup_routing_record(
         decision=config.routing_decision,
         repo_root=repo_root,
         bus_dir=bus_dir,
+        # Thread the wave's declared FOUNDER_OVERRIDE (defaults to wave_id) into
+        # the routing record so it is durable from launch time. The commit-executor
+        # growth-cap auto-bump reads it via _extract_founder_override_from_routing_record;
+        # without this, a gate-authoring wave stranded 'no_founder_override' at Step 5e.
+        founder_override=config.founder_override,
     )
     if errors:
         raise LaunchWaveError(

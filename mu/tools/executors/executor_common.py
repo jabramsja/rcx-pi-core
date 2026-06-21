@@ -1380,6 +1380,7 @@ def build_post_merge_routing_record(
     merge_sha: str | None = None,
     repo_root: Path | None = None,
     allow_completed_tracked_packet: bool = False,
+    founder_override: str = "",
 ) -> tuple[dict[str, Any], list[str]]:
     """Build a validated post-merge routing record from kwargs.
 
@@ -1405,6 +1406,14 @@ def build_post_merge_routing_record(
       - explicit tracked_packet Wave ID, when present, matches wave_name
       - completed tracked packets are rejected unless the caller explicitly
         marks this as a post-push/same-wave recovery reroute
+
+    Optional fields:
+      - founder_override: when non-empty, the record carries a ``founder_override``
+        key (the bare override id). This makes a wave's declared FOUNDER_OVERRIDE
+        durable in the routing record from launch time, so the commit-executor
+        growth-cap auto-bump's _extract_founder_override_from_routing_record reads
+        a non-empty token instead of stranding 'no_founder_override'. Default
+        empty preserves the prior record shape exactly (no key emitted).
     """
     errors: list[str] = []
 
@@ -1519,6 +1528,8 @@ def build_post_merge_routing_record(
     }
     if allow_completed_tracked_packet:
         record["allow_completed_tracked_packet"] = True
+    if isinstance(founder_override, str) and founder_override.strip():
+        record["founder_override"] = founder_override.strip()
     return record, []
 
 
@@ -1537,6 +1548,7 @@ def build_and_write_routing_record(
     output_path: Path | None = None,
     bus_dir: str | Path | None = None,
     allow_completed_tracked_packet: bool = False,
+    founder_override: str = "",
 ) -> tuple[dict[str, Any], list[str]]:
     """Build + persist a routing record. Returns (record, errors).
 
@@ -1562,6 +1574,7 @@ def build_and_write_routing_record(
         merge_sha=merge_sha,
         repo_root=effective_repo_root,
         allow_completed_tracked_packet=allow_completed_tracked_packet,
+        founder_override=founder_override,
     )
     if errors:
         return {}, errors

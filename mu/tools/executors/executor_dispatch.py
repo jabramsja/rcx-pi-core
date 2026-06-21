@@ -2263,6 +2263,29 @@ def _emit_completed_process_output(
         sys.stderr.write(completed.stderr)
 
 
+def _carry_forward_founder_override(record: dict[str, Any] | None) -> dict[str, str]:
+    """Founder-override fields to carry across an A->B routing-record rebuild.
+
+    launch_wave persists the wave's declared ``founder_override`` into the routing
+    record at launch time. When the dispatcher rebuilds the routing dict for the
+    chained Phase B leg it constructs a fresh dict from a few fields, so the
+    override must be copied forward explicitly. Without this, the rebuilt record
+    drops the launch-persisted token on the normal chained path and the
+    commit-executor Step-5e growth-cap auto-bump reads an empty token via
+    ``_extract_founder_override_from_routing_record`` -> a gate-authoring wave
+    strands ``no_founder_override``. Both field forms the extractor recognises
+    (``founder_override_token`` then ``founder_override``) are preserved when
+    present and non-empty; absent fields yield an empty dict, so records without a
+    declared override (e.g. the surface-retry path) are unchanged.
+    """
+    carried: dict[str, str] = {}
+    for key in ("founder_override_token", "founder_override"):
+        value = (record or {}).get(key)
+        if isinstance(value, str) and value.strip():
+            carried[key] = value.strip()
+    return carried
+
+
 def _continue_successful_executor_chain(
     executor_name: str,
     completed: subprocess.CompletedProcess[str],
@@ -2370,6 +2393,12 @@ def _continue_successful_executor_chain(
             "task_id": (record or {}).get("task_id", ""),
             "summary": "Chained from Phase A convergence",
             "next_candidates": phase_b_candidates,
+            # Carry the wave's declared FOUNDER_OVERRIDE across the A->B rebuild so
+            # the commit-executor Step-5e growth-cap auto-bump reads a non-empty
+            # token (see _carry_forward_founder_override). Without this, the rebuilt
+            # dict dropped the launch-persisted override on the normal chained path
+            # and a gate-authoring wave stranded 'no_founder_override'.
+            **_carry_forward_founder_override(record),
         }
         phase_b_args = [
             sys.executable,

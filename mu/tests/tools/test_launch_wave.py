@@ -179,6 +179,88 @@ def test_setup_reuses_existing_builders(wave_repo):
 
 
 # --------------------------------------------------------------------------- #
+# Founder-override propagation into the routing record                        #
+# --------------------------------------------------------------------------- #
+
+
+def test_routing_record_carries_founder_override_for_commit_autobump(wave_repo):
+    """The launcher threads the wave's FOUNDER_OVERRIDE into the routing record.
+
+    Regression for the gate-authoring strand: a wave that adds a governed test
+    file and DECLARES a FOUNDER_OVERRIDE still stranded at the commit-executor
+    Step-5e growth-cap auto-bump, because ``setup_routing_record`` never passed
+    ``config.founder_override`` to ``build_and_write_routing_record``. The record
+    then carried no ``founder_override`` field and the commit flow's
+    ``_extract_founder_override_from_routing_record`` returned "" -> the auto-bump
+    fail-closed ``no_founder_override``. The launcher must make the declared
+    override durable in the routing record so the extractor returns a non-empty
+    token (the same token Gate 8 validates).
+    """
+    config = make_config()
+    lw.setup_packet(wave_repo, config)  # routing builder validates the packet exists
+    record = lw.setup_routing_record(wave_repo, config)
+
+    # config.founder_override defaults to the wave_id (the declared override).
+    assert config.founder_override == config.wave_id
+
+    # The returned record AND the persisted record both carry the override.
+    assert record["founder_override"] == config.founder_override
+    on_disk = json.loads(
+        (wave_repo / ".agent_bus" / "meta" / "post_merge_routing.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert on_disk["founder_override"] == config.founder_override
+
+    # The commit-flow extractor returns the wave's token from that record — the
+    # token the Step-5e growth-cap auto-bump needs (non-empty -> not stranded).
+    # Asserted directly against commit_executor's module-private extractor (the
+    # field-name contract under test): the packet forbids changing commit_executor,
+    # so we do NOT add a public seam; instead the ANTICHEAT_OK escape hatch mirrors
+    # test_executor_dispatch.py, which unit-tests this same module's internal
+    # parsers (check_private_attr_access.py allows private access on such lines).
+    import commit_executor as ce  # executors dir is on sys.path (module top)
+
+    assert ce._extract_founder_override_from_routing_record(on_disk, wave_repo) == config.founder_override  # ANTICHEAT_OK: regression locks the launcher-written founder_override as the exact field the commit-flow extractor (Step-5e auto-bump source) reads
+
+
+def test_routing_record_omits_founder_override_when_builder_not_threaded(wave_repo):
+    """Backward-compat: the optional param defaults empty, so existing direct
+    callers and records are byte-unchanged (no ``founder_override`` key emitted),
+    and threading a non-empty override adds exactly that one key.
+    """
+    config = make_config()
+    lw.setup_packet(wave_repo, config)  # a valid tracked_packet must exist on disk
+
+    # Direct builder call WITHOUT founder_override == every existing caller today.
+    record, errors = ec.build_post_merge_routing_record(
+        wave_name=config.wave_id,
+        task_id=config.task_id,
+        tracked_packet=config.tracked_packet,
+        request_for_claude=config.request_for_claude,
+        request_for_agent=config.request_for_agent,
+        summary=config.routing_summary,
+        repo_root=wave_repo,
+    )
+    assert errors == []
+    assert "founder_override" not in record
+
+    # Threading a non-empty override adds exactly that key (the bare token).
+    threaded, threaded_errors = ec.build_post_merge_routing_record(
+        wave_name=config.wave_id,
+        task_id=config.task_id,
+        tracked_packet=config.tracked_packet,
+        request_for_claude=config.request_for_claude,
+        request_for_agent=config.request_for_agent,
+        summary=config.routing_summary,
+        repo_root=wave_repo,
+        founder_override=config.founder_override,
+    )
+    assert threaded_errors == []
+    assert threaded["founder_override"] == config.founder_override
+
+
+# --------------------------------------------------------------------------- #
 # Baked-in fences                                                             #
 # --------------------------------------------------------------------------- #
 
