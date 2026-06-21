@@ -3261,6 +3261,22 @@ def _refresh_canonical_routing_record_state(
             print("[dispatch] Canonical routing rebind failed: no tracked_packet")
         return False, None
 
+    # Carry the wave's declared FOUNDER_OVERRIDE across the canonical rebind so the
+    # commit-executor Step-5e growth-cap auto-bump still reads a non-empty token via
+    # _extract_founder_override_from_routing_record. Without this, resuming a launched
+    # wave on a stale canonical post_merge_routing.json rebuilt the record through the
+    # builder WITHOUT the override -- dropping the launch-persisted token and stranding
+    # a gate-authoring wave on 'no_founder_override'. The builder emits a single
+    # ``founder_override`` key; both routing-record consumers read
+    # ``founder_override_token`` then ``founder_override`` with fallback, so collapsing
+    # the carried token-first value into that one param preserves the override. Mirrors
+    # the chained A->B path (see _carry_forward_founder_override).
+    carried_founder_override = _carry_forward_founder_override(record)
+    founder_override_value = (
+        carried_founder_override.get("founder_override_token")
+        or carried_founder_override.get("founder_override")
+        or ""
+    )
     refreshed, errors = _common_build_and_write_routing_record(
         wave_name=str(record.get("wave_name") or record.get("wave_id") or ""),
         task_id=str(record.get("task_id") or ""),
@@ -3275,6 +3291,7 @@ def _refresh_canonical_routing_record_state(
         output_path=output_path or _canonical_routing_record_path(repo_root, bus_dir),
         bus_dir=bus_dir,
         allow_completed_tracked_packet=bool(record.get("allow_completed_tracked_packet")),
+        founder_override=founder_override_value,
     )
     if errors:
         if verbose:
