@@ -1,0 +1,24 @@
+{
+  "wave_id": "pipeline-fix-31-transient-rate-limit-recovery-2026-06-21",
+  "repeat_run_speedup_ratio": 1.719102,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.261486,
+  "repeat_run_raw_seconds": [
+    0.449521,
+    0.261486
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.449521
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.711007
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-21T11:04:31Z",
+  "collector_version": "2.2.0"
+}

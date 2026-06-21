@@ -26,7 +26,7 @@ import time
 import uuid
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, NamedTuple, Optional
@@ -105,6 +105,12 @@ class FailureClass(Enum):
     PROCESS_TIMEOUT = "process_timeout"
     TRANSIENT_KILL = "transient_kill"
     UPSTREAM_CONNECTIVITY = "upstream_connectivity"
+    # A transient adapter rate/session/spend/usage limit (e.g. "You've hit your
+    # session limit - resets 3:50am"). Distinct sibling of TRANSIENT_KILL: the
+    # limit is temporary and resets on its own, so it routes to a REAL bounded,
+    # reset-aware back-off WAIT (fix_transient_rate_limit) — never the no-op
+    # TRANSIENT_KILL handler, which would retry immediately and burn the budget.
+    TRANSIENT_RATE_LIMIT = "transient_rate_limit"
     AGGREGATION_HANG = "aggregation_hang"
     IMPLEMENTER_STALE = "implementer_stale"
     PR_MERGE_CONFLICT = "pr_merge_conflict"
@@ -147,6 +153,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.STAGE_PATH_SYMLINK_ALIAS: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.UPSTREAM_CONNECTIVITY: 2,
+    FailureClass.TRANSIENT_RATE_LIMIT: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
     FailureClass.PR_MERGE_CONFLICT: 2,
     FailureClass.PR_CONFLICTING: 2,
@@ -182,6 +189,52 @@ _STANDALONE_STATUS_FAILURE_CLASSES: dict[str, FailureClass] = {
     "l4_contract_violation": FailureClass.L4_CONTRACT_VIOLATION,
 }
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
+# Transient adapter rate/session/spend/usage-limit recovery (wave
+# pipeline-fix-31-transient-rate-limit-recovery-2026-06-21). An adapter that
+# hits a temporary provider limit exits NON-ZERO with a limit message (observed
+# on PR #1140: "Adapter 'claude' exited 1 ... You've hit your session limit -
+# resets 3:50am"). That is not a kill code, so it is detected from the result
+# envelope TEXT and routed to a REAL bounded, reset-aware back-off WAIT — the
+# no-op fix_transient_kill does not wait. Signatures are PRECISE provider-limit
+# phrasing (never a bare "limit") so a genuine test_failure/unknown_error whose
+# output merely mentions limits is not misclassified as transient.
+_RATE_LIMIT_SIGNATURES = (
+    "session limit",
+    "usage limit",
+    "spend limit",
+    "spending limit",
+    "monthly limit",
+    "account limit",
+    "rate limit reached",
+    "rate limit exceeded",
+    "rate limit hit",
+    "rate-limit reached",
+    "rate-limit exceeded",
+    "rate_limit_error",
+    "rate-limited",
+    "rate limited",
+    "ratelimited",
+    "too many requests",
+    "quota exceeded",
+    "exceeded your current quota",
+    "hour limit reached",
+)
+# Bounded back-off knobs. Every WAIT is hard-capped by RATE_LIMIT_BACKOFF_MAX_S
+# (never unbounded); when no reset time is parseable the handler waits a fixed
+# RATE_LIMIT_BACKOFF_DEFAULT_S. The per-tuple attempt budget
+# (MAX_TRANSIENT_RATE_LIMIT_ATTEMPTS_PER_TUPLE, defined near attempt_recovery)
+# lets a few capped waits span a longer reset window.
+RATE_LIMIT_BACKOFF_MIN_S = 1.0
+RATE_LIMIT_BACKOFF_DEFAULT_S = 60.0
+RATE_LIMIT_BACKOFF_MAX_S = 1800.0
+# "resets 3:50am" / "resets at 15:30" / "resets 3pm" — a clock time shortly
+# after the word "reset(s)". The bounded {0,10} gap keeps an unrelated "reset …"
+# sentence from binding a distant number elsewhere in the text.
+_RATE_LIMIT_RESET_RE = re.compile(
+    r"reset[s]?\b[^0-9]{0,10}?(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?"
+    r"\s*(?P<meridiem>am|pm)?",
+    re.IGNORECASE,
+)
 PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
 PHASE_B_RECOVERY_PLAN_WAVE_ENV = "RCX_RECOVERY_PHASE_B_PLAN_WAVE_ID"
 STALE_BRIDGE_LOCK_WAIT_TIMEOUT_S = 30.0
@@ -462,6 +515,18 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PROCESS_TIMEOUT
     if exit_code is not None and exit_code in _TRANSIENT_KILL_CODES:
         return FailureClass.TRANSIENT_KILL
+    # A transient adapter rate/session/spend/usage limit (e.g. "You've hit your
+    # session limit - resets 3:50am") exits NON-ZERO without a kill code, so it
+    # is detected from the envelope TEXT — not just the exit code — and routed to
+    # a DEDICATED bounded reset-aware back-off WAIT (fix_transient_rate_limit),
+    # NOT TRANSIENT_KILL (whose handler is a no-op that would retry immediately
+    # and burn the attempt budget against an un-reset limit). Checked AFTER the
+    # kill-code guard so kill-code behavior is unchanged, and before the broad
+    # TEST_FAILURE/AGENT_REVIEW_CRASH/UNKNOWN_ERROR fall-throughs below.
+    if status_failed and _looks_like_transient_rate_limit(
+        _rate_limit_envelope_text(result)
+    ):
+        return FailureClass.TRANSIENT_RATE_LIMIT
     if "aggregation" in combined_lower:
         return FailureClass.AGGREGATION_HANG
     if result.get("implementer_status") == "stale":
@@ -1080,6 +1145,86 @@ def _looks_like_upstream_connectivity_failure(detail: str) -> bool:
     ):
         return True
     return False
+
+
+def _rate_limit_envelope_text(result: dict[str, Any]) -> str:
+    """Return all textual values in the adapter result envelope (untruncated).
+
+    Used both to DETECT the limit signature and to PARSE a reset time that may
+    sit at the tail of a long adapter "Output tail". _iter_text_values walks
+    str/list/dict, so an ``errors`` list or an embedded-JSON string is fully
+    included — without the 160-char excerpt truncation that
+    classify_failure's reason summary applies (which could drop a trailing
+    "resets 3:50am").
+    """
+    try:
+        return " ".join(_iter_text_values(result))
+    except Exception:
+        return str(result.get("stderr", "") or "")
+
+
+def _looks_like_transient_rate_limit(text: str) -> bool:
+    """Detect a transient adapter rate/session/spend/usage-limit signature.
+
+    Precise on purpose: matches known provider quota/limit phrasing only (never
+    a bare "limit"), so a genuine test_failure/unknown_error whose output merely
+    mentions limits is not misclassified as transient (which would mask a real
+    bug). Distinct from TRANSIENT_KILL (kill codes) and its no-op handler.
+    """
+    lowered = str(text or "").lower()
+    if not lowered:
+        return False
+    return any(signature in lowered for signature in _RATE_LIMIT_SIGNATURES)
+
+
+def _parse_rate_limit_reset(text: str, now: datetime) -> Optional[datetime]:
+    """Parse a "resets 3:50am"-style reset clock time into the next future dt.
+
+    Pure and deterministic: ``now`` drives the today/tomorrow rollover (a parsed
+    clock time already past today rolls to tomorrow). Returns None when the
+    envelope carries no parseable reset time, so the caller applies the fixed
+    bounded back-off instead. ``now`` is naive local time, matching the
+    adapter's local-clock reset wording.
+    """
+    if not text:
+        return None
+    match = _RATE_LIMIT_RESET_RE.search(text)
+    if not match:
+        return None
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute") or 0)
+    meridiem = (match.group("meridiem") or "").lower()
+    if meridiem == "pm" and hour != 12:
+        hour += 12
+    elif meridiem == "am" and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59:
+        return None
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate = candidate + timedelta(days=1)
+    return candidate
+
+
+def _compute_rate_limit_backoff_seconds(
+    reset_dt: Optional[datetime], now: datetime
+) -> float:
+    """Return a BOUNDED, reset-aware back-off delay in seconds (never unbounded).
+
+    With a reset time: wait until reset, clamped to
+    [RATE_LIMIT_BACKOFF_MIN_S, RATE_LIMIT_BACKOFF_MAX_S] (a reset already in the
+    past collapses to the minimum positive back-off). Without one: a fixed
+    bounded back-off (RATE_LIMIT_BACKOFF_DEFAULT_S). The hard
+    RATE_LIMIT_BACKOFF_MAX_S cap guarantees a single wait can never block
+    unbounded; the per-tuple attempt budget lets several capped waits span a
+    longer reset.
+    """
+    if reset_dt is None:
+        return RATE_LIMIT_BACKOFF_DEFAULT_S
+    delta = (reset_dt - now).total_seconds()
+    if delta <= RATE_LIMIT_BACKOFF_MIN_S:
+        return RATE_LIMIT_BACKOFF_MIN_S
+    return min(delta, RATE_LIMIT_BACKOFF_MAX_S)
 
 
 def _looks_like_git_index_permission_failure(detail: str) -> bool:
@@ -3588,6 +3733,51 @@ def fix_transient_kill(repo_root: Path, **kw: Any) -> dict[str, Any]:
                        "transient kill — safe to retry with same parameters")
 
 
+def _rate_limit_now() -> datetime:
+    """Return wall-clock now (naive local) for reset math. Patchable in tests."""
+    return datetime.now()
+
+
+def _rate_limit_sleep(seconds: float) -> None:
+    """Perform the bounded back-off sleep. Patchable in tests to avoid real waits."""
+    time.sleep(seconds)
+
+
+def fix_transient_rate_limit(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Bounded, reset-aware back-off for a transient adapter rate/session limit.
+
+    Unlike fix_transient_kill (a NO-OP that lets the dispatcher retry
+    IMMEDIATELY), this performs a REAL WAIT before the retry: when the limit
+    message carries a reset time (e.g. "resets 3:50am") it waits until that
+    time, clamped to RATE_LIMIT_BACKOFF_MAX_S; otherwise it applies a fixed
+    bounded back-off. The wait is realized HERE because the dispatcher's
+    recovered->retry path continues immediately with no sleep, and it is ALWAYS
+    bounded (hard cap — never an unbounded loop/sleep). The now/sleep seams are
+    module-level so the regression asserts the back-off via an injected sleep,
+    without a real multi-second wait.
+    """
+    result = kw.get("result")
+    if not isinstance(result, dict):
+        result = {}
+    envelope_text = _rate_limit_envelope_text(result)
+    now = _rate_limit_now()
+    reset_dt = _parse_rate_limit_reset(envelope_text, now)
+    delay_seconds = _compute_rate_limit_backoff_seconds(reset_dt, now)
+    _rate_limit_sleep(delay_seconds)
+    if reset_dt is not None:
+        detail = (
+            "transient adapter rate/session limit — waited "
+            f"{delay_seconds:.0f}s (reset-aware, until ~{reset_dt.strftime('%H:%M')}, "
+            f"capped at {RATE_LIMIT_BACKOFF_MAX_S:.0f}s) before retry"
+        )
+    else:
+        detail = (
+            "transient adapter rate/session limit — waited "
+            f"{delay_seconds:.0f}s (fixed bounded back-off) before retry"
+        )
+    return _fix_result(True, "rate_limit_backoff", detail)
+
+
 def fix_upstream_connectivity(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """Mark external Codex/network failures as retryable without Tier 3."""
     os.environ["RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY"] = "1"
@@ -3944,6 +4134,7 @@ _TIER2_FIXES: dict[FailureClass, Any] = {
     FailureClass.PROCESS_TIMEOUT: fix_process_timeout,
     FailureClass.TRANSIENT_KILL: fix_transient_kill,
     FailureClass.UPSTREAM_CONNECTIVITY: fix_upstream_connectivity,
+    FailureClass.TRANSIENT_RATE_LIMIT: fix_transient_rate_limit,
     FailureClass.AGGREGATION_HANG: fix_aggregation_hang,
     FailureClass.IMPLEMENTER_STALE: fix_implementer_stale,
     FailureClass.PR_MERGE_CONFLICT: fix_pr_merge_conflict,
@@ -9385,11 +9576,17 @@ def _count_prior_attempts(
 
 MAX_ATTEMPTS_PER_TUPLE = 2
 MAX_UPSTREAM_CONNECTIVITY_ATTEMPTS_PER_TUPLE = 6
+# A couple of bounded, reset-aware waits can span a longer limit-reset window
+# (each wait is hard-capped by RATE_LIMIT_BACKOFF_MAX_S), so the rate-limit
+# class gets the same higher-but-BOUNDED budget as UPSTREAM_CONNECTIVITY.
+MAX_TRANSIENT_RATE_LIMIT_ATTEMPTS_PER_TUPLE = 6
 
 
 def _max_attempts_for_failure(fc: FailureClass) -> int:
     if fc == FailureClass.UPSTREAM_CONNECTIVITY:
         return MAX_UPSTREAM_CONNECTIVITY_ATTEMPTS_PER_TUPLE
+    if fc == FailureClass.TRANSIENT_RATE_LIMIT:
+        return MAX_TRANSIENT_RATE_LIMIT_ATTEMPTS_PER_TUPLE
     return MAX_ATTEMPTS_PER_TUPLE
 
 
