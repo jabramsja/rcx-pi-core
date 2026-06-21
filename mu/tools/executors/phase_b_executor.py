@@ -365,16 +365,16 @@ def _load_control_packet_line_ref_checker(repo_root: Path) -> Any:
     return module
 
 
-def _control_packet_line_ref_lint_error(
-    repo_root: Path,
-    *,
-    plan_path: str,
-    changed_files: list[str],
-) -> str | None:
-    """Return an error string when changed control packets cite code by line."""
-    packet_paths: set[str] = set()
+def _control_packet_paths(plan_path: str, changed_files: list[str]) -> list[str]:
+    """Return sorted relative control-packet paths among ``plan_path`` + ``changed_files``.
 
-    def add_packet_path(raw_path: str) -> None:
+    A control packet is a ``reports/control_plane/*.md`` file. Shared by the
+    pre-finalization line-ref normalizer and the line-ref lint so both operate
+    on exactly the same packet set by construction -- the normalizer cannot
+    drift out of lockstep with what the lint inspects.
+    """
+    packet_paths: set[str] = set()
+    for raw_path in [plan_path, *changed_files]:
         rel_path = str(raw_path or "").strip()
         if (
             rel_path
@@ -383,10 +383,85 @@ def _control_packet_line_ref_lint_error(
             and rel_path.endswith(".md")
         ):
             packet_paths.add(rel_path)
+    return sorted(packet_paths)
 
-    add_packet_path(plan_path)
-    for rel_path in changed_files:
-        add_packet_path(rel_path)
+
+def _normalize_control_packet_line_refs(
+    repo_root: Path,
+    *,
+    plan_path: str,
+    changed_files: list[str],
+) -> None:
+    """Strip extension-colon-digit line refs from changed control packets in place.
+
+    phase_b is the PRODUCING executor of its own control packet, so rewriting the
+    packet on disk here is not an external artifact edit. Every
+    ``<name>.<ext>:<line>`` reference -- including the ``:<line>:<col>``,
+    ``:<line>-<line>`` (range), and ``:<line>,<line>`` (list) tails -- is
+    reduced to the compliant name-only ``<name>.<ext>`` form *before* the
+    fail-closed line-ref lint runs, so an implementer-added line citation
+    self-heals instead of stranding the wave (tier-3 recovery cannot remove it
+    because control-plane artifacts are edit-gated). The extension set is taken
+    from the checker's ``CODE_EXTENSIONS`` so the normalizer stays in lockstep
+    with what the lint flags.
+
+    Best-effort by design: the lint remains the post-normalization guard. If the
+    checker cannot load, or a packet cannot be read or written, this returns
+    without raising and the lint fails closed on the still-offending packet --
+    normalization can only remove strands, never introduce a fail-open.
+    """
+    packet_paths = _control_packet_paths(plan_path, changed_files)
+    if not packet_paths:
+        return
+
+    try:
+        checker = _load_control_packet_line_ref_checker(repo_root)
+    except PhaseBExecutorError:
+        return
+
+    extensions = getattr(checker, "CODE_EXTENSIONS", ())
+    if not extensions:
+        return
+    # Longest-first alternation mirrors the checker so a prefix extension
+    # (``js`` inside ``json``) cannot shadow the longer match. Capture the
+    # ``.<ext>`` head, then consume the FULL numeric citation tail: a mandatory
+    # ``:<digits>`` (the same anchor the lint flags) followed by any number of
+    # ``[:,-]<digits>`` groups. That single greedy tail collapses every common
+    # citation shape -- ``file:line``, ``file:line:col``, ``file:line-line``
+    # (range), and ``file:line,line`` (list) -- to the bare name-only head in
+    # one pass. Consuming only ``:<digits>`` groups (the earlier form) stripped
+    # the ``:line`` of a range but left the ``-line`` behind as malformed
+    # ``file.py-line`` residue; the lint then PASSED on it (no longer
+    # ``.<ext>:<digit>``) and silently shipped a broken ref. Requiring a leading
+    # ``:<digits>`` keeps host:port, clock times, and extension-less numeric
+    # ranges untouched, exactly as the lint leaves them.
+    ext_alternation = "|".join(sorted(extensions, key=len, reverse=True))
+    normalize_re = re.compile(
+        r"(\.(?:" + ext_alternation + r")):\d+(?:[:,-]\d+)*"
+    )
+
+    for rel_path in packet_paths:
+        packet = repo_root / rel_path
+        try:
+            text = packet.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        normalized = normalize_re.sub(r"\1", text)
+        if normalized != text:
+            try:
+                packet.write_text(normalized, encoding="utf-8")
+            except OSError:
+                continue
+
+
+def _control_packet_line_ref_lint_error(
+    repo_root: Path,
+    *,
+    plan_path: str,
+    changed_files: list[str],
+) -> str | None:
+    """Return an error string when changed control packets cite code by line."""
+    packet_paths = _control_packet_paths(plan_path, changed_files)
     if not packet_paths:
         return None
 
@@ -396,7 +471,7 @@ def _control_packet_line_ref_lint_error(
         return str(exc)
 
     reports: list[str] = []
-    for rel_path in sorted(packet_paths):
+    for rel_path in packet_paths:
         packet = repo_root / rel_path
         try:
             offenses = checker.scan_path(packet)
@@ -7499,6 +7574,11 @@ def run_phase_b(
         _clear_state(repo_root)
         return result
 
+    _normalize_control_packet_line_refs(
+        repo_root,
+        plan_path=plan_path,
+        changed_files=changed_files,
+    )
     line_ref_error = _control_packet_line_ref_lint_error(
         repo_root,
         plan_path=plan_path,
@@ -7640,6 +7720,11 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        _normalize_control_packet_line_refs(
+            repo_root,
+            plan_path=plan_path,
+            changed_files=changed_files,
+        )
         line_ref_error = _control_packet_line_ref_lint_error(
             repo_root,
             plan_path=plan_path,
@@ -7664,6 +7749,11 @@ def run_phase_b(
             )
             if private_attr_bridge_error is not None:
                 return private_attr_bridge_error
+            _normalize_control_packet_line_refs(
+                repo_root,
+                plan_path=plan_path,
+                changed_files=changed_files,
+            )
             line_ref_error = _control_packet_line_ref_lint_error(
                 repo_root,
                 plan_path=plan_path,
@@ -8629,6 +8719,11 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        _normalize_control_packet_line_refs(
+            repo_root,
+            plan_path=plan_path,
+            changed_files=changed_files,
+        )
         line_ref_error = _control_packet_line_ref_lint_error(
             repo_root,
             plan_path=plan_path,
@@ -8655,6 +8750,11 @@ def run_phase_b(
             if private_attr_bridge_error is not None:
                 _clear_state(repo_root)
                 return private_attr_bridge_error
+            _normalize_control_packet_line_refs(
+                repo_root,
+                plan_path=plan_path,
+                changed_files=changed_files,
+            )
             line_ref_error = _control_packet_line_ref_lint_error(
                 repo_root,
                 plan_path=plan_path,
