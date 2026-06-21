@@ -9890,8 +9890,111 @@ class TestResumeNeedsPhaseB:
         assert result["status"] == "commit_ready", result
         assert mock_impl.invoke_implementer.call_count >= 2
 
-    def test_line_ref_lint_rejects_post_bridge_packet_drift_before_final_pytest(self, tmp_path):
-        """Post-bridge control-packet file:line drift blocks before final pytest/supervisor."""
+    def test_control_packet_line_ref_normalized_to_name_only_no_strand(self, tmp_path):
+        """A control-packet extension-colon-digit ref is normalized to name-only; the lint then passes (no strand).
+
+        Regression for pipeline-fix-25: an implementer addressing a line-cited
+        finding writes ``TASKS.md:128`` / ``loader.py:42:7`` into the packet. The
+        producing executor normalizes the packet to the compliant name-only form
+        *before* the fail-closed lint, so the wave self-heals instead of
+        stranding (tier-3 recovery cannot remove an edit-gated control-plane ref).
+        """
+        repo = tmp_path / "repo"
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        packet = repo / plan_path
+        packet.write_text(
+            "# Plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Purpose: address finding citing TASKS.md:128 and loader.py:42:7.\n",
+            encoding="utf-8",
+        )
+        changed_files = [plan_path]
+
+        # Pre-normalization: the lint would strand (line-ref present).
+        pre = pb_mod._control_packet_line_ref_lint_error(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+        assert pre is not None
+        assert "TASKS.md:128" in pre
+
+        # The producing executor normalizes its own packet in place.
+        pb_mod._normalize_control_packet_line_refs(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+
+        # The packet ends line-ref-free on disk; the name-only form is preserved
+        # (file:line and file:line:col both collapse to the bare name).
+        text = packet.read_text(encoding="utf-8")
+        assert "TASKS.md:128" not in text
+        assert "loader.py:42" not in text
+        assert "TASKS.md" in text
+        assert "loader.py" in text
+
+        # The lint now returns no error: the no-line-refs invariant holds and the
+        # wave does not strand.
+        post = pb_mod._control_packet_line_ref_lint_error(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+        assert post is None
+
+    def test_control_packet_line_range_ref_normalized_no_malformed_residue(self, tmp_path):
+        """A line-RANGE/list/col citation collapses to name-only with no malformed residue.
+
+        Regression for pipeline-fix-25 bridge round 2: the earlier normalizer
+        consumed only ``:<line>`` colon-digit groups, so a range citation
+        ``loader.py:42-45`` lost its ``:42`` but kept the dangling ``-45`` --
+        leaving the malformed ``loader.py-45`` residue. The lint then PASSED on
+        it (it is no longer ``.<ext>:<digit>``) and the wave silently shipped a
+        broken ref. The full numeric-tail normalizer collapses range, list, and
+        col forms to the bare name in one pass, and the lint stays clean.
+        """
+        repo = tmp_path / "repo"
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        packet = repo / plan_path
+        packet.write_text(
+            "# Plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Refs: loader.py:42-45 and TASKS.md:128.\n"
+            "List: parser.py:10,14,20 col eval_step.js:7:3.\n",
+            encoding="utf-8",
+        )
+        changed_files = [plan_path]
+
+        # Pre-normalization: the lint strands on the range/list/col citations.
+        pre = pb_mod._control_packet_line_ref_lint_error(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+        assert pre is not None
+        assert "loader.py:42-45" in pre
+
+        # The producing executor normalizes its own packet in place.
+        pb_mod._normalize_control_packet_line_refs(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+
+        text = packet.read_text(encoding="utf-8")
+        # Every name-only head survives; every numeric tail (range, list, col) is gone.
+        assert "loader.py" in text
+        assert "TASKS.md" in text
+        assert "parser.py" in text
+        assert "eval_step.js" in text
+        # No malformed residue: the range's trailing ``-45`` must NOT survive,
+        # and no citation digits or separators remain anywhere in the packet.
+        assert "loader.py-45" not in text
+        assert "-45" not in text
+        assert ":42" not in text and ":128" not in text
+        assert "10,14,20" not in text and ":7:3" not in text
+
+        # The lint is clean post-normalization: the wave self-heals (no strand).
+        post = pb_mod._control_packet_line_ref_lint_error(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+        assert post is None
+
+    def test_line_ref_lint_normalizes_post_bridge_packet_drift_before_final_pytest(self, tmp_path):
+        """Post-bridge control-packet file:line drift self-heals (normalized to name-only) instead of stranding."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -9926,15 +10029,24 @@ class TestResumeNeedsPhaseB:
              patch.object(pb_mod, "_select_pytest_gate_files", return_value=[test_path]), \
              patch.object(pb_mod, "_run_pytest_on_files", side_effect=final_pytest), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"), \
              patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
             result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=2)
 
-        assert result["status"] == "error"
-        assert result["step"] == "control_packet_line_ref_lint"
-        assert "phase_b_executor.py:42" in result["errors"][0]
-        final_pytest.assert_not_called()
-        supervisor.assert_not_called()
+        # New behavior: the implementer-added line-ref self-heals to name-only,
+        # so the wave finalizes (commit_ready) instead of stranding at the lint.
+        # ``step`` is only set on error, so its absence is itself proof of no strand.
+        assert result["status"] == "commit_ready", result
+        assert result.get("step") != "control_packet_line_ref_lint", result
+        # The packet ends line-ref-free on disk (normalized to name-only).
+        packet_text = (repo / plan_path).read_text(encoding="utf-8")
+        assert "phase_b_executor.py:42" not in packet_text
+        assert "phase_b_executor.py" in packet_text
+        # Self-heal proceeds past the lint into final pytest + supervisor finalization.
+        final_pytest.assert_called()
+        supervisor.assert_called()
 
     def test_resume_from_bridge_converged_rehydrates_dirty_baseline_into_package(self, tmp_path):
         """Legacy saved state without baseline tracking must still rebuild an honest supervisor package."""
