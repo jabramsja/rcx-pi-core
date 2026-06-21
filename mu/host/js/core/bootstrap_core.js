@@ -473,10 +473,15 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
       continue;
     }
 
-    // Primitives (=== handles bool/int distinction in JS)
+    // Primitives: content-addressed equality collapses the scalar dispatch
+    // into one muHashCached comparison (parity with Python _stage0_match).
+    // The isValidMu validity guard keeps invalid/non-Mu values (raw arrays,
+    // undefined) from reaching muHashCached (which throws on non-valid-Mu) —
+    // they fall through to NO_MATCH. muHashCached preserves ±0 sign, so
+    // +0 vs -0 is NO_MATCH (authorized content-addressed delta, Python parity).
     if (typeof pattern !== 'object') {
-      if (pattern !== input) return NO_MATCH;
-      continue;
+      if (isValidMu(pattern) && isValidMu(input) && muHashCached(pattern) === muHashCached(input)) continue;
+      return NO_MATCH;
     }
 
     // Array branch REMOVED (P7W4): After normalization, all arrays become head/tail
