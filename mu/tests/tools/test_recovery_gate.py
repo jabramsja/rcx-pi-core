@@ -1070,6 +1070,148 @@ class TestTierMapping:
         assert tier4 == {FailureClass.TERMINAL_POLICY, FailureClass.UNCLASSIFIED}
 
 
+class TestTransientRateLimitRecovery:
+    """A transient adapter rate/session/spend/usage limit must classify as a
+    DEDICATED sibling transient class and recover via a REAL bounded,
+    reset-aware back-off WAIT — not the no-op TRANSIENT_KILL handler, not an
+    immediate retry, never an unbounded wait. Wave
+    pipeline-fix-31-transient-rate-limit-recovery-2026-06-21."""
+
+    # The exact envelope shape observed stranding PR #1140.
+    _SESSION_LIMIT_RESULT = {
+        "status": "error",
+        "step": "implementer",
+        "errors": [
+            "Implementer failed: error (exit=1): Adapter 'claude' exited 1. "
+            "Output tail:\nYou've hit your session limit - resets 3:50am"
+        ],
+    }
+
+    def test_session_limit_classifies_as_transient_rate_limit(self):
+        fc = rg_mod.classify_failure(self._SESSION_LIMIT_RESULT)
+        assert fc == FailureClass.TRANSIENT_RATE_LIMIT
+        # Precisely NOT the no-op kill class, and NOT a tier-3 class that would
+        # exhaust recovery (the pre-fix behavior that stranded the wave).
+        assert fc != FailureClass.TRANSIENT_KILL
+        assert fc != FailureClass.TEST_FAILURE
+        assert fc != FailureClass.UNKNOWN_ERROR
+        assert fc != FailureClass.AGENT_REVIEW_CRASH
+        assert rg_mod.tier_for(fc) == 2
+
+    @pytest.mark.parametrize("message", [
+        "You've hit your session limit - resets 3:50am",
+        "Claude usage limit reached",
+        "rate_limit_error: please slow down",
+        "429 Too Many Requests",
+        "You exceeded your current quota",
+        "5-hour limit reached ∙ resets 3pm",
+    ])
+    def test_known_provider_limit_phrasings_classify_transient(self, message):
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "exit_code": 1,
+            "stderr": f"Adapter 'claude' exited 1. {message}",
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.TRANSIENT_RATE_LIMIT
+
+    def test_generic_failure_without_limit_phrasing_not_misclassified(self):
+        # Precision guard: a genuine failure that merely says "error", or that
+        # mentions a bare "limit" without provider-quota phrasing, must NOT be
+        # swept into the transient class (that would mask a real bug).
+        assert rg_mod.classify_failure(
+            {"status": "error", "step": "some_step",
+             "stderr": "something unexpected went wrong"}
+        ) != FailureClass.TRANSIENT_RATE_LIMIT
+        assert rg_mod.classify_failure(
+            {"status": "error", "step": "some_step",
+             "stderr": "recursion limit while building the graph"}
+        ) != FailureClass.TRANSIENT_RATE_LIMIT
+
+    def test_kill_code_behavior_unchanged(self):
+        # A real kill code stays TRANSIENT_KILL — the new class never steals it.
+        assert rg_mod.classify_failure(
+            {"status": "failed", "exit_code": -9, "stderr": "", "step": "impl"}
+        ) == FailureClass.TRANSIENT_KILL
+
+    def test_handler_waits_until_parsed_reset_time(self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        # now = 03:40 local; "resets 3:50am" => a reset-driven 10-minute wait
+        # (600s) — neither the 60s fixed default nor the 1800s hard cap.
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 3, 40, 0))
+        fix = rg_mod.fix_transient_rate_limit(
+            tmp_path, result=self._SESSION_LIMIT_RESULT)
+        assert fix["fixed"] is True
+        assert fix["action"] == "rate_limit_backoff"
+        # A REAL wait happened inside the handler (one injected sleep call),
+        # driven by the parsed reset time, positive and within the hard cap.
+        assert slept == [600.0]
+        assert 0 < slept[0] <= rg_mod.RATE_LIMIT_BACKOFF_MAX_S
+
+    def test_handler_caps_wait_at_bounded_maximum(self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        # now = 00:00; "resets 3:50am" is ~3h50m away => clamped to the hard cap.
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 0, 0, 0))
+        rg_mod.fix_transient_rate_limit(
+            tmp_path, result=self._SESSION_LIMIT_RESULT)
+        assert slept == [rg_mod.RATE_LIMIT_BACKOFF_MAX_S]
+
+    def test_handler_rolls_past_reset_to_tomorrow_and_stays_bounded(
+        self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        # now = 04:00, after 3:50am today => reset rolls to tomorrow => ~23h50m
+        # => still clamped to the hard cap (never unbounded).
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 4, 0, 0))
+        rg_mod.fix_transient_rate_limit(
+            tmp_path, result=self._SESSION_LIMIT_RESULT)
+        assert slept == [rg_mod.RATE_LIMIT_BACKOFF_MAX_S]
+
+    def test_handler_fixed_backoff_when_no_reset_time(self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 12, 0, 0))
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "stderr": "Adapter 'claude' exited 1. Claude usage limit reached",
+        }
+        rg_mod.fix_transient_rate_limit(tmp_path, result=result)
+        # No parseable reset => fixed bounded back-off (positive, within cap).
+        assert slept == [rg_mod.RATE_LIMIT_BACKOFF_DEFAULT_S]
+        assert 0 < slept[0] <= rg_mod.RATE_LIMIT_BACKOFF_MAX_S
+
+    def test_transient_rate_limit_has_bounded_attempt_budget(self):
+        # A couple of bounded waits can span a reset window (analogous to
+        # UPSTREAM_CONNECTIVITY), but the budget is still BOUNDED.
+        budget = rg_mod._max_attempts_for_failure(  # ANTICHEAT_OK
+            FailureClass.TRANSIENT_RATE_LIMIT)
+        assert budget == 6  # ANTICHEAT_OK
+        assert budget > rg_mod.MAX_ATTEMPTS_PER_TUPLE  # ANTICHEAT_OK
+
+    def test_tier2_transient_rate_limit_recovers_via_backoff(
+        self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 3, 40, 0))
+        r = rg_mod.attempt_recovery(
+            tmp_path, dict(self._SESSION_LIMIT_RESULT), "w-rate-limit")
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == FailureClass.TRANSIENT_RATE_LIMIT.value
+        assert r["action"] == "rate_limit_backoff"
+        # End-to-end proof: the bounded reset-aware WAIT was realized inside the
+        # handler (one injected sleep), NOT an immediate retry by the dispatcher.
+        assert slept == [600.0]
+
+
 class TestFixHandoffReceiptBuilderRefresh:
     def _write_routing_record(
         self,
@@ -3304,6 +3446,7 @@ class TestTier2FixesMap:
             rg_mod.FailureClass.STALE_ACTIVE_ITEMS,
             rg_mod.FailureClass.HANDOFF_RECEIPT_BUILDER_REFRESH,
             rg_mod.FailureClass.UPSTREAM_CONNECTIVITY,
+            rg_mod.FailureClass.TRANSIENT_RATE_LIMIT,
             rg_mod.FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP,
             rg_mod.FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP,
             rg_mod.FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP,
