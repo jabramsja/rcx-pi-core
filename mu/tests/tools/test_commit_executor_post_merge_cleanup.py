@@ -1998,3 +1998,240 @@ def test_growth_cap_autobump_rolls_back_when_staging_fails(tmp_path, monkeypatch
 
     # The rollback is logged so a retry is observable.
     assert any("rolled back" in m and "fail-closed" in m for m in lines), lines
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Growth-cap auto-bump CALL-SITE contract on the NORMAL commit path
+# (wave: pipeline-growth-cap-autobump-normal-commit-override-2026-06-21)
+#
+# The sibling test_growth_cap_autobump_* cases above call the public auto-bump
+# seam DIRECTLY with an explicit founder_override_token=. The two cases below
+# instead drive a NORMAL (non-UPDATE_TRACKER_ONLY) commit through
+# run_commit_pipeline -> _run_commit_pipeline_impl, so the Step-5e auto-bump
+# receives the token RESOLVED at Step 1 from the tracker note
+# (_resolve_control_surface_founder_override_token). This locks the verified
+# call-site contract: that Step-1-resolved, tracker-note-inclusive
+# founder_override_token is the exact value passed to the Step-5e
+# _maybe_autobump_growth_cap_for_founder_override call — it is never reassigned
+# between Step 1 and Step 5e — so a declared override auto-bumps on the normal
+# commit path instead of stranding. Run against UNMODIFIED commit_executor.py;
+# no commit_executor.py change is required (the original packet's proposed swap
+# to `effective_founder_override_token`, a handoff-builder local, targets a
+# variable that is out of scope at the Step-5e call site).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _StopPipelineAfterGrowthCapAutobump(BaseException):
+    """Sentinel raised by the Step-5e spy to halt the pipeline right after the
+    growth-cap auto-bump, BEFORE the Step 6 supervisor (so no bridge is needed).
+
+    Subclasses BaseException (NOT Exception) deliberately: the Step-5e call in
+    _run_commit_pipeline_impl is wrapped in `except Exception` (an auto-bump
+    error is non-fatal there), so an Exception sentinel would be swallowed and
+    the pipeline would continue into the supervisor. A BaseException escapes
+    that guard and propagates cleanly out of run_commit_pipeline (which has no
+    try/finally around the impl call)."""
+
+
+def _add_growth_cap_pipeline_scaffolding(primary: Path) -> None:
+    """Add the minimal commit-pipeline fixture (a TASKS.md ## Ra section, an
+    indicator collector stub, and a Phase B handoff receipt) onto the
+    growth-cap PRIMARY so run_commit_pipeline can reach Step 5e.
+
+    The indicator stub is written UNTRACKED (never git-added), exactly like the
+    receipt suite's _setup_repo, so it is NOT detected as a new mu/tools script
+    by the auto-bump's staged-additions-vs-merge-base scan
+    (_new_mu_tool_scripts_vs_merge_base reads `git diff --cached
+    --diff-filter=A`) — keeping the regression focused on CAP_TEST_FILES."""
+    (primary / "TASKS.md").write_text(
+        "## Ra\n\n- Tracker sync note (seed): init\n\n---\n", encoding="utf-8"
+    )
+    indicator = primary / "mu" / "tools" / "metrics" / "collect_l4_wave_indicators.py"
+    indicator.parent.mkdir(parents=True, exist_ok=True)
+    indicator.write_text(
+        "#!/usr/bin/env python3\n"
+        "import argparse, json, pathlib\n"
+        'p = argparse.ArgumentParser()\n'
+        'p.add_argument("--wave-id")\n'
+        'p.add_argument("--output")\n'
+        "a = p.parse_args()\n"
+        "out = pathlib.Path(a.output)\n"
+        "out.parent.mkdir(parents=True, exist_ok=True)\n"
+        'out.write_text(json.dumps({"wave_id": a.wave_id}))\n',
+        encoding="utf-8",
+    )
+    receipt_dir = primary / ".agent_bus" / "meta"
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+    (receipt_dir / "pre_commit_receipt.json").write_text(
+        json.dumps({
+            "decision": "COMMIT_GO", "staged_sha": "phase_b_sha",
+            "timestamp_utc": "2026-03-24T00:00:00+00:00",
+        }),
+        encoding="utf-8",
+    )
+
+
+def _growth_cap_normal_commit_handoff(wave_id: str, *, declare_override: bool) -> dict:
+    """A valid NON-UPDATE_TRACKER_ONLY (normal) commit handoff whose tracker
+    note optionally declares this wave's FOUNDER_OVERRIDE. wave_class
+    L4_ENABLER permits founder-override resolution; with declare_override=False
+    and no tracked_packet, Step 1 resolves an EMPTY token (fail-closed) because
+    neither the tracker note nor an authorized control-surface packet grants
+    one."""
+    note = (
+        f"- Tracker sync note (2026-06-21, {wave_id}): **Growth-cap autobump "
+        f"normal-commit call-site regression.** Class: L4_ENABLER. "
+        f"target_gate_id: G8. "
+        f"evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -q "
+        f"mu/tests/tools/test_commit_executor_post_merge_cleanup.py "
+        f"-k 'growth or autobump or cap' --tb=short`. "
+        f"evidence_delta: (1) Locks the Step-1 -> Step-5e token flow. "
+        f"(2) Proves the cap bumps on a declared override. "
+        f"(3) Proves fail-closed without one. "
+        f"progress_proof_before: call-site flow regression-unlocked. "
+        f"progress_proof_after: call-site flow regression-locked. "
+        f"primary_blocker_class: INTEGRATION. "
+        f"primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+        f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+        f"indicator_collection_command: python3 "
+        f"mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
+        f"--output reports/l4_wave_indicators/{wave_id}.json. "
+        f"bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+        f"boot0_track_id: V1. boot0_progress_state: HOLD."
+    )
+    if declare_override:
+        note = f"{note} FOUNDER_OVERRIDE:{wave_id} (test authorization)"
+    return {
+        "wave_id": wave_id,
+        "task_id": "[TEST]",
+        "wave_class": "L4_ENABLER",
+        "target_gate_id": "G8",
+        "caller": "phase_b",
+        "branch_prefix": "jabramsja",
+        "files_to_stage": ["mu/tests/tools/test_new_feature.py"],
+        "force_add_files": [],
+        "commit_message": "feat: growth-cap autobump call-site regression\n\nCo-Authored-By: test",
+        "pr_title": "feat: growth-cap autobump call-site regression",
+        "pr_body": "## Summary\nregression",
+        "base_branch": "dev",
+        "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipt.json",
+        "fixes_implemented": ["lock Step-1 -> Step-5e founder-override flow"],
+        "tracker_note_text": note,
+    }
+
+
+def _drive_pipeline_capturing_autobump_token(primary, handoff, monkeypatch):
+    """Drive run_commit_pipeline (which executes _run_commit_pipeline_impl) and
+    capture the founder_override_token the Step-5e growth-cap auto-bump
+    RECEIVES. A spy records the token, delegates to the REAL auto-bump (so a
+    genuine bump/no-op is exercised end-to-end), then raises the BaseException
+    sentinel to halt before the Step 6 supervisor. Returns (token, outcome).
+
+    String-named getattr/setattr keep this gate-safe (no dotted private-attr
+    access), matching the sibling `_run` patch above."""
+    real_autobump = getattr(
+        commit_mod, "_maybe_autobump_growth_cap_for_founder_override"
+    )
+    captured: dict = {}
+
+    def _spy(repo_root, *, wave_id, base_branch, founder_override_token, log):
+        captured["token"] = founder_override_token
+        captured["outcome"] = real_autobump(
+            repo_root,
+            wave_id=wave_id,
+            base_branch=base_branch,
+            founder_override_token=founder_override_token,
+            log=log,
+        )
+        raise _StopPipelineAfterGrowthCapAutobump()
+
+    monkeypatch.setattr(
+        commit_mod, "_maybe_autobump_growth_cap_for_founder_override", _spy
+    )
+    try:
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=primary)
+    except _StopPipelineAfterGrowthCapAutobump:
+        return captured["token"], captured["outcome"]
+    raise AssertionError(
+        "pipeline did not reach the Step-5e growth-cap auto-bump; it returned "
+        f"early: {result}"
+    )
+
+
+def test_growth_cap_autobump_receives_resolved_override_on_normal_commit_path(
+    tmp_path, monkeypatch
+):
+    """NORMAL (non-UPDATE_TRACKER_ONLY) commit whose tracker note declares the
+    wave's FOUNDER_OVERRIDE, driven through run_commit_pipeline ->
+    _run_commit_pipeline_impl: the Step-5e auto-bump RECEIVES the NON-EMPTY
+    token Step 1 resolved from the tracker note
+    (_resolve_control_surface_founder_override_token), so CAP_TEST_FILES bumps
+    by the exact shortfall instead of stranding.
+
+    Unlike the sibling test_growth_cap_autobump_* cases (which call the
+    auto-bump seam directly with an explicit founder_override_token=), this
+    exercises the pipeline's Step-1 -> Step-5e token RESOLUTION + flow against
+    UNMODIFIED commit_executor.py — no source change is required."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    _add_growth_cap_pipeline_scaffolding(primary)
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+
+    handoff = _growth_cap_normal_commit_handoff(
+        GROWTH_CAP_WAVE_ID, declare_override=True
+    )
+    token, outcome = _drive_pipeline_capturing_autobump_token(
+        primary, handoff, monkeypatch
+    )
+
+    # The token Step 5e received is exactly the Step-1-resolved, tracker-note
+    # inclusive FOUNDER_OVERRIDE — NON-EMPTY — proving the call-site contract.
+    assert token == GROWTH_CAP_WAVE_ID, token
+    # And it drives a real bump (non-empty token -> cap bumps by the shortfall).
+    assert outcome["bumped"] is True, outcome
+    assert outcome["shortfall"] == 1, outcome
+    assert outcome["new_cap"] == 1, outcome
+    text, _, cap = _read_growth_cap_values(primary)
+    assert cap == 1, text
+    assert f"FOUNDER_OVERRIDE:{GROWTH_CAP_WAVE_ID}" in text, text
+    # test_growth_caps.py is staged so the Step 8 gate would see the bumped cap.
+    assert _growth_cap_staged(primary)
+
+
+def test_growth_cap_autobump_strands_without_declared_override_on_normal_commit_path(
+    tmp_path, monkeypatch
+):
+    """Fail-closed companion: the SAME normal commit path with NO declared
+    FOUNDER_OVERRIDE (and no tracked_packet authorizing the control surface)
+    resolves an EMPTY token at Step 1, so the Step-5e auto-bump receives "" and
+    does NOT bump — the growth-cap gate would still strand the commit exactly as
+    today. Locks that the call-site flow never fabricates an override."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path, baseline=3, cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
+        ],
+    )
+    _add_growth_cap_pipeline_scaffolding(primary)
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+
+    handoff = _growth_cap_normal_commit_handoff(
+        GROWTH_CAP_WAVE_ID, declare_override=False
+    )
+    token, outcome = _drive_pipeline_capturing_autobump_token(
+        primary, handoff, monkeypatch
+    )
+
+    # No declared override -> Step 1 resolves an EMPTY token -> Step 5e no-op.
+    assert token == "", token
+    assert outcome["bumped"] is False, outcome
+    assert outcome["reason"] == "no_founder_override", outcome
+    # The genuine shortfall is unchanged; the cap is NOT bumped (fail-closed).
+    assert outcome["shortfall"] == 1, outcome
+    _, _, cap = _read_growth_cap_values(primary)
+    assert cap == 0, cap
+    assert not _growth_cap_staged(primary)
