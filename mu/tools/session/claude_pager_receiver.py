@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Dormant Claude quick-ack pager receiver (pager-quickack Wave 1).
+"""Claude quick-ack pager receiver (pager-quickack Wave 1; wired in Wave 2b).
 
-DORMANCY CONTRACT (Wave 1): this module is intentionally DORMANT. Nothing in the
-tree imports, wires, or starts it. The only cross-module coupling is a READ-ONLY
-reuse of ``pipeline_agent_pager._claude_dispatch_env`` for the delivery
-subprocess environment. Pager wiring (Wave 2) and preflight/daemon auto-start
-(Wave 3) are explicitly OUT of scope here.
+WIRING (Wave 2b): the pager's ``_dispatch_claude`` now drives this receiver -- it
+ENQUEUES each page and calls ``ensure_draining`` to GUARANTEE the queued event is
+drained (PR #1137 P1). Cross-module coupling is still a READ-ONLY reuse of
+``pipeline_agent_pager._claude_dispatch_env`` for the delivery subprocess
+environment; this module never imports the pager's mutable state. There is no
+open-ended daemon lifecycle: ``ensure_draining`` lazily starts a SINGLE bounded
+drain pass (``--once`` -> ``run_until_empty``) that exits when the queue is drained.
 
-What it provides (the seven behaviors locked by
+What it provides (the behaviors locked by
 ``mu/tests/tools/test_claude_pager_receiver.py``):
 
 1. Per-bus file-queue inbox. The atomic enqueue IS the quick-ack: ``enqueue``
@@ -34,9 +36,19 @@ What it provides (the seven behaviors locked by
 6. Exit-0 -> durable receipt; non-zero exit or timeout -> fail-open re-queue (the
    event is re-written to the back of the queue and is never lost).
 
-7. Idempotency keyed by ``event_id`` / ``transition_key``. A duplicate event
-   (one whose id-set intersects an already-delivered or already-queued event) is
-   not re-queued and not re-delivered.
+7. Idempotency keyed by ``event_id`` ONLY (PR #1137 P2). A duplicate event (one
+   whose ``event_id`` matches an already-delivered or already-queued event) is not
+   re-queued and not re-delivered. ``transition_key`` is deliberately EXCLUDED from
+   the dedup identity: the pager hashes ``event_type`` / ``state`` / ``phase`` plus
+   ``transition_key`` into a distinct ``event_id``, so two genuinely-distinct pager
+   events can legitimately share a ``transition_key`` -- deduping on it would
+   collapse them and silently drop the second.
+
+8. ``ensure_draining`` -- the minimal idempotent start-if-not-running entry the
+   pager calls right after enqueue. It spawns ONE bounded, detached drain pass
+   (``--once`` -> ``run_until_empty``, then exit); no owner-loop / poll-forever /
+   session-rebuild / restart-supervision. The just-enqueued event (queued BEFORE
+   the spawn) is guaranteed to be observed by that pass.
 
 This is additive, observability-only tooling. It touches no runtime/substrate
 surface (``rcx_pi/selfhost/`` or ``mu/host/``) and introduces no host semantics.
@@ -69,6 +81,9 @@ DEFAULT_DELIVERY_TIMEOUT_S = 120.0
 DEFAULT_POLL_INTERVAL_S = 5.0
 CLAUDE_BIN_ENV = "RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN"
 PROCESS_GROUP_GRACE_S = 5.0
+# This module's own path, used by ``ensure_draining`` to spawn a bounded drain
+# pass (``<python> claude_pager_receiver.py --once ...``). Resolved once at import.
+_RECEIVER_SCRIPT = str(Path(__file__).resolve())
 
 # A drain cycle made "progress" only if at least one event left the queue durably
 # this cycle (delivered, or dropped as a duplicate / unreadable). A cycle that
@@ -185,13 +200,22 @@ def delivery_env() -> dict[str, str]:
 
 
 def event_keys(event: dict[str, Any]) -> set[str]:
-    """Idempotency key-set for *event*: its non-empty ``event_id`` / ``transition_key``."""
-    keys: set[str] = set()
-    for field in ("event_id", "transition_key"):
-        value = str(event.get(field) or "").strip()
-        if value:
-            keys.add(value)
-    return keys
+    """Idempotency key-set for *event*: its non-empty ``event_id`` ONLY (PR #1137 P2).
+
+    ``transition_key`` is deliberately EXCLUDED. It is not a unique event identity:
+    the pager hashes ``event_type`` / ``state`` / ``phase`` plus ``transition_key``
+    into a distinct ``event_id``, so two genuinely-distinct pager events can share a
+    ``transition_key``. Including it in the dedup key collapsed those distinct events
+    -- the second enqueue returned a duplicate and was silently dropped while the
+    receipt-bridge (which promotes by ``event_id``) left it pending forever. Keying on
+    ``event_id`` only keeps distinct same-``transition_key`` events distinct.
+
+    Returns a 0-or-1 element set so the existing ``keys & delivered``/``keys & queued``
+    intersection logic is unchanged; an event with no ``event_id`` yields the empty
+    set (``enqueue`` rejects it).
+    """
+    event_id = str(event.get("event_id") or "").strip()
+    return {event_id} if event_id else set()
 
 
 class ClaudePagerReceiver:
@@ -266,10 +290,9 @@ class ClaudePagerReceiver:
         keys = event_keys(event)
         if not keys:
             raise ClaudePagerReceiverError(
-                "event requires a non-empty event_id or transition_key"
+                "event requires a non-empty event_id"
             )
-        event_id = str(event.get("event_id") or "").strip()
-        primary = event_id or sorted(keys)[0]
+        primary = str(event.get("event_id") or "").strip()
         with self._queue_guard():
             if keys & self._delivered_keys():
                 return {"status": "duplicate_delivered", "event_id": primary, "queue_path": None}
@@ -277,6 +300,66 @@ class ClaudePagerReceiver:
                 return {"status": "duplicate_queued", "event_id": primary, "queue_path": None}
             queue_path = self._atomic_write_event(event)
         return {"status": "queued", "event_id": primary, "queue_path": str(queue_path)}
+
+    # -- ensure-draining (the start-if-not-running entry) ---------------------
+
+    def ensure_draining(self) -> dict[str, Any]:
+        """Start a bounded, detached drain pass so a queued event is GUARANTEED to drain.
+
+        This is the minimal idempotent "start-if-not-running" entry the pager calls
+        right after it enqueues a page (PR #1137 P1): a durably-queued event always has
+        a drain pass started after it, so there is NO never-drained-queue window.
+
+        Mechanism (deliberately minimal -- NO open-ended daemon lifecycle): spawn a
+        DETACHED child that runs a SINGLE bounded drain pass (``--once`` ->
+        ``run_until_empty``) and then EXITS. There is no owner-loop, no poll-forever, no
+        session-rebuild, and no restart-supervision; each ``claude`` page the child makes
+        reuses the existing per-delivery timeout + ``_terminate_process_group`` reaper.
+        The child is its own session/process-group (``start_new_session=True``) so it
+        outlives this short-lived pager invocation.
+
+        Idempotent and safe under concurrency WITHOUT suppressing spawns: ``deliver_once``
+        is single-flight (the delivery lock serializes ``claude`` children), so back-to-back
+        enqueues that each start a drainer never run two ``claude`` pages at once -- a
+        redundant drainer simply finds the queue already drained and exits. Because the
+        caller enqueues the event BEFORE calling this, the spawned pass is guaranteed to
+        OBSERVE that event (``run_until_empty`` globs the queue dir); spawning before
+        enqueue would risk the drainer globbing an empty queue and exiting first, so the
+        ordering (enqueue, then ensure_draining) is the contract that closes the window.
+
+        Returns ``{"started": True, "pid": ..., "mode": "detached_once"}`` on success.
+        Raises ``ClaudePagerReceiverError`` if the drainer cannot be started, so the pager
+        can FAIL-OPEN (leave the target pending rather than accept an undrainable queue).
+        """
+        self._base.mkdir(parents=True, exist_ok=True)
+        spawn_log = self._base / "drain_spawn.log"
+        command = [
+            sys.executable,
+            _RECEIVER_SCRIPT,
+            "--repo-root", str(self.repo_root),
+            "--bus-dir", self.bus_dir,
+            "--timeout-s", str(self.timeout_s),
+            "--once",
+        ]
+        try:
+            with spawn_log.open("a", encoding="utf-8") as sink:
+                proc = subprocess.Popen(
+                    command,
+                    cwd=str(self.repo_root),
+                    stdin=subprocess.DEVNULL,
+                    stdout=sink,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    # Own session/process-group: outlives the pager invocation and lets
+                    # each delivery's timeout reaper kill the whole claude child group.
+                    start_new_session=True,
+                    env=os.environ.copy(),
+                )
+        except OSError as exc:
+            raise ClaudePagerReceiverError(
+                f"claude pager drain spawn failed: {exc}"
+            ) from exc
+        return {"started": True, "pid": proc.pid, "mode": "detached_once"}
 
     # -- delivery (single-flight) --------------------------------------------
 
@@ -490,12 +573,14 @@ class ClaudePagerReceiver:
         return records
 
     def _delivered_keys(self) -> set[str]:
+        # Event_id ONLY (PR #1137 P2), mirroring ``event_keys``: a receipt's
+        # ``transition_key`` is informational and must not dedup a distinct event
+        # that merely reuses it.
         keys: set[str] = set()
         for record in self._delivered_records():
-            for field in ("event_id", "transition_key"):
-                value = str(record.get(field) or "").strip()
-                if value:
-                    keys.add(value)
+            value = str(record.get("event_id") or "").strip()
+            if value:
+                keys.add(value)
         return keys
 
     def _already_delivered(self, event: dict[str, Any]) -> bool:

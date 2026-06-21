@@ -1,7 +1,7 @@
-"""Unit tests for the dormant Claude quick-ack pager receiver (Wave 1).
+"""Unit tests for the Claude quick-ack pager receiver (Wave 1; wired in Wave 2b).
 
-Locks the seven behaviors of ``mu/tools/session/claude_pager_receiver.py`` with a
-MOCKED subprocess boundary -- no real ``claude`` process is ever spawned:
+Locks the behaviors of ``mu/tools/session/claude_pager_receiver.py`` with a MOCKED
+subprocess boundary -- no real ``claude`` process is ever spawned:
 
 1. atomic-enqueue quick-ack (durable queue file; no subprocess during enqueue;
    enqueue is not blocked by an in-flight delivery);
@@ -11,7 +11,11 @@ MOCKED subprocess boundary -- no real ``claude`` process is ever spawned:
 5. delivery env via the pager's clobber-safe ``_claude_dispatch_env``
    (``RCX_PIPELINE_SESSION=1`` set, ``RCX_CLAUDE_MONITOR`` cleared);
 6. exit-0 -> durable receipt vs non-zero/timeout -> fail-open re-queue;
-7. idempotency keyed by ``event_id`` / ``transition_key``.
+7. idempotency keyed by ``event_id`` ONLY (PR #1137 P2): distinct events that reuse
+   a ``transition_key`` are each delivered, never collapsed;
+8. ``ensure_draining`` -- the minimal idempotent start-if-not-running entry the pager
+   calls after enqueue: spawns ONE bounded, detached ``--once`` drain pass (no
+   open-ended daemon lifecycle), and fails closed if the drainer cannot be started.
 
 The subprocess is mocked by patching ``receiver_mod.subprocess.Popen``; the
 receiver's public API is exercised directly, so no private-attr access is needed.
@@ -419,19 +423,34 @@ def test_delivered_event_is_not_redelivered(tmp_path, monkeypatch):
     assert recorder.call_count == 1
 
 
-def test_idempotency_keys_on_transition_key_independent_of_event_id(tmp_path, monkeypatch):
+def test_distinct_events_sharing_a_transition_key_are_each_delivered(tmp_path, monkeypatch):
+    """PR #1137 P2: idempotency keys on ``event_id`` ONLY, never ``transition_key``.
+
+    Two genuinely-distinct events that reuse a ``transition_key`` (the pager hashes
+    event_type/state/phase plus transition_key into a distinct event_id) must NOT collapse.
+    Before the fix the second was deduped as a duplicate and silently dropped; now each is
+    queued and delivered independently.
+    """
     recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=0))
     receiver = _receiver(tmp_path)
+
     # Deliver an event carrying transition_key TK under event_id X...
     receiver.enqueue({"event_id": "X", "transition_key": "TK"})
     receiver.run_until_empty()
     assert recorder.call_count == 1
 
-    # ...a DIFFERENT event_id Y but the SAME transition_key TK is still a duplicate.
-    duplicate = receiver.enqueue({"event_id": "Y", "transition_key": "TK"})
-    assert duplicate["status"] == "duplicate_delivered"
+    # ...a DIFFERENT event_id Y with the SAME transition_key TK is NOT a duplicate.
+    distinct = receiver.enqueue({"event_id": "Y", "transition_key": "TK"})
+    assert distinct["status"] == "queued"
+    receiver.run_until_empty()
+    assert recorder.call_count == 2
+    assert receiver.delivered_event_ids() == {"X", "Y"}
+
+    # And the SAME event_id IS still deduped (event-id identity is what dedups).
+    same = receiver.enqueue({"event_id": "X", "transition_key": "TK-other"})
+    assert same["status"] == "duplicate_delivered"
     assert receiver.run_until_empty() == []
-    assert recorder.call_count == 1
+    assert recorder.call_count == 2
 
 
 def test_distinct_events_are_each_delivered(tmp_path, monkeypatch):
@@ -539,3 +558,76 @@ def test_run_forever_backs_off_on_persistent_failure_no_tight_loop(tmp_path, mon
     # The poison event is failed-open (still queued), never delivered.
     assert "POISON" in receiver.queued_event_ids()
     assert receiver.delivered_event_ids() == set()
+
+
+# --------------------------------------------------------------------------- #
+# (8) ensure_draining -- minimal idempotent start-if-not-running entry (Wave 2b)
+# --------------------------------------------------------------------------- #
+
+
+def test_ensure_draining_spawns_detached_bounded_once_drainer(tmp_path, monkeypatch):
+    """ensure_draining starts ONE bounded, detached drain pass (no open-ended daemon).
+
+    The pager calls this right after enqueue to GUARANTEE the queued event drains
+    (PR #1137 P1). It must spawn a SINGLE bounded pass: ``<python> claude_pager_receiver.py
+    --once`` (run_until_empty then exit) -- NEVER an owner-loop / poll-forever -- in its own
+    session/process-group so it outlives the short-lived pager invocation.
+    """
+    recorder = _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path)
+
+    result = receiver.ensure_draining()
+
+    assert result["started"] is True
+    assert result["mode"] == "detached_once"
+    assert recorder.call_count == 1
+    command = recorder.commands[0]
+    # Bounded single pass: --once -> run_until_empty -> exit (NOT run-forever).
+    assert "--once" in command
+    # The drainer is a python process running the receiver CLI itself (it then spawns claude).
+    assert command[0] == receiver_mod.sys.executable
+    # ``command[1]`` is the receiver script. Assert it against the module file the test
+    # loaded (``_tool_path``, resolved) -- the same value the module derives into its
+    # self-path constant -- rather than reaching into that private constant, so the suite
+    # stays on a public seam (the private-attr test-integrity gate).
+    assert str(_tool_path.resolve()) in command
+    # Bound to the SAME repo/bus the pager enqueued into.
+    assert "--repo-root" in command and str(receiver.repo_root) in command
+    assert "--bus-dir" in command and receiver.bus_dir in command
+    # Detached: its own session/process-group so a timeout reaper can kill the whole group.
+    assert recorder.start_new_sessions[0] is True
+
+
+def test_ensure_draining_is_idempotent_and_repeatable(tmp_path, monkeypatch):
+    """Calling ensure_draining repeatedly is safe (idempotent start-if-not-running).
+
+    Back-to-back enqueues each call ensure_draining; the delivery lock makes deliver_once
+    single-flight, so redundant drainers never run two claude pages at once -- a redundant
+    drainer simply finds the queue already drained and exits. The entry never raises on a
+    repeat call.
+    """
+    recorder = _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path)
+
+    first = receiver.ensure_draining()
+    second = receiver.ensure_draining()
+
+    assert first["started"] is True and second["started"] is True
+    assert recorder.call_count == 2  # each call starts a bounded pass; safe under the delivery lock
+
+
+def test_ensure_draining_fails_closed_when_spawn_raises(tmp_path, monkeypatch):
+    """If the drainer cannot be started, ensure_draining RAISES (so the pager fails open).
+
+    A spawn OSError must surface as ClaudePagerReceiverError, not be swallowed -- the pager's
+    _dispatch_claude relies on this to leave the claude target pending (never accept a queue
+    that may not drain).
+    """
+    def _boom(command, **kwargs):
+        raise OSError("cannot spawn drainer")
+
+    monkeypatch.setattr(receiver_mod.subprocess, "Popen", _boom)
+    receiver = _receiver(tmp_path)
+
+    with pytest.raises(receiver_mod.ClaudePagerReceiverError):
+        receiver.ensure_draining()
