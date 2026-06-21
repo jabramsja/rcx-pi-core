@@ -5325,6 +5325,45 @@ def _build_diagnosis_prompt(
         else "\n"
     )
 
+    # PIPELINE-FIX-34 (2026-06-20): align the advertised action menu with the
+    # tier-3 bot_findings_pending gate, which requires a DURABLE structured edit.
+    # That gate (failure_class == BOT_FINDINGS_PENDING branch in
+    # _run_tier3_recovery_loop) dispatches BEFORE the generic shell/edit handlers,
+    # so a "shell" fix never executes and is recorded as the no_durable_edits
+    # hard-fail terminal. Advertising "shell" in the menu would let a COMPLIANT
+    # agent follow the prompt straight into that terminal. So for this class the
+    # menu is edit-only: drop "shell" and state the durable-edit contract.
+    # skip/escalate/delegate_implementer stay valid -- they are handled ABOVE the
+    # gate (deliberate-skip severity split, code-writing delegate path) and are
+    # left untouched.
+    bot_findings_pending = fc in (
+        FailureClass.BOT_FINDINGS_PENDING,
+        FailureClass.BOT_FINDINGS_PENDING.value,
+    )
+    if bot_findings_pending:
+        action_menu = """Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
+{"action": "edit"|"delegate_implementer"|"skip"|"escalate", "commands": [...], "explanation": "why"}
+
+This is a bot-finding remediation -- it is fixed ONLY by a durable file change.
+Return "edit" with the structured file edits (preferred), or
+"delegate_implementer" for a bounded code-writing repair. Do NOT return "shell":
+a passing shell command is indicator-only theater for a bot finding, not durable
+remediation, and the shell action is rejected as a no-durable-edit hard failure.
+
+- "edit": apply file edits (commands = [{"file_path": "...", "old_text": "...", "new_text": "..."}])
+- "delegate_implementer": request the existing phase_b_implementer code-writing actor for a bounded control-surface repair
+- "skip": cannot fix, return failure
+- "escalate": need human intervention"""
+    else:
+        action_menu = """Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
+{"action": "shell"|"edit"|"delegate_implementer"|"skip"|"escalate", "commands": [...], "explanation": "why"}
+
+- "shell": run shell commands to fix the issue
+- "edit": apply file edits (commands = [{"file_path": "...", "old_text": "...", "new_text": "..."}])
+- "delegate_implementer": request the existing phase_b_implementer code-writing actor for a bounded control-surface repair
+- "skip": cannot fix, return failure
+- "escalate": need human intervention"""
+
     prompt = f"""You are a pipeline recovery agent. A pipeline step has failed and you must diagnose and fix it.
 
 Failure class: {fc}
@@ -5349,14 +5388,7 @@ Do not run tools or shell commands yourself during this diagnosis turn.
 Use only the evidence above, decide the smallest honest next action, and
 return the JSON plan immediately.
 
-Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
-{{"action": "shell"|"edit"|"delegate_implementer"|"skip"|"escalate", "commands": [...], "explanation": "why"}}
-
-- "shell": run shell commands to fix the issue
-- "edit": apply file edits (commands = [{{"file_path": "...", "old_text": "...", "new_text": "..."}}])
-- "delegate_implementer": request the existing phase_b_implementer code-writing actor for a bounded control-surface repair
-- "skip": cannot fix, return failure
-- "escalate": need human intervention
+{action_menu}
 
 For "delegate_implementer", "commands" must contain exactly one object:
 {{
