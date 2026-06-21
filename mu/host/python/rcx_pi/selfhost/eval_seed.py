@@ -14,7 +14,7 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH, consume_budget, _NO_BUDGET
+from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH, consume_budget, _NO_BUDGET
 
 
 # _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
@@ -555,34 +555,10 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
             if input_value is None:
                 continue
             return NO_MATCH
-        # Bool (before int — bool is subclass of int)
-        if isinstance(pattern, bool):
-            if isinstance(input_value, bool) and pattern == input_value:
-                continue
-            return NO_MATCH
-        # Int
-        if isinstance(pattern, int):
-            if isinstance(input_value, int) and not isinstance(input_value, bool):
-                if pattern == input_value:
-                    continue
-            return NO_MATCH
-        # Float
-        if isinstance(pattern, float):
-            if isinstance(input_value, float) and pattern == input_value:
-                continue
-            return NO_MATCH
-        # String
-        if isinstance(pattern, str):
-            if isinstance(input_value, str) and pattern == input_value:
-                continue
-            return NO_MATCH
-        # List branch REMOVED (P7W4): After normalization, all lists become
-        # head/tail linked lists (dicts). No kernel-path code passes raw
-        # Python lists to _stage0_match. Verified: zero seed patterns/bodies
-        # contain raw arrays. If a raw list reaches here, it falls through to
-        # NO_MATCH (correct behavior).
-
-        # Dict (Gate-3: allow pattern to omit _type when input has _type="list")
+        # Compound dict (Gate-3: allow pattern to omit _type when input has
+        # _type="list"). Resolved above the scalar content-hash so dict patterns
+        # bind through the worklist instead of hashing. Logic UNCHANGED; only
+        # reordered ahead of the collapsed scalar branch.
         if isinstance(pattern, dict):
             if not isinstance(input_value, dict):
                 return NO_MATCH
@@ -597,6 +573,25 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
             for key in reversed(tuple(pattern)):
                 work.append((pattern[key], input_value[key], depth + 1))
             continue
+        # Input-side raw-list fail-close — the symmetric analog of JS
+        # stage0Match's Array.isArray(input) guard. A raw list at a
+        # non-var/non-dict site never matches; this restores NO_MATCH for raw
+        # lists once the scalar branches collapse to a content hash. Pattern-side
+        # list dispatch stays forbidden (P7W4 relaxed fence: input-side only).
+        if isinstance(input_value, list):
+            return NO_MATCH
+        # Scalar content-addressed equality. Collapses the former
+        # bool/int/float/str isinstance dispatch into a single mu_hash_cached
+        # comparison (host-semantics reduction: 4 scalar branches -> 1 content
+        # hash + 1 input-side list fail-close). The is_mu validity guard keeps
+        # unsupported/invalid host values (tuple, non-Mu) from reaching
+        # assert_mu/mu_hash_cached — they fall through to NO_MATCH exactly as
+        # before. mu_hash_cached (NOT the control hash) preserves int/float and
+        # ±0.0 sign, so +0.0 vs -0.0 is NO_MATCH (authorized content-addressed
+        # delta, identical in both substrates).
+        if is_mu(pattern) and is_mu(input_value):
+            if mu_hash_cached(pattern) == mu_hash_cached(input_value):
+                continue
         return NO_MATCH
     return current
 
