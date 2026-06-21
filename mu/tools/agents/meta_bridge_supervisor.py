@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -116,6 +117,31 @@ VALIDATION_COMMAND_TIMEOUT_S = _read_bounded_timeout_env(
     1200,
     minimum=1,
     maximum=7200,
+)
+# Bounded-wait for the single-supervisor lock (_MetaBridgeLock). When a sibling
+# pipeline wave already holds the meta-bridge flock, a contending wave WAITS
+# (bounded) for it to finish instead of failing immediately on non-blocking
+# contention. The default comfortably outlasts a normal holder's critical
+# section (a meta-review can run up to META_STALE_TIMEOUT_S=300s, plus
+# validations) so parallel waves serialize; it stays bounded so a genuinely
+# stuck holder eventually fails closed rather than hanging forever. The kernel
+# flock is the SOLE authority: a dead holder's flock is released automatically
+# by the kernel, so a later retry simply acquires it -- we never read the
+# metadata PID to clear/bypass the lock, and never change the lockfile inode.
+META_LOCK_WAIT_TIMEOUT_S = _read_bounded_timeout_env(
+    "RCX_META_LOCK_WAIT_TIMEOUT_S",
+    600,
+    minimum=1,
+    maximum=3600,
+)
+# Backoff between non-blocking flock retries, in milliseconds (env-overridable
+# and clamped like the timeouts above). Small enough that a dead-holder lock is
+# reacquired almost immediately once the kernel releases it.
+META_LOCK_WAIT_BACKOFF_MS = _read_bounded_timeout_env(
+    "RCX_META_LOCK_WAIT_BACKOFF_MS",
+    100,
+    minimum=1,
+    maximum=5000,
 )
 # Stale-detection timeout for meta-review adapter output.
 # Root-cause fix: 90s was too short for Codex xhigh reasoning effort.
@@ -338,16 +364,39 @@ class _MetaBridgeLock:
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o644)
         self._fp = os.fdopen(fd, "r+", encoding="utf-8")
-        try:
-            fcntl.flock(self._fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (IOError, OSError):
-            self._fp.close()
-            raise MetaBridgeError(
-                "Another meta-bridge supervisor is running. "
-                "Wait for it to finish. The lockfile path persists by design; "
-                "only remove .agent_bus/meta/meta_bridge.lock if a lock probe "
-                "shows no process holds the flock."
-            )
+        # Bounded-wait acquire: retry the NON-BLOCKING flock with short backoff so
+        # a sibling pipeline wave serializes (waits for the current holder to
+        # finish) instead of failing immediately on contention. The kernel flock
+        # is the SOLE authority -- a dead holder's flock is auto-released by the
+        # kernel, so a later retry just acquires it. We never read the metadata
+        # PID to clear or bypass the lock, and never unlink/recreate the lockfile
+        # (flock mutual exclusion is per-inode, so the inode MUST stay stable).
+        backoff_s = META_LOCK_WAIT_BACKOFF_MS / 1000.0
+        start = time.monotonic()
+        deadline = start + META_LOCK_WAIT_TIMEOUT_S
+        while True:
+            try:
+                fcntl.flock(self._fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except (IOError, OSError):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    # Timeout elapsed with the flock STILL HELD -> fail closed.
+                    waited_s = time.monotonic() - start
+                    holder_note = self._recorded_holder_note()
+                    self._fp.close()
+                    self._fp = None
+                    raise MetaBridgeError(
+                        "Another meta-bridge supervisor is running. "
+                        "Wait for it to finish. "
+                        f"Bounded-waited {waited_s:.1f}s for the kernel flock to "
+                        "release (RCX_META_LOCK_WAIT_TIMEOUT_S="
+                        f"{META_LOCK_WAIT_TIMEOUT_S}s) but it is still held. "
+                        "The lockfile path persists by design; "
+                        "only remove .agent_bus/meta/meta_bridge.lock if a lock "
+                        "probe shows no process holds the flock." + holder_note
+                    )
+                time.sleep(min(backoff_s, remaining))
         _write_lock_metadata(
             self._fp,
             holder="meta_bridge_supervisor",
@@ -371,6 +420,37 @@ class _MetaBridgeLock:
                 self._fp.close()
                 self._fp = None
         return False
+
+    def _recorded_holder_note(self) -> str:
+        """Read recorded holder metadata READ-ONLY for the timeout diagnostic.
+
+        Surfaced in the fail-closed timeout message only. This MUST NEVER gate
+        acquisition, clear the lock, or change the lockfile inode -- the kernel
+        flock is the sole authority for who holds the lock. A stale (e.g. dead)
+        PID here proves nothing about who currently holds the flock, so it is
+        advisory operator diagnostics, not an authority signal.
+        """
+        try:
+            raw = self._lock_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+        if not raw:
+            return ""
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return ""
+        if not isinstance(data, dict):
+            return ""
+        pid = data.get("pid")
+        acquired = data.get("acquired_at_utc")
+        if pid is None and acquired is None:
+            return ""
+        return (
+            " Recorded holder (diagnostic only, NOT authoritative -- a stale PID "
+            f"does not prove the flock is held): pid={pid}, "
+            f"acquired_at_utc={acquired}."
+        )
 
 
 @dataclass(frozen=True)

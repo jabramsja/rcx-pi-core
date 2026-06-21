@@ -15,6 +15,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -729,21 +731,119 @@ def test_meta_bridge_lock_persists_owner_metadata(tmp_path):
     assert metadata["lock_path"] == str(lock_path)
 
 
-def test_meta_bridge_lock_error_clarifies_persistent_path(tmp_path):
+def test_meta_bridge_lock_error_clarifies_persistent_path(tmp_path, monkeypatch):
+    # Bounded-wait fail-closed: a live holder that NEVER releases makes a second
+    # __enter__ WAIT the bounded timeout and then raise (fail-closed preserved),
+    # rather than failing immediately. Drive a tiny timeout so the regression is
+    # fast and deterministic.
+    monkeypatch.setattr(meta, "META_LOCK_WAIT_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(meta, "META_LOCK_WAIT_BACKOFF_MS", 20)
     lock_path = tmp_path / "meta_bridge.lock"
     fp = open(lock_path, "w")
     try:
         fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        start = time.monotonic()
         with pytest.raises(meta.MetaBridgeError, match="persists by design") as excinfo:
             with meta._MetaBridgeLock(lock_path):  # ANTICHEAT_OK: lock error-path coverage
                 pass
+        elapsed = time.monotonic() - start
     finally:
         fcntl.flock(fp, fcntl.LOCK_UN)
         fp.close()
 
+    # It WAITED (bounded) for the held flock before failing closed — it did not
+    # raise immediately on contention.
+    assert elapsed >= 0.2
+    assert "Bounded-waited" in str(excinfo.value)
     assert "if stale" not in str(excinfo.value)
 
 
+def test_meta_bridge_lock_waits_then_succeeds_when_holder_releases(tmp_path, monkeypatch):
+    """A live holder makes a second __enter__ WAIT (bounded) and then SUCCEED.
+
+    Regression for the parallel-pipeline collision: two waves reaching the bridge
+    must serialize on the kernel flock instead of the second failing immediately.
+    """
+    # Generous timeout (never reached); small backoff so reacquire is snappy.
+    monkeypatch.setattr(meta, "META_LOCK_WAIT_TIMEOUT_S", 10.0)
+    monkeypatch.setattr(meta, "META_LOCK_WAIT_BACKOFF_MS", 20)
+    lock_path = tmp_path / "meta_bridge.lock"
+
+    holding = threading.Event()
+    hold_seconds = 0.4
+
+    def _hold_then_release():
+        # Separate open file description in the same process: flock contends
+        # across OFDs, so this faithfully blocks the _MetaBridgeLock acquire.
+        holder_fp = open(lock_path, "w")
+        fcntl.flock(holder_fp, fcntl.LOCK_EX)
+        holding.set()
+        time.sleep(hold_seconds)
+        fcntl.flock(holder_fp, fcntl.LOCK_UN)
+        holder_fp.close()
+
+    holder = threading.Thread(target=_hold_then_release)
+    holder.start()
+    try:
+        assert holding.wait(timeout=5.0), "holder thread never acquired the flock"
+        start = time.monotonic()
+        with meta._MetaBridgeLock(lock_path):  # ANTICHEAT_OK: bounded-wait serialize proof
+            elapsed = time.monotonic() - start
+            # It WAITED for the holder to release (did not fail immediately) and
+            # then acquired successfully — parallel waves serialize.
+            assert elapsed >= 0.2
+            assert lock_path.stat().st_size > 0  # holder metadata re-written
+    finally:
+        holder.join(timeout=5.0)
+    assert not holder.is_alive()
+
+
+def test_meta_bridge_lock_acquires_immediately_despite_stale_dead_pid_metadata(
+    tmp_path, monkeypatch
+):
+    """Acquisition depends on the FREE kernel flock, not on metadata PID liveness.
+
+    A lockfile holding only stale (dead-PID) metadata but NO held flock is
+    acquired on the first non-blocking attempt, and the lockfile is never
+    unlinked/recreated (inode preserved). This locks in the Round-1 review fix:
+    the metadata PID is never parsed to clear or bypass the lock.
+    """
+    # Make any wait expensive so "immediate" is a strong assertion: a single
+    # backoff would cost 5s, but a free flock acquires on the first try (~0s).
+    monkeypatch.setattr(meta, "META_LOCK_WAIT_TIMEOUT_S", 30.0)
+    monkeypatch.setattr(meta, "META_LOCK_WAIT_BACKOFF_MS", 5000)
+    lock_path = tmp_path / "meta_bridge.lock"
+
+    # A definitely-dead PID: spawn a trivial subprocess and reap it.
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    dead_pid = proc.pid
+
+    stale_metadata = {
+        "holder": "meta_bridge_supervisor",
+        "pid": dead_pid,
+        "lock_path": str(lock_path),
+        "acquired_at_utc": "2026-06-21T00:00:00+00:00",
+    }
+    lock_path.write_text(json.dumps(stale_metadata, sort_keys=True) + "\n", encoding="utf-8")
+    inode_before = lock_path.stat().st_ino
+
+    start = time.monotonic()
+    with meta._MetaBridgeLock(lock_path):  # ANTICHEAT_OK: free-flock acquire proof
+        elapsed = time.monotonic() - start
+        # Acquired on the FIRST non-blocking attempt (no backoff sleep) — proves
+        # acquisition ignores the stale metadata PID entirely.
+        assert elapsed < 1.0
+        inode_held = lock_path.stat().st_ino
+        # The new holder's own metadata overwrote the stale entry.
+        held_metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+        assert held_metadata["pid"] == os.getpid()
+    inode_after = lock_path.stat().st_ino
+
+    # The lockfile inode never changed — never unlinked/recreated (flock mutual
+    # exclusion is per-inode, so an inode swap would break single-supervisor).
+    assert inode_before == inode_held == inode_after
+    assert lock_path.exists()
 
 
 
@@ -2971,9 +3071,13 @@ class TestWaveEvidenceGate:
         assert gate.passed
         assert all_passed
 
-    def test_evidence_restore_is_guarded_by_supervisor_lock(self, tmp_path):
+    def test_evidence_restore_is_guarded_by_supervisor_lock(self, tmp_path, monkeypatch):
         repo = tmp_path / "repo"
         repo.mkdir()
+        # Bounded-wait: the held lock makes __enter__ wait then fail closed; drive
+        # a tiny timeout so the propagation path stays fast and deterministic.
+        monkeypatch.setattr(meta, "META_LOCK_WAIT_TIMEOUT_S", 0.3)
+        monkeypatch.setattr(meta, "META_LOCK_WAIT_BACKOFF_MS", 20)
         command = "echo should-not-run"
         package = _make_wave_evidence_package(
             tracker_command=command,
