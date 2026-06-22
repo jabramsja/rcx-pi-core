@@ -163,7 +163,7 @@ pane_max_lines() {
 fit_output_to_pane() {
   local file="$1"
   local max_lines="$2"
-  local total_lines head_keep tail_keep tmp
+  local total_lines head_keep tail_keep tmp recovery_line effective_head recovery_keep recovery_end
 
   total_lines=$(wc -l < "$file" 2>/dev/null | xargs)
   if ! [[ "$total_lines" =~ ^[0-9]+$ ]] || [ "$total_lines" -le "$max_lines" ]; then
@@ -179,6 +179,26 @@ fit_output_to_pane() {
   [ "$tail_keep" -lt 3 ] && tail_keep=3
 
   tmp="${file}.trim"
+  recovery_line=$(grep -n "RECOVERY" "$file" 2>/dev/null | head -1 | cut -d: -f1)
+  if [[ "$recovery_line" =~ ^[0-9]+$ ]] && [ "$recovery_line" -gt 0 ]; then
+    effective_head="$head_keep"
+    if [ "$recovery_line" -le "$head_keep" ]; then
+      effective_head=$(( recovery_line - 1 ))
+    fi
+    [ "$effective_head" -lt 8 ] && effective_head=8
+    recovery_keep=$(( max_lines - effective_head - 1 ))
+    if [ "$recovery_keep" -ge 4 ]; then
+      recovery_end=$(( recovery_line + recovery_keep - 1 ))
+      {
+        head -n "$effective_head" "$file"
+        echo -e "  ${DIM}More detail is hidden to keep this pane readable.${RESET}"
+        sed -n "${recovery_line},${recovery_end}p" "$file"
+      } > "$tmp"
+      mv "$tmp" "$file"
+      return 0
+    fi
+  fi
+
   {
     head -n "$head_keep" "$file"
     echo -e "  ${DIM}More detail is hidden to keep this pane readable.${RESET}"

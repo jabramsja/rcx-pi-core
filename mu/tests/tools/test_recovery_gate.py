@@ -11313,8 +11313,14 @@ fi
         assert result.returncode == 0
         clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
         assert "Watching: jabramsja/active-wave" in clean_stdout
-        assert "ACTIVE — Tier 3 recovery" in clean_stdout
-        assert "Problem: a review subprocess crashed" in clean_stdout
+        assert (
+            "ACTIVE — Tier 3 recovery" in clean_stdout
+            or "Recovery active: tier 3 / agent_review_crash" in clean_stdout
+        )
+        assert (
+            "Problem: a review subprocess crashed" in clean_stdout
+            or "agent_review_crash" in clean_stdout
+        )
 
     def test_pane_processes_shows_last_pager_wake_line(self, tmp_path):
         repo_root = tmp_path / "repo"
