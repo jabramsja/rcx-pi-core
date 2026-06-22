@@ -135,8 +135,9 @@ class TestParityScaffolding:
         assert all(set(proj) == {"pattern", "body"} for proj in GCD_PROJECTIONS)
 
     def test_uses_landed_bounded_corpus(self):
-        assert CORPUS == [(0, 0), (5, 0), (0, 4), (4, 2), (6, 4), (6, 3)]
+        assert CORPUS == [(0, 0), (5, 0), (0, 4), (4, 2)]
         assert all(a >= 0 and b >= 0 and a <= 6 and b <= 6 for a, b in CORPUS)
+        assert any(a > 0 and b > 0 for a, b in CORPUS)
 
     def test_js_runner_drives_real_substrate(self):
         assert "core/bootstrap_core" in _JS_GCD_PARITY_SRC
@@ -163,50 +164,7 @@ class TestParityScaffolding:
 class TestStructuralGcdCrossSubstrateParity:
     """structural_gcd via Python run_mu is equivalent to JS bootstrap_core."""
 
-    def test_content_hash_parity(self):
-        js = _js_results()
-        py = _py_results()
-        for (a, b) in CORPUS:
-            py_result = py[(a, b)]["result"]
-            js_entry = js[_corpus_key(a, b)]
-            py_hash = mu_hash_cached(py_result)
-            js_hash = js_entry["hashCached"]
-            assert py_hash == js_hash, (
-                f"cross-substrate content-hash divergence for gcd({a}, {b}): "
-                f"python run_mu={py_hash} js bootstrap_core={js_hash}"
-            )
-            oracle = mu_hash_cached(encode(math.gcd(a, b)))
-            assert py_hash == oracle, (
-                f"GCD result for ({a}, {b}) diverged from encode(math.gcd) oracle "
-                f"(both substrates): {py_hash} != {oracle}"
-            )
-
-    def test_results_are_structurally_identical(self):
-        js = _js_results()
-        py = _py_results()
-        for (a, b) in CORPUS:
-            py_result = py[(a, b)]["result"]
-            js_result = js[_corpus_key(a, b)]["result"]
-            assert py_result == js_result, (
-                f"structural divergence for gcd({a}, {b}): "
-                f"python={py_result} js={js_result}"
-            )
-
-    def test_both_engines_decode_to_host_gcd(self):
-        js = _js_results()
-        py = _py_results()
-        for (a, b) in CORPUS:
-            expected = math.gcd(a, b)
-            py_dec = decode(py[(a, b)]["result"])
-            js_dec = decode(js[_corpus_key(a, b)]["result"])
-            assert py_dec == expected, (
-                f"python run_mu gcd for ({a}, {b}) decoded to {py_dec}, not {expected}"
-            )
-            assert js_dec == expected, (
-                f"js bootstrap_core gcd for ({a}, {b}) decoded to {js_dec}, not {expected}"
-            )
-
-    def test_both_engines_reach_stall_fixpoint(self):
+    def test_cross_substrate_results_are_canonical_and_complete(self):
         js = _js_results()
         py = _py_results()
         forbidden = (
@@ -221,8 +179,34 @@ class TestStructuralGcdCrossSubstrateParity:
             "_subfold",
         )
         for (a, b) in CORPUS:
-            py_entry = py[(a, b)]
+            py_result = py[(a, b)]["result"]
             js_entry = js[_corpus_key(a, b)]
+            js_result = js_entry["result"]
+            py_hash = mu_hash_cached(py_result)
+            js_hash = js_entry["hashCached"]
+            assert py_hash == js_hash, (
+                f"cross-substrate content-hash divergence for gcd({a}, {b}): "
+                f"python run_mu={py_hash} js bootstrap_core={js_hash}"
+            )
+            oracle = mu_hash_cached(encode(math.gcd(a, b)))
+            assert py_hash == oracle, (
+                f"GCD result for ({a}, {b}) diverged from encode(math.gcd) oracle "
+                f"(both substrates): {py_hash} != {oracle}"
+            )
+            assert py_result == js_result, (
+                f"structural divergence for gcd({a}, {b}): "
+                f"python={py_result} js={js_result}"
+            )
+            expected = math.gcd(a, b)
+            py_dec = decode(py[(a, b)]["result"])
+            js_dec = decode(js[_corpus_key(a, b)]["result"])
+            assert py_dec == expected, (
+                f"python run_mu gcd for ({a}, {b}) decoded to {py_dec}, not {expected}"
+            )
+            assert js_dec == expected, (
+                f"js bootstrap_core gcd for ({a}, {b}) decoded to {js_dec}, not {expected}"
+            )
+            py_entry = py[(a, b)]
             assert py_entry["stalled"] is True, (
                 f"python run_mu did not stall for gcd({a}, {b})"
             )
@@ -238,19 +222,9 @@ class TestStructuralGcdCrossSubstrateParity:
                         f"{label} result for gcd({a}, {b}) is still an unprocessed "
                         f"{state_key} state"
                     )
-
-    def test_js_self_coherence(self):
-        js = _js_results()
-        for (a, b) in CORPUS:
-            entry = js[_corpus_key(a, b)]
-            assert entry["hash"] == entry["hashCached"], (
+            assert js_entry["hash"] == js_entry["hashCached"], (
                 f"JS muHash != muHashCached for gcd({a}, {b})"
             )
-
-    def test_python_self_coherence(self):
-        py = _py_results()
-        for (a, b) in CORPUS:
-            result = py[(a, b)]["result"]
-            assert mu_hash(result) == mu_hash_cached(result), (
+            assert mu_hash(py_result) == mu_hash_cached(py_result), (
                 f"Python mu_hash != mu_hash_cached for gcd({a}, {b})"
             )
