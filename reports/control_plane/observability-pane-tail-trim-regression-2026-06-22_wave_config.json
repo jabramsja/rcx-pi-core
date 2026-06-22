@@ -1,0 +1,62 @@
+{
+  "wave_id": "observability-pane-tail-trim-regression-2026-06-22",
+  "title": "Observability Pane Tail Trim Regression 2026-06-22",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Repair the bot-remediation trim regression on the existing PR branch for PR #1148 so constrained tmux panes keep the active recovery problem detail while preserving useful tail context.\nLane: control-surface observability pipeline-hardening\nAuthorization: authorized control-surface L4_ENABLER; standing pipeline-bug-fix authorization for bounded PR #1148 same-branch repair.",
+  "date": "2026-06-22",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/observability-pane-tail-trim-regression-2026-06-22.json",
+  "indicator_collection_command": "python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id observability-pane-tail-trim-regression-2026-06-22 --output reports/l4_wave_indicators/observability-pane-tail-trim-regression-2026-06-22.json",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_processes_uses_local_dashboard_code_for_active_worktree_data --tb=short && PYTHONHASHSEED=0 python3 -m pytest -q tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_processes_shows_last_pager_wake_line --tb=short && PYTHONHASHSEED=0 python3 -m pytest -q tests/tools/test_recovery_gate.py --tb=short && ./tools/checks/check_docs_consistency.sh && python3 mu/tools/checks/check_host_semantics_ratchet.py --json && python3 tools/checks/check_host_authority_inventory_ratchet.py",
+  "evidence_delta": "(1) PR #1148 reached a green first commit, then bot remediation introduced a constrained-pane trim regression before push. (2) The focused pre-push test now drops both the active recovery problem line and agent_review_crash signal when the recovery block competes with reserved tail rows. (3) This wave repairs only the observability pane trim contract so the already-open PR branch can pass pre-push without weakening recovery visibility.",
+  "progress_proof_before": "The local bot-remediation commit on the PR #1148 branch fails pre-push-fast because tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_processes_uses_local_dashboard_code_for_active_worktree_data does not see the active recovery problem detail or agent_review_crash signal.",
+  "progress_proof_after": "The existing PR branch preserves active recovery problem detail in constrained tmux panes, the last-pager tail contract remains visible, and the observability pre-push gate no longer blocks the Nightly GCD repair lane.",
+  "structural_artifact_ref": "tools/observability/_pane_processes.sh; mu/tools/observability/_pane_processes.sh; tests/tools/test_recovery_gate.py",
+  "founder_override": "observability-pane-tail-trim-regression-2026-06-22",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "scope_summary": "Control-surface observability repair only. Land on the existing PR branch for PR #1148 and repair the constrained-pane tail-trim regression without touching runtime, substrate, seed, Stage 4, matcher, StructuralNumbers, or Nightly GCD files.",
+  "scope_items": [
+    "tools/observability/_pane_processes.sh (MODIFY IF NEEDED) -- root observability pane trim contract.",
+    "mu/tools/observability/_pane_processes.sh (MODIFY IF NEEDED) -- mirrored Mu observability pane trim contract.",
+    "tests/tools/test_recovery_gate.py (MODIFY IF NEEDED) -- focused regression coverage for recovery problem detail plus last-pager/tail visibility.",
+    "reports/l4_wave_indicators/observability-pane-tail-trim-regression-2026-06-22.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Reproduce the current focused pre-push failure on the existing PR branch and capture the missing recovery problem detail.",
+    "Adjust the pane trim budgeting so a constrained pane with RECOVERY keeps an active Tier 3 signal and either the explicit problem line or agent_review_crash signal.",
+    "Preserve a useful post-recovery tail or last-pager signal when there is enough pane budget, instead of hiding the tail entirely.",
+    "Keep tools and mu/tools observability copies synchronized when both paths are in scope.",
+    "Run the configured evidence command, collect the indicator artifact, and leave commit, push, and PR update to the commit executor."
+  ],
+  "constraints": [
+    "Use launch_wave.py, executor_dispatch, Phase A, Phase B, bridge review, and commit executor. Do not hand-author receipts, handoffs, commits, pushes, or PR updates.",
+    "This is an authorized same-branch control-surface repair for the existing PR branch; do not create a separate runtime or Nightly GCD repair branch from this wave.",
+    "No runtime, substrate, seed, registry, matcher, StructuralNumbers, Stage 4, or Nightly GCD test files may change.",
+    "Do not bypass pre-push-fast. The root observability regression must be fixed so the hook passes normally.",
+    "Do not weaken the regression to only check command success; it must still prove active-worktree resolution, active recovery visibility, and problem-detail visibility."
+  ],
+  "stop_conditions": [
+    "Halt if recovery problem detail cannot fit without removing the active recovery signal.",
+    "Halt if the fix requires touching runtime, substrate, Stage 4, matcher, StructuralNumbers, or Nightly GCD repair files.",
+    "Halt if tools and mu/tools observability paths would diverge without a documented local convention.",
+    "Do not commit without pipeline-produced handoff, receipt, focused evidence, docs consistency, and ratchet checks."
+  ],
+  "acceptance_criteria": [
+    "The focused failing pre-push test passes and still asserts Watching: jabramsja/active-wave.",
+    "A constrained pane with active Tier 3 recovery preserves a recovery signal and the problem detail or agent_review_crash signal.",
+    "A constrained pane still preserves useful tail context or last-pager visibility when enough rows are available.",
+    "tools/observability/_pane_processes.sh and mu/tools/observability/_pane_processes.sh remain synchronized for the trim contract.",
+    "No non-observability runtime or structuralization files appear in the diff.",
+    "The configured evidence command passes and the L4 indicator artifact is collected."
+  ],
+  "request_for_agent": "Implement the smallest observability trim repair through the pipeline on the existing PR branch for PR #1148. Reproduce the failed focused pre-push test, adjust recovery-aware pane trimming so active recovery and problem detail remain visible in constrained panes while preserving useful tail context when possible, keep root and Mu observability copies synchronized, run the configured evidence command, collect the indicator, and leave commit/push/PR update to the commit executor.",
+  "authorization_note": "Authorized control-surface L4_ENABLER same-PR repair on the existing PR branch for PR #1148 under standing pipeline-bug-fix authorization. Scope is limited to observability pane trim contract, focused tests, tracker, packet, and indicator surfaces.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Same-branch control-surface repair for PR #1148 constrained-pane recovery trim regression.",
+  "tracked_packet": "reports/control_plane/observability-pane-tail-trim-regression-2026-06-22_2026-06-22.md"
+}

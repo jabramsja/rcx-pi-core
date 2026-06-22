@@ -190,7 +190,7 @@ fit_output_to_pane() {
     recovery_tail_cap=$(( max_lines / 3 ))
     [ "$recovery_tail_cap" -lt 3 ] && recovery_tail_cap=3
     [ "$recovery_tail_keep" -gt "$recovery_tail_cap" ] && recovery_tail_keep="$recovery_tail_cap"
-    recovery_min_keep=3
+    recovery_min_keep=4
     max_effective_head=$(( max_lines - recovery_min_keep - recovery_tail_keep - 1 ))
     [ "$max_effective_head" -lt 0 ] && max_effective_head=0
     [ "$effective_head" -gt "$max_effective_head" ] && effective_head="$max_effective_head"

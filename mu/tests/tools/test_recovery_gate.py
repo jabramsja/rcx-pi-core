@@ -11280,6 +11280,36 @@ fi
             ),
             encoding="utf-8",
         )
+        pager_state = active / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
+        pager_state.parent.mkdir(parents=True, exist_ok=True)
+        pager_state.write_text(
+            json.dumps(
+                {
+                    "dispatcher": {
+                        "active": False,
+                        "pid": 0,
+                        "updated_at": "2026-06-22T19:10:00+00:00",
+                        "last_dispatch": {
+                            "event_id": "evt-active",
+                            "event_type": "recovery_state_changed",
+                            "wave_id": "wave-active",
+                            "task_id": "[PIPELINE-AGENT-PAGER]",
+                            "phase": "recovery",
+                            "state": "tier3_waiting_on_agent",
+                            "transition_key": "recovery-tier3",
+                            "summary": "Recovery moved to tier3_waiting_on_agent and woke dispatcher.",
+                            "target": "codex",
+                            "attempted_at": "2026-06-22T19:09:55+00:00",
+                            "completed_at": "2026-06-22T19:09:56+00:00",
+                            "acknowledged": True,
+                            "error": "",
+                        },
+                    }
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
         worktree_output = (
             f"worktree {quiet}\n"
@@ -11298,6 +11328,7 @@ fi
         env = os.environ | {
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "RCX_PANE_ONESHOT": "1",
+            "RCX_PANE_MAX_LINES": "24",
             "TERM": "xterm",
         }
 
@@ -11321,6 +11352,10 @@ fi
             "Problem: a review subprocess crashed" in clean_stdout
             or "agent_review_crash" in clean_stdout
         )
+        assert "Last pager wake:" in clean_stdout
+        assert "recovery_state_changed" in clean_stdout
+        assert "target codex" in clean_stdout
+        assert len(clean_stdout.splitlines()) <= 24
 
     def test_pane_processes_shows_last_pager_wake_line(self, tmp_path):
         repo_root = tmp_path / "repo"
