@@ -164,6 +164,7 @@ fit_output_to_pane() {
   local file="$1"
   local max_lines="$2"
   local total_lines head_keep tail_keep tmp recovery_line effective_head recovery_keep recovery_end
+  local recovery_tail_keep recovery_tail_cap recovery_min_keep max_effective_head tail_start
 
   total_lines=$(wc -l < "$file" 2>/dev/null | xargs)
   if ! [[ "$total_lines" =~ ^[0-9]+$ ]] || [ "$total_lines" -le "$max_lines" ]; then
@@ -185,14 +186,30 @@ fit_output_to_pane() {
     if [ "$recovery_line" -le "$head_keep" ]; then
       effective_head=$(( recovery_line - 1 ))
     fi
-    [ "$effective_head" -lt 8 ] && effective_head=8
-    recovery_keep=$(( max_lines - effective_head - 1 ))
-    if [ "$recovery_keep" -ge 4 ]; then
+    recovery_tail_keep="$tail_keep"
+    recovery_tail_cap=$(( max_lines / 3 ))
+    [ "$recovery_tail_cap" -lt 3 ] && recovery_tail_cap=3
+    [ "$recovery_tail_keep" -gt "$recovery_tail_cap" ] && recovery_tail_keep="$recovery_tail_cap"
+    recovery_min_keep=3
+    max_effective_head=$(( max_lines - recovery_min_keep - recovery_tail_keep - 1 ))
+    [ "$max_effective_head" -lt 0 ] && max_effective_head=0
+    [ "$effective_head" -gt "$max_effective_head" ] && effective_head="$max_effective_head"
+    if [ "$effective_head" -ge "$recovery_line" ]; then
+      effective_head=$(( recovery_line - 1 ))
+    fi
+    [ "$effective_head" -lt 0 ] && effective_head=0
+    recovery_keep=$(( max_lines - effective_head - recovery_tail_keep - 1 ))
+    if [ "$recovery_keep" -ge "$recovery_min_keep" ]; then
       recovery_end=$(( recovery_line + recovery_keep - 1 ))
+      tail_start=$(( total_lines - recovery_tail_keep + 1 ))
+      [ "$tail_start" -lt 1 ] && tail_start=1
       {
         head -n "$effective_head" "$file"
         echo -e "  ${DIM}More detail is hidden to keep this pane readable.${RESET}"
         sed -n "${recovery_line},${recovery_end}p" "$file"
+        if [ "$tail_start" -gt "$recovery_end" ]; then
+          tail -n "$recovery_tail_keep" "$file"
+        fi
       } > "$tmp"
       mv "$tmp" "$file"
       return 0
