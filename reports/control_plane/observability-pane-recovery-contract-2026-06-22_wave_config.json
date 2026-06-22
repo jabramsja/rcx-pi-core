@@ -1,0 +1,61 @@
+{
+  "wave_id": "observability-pane-recovery-contract-2026-06-22",
+  "title": "Observability Pane Recovery Contract 2026-06-22",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Repair the pre-push failure where the tmux pane recovery-status test expects the historical active-recovery headline while the current pane renderer emits the newer compact plain-English recovery wording. Keep the fix scoped to observability/test contract alignment so pending Nightly and Stage 4 runtime work do not absorb tooling drift.",
+  "date": "2026-06-22",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/observability-pane-recovery-contract-2026-06-22.json",
+  "indicator_collection_command": "python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id observability-pane-recovery-contract-2026-06-22 --output reports/l4_wave_indicators/observability-pane-recovery-contract-2026-06-22.json",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_processes_uses_local_dashboard_code_for_active_worktree_data --tb=short && PYTHONHASHSEED=0 python3 -m pytest -q tests/tools/test_recovery_gate.py --tb=short && ./tools/checks/check_docs_consistency.sh",
+  "evidence_delta": "(1) Nightly GCD commit executor reached local commit b365d2d5 but pre-push-fast failed because TestObservabilityWorktreeResolution expected the old active-recovery headline. (2) Current pane output still reports the active recovery state in plain English, but the test is pinned to older presentation wording. (3) This wave aligns the observability contract without changing runtime, substrate, seed, matcher, or StructuralNumbers semantics.",
+  "progress_proof_before": "The Nightly GCD repair could not push after local commit because pre-push-fast failed in tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_processes_uses_local_dashboard_code_for_active_worktree_data.",
+  "progress_proof_after": "The pane renderer and recovery worktree-resolution test agree on the active Tier 3 recovery contract, so pre-push-fast is no longer blocked by dashboard wording drift.",
+  "structural_artifact_ref": "tools/observability/_pane_processes.sh; mu/tools/observability/_pane_processes.sh; tests/tools/test_recovery_gate.py",
+  "founder_override": "observability-pane-recovery-contract-2026-06-22",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "scope_summary": "Pipeline-hardening observability/test contract repair only. Align the tmux pane active-recovery output and the recovery worktree-resolution regression so the pre-push gate reflects the intended founder-facing dashboard behavior.",
+  "scope_items": [
+    "tools/observability/_pane_processes.sh (MODIFY IF NEEDED) -- active recovery display contract used by the root tools path.",
+    "mu/tools/observability/_pane_processes.sh (MODIFY IF NEEDED) -- mirrored active recovery display contract used by the mu tools path.",
+    "tests/tools/test_recovery_gate.py (MODIFY IF NEEDED) -- update the regression to assert the intended active recovery wording and failure detail without accepting loss of worktree resolution.",
+    "reports/l4_wave_indicators/observability-pane-recovery-contract-2026-06-22.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Reproduce the failing pre-push assertion from the Nightly lane using the focused test.",
+    "Inspect the current pane renderer output for tier3_waiting_on_agent recovery and decide whether the renderer should restore the active Tier headline, the test should accept the compact wording, or both should be tightened.",
+    "Keep the Watching: active-worktree assertion intact so the live-root selection contract remains protected.",
+    "Keep the active recovery failure detail visible enough for operators; do not hide the failure class entirely behind the compact summary.",
+    "Run the configured evidence command, collect the indicator artifact, and leave commit/push to the pipeline."
+  ],
+  "constraints": [
+    "Use launch_wave.py, executor_dispatch, Phase A, Phase B, bridge review, and commit executor. Do not hand-author receipts or manually commit this wave.",
+    "No runtime, substrate, seed, registry, matcher, StructuralNumbers, Stage 4 implementation, or Nightly GCD test files may change.",
+    "Do not bypass pre-push-fast. The root cause must be fixed so the hook passes normally.",
+    "Keep tools/ and mu/tools/ observability copies synchronized if both paths exist and the contract applies to both.",
+    "Do not weaken the test to only check command success; it must still prove active-worktree resolution and active recovery visibility."
+  ],
+  "stop_conditions": [
+    "Halt if the only way to pass is to remove active recovery visibility from the pane.",
+    "Halt if the change requires touching runtime, substrate, Stage 4, or GCD repair files.",
+    "Halt if tools/ and mu/tools/ observability paths would diverge without a documented local convention.",
+    "Do not commit without pipeline-produced handoff, receipt, focused test evidence, and docs consistency."
+  ],
+  "acceptance_criteria": [
+    "The focused failing test passes and still asserts Watching: jabramsja/active-wave.",
+    "The regression asserts an active Tier 3 recovery signal and the agent_review_crash problem detail, either through restored headline wording or the accepted compact wording.",
+    "tools/observability/_pane_processes.sh and mu/tools/observability/_pane_processes.sh remain synchronized for the active recovery rendering logic.",
+    "No non-observability runtime or structuralization files appear in the diff.",
+    "The configured evidence command passes and the L4 indicator artifact is collected."
+  ],
+  "request_for_agent": "Implement this small observability/test contract repair through the pipeline. Reproduce the exact failing pre-push test, align the pane active-recovery output and regression without weakening active-worktree or recovery visibility guarantees, keep tools and mu/tools observability copies synchronized, run the configured evidence command, collect the indicator, and leave commit handling to the commit executor.",
+  "authorization_note": "Opened after the Nightly GCD repair reached local commit but pre-push-fast failed on the pane recovery wording regression. This is a separate pipeline-hardening lane so the GCD repair is not manually amended or pushed with a hook bypass.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Pipeline-hardening repair for tmux pane active recovery wording/test contract after Nightly pre-push failure.",
+  "tracked_packet": "reports/control_plane/observability-pane-recovery-contract-2026-06-22_2026-06-22.md"
+}
