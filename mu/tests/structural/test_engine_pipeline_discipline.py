@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,9 @@ from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
 
 _REPO = Path(__file__).resolve().parents[3]
 _STEP_MU_PATH = _REPO / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "engine_pipeline.py"
+_PY_STEP_MU_PATH = _REPO / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+_JS_KERNEL_PATH = _REPO / "mu" / "host" / "js" / "engine" / "kernel.js"
+_JS_PIPELINE_PATH = _REPO / "mu" / "host" / "js" / "engine" / "pipeline.js"
 
 
 def _read_all_js_source() -> str:
@@ -65,6 +69,25 @@ def _extract_js_function_body(source: str, function_name: str) -> str:
             if depth == 0:
                 return source[opening_brace + 1:index]
     raise AssertionError(f"Could not find {function_name} closing brace")
+
+
+def _numeric_json_leaf_paths(value, path: str = "$") -> list[str]:
+    """Return paths to JSON int/float leaves, excluding bool."""
+    if isinstance(value, bool):
+        return []
+    if isinstance(value, (int, float)):
+        return [path]
+    if isinstance(value, list):
+        paths: list[str] = []
+        for index, item in enumerate(value):
+            paths.extend(_numeric_json_leaf_paths(item, f"{path}[{index}]"))
+        return paths
+    if isinstance(value, dict):
+        paths: list[str] = []
+        for key, item in value.items():
+            paths.extend(_numeric_json_leaf_paths(item, f"{path}.{key}"))
+        return paths
+    return []
 
 # ── Known callsite inventory ─────────────────────────────────────────────
 
@@ -147,6 +170,515 @@ class TestPipelineDefaults:
         )
 
 
+# ── Stage 4 StructuralNumbers cutover discipline ─────────────────────────
+
+
+class TestStage4StructuralNumbersCutover:
+    """Matcher-facing numeric facts must be structural numerals."""
+
+    def test_migrated_seed_files_have_no_host_numeric_leaves(self):
+        seed_paths = [
+            _REPO / "mu" / "closures" / "fix.v1.json",
+            _REPO / "mu" / "programs" / "rcx_engine.v1.json",
+        ]
+        offenders: dict[str, list[str]] = {}
+        for seed_path in seed_paths:
+            paths = _numeric_json_leaf_paths(json.loads(seed_path.read_text()))
+            if paths:
+                offenders[str(seed_path.relative_to(_REPO))] = paths
+        assert not offenders, (
+            "Stage 4 seed migration must not leave host int/float JSON leaves: "
+            f"{offenders}"
+        )
+
+    @pytest.mark.slow
+    def test_public_engine_path_rejects_host_numeric_domain_input(self):
+        from rcx_pi.selfhost.step_mu import RcxEngineError  # ANTICHEAT_OK: public error type assertion
+
+        projs = [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}]
+        with pytest.raises(RcxEngineError, match="stalled"):
+            run_engine_pipeline(projs, 7, max_steps=3, use_boot1_recursive=False)
+
+    @pytest.mark.slow
+    def test_public_engine_path_accepts_structural_numeral_input(self):
+        one = {"_num": {"xH": None}}
+        projs = [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}]
+        result = run_engine_pipeline(projs, one, max_steps=3, use_boot1_recursive=False)
+        assert result["value"] == one
+
+
+class TestStage4ReentryMaxStepsStructuralDiscipline:
+    """Re-entry max_steps must stay exact StructuralNumbers Mu data."""
+
+    @staticmethod
+    def _structural_num(n: int) -> dict:
+        if n < 0:
+            raise ValueError("StructuralNumbers helper requires non-negative integer")
+        if n == 0:
+            return {"_num": None}
+        lower_bits = []
+        while n > 1:
+            lower_bits.append(n & 1)
+            n >>= 1
+        node = {"xH": None}
+        for bit in reversed(lower_bits):
+            node = {"xI": node} if bit else {"xO": node}
+        return {"_num": node}
+
+    def test_python_run_trace_over_cap_budget_rejects_before_structural_reduction(self, monkeypatch):
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline
+        from rcx_pi.selfhost.engine_pipeline import _service_boundary_effect  # ANTICHEAT_OK: boundary fast-reject regression path
+        from rcx_pi.selfhost.step_mu import RcxEngineError  # ANTICHEAT_OK: typed fail-closed assertion
+
+        def reject_structural_step(*args, **kwargs):
+            raise AssertionError("over-cap run_trace budget used structural reduction")
+
+        monkeypatch.setattr(engine_pipeline, "_step_trusted", reject_structural_step)
+        request = {
+            "operation": "run_trace",
+            "input": {
+                "projections": [
+                    {"pattern": "A", "body": "B"},
+                    {"pattern": "B", "body": "A"},
+                ],
+                "value": "A",
+                "max_steps": self._structural_num(10001),
+            },
+            "context": {},
+            "inject_key": "trace",
+        }
+        with pytest.raises(RcxEngineError) as exc:
+            _service_boundary_effect(
+                request,
+                max_algorithm_iterations=10,
+                emit_fn=lambda *args, **kwargs: None,
+                step=0,
+                state={},
+            )
+        assert exc.value.error_code == "api.bad_request"
+        assert "10000" in str(exc.value)
+
+    def test_python_public_max_steps_requires_add_projection_table(self, monkeypatch):
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline
+        from rcx_pi.selfhost.step_mu import RcxEngineError  # ANTICHEAT_OK: typed fail-closed assertion
+
+        monkeypatch.setattr(engine_pipeline, "_STRUCTURAL_NUMBER_ADD_PROJECTIONS", ())
+        with pytest.raises(RcxEngineError, match="ADD produced malformed numeral") as exc:
+            run_engine_pipeline(
+                [],
+                None,
+                max_steps=1,
+                max_engine_iterations=2,
+                max_algorithm_iterations=1,
+                use_boot1_recursive=False,
+            )
+        assert exc.value.error_code == "execution.invalid_result"
+
+    def test_js_run_trace_over_cap_budget_rejects_without_projection_tables(self):
+        import subprocess
+
+        script = """
+        const kernel = require('./mu/host/js/engine/kernel');
+        kernel.STRUCTURAL_NUMBER_ADD_PROJECTIONS = Object.freeze([]);
+        kernel.STRUCTURAL_NUMBER_COMPARE_PROJECTIONS = Object.freeze([]);
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        function structuralNum(n) {
+          if (n === 0) return {_num: null};
+          const lowerBits = [];
+          while (n > 1) {
+            lowerBits.push(n & 1);
+            n = Math.floor(n / 2);
+          }
+          let node = {xH: null};
+          for (let i = lowerBits.length - 1; i >= 0; i--) {
+            node = lowerBits[i] ? {xI: node} : {xO: node};
+          }
+          return {_num: node};
+        }
+        const request = {
+          operation: 'run_trace',
+          input: {
+            projections: [
+              {pattern: 'A', body: 'B'},
+              {pattern: 'B', body: 'A'}
+            ],
+            value: 'A',
+            max_steps: structuralNum(10001)
+          },
+          context: {},
+          inject_key: 'trace'
+        };
+        try {
+          pipeline.serviceBoundaryEffect([], new Map(), request, 1, () => {}, 0, {}, null);
+          console.log(JSON.stringify({ok: true}));
+        } catch (e) {
+          console.log(JSON.stringify({
+            ok: false,
+            error_code: e.error_code || null,
+            message: e.message
+          }));
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["ok"] is False
+        assert payload["error_code"] == "api.bad_request"
+        assert "10000" in payload["message"]
+
+    def test_js_public_max_steps_requires_add_projection_table(self):
+        import subprocess
+
+        script = """
+        const kernel = require('./mu/host/js/engine/kernel');
+        kernel.STRUCTURAL_NUMBER_ADD_PROJECTIONS = Object.freeze([]);
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        try {
+          pipeline.runEnginePipeline([], new Map(), [], [], null, {
+            maxSteps: 1,
+            maxEngineIterations: 2,
+            maxAlgorithmIterations: 1
+          });
+          console.log(JSON.stringify({ok: true}));
+        } catch (e) {
+          console.log(JSON.stringify({
+            ok: false,
+            error_code: e.error_code || null,
+            message: e.message
+          }));
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["ok"] is False
+        assert payload["error_code"] == "execution.invalid_result"
+        assert "ADD produced malformed numeral" in payload["message"]
+
+    def test_runtime_counter_sources_do_not_reintroduce_host_bit_codecs(self):
+        forbidden = (
+            "lower_bits",
+            "p & 1",
+            "p >>=",
+            "trace_max_steps +=",
+            "weight <<",
+            "weight *=",
+            "BigInt(",
+        )
+        offenders: dict[str, list[str]] = {}
+        for path in (_PY_STEP_MU_PATH, _STEP_MU_PATH, _JS_KERNEL_PATH, _JS_PIPELINE_PATH):
+            text = path.read_text()
+            hits = [needle for needle in forbidden if needle in text]
+            if hits:
+                offenders[str(path.relative_to(_REPO))] = hits
+        assert not offenders, (
+            "Stage 4 runtime counters must use StructuralNumbers compare/add "
+            f"projection helpers, not host bit codecs: {offenders}"
+        )
+
+    def test_python_js_structural_number_projection_tables_are_equivalent(self):
+        import subprocess
+        from rcx_pi.selfhost.eval_seed import step
+        from rcx_pi.selfhost.step_mu import (
+            STRUCTURAL_NUMBER_ADD_PROJECTIONS,
+            STRUCTURAL_NUMBER_COMPARE_PROJECTIONS,
+            SN_ONE,
+            SN_PROJECTION_STEP_LIMIT,
+        )
+
+        def settle(projections, initial):
+            current = initial
+            from rcx_pi.selfhost.mu_type import mu_hash_control_cached  # ANTICHEAT_OK: projection-settle parity helper
+            current_hash = mu_hash_control_cached(current, "test.structural_number.initial")
+            for _ in range(SN_PROJECTION_STEP_LIMIT):
+                result = step(projections, current)
+                result_hash = mu_hash_control_cached(result, "test.structural_number.stall")
+                if result_hash == current_hash:
+                    return result
+                current = result
+                current_hash = result_hash
+            raise AssertionError("StructuralNumbers projection did not settle")
+
+        py_two = settle(
+            STRUCTURAL_NUMBER_ADD_PROJECTIONS,
+            {"_add": {"a": SN_ONE, "b": SN_ONE}},
+        )
+        assert py_two == {"_num": {"xO": {"xH": None}}}
+        py_ord = settle(
+            STRUCTURAL_NUMBER_COMPARE_PROJECTIONS,
+            {"_cmp": {"a": SN_ONE, "b": py_two}},
+        )
+        assert py_ord == {"_ord": {"lt": None}}
+
+        script = """
+        const kernel = require('./mu/host/js/engine/kernel');
+        const { _stepTrusted } = require('./mu/host/js/core/bootstrap_core');
+        const { muHashControlCached } = require('./mu/host/js/core/types');
+        const muContainers = require('./mu/host/js/core/container_factory');
+        function settle(projections, initial, context) {
+          let current = initial;
+          let currentHash = muHashControlCached(current, `${context}.initial`);
+          for (let guard = 0; guard < kernel.SN_PROJECTION_STEP_LIMIT; guard++) {
+            const result = _stepTrusted(projections, current);
+            const resultHash = muHashControlCached(result, `${context}.stall`);
+            if (resultHash === currentHash) return result;
+            current = result;
+            currentHash = resultHash;
+          }
+          throw new Error(`${context}: did not settle`);
+        }
+        const two = settle(
+          kernel.STRUCTURAL_NUMBER_ADD_PROJECTIONS,
+          muContainers.record([['_add', muContainers.record([['a', kernel.SN_ONE], ['b', kernel.SN_ONE]])]]),
+          'test.add'
+        );
+        const ord = settle(
+          kernel.STRUCTURAL_NUMBER_COMPARE_PROJECTIONS,
+          muContainers.record([['_cmp', muContainers.record([['a', kernel.SN_ONE], ['b', two]])]]),
+          'test.compare'
+        );
+        console.log(JSON.stringify({two, ord}));
+        """
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload == {"two": py_two, "ord": py_ord}
+
+    def test_python_reentry_rejects_dirty_structural_max_steps_wrapper(self):
+        from rcx_pi.selfhost.engine_pipeline import _validate_reentry_payload  # ANTICHEAT_OK: exported validator parity regression
+        from rcx_pi.selfhost.step_mu import RcxEngineError  # ANTICHEAT_OK: typed fail-closed assertion
+
+        dirty_payload = {
+            "projections": [],
+            "input": None,
+            "max_steps": {"_num": None, "extra": True},
+        }
+        with pytest.raises(RcxEngineError, match="StructuralNumbers numeral") as exc:
+            _validate_reentry_payload(dirty_payload, "probe")
+        assert exc.value.error_code == "input.invalid_type"
+
+    @pytest.mark.parametrize("digit", ["xO", "xI"])
+    def test_python_reentry_rejects_malformed_positive_structural_max_steps_tail(self, digit):
+        from rcx_pi.selfhost.engine_pipeline import _validate_reentry_payload  # ANTICHEAT_OK: exported validator parity regression
+        from rcx_pi.selfhost.step_mu import RcxEngineError  # ANTICHEAT_OK: typed fail-closed assertion
+
+        dirty_payload = {
+            "projections": [],
+            "input": None,
+            "max_steps": {"_num": {digit: None}},
+        }
+        with pytest.raises(RcxEngineError, match="malformed StructuralNumbers numeral") as exc:
+            _validate_reentry_payload(dirty_payload, "probe")
+        assert exc.value.error_code == "input.invalid_type"
+
+    def test_js_reentry_rejects_dirty_structural_max_steps_wrapper(self):
+        import subprocess
+
+        script = """
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        try {
+          pipeline.validateReentryPayload(
+            {projections: [], input: null, max_steps: {_num: null, extra: true}},
+            'probe'
+          );
+          console.log(JSON.stringify({ok: true}));
+        } catch (e) {
+          console.log(JSON.stringify({
+            ok: false,
+            error_code: e.error_code || null,
+            message: e.message
+          }));
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["ok"] is False
+        assert payload["error_code"] == "input.invalid_type"
+        assert "StructuralNumbers numeral" in payload["message"]
+
+    @pytest.mark.parametrize("digit", ["xO", "xI"])
+    def test_js_reentry_rejects_malformed_positive_structural_max_steps_tail(self, digit):
+        import subprocess
+
+        script = f"""
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        try {{
+          pipeline.validateReentryPayload(
+            {{projections: [], input: null, max_steps: {{_num: {{{digit}: null}}}}}},
+            'probe'
+          );
+          console.log(JSON.stringify({{ok: true}}));
+        }} catch (e) {{
+          console.log(JSON.stringify({{
+            ok: false,
+            error_code: e.error_code || null,
+            message: e.message
+          }}));
+        }}
+        """
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["ok"] is False
+        assert payload["error_code"] == "input.invalid_type"
+        assert "malformed StructuralNumbers numeral" in payload["message"]
+
+    @pytest.mark.parametrize("digit", ["xO", "xI"])
+    def test_python_run_trace_rejects_malformed_positive_structural_max_steps_tail(self, digit):
+        from rcx_pi.selfhost.engine_pipeline import _service_boundary_effect  # ANTICHEAT_OK: boundary-handler regression path
+        from rcx_pi.selfhost.step_mu import RcxEngineError  # ANTICHEAT_OK: typed fail-closed assertion
+
+        request = {
+            "operation": "run_trace",
+            "input": {
+                "projections": [],
+                "value": None,
+                "max_steps": {"_num": {digit: None}},
+            },
+            "context": {},
+            "inject_key": "trace",
+        }
+        with pytest.raises(RcxEngineError, match="malformed StructuralNumbers numeral") as exc:
+            _service_boundary_effect(
+                request,
+                max_algorithm_iterations=1,
+                emit_fn=lambda *args, **kwargs: None,
+                step=0,
+                state={},
+            )
+        assert exc.value.error_code == "api.bad_request"
+
+    @pytest.mark.parametrize("digit", ["xO", "xI"])
+    def test_js_run_trace_rejects_malformed_positive_structural_max_steps_tail(self, digit):
+        import subprocess
+
+        script = f"""
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        const request = {{
+          operation: 'run_trace',
+          input: {{projections: [], value: null, max_steps: {{_num: {{{digit}: null}}}}}},
+          context: {{}},
+          inject_key: 'trace'
+        }};
+        try {{
+          pipeline.serviceBoundaryEffect([], new Map(), request, 1, () => {{}}, 0, {{}}, null);
+          console.log(JSON.stringify({{ok: true}}));
+        }} catch (e) {{
+          console.log(JSON.stringify({{
+            ok: false,
+            error_code: e.error_code || null,
+            message: e.message
+          }}));
+        }}
+        """
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["ok"] is False
+        assert payload["error_code"] == "api.bad_request"
+        assert "malformed StructuralNumbers numeral" in payload["message"]
+
+    def test_python_run_trace_rejects_cyclic_structural_max_steps(self):
+        from rcx_pi.selfhost.engine_pipeline import _service_boundary_effect  # ANTICHEAT_OK: boundary-handler regression path
+        from rcx_pi.selfhost.step_mu import RcxEngineError  # ANTICHEAT_OK: typed fail-closed assertion
+
+        node = {}
+        node["xO"] = node
+        request = {
+            "operation": "run_trace",
+            "input": {
+                "projections": [],
+                "value": None,
+                "max_steps": {"_num": node},
+            },
+            "context": {},
+            "inject_key": "trace",
+        }
+        with pytest.raises(RcxEngineError, match="cyclic StructuralNumbers numeral") as exc:
+            _service_boundary_effect(
+                request,
+                max_algorithm_iterations=1,
+                emit_fn=lambda *args, **kwargs: None,
+                step=0,
+                state={},
+            )
+        assert exc.value.error_code == "api.bad_request"
+
+    def test_js_run_trace_rejects_cyclic_structural_max_steps(self):
+        import subprocess
+
+        script = """
+        const pipeline = require('./mu/host/js/engine/pipeline');
+        const node = {};
+        node.xO = node;
+        const request = {
+          operation: 'run_trace',
+          input: {projections: [], value: null, max_steps: {_num: node}},
+          context: {},
+          inject_key: 'trace'
+        };
+        try {
+          pipeline.serviceBoundaryEffect([], new Map(), request, 1, () => {}, 0, {}, null);
+          console.log(JSON.stringify({ok: true}));
+        } catch (e) {
+          console.log(JSON.stringify({
+            ok: false,
+            error_code: e.error_code || null,
+            message: e.message
+          }));
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["ok"] is False
+        assert payload["error_code"] == "api.bad_request"
+        assert "cyclic StructuralNumbers numeral" in payload["message"]
+
+
 # ── Observer event contract ──────────────────────────────────────────────
 
 OBSERVER_MANDATORY_FIELDS = {"event_name", "step", "state_hash", "error_code", "substrate", "timestamp"}
@@ -165,7 +697,7 @@ class TestObserverEventContract:
         ]
         run_engine_pipeline(
             projections=projections,
-            input_value=42,
+            input_value="payload",
             max_steps=3,
             observer=observer,
         )
@@ -204,7 +736,7 @@ class TestObserverEventContract:
         ]
         run_engine_pipeline(
             projections=projections,
-            input_value=[1, 2, 3],
+            input_value=["one", "two", "three"],
             max_steps=5,
             observer=observer,
         )
@@ -224,7 +756,7 @@ class TestObserverEventContract:
         ]
         run_engine_pipeline(
             projections=projections,
-            input_value={"a": 1},
+            input_value={"a": "one"},
             max_steps=3,
             observer=observer,
         )
@@ -445,7 +977,7 @@ class TestPipelineReturnContract:
     def test_return_is_dict(self):
         result = run_engine_pipeline(
             projections=[{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
-            input_value=42,
+            input_value="payload",
             max_steps=3,
             use_boot1_recursive=False,
         )
@@ -457,7 +989,7 @@ class TestPipelineReturnContract:
         engine_keys = _load_tc_key_sets()["tc.engine"]
         result = run_engine_pipeline(
             projections=[{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
-            input_value=42,
+            input_value="payload",
             max_steps=3,
             use_boot1_recursive=False,
         )
@@ -505,7 +1037,7 @@ class TestEngineWithRoutingValidation:
         with pytest.raises(TypeError, match="hemispheres must be dict"):
             run_engine_with_routing(
                 [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
-                42,
+                "payload",
                 hemispheres="not a dict",
             )
 
@@ -515,7 +1047,7 @@ class TestEngineWithRoutingValidation:
         with pytest.raises(ValueError, match="hemispheres shape mismatch"):
             run_engine_with_routing(
                 [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
-                42,
+                "payload",
                 hemispheres={"r_null": None},  # missing 4 keys
             )
 
@@ -525,7 +1057,7 @@ class TestEngineWithRoutingValidation:
         with pytest.raises(ValueError, match="hemispheres shape mismatch"):
             run_engine_with_routing(
                 [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
-                42,
+                "payload",
                 hemispheres={"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None, "extra": None},
             )
 
@@ -543,7 +1075,7 @@ class TestEngineWithRoutingReturnShape:
 
         result = run_engine_with_routing(
             [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
-            42,
+            "payload",
             max_steps=3,
         )
         assert set(result.keys()) == {"engine_result", "hemispheres"}, (
@@ -558,7 +1090,7 @@ class TestEngineWithRoutingReturnShape:
         engine_keys = _load_tc_key_sets()["tc.engine"]
         result = run_engine_with_routing(
             [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
-            42,
+            "payload",
             max_steps=3,
         )
         assert set(result["engine_result"].keys()) == engine_keys, (
@@ -575,7 +1107,7 @@ class TestEngineWithRoutingReturnShape:
         hemi_keys = _get_hemisphere_keys()
         result = run_engine_with_routing(
             [{"id": "t.id", "pattern": {"var": "x"}, "body": {"var": "x"}}],
-            42,
+            "payload",
             max_steps=3,
         )
         assert set(result["hemispheres"].keys()) == hemi_keys, (
@@ -829,7 +1361,7 @@ class TestBoot1ModeRoutingContract:
         observer: list = []
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
         run_engine_pipeline(
-            projs, {"test": 42},
+            projs, {"test": "payload"},
             max_steps=5, use_boot1_recursive=False, observer=observer,
         )
         assert len(observer) > 0, "No observer events emitted"
@@ -852,7 +1384,7 @@ class TestBoot1ModeRoutingContract:
         observer: list = []
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
         run_engine_pipeline(
-            projs, {"test": 42},
+            projs, {"test": "payload"},
             max_steps=5, use_boot1_recursive=True, observer=observer,
         )
         step_events = [e for e in observer if e["event_name"] == "step_boundary"]
@@ -878,27 +1410,27 @@ class TestBoot1TypeHardening:
     def test_pipeline_rejects_string_true(self):
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
-            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive="true")
+            run_engine_pipeline(projs, {"x": "one"}, max_steps=5, use_boot1_recursive="true")
 
     def test_pipeline_rejects_string_false(self):
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
-            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive="false")
+            run_engine_pipeline(projs, {"x": "one"}, max_steps=5, use_boot1_recursive="false")
 
     def test_pipeline_rejects_int_one(self):
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
-            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive=1)
+            run_engine_pipeline(projs, {"x": "one"}, max_steps=5, use_boot1_recursive=1)
 
     def test_pipeline_rejects_int_zero(self):
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
-            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive=0)
+            run_engine_pipeline(projs, {"x": "one"}, max_steps=5, use_boot1_recursive=0)
 
     def test_pipeline_rejects_none(self):
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
-            run_engine_pipeline(projs, {"x": 1}, max_steps=5, use_boot1_recursive=None)
+            run_engine_pipeline(projs, {"x": "one"}, max_steps=5, use_boot1_recursive=None)
 
     def test_routing_rejects_string(self):
         """run_engine_with_routing rejects non-bool use_boot1_recursive."""
@@ -906,14 +1438,14 @@ class TestBoot1TypeHardening:
 
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
-            run_engine_with_routing(projs, {"x": 1}, use_boot1_recursive="true")
+            run_engine_with_routing(projs, {"x": "one"}, use_boot1_recursive="true")
 
     def test_routing_rejects_int(self):
         from rcx_pi.selfhost.engine_pipeline import run_engine_with_routing
 
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(TypeError, match="use_boot1_recursive must be bool"):
-            run_engine_with_routing(projs, {"x": 1}, use_boot1_recursive=1)
+            run_engine_with_routing(projs, {"x": "one"}, use_boot1_recursive=1)
 
 
 # ── I1: Boundary Mu validation ──────────────────────────────────────────

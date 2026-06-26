@@ -10,6 +10,7 @@ This mirrors the kernel dispatch strategy for non-linear conflict detection.
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
@@ -19,7 +20,13 @@ from rcx_pi.selfhost.match_mu import _clear_match_bundle  # ANTICHEAT_OK: test-o
 from rcx_pi.selfhost.match_mu import _load_bridge_bundle  # ANTICHEAT_OK: test-only — gate test for bridge bundle loading
 from rcx_pi.selfhost.match_mu import _clear_bridge_bundle  # ANTICHEAT_OK: test-only — cache clear for bridge provenance test
 from rcx_pi.selfhost.match_mu import _validate_match_bridge_ordering  # ANTICHEAT_OK: test-only — ordering invariant negative control
-from rcx_pi.selfhost.eval_seed import NO_MATCH
+from rcx_pi.selfhost.eval_seed import NO_MATCH, _stage0_match  # ANTICHEAT_OK: direct trusted matcher regression
+from rcx_pi.selfhost.stage0_vm import stage0_vm_run
+
+
+ZERO = {"_num": None}
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
 
 
 class TestMatchVMStagedDispatchGate:
@@ -30,9 +37,13 @@ class TestMatchVMStagedDispatchGate:
     # ------------------------------------------------------------------
 
     def test_literal_match_returns_empty_bindings(self):
-        """Literal equality (no vars) returns empty bindings dict."""
-        result = match_mu(42, 42)
+        """StructuralNumbers literal equality returns empty bindings dict."""
+        result = match_mu(ONE, ONE)
         assert result == {}
+
+    def test_host_numeric_literal_fails_closed(self):
+        """Stage 4: host numeric leaves are outside the matcher domain."""
+        assert match_mu(42, 42) is NO_MATCH
 
     def test_string_literal_match(self):
         """String literal match returns empty bindings."""
@@ -53,30 +64,105 @@ class TestMatchVMStagedDispatchGate:
     # ------------------------------------------------------------------
 
     def test_single_variable_binding(self):
-        """Single var pattern binds value through bridge dispatch."""
-        result = match_mu({"var": "x"}, 42)
-        assert result == {"x": 42}
+        """Single var pattern binds structural value through bridge dispatch."""
+        result = match_mu({"var": "x"}, ONE)
+        assert result == {"x": ONE}
+
+    def test_single_variable_host_numeric_fails_closed(self):
+        """Stage 4: bridge dispatch must not bind host numeric leaves."""
+        assert match_mu({"var": "x"}, 42) is NO_MATCH
+
+    def test_python_stage0_match_cyclic_variable_input_fails_closed(self):
+        """Stage 4 numeric-domain scan must not hang on cyclic values."""
+        cyclic = {}
+        cyclic["self"] = cyclic
+        assert _stage0_match({"var": "x"}, cyclic) is NO_MATCH
+
+    def test_js_stage0_match_cyclic_variable_input_fails_closed(self):
+        """JS stage0Match mirrors the Python cyclic-value fail-closed path."""
+        script = """
+        const { stage0Match, NO_MATCH } = require('./mu/host/js/core/bootstrap_core');
+        const cyclic = {};
+        cyclic.self = cyclic;
+        const result = stage0Match({var: 'x'}, cyclic);
+        console.log(JSON.stringify({no_match: result === NO_MATCH}));
+        """
+        proc = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert json.loads(proc.stdout)["no_match"] is True
+
+    def test_python_compiled_match_vm_cyclic_capture_fails_closed(self):
+        """Compiled match_v2 VM capture must not hang before safe copy."""
+        cyclic = {}
+        cyclic["self"] = cyclic
+        inp = {
+            "mode": "match",
+            "pattern_focus": {"var": "x"},
+            "value_focus": cyclic,
+            "bindings": None,
+            "stack": None,
+            "_match_ctx": {"projection_id": "test"},
+        }
+        result = stage0_vm_run(_load_match_bundle(), inp, max_steps=1)
+        assert result["status"] == "complete"
+        assert result["metrics"]["total_steps"] == 0
+
+    def test_js_compiled_match_vm_cyclic_capture_fails_closed(self):
+        """JS compiled match_v2 VM capture mirrors Python fail-closed behavior."""
+        script = """
+        const { stage0VmRun } = require('./mu/host/js/core/stage0_vm');
+        const bundle = require('./mu/stage0/compiled/match_v2.compiled.v1.json');
+        const cyclic = {};
+        cyclic.self = cyclic;
+        const input = {
+          mode: 'match',
+          pattern_focus: {var: 'x'},
+          value_focus: cyclic,
+          bindings: null,
+          stack: null,
+          _match_ctx: {projection_id: 'test'}
+        };
+        const result = stage0VmRun(bundle, input, 1);
+        console.log(JSON.stringify({
+          status: result.status,
+          total_steps: result.metrics.total_steps
+        }));
+        """
+        proc = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr
+        payload = json.loads(proc.stdout)
+        assert payload == {"status": "complete", "total_steps": 0}
 
     def test_dict_with_variable_binding(self):
         """Dict pattern with var produces correct bindings."""
-        result = match_mu({"a": {"var": "x"}, "b": 2}, {"a": 1, "b": 2})
-        assert result == {"x": 1}
+        result = match_mu({"a": {"var": "x"}, "b": "two"}, {"a": ONE, "b": "two"})
+        assert result == {"x": ONE}
 
     def test_multiple_variable_bindings(self):
         """Multiple distinct vars bind correctly through bridge."""
         result = match_mu(
             {"x": {"var": "a"}, "y": {"var": "b"}},
-            {"x": 1, "y": 2},
+            {"x": ONE, "y": TWO},
         )
-        assert result == {"a": 1, "b": 2}
+        assert result == {"a": ONE, "b": TWO}
 
     def test_nested_dict_variable_binding(self):
         """Nested dict pattern binds correctly through staged dispatch."""
         result = match_mu(
             {"outer": {"inner": {"var": "v"}}},
-            {"outer": {"inner": 99}},
+            {"outer": {"inner": ONE}},
         )
-        assert result == {"v": 99}
+        assert result == {"v": ONE}
 
     # ------------------------------------------------------------------
     # 3. NO_MATCH — match.fail (pattern doesn't match value)
@@ -92,7 +178,7 @@ class TestMatchVMStagedDispatchGate:
 
     def test_structure_mismatch_returns_no_match(self):
         """Dict pattern vs scalar value produces NO_MATCH."""
-        assert match_mu({"a": 1}, 42) is NO_MATCH
+        assert match_mu({"a": ONE}, "not_a_dict") is NO_MATCH
 
     def test_bool_mismatch_returns_no_match(self):
         """Boolean mismatch produces NO_MATCH."""
@@ -107,7 +193,7 @@ class TestMatchVMStagedDispatchGate:
         """Same var, different values -> NO_MATCH via bridge conflict detection."""
         result = match_mu(
             {"a": {"var": "x"}, "b": {"var": "x"}},
-            {"a": 1, "b": 2},
+            {"a": ONE, "b": TWO},
         )
         assert result is NO_MATCH
 
@@ -115,7 +201,7 @@ class TestMatchVMStagedDispatchGate:
         """Nested non-linear conflict -> NO_MATCH via bridge.lookup.found_different."""
         result = match_mu(
             {"x": {"var": "v"}, "y": {"nested": {"var": "v"}}},
-            {"x": 1, "y": {"nested": 2}},
+            {"x": ONE, "y": {"nested": TWO}},
         )
         assert result is NO_MATCH
 
@@ -128,17 +214,17 @@ class TestMatchVMStagedDispatchGate:
         """Same var, same values -> success via bridge.lookup.found_same."""
         result = match_mu(
             {"a": {"var": "x"}, "b": {"var": "x"}},
-            {"a": 1, "b": 1},
+            {"a": ONE, "b": ONE},
         )
-        assert result == {"x": 1}
+        assert result == {"x": ONE}
 
     def test_nonlinear_agreement_complex_value(self):
         """Non-linear agreement with complex (dict) values succeeds."""
         result = match_mu(
             {"a": {"var": "x"}, "b": {"var": "x"}},
-            {"a": {"nested": 42}, "b": {"nested": 42}},
+            {"a": {"nested": ONE}, "b": {"nested": ONE}},
         )
-        assert result == {"x": {"nested": 42}}
+        assert result == {"x": {"nested": ONE}}
 
     # ------------------------------------------------------------------
     # 6. match.sibling coverage — list matching exercises sibling traversal
@@ -157,9 +243,9 @@ class TestMatchVMStagedDispatchGate:
         """Dict containing list value matches through sibling traversal."""
         result = match_mu(
             {"items": {"var": "xs"}},
-            {"items": [1, 2, 3]},
+            {"items": ["one", "two", "three"]},
         )
-        assert result == {"xs": [1, 2, 3]}
+        assert result == {"xs": ["one", "two", "three"]}
 
     # ------------------------------------------------------------------
     # 7. Bridge ordering negative control
@@ -297,4 +383,4 @@ class TestMatchVMStagedDispatchGate:
             side_effect=fake_error,
         ):
             with pytest.raises(Stage0VMError, match="Op limit exceeded"):
-                match_mu(42, 42)
+                match_mu(ONE, ONE)

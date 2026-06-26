@@ -35,6 +35,9 @@ from rcx_pi.subst_mu import (
 )
 from tests.helpers.projection_stepper import run_projections
 
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
+
 
 # =============================================================================
 # Test: Direct Projection Execution
@@ -244,7 +247,7 @@ class TestStructuralEquality:
     def test_mu_equal_for_results(self):
         """Use mu_equal for structural comparison."""
         pattern = {"var": "x"}
-        value = 42
+        value = ONE
 
         bindings1 = match_mu(pattern, value)
         bindings2 = match_mu(pattern, value)
@@ -255,7 +258,7 @@ class TestStructuralEquality:
     def test_result_validity_check(self):
         """All results must be valid Mu."""
         # Match produces Mu
-        bindings = match_mu({"var": "x"}, [1, 2, 3])
+        bindings = match_mu({"var": "x"}, ["one", "two", "three"])
         assert_mu(bindings, "match_mu bindings")
 
         # Subst produces Mu
@@ -477,7 +480,7 @@ class TestIntegrationGrounding:
             "pattern": {"a": {"var": "x"}, "b": {"var": "y"}},
             "body": {"result": {"first": {"var": "x"}, "second": {"var": "y"}}}
         }
-        value = {"a": 1, "b": 2}
+        value = {"a": ONE, "b": TWO}
 
         # Match
         bindings = match_mu(projection["pattern"], value)
@@ -488,7 +491,7 @@ class TestIntegrationGrounding:
         assert_mu(result, "subst result")
 
         # Verify result
-        assert result == {"result": {"first": 1, "second": 2}}
+        assert result == {"result": {"first": ONE, "second": TWO}}
 
     def test_parity_reference_is_mu(self):
         """Reference apply_projection also produces valid Mu."""
@@ -496,7 +499,7 @@ class TestIntegrationGrounding:
             "pattern": {"var": "x"},
             "body": {"wrapped": {"var": "x"}}
         }
-        value = [1, 2, 3]
+        value = ["one", "two", "three"]
 
         result = apply_projection(projection, value)
         assert_mu(result, "apply_projection result")

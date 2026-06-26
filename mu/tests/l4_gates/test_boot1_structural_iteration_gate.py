@@ -126,7 +126,7 @@ def python_mock_reentry_observer():
             return {"_run_engine": {
                 "projections": [],
                 "input": {"reentry_marker": True},
-                "max_steps": 10,
+                "max_steps": {"_num": {"xO": {"xI": {"xO": {"xH": None}}}}},
                 "frozen": None,
             }}
         return result

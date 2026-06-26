@@ -54,6 +54,19 @@ function trustMu(value) {
 """
 
 
+def _structural_num(n: int) -> dict:
+    if n == 0:
+        return {"_num": None}
+    lower_bits = []
+    while n > 1:
+        lower_bits.append(n & 1)
+        n >>= 1
+    node = {"xH": None}
+    for bit in reversed(lower_bits):
+        node = {"xI": node} if bit else {"xO": node}
+    return {"_num": node}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -451,7 +464,7 @@ class TestEnvelopeTypeValidation:
             "input": {
                 "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
                 "value": "hello",
-                "max_steps": 3,
+                "max_steps": _structural_num(3),
             },
             "context": {},
             "inject_key": "boundary_result",
@@ -488,7 +501,7 @@ class TestEnvelopeTypeValidation:
                     input: {{
                         projections: [{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }}, id: 'id.passthrough' }}],
                         value: 'hello',
-                        max_steps: 3,
+                        max_steps: {{ _num: {{ xI: {{ xH: null }} }} }},
                     }},
                     context: {{}},
                     inject_key: 'boundary_result',
@@ -1132,7 +1145,7 @@ class TestBoundaryPathEmission:
                 input: {{
                     projections: [{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }}, id: 'id.passthrough' }}],
                     value: 'hello',
-                    max_steps: 3,
+                    max_steps: {{ _num: {{ xI: {{ xH: null }} }} }},
                 }},
                 context: {{
                     emit_ontology_candidate: true,
@@ -1224,7 +1237,7 @@ class TestBoundaryPathEmission:
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.passthrough' }],
                     value: 'hello',
-                    max_steps: 3,
+                    max_steps: { _num: { xI: { xH: null } } },
                 },
                 context: {},
                 inject_key: 'boundary_result',
@@ -1284,7 +1297,7 @@ class TestEmissionEdgeCases:
                 "input": {
                     "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
                     "value": "hello",
-                    "max_steps": 3,
+                    "max_steps": _structural_num(3),
                 },
                 "context": {"emit_ontology_candidate": truthy_val},
                 "inject_key": "boundary_result",
@@ -1455,7 +1468,7 @@ class TestCrossSubstrateMalformedEvidence:
             "input": {
                 "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
                 "value": "hello",
-                "max_steps": 3,
+                "max_steps": _structural_num(3),
             },
             "context": {
                 "emit_ontology_candidate": True,
@@ -1490,7 +1503,7 @@ class TestCrossSubstrateMalformedEvidence:
                 input: {{
                     projections: [{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }}, id: 'id.passthrough' }}],
                     value: 'hello',
-                    max_steps: 3,
+                    max_steps: {{ _num: {{ xI: {{ xH: null }} }} }},
                 }},
                 context: {{
                     emit_ontology_candidate: true,
@@ -1744,7 +1757,7 @@ def _make_boundary_request(*, context_extra=None):
         "input": {
             "projections": [{"pattern": {"var": "x"}, "body": {"var": "x"}, "id": "id.passthrough"}],
             "value": "hello",
-            "max_steps": 3,
+            "max_steps": _structural_num(3),
         },
         "context": ctx,
         "inject_key": "boundary_result",
@@ -2060,7 +2073,7 @@ class TestEvidenceCollectorJS:
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
                     value: 'hello',
-                    max_steps: 3,
+                    max_steps: { _num: { xI: { xH: null } } },
                 },
                 context: { collect_ontology_candidate_evidence: true },
                 inject_key: 'boundary_result',
@@ -2091,7 +2104,7 @@ class TestEvidenceCollectorJS:
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
                     value: 'hello',
-                    max_steps: 3,
+                    max_steps: { _num: { xI: { xH: null } } },
                 },
                 context: { collect_ontology_candidate_evidence: 1 },
                 inject_key: 'boundary_result',
@@ -2138,7 +2151,7 @@ class TestEvidenceCollectorJS:
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
                     value: 'hello',
-                    max_steps: 3,
+                    max_steps: { _num: { xI: { xH: null } } },
                 },
                 context: {
                     collect_ontology_candidate_evidence: true,
@@ -2169,7 +2182,7 @@ class TestEvidenceCollectorJS:
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
                     value: 'hello',
-                    max_steps: 3,
+                    max_steps: { _num: { xI: { xH: null } } },
                 },
                 context: { collect_ontology_candidate_evidence: true },
                 inject_key: 'boundary_result',
@@ -2326,7 +2339,7 @@ class TestEvidenceCollectorBoundaryPath:
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
                     value: 'hello',
-                    max_steps: 3,
+                    max_steps: { _num: { xI: { xH: null } } },
                 },
                 context: { collect_ontology_candidate_evidence: true },
                 inject_key: 'boundary_result',
@@ -2390,7 +2403,7 @@ class TestEvidenceCollectorBoundaryPath:
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
                     value: 'hello',
-                    max_steps: 3,
+                    max_steps: { _num: { xI: { xH: null } } },
                 },
                 context: {
                     collect_ontology_candidate_evidence: true,

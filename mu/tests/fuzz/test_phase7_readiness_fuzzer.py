@@ -44,23 +44,20 @@ from rcx_pi.selfhost.subst_mu import subst_mu, load_subst_projections
 from rcx_pi.selfhost.step_mu import apply_mu, step_mu, run_mu
 from rcx_pi.selfhost.classify_mu import load_classify_projections
 from rcx_pi.eval_seed import NO_MATCH
+from tests.helpers.structural_numbers import sn
 
 
 # =============================================================================
 # Hypothesis Strategies for Phase 7 Testing
 # =============================================================================
 
-# Primitive Mu values (JSON-compatible)
+# Primitive Mu values (JSON-compatible). Stage 4 encodes matcher-facing
+# integer facts as StructuralNumbers; host floats are not legal broad
+# matcher-facing fuzz inputs.
 mu_primitives = st.one_of(
     st.none(),
     st.booleans(),
-    st.integers(min_value=-(2**31), max_value=2**31),  # JSON safe integers
-    st.floats(
-        allow_nan=False,
-        allow_infinity=False,
-        min_value=-1e10,
-        max_value=1e10
-    ),
+    st.integers(min_value=-128, max_value=128).map(sn),
     st.text(max_size=20),
 )
 
@@ -519,7 +516,7 @@ class TestNonLinearPatternFuzzing:
         Non-linear pattern binds first occurrence (current behavior).
 
         Pattern: {"x": {"var": "v"}, "y": {"var": "v"}}
-        Value:   {"x": 1, "y": 2}
+        Value:   {"x": "one", "y": "two"}
 
         Note: Current match_mu binds first occurrence of var and does NOT
         enforce consistency across multiple occurrences. This is documented
@@ -528,7 +525,7 @@ class TestNonLinearPatternFuzzing:
         substitution, not pattern matching.
         """
         pattern = {"x": {"var": "v"}, "y": {"var": "v"}}
-        value = {"x": 1, "y": 2}
+        value = {"x": "one", "y": "two"}
 
         result = match_mu(pattern, value)
 
@@ -537,8 +534,8 @@ class TestNonLinearPatternFuzzing:
         if result is not NO_MATCH:
             # If it matched, the binding should be from one of the occurrences
             assert "v" in result, "Var should be bound"
-            # Value should be either 1 or 2 (whichever was bound first)
-            assert result["v"] in (1, 2), f"Bound unexpected value: {result['v']}"
+            # Value should be whichever occurrence was bound first.
+            assert result["v"] in ("one", "two"), f"Bound unexpected value: {result['v']}"
 
     @given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=3),
            mu_primitives)
@@ -548,7 +545,7 @@ class TestNonLinearPatternFuzzing:
         Non-linear pattern should accept consistent values.
 
         Pattern: {"x": {"var": "v"}, "y": {"var": "v"}}
-        Value:   {"x": 1, "y": 1}  # Should match (1 == 1)
+        Value:   {"x": value, "y": value}  # Should match structurally
         """
         assume(is_mu(value))
         if contains_empty_collection(value):
@@ -871,11 +868,11 @@ class TestLinkedListCursor:
         """
         # Three projections as linked list
         proj_list = {
-            "head": {"id": "p1", "pattern": {"a": 1}, "body": "r1"},
+            "head": {"id": "p1", "pattern": {"a": "one"}, "body": "r1"},
             "tail": {
-                "head": {"id": "p2", "pattern": {"b": 2}, "body": "r2"},
+                "head": {"id": "p2", "pattern": {"b": "two"}, "body": "r2"},
                 "tail": {
-                    "head": {"id": "p3", "pattern": {"c": 3}, "body": "r3"},
+                    "head": {"id": "p3", "pattern": {"c": "three"}, "body": "r3"},
                     "tail": None
                 }
             }

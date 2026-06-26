@@ -1,0 +1,24 @@
+{
+  "wave_id": "stage4-loop-struct-2026-06-22",
+  "repeat_run_speedup_ratio": 1.108016,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.259711,
+  "repeat_run_raw_seconds": [
+    0.287764,
+    0.259711
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.287764
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.547475
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-26T05:54:51Z",
+  "collector_version": "2.2.0"
+}

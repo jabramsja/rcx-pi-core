@@ -274,7 +274,7 @@ const rec = tc.RECURRENCE_TERMINAL_KEYS;
 rec.add('injected');
 rec.clear();
 const result = tc.classifyTerminalKind(
-  muCopy({closure_detected: true, final_result: 42, tau_step: 1}, true, 'terminal cache fixture')
+  muCopy({closure_detected: true, final_result: 'forty_two', tau_step: {_num: {xH: null}}}, true, 'terminal cache fixture')
 );
 console.log(result);
 """
@@ -316,11 +316,11 @@ console.log(tc.ENGINE_EXIT_REASONS.size);
         script = """
 const tc = require('./mu/host/js/core/terminal_classification');
 const { muCopy } = require('./mu/host/js/core/stage0_vm');
-tc.classifyTerminalKind(muCopy({closure_detected: true, final_result: 42, tau_step: 1}, true, 'terminal cache fixture'));
+tc.classifyTerminalKind(muCopy({closure_detected: true, final_result: 'forty_two', tau_step: {_num: {xH: null}}}, true, 'terminal cache fixture'));
 tc._clearTcCache();  // # ANTICHEAT_OK: testing JS cache clear export
-const r1 = tc.classifyTerminalKind(muCopy({closure_detected: true, final_result: 42, tau_step: 1}, true, 'terminal cache fixture'));
+const r1 = tc.classifyTerminalKind(muCopy({closure_detected: true, final_result: 'forty_two', tau_step: {_num: {xH: null}}}, true, 'terminal cache fixture'));
 const r2 = tc.classifyTerminalKind(muCopy({
-  value: 1, closure_detected: false, tau_step: 0,
+  value: 'one', closure_detected: false, tau_step: {_num: null},
   exhaustion_detected: false, operator_frozen: false,
   frozen_set: [], action: null, stall: false,
 }, true, 'terminal engine fixture'));

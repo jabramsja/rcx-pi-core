@@ -38,8 +38,35 @@ def reset_cache():
 # =============================================================================
 
 
+def _sn_positive(n: int):
+    if n == 1:
+        return {"xH": None}
+    half = _sn_positive(n // 2)
+    return {"xO" if n % 2 == 0 else "xI": half}
+
+
+def _sn(n: int):
+    if n < 0:
+        raise ValueError("test helper only supports non-negative structural numbers")
+    return {"_num": None if n == 0 else _sn_positive(n)}
+
+
+def _structuralize_numbers(value):
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return value
+    if isinstance(value, int):
+        return _sn(value)
+    if isinstance(value, list):
+        return [_structuralize_numbers(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _structuralize_numbers(item) for key, item in value.items()}
+    return value
+
+
 def assert_parity(pattern, value):
     """Assert that match_mu and match produce identical results."""
+    pattern = _structuralize_numbers(pattern)
+    value = _structuralize_numbers(value)
     py_result = match(pattern, value)
     mu_result = match_mu(pattern, value)
 
@@ -576,7 +603,7 @@ class TestSharedReferencesAllowed:
         """Shared list reference should not trigger cycle detection."""
         from rcx_pi.match_mu import normalize_for_match, denormalize_from_match
 
-        shared = [1, 2, 3]
+        shared = ["one", "two", "three"]
         dag = [shared, shared]  # Same object twice
 
         # Should NOT raise ValueError
@@ -584,14 +611,14 @@ class TestSharedReferencesAllowed:
         assert result is not None
         # Verify round-trip preserves semantic content (both branches have same values)
         denorm = denormalize_from_match(result)
-        assert denorm[0] == [1, 2, 3], f"First element wrong: {denorm[0]}"
-        assert denorm[1] == [1, 2, 3], f"Second element wrong: {denorm[1]}"
+        assert denorm[0] == ["one", "two", "three"], f"First element wrong: {denorm[0]}"
+        assert denorm[1] == ["one", "two", "three"], f"Second element wrong: {denorm[1]}"
 
     def test_shared_dict_in_normalize(self):
         """Shared dict reference should not trigger cycle detection."""
         from rcx_pi.match_mu import normalize_for_match, denormalize_from_match
 
-        shared = {"x": 42}
+        shared = {"x": "forty_two"}
         dag = {"a": shared, "b": shared}  # Same object twice
 
         # Should NOT raise ValueError
@@ -599,8 +626,8 @@ class TestSharedReferencesAllowed:
         assert result is not None
         # Verify round-trip preserves semantic content
         denorm = denormalize_from_match(result)
-        assert denorm["a"] == {"x": 42}, f"Key 'a' wrong: {denorm['a']}"
-        assert denorm["b"] == {"x": 42}, f"Key 'b' wrong: {denorm['b']}"
+        assert denorm["a"] == {"x": "forty_two"}, f"Key 'a' wrong: {denorm['a']}"
+        assert denorm["b"] == {"x": "forty_two"}, f"Key 'b' wrong: {denorm['b']}"
 
     def test_shared_empty_list_in_normalize(self):
         """Shared empty list reference - the original bug case."""
@@ -622,7 +649,7 @@ class TestSharedReferencesAllowed:
         """Diamond DAG pattern - shared node at multiple depths."""
         from rcx_pi.match_mu import normalize_for_match, denormalize_from_match
 
-        leaf = {"value": 1}
+        leaf = {"value": "leaf"}
         left = {"child": leaf}
         right = {"child": leaf}
         root = {"left": left, "right": right}
@@ -632,15 +659,15 @@ class TestSharedReferencesAllowed:
         assert result is not None
         # Verify round-trip preserves semantic content
         denorm = denormalize_from_match(result)
-        assert denorm["left"]["child"]["value"] == 1, f"Left path wrong: {denorm}"
-        assert denorm["right"]["child"]["value"] == 1, f"Right path wrong: {denorm}"
+        assert denorm["left"]["child"]["value"] == "leaf", f"Left path wrong: {denorm}"
+        assert denorm["right"]["child"]["value"] == "leaf", f"Right path wrong: {denorm}"
 
     def test_shared_reference_in_denormalize(self):
         """Shared reference in denormalize_from_match."""
         from rcx_pi.match_mu import denormalize_from_match
 
         # Manually construct a normalized structure with shared refs
-        shared = {"head": 1, "tail": {"head": 2, "tail": None}}
+        shared = {"head": _sn(1), "tail": {"head": _sn(2), "tail": None}}
         dag = {"head": shared, "tail": {"head": shared, "tail": None}}
 
         # Should NOT raise ValueError
@@ -663,7 +690,7 @@ class TestSharedReferencesAllowed:
         """True cycles should still be detected in denormalize."""
         from rcx_pi.match_mu import denormalize_from_match
 
-        cycle = {"head": 1, "tail": None}
+        cycle = {"head": "one", "tail": None}
         cycle["tail"] = cycle
 
         with pytest.raises(ValueError, match="Circular reference"):
@@ -673,14 +700,14 @@ class TestSharedReferencesAllowed:
         """Shared references should survive normalize/denormalize roundtrip."""
         from rcx_pi.match_mu import normalize_for_match, denormalize_from_match
 
-        shared = [1, 2, 3]
+        shared = ["one", "two", "three"]
         original = [shared, shared]
 
         normalized = normalize_for_match(original)
         denormalized = denormalize_from_match(normalized)
 
         # Structure should be preserved (though shared refs become copies)
-        assert denormalized == [[1, 2, 3], [1, 2, 3]]
+        assert denormalized == [["one", "two", "three"], ["one", "two", "three"]]
 
 
 # =============================================================================
@@ -700,31 +727,31 @@ class TestEmptyVarNameRejection:
     def test_match_mu_rejects_shallow_empty_var(self):
         """match_mu raises ValueError for {"var": ""} at top level."""
         with pytest.raises(ValueError, match="Variable name cannot be empty"):
-            match_mu({"var": ""}, 42)
+            match_mu({"var": ""}, "payload")
 
     def test_match_mu_rejects_empty_var_in_dict(self):
         """match_mu rejects empty var name nested in dict."""
         pattern = {"a": {"var": ""}}
         with pytest.raises(ValueError, match="Variable name cannot be empty"):
-            match_mu(pattern, {"a": 1})
+            match_mu(pattern, {"a": "payload"})
 
     def test_match_mu_rejects_empty_var_deeply_nested(self):
         """match_mu rejects deeply nested empty var names."""
         pattern = {"a": {"b": {"c": {"d": {"var": ""}}}}}
         with pytest.raises(ValueError, match="Variable name cannot be empty"):
-            match_mu(pattern, {"a": {"b": {"c": {"d": 1}}}})
+            match_mu(pattern, {"a": {"b": {"c": {"d": "payload"}}}})
 
     def test_match_mu_rejects_empty_var_in_list(self):
         """match_mu rejects empty var in list."""
         pattern = [{"var": ""}, {"var": "x"}]
         with pytest.raises(ValueError, match="Variable name cannot be empty"):
-            match_mu(pattern, [1, 2])
+            match_mu(pattern, ["one", "two"])
 
     def test_match_mu_rejects_empty_var_in_nested_list(self):
         """match_mu rejects empty var in nested list."""
         pattern = [[[[{"var": ""}]]]]
         with pytest.raises(ValueError, match="Variable name cannot be empty"):
-            match_mu(pattern, [[[[1]]]])
+            match_mu(pattern, [[[["payload"]]]])
 
     def test_match_mu_rejects_empty_var_in_mixed_structure(self):
         """match_mu rejects empty var in mixed list/dict structure."""
@@ -735,16 +762,16 @@ class TestEmptyVarNameRejection:
     def test_match_mu_accepts_valid_var_names(self):
         """match_mu accepts non-empty variable names."""
         # Single char
-        result = match_mu({"var": "x"}, 42)
-        assert result == {"x": 42}
+        result = match_mu({"var": "x"}, _sn(42))
+        assert result == {"x": _sn(42)}
 
         # Longer name
         result = match_mu({"var": "my_variable"}, "hello")
         assert result == {"my_variable": "hello"}
 
         # Unicode
-        result = match_mu({"var": "变量"}, 123)
-        assert result == {"变量": 123}
+        result = match_mu({"var": "变量"}, "payload")
+        assert result == {"变量": "payload"}
 
     def test_match_mu_accepts_deeply_nested_valid_vars(self):
         """match_mu accepts valid vars at any depth."""
@@ -756,16 +783,16 @@ class TestEmptyVarNameRejection:
     def test_iterative_handles_wide_structure(self):
         """Iterative check handles wide structures (many keys)."""
         # Build pattern with many keys, one has empty var
-        pattern = {f"key_{i}": i for i in range(50)}
+        pattern = {f"key_{i}": f"value_{i}" for i in range(50)}
         pattern["bad_key"] = {"var": ""}
 
         with pytest.raises(ValueError, match="Variable name cannot be empty"):
-            match_mu(pattern, {f"key_{i}": i for i in range(51)})
+            match_mu(pattern, {f"key_{i}": f"value_{i}" for i in range(51)})
 
     def test_iterative_handles_wide_list(self):
         """Iterative check handles wide lists (many elements)."""
         # Build list with many elements, one has empty var
-        pattern = list(range(50)) + [{"var": ""}]
+        pattern = [f"value_{i}" for i in range(50)] + [{"var": ""}]
 
         with pytest.raises(ValueError, match="Variable name cannot be empty"):
-            match_mu(pattern, list(range(51)))
+            match_mu(pattern, [f"value_{i}" for i in range(51)])

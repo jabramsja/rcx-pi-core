@@ -25,6 +25,25 @@ from tests.repo_root import REPO_ROOT as ROOT
 from rcx_pi.selfhost.step_mu import list_to_linked
 
 
+def _sn_positive(n: int) -> dict:
+    """Encode positive host ints as StructuralNumbers positive numerals."""
+    if n <= 0:
+        raise ValueError("positive StructuralNumbers helper requires n >= 1")
+    if n == 1:
+        return {"xH": None}
+    q, r = divmod(n, 2)
+    return {"xI" if r else "xO": _sn_positive(q)}
+
+
+def _sn(n: int) -> dict:
+    """Encode host ints as Stage 4 StructuralNumbers numerals for test fixtures."""
+    if n == 0:
+        return {"_num": None}
+    if n < 0:
+        return {"_num": {"neg": _sn_positive(-n)}}
+    return {"_num": _sn_positive(n)}
+
+
 def _read_all_js_source() -> str:
     """Read all JS module files concatenated (monolith was split into modules)."""
     js_dir = ROOT / "mu" / "host" / "js"
@@ -114,8 +133,8 @@ class TestStage0VMAttemptTraceParity:
 
         inp = {
             "mode": "match",
-            "pattern_focus": 42,
-            "value_focus": 42,
+            "pattern_focus": "same_atom",
+            "value_focus": "same_atom",
             "bindings": None,
             "stack": None,
             "_match_ctx": {"projection_id": "test"},
@@ -473,8 +492,8 @@ class TestCrossSubstrateParity:
             {"nested": {"deep": [1, 2]}},
             # Algorithm state shapes
             {"_detect_closure": {"trace": None, "result": "X"}},
-            {"_detect_closure": {"trace": [{"step": 0, "state": "A"}], "result": "A"}},
-            {"_detect_exhaustion": {"trace": None, "frozen": None, "tau_step": 0}},
+            {"_detect_closure": {"trace": [{"step": _sn(0), "state": "A"}], "result": "A"}},
+            {"_detect_exhaustion": {"trace": None, "frozen": None, "tau_step": None}},
         ]
 
         for case in test_cases:
@@ -1453,9 +1472,9 @@ class TestJSBridgeParity:
         input_data = {
             "_detect_closure": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "p1"},
+                    "head": {"step": _sn(0), "state": "A", "projection": "p1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "p2"},
+                        "head": {"step": _sn(1), "state": "B", "projection": "p2"},
                         "tail": None
                     }
                 },
@@ -1498,11 +1517,11 @@ class TestJSBridgeParity:
         input_data = {
             "_detect_closure": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "p1"},
+                    "head": {"step": _sn(0), "state": "A", "projection": "p1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "p2"},
+                        "head": {"step": _sn(1), "state": "B", "projection": "p2"},
                         "tail": {
-                            "head": {"step": 2, "state": "A", "projection": "p3"},
+                            "head": {"step": _sn(2), "state": "A", "projection": "p3"},
                             "tail": None
                         }
                     }
@@ -1550,14 +1569,14 @@ class TestJSBridgeParity:
         input_data = {
             "_detect_exhaustion": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "op1"},
+                    "head": {"step": _sn(0), "state": "A", "projection": "op1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "op2"},
+                        "head": {"step": _sn(1), "state": "B", "projection": "op2"},
                         "tail": None
                     }
                 },
                 "frozen": None,
-                "tau_step": 0,
+                "tau_step": _sn(0),
                 "operator_ids": {
                     "head": "op1",
                     "tail": {"head": "op2", "tail": None}
@@ -1600,14 +1619,14 @@ class TestJSBridgeParity:
         input_data = {
             "_detect_exhaustion": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "op1"},
+                    "head": {"step": _sn(0), "state": "A", "projection": "op1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "op1"},
+                        "head": {"step": _sn(1), "state": "B", "projection": "op1"},
                         "tail": None
                     }
                 },
                 "frozen": None,
-                "tau_step": 0,
+                "tau_step": _sn(0),
                 "operator_ids": {"head": "op1", "tail": None}
             }
         }
@@ -1665,9 +1684,9 @@ class TestEngineHelpersParity:
 
 
         trace = {
-            "head": {"step": 0, "state": {"x": 1}, "projection": "test"},
+            "head": {"step": _sn(0), "state": {"x": "one"}, "projection": "test"},
             "tail": {
-                "head": {"step": 1, "state": {"x": 1}, "stall": True},
+                "head": {"step": _sn(1), "state": {"x": "one"}, "stall": True},
                 "tail": None
             }
         }
@@ -1682,7 +1701,7 @@ class TestEngineHelpersParity:
         """Both substrates reject traces exceeding maxEntries."""
         trace = None
         for i in range(5):
-            trace = {"head": {"state": str(i), "step": i}, "tail": trace}
+            trace = {"head": {"state": str(i), "step": _sn(i)}, "tail": trace}
 
         js_response = self._run_js_json_api({
             "action": "hash_trace", "trace": trace, "maxEntries": 3
@@ -2000,7 +2019,7 @@ class TestEnginePipelineCrossSubstrateParity:
 
 
         engine_result = {
-            "value": {"x": 1}, "closure_detected": True, "tau_step": 2,
+            "value": {"x": "one"}, "closure_detected": True, "tau_step": _sn(2),
             "exhaustion_detected": False, "operator_frozen": False,
             "frozen_set": None, "action": None, "stall": True,
         }
@@ -2091,7 +2110,7 @@ class TestEngineFixPathParity:
 
         from rcx_pi.selfhost.kernel import reset_step_budget
 
-        graph_input = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
+        graph_input = {"graph": {"vertices": ["v1", "v2"], "edges": [{"src": "v1", "dst": "v2"}]}}
 
         reset_step_budget()
         py_result = run_engine_pipeline(
@@ -2133,7 +2152,7 @@ class TestEngineFixPathParity:
 
         from rcx_pi.selfhost.kernel import reset_step_budget
 
-        scalar_input = {"value": 42, "status": "test"}
+        scalar_input = {"value": "forty_two", "status": "test"}
 
         reset_step_budget()
         py_result = run_engine_pipeline(
@@ -2171,7 +2190,7 @@ class TestEngineFixPathParity:
 
         from rcx_pi.selfhost.kernel import reset_step_budget
 
-        graph_input = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
+        graph_input = {"graph": {"vertices": ["v1", "v2"], "edges": [{"src": "v1", "dst": "v2"}]}}
 
         reset_step_budget()
         py_result = run_engine_with_routing(
@@ -2213,7 +2232,7 @@ class TestEngineFixPathParity:
 
         from rcx_pi.selfhost.kernel import reset_step_budget
 
-        scalar_input = {"value": 42, "status": "test"}
+        scalar_input = {"value": "forty_two", "status": "test"}
 
         reset_step_budget()
         py_result = run_engine_with_routing(
@@ -2284,7 +2303,7 @@ class TestEngineLoopPathParity:
 
         from rcx_pi.selfhost.kernel import reset_step_budget
 
-        test_input = {"value": 42}
+        test_input = {"value": "forty_two"}
 
         reset_step_budget()
         py_result = run_engine_pipeline(
@@ -2336,7 +2355,7 @@ class TestEngineLoopPathParity:
             {"id": "add_done", "pattern": {"value": {"var": "v"}},
              "body": {"value": {"var": "v"}, "done": True}},
         ]
-        test_input = {"value": 42}
+        test_input = {"value": "forty_two"}
 
         reset_step_budget()
         py_result = run_engine_pipeline(
@@ -2374,7 +2393,7 @@ class TestEngineLoopPathParity:
 
         from rcx_pi.selfhost.kernel import reset_step_budget
 
-        test_input = {"value": 42}
+        test_input = {"value": "forty_two"}
 
         reset_step_budget()
         py_result = run_engine_pipeline(
@@ -2493,7 +2512,7 @@ class TestFalsyDefaultParity:
         from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
 
 
-        trace = {"head": {"state": "a", "step": 0}, "tail": None}
+        trace = {"head": {"state": "a", "step": _sn(0)}, "tail": None}
 
         # Python: maxEntries=0 should raise (trace has 1 entry, exceeds 0 cap)
         with pytest.raises(ValueError, match="exceeds 0 entries"):
@@ -2502,7 +2521,7 @@ class TestFalsyDefaultParity:
         # JS: maxEntries=0 should also fail (not silently become 10000)
         js_response = self._run_js_json_api({
             "action": "hash_trace",
-            "trace": {"head": {"state": "a", "step": 0}, "tail": None},
+            "trace": {"head": {"state": "a", "step": _sn(0)}, "tail": None},
             "maxEntries": 0,
         })
         assert not js_response["success"], (
@@ -2569,6 +2588,10 @@ class TestNoOrBarBarNumericDefaults:
                 continue
             for pattern in self._FORBIDDEN_PATTERNS:
                 if re.search(pattern, line):
+                    # Validation predicates legitimately join numeric guards with ||;
+                    # this lock is only about falsy defaulting such as x || default.
+                    if "typeof " in line or "!==" in line or "===" in line:
+                        continue
                     violations.append(f"  eval_step.js:{line_num}: {line.strip()}")
 
         assert not violations, (
@@ -3588,18 +3611,19 @@ class TestReservedFieldValidationFuzzer:
 @st.composite
 def _engine_result(draw):
     """Generate a valid 8-key engine_result dict for hemisphere routing."""
+    closure_detected = draw(st.booleans())
+    scalar_value = st.one_of(st.none(), st.booleans(), st.text(max_size=10))
     value = draw(st.one_of(
         st.none(),
         st.booleans(),
-        st.integers(min_value=-100, max_value=100),
         st.text(max_size=10),
-        st.lists(_mu_primitives, max_size=2),
-        st.dictionaries(_safe_keys, _mu_primitives, max_size=2),
+        st.lists(scalar_value, max_size=2),
+        st.dictionaries(_safe_keys, scalar_value, max_size=2),
     ))
     return {
         "value": value,
-        "closure_detected": draw(st.booleans()),
-        "tau_step": draw(st.integers(min_value=0, max_value=10)),
+        "closure_detected": closure_detected,
+        "tau_step": draw(st.builds(_sn, st.integers(min_value=0, max_value=10))) if closure_detected else None,
         "exhaustion_detected": draw(st.booleans()),
         "operator_frozen": draw(st.one_of(st.none(), st.text(min_size=1, max_size=8))),
         "frozen_set": draw(st.one_of(st.none(), st.lists(st.text(max_size=5), max_size=3))),
@@ -3644,7 +3668,7 @@ def _invalid_engine_result(draw):
         er = {
             "value": "test",
             "closure_detected": False,
-            "tau_step": 0,
+            "tau_step": None,
             "exhaustion_detected": False,
             "operator_frozen": None,
             "frozen_set": None,
@@ -3763,7 +3787,7 @@ def _trace_entry(draw, step_num):
         _mu_primitives,
         st.dictionaries(_safe_keys, _mu_primitives, min_size=1, max_size=3),
     ))
-    entry = {"step": step_num, "state": state_value}
+    entry = {"step": _sn(step_num), "state": state_value}
     if draw(st.booleans()):
         entry["projection"] = draw(st.text(
             alphabet=st.characters(whitelist_categories=("L",)),
@@ -3803,7 +3827,7 @@ class TestTraceHashParityFuzzer:
         # diverges for this pair unless a code-point comparator is used.
         trace = {
             "head": {
-                "step": 0,
+                "step": _sn(0),
                 "state": {"\uf900": None, "\U00010000": None},
             },
             "tail": None,
@@ -4114,7 +4138,7 @@ class TestDifferentialReplayAuditR3:
     @pytest.mark.parametrize("vector", _r3_hash_corpus())
     def test_hash_vector_replay(self, vector):
         """Replay hashing vector: hash_trace on both substrates."""
-        trace = {"head": {"step": 0, "state": vector['value']}, "tail": None}
+        trace = {"head": {"step": _sn(0), "state": vector['value']}, "tail": None}
         js = _module_run_js_json_api({
             'action': 'hash_trace', 'trace': trace, 'maxEntries': 10000,
         })
@@ -4263,7 +4287,7 @@ class TestDifferentialReplayAuditR3:
         (both return input.shape_mismatch after R3-F1 classifier fix in 17N).
         """
         base = {
-            "value": 42, "closure_detected": False, "tau_step": 0,
+            "value": "forty_two", "closure_detected": False, "tau_step": None,
             "exhaustion_detected": False, "operator_frozen": None,
             "frozen_set": None, "action": "none", "stall": False,
         }

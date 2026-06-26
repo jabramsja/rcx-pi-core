@@ -56,9 +56,11 @@ class TestStage0ListBranchRemoved:
         2026-06-21 (FOUNDER_OVERRIDE:stage0-content-addressed-symmetric-fence-2026-06-21c).
         Mirrors the JS fence ``test_js_stage0_match_no_array_branch`` scope:
         forbid ONLY the pattern-side list dispatch; PERMIT exactly one input-side
-        ``isinstance(input_value, list)`` reject-guard (the analog of the JS
-        input-side ``Array.isArray(input)`` fail-close that stage0Match relies on
-        after the scalar branches collapse to a content-addressed hash). The
+        ``isinstance(input_value, list)`` reject-guard plus the Stage 4
+        ``candidate`` scan that rejects host numeric leaves before variable
+        binding (the analog of the JS input-side ``Array.isArray(input)``
+        fail-close that stage0Match relies on after the scalar branches
+        collapse to a content-addressed hash). The
         no-scalar-isinstance + content-hash reduction thesis is proved by
         test_stage0_content_addressed_collapse_gate.py.
         """
@@ -93,6 +95,8 @@ class TestStage0ListBranchRemoved:
                 )
             elif subject_name == "input_value":
                 input_side_guards += 1
+            elif subject_name == "candidate":
+                continue
             else:
                 pytest.fail(
                     f"_stage0_match has isinstance({subject_name}, list) on an "

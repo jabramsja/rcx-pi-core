@@ -42,14 +42,14 @@
           "input": {
             "projections": {"var": "projs"},
             "value": {"var": "input"},
-            "max_steps": 100
+            "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}
           },
           "context": {
             "_mode": "engine",
             "_frozen": null,
             "_config": {
               "projections": {"var": "projs"},
-              "max_steps": 100
+              "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}
             }
           },
           "inject_key": "_trace_result"
@@ -136,8 +136,8 @@
             "apply_fix": {
               "stalled_state": {"var": "result"},
               "stall_hash": "structural_stall",
-              "tau_step": 1,
-              "engine_iteration": 0
+              "tau_step": {"_num": {"xH": null}},
+              "engine_iteration": {"_num": null}
             }
           },
           "context": {

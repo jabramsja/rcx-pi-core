@@ -17,7 +17,7 @@ const { muCopy } = require('./stage0_vm');
 const SEED_REGISTRY_MANIFEST_NAME = 'seed_registry_manifest.v1.json';
 const SEED_REGISTRY_MANIFEST_SCHEMA = 'rcx.seed_registry_manifest.v1';
 const SEED_REGISTRY_MANIFEST_SHA256 =
-  '0681e854327229c78dc63bb3e415e94ba4032e658b2e0513eb235bfddbdae7a5';
+  '5c4fd20284247462ac0d17d4e9a898a2b81f5b448e3a9eca47c490f432dbb2fa';
 
 const manifestPath = path.join(__dirname, '..', '..', '..', SEED_REGISTRY_MANIFEST_NAME);
 const manifestBytes = fs.readFileSync(manifestPath);

@@ -196,6 +196,21 @@ class TestJSClassifierSourceLock:
         from pathlib import Path
         return Path("mu/host/js/engine/pipeline.js").read_text()
 
+    @staticmethod
+    def _js_function_body(src: str, function_name: str) -> str:
+        start = src.index(f"function {function_name}(")
+        opening = src.index("{", start)
+        depth = 0
+        for index in range(opening, len(src)):
+            char = src[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return src[opening:index + 1]
+        raise AssertionError(f"could not find closing brace for {function_name}")
+
     def test_classify_engine_step_exists(self):
         """JS pipeline.js must contain _classifyEngineStep function."""
         src = self._read_pipeline_js()
@@ -204,16 +219,13 @@ class TestJSClassifierSourceLock:
     def test_trampoline_uses_classifier(self):
         """runEnginePipeline must call _classifyEngineStep."""
         src = self._read_pipeline_js()
-        # Find the function body
-        idx = src.index("function runEnginePipeline(")
-        body = src[idx:idx + 3000]
+        body = self._js_function_body(src, "runEnginePipeline")
         assert "_classifyEngineStep(" in body
 
     def test_boot1_uses_classifier(self):
         """runEnginePipelineRecursive must call _classifyEngineStep."""
         src = self._read_pipeline_js()
-        idx = src.index("function runEnginePipelineRecursive(")
-        body = src[idx:idx + 3000]
+        body = self._js_function_body(src, "runEnginePipelineRecursive")
         assert "_classifyEngineStep(" in body
 
     def test_trampoline_validates_run_engine(self):
@@ -236,7 +248,7 @@ class TestJSClassifierSourceLock:
             "run_engine_pipeline",
             boot1LoopMode=False,
             projections=[],
-            input={"value": 42},
+            input={"value": "forty_two"},
             maxSteps=5,
             maxEngineIterations=20,
             maxAlgorithmIterations=50,

@@ -27,6 +27,7 @@ from rcx_pi.mu_type import mu_equal
 # Import apply_mu from production code (9-agent Expert finding 2026-02-01)
 # Production version has assert_mu() validation that conftest version lacked
 from rcx_pi.step_mu import apply_mu
+from tests.helpers.structural_numbers import sn
 
 
 class TestApplyMuParitySimple:
@@ -34,19 +35,19 @@ class TestApplyMuParitySimple:
 
     def test_literal_match_no_vars(self):
         """Literal pattern with no variables."""
-        proj = {"pattern": 42, "body": "matched"}
+        proj = {"pattern": "forty-two", "body": "matched"}
 
-        py_result = apply_projection(proj, 42)
-        mu_result = apply_mu(proj, 42)
+        py_result = apply_projection(proj, "forty-two")
+        mu_result = apply_mu(proj, "forty-two")
 
         assert py_result == mu_result == "matched"
 
     def test_literal_no_match(self):
         """Literal pattern that doesn't match."""
-        proj = {"pattern": 42, "body": "matched"}
+        proj = {"pattern": "forty-two", "body": "matched"}
 
-        py_result = apply_projection(proj, 99)
-        mu_result = apply_mu(proj, 99)
+        py_result = apply_projection(proj, "ninety-nine")
+        mu_result = apply_mu(proj, "ninety-nine")
 
         assert py_result is NO_MATCH
         assert mu_result is NO_MATCH
@@ -55,10 +56,10 @@ class TestApplyMuParitySimple:
         """Single variable captures value."""
         proj = {"pattern": {"var": "x"}, "body": {"var": "x"}}
 
-        py_result = apply_projection(proj, 42)
-        mu_result = apply_mu(proj, 42)
+        py_result = apply_projection(proj, "payload")
+        mu_result = apply_mu(proj, "payload")
 
-        assert py_result == mu_result == 42
+        assert py_result == mu_result == "payload"
 
     def test_variable_in_body(self):
         """Variable substituted into body structure."""
@@ -82,12 +83,12 @@ class TestApplyMuParityStructures:
             "pattern": {"name": {"var": "n"}, "age": {"var": "a"}},
             "body": {"person": {"var": "n"}, "years": {"var": "a"}}
         }
-        input_val = {"name": "Alice", "age": 30}
+        input_val = {"name": "Alice", "age": "thirty"}
 
         py_result = apply_projection(proj, input_val)
         mu_result = apply_mu(proj, input_val)
 
-        assert py_result == mu_result == {"person": "Alice", "years": 30}
+        assert py_result == mu_result == {"person": "Alice", "years": "thirty"}
 
     def test_list_pattern_extraction(self):
         """Extract values from list pattern."""
@@ -95,12 +96,12 @@ class TestApplyMuParityStructures:
             "pattern": [{"var": "first"}, {"var": "second"}],
             "body": {"a": {"var": "first"}, "b": {"var": "second"}}
         }
-        input_val = [1, 2]
+        input_val = ["one", "two"]
 
         py_result = apply_projection(proj, input_val)
         mu_result = apply_mu(proj, input_val)
 
-        assert py_result == mu_result == {"a": 1, "b": 2}
+        assert py_result == mu_result == {"a": "one", "b": "two"}
 
     def test_nested_structure(self):
         """Deeply nested pattern and body."""
@@ -152,12 +153,12 @@ class TestApplyMuParityMultipleVars:
             "pattern": {"a": {"var": "x"}, "b": {"var": "y"}, "c": {"var": "z"}},
             "body": {"first": {"var": "x"}, "second": {"var": "y"}, "third": {"var": "z"}}
         }
-        input_val = {"a": 1, "b": 2, "c": 3}
+        input_val = {"a": "one", "b": "two", "c": "three"}
 
         py_result = apply_projection(proj, input_val)
         mu_result = apply_mu(proj, input_val)
 
-        assert py_result == mu_result == {"first": 1, "second": 2, "third": 3}
+        assert py_result == mu_result == {"first": "one", "second": "two", "third": "three"}
 
     def test_variable_used_multiple_times(self):
         """Same variable used multiple times in body."""
@@ -260,10 +261,10 @@ class TestApplyMuParityEdgeCases:
         }
         complex_data = {
             "users": [
-                {"name": "Alice", "scores": [1, 2, 3]},
-                {"name": "Bob", "scores": [4, 5, 6]}
+                {"name": "Alice", "scores": ["one", "two", "three"]},
+                {"name": "Bob", "scores": ["four", "five", "six"]}
             ],
-            "meta": {"count": 2, "active": True}
+            "meta": {"count": "two", "active": True}
         }
         input_val = {"data": complex_data}
 
@@ -283,13 +284,13 @@ class TestApplyMuParityRealProjections:
             "pattern": {"op": "get", "key": {"var": "k"}, "from": {"var": "obj"}},
             "body": {"lookup": {"key": {"var": "k"}, "in": {"var": "obj"}}}
         }
-        input_val = {"op": "get", "key": "name", "from": {"name": "Alice", "age": 30}}
+        input_val = {"op": "get", "key": "name", "from": {"name": "Alice", "age": "thirty"}}
 
         py_result = apply_projection(proj, input_val)
         mu_result = apply_mu(proj, input_val)
 
         assert py_result == mu_result == {
-            "lookup": {"key": "name", "in": {"name": "Alice", "age": 30}}
+            "lookup": {"key": "name", "in": {"name": "Alice", "age": "thirty"}}
         }
 
     def test_state_transform_projection(self):
@@ -316,20 +317,20 @@ class TestApplyMuParityRealProjections:
             "pattern": {"head": {"var": "h"}, "tail": {"var": "t"}},
             "body": {"first": {"var": "h"}, "rest": {"var": "t"}}
         }
-        input_val = {"head": 1, "tail": {"head": 2, "tail": None}}
+        input_val = {"head": "one", "tail": {"head": "two", "tail": None}}
 
         py_result = apply_projection(proj, input_val)
         mu_result = apply_mu(proj, input_val)
 
         # Python version preserves original structure
         assert py_result == {
-            "first": 1,
-            "rest": {"head": 2, "tail": None}
+            "first": "one",
+            "rest": {"head": "two", "tail": None}
         }
         # Mu version denormalizes linked list to Python list
         assert mu_result == {
-            "first": 1,
-            "rest": [2]
+            "first": "one",
+            "rest": ["two"]
         }
 
 
@@ -460,7 +461,7 @@ class TestNonLinearPatternParity:
     def test_nonlinear_conflict_returns_no_match(self):
         """Same var, different values -> NO_MATCH on both paths."""
         proj = {"pattern": {"a": {"var": "x"}, "b": {"var": "x"}}, "body": "ok"}
-        input_value = {"a": 1, "b": 2}
+        input_value = {"a": "one", "b": "two"}
 
         ref = apply_projection(proj, input_value)
         mu = apply_mu(proj, input_value)
@@ -471,7 +472,7 @@ class TestNonLinearPatternParity:
     def test_nonlinear_agreement_returns_result(self):
         """Same var, same values -> match succeeds on both paths."""
         proj = {"pattern": {"a": {"var": "x"}, "b": {"var": "x"}}, "body": "ok"}
-        input_value = {"a": 1, "b": 1}
+        input_value = {"a": "one", "b": "one"}
 
         ref = apply_projection(proj, input_value)
         mu = apply_mu(proj, input_value)
@@ -485,7 +486,7 @@ class TestNonLinearPatternParity:
             "pattern": {"x": {"var": "v"}, "y": {"nested": {"var": "v"}}},
             "body": "matched",
         }
-        input_value = {"x": 1, "y": {"nested": 2}}
+        input_value = {"x": "one", "y": {"nested": "two"}}
 
         ref = apply_projection(proj, input_value)
         mu = apply_mu(proj, input_value)
@@ -501,7 +502,7 @@ class TestNonLinearPatternParity:
         """
         proj = {"pattern": {"var": "x"}, "body": {"var": "x"}}
 
-        for value in [42, "hello", None, True, {"a": 1}, [1, 2, 3]]:
+        for value in [sn(42), "hello", None, True, {"a": sn(1)}, ["one", "two", "three"]]:
             ref = apply_projection(proj, value)
             mu = apply_mu(proj, value)
             assert mu_equal(ref, value), f"apply_projection identity failed for {value}"

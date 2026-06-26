@@ -32,6 +32,7 @@ from rcx_pi.selfhost.kernel import reset_step_budget
 # Root directory of the project (symlink-safe — see tests/repo_root.py)
 from tests.repo_root import REPO_ROOT
 from tests.l4_gates.engine_evidence_cache import cached_js_request, cached_python_pipeline
+from tests.helpers.structural_numbers import sn
 ROOT = str(REPO_ROOT)
 
 
@@ -198,7 +199,7 @@ class TestBoot1SafetyInvariants:
         # SPEED_OK: bounded Boot1 safety invariant; tiny input/max_steps stays in fast gate.
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
-        result = _run_boot1(projs, {"test": 42}, max_steps=10)
+        result = _run_boot1(projs, {"test": "payload"}, max_steps=10)
         expected_keys = {"value", "closure_detected", "tau_step", "exhaustion_detected",
                         "operator_frozen", "frozen_set", "action", "stall"}
         assert set(result.keys()) == expected_keys
@@ -208,7 +209,7 @@ class TestBoot1SafetyInvariants:
         # SPEED_OK: bounded Boot1 safety invariant; tiny input/max_steps stays in fast gate.
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
-        result = _run_boot1(projs, {"test": 42}, max_steps=10)
+        result = _run_boot1(projs, {"test": "payload"}, max_steps=10)
         assert "_config" not in result
 
     def test_s7_no_tail_call_leak(self):
@@ -216,7 +217,7 @@ class TestBoot1SafetyInvariants:
         # SPEED_OK: bounded Boot1 safety invariant; tiny input/max_steps stays in fast gate.
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
-        result = _run_boot1(projs, {"test": 42}, max_steps=10)
+        result = _run_boot1(projs, {"test": "payload"}, max_steps=10)
         assert "_tail_call" not in result
 
     def test_tail_call_reserved(self):
@@ -231,7 +232,7 @@ class TestBoot1SafetyInvariants:
         """Domain data with _tail_call is rejected by validation."""
         with pytest.raises(ValueError, match="kernel-reserved"):
             validate_no_kernel_reserved_fields(
-                {"_tail_call": {"projections": [], "input": 1}},
+                {"_tail_call": {"projections": [], "input": "payload"}},
                 context="test_domain",
             )
 
@@ -240,7 +241,7 @@ class TestBoot1SafetyInvariants:
         # SPEED_OK: bounded Boot1 safety invariant; tiny input/max_steps stays in fast gate.
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
-        result = _run_boot1(projs, {"test": 42}, max_steps=10)
+        result = _run_boot1(projs, {"test": "payload"}, max_steps=10)
         for key in result:
             assert key not in KERNEL_RESERVED_FIELDS, (
                 f"Boot1 terminal result contains reserved field: {key}"
@@ -1445,16 +1446,16 @@ class TestTrampolineTailCallReservedFieldRejection:
         import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod  # ANTICHEAT_OK: monkeypatch target
 
         original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: monkeypatch for D-02 security test
-        call_count = [0]
+        injected = [False]
 
         def _injecting_step(projs, state):
-            call_count[0] += 1
-            if call_count[0] == 1:
+            if not injected[0] and isinstance(state, dict) and "_run_engine" in state:
+                injected[0] = True
                 # First engine step: produce _tail_call with reserved field
                 return {"_tail_call": {
                     "projections": [],
                     "input": {"_mode": "forged_state"},
-                    "max_steps": 5,
+                    "max_steps": sn(5),
                 }}
             return original_step(projs, state)
 
@@ -1471,15 +1472,15 @@ class TestTrampolineTailCallReservedFieldRejection:
         import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod  # ANTICHEAT_OK: monkeypatch target
 
         original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: monkeypatch for D-02 security test
-        call_count = [0]
+        injected = [False]
 
         def _injecting_step(projs, state):
-            call_count[0] += 1
-            if call_count[0] == 1:
+            if not injected[0] and isinstance(state, dict) and "_run_engine" in state:
+                injected[0] = True
                 return {"_tail_call": {
                     "projections": [],
                     "input": {"clean": "ok"},
-                    "max_steps": 5,
+                    "max_steps": sn(5),
                     "frozen": {"_stall": True},
                 }}
             return original_step(projs, state)
@@ -1776,7 +1777,7 @@ class TestReentryPayloadValidation:
 
     def test_valid_payload_passes(self):
         """Well-formed payload passes validation."""
-        _validate_reentry_payload({"projections": [], "input": {}, "max_steps": 10}, "test")
+        _validate_reentry_payload({"projections": [], "input": {}, "max_steps": sn(10)}, "test")
 
     def test_reserved_field_in_input_fails(self):
         """Reserved field in input triggers validation error."""

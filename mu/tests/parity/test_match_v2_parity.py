@@ -19,6 +19,19 @@ from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
 
+def _sn_positive(n: int):
+    if n == 1:
+        return {"xH": None}
+    half = _sn_positive(n // 2)
+    return {"xO" if n % 2 == 0 else "xI": half}
+
+
+def _sn(n: int):
+    if n < 0:
+        raise ValueError("test helper only supports non-negative structural numbers")
+    return {"_num": None if n == 0 else _sn_positive(n)}
+
+
 class TestMatchV2SeedStructure:
     """Verify v2 seed structure is compatible with v1."""
 
@@ -73,32 +86,32 @@ class TestMatchMuBehaviorStable:
 
     def test_literal_match(self):
         """Literals match as expected."""
-        assert mu_equal(match_mu(42, 42), {})
+        assert mu_equal(match_mu(_sn(42), _sn(42)), {})
 
     def test_literal_mismatch(self):
         """Literal mismatches return NO_MATCH."""
-        assert match_mu(42, 43) is NO_MATCH
+        assert match_mu(_sn(42), _sn(43)) is NO_MATCH
 
     def test_variable_binding(self):
         """Variables bind correctly."""
-        assert mu_equal(match_mu({"var": "x"}, 42), {"x": 42})
+        assert mu_equal(match_mu({"var": "x"}, _sn(42)), {"x": _sn(42)})
 
     def test_dict_match(self):
         """Dict patterns match correctly."""
-        result = match_mu({"a": {"var": "x"}, "b": 2}, {"a": 1, "b": 2})
-        assert mu_equal(result, {"x": 1})
+        result = match_mu({"a": {"var": "x"}, "b": _sn(2)}, {"a": _sn(1), "b": _sn(2)})
+        assert mu_equal(result, {"x": _sn(1)})
 
     def test_nested_dict_match(self):
         """Nested dict patterns match correctly."""
         result = match_mu(
             {"outer": {"inner": {"var": "v"}}},
-            {"outer": {"inner": 99}}
+            {"outer": {"inner": _sn(99)}}
         )
-        assert mu_equal(result, {"v": 99})
+        assert mu_equal(result, {"v": _sn(99)})
 
     def test_structure_mismatch(self):
         """Structure mismatches return NO_MATCH."""
-        assert match_mu({"a": 1}, 42) is NO_MATCH
+        assert match_mu({"a": _sn(1)}, _sn(42)) is NO_MATCH
 
     def test_string_match(self):
         """String patterns match correctly."""
@@ -112,9 +125,9 @@ class TestMatchMuBehaviorStable:
         """Multiple variables bind correctly."""
         result = match_mu(
             {"x": {"var": "a"}, "y": {"var": "b"}},
-            {"x": 1, "y": 2}
+            {"x": _sn(1), "y": _sn(2)}
         )
-        assert mu_equal(result, {"a": 1, "b": 2})
+        assert mu_equal(result, {"a": _sn(1), "b": _sn(2)})
 
     def test_null_match(self):
         """Null patterns match correctly."""

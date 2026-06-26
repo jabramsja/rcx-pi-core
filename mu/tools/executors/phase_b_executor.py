@@ -124,7 +124,10 @@ BRIDGE_REVIEW_POLL_SLEEP = 5.0
 BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
 DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
-MAX_PYTEST_GATE_TIMEOUT_S = 2400
+# Structural/L4 gates can legitimately exceed 40 minutes under the Phase B
+# final sweep. Keep a bounded cap while allowing the configured executor budget
+# to cover a full evidence-sized pytest run.
+MAX_PYTEST_GATE_TIMEOUT_S = 7200
 _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/host/",
     "mu/substrate/",
@@ -1577,6 +1580,11 @@ _STRUCTURAL_ARTIFACT_PREFIXES = (
     "tests/l4_gates/",
 )
 
+_EXPLICIT_WORKLOAD_TARGET_RE = re.compile(
+    r"^\s*workload_target:\s*`?([A-Za-z0-9_.-]+)`?",
+    re.MULTILINE,
+)
+
 
 def _select_non_gate_test_files(paths: list[str]) -> list[str]:
     return [
@@ -1587,6 +1595,9 @@ def _select_non_gate_test_files(paths: list[str]) -> list[str]:
 
 def _infer_structural_workload_target(changed_files: list[str], plan_content: str) -> str:
     """Infer the least-surprising L4 structural workload target from wave scope."""
+    explicit_target = _EXPLICIT_WORKLOAD_TARGET_RE.search(plan_content or "")
+    if explicit_target:
+        return explicit_target.group(1).strip("` .")
     scope_text = "\n".join(changed_files) + "\n" + (plan_content or "")
     if (
         "attempt_trace" in scope_text

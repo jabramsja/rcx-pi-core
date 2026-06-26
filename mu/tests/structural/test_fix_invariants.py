@@ -26,6 +26,10 @@ from rcx_pi.selfhost.step_mu import (
 from tests.repo_root import REPO_ROOT
 
 ROOT = REPO_ROOT
+ZERO = {"_num": None}
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
+THREE = {"_num": {"xI": {"xH": None}}}
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +48,7 @@ def fix_projections():
 # ---------------------------------------------------------------------------
 
 
-def run_fix(fix_projections, stalled_state, *, stall_hash=None, tau_step=1):
+def run_fix(fix_projections, stalled_state, *, stall_hash=None, tau_step=ONE):
     """Run fix seed to completion (loop until stall)."""
     if stall_hash is None:
         stall_hash = mu_hash(stalled_state)
@@ -54,7 +58,7 @@ def run_fix(fix_projections, stalled_state, *, stall_hash=None, tau_step=1):
             "stalled_state": stalled_state,
             "stall_hash": stall_hash,
             "tau_step": tau_step,
-            "engine_iteration": 0,
+            "engine_iteration": ZERO,
         }
     }
 
@@ -85,9 +89,14 @@ def _check_no_reserved_fields(value):
 # Test inputs
 # ---------------------------------------------------------------------------
 
-GRAPH_WITH_EDGES = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
-GRAPH_WITHOUT_EDGES = {"graph": {"vertices": [1, 2, 3]}}
-NON_GRAPH = {"value": 42, "status": "stalled"}
+GRAPH_WITH_EDGES = {
+    "graph": {
+        "vertices": [ONE, TWO],
+        "edges": [{"src": ONE, "dst": TWO}],
+    }
+}
+GRAPH_WITHOUT_EDGES = {"graph": {"vertices": [ONE, TWO, THREE]}}
+NON_GRAPH = {"value": ONE, "status": "stalled"}
 
 
 # ===========================================================================

@@ -949,7 +949,12 @@ class TestLoadExecutorConfig:
         assert config["backends"]["phase_b_executor"] == config["role_agents"]["implementer"]
         assert config["hybrid_recovery_enabled"] is True
 
-    def test_existing_config_loaded(self, tmp_path):
+    def test_existing_config_loaded(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", raising=False)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         config_dir.mkdir(parents=True)
         config_file = config_dir / "executor_config.json"
@@ -2845,6 +2850,15 @@ class TestMaintenanceTrackerMetadataPropagation:
             ],
             "Stage0 VM attempt_trace closes coverage reconstruction from host bundle order.",
         ) == "host_debt_reduction"
+
+    def test_structural_workload_target_preserves_explicit_plan_target(self):
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [
+                "mu/host/python/rcx_pi/selfhost/engine_pipeline.py",
+                "mu/host/js/engine/pipeline.js",
+            ],
+            "workload_target: rcx_engine_cycle\nengine_pipeline structuralization",
+        ) == "rcx_engine_cycle"
 
     def test_structural_workload_target_prioritizes_specific_targets_before_generic_coverage(self):
         assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
@@ -4985,6 +4999,34 @@ class TestFinalPytestGate:
         assert "tools/checks/enforce_l4_execution_contract.py --staged" not in note
         assert "tools/checks/enforce_l4_execution_contract.py --files" in note
         assert "reports/l4_wave_indicators/post-redteam-engine-state-scheduler-reduction-2026-04-30.json --wave-id" in note
+
+    def test_structural_tracker_note_preserves_explicit_packet_workload_target(self):
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id="stage4-loop-struct-2026-06-22",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/stage4-loop-struct-2026-06-22_2026-06-22.md",
+            plan_content=(
+                "Class: L4_STRUCTURAL\n"
+                "workload_target: rcx_engine_cycle\n"
+                "engine_pipeline structuralization\n"
+            ),
+            changed_files=[
+                "mu/host/python/rcx_pi/selfhost/engine_pipeline.py",
+                "mu/host/js/engine/pipeline.js",
+                "mu/tests/structural/test_rcx_engine_workload_contract.py",
+            ],
+            test_files=[
+                "mu/tests/structural/test_rcx_engine_workload_contract.py",
+            ],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/r.json",
+            bridge_rounds=15,
+            reentry=False,
+        )
+
+        assert "workload_target: rcx_engine_cycle" in note
+        assert "workload_target: host_debt_reduction" not in note
 
     def test_structural_tracker_note_l4_files_command_includes_indicator_artifact(self):
         wave_id = "n3-kernel-driver-mu-driver-boundary-design-2026-05-20"
@@ -12351,7 +12393,7 @@ class TestSdkReviewDepthContract:
             pb_mod._resolve_bridge_turn_timeout({"bridge_turn_timeouts": {"phase_b": -1}}, "phase_b", 300)  # ANTICHEAT_OK: testing config resolver
 
     def test_phase_b_pytest_gate_timeout_allows_pre_push_budget(self):
-        assert pb_mod.resolve_pytest_gate_timeout(18000) == 2400
+        assert pb_mod.resolve_pytest_gate_timeout(18000) == 7200
 
     def test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values(self):
         assert pb_mod.resolve_pytest_gate_timeout(0) == 300

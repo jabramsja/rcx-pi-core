@@ -122,6 +122,7 @@ const ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = new Set([
   '_current',
   '_frozen',
   '_mode',
+  '_num',
   '_operator_ids',
   '_phase',
   '_result',

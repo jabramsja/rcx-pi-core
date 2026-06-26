@@ -245,31 +245,65 @@ def _safe_mu_copy(value, reject_non_mu=False, context="Deep copy"):
         raise Stage0VMError(msg)
 
 
+_MATCHER_NUMERIC_CUTOVER_SOURCES = frozenset((
+    "match.v2.json",
+    "bootstrap_structural.v1.json",
+))
+
+
 # ---------------------------------------------------------------------------
 # Float scanner (iterative, depth-bounded)
 # ---------------------------------------------------------------------------
 
-def _check_no_floats(value):
+def _check_no_floats(
+        value, reject_numbers=False, depth_limit=MAX_TEMPLATE_DEPTH):
     """Validate literal values: Mu-domain only, no floats. Iterative + depth-bounded.
 
     Mu value domain: None, bool, int, str, dict, list. Float rejected in IR v1.
     Non-Mu types (tuple, set, bytes, custom objects, etc.) are rejected.
     """
-    stack = [(value, 0)]
+    stack = [(value, 0, False)]
+    active_containers = set()
+    finished_containers = set()
     while stack:
-        v, depth = stack.pop()
-        if depth > MAX_TEMPLATE_DEPTH:
+        v, depth, exiting = stack.pop()
+        if depth_limit is not None and depth > depth_limit:
             raise ValueError(
-                f"Literal value depth exceeded ({MAX_TEMPLATE_DEPTH})")
-        if isinstance(v, float):
+                f"Literal value depth exceeded ({depth_limit})")
+        if type(v) is float:
             raise ValueError(
                 f"Float values unsupported in Stage0 IR v1: {v!r}")
+        if reject_numbers and type(v) is int:
+            raise ValueError(
+                f"Host numeric values unsupported in matcher domain: {v!r}")
         if type(v) is dict:
+            v_id = id(v)
+            if exiting:
+                active_containers.discard(v_id)
+                finished_containers.add(v_id)
+                continue
+            if v_id in active_containers:
+                raise ValueError("Cyclic literal value unsupported")
+            if v_id in finished_containers:
+                continue
+            active_containers.add(v_id)
+            stack.append((v, depth, True))
             for child in v.values():
-                stack.append((child, depth + 1))
+                stack.append((child, depth + 1, False))
         elif type(v) is list:
+            v_id = id(v)
+            if exiting:
+                active_containers.discard(v_id)
+                finished_containers.add(v_id)
+                continue
+            if v_id in active_containers:
+                raise ValueError("Cyclic literal value unsupported")
+            if v_id in finished_containers:
+                continue
+            active_containers.add(v_id)
+            stack.append((v, depth, True))
             for child in v:
-                stack.append((child, depth + 1))
+                stack.append((child, depth + 1, False))
         elif v is not None and type(v) is not bool and type(v) is not int and type(v) is not str:
             raise ValueError(
                 f"Non-Mu value type in literal: {type(v).__name__}")
@@ -728,6 +762,9 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
     op_count = 0
     attempt_count = 0
     attempted_program_ids = []
+    matcher_numeric_cutover = (
+        bundle.get("source_seed") in _MATCHER_NUMERIC_CUTOVER_SOURCES
+    )
 
     for program_id in order:
         program = program_map[program_id]
@@ -785,6 +822,18 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
 
                 for k, allowed in optional_constraints.items():
                     if k in actual:
+                        if matcher_numeric_cutover:
+                            try:
+                                _check_no_floats(
+                                    val[k], reject_numbers=True,
+                                    depth_limit=None)
+                                for a in allowed:
+                                    _check_no_floats(
+                                        a, reject_numbers=True,
+                                        depth_limit=None)
+                            except ValueError:
+                                failed = True
+                                break
                         if not any(_safe_mu_deep_equal(val[k], a) for a in allowed):
                             failed = True
                             break
@@ -794,6 +843,18 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
             # ---- check_equal ----
             elif op == "check_equal":
                 val, ok = _resolve_path(input_root, op_spec["path"])
+                if matcher_numeric_cutover:
+                    try:
+                        if ok:
+                            _check_no_floats(
+                                val, reject_numbers=True,
+                                depth_limit=None)
+                        _check_no_floats(
+                            op_spec["value"], reject_numbers=True,
+                            depth_limit=None)
+                    except ValueError:
+                        failed = True
+                        break
                 if not ok or not _safe_mu_deep_equal(val, op_spec["value"]):
                     failed = True
                     break
@@ -809,6 +870,17 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
                     raise Stage0VMError(
                         f"check_captured_equal: '{cname}' not yet captured "
                         f"in program '{program_id}'")
+                if matcher_numeric_cutover:
+                    try:
+                        _check_no_floats(
+                            val, reject_numbers=True,
+                            depth_limit=None)
+                        _check_no_floats(
+                            captures[cname], reject_numbers=True,
+                            depth_limit=None)
+                    except ValueError:
+                        failed = True
+                        break
                 if not _safe_mu_deep_equal(val, captures[cname]):
                     failed = True
                     break
@@ -824,8 +896,20 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
                     raise Stage0VMError(
                         f"capture_path: duplicate capture '{name}' "
                         f"in program '{program_id}'")
-                captures[name] = _safe_mu_copy(
-                    val, reject_non_mu=True, context="capture_path")
+                if matcher_numeric_cutover:
+                    try:
+                        _check_no_floats(
+                            val, reject_numbers=True,
+                            depth_limit=None)
+                        captures[name] = _safe_mu_copy(
+                            val, reject_non_mu=True,
+                            context="capture_path")
+                    except (Stage0VMError, ValueError):
+                        failed = True
+                        break
+                else:
+                    captures[name] = _safe_mu_copy(
+                        val, reject_non_mu=True, context="capture_path")
 
             # ---- write_path ----
             elif op == "write_path":

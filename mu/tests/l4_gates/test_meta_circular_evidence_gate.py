@@ -42,6 +42,7 @@ from tests.repo_root import REPO_ROOT
 
 JS_RUNTIME = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
 SEED_DIR = REPO_ROOT / "mu" / "substrate"
+ONE = {"_num": {"xH": None}}
 
 
 # ---------------------------------------------------------------------------
@@ -139,9 +140,9 @@ class TestStepCountEvidence:
     def test_var_bind_step_count(self):
         """Variable binding: step count proves structural execution."""
         proj = {"id": "var", "pattern": {"var": "a"}, "body": {"var": "a"}}
-        meta = step_kernel_mu([proj], 42, return_meta=True)
+        meta = step_kernel_mu([proj], ONE, return_meta=True)
         assert meta["stall"] is False
-        assert meta["output"] == 42
+        assert meta["output"] == ONE
         assert meta["steps_used"] == 11, (
             f"Var-bind step count changed: got {meta['steps_used']}, "
             f"expected exactly 11 (structural execution lock)"
@@ -427,12 +428,12 @@ class TestCrossSubstrateParity:
         proj = {"id": "var", "pattern": {"var": "a"}, "body": {"var": "a"}}
 
         # Python
-        py_meta = step_kernel_mu([proj], 42, return_meta=True)
+        py_meta = step_kernel_mu([proj], ONE, return_meta=True)
 
         # JS
         js_resp = _run_js_api({
             "action": "step_kernel_meta",
-            "input": 42,
+            "input": ONE,
             "projections": [proj],
         })
         assert js_resp["success"], f"JS step_kernel_meta failed: {js_resp.get('error')}"
@@ -472,10 +473,10 @@ class TestDictPatternMetaCircularExecution:
             "pattern": {"k": {"var": "v"}},
             "body": {"out": {"var": "v"}},
         }
-        dict_meta = step_kernel_mu([dict_proj], {"k": 99}, return_meta=True)
+        dict_meta = step_kernel_mu([dict_proj], {"k": ONE}, return_meta=True)
 
         assert dict_meta["stall"] is False
-        assert dict_meta["output"] == {"out": 99}
+        assert dict_meta["output"] == {"out": ONE}
         assert dict_meta["steps_used"] > lit_meta["steps_used"], (
             f"Dict pattern ({dict_meta['steps_used']} steps) should take more "
             f"steps than literal ({lit_meta['steps_used']} steps) — "
@@ -489,7 +490,7 @@ class TestDictPatternMetaCircularExecution:
             "pattern": {"k": {"var": "v"}},
             "body": {"out": {"var": "v"}},
         }
-        meta = step_kernel_mu([proj], {"k": 99}, return_meta=True)
+        meta = step_kernel_mu([proj], {"k": ONE}, return_meta=True)
         # Dict matching: kernel.wrap -> kernel.try -> match.wrap ->
         # match.dict.descend (head/tail) -> match.var/match.equal (keys+values) ->
         # match.sibling -> ... -> match.done -> kernel.match_success ->

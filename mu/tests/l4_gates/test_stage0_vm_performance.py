@@ -74,12 +74,12 @@ MATCH_DIAGNOSTIC_VECTORS = [
     }),
     ("match.var", {
         "mode": "match", "pattern_focus": {"var": "x"},
-        "value_focus": 42, "bindings": None,
+        "value_focus": "forty_two", "bindings": None,
         "stack": None, "_match_ctx": _match_ctx(),
     }),
     ("match.done", {
         "mode": "match", "pattern_focus": None, "value_focus": None,
-        "bindings": {"name": "x", "value": 42, "rest": None},
+        "bindings": {"name": "x", "value": "forty_two", "rest": None},
         "stack": None, "_match_ctx": _match_ctx(),
     }),
     ("match.fail", {

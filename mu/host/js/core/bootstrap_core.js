@@ -131,8 +131,9 @@ function match(pattern, input, _depth = 0, _validated = false, _budget = _NO_BUD
       const sub = match(pattern[i], input[i], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [k, v] of Object.entries(sub)) {
-        // Non-linear conflict: use muHashCached (NOT muHashControlCached —
-        // control hash canonicalizes 0.0→0, breaking int/float distinction).
+        // Non-linear conflict: use content hash, not control hash. Conflict
+        // detection compares structural data identity; numeric leaves on the
+        // Stage 4 path are StructuralNumbers numerals, not host numbers.
         if (Object.hasOwn(bindings, k) && muHashCached(bindings[k]) !== muHashCached(v)) {
           return NO_MATCH;
         }
@@ -167,8 +168,9 @@ function match(pattern, input, _depth = 0, _validated = false, _budget = _NO_BUD
       const sub = match(pattern[k], input[k], _depth + 1);
       if (sub === NO_MATCH) return NO_MATCH;
       for (const [bk, bv] of Object.entries(sub)) {
-        // Non-linear conflict: use muHashCached (NOT muHashControlCached —
-        // control hash canonicalizes 0.0→0, breaking int/float distinction).
+        // Non-linear conflict: use content hash, not control hash. Conflict
+        // detection compares structural data identity; numeric leaves on the
+        // Stage 4 path are StructuralNumbers numerals, not host numbers.
         if (Object.hasOwn(bindings, bk) && muHashCached(bindings[bk]) !== muHashCached(bv)) {
           return NO_MATCH;
         }
@@ -453,32 +455,38 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
     const depth = frame.depth;
     if (depth > MAX_DEPTH) return NO_MATCH;
 
+    // Stage 4 StructuralNumbers cutover: host numeric leaves are no longer
+    // matcher-domain data. A stray number fails closed before it can bind
+    // through a variable site or match through content-hash equality.
+    if (typeof pattern === 'number' || typeof input === 'number') return NO_MATCH;
+
     // Variable site
     if (isVar(pattern)) {
       const name = pattern.var;
       if (!name) return NO_MATCH;  // F-25: parity with Python _stage0_match
-      if (Object.hasOwn(current, name)) {
-        // Non-linear conflict: use muHashCached (NOT muHashControlCached —
-        // control hash canonicalizes 0.0→0, breaking int/float distinction).
-        if (muHashCached(current[name]) !== muHashCached(input)) return NO_MATCH;
-      } else {
-        current = Object.assign(Object.create(null), current, { [name]: input });
+      const seen = new WeakSet(), pending = [[input, 0]]; while (pending.length) {  // AST_OK_JS: path-local cycle detection for fail-closed Stage 4 matcher scan
+        const [candidate, exit] = pending.pop(); if (typeof candidate === 'number') return NO_MATCH;
+        if (candidate !== null && typeof candidate === 'object') { if (exit) { seen.delete(candidate); continue; } if (seen.has(candidate)) return NO_MATCH;
+          seen.add(candidate); pending.push([candidate, 1]); for (const v of (Array.isArray(candidate) ? candidate : Object.values(candidate))) pending.push([v, 0]); }
       }
+      if (Object.hasOwn(current, name)) {
+        // Non-linear conflict: use content hash, not control hash. Conflict
+        // detection compares structural data identity; numeric leaves on the
+        // Stage 4 path are StructuralNumbers numerals, not host numbers.
+        if (muHashCached(current[name]) !== muHashCached(input)) return NO_MATCH;
+      } else current = Object.assign(Object.create(null), current, { [name]: input });
       continue;
     }
 
     // Null
-    if (pattern === null) {
-      if (input !== null) return NO_MATCH;
-      continue;
-    }
+    if (pattern === null) { if (input !== null) return NO_MATCH; continue; }
 
-    // Primitives: content-addressed equality collapses the scalar dispatch
-    // into one muHashCached comparison (parity with Python _stage0_match).
+    // Non-numeric primitives: content-addressed equality collapses the
+    // remaining bool/string scalar dispatch into one muHashCached comparison
+    // (parity with Python _stage0_match).
     // The isValidMu validity guard keeps invalid/non-Mu values (raw arrays,
     // undefined) from reaching muHashCached (which throws on non-valid-Mu) —
-    // they fall through to NO_MATCH. muHashCached preserves ±0 sign, so
-    // +0 vs -0 is NO_MATCH (authorized content-addressed delta, Python parity).
+    // they fall through to NO_MATCH.
     if (typeof pattern !== 'object') {
       if (isValidMu(pattern) && isValidMu(input) && muHashCached(pattern) === muHashCached(input)) continue;
       return NO_MATCH;
