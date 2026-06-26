@@ -763,6 +763,125 @@ def _set_bridge_cmd_max_turns(cmd: list[Any], max_turns: str) -> bool:
     return False
 
 
+def _bridge_cmd_executable_name(cmd: list[Any]) -> str:
+    if not cmd:
+        return ""
+    token = str(cmd[0]).strip()
+    return Path(token).name
+
+
+def _looks_like_codex_exec_cmd(cmd: list[Any]) -> bool:
+    return (
+        len(cmd) >= 2
+        and _bridge_cmd_executable_name(cmd) == "codex"
+        and cmd[1] == "exec"
+    )
+
+
+def _looks_like_claude_cmd(cmd: list[Any]) -> bool:
+    return _bridge_cmd_executable_name(cmd) == "claude"
+
+
+def _ensure_bridge_cmd_max_turns(
+    cmd: list[Any], max_turns: int | str
+) -> tuple[bool, str | None]:
+    """Ensure *cmd* carries a supported max-turn override.
+
+    Returns ``(changed, error)``. Existing ``--max-turns`` tokens are updated
+    in place, except for Codex ``exec`` where no verified max-turn command or
+    config key exists. Claude commands without the token receive the CLI flag.
+    """
+    max_turns_text = str(max_turns)
+    if _looks_like_codex_exec_cmd(cmd):
+        return (
+            False,
+            "codex exec has no verified max-turn override; refusing to append "
+            "unsupported --max-turns or -c max_turns=<n>",
+        )
+    for index, token in enumerate(cmd):
+        if token != "--max-turns":
+            continue
+        if index == len(cmd) - 1:
+            cmd.append(max_turns_text)
+            return True, None
+        if str(cmd[index + 1]) == max_turns_text:
+            return False, None
+        cmd[index + 1] = max_turns_text
+        return True, None
+    if not _looks_like_claude_cmd(cmd):
+        return False, "agent command has no supported --max-turns position"
+    cmd.extend(["--max-turns", max_turns_text])
+    return True, None
+
+
+def apply_bridge_config_max_turns_override(
+    repo_root: Path,
+    max_turns: int,
+    agent_names: list[str] | tuple[str, ...] | set[str] | frozenset[str],
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Apply a per-wave max-turn override to selected live bridge adapters.
+
+    This intentionally edits only the active bus-local ``bridge_config.json``.
+    It does not mutate committed executor defaults or discover unrelated buses.
+    """
+    config_path = bridge_config_path(repo_root, bus_dir)
+    if not config_path.exists():
+        return None
+    try:
+        loaded = json.loads(config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    agents = loaded.get("agents")
+    if not isinstance(agents, dict):
+        return None
+
+    candidate = copy.deepcopy(loaded)
+    candidate_agents = candidate.get("agents")
+    if not isinstance(candidate_agents, dict):
+        return None
+
+    changed = False
+    applied_agents: list[str] = []
+    missing_agents: list[str] = []
+    unsupported_agents: dict[str, str] = {}
+    for name in sorted({str(agent).strip() for agent in agent_names if str(agent).strip()}):
+        agent = candidate_agents.get(name)
+        cmd = agent.get("cmd") if isinstance(agent, dict) else None
+        if not isinstance(cmd, list):
+            missing_agents.append(name)
+            continue
+        command_changed, error = _ensure_bridge_cmd_max_turns(cmd, max_turns)
+        if error is not None:
+            unsupported_agents[name] = error
+            continue
+        if command_changed:
+            changed = True
+        applied_agents.append(name)
+
+    if missing_agents or unsupported_agents:
+        return {
+            "path": str(config_path),
+            "max_turns": max_turns,
+            "agents": [],
+            "missing_agents": missing_agents,
+            "unsupported_agents": unsupported_agents,
+            "changed": False,
+        }
+    if changed:
+        _atomic_write_text(config_path, json.dumps(candidate, indent=2) + "\n")
+    return {
+        "path": str(config_path),
+        "max_turns": max_turns,
+        "agents": applied_agents,
+        "missing_agents": missing_agents,
+        "unsupported_agents": unsupported_agents,
+        "changed": changed,
+    }
+
+
 def _atomic_write_text(path: Path, text: str) -> None:
     """Write *text* to *path* atomically so readers never observe a torn write.
 

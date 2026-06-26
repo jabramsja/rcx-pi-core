@@ -123,6 +123,13 @@ def _artifact_counts(repo, wave_id):
     return len(packets), len(notes), len(candidates)
 
 
+def _write_bridge_config(repo, agents):
+    path = ec.bridge_config_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"agents": agents}, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 # --------------------------------------------------------------------------- #
 # Sequential setup                                                            #
 # --------------------------------------------------------------------------- #
@@ -688,6 +695,244 @@ def test_setup_bridge_config_noop_when_no_seed_source_on_namespaced_bus(wave_rep
     assert lw.setup_bridge_config(wave_repo, bus_dir=".agent_bus-x7") is None
 
 
+def test_launch_max_turns_updates_existing_bridge_token(wave_repo):
+    bridge_path = _write_bridge_config(
+        wave_repo,
+        {
+            "claude": {
+                "mode": "live",
+                "display_name": "Claude",
+                "cmd": ["claude", "--print", "--max-turns", "100"],
+                "prompt_via_stdin": True,
+                "timeout_s": 900,
+                "env": {},
+            }
+        },
+    )
+
+    result = lw.run_wave_setup(
+        wave_repo,
+        make_config(implementer_agent="claude", reviewer_agent="claude", max_turns=42),
+    )
+
+    bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
+    cmd = bridge["agents"]["claude"]["cmd"]
+    assert cmd.count("--max-turns") == 1
+    assert cmd[cmd.index("--max-turns") + 1] == "42"
+    assert result.launch["launch_overrides"] == {
+        "implementer_agent": "claude",
+        "reviewer_agent": "claude",
+        "max_turns": 42,
+    }
+    assert result.launch["bridge_max_turns_override"]["agents"] == ["claude"]
+
+
+def test_launch_max_turns_appends_to_claude_bridge_command_without_token(wave_repo):
+    bridge_path = _write_bridge_config(
+        wave_repo,
+        {
+            "claude": {
+                "mode": "live",
+                "display_name": "Claude",
+                "cmd": ["claude", "--print", "--model", "claude-opus-4-8"],
+                "prompt_via_stdin": True,
+                "timeout_s": 900,
+                "env": {},
+            }
+        },
+    )
+
+    result = lw.run_wave_setup(
+        wave_repo,
+        make_config(
+            implementer_agent="claude",
+            reviewer_agent="claude",
+            max_turns=37,
+        ),
+    )
+
+    bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
+    cmd = bridge["agents"]["claude"]["cmd"]
+    assert cmd[-2:] == ["--max-turns", "37"]
+    assert cmd.count("--max-turns") == 1
+    assert result.launch["launch_overrides"] == {
+        "implementer_agent": "claude",
+        "reviewer_agent": "claude",
+        "max_turns": 37,
+    }
+    assert result.launch["bridge_max_turns_override"]["max_turns"] == 37
+    assert result.launch["bridge_max_turns_override"]["agents"] == ["claude"]
+
+
+def test_launch_max_turns_rejects_codex_exec_without_verified_override(wave_repo):
+    bridge_path = _write_bridge_config(
+        wave_repo,
+        {
+            "codex": {
+                "mode": "live",
+                "display_name": "Codex",
+                "cmd": [
+                    "codex",
+                    "exec",
+                    "-",
+                    "--json",
+                    "-m",
+                    "gpt-5.5",
+                    "-c",
+                    'model_reasoning_effort="xhigh"',
+                    "--sandbox",
+                    "danger-full-access",
+                ],
+                "prompt_via_stdin": True,
+                "timeout_s": 1200,
+                "env": {},
+            }
+        },
+    )
+
+    config = make_config(
+        implementer_agent="codex",
+        reviewer_agent="codex",
+        pager_route="codex",
+        max_turns=37,
+    )
+
+    with pytest.raises(lw.LaunchWaveError) as exc:
+        lw.run_wave_setup(wave_repo, config)
+
+    bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
+    cmd = bridge["agents"]["codex"]["cmd"]
+    assert "--max-turns" not in cmd
+    assert "max_turns=37" not in cmd
+    assert "codex" in str(exc.value)
+    assert "verified max-turn override" in str(exc.value)
+    assert "support a max-turn override" in str(exc.value)
+
+
+def test_launch_max_turns_rejects_codex_exec_with_unsupported_token(wave_repo):
+    bridge_path = _write_bridge_config(
+        wave_repo,
+        {
+            "codex": {
+                "mode": "live",
+                "display_name": "Codex",
+                "cmd": ["codex", "exec", "-", "--max-turns", "100"],
+                "prompt_via_stdin": True,
+                "timeout_s": 1200,
+                "env": {},
+            }
+        },
+    )
+
+    with pytest.raises(lw.LaunchWaveError) as exc:
+        lw.run_wave_setup(
+            wave_repo,
+            make_config(
+                implementer_agent="codex",
+                reviewer_agent="codex",
+                pager_route="codex",
+                max_turns=37,
+            ),
+        )
+
+    bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
+    assert bridge["agents"]["codex"]["cmd"] == [
+        "codex",
+        "exec",
+        "-",
+        "--max-turns",
+        "100",
+    ]
+    assert "codex" in str(exc.value)
+    assert "--max-turns" in str(exc.value)
+    assert "support a max-turn override" in str(exc.value)
+
+
+def test_launch_max_turns_rejects_mixed_agents_without_partial_mutation(wave_repo):
+    bridge_path = _write_bridge_config(
+        wave_repo,
+        {
+            "claude": {
+                "mode": "live",
+                "display_name": "Claude",
+                "cmd": ["claude", "--print", "--max-turns", "100"],
+                "prompt_via_stdin": True,
+                "timeout_s": 900,
+                "env": {},
+            },
+            "custom": {
+                "mode": "live",
+                "display_name": "Custom",
+                "cmd": ["python3", "custom_agent.py"],
+                "prompt_via_stdin": True,
+                "timeout_s": 900,
+                "env": {},
+            },
+        },
+    )
+
+    config_path = wave_repo / "mu" / "tools" / "executors" / "executor_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "role_agents": {"implementer": "claude", "reviewer": "custom"},
+                "bridge_agent_defaults": {"claude": {}, "custom": {}},
+                "pipeline_agent_pager": {"enabled": False, "route": "notify-only"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(lw.LaunchWaveError) as exc:
+        lw.run_wave_setup(
+            wave_repo,
+            make_config(
+                implementer_agent="claude",
+                reviewer_agent="custom",
+                max_turns=42,
+            ),
+        )
+
+    bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
+    assert bridge["agents"]["claude"]["cmd"] == [
+        "claude",
+        "--print",
+        "--max-turns",
+        "100",
+    ]
+    assert bridge["agents"]["custom"]["cmd"] == ["python3", "custom_agent.py"]
+    assert "custom" in str(exc.value)
+    assert "support a max-turn override" in str(exc.value)
+
+
+def test_launch_max_turns_does_not_mutate_executor_config(wave_repo):
+    config_path = wave_repo / "mu" / "tools" / "executors" / "executor_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps({"role_agents": {"implementer": "claude", "reviewer": "claude"}}),
+        encoding="utf-8",
+    )
+    before = config_path.read_text(encoding="utf-8")
+    _write_bridge_config(
+        wave_repo,
+        {
+            "claude": {
+                "mode": "live",
+                "display_name": "Claude",
+                "cmd": ["claude", "--print", "--max-turns", "100"],
+                "prompt_via_stdin": True,
+                "timeout_s": 900,
+                "env": {},
+            }
+        },
+    )
+
+    lw.run_wave_setup(wave_repo, make_config(max_turns=55))
+
+    assert config_path.read_text(encoding="utf-8") == before
+
+
 # --------------------------------------------------------------------------- #
 # Optional dispatcher launch                                                  #
 # --------------------------------------------------------------------------- #
@@ -796,6 +1041,16 @@ def test_config_accepts_valid_role_and_pager_pins(wave_repo):
         pager_route="codex",
     )
     assert config.validate(wave_repo) == []
+
+
+def test_config_accepts_valid_max_turns_override(wave_repo):
+    assert make_config(max_turns=100).validate(wave_repo) == []
+
+
+@pytest.mark.parametrize("bad_max_turns", [0, -1, 1.5, "50", True, 1001])
+def test_config_rejects_invalid_max_turns_override(wave_repo, bad_max_turns):
+    errors = make_config(max_turns=bad_max_turns).validate(wave_repo)
+    assert any("max_turns" in error for error in errors)
 
 
 def test_config_validation_uses_configured_bridge_agent_defaults(wave_repo):

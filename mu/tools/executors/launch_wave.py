@@ -16,7 +16,9 @@ Sequential chain (seven steps, in order):
   3. routing record    -- ``executor_common.build_and_write_routing_record`` writes
                           the post-merge routing record (single next-candidate).
   4. bridge_config sync-- ``executor_common.sync_bridge_config_agents_from_defaults``
-                          converges the live bridge_config with committed defaults.
+                          converges the live bridge_config with committed defaults,
+                          then applies this wave's optional max_turns override to
+                          the selected live bridge adapter commands.
   5. fail-closed
      precondition      -- the dispatcher's own pre-Phase-B gate
                           (``executor_dispatch._tasks_tracker_entry_exists``): the
@@ -128,6 +130,7 @@ _DISPATCHER_OVERRIDE_ENV_KEYS = frozenset(
 _DISPATCHER_OVERRIDE_TRIGGER_ENV_KEYS = (
     _DISPATCHER_OVERRIDE_ENV_KEYS - {_ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV}
 )
+_MAX_SAFE_MAX_TURNS = 1000
 
 
 def _agent_pin_valid_names(repo_root: Path | None) -> set[str]:
@@ -213,6 +216,7 @@ class WaveConfig:
     implementer_agent: str = ""
     reviewer_agent: str = ""
     pager_route: str = ""
+    max_turns: int | None = None
 
     # Packet body
     scope_summary: str = ""
@@ -344,6 +348,16 @@ class WaveConfig:
                 "pager_route must be one of "
                 f"{sorted(_ALLOWED_PAGER_ROUTES)!r} (got {self.pager_route!r})"
             )
+        if self.max_turns is not None:
+            if isinstance(self.max_turns, bool) or not isinstance(self.max_turns, int):
+                errors.append("max_turns must be an integer")
+            elif self.max_turns <= 0:
+                errors.append("max_turns must be positive")
+            elif self.max_turns > _MAX_SAFE_MAX_TURNS:
+                errors.append(
+                    f"max_turns must be <= {_MAX_SAFE_MAX_TURNS} "
+                    f"(got {self.max_turns!r})"
+                )
         return errors
 
 
@@ -675,6 +689,58 @@ def setup_bridge_config(
     return synced
 
 
+def _max_turns_target_agents(repo_root: Path, config: WaveConfig) -> list[str]:
+    executor_config = _ec.load_executor_config(repo_root)
+    implementer = config.implementer_agent or _ec.resolve_role_agent(
+        executor_config,
+        "implementer",
+        raw_overrides=executor_config,
+        use_env_overrides=False,
+    )
+    reviewer = config.reviewer_agent or _ec.resolve_role_agent(
+        executor_config,
+        "reviewer",
+        raw_overrides=executor_config,
+        use_env_overrides=False,
+    )
+    return sorted({agent for agent in (implementer, reviewer) if agent})
+
+
+def setup_bridge_max_turns_override(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Apply this wave's max-turn override to the selected live bridge adapters."""
+    if config.max_turns is None:
+        return None
+    result = _ec.apply_bridge_config_max_turns_override(
+        repo_root,
+        config.max_turns,
+        _max_turns_target_agents(repo_root, config),
+        bus_dir,
+    )
+    if result is None:
+        raise LaunchWaveError(
+            "max_turns was requested but no readable bridge_config.json exists "
+            "for the launched wave bus"
+        )
+    missing = result.get("missing_agents") or []
+    if missing:
+        raise LaunchWaveError(
+            "max_turns was requested but bridge_config has no command for "
+            f"selected agent(s): {missing!r}"
+        )
+    unsupported = result.get("unsupported_agents") or {}
+    if unsupported:
+        raise LaunchWaveError(
+            "max_turns was requested but selected bridge command(s) do not "
+            f"support a max-turn override: {unsupported!r}"
+        )
+    return result
+
+
 def verify_fail_closed_precondition(
     repo_root: Path,
     config: WaveConfig,
@@ -771,6 +837,26 @@ def dispatcher_environment_overrides(config: WaveConfig) -> dict[str, str]:
     return overrides
 
 
+def launch_metadata(config: WaveConfig) -> dict[str, Any]:
+    """Return non-secret operator metadata for launch-time overrides."""
+    metadata: dict[str, Any] = {}
+    env_overrides = dispatcher_environment_overrides(config)
+    if env_overrides:
+        metadata["environment_overrides"] = dict(env_overrides)
+    launch_overrides: dict[str, Any] = {}
+    if config.implementer_agent:
+        launch_overrides["implementer_agent"] = config.implementer_agent
+    if config.reviewer_agent:
+        launch_overrides["reviewer_agent"] = config.reviewer_agent
+    if config.pager_route:
+        launch_overrides["pager_route"] = config.pager_route
+    if config.max_turns is not None:
+        launch_overrides["max_turns"] = config.max_turns
+    if launch_overrides:
+        metadata["launch_overrides"] = launch_overrides
+    return metadata
+
+
 def dispatcher_child_environment(repo_root: Path, config: WaveConfig) -> dict[str, str] | None:
     """Return a sanitized child env when launch-owned override keys matter.
 
@@ -818,12 +904,7 @@ def maybe_launch_dispatcher(
     failure converges -- see the bounded re-run recovery contract.)
     """
     cmd = build_dispatch_command(repo_root, config, bus_dir=bus_dir)
-    env_overrides = dispatcher_environment_overrides(config)
-    metadata = (
-        {"environment_overrides": dict(env_overrides)}
-        if env_overrides
-        else {}
-    )
+    metadata = launch_metadata(config)
     if not launch:
         return {"launched": False, "command": cmd, **metadata}
     runner_kwargs: dict[str, Any] = {"cwd": str(repo_root)}
@@ -931,6 +1012,9 @@ def run_wave_setup(
     setup_tracker_note(repo_root, config)
     setup_routing_record(repo_root, config, bus_dir=bus_dir)
     bridge_config_path = setup_bridge_config(repo_root, bus_dir=bus_dir)
+    max_turns_result = setup_bridge_max_turns_override(
+        repo_root, config, bus_dir=bus_dir
+    )
 
     # Steps 5-6: verification (persist nothing; fail-closed).
     verify_fail_closed_precondition(repo_root, config)
@@ -940,6 +1024,8 @@ def run_wave_setup(
     launch_result = maybe_launch_dispatcher(
         repo_root, config, launch=launch, runner=runner, bus_dir=bus_dir
     )
+    if max_turns_result is not None:
+        launch_result["bridge_max_turns_override"] = max_turns_result
 
     routing_path = _ec.routing_record_path(repo_root, bus_dir)
     return WaveSetupResult(

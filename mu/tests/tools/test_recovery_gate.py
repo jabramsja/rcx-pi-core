@@ -17323,6 +17323,59 @@ _STEP14_INNER_PAYLOAD = {
 }
 
 
+class TestClassifyEngineDisciplineAssertSet:
+    def test_engine_discipline_assert_set_is_test_failure(self):
+        result = {
+            "status": "failed",
+            "step": "phase_b",
+            "stderr": (
+                "mu/tests/structural/test_engine_pipeline_discipline.py:996: "
+                "AssertionError: assert set(result.keys()) == engine_keys"
+            ),
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.TEST_FAILURE
+
+    def test_pr_conflict_signal_still_wins_over_assert_set_text(self):
+        result = {
+            "status": "error",
+            "step": "ensure_review_clear_and_merge",
+            "stdout": (
+                "mergeStateStatus=DIRTY for PR #1139\n"
+                "mu/tests/structural/test_engine_pipeline_discipline.py:996: "
+                "AssertionError: assert set(result.keys()) == engine_keys"
+            ),
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.PR_CONFLICTING
+
+    def test_l4_contract_signal_still_wins_over_assert_set_text(self):
+        result = {
+            "status": "failed",
+            "step": "pre_push",
+            "stderr": (
+                "L4 execution contract violation: use FOUNDER_OVERRIDE\n"
+                "mu/tests/structural/test_engine_pipeline_discipline.py:996: "
+                "AssertionError: assert set(result.keys()) == engine_keys"
+            ),
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.L4_CONTRACT_VIOLATION
+
+    def test_bridge_subprocess_assert_set_is_agent_review_crash(self):
+        result = {
+            "status": "failed",
+            "step": "bridge_subprocess",
+            "stderr": (
+                "Bridge subprocess failed in round 1 (exit=1). "
+                "mu/tests/structural/test_engine_pipeline_discipline.py:996: "
+                "AssertionError: assert set(result.keys()) == engine_keys"
+            ),
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.AGENT_REVIEW_CRASH
+
+
 class TestClassifyPrConflicting:
     """Work Item E.1: classifier hits for all 3 signatures (4 sub-shapes)."""
 
