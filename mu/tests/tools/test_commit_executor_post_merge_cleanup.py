@@ -565,7 +565,7 @@ def test_post_merge_package_refresh_falls_back_to_simple_program_queue_item(tmp_
     assert package["next_candidates"] == [candidate]
     assert candidate["candidate"] == "recursive-ordinals-as-structure"
     assert candidate["bounded"] is True
-    assert candidate["tracked_packet"] == ""
+    assert candidate["tracked_packet"] is None
     assert "launch_wave.py" in candidate["request_for_claude"]
     assert "executor_dispatch.py" in candidate["request_for_claude"]
     assert "commit_executor.py" in candidate["request_for_claude"]

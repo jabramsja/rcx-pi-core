@@ -79,15 +79,12 @@ FOUNDER_OVERRIDE:program-queue-postmerge-selector-truth-2026-06-26
 - Refresh wave: `program-queue-postmerge-selector-truth-2026-06-26`
 - Active packet: `reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_2026-06-26.md`
 - Indicator artifact: `reports/l4_wave_indicators/program-queue-postmerge-selector-truth-2026-06-26.json`
-- Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
+- Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe the current four-file staged scope.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
 - Authorized staged files:
-  - `STATUS.md`
   - `TASKS.md`
   - `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`
-  - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_2026-06-26.md`
-  - `reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_wave_config.json`
   - `reports/l4_wave_indicators/program-queue-postmerge-selector-truth-2026-06-26.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
 
@@ -113,18 +110,15 @@ FOUNDER_OVERRIDE:program-queue-postmerge-selector-truth-2026-06-26
 - Refresh wave: `program-queue-postmerge-selector-truth-2026-06-26`
 - Active packet: `reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_2026-06-26.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `20d8d9b3397388c2a2bf24146a7b5c786538f4ee106384cbcbb191aea930484c`
+- Tracker note sha256: `9893c614e69b80b021ff9a7a351d70b3f56eae6d767e79bba4dabd3164f0dc7d`
 - Indicator artifact: `reports/l4_wave_indicators/program-queue-postmerge-selector-truth-2026-06-26.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_post_merge_cleanup.py`.
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_2026-06-26.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/program-queue-postmerge-selector-truth-2026-06-26.json`
 - Current staged files:
-  - `STATUS.md`
   - `TASKS.md`
   - `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`
-  - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_2026-06-26.md`
-  - `reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_wave_config.json`
   - `reports/l4_wave_indicators/program-queue-postmerge-selector-truth-2026-06-26.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
