@@ -9409,7 +9409,16 @@ esac
         codex_home = tmp_path / "codex-home"
         state_dir = codex_home / "state"
         state_dir.mkdir(parents=True)
-        state_path = state_dir / "rcx_autoping_thread-123.json"
+        identity = "|".join(
+            (
+                str(repo_root.expanduser().resolve()),
+                ".agent_bus",
+                "rcx-pipeline",
+                "rcx-pipeline:1.3",
+            )
+        )
+        state_slug = f"thread-123__{re.sub(r'[^A-Za-z0-9_.-]+', '_', identity)}"
+        state_path = state_dir / f"rcx_autoping_{state_slug}.json"
         unrelated = subprocess.Popen(["sleep", "60"])
         tmux_log = tmp_path / "tmux.log"
         tmux_bin = tmp_path / "tmux-bin"
@@ -9488,6 +9497,86 @@ esac
                 unrelated.terminate()
                 unrelated.wait(timeout=5)
             if "existing" in locals() and existing.poll() is None:
+                existing.terminate()
+                existing.wait(timeout=5)
+
+    def test_ensure_codex_autoping_stops_legacy_thread_state_watcher(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        launcher_dir = repo_root / "tools" / "session"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        launcher = launcher_dir / "ensure_codex_autoping.sh"
+        launcher.write_text(
+            (_REPO_ROOT / "mu" / "tools" / "session" / "ensure_codex_autoping.sh").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | 0o111)
+        watch_script = launcher_dir / "codex_autoping_watch.py"
+        watch_script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
+        window_script = launcher_dir / "codex_autoping_window.sh"
+        window_script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        window_script.chmod(window_script.stat().st_mode | 0o111)
+
+        codex_home = tmp_path / "codex-home"
+        state_dir = codex_home / "state"
+        state_dir.mkdir(parents=True)
+        legacy_state_path = state_dir / "rcx_autoping_thread-123.json"
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = tmp_path / "tmux-bin"
+        tmux_bin.mkdir()
+        self._write_executable(
+            tmux_bin / "tmux",
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            f"printf '%s\\n' \"$*\" >> {tmux_log!s}\n"
+            "case \"${1:-}\" in\n"
+            "  has-session) exit 0 ;;\n"
+            "  list-windows) printf 'bash\\n'; exit 0 ;;\n"
+            "  new-window) exit 0 ;;\n"
+            "  respawn-window) exit 0 ;;\n"
+            "  *) exit 1 ;;\n"
+            "esac\n",
+        )
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{os.environ['PATH']}",
+            "RCX_CODEX_HOME": str(codex_home),
+            "RCX_PIPELINE_SESSION": "0",
+        }
+
+        existing = subprocess.Popen(
+            [
+                sys.executable,
+                str(watch_script),
+                "--repo-root",
+                str(repo_root),
+                "--thread-id",
+                "thread-123",
+                "--interval",
+                "60",
+            ]
+        )
+        try:
+            legacy_state_path.write_text(
+                json.dumps({"thread_id": "thread-123", "watcher_pid": existing.pid}) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                ["bash", str(launcher), "--repo", str(repo_root), "--thread-id", "thread-123"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=10,
+            )
+
+            assert result.returncode == 0
+            assert "legacy thread-only state-key migration" in result.stdout
+            assert "ACTIVE in tmux-managed AUTO-PING window" in result.stdout
+            assert "new-window -d -t rcx-pipeline -n AUTO-PING" in tmux_log.read_text(encoding="utf-8")
+            assert existing.wait(timeout=5) != 0
+        finally:
+            if existing.poll() is None:
                 existing.terminate()
                 existing.wait(timeout=5)
 

@@ -17,6 +17,53 @@ _tool_path = REPO_ROOT / "tools" / "session" / "codex_autoping_watch.py"
 watch_mod = load_module("codex_autoping_watch", _tool_path)
 
 
+def _autoping_paths(
+    codex_home: Path,
+    *,
+    thread_id: str,
+    repo_root: Path,
+    bus_dir: str = ".agent_bus",
+    tmux_session: str = "rcx-pipeline",
+    tmux_pane: str | None = None,
+) -> tuple[Path, Path, Path]:
+    pane = tmux_pane or f"{tmux_session}:1.3"
+    slug = watch_mod._autoping_state_slug(  # ANTICHEAT_OK: autoping path contract test helper
+        thread_id=thread_id,
+        repo_root=repo_root,
+        bus_dir=bus_dir,
+        tmux_session=tmux_session,
+        tmux_pane=pane,
+    )
+    state_path = codex_home / "state" / f"rcx_autoping_{slug}.json"
+    summary_path = codex_home / "state" / f"rcx_autoping_{slug}_summary.txt"
+    runner_log = codex_home / "log" / "autoping" / f"rcx_autoping_{slug}.runner.log"
+    return state_path, summary_path, runner_log
+
+
+def test_autoping_state_slug_separates_same_thread_by_bus_and_tmux(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    root_slug = watch_mod._autoping_state_slug(  # ANTICHEAT_OK: state-key contract test
+        thread_id="thread-same",
+        repo_root=repo_root,
+        bus_dir=".agent_bus",
+        tmux_session="rcx-pipeline",
+        tmux_pane="rcx-pipeline:1.3",
+    )
+    stage4_slug = watch_mod._autoping_state_slug(  # ANTICHEAT_OK: state-key contract test
+        thread_id="thread-same",
+        repo_root=repo_root,
+        bus_dir=".agent_bus-stage4loop",
+        tmux_session="rcx-stage4-loop",
+        tmux_pane="rcx-stage4-loop:1.3",
+    )
+
+    assert root_slug != stage4_slug
+    assert root_slug.startswith("thread-same__")
+    assert stage4_slug.startswith("thread-same__")
+
+
 def test_extract_worktree_candidates_prefers_bridge_supervisor_and_higher_pid():
     ps_output = "\n".join(
         [
@@ -387,8 +434,14 @@ def test_idle_no_wave_cycle_replaces_stale_attention_summary_without_launching_t
     state_dir.mkdir(parents=True)
     repo_root = (tmp_path / "repo").resolve()
     repo_root.mkdir()
-    state_path = state_dir / "rcx_autoping_thread-idle.json"
-    summary_path = state_dir / "rcx_autoping_thread-idle_summary.txt"
+    state_path, summary_path, _ = _autoping_paths(
+        codex_home,
+        thread_id="thread-idle",
+        repo_root=repo_root,
+        bus_dir=".agent_bus-codexmode",
+        tmux_session="fake-session",
+        tmux_pane="fake-pane",
+    )
     stale_summary = (
         "attention required: stale executor_hard_fail from a previous wave"
     )
@@ -480,8 +533,14 @@ def test_hard_fail_tail_with_active_bridge_job_stays_attention_required(
     repo_root.mkdir()
     wave_root = (tmp_path / "wave").resolve()
     wave_root.mkdir()
-    state_path = state_dir / "rcx_autoping_thread-hard-fail.json"
-    summary_path = state_dir / "rcx_autoping_thread-hard-fail_summary.txt"
+    state_path, summary_path, _ = _autoping_paths(
+        codex_home,
+        thread_id="thread-hard-fail",
+        repo_root=repo_root,
+        bus_dir=".agent_bus-codexmode",
+        tmux_session="fake-session",
+        tmux_pane="fake-pane",
+    )
     stale_summary = "attention required: stale failure from an earlier wave"
     state_path.write_text(
         json.dumps(
@@ -811,6 +870,7 @@ def test_autoping_window_restarts_dead_watcher_without_manual_preflight(tmp_path
 import argparse
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -836,7 +896,11 @@ count_path.write_text(str(count), encoding="utf-8")
 codex_home = Path(os.environ["RCX_CODEX_HOME"])
 state_dir = codex_home / "state"
 state_dir.mkdir(parents=True, exist_ok=True)
-thread_slug = args.thread_id
+def slug(value):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+identity = "|".join((str(Path(args.repo_root).expanduser().resolve()), args.bus_dir, args.tmux_session, args.tmux_pane))
+thread_slug = f"{slug(args.thread_id)}__{slug(identity)}"
 state_path = state_dir / f"rcx_autoping_{thread_slug}.json"
 summary_path = state_dir / f"rcx_autoping_{thread_slug}_summary.txt"
 summary_path.write_text(f"fake launch {count}\\n", encoding="utf-8")
@@ -933,7 +997,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--thread-id")
-args = parser.parse_args()
+args, _ = parser.parse_known_args()
 print(f"fake render {args.thread_id}")
 """.lstrip(),
         encoding="utf-8",
@@ -1003,17 +1067,16 @@ print(f"fake render {args.thread_id}")
         assert _wait_until(lambda: not _pid_alive(active_child_pid)) is True
         assert _wait_until(lambda: not _pgid_alive(active_pid)) is True
 
-        state_path = codex_home / "state" / "rcx_autoping_thread-window.json"
+        state_path, _, runner_log_path = _autoping_paths(
+            codex_home,
+            thread_id="thread-window",
+            repo_root=fake_repo,
+        )
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["status"] == "fake_launch_2"
         assert state["watcher_pid"] == launches[-1]["pid"]
 
-        runner_log = (
-            codex_home
-            / "log"
-            / "autoping"
-            / "rcx_autoping_thread-window.runner.log"
-        ).read_text(encoding="utf-8")
+        runner_log = runner_log_path.read_text(encoding="utf-8")
         assert "[autoping-window] watcher exited pid=" in runner_log
         assert "[autoping-window] watcher_pid=" in runner_log
         assert "[autoping-window] terminated stale active ping pid=" in runner_log
@@ -1047,6 +1110,7 @@ def test_autoping_window_skips_stale_active_pid_and_records_degraded_state(tmp_p
 import argparse
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -1077,6 +1141,12 @@ if count == 1:
     active_log.write_text("stale active log\\n", encoding="utf-8")
     stale_pid = int(os.environ["FAKE_STALE_ACTIVE_PID"])
     old_timestamp = "2000-01-01T00:00:00+00:00"
+    def slug(value):
+        return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+    identity = "|".join((str(Path(args.repo_root).expanduser().resolve()), args.bus_dir, args.tmux_session, args.tmux_pane))
+    thread_slug = f"{slug(args.thread_id)}__{slug(identity)}"
+    summary_path = state_dir / f"rcx_autoping_{thread_slug}_summary.txt"
     payload = {
         "updated_at": old_timestamp,
         "watcher_pid": os.getpid(),
@@ -1087,9 +1157,9 @@ if count == 1:
         "active_mode": "resume",
         "last_dispatched_at": old_timestamp,
         "last_dispatched_pid": stale_pid,
-        "summary_path": str(state_dir / f"rcx_autoping_{args.thread_id}_summary.txt"),
+        "summary_path": str(summary_path),
     }
-    (state_dir / f"rcx_autoping_{args.thread_id}.json").write_text(
+    (state_dir / f"rcx_autoping_{thread_slug}.json").write_text(
         json.dumps(payload, sort_keys=True) + "\\n", encoding="utf-8"
     )
     raise SystemExit(0)
@@ -1104,7 +1174,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--thread-id")
-args = parser.parse_args()
+args, _ = parser.parse_known_args()
 print(f"fake render {args.thread_id}")
 """.lstrip(),
             encoding="utf-8",
@@ -1150,7 +1220,11 @@ print(f"fake render {args.thread_id}")
             assert launches is not None, "wrapper did not restart after stale active state"
             assert _pid_alive(unrelated.pid)
 
-            state_path = codex_home / "state" / "rcx_autoping_thread-stale-window.json"
+            state_path, _, runner_log_path = _autoping_paths(
+                codex_home,
+                thread_id="thread-stale-window",
+                repo_root=fake_repo,
+            )
             state = json.loads(state_path.read_text(encoding="utf-8"))
             assert state["status"] == "watcher_restart_degraded_active_ping_cleanup_failed"
             assert state["active_pid"] == unrelated.pid
@@ -1158,12 +1232,7 @@ print(f"fake render {args.thread_id}")
             assert "unsafe_active_ping_cleanup_target" in state["last_active_cleanup_error"]
             assert "stale_active_" in state["last_active_cleanup_error"]
 
-            runner_log = (
-                codex_home
-                / "log"
-                / "autoping"
-                / "rcx_autoping_thread-stale-window.runner.log"
-            ).read_text(encoding="utf-8")
+            runner_log = runner_log_path.read_text(encoding="utf-8")
             assert "[autoping-window] active ping cleanup failed; restarting watcher degraded" in runner_log
         finally:
             proc.terminate()
