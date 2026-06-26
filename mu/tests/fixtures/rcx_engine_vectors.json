@@ -13,7 +13,7 @@
       "input": {
         "_run_engine": {
           "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
-          "input": {"value": 42}
+          "input": {"value": "payload"}
         }
       },
       "expected": {
@@ -21,15 +21,15 @@
           "operation": "run_trace",
           "input": {
             "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
-            "value": {"value": 42},
-            "max_steps": 100
+            "value": {"value": "payload"},
+            "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}
           },
           "context": {
             "_mode": "engine",
             "_frozen": null,
             "_config": {
               "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
-              "max_steps": 100
+              "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}
             }
           },
           "inject_key": "_trace_result"
@@ -42,8 +42,8 @@
       "input": {
         "_run_engine": {
           "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
-          "input": {"value": 42},
-          "max_steps": 50,
+          "input": {"value": "payload"},
+          "max_steps": {"_num": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}},
           "frozen": {"head": "op1", "tail": null}
         }
       },
@@ -52,15 +52,15 @@
           "operation": "run_trace",
           "input": {
             "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
-            "value": {"value": 42},
-            "max_steps": 50
+            "value": {"value": "payload"},
+            "max_steps": {"_num": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}
           },
           "context": {
             "_mode": "engine",
             "_frozen": {"head": "op1", "tail": null},
             "_config": {
               "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
-              "max_steps": 50
+              "max_steps": {"_num": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}
             }
           },
           "inject_key": "_trace_result"
@@ -73,7 +73,7 @@
       "input": {
         "_mode": "engine",
         "_frozen": null,
-        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": 100},
+        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}},
         "_trace_result": {
           "result": {"final": "value"},
           "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
@@ -90,7 +90,7 @@
             "_frozen": null,
             "_stall": false,
             "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
-            "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": 100}
+            "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}}
           },
           "inject_key": "_hashed_trace"
         }
@@ -105,7 +105,7 @@
         "_frozen": null,
         "_stall": false,
         "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
-        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": 100},
+        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}},
         "_hashed_trace": {"head": {"step": 0, "state": "A", "state_hash": "abc123", "projection": "p1"}, "tail": null}
       },
       "expected": {
@@ -123,7 +123,7 @@
             "_frozen": null,
             "_stall": false,
             "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
-            "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": 100}
+            "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}}
           },
           "inject_key": "_recurrence_result"
         }
@@ -137,7 +137,7 @@
         "_frozen": null,
         "_stall": false,
         "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "op1"}, "tail": null},
-        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": 100},
+        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}},
         "_recurrence_result": {
           "closure_detected": true,
           "tau_step": 5,
@@ -162,7 +162,7 @@
             "_closure_detected": true,
             "_tau_step": 5,
             "_final_result": {"computed": "result"},
-            "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": 100}
+            "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}}
           },
           "inject_key": "_exhaustion_result"
         }
@@ -179,7 +179,7 @@
         "_final_result": {"computed": "result"},
         "_config": {
           "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
-          "max_steps": 100
+          "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}
         },
         "_exhaustion_result": {
           "exhaustion_detected": true,
@@ -192,7 +192,7 @@
         "_run_engine": {
           "projections": [{"id": "test.proj", "pattern": {}, "body": {}}],
           "input": {"computed": "result"},
-          "max_steps": 100,
+          "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}},
           "frozen": {"head": "op1", "tail": null}
         }
       }
@@ -206,7 +206,7 @@
         "_closure_detected": true,
         "_tau_step": 5,
         "_final_result": {"computed": "result"},
-        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": 100},
+        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}},
         "_exhaustion_result": {
           "exhaustion_detected": false,
           "operator_to_freeze": null,
@@ -261,7 +261,7 @@
         "_frozen": null,
         "_stall": true,
         "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": null},
-        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": 100},
+        "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}},
         "_recurrence_result": {
           "closure_detected": false,
           "tau_step": null,
@@ -286,7 +286,7 @@
             "_closure_detected": false,
             "_tau_step": null,
             "_final_result": {"computed": "result"},
-            "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": 100}
+            "_config": {"projections": [{"id": "test.proj", "pattern": {}, "body": {}}], "max_steps": {"_num": {"xO": {"xO": {"xI": {"xO": {"xO": {"xI": {"xH": null}}}}}}}}}
           },
           "inject_key": "_exhaustion_result"
         }

@@ -64,9 +64,9 @@ class TestMaxStepsExhaustion:
         projections = [
             {"pattern": {"var": "x"}, "body": {"wrap": {"var": "x"}}}
         ]
-        input_value = 42
+        input_value = "seed"
 
-        # This will keep wrapping: 42 → {wrap: 42} → {wrap: {wrap: 42}} → ...
+        # This will keep wrapping until max_steps is reached.
         # Until max_steps is reached
         result = step_mu(projections, input_value)
 
@@ -86,14 +86,14 @@ class TestMaxStepsExhaustion:
         projections = [
             {"pattern": {"n": {"var": "x"}}, "body": {"n": {"var": "x"}, "seen": True}}
         ]
-        input_value = {"n": 1}
+        input_value = {"n": "one"}
 
         result = step_mu(projections, input_value)
 
         # Should have been transformed (not original input)
         assert is_mu(result)
         # The projection adds "seen" key
-        assert "seen" in result or result == {"n": 1}
+        assert "seen" in result or result == {"n": "one"}
 
 
 # =============================================================================
@@ -132,8 +132,8 @@ class TestMuEqualStallDetection:
             {"pattern": {"var": "x"}, "body": {"var": "x"}}
         ]
 
-        result = step_mu(projections, 42)
-        assert result == 42
+        result = step_mu(projections, "forty_two")
+        assert result == "forty_two"
 
         result = step_mu(projections, "hello")
         assert result == "hello"
@@ -149,8 +149,8 @@ class TestMuEqualStallDetection:
             {"pattern": {"var": "x"}, "body": {"var": "x"}}
         ]
 
-        result = step_mu(projections, [1, 2, 3])
-        assert result == [1, 2, 3]
+        result = step_mu(projections, ["one", "two", "three"])
+        assert result == ["one", "two", "three"]
 
     def test_stall_detection_preserves_empty_containers(self):
         """
@@ -222,11 +222,11 @@ class TestMechanicalLoopEdgeCases:
             {"pattern": {"x": {"var": "a"}, "y": {"var": "b"}},
              "body": {"first": {"var": "a"}, "second": {"var": "b"}}}
         ]
-        input_value = {"x": 1, "y": 2}
+        input_value = {"x": "one", "y": "two"}
 
         result = step_mu(projections, input_value)
 
-        assert result == {"first": 1, "second": 2}
+        assert result == {"first": "one", "second": "two"}
 
     def test_projection_order_first_match_wins(self):
         """
@@ -238,7 +238,7 @@ class TestMechanicalLoopEdgeCases:
             {"pattern": {"var": "x"}, "body": "third"},
         ]
 
-        result = step_mu(projections, 42)
+        result = step_mu(projections, "seed")
 
         assert result == "first"
 

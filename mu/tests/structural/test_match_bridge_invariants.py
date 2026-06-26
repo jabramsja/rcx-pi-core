@@ -17,6 +17,9 @@ from rcx_pi.selfhost.match_mu import (
 )
 pytestmark = [pytest.mark.slow]
 
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
+
 
 # =============================================================================
 # Bridge Ordering Invariants
@@ -133,7 +136,7 @@ class TestSplitSemanticsContract:
         from rcx_pi.selfhost.eval_seed import NO_MATCH
 
         proj = {"pattern": {"a": {"var": "x"}, "b": {"var": "x"}}, "body": "ok"}
-        result = apply_mu(proj, {"a": 1, "b": 2})
+        result = apply_mu(proj, {"a": ONE, "b": TWO})
         assert result is NO_MATCH, "apply_mu must detect non-linear conflicts"
 
     def test_apply_mu_accepts_nonlinear_agreement(self):
@@ -141,7 +144,7 @@ class TestSplitSemanticsContract:
         from rcx_pi.selfhost.step_mu import apply_mu
 
         proj = {"pattern": {"a": {"var": "x"}, "b": {"var": "x"}}, "body": "ok"}
-        result = apply_mu(proj, {"a": 1, "b": 1})
+        result = apply_mu(proj, {"a": ONE, "b": ONE})
         assert result == "ok", "apply_mu must succeed when non-linear vars agree"
 
     def test_step_mu_uses_core_kernel_for_linear(self):
@@ -150,8 +153,8 @@ class TestSplitSemanticsContract:
 
         projs = [{"pattern": {"op": "double", "v": {"var": "x"}},
                   "body": {"op": "done", "v": {"var": "x"}}}]
-        result = step_mu(projs, {"op": "double", "v": 7})
-        assert result == {"op": "done", "v": 7}
+        result = step_mu(projs, {"op": "double", "v": ONE})
+        assert result == {"op": "done", "v": ONE}
 
     def test_step_mu_rejects_nonlinear_patterns(self):
         """step_mu is fail-closed: rejects non-linear patterns with ValueError."""

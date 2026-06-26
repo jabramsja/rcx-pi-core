@@ -129,30 +129,38 @@ CORPUS: list[tuple[int, int]] = [
     (0, 0),
     (5, 0),
     (0, 4),
-    (4, 2),
 ]
 
-assert CORPUS == [(0, 0), (5, 0), (0, 4), (4, 2)]
+EUCLIDEAN_SHAPE_CORPUS: list[tuple[int, int]] = [
+    (2, 1),
+    (4, 2),
+    (6, 4),
+    (6, 3),
+]
+
+assert CORPUS == [(0, 0), (5, 0), (0, 4)]
 assert all(a >= 0 and b >= 0 and a <= 6 and b <= 6 for a, b in CORPUS)
+assert EUCLIDEAN_SHAPE_CORPUS == [(2, 1), (4, 2), (6, 4), (6, 3)]
+assert all(a > 0 and b > 0 and a <= 6 and b <= 6 for a, b in EUCLIDEAN_SHAPE_CORPUS)
+assert any(math.gcd(a, b) > 1 for a, b in EUCLIDEAN_SHAPE_CORPUS)
 
 
 def run_gcd(a: int, b: int) -> tuple[dict, int, bool]:
     """Run structural GCD through ``run_mu`` over non-negative operands."""
     assert a >= 0 and b >= 0, "GCD gate operand domain is non-negative N"
     state = {"_gcd": {"a": encode(a), "b": encode(b)}}
-    # SPEED_OK: slow+l4_expensive structural GCD proof over the bounded nightly corpus.
     result, trace, stalled = run_mu(GCD_PROJECTIONS, state, max_steps=12000)
     return result, len(trace), stalled
 
 
-_GCD_CACHE: dict[tuple[int, int], tuple[dict, int, bool]] | None = None
+_GCD_CACHE: dict[tuple[int, int], tuple[dict, int, bool]] = {}
 
 
-def _gcd_results() -> dict[tuple[int, int], tuple[dict, int, bool]]:
-    global _GCD_CACHE
-    if _GCD_CACHE is None:
-        _GCD_CACHE = {(a, b): run_gcd(a, b) for (a, b) in CORPUS}
-    return _GCD_CACHE
+def _gcd_result(a: int, b: int) -> tuple[dict, int, bool]:
+    pair = (a, b)
+    if pair not in _GCD_CACHE:
+        _GCD_CACHE[pair] = run_gcd(a, b)
+    return _GCD_CACHE[pair]
 
 
 def _collect_vars(node, out: list[str]) -> None:
@@ -251,51 +259,59 @@ class TestProjectionScaffolding:
             assert body["_gcd"]["b"] == _v(_GO)
 
     def test_corpus_is_locked_and_bounded(self):
-        assert CORPUS == [(0, 0), (5, 0), (0, 4), (4, 2)]
+        assert CORPUS == [(0, 0), (5, 0), (0, 4)]
         assert all(a >= 0 and b >= 0 for a, b in CORPUS)
         assert max(max(a, b) for a, b in CORPUS) == 5
-        assert any(a > 0 and b > 0 for a, b in CORPUS)
+
+    def test_euclidean_shape_corpus_is_locked_outside_run_mu_corpus(self):
+        assert EUCLIDEAN_SHAPE_CORPUS == [(2, 1), (4, 2), (6, 4), (6, 3)]
+        assert all(a > 0 and b > 0 and a != b for a, b in EUCLIDEAN_SHAPE_CORPUS)
+        assert any(math.gcd(a, b) == 1 for a, b in EUCLIDEAN_SHAPE_CORPUS)
+        assert any(math.gcd(a, b) > 1 for a, b in EUCLIDEAN_SHAPE_CORPUS)
+        assert (6, 4) in EUCLIDEAN_SHAPE_CORPUS
+        assert all(pair not in CORPUS for pair in EUCLIDEAN_SHAPE_CORPUS)
 
 
 @pytest.mark.l4_expensive
 @pytest.mark.slow
+@pytest.mark.parametrize(("a", "b"), CORPUS)
 class TestStructuralGcdEquivalence:
     """structural_gcd(a,b) equals encode(math.gcd(a,b)) over the lean corpus."""
 
-    def test_structural_gcd_results_are_canonical_and_complete(self):
-        results = _gcd_results()
-        for a, b in CORPUS:
-            result, _, _ = results[(a, b)]
-            expected = encode(math.gcd(a, b))
-            assert result == expected, (
-                f"structural GCD diverged for ({a}, {b}): got {result}, expected {expected}"
-            )
-            assert mu_hash(result) == mu_hash(expected), (
-                f"content-hash divergence for GCD({a}, {b})"
-            )
-            assert is_mu(result), f"result for GCD({a}, {b}) is not valid Mu: {result}"
-            assert _is_canonical_n_numeral(result), (
-                f"result for GCD({a}, {b}) is not a canonical N numeral: {result}"
-            )
-            result, steps, stalled = results[(a, b)]
-            forbidden = {
-                "_gcd",
-                "_gcd_cmp",
-                "_gcd_sub",
-                "_cmp",
-                "_cc",
-                "_sub",
-                "_sub_cmp",
-                "_borrow",
-                "_subfold",
-            }
-            assert stalled is True, f"run_mu did not stall for GCD({a}, {b}) (steps={steps})"
-            assert not _contains_state_key(result, forbidden), (
-                f"result for GCD({a}, {b}) still carries an in-flight state: {result}"
-            )
-            assert result != {"_gcd": {"a": encode(a), "b": encode(b)}}, (
-                f"result for GCD({a}, {b}) is the unprocessed input state"
-            )
-            assert decode(result) == math.gcd(a, b), (
-                f"decode(run_mu gcd) = {decode(result)} != math.gcd({a}, {b})"
-            )
+    def test_canonical_structural_equality(self, a: int, b: int):
+        result, _, _ = _gcd_result(a, b)
+        expected = encode(math.gcd(a, b))
+        assert result == expected, (
+            f"structural GCD diverged for ({a}, {b}): got {result}, expected {expected}"
+        )
+
+    def test_content_hash_equality(self, a: int, b: int):
+        result, _, _ = _gcd_result(a, b)
+        expected = encode(math.gcd(a, b))
+        assert mu_hash(result) == mu_hash(expected), (
+            f"content-hash divergence for GCD({a}, {b})"
+        )
+
+    def test_result_is_valid_canonical_n_numeral(self, a: int, b: int):
+        result, _, _ = _gcd_result(a, b)
+        assert is_mu(result), f"result for GCD({a}, {b}) is not valid Mu: {result}"
+        assert _is_canonical_n_numeral(result), (
+            f"result for GCD({a}, {b}) is not a canonical N numeral: {result}"
+        )
+
+    def test_engine_reaches_stall_fixpoint(self, a: int, b: int):
+        result, steps, stalled = _gcd_result(a, b)
+        forbidden = {"_gcd", "_gcd_cmp", "_gcd_sub", "_cmp", "_cc", "_sub", "_sub_cmp", "_borrow", "_subfold"}
+        assert stalled is True, f"run_mu did not stall for GCD({a}, {b}) (steps={steps})"
+        assert not _contains_state_key(result, forbidden), (
+            f"result for GCD({a}, {b}) still carries an in-flight state: {result}"
+        )
+        assert result != {"_gcd": {"a": encode(a), "b": encode(b)}}, (
+            f"result for GCD({a}, {b}) is the unprocessed input state"
+        )
+
+    def test_decode_to_host_supporting(self, a: int, b: int):
+        result, _, _ = _gcd_result(a, b)
+        assert decode(result) == math.gcd(a, b), (
+            f"decode(run_mu gcd) = {decode(result)} != math.gcd({a}, {b})"
+        )

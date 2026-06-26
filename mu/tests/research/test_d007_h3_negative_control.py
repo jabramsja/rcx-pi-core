@@ -51,14 +51,14 @@ MULTI_EXPECTED = {"phase": "done"}
 
 # V_CHAIN: 5 steps required
 CHAIN_PROJECTIONS = [
-    {"id": "chain.1", "pattern": {"n": 0}, "body": {"n": 1}},
-    {"id": "chain.2", "pattern": {"n": 1}, "body": {"n": 2}},
-    {"id": "chain.3", "pattern": {"n": 2}, "body": {"n": 3}},
-    {"id": "chain.4", "pattern": {"n": 3}, "body": {"n": 4}},
-    {"id": "chain.5", "pattern": {"n": 4}, "body": {"n": 5}},
+    {"id": "chain.1", "pattern": {"n": "zero"}, "body": {"n": "one"}},
+    {"id": "chain.2", "pattern": {"n": "one"}, "body": {"n": "two"}},
+    {"id": "chain.3", "pattern": {"n": "two"}, "body": {"n": "three"}},
+    {"id": "chain.4", "pattern": {"n": "three"}, "body": {"n": "four"}},
+    {"id": "chain.5", "pattern": {"n": "four"}, "body": {"n": "five"}},
 ]
-CHAIN_INPUT = {"n": 0}
-CHAIN_EXPECTED = {"n": 5}
+CHAIN_INPUT = {"n": "zero"}
+CHAIN_EXPECTED = {"n": "five"}
 
 # Verify reference vectors with run_mu
 def _verify_reference():
@@ -146,10 +146,10 @@ class TestH3Strategy1SingleStep:
         assert result == {"phase": "b"}  # only one step happened
 
     def test_single_step_fails_chain(self):
-        """One step takes 0->1, not 0->5."""
+        """One step takes zero->one, not zero->five."""
         result = single_step_run(CHAIN_PROJECTIONS, CHAIN_INPUT)
         assert result != CHAIN_EXPECTED
-        assert result == {"n": 1}
+        assert result == {"n": "one"}
 
     def test_single_step_has_no_iteration(self):
         """AST verify: single_step_run contains no loop or recursion."""
@@ -179,7 +179,7 @@ class TestH3Strategy2FixedUnrolling:
         """Unroll-3 cannot converge a 5-step chain."""
         result = unrolled_run_3(CHAIN_PROJECTIONS, CHAIN_INPUT)
         assert result != CHAIN_EXPECTED
-        assert result == {"n": 3}  # stopped at 3, needed 5
+        assert result == {"n": "three"}  # stopped at three, needed five
 
     def test_unrolled_5_wastes_on_3_step_input(self):
         """Unroll-5 overshoots a 3-step input (applies 2 stall steps)."""

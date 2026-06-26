@@ -1218,7 +1218,7 @@ class TestFailClosedNegativeControl:
           input: {
             projections: [{ pattern: { var: 'x' }, body: { var: 'x' } }],
             value: trustMu({ hello: 'world' }),
-            max_steps: 1,
+            max_steps: { _num: { xH: null } },
           },
           context: {},
           inject_key: 'trace_result',

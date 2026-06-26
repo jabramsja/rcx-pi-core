@@ -1,6 +1,6 @@
 {
   "role_agents": {
-    "implementer": "claude",
+    "implementer": "codex",
     "reviewer": "codex"
   },
   "bridge_agent_defaults": {
@@ -23,9 +23,9 @@
   "backends": {
     "post_merge_supervisor": "codex",
     "dialectic_executor": "codex",
-    "phase_a_executor": "claude",
-    "phase_b_executor": "claude",
-    "bot_remediation": "claude",
+    "phase_a_executor": "codex",
+    "phase_b_executor": "codex",
+    "bot_remediation": "codex",
     "commit_executor": null
   },
   "bridge_reviewers": {
@@ -70,6 +70,11 @@
         "bus_dir": ".agent_bus-lane5",
         "dashboard_port": 8105,
         "tmux_session": "rcx-pipeline-lane5"
+      },
+      "stage4loop": {
+        "bus_dir": ".agent_bus-stage4loop",
+        "dashboard_port": 8106,
+        "tmux_session": "rcx-stage4-loop"
       }
     }
   },

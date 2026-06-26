@@ -716,13 +716,13 @@ MATCH_PARITY_VECTORS = [
     # match.var — variable bind
     ("match.var", {
         "mode": "match", "pattern_focus": {"var": "x"},
-        "value_focus": 42, "bindings": None,
+        "value_focus": "forty_two", "bindings": None,
         "stack": None, "_match_ctx": _match_ctx(),
     }),
     # match.done — terminal (focus null, stack null)
     ("match.done", {
         "mode": "match", "pattern_focus": None, "value_focus": None,
-        "bindings": {"name": "x", "value": 42, "rest": None},
+        "bindings": {"name": "x", "value": "forty_two", "rest": None},
         "stack": None, "_match_ctx": _match_ctx(),
     }),
     # match.sibling — stack pop
@@ -739,7 +739,7 @@ MATCH_PARITY_VECTORS = [
     ("match.typed.descend", {
         "mode": "match",
         "pattern_focus": {"_type": "list", "head": {"var": "h"}, "tail": {"var": "t"}},
-        "value_focus": {"_type": "list", "head": 1, "tail": None},
+        "value_focus": {"_type": "list", "head": "one", "tail": None},
         "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
     }),
     # match.dict.descend — head/tail structure (no _type)
@@ -760,7 +760,7 @@ MATCH_PARITY_VECTORS = [
 SUBST_PARITY_VECTORS = [
     # subst.wrap — entry point
     ("subst.wrap", {
-        "subst": {"body": {"var": "x"}, "bindings": {"name": "x", "value": 42, "rest": None}},
+        "subst": {"body": {"var": "x"}, "bindings": {"name": "x", "value": "forty_two", "rest": None}},
         "_subst_ctx": _subst_ctx(),
     }),
     # subst.primitive — traverse literal
@@ -772,23 +772,23 @@ SUBST_PARITY_VECTORS = [
     ("subst.var", {
         "mode": "subst", "phase": "traverse",
         "focus": {"var": "x"},
-        "bindings": {"name": "x", "value": 42, "rest": None},
+        "bindings": {"name": "x", "value": "forty_two", "rest": None},
         "context": None, "_subst_ctx": _subst_ctx(),
     }),
     # subst.lookup.found — name matches
     ("subst.lookup.found", {
         "mode": "subst", "phase": "lookup",
         "lookup_name": "x",
-        "lookup_bindings": {"name": "x", "value": 42, "rest": None},
-        "bindings": {"name": "x", "value": 42, "rest": None},
+        "lookup_bindings": {"name": "x", "value": "forty_two", "rest": None},
+        "bindings": {"name": "x", "value": "forty_two", "rest": None},
         "context": None, "_subst_ctx": _subst_ctx(),
     }),
     # subst.lookup.next — name doesn't match, continue
     ("subst.lookup.next", {
         "mode": "subst", "phase": "lookup",
         "lookup_name": "x",
-        "lookup_bindings": {"name": "y", "value": 99, "rest": None},
-        "bindings": {"name": "y", "value": 99, "rest": None},
+        "lookup_bindings": {"name": "y", "value": "ninety_nine", "rest": None},
+        "bindings": {"name": "y", "value": "ninety_nine", "rest": None},
         "context": None, "_subst_ctx": _subst_ctx(),
     }),
     # subst.lookup.exhausted — bindings null
@@ -799,13 +799,13 @@ SUBST_PARITY_VECTORS = [
     }),
     # subst.done — terminal (phase=result, context=null)
     ("subst.done", {
-        "mode": "subst", "phase": "result", "focus": 42,
+        "mode": "subst", "phase": "result", "focus": "forty_two",
         "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
     }),
     # subst.descend — traverse head/tail
     ("subst.descend", {
         "mode": "subst", "phase": "traverse",
-        "focus": {"head": 1, "tail": 2},
+        "focus": {"head": "one", "tail": "two"},
         "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
     }),
     # subst.ascend — both head and tail done, reconstruct
@@ -831,7 +831,7 @@ SUBST_PARITY_VECTORS = [
     # subst.typed.descend — type-tagged traverse
     ("subst.typed.descend", {
         "mode": "subst", "phase": "traverse",
-        "focus": {"_type": "pair", "head": 1, "tail": 2},
+        "focus": {"_type": "pair", "head": "one", "tail": "two"},
         "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
     }),
     # subst.typed.sibling — type-tagged head done, move to tail
@@ -1018,7 +1018,7 @@ class TestCompilerBundleParityVsHostStage0:
         inp = {
             "subst": {
                 "body": {"var": "x"},
-                "bindings": {"name": "x", "value": 42, "rest": None},
+                "bindings": {"name": "x", "value": "forty_two", "rest": None},
             },
             "_subst_ctx": _subst_ctx(),
         }
@@ -1028,7 +1028,7 @@ class TestCompilerBundleParityVsHostStage0:
             f"Multi-step subst divergence:\n"
             f"host_stage0={source_final!r}\ncompiled_py={compiled_final!r}")
         assert source_final.get("_mode") == "subst_done"
-        assert source_final.get("_result") == 42
+        assert source_final.get("_result") == "forty_two"
 
     def test_subst_run_to_completion_structured(self):
         """Full subst with head/tail body: exercises descend/sibling/ascend chain."""
@@ -1038,8 +1038,8 @@ class TestCompilerBundleParityVsHostStage0:
             "subst": {
                 "body": {"head": {"var": "a"}, "tail": {"var": "b"}},
                 "bindings": {
-                    "name": "a", "value": 1,
-                    "rest": {"name": "b", "value": 2, "rest": None},
+                    "name": "a", "value": "one",
+                    "rest": {"name": "b", "value": "two", "rest": None},
                 },
             },
             "_subst_ctx": _subst_ctx(),
@@ -1050,7 +1050,7 @@ class TestCompilerBundleParityVsHostStage0:
             f"Multi-step subst-structured divergence:\n"
             f"host_stage0={source_final!r}\ncompiled_py={compiled_final!r}")
         assert source_final.get("_mode") == "subst_done"
-        assert _mu_deep_equal(source_final.get("_result"), {"head": 1, "tail": 2})
+        assert _mu_deep_equal(source_final.get("_result"), {"head": "one", "tail": "two"})
 
 
 class TestCompilerBundleCrossSubstrate:

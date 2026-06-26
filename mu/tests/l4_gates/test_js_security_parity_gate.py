@@ -280,7 +280,7 @@ try {
 const { applyProjection, NO_MATCH } = require('./mu/host/js/core/bootstrap_core');
 """ + JS_TRUST_MU_PRELUDE + """
 try {
-  const r = applyProjection(trustMu({pattern: {var: 'x'}, body: {var: 'x'}}), 42);
+  const r = applyProjection(trustMu({pattern: {var: 'x'}, body: {var: 'x'}}), 'forty_two');
   console.log(JSON.stringify({result: r, error: null}));
 } catch(e) {
   console.log(JSON.stringify({result: null, error: e.message}));
@@ -294,7 +294,7 @@ try {
         assert output["error"] is None, (
             f"JS should accept normal projection, got error: {output['error']}"
         )
-        assert output["result"] == 42, (
+        assert output["result"] == "forty_two", (
             f"Identity projection should return input, got: {output['result']}"
         )
 

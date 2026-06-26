@@ -21,6 +21,8 @@ from tests.repo_root import REPO_ROOT
 from rcx_pi.selfhost.step_mu import run_mu  # SPEED_OK: used in slow tests only
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 
+ZERO = {"_num": None}
+
 
 # ---------------------------------------------------------------------------
 # Source proof helpers
@@ -71,7 +73,7 @@ class TestWalkerStallBehavior:
         """Walker cannot match head-only nodes — no evidence_done in output."""
         projs = load_verified_seed(get_seed_path("evidence_walker.v1.json"))["projections"]
         # Head-only trace node (no 'tail' key) — walker init pattern requires {head, tail}
-        trace = {"head": {"state": "a", "step": 0, "projection": "test.stall"}}
+        trace = {"head": {"state": "a", "step": ZERO, "projection": "test.stall"}}
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=20)
         # Walker stalls: no evidence_done because init pattern doesn't match
@@ -84,7 +86,7 @@ class TestWalkerStallBehavior:
     def test_wellformed_trace_does_not_stall(self):
         """Confirm {head, tail} traces work normally (control case)."""
         projs = load_verified_seed(get_seed_path("evidence_walker.v1.json"))["projections"]
-        trace = {"head": {"state": "a", "step": 0, "projection": "test.ok"}, "tail": None}
+        trace = {"head": {"state": "a", "step": ZERO, "projection": "test.ok"}, "tail": None}
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=20)
         assert isinstance(result, dict)

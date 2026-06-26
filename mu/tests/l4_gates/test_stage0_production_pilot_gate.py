@@ -102,7 +102,7 @@ class TestStage0CanonicalVectors:
         assert _stage0_match("x", "x") == {}
 
     def test_var_bind(self):
-        assert _stage0_match({"var": "a"}, 42) == {"a": 42}
+        assert _stage0_match({"var": "a"}, "forty_two") == {"a": "forty_two"}
 
     def test_match_failure(self):
         assert _stage0_match("x", "y") is NO_MATCH
@@ -119,12 +119,12 @@ class TestStage0CanonicalVectors:
 
     def test_structural_worklist_match_and_subst(self):
         pattern = {"outer": {"left": {"var": "x"}, "right": {"var": "x"}}}
-        input_value = {"outer": {"left": 7, "right": 7}}
-        assert _stage0_match(pattern, input_value) == {"x": 7}
+        input_value = {"outer": {"left": "seven", "right": "seven"}}
+        assert _stage0_match(pattern, input_value) == {"x": "seven"}
         assert _stage0_substitute(
             {"ok": True, "value": {"var": "x"}},
-            {"x": {"nested": [1, 2, 3]}},
-        ) == {"ok": True, "value": {"nested": [1, 2, 3]}}
+            {"x": {"nested": ["one", "two", "three"]}},
+        ) == {"ok": True, "value": {"nested": ["one", "two", "three"]}}
 
 
 # ===========================================================================
@@ -141,26 +141,26 @@ class TestParityWithMatchInner:
         # (pattern, input_value)
         ("x", "x"),
         ("x", "y"),
-        (42, 42),
-        (42, 43),
+        ("forty_two", "forty_two"),
+        ("forty_two", "forty_three"),
         (None, None),
-        (None, 0),
+        (None, "zero"),
         (True, True),
         (True, False),
         (True, 1),
         (1, True),
-        (3.14, 3.14),
-        (3.14, 2.71),
-        ({"var": "x"}, 42),
+        ("pi", "pi"),
+        ("pi", "tau"),
+        ({"var": "x"}, "forty_two"),
         ({"var": "x"}, "hello"),
         ({"var": "x"}, None),
         # List cases removed (P7W4): _stage0_match no longer handles raw lists.
         # Kernel path normalizes all lists to head/tail dicts before matching.
-        ({"a": {"var": "x"}, "b": {"var": "y"}}, {"a": 1, "b": 2}),
-        ({"a": {"var": "x"}, "b": {"var": "x"}}, {"a": 1, "b": 1}),  # nonlinear agree
-        ({"a": {"var": "x"}, "b": {"var": "x"}}, {"a": 1, "b": 2}),  # nonlinear conflict
-        ({"a": {"b": {"var": "x"}}}, {"a": {"b": 3}}),  # nested worklist path
-        ({"a": 1}, {"a": 1, "b": 2}),  # extra key in input
+        ({"a": {"var": "x"}, "b": {"var": "y"}}, {"a": "one", "b": "two"}),
+        ({"a": {"var": "x"}, "b": {"var": "x"}}, {"a": "one", "b": "one"}),  # nonlinear agree
+        ({"a": {"var": "x"}, "b": {"var": "x"}}, {"a": "one", "b": "two"}),  # nonlinear conflict
+        ({"a": {"b": {"var": "x"}}}, {"a": {"b": "three"}}),  # nested worklist path
+        ({"a": "one"}, {"a": "one", "b": "two"}),  # extra key in input
     ]
 
     @pytest.mark.parametrize("pattern,input_value", PARITY_CASES,
@@ -275,31 +275,31 @@ class TestStage0Gate3TypeListParity:
     def test_pattern_omits_type_list_succeeds(self):
         result = _stage0_match(
             {"head": {"var": "x"}, "tail": {"var": "y"}},
-            {"head": 1, "tail": None, "_type": "list"},
+            {"head": "one", "tail": None, "_type": "list"},
         )
         assert result is not NO_MATCH
-        assert result == {"x": 1, "y": None}
+        assert result == {"x": "one", "y": None}
 
     def test_pattern_omits_type_dict_rejects(self):
         result = _stage0_match(
             {"a": {"var": "x"}},
-            {"a": 1, "_type": "dict"},
+            {"a": "one", "_type": "dict"},
         )
         assert result is NO_MATCH
 
     def test_pattern_includes_type_matches(self):
         result = _stage0_match(
             {"head": {"var": "x"}, "_type": "list"},
-            {"head": 1, "_type": "list"},
+            {"head": "one", "_type": "list"},
         )
         assert result is not NO_MATCH
-        assert result == {"x": 1}
+        assert result == {"x": "one"}
 
     def test_parity_with_match_inner(self):
         cases = [
-            ({"head": {"var": "x"}}, {"head": 1, "_type": "list"}),
-            ({"a": {"var": "x"}}, {"a": 1, "_type": "dict"}),
-            ({"head": {"var": "x"}, "_type": "list"}, {"head": 1, "_type": "list"}),
+            ({"head": {"var": "x"}}, {"head": "one", "_type": "list"}),
+            ({"a": {"var": "x"}}, {"a": "one", "_type": "dict"}),
+            ({"head": {"var": "x"}, "_type": "list"}, {"head": "one", "_type": "list"}),
         ]
         for pattern, value in cases:
             legacy = _match_inner(pattern, value)

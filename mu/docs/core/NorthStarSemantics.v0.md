@@ -51,19 +51,33 @@ This document is the single canonical source for these policies. If a design doc
 
 **Current implementation:** Undefined operations manifest as stalls (hash-equal consecutive states in `step_kernel_mu`). The kernel stall meta path now also produces an `undefined_motif` field carrying the canonical v0 motif shape.
 
-## B. Zero Canonicalization Policy
+## B. Zero Canonicalization / Structural Numeric Zero Policy
 
-**Policy:** Core identity and hash operations canonicalize `+0` and `-0` to canonical `0`.
+**Policy:** Semantic numeric zero is the StructuralNumbers numeral `{"_num": null}`.
+Host numeric spellings such as `0`, `0.0`, `+0.0`, and `-0.0` are not semantic
+numeric authority and must not enter matcher-facing numeric facts.
 
-**Rationale:** IEEE 754 distinguishes `+0.0` and `-0.0`, but structural identity must be deterministic across substrates. Python and JavaScript handle signed zero differently in edge cases. Canonicalization eliminates this as a parity divergence vector.
+**Rationale:** Structural identity must be deterministic across substrates without relying
+on Python or JavaScript numeric formatting, signed-zero behavior, or host `int`/`float`
+type dispatch. Stage 4 moves matcher-facing integer facts into StructuralNumbers Mu data;
+host numeric zero is therefore an invalid matcher-domain leaf, not a value to
+canonicalize into semantic identity.
 
 **Constraints:**
-1. `mu_hash_cached(+0.0)` MUST equal `mu_hash_cached(-0.0)`.
-2. `mu_hash_cached(0)` MUST equal `mu_hash_cached(0.0)` (Python int/float unification for zero).
-3. Sign-origin metadata (if ever needed) is non-identity and non-hash — it lives outside the structural equality domain.
-4. JSON serialization already canonicalizes `0.0` to `0` — this policy is consistent with the existing JSON-as-Phase-0-format approach.
+1. Matcher-facing numeric facts MUST use StructuralNumbers numerals; zero is
+   `{"_num": null}`.
+2. A host `int` or `float` zero leaf in matcher-facing data is invalid and fails
+   closed to `NO_MATCH`.
+3. `mu_hash_cached(+0.0)`, `mu_hash_cached(-0.0)`, `mu_hash_cached(0)`, and
+   `mu_hash_cached(0.0)` are not semantic numeric-equality requirements.
+4. Sign-origin metadata (if ever needed) is non-identity and non-hash — it lives
+   outside the structural equality domain.
+5. Control-channel numeric canonicalization remains limited to §B.1 execution
+   mechanics and does not authorize matcher-facing host numeric leaves.
 
-**Current implementation:** `mu_hash_cached()` uses `json.dumps()` for serialization, which canonicalizes `0.0` and `-0.0` to `0`. This satisfies constraints 1-2.
+**Current implementation:** Stage 4 rejects host `int`/`float` leaves in
+`_stage0_match` / `stage0Match`; semantic zero is represented by `{"_num": null}`.
+Control hash wrappers remain available only for the execution paths listed in §B.1.
 
 ### B.1 Control-Channel Hash Safety Lock (Wave 24)
 
@@ -74,11 +88,11 @@ This document is the single canonical source for these policies. If a design doc
 **Scope:**
 - **Control paths (use `mu_hash_control*`):** stall detection in `step_kernel_mu`/`stepKernel`, `run_mu`/`run`, `run_mu_structural`/`runStructural`, `run_hemisphere_routing`, `runSubAlgorithm`, `hash_trace_for_recurrence`/`hashTraceForRecurrence`. (Note: `projection_runner` retired Wave 3F; `stage0_vm_run_bounded` uses VM step status, not hash-based stall detection.)
 - **Data paths (use `mu_hash`/`mu_hash_cached`):** observer event hashing, undefined motif output, `makeUndefinedMotif`.
-- **Non-linear binding (A5→Wave 25 revert):** non-linear binding conflict checks in `match()`/`_match_inner()` use `mu_hash_cached`/`muHashCached` (content hash, NOT control hash). Wave A5 initially switched to control hash, but Wave 25 reverted: control hash canonicalizes `0.0→0`, which collapses int/float type distinction needed for correct non-linear conflict detection. See `_match_inner()` non-linear conflict check comments in `eval_seed.py`.
+- **Non-linear binding (A5→Wave 25 revert, Stage 4 update):** non-linear binding conflict checks in `match()`/`_match_inner()` and the Stage 0 matcher path use `mu_hash_cached`/`muHashCached` (content hash, NOT control hash) so conflict detection compares structural data identity. After Stage 4, matcher-facing numeric facts are StructuralNumbers numerals rather than host `int`/`float` leaves; control hash canonicalization remains restricted to the control paths above.
 
 **Canonicalization rules:**
 1. Integer-valued floats → int: `1.0` → `1`, `-3.0` → `-3`
-2. ±0.0 → 0 (consistent with §B above)
+2. ±0.0 → 0 (control-channel execution mechanics only; not semantic numeric identity)
 3. Non-integer floats (3.14) pass through unchanged (serialize identically in both substrates)
 4. Non-numeric types pass through unchanged
 

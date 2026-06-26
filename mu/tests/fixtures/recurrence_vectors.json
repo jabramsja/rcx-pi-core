@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.1.0",
-    "description": "Parity vectors for EngineNews closure detection (Step 6 v0: added tau_step)",
+        "version": "1.2.0",
+        "description": "Parity vectors for EngineNews closure detection (Stage 4: StructuralNumbers tau_step/trace step)",
     "spec_ref": "RCXEngineNew.pdf Rule 2.2♢",
     "substrates": ["python", "javascript"]
   },
@@ -12,9 +12,9 @@
       "input": {
         "_detect_closure": {
           "trace": {
-            "head": {"step": 0, "state": "A", "projection": null},
+            "head": {"step": {"_num": null}, "state": "A", "projection": null},
             "tail": {
-              "head": {"step": 1, "state": "A", "projection": null, "stall": true},
+              "head": {"step": {"_num": {"xH": null}}, "state": "A", "projection": null, "stall": true},
               "tail": null
             }
           },
@@ -23,7 +23,7 @@
       },
       "expected": {
         "closure_detected": true,
-        "tau_step": 1,
+        "tau_step": {"_num": {"xH": null}},
         "final_result": "A"
       },
       "notes": "State A appears twice -> closure detected at step 1"
@@ -34,7 +34,7 @@
       "input": {
         "_detect_closure": {
           "trace": {
-            "head": {"step": 0, "state": "X", "projection": null, "stall": true},
+            "head": {"step": {"_num": null}, "state": "X", "projection": null, "stall": true},
             "tail": null
           },
           "result": "X"
@@ -53,11 +53,11 @@
       "input": {
         "_detect_closure": {
           "trace": {
-            "head": {"step": 0, "state": "A", "projection": "to_b"},
+            "head": {"step": {"_num": null}, "state": "A", "projection": "to_b"},
             "tail": {
-              "head": {"step": 1, "state": "B", "projection": "to_a"},
+              "head": {"step": {"_num": {"xH": null}}, "state": "B", "projection": "to_a"},
               "tail": {
-                "head": {"step": 2, "state": "A", "projection": "to_b"},
+                "head": {"step": {"_num": {"xO": {"xH": null}}}, "state": "A", "projection": "to_b"},
                 "tail": null
               }
             }
@@ -67,7 +67,7 @@
       },
       "expected": {
         "closure_detected": true,
-        "tau_step": 2,
+        "tau_step": {"_num": {"xO": {"xH": null}}},
         "final_result": "A"
       },
       "notes": "A appears at step 0 and step 2 -> closure at step 2"
@@ -78,49 +78,49 @@
       "input": {
         "_detect_closure": {
           "trace": {
-            "head": {"step": 0, "state": 1, "projection": "inc"},
+            "head": {"step": {"_num": null}, "state": "S1", "projection": "inc"},
             "tail": {
-              "head": {"step": 1, "state": 2, "projection": "inc"},
+              "head": {"step": {"_num": {"xH": null}}, "state": "S2", "projection": "inc"},
               "tail": {
-                "head": {"step": 2, "state": 3, "projection": null, "stall": true},
+                "head": {"step": {"_num": {"xO": {"xH": null}}}, "state": "S3", "projection": null, "stall": true},
                 "tail": null
               }
             }
           },
-          "result": 3
+          "result": "S3"
         }
       },
       "expected": {
         "closure_detected": false,
         "tau_step": null,
-        "final_result": 3
+        "final_result": "S3"
       },
-      "notes": "States 1, 2, 3 are all distinct"
+      "notes": "States S1, S2, S3 are all distinct"
     },
     {
       "id": "engine.closure_numeric",
-      "description": "Numeric oscillation 0->1->0",
+      "description": "StructuralNumbers oscillation 0->1->0",
       "input": {
         "_detect_closure": {
           "trace": {
-            "head": {"step": 0, "state": 0, "projection": "to_1"},
+            "head": {"step": {"_num": null}, "state": {"_num": null}, "projection": "to_1"},
             "tail": {
-              "head": {"step": 1, "state": 1, "projection": "to_0"},
+              "head": {"step": {"_num": {"xH": null}}, "state": {"_num": {"xH": null}}, "projection": "to_0"},
               "tail": {
-                "head": {"step": 2, "state": 0, "projection": "to_1"},
+                "head": {"step": {"_num": {"xO": {"xH": null}}}, "state": {"_num": null}, "projection": "to_1"},
                 "tail": null
               }
             }
           },
-          "result": 0
+          "result": {"_num": null}
         }
       },
       "expected": {
         "closure_detected": true,
-        "tau_step": 2,
-        "final_result": 0
+        "tau_step": {"_num": {"xO": {"xH": null}}},
+        "final_result": {"_num": null}
       },
-      "notes": "0 appears at step 0 and step 2 -> closure at step 2"
+      "notes": "Structural zero appears at step 0 and step 2 -> closure at step 2"
     }
   ]
 }

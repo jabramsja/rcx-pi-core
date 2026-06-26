@@ -15,6 +15,12 @@ from rcx_pi.selfhost.step_mu import (
     run_mu,  # SPEED_OK: tested via run_mu (slow-marked below)
 )
 
+ZERO = {"_num": None}
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
+THREE = {"_num": {"xI": {"xH": None}}}
+FOUR = {"_num": {"xO": {"xO": {"xH": None}}}}
+
 
 # =============================================================================
 # Structural Contract Tests (fast gate — no run_mu)
@@ -135,7 +141,7 @@ class TestEvidenceWalkerTruthTable:
     def test_single_entry_with_projection(self):
         """Single trace entry with projection → entry collected."""
         projs = _load_walker_projs()
-        trace = _make_trace({"state": "a", "step": 0, "projection": "test.rewrite"})
+        trace = _make_trace({"state": "a", "step": ZERO, "projection": "test.rewrite"})
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=20)
         entries = _collect_entries(result)
@@ -145,7 +151,7 @@ class TestEvidenceWalkerTruthTable:
     def test_single_entry_without_projection(self):
         """Single trace entry without projection → still collected (boundary filters)."""
         projs = _load_walker_projs()
-        trace = _make_trace({"state": "a", "step": 0})
+        trace = _make_trace({"state": "a", "step": ZERO})
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=20)
         entries = _collect_entries(result)
@@ -156,9 +162,9 @@ class TestEvidenceWalkerTruthTable:
         """Mix of entries → all collected for boundary post-processing."""
         projs = _load_walker_projs()
         trace = _make_trace(
-            {"state": "a", "step": 0, "projection": "p1"},
-            {"state": "b", "step": 1},
-            {"state": "c", "step": 2, "projection": "p2"},
+            {"state": "a", "step": ZERO, "projection": "p1"},
+            {"state": "b", "step": ONE},
+            {"state": "c", "step": TWO, "projection": "p2"},
         )
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=30)
@@ -169,9 +175,9 @@ class TestEvidenceWalkerTruthTable:
         """All entries have projection → all collected."""
         projs = _load_walker_projs()
         trace = _make_trace(
-            {"state": "a", "step": 0, "projection": "id.1"},
-            {"state": "b", "step": 1, "projection": "id.2"},
-            {"state": "c", "step": 2, "projection": "id.1"},
+            {"state": "a", "step": ZERO, "projection": "id.1"},
+            {"state": "b", "step": ONE, "projection": "id.2"},
+            {"state": "c", "step": TWO, "projection": "id.1"},
         )
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=30)
@@ -182,23 +188,23 @@ class TestEvidenceWalkerTruthTable:
         """Non-string projection values collected (boundary filters later)."""
         projs = _load_walker_projs()
         trace = _make_trace(
-            {"state": "a", "step": 0, "projection": 42},
+            {"state": "a", "step": ZERO, "projection": ONE},
         )
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=20)
         entries = _collect_entries(result)
         assert len(entries) == 1
-        assert entries[0]["projection"] == 42
+        assert entries[0]["projection"] == ONE
 
     def test_trace_len_from_entry_count(self):
         """Total entry count equals trace length."""
         projs = _load_walker_projs()
         trace = _make_trace(
-            {"state": "a", "step": 0},
-            {"state": "b", "step": 1, "projection": "p1"},
-            {"state": "c", "step": 2},
-            {"state": "d", "step": 3, "projection": "p2"},
-            {"state": "e", "step": 4},
+            {"state": "a", "step": ZERO},
+            {"state": "b", "step": ONE, "projection": "p1"},
+            {"state": "c", "step": TWO},
+            {"state": "d", "step": THREE, "projection": "p2"},
+            {"state": "e", "step": FOUR},
         )
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=50)

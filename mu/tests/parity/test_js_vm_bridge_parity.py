@@ -645,7 +645,7 @@ class TestJsBridgeVmOrderingE2E:
         proof = _run_js_bridge_vm_ordering_probe()
 
         assert proof["fixture"]["file"] == JS_BRIDGE_FIXTURE_REL
-        assert proof["fixture"]["input"] == {"op": "double", "value": 42}
+        assert proof["fixture"]["input"] == {"op": "double", "value": "forty_two"}
         assert proof["fixture"]["projection"] == {
             "pattern": {"op": "double", "value": {"var": "n"}},
             "body": {"result": {"var": "n"}, "doubled": {"var": "n"}},
@@ -669,7 +669,7 @@ class TestJsBridgeVmOrderingE2E:
             "rcx.stage0.match_v2.compiled.v1",
         ]
 
-        assert proof["ordered"]["output"] == {"result": 42, "doubled": 42}
+        assert proof["ordered"]["output"] == {"result": "forty_two", "doubled": "forty_two"}
         assert proof["ordered"]["stall"] is False
         assert proof["ordered"]["termination_reason"] == "projection_applied"
         ordered_trace = proof["ordered"]["public_entrypoint_trace"]
@@ -741,11 +741,11 @@ class TestJsBridgeVmOrderingE2E:
             ),
         }
 
-        assert proof["kernel_replaced_by_bridge"]["output"] == {"op": "double", "value": 42}
+        assert proof["kernel_replaced_by_bridge"]["output"] == {"op": "double", "value": "forty_two"}
         assert proof["kernel_replaced_by_bridge"]["stall"] is True
         assert proof["kernel_replaced_by_bridge"]["termination_reason"] == "hash_stall"
 
-        assert proof["match_replaced_by_bridge"]["output"] == {"op": "double", "value": 42}
+        assert proof["match_replaced_by_bridge"]["output"] == {"op": "double", "value": "forty_two"}
         assert proof["match_replaced_by_bridge"]["stall"] is True
         assert proof["match_replaced_by_bridge"]["termination_reason"] == "max_steps_exhausted"
         assert proof["match_replaced_by_bridge"]["steps_used"] == proof["max_steps"]

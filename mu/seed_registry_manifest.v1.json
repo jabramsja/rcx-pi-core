@@ -169,7 +169,7 @@
     },
     "rcx_engine.v1.json": {
       "subdir": "programs",
-      "sha256": "1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f",
+      "sha256": "0b50f1844e182a79ac8a21d0a9c150de480c626db750619786ca65484b21df5f",
       "projection_ids": [
         "engine.init",
         "engine.init_config",
@@ -342,7 +342,7 @@
     },
     "fix.v1.json": {
       "subdir": "closures",
-      "sha256": "d961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34",
+      "sha256": "dbfc055d652c61d7708c10702b1d4ce494f1e5a85505010e0e4f7c1222815ed1",
       "projection_ids": [
         "fix.init",
         "fix.edge_add_guard",

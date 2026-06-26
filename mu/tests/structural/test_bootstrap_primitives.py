@@ -29,6 +29,7 @@ pytestmark = [pytest.mark.slow]
 
 # Project root
 ROOT = REPO_ROOT
+ONE = {"_num": {"xH": None}}
 
 
 # =============================================================================
@@ -213,7 +214,7 @@ class TestMaxStepsPrimitive:
             {"pattern": {"var": "x"}, "body": {"loop": {"var": "x"}}}
         ]
 
-        initial = {"start": 1}
+        initial = {"start": ONE}
 
         # Run with small limit
         final, trace, is_stall = run_mu(infinite_loop, initial, max_steps=10)
@@ -230,7 +231,7 @@ class TestMaxStepsPrimitive:
         projections = [
             {"pattern": {"var": "x"}, "body": {"var": "x"}}
         ]
-        value = 42
+        value = ONE
 
         # Should not hang (default limit applies)
         final, trace, is_stall = run_mu(projections, value)
@@ -522,6 +523,8 @@ class TestDocumentationClaims:
 class TestPrimitivesEnableStructural:
     """Verify primitives enable structural self-hosting."""
 
+    ONE = {"_num": {"xH": None}}
+
     def test_primitives_enable_pattern_matching(self):
         """Primitives enable match.v1 projections to work."""
         from rcx_pi.selfhost.match_mu import match_mu
@@ -531,9 +534,9 @@ class TestPrimitivesEnableStructural:
         # - step (eval_step primitive)
         # - mu_equal (stall detection primitive)
 
-        result = match_mu({"var": "x"}, 42)
+        result = match_mu({"var": "x"}, self.ONE)
         assert result != NO_MATCH
-        assert mu_equal(result["x"], 42)
+        assert mu_equal(result["x"], self.ONE)
 
     def test_primitives_enable_substitution(self):
         """Primitives enable subst.v1 projections to work."""
@@ -557,5 +560,5 @@ class TestPrimitivesEnableStructural:
             {"pattern": {"x": {"var": "a"}}, "body": {"y": {"var": "a"}}}
         ]
 
-        result = step_mu(projections, {"x": 1})
-        assert mu_equal(result, {"y": 1})
+        result = step_mu(projections, {"x": self.ONE})
+        assert mu_equal(result, {"y": self.ONE})

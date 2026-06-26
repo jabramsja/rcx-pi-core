@@ -127,7 +127,7 @@
                     "graph": {
                         "vertices": {
                             "head": {
-                                "id": 0,
+                                "id": {"_num": null},
                                 "label": "empty_set_emergence",
                                 "tau_step": {"var": "guard_tau"}
                             },
@@ -144,7 +144,7 @@
                     "graph": {
                         "vertices": {
                             "head": {
-                                "id": 0,
+                                "id": {"_num": null},
                                 "label": "empty_set_emergence",
                                 "tau_step": {"var": "guard_tau"}
                             },
@@ -175,7 +175,7 @@
                     "graph": {
                         "vertices": {
                             "head": {
-                                "id": 0,
+                                "id": {"_num": null},
                                 "label": "empty_set_emergence",
                                 "tau_step": {"var": "tau"}
                             },

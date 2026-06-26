@@ -41,23 +41,20 @@ from rcx_pi.mu_type import is_mu, mu_equal, MAX_MU_DEPTH
 # Import apply_mu from production code (9-agent Expert finding 2026-02-01)
 # Production version has assert_mu() validation that conftest version lacked
 from rcx_pi.step_mu import apply_mu
+from tests.helpers.structural_numbers import sn
 
 
 # =============================================================================
 # Hypothesis Strategies for Mu Values
 # =============================================================================
 
-# Primitive Mu values (JSON-compatible)
+# Primitive Mu values (JSON-compatible). Stage 4 encodes matcher-facing
+# integer facts as StructuralNumbers; host floats are covered by explicit
+# legacy edge-case probes below, not broad legal Mu generation.
 mu_primitives = st.one_of(
     st.none(),
     st.booleans(),
-    st.integers(min_value=-(2**53), max_value=2**53),  # JSON safe integers
-    st.floats(
-        allow_nan=False,
-        allow_infinity=False,
-        min_value=-1e10,
-        max_value=1e10
-    ),
+    st.integers(min_value=-128, max_value=128).map(sn),
     st.text(max_size=100),  # Reasonable string length
 )
 
@@ -714,20 +711,20 @@ def edge_case_mu_values(draw):
         st.just(None),
         st.just(True),
         st.just(False),
-        st.just(0),
+        st.just(sn(0)),
         st.just(-0.0),
-        st.just(1),
-        st.just(-1),
+        st.just(sn(1)),
+        st.just(sn(-1)),
         st.just(""),
         st.just([]),
         st.just({}),
-        st.just({"head": 1, "tail": None}),
-        st.just({"head": 1, "tail": {"head": 2, "tail": None}}),
+        st.just({"head": sn(1), "tail": None}),
+        st.just({"head": sn(1), "tail": {"head": sn(2), "tail": None}}),
         st.just({"var": "x"}),
         # Deep nesting (moderate depth for speed)
         st.builds(lambda: build_deep_structure(30)),
         # Wide structure
-        st.builds(lambda: {f"key{i}": i for i in range(20)}),
+        st.builds(lambda: {f"key{i}": sn(i) for i in range(20)}),
         # Unicode
         st.just("hello"),
         st.just({"key": "value"}),
@@ -802,12 +799,12 @@ class TestTypeDiscrimination:
     def test_true_vs_one(self):
         """True and 1 should be treated distinctly in patterns."""
         proj_bool = {"pattern": True, "body": "bool"}
-        proj_int = {"pattern": 1, "body": "int"}
+        proj_int = {"pattern": sn(1), "body": "int"}
 
         # True should match True pattern
         assert apply_mu(proj_bool, True) == "bool"
         # 1 should match 1 pattern
-        assert apply_mu(proj_int, 1) == "int"
+        assert apply_mu(proj_int, sn(1)) == "int"
 
         # Cross-matching behavior depends on Python semantics
         # (True == 1 in Python, so both may match)
@@ -815,16 +812,16 @@ class TestTypeDiscrimination:
     def test_false_vs_zero(self):
         """False and 0 should be treated distinctly in patterns."""
         proj_bool = {"pattern": False, "body": "bool"}
-        proj_int = {"pattern": 0, "body": "int"}
+        proj_int = {"pattern": sn(0), "body": "int"}
 
         assert apply_mu(proj_bool, False) == "bool"
-        assert apply_mu(proj_int, 0) == "int"
+        assert apply_mu(proj_int, sn(0)) == "int"
 
     def test_none_matches_none(self):
         """None only matches None."""
         proj = {"pattern": None, "body": "null"}
 
         assert apply_mu(proj, None) == "null"
-        assert apply_mu(proj, 0) is NO_MATCH
+        assert apply_mu(proj, sn(0)) is NO_MATCH
         assert apply_mu(proj, "") is NO_MATCH
         assert apply_mu(proj, False) is NO_MATCH

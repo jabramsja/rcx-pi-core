@@ -30,6 +30,7 @@ import pytest
 from tests.repo_root import REPO_ROOT
 
 from rcx_pi.selfhost.step_mu import RcxEngineError  # ANTICHEAT_OK: gate verifies typed fail-closed errors
+import rcx_pi.selfhost.engine_pipeline as engine_pipeline
 from rcx_pi.selfhost.engine_pipeline import (
     _load_boundary_ops,  # ANTICHEAT_OK: gate verifies seed-derived boundary ops
     _clear_boundary_ops_cache,  # ANTICHEAT_OK: gate verifies cache-clear parity
@@ -82,6 +83,25 @@ def setup_function():
 
 
 _MAX_STEPS_MISSING = object()
+
+
+def _structural_num(n: int):
+    if n < 0:
+        raise ValueError("StructuralNumbers helper requires non-negative integer")
+    if n == 0:
+        return {"_num": None}
+    lower_bits = []
+    while n > 1:
+        lower_bits.append(n & 1)
+        n >>= 1
+    node = {"xH": None}
+    for bit in reversed(lower_bits):
+        node = {"xI": node} if bit else {"xO": node}
+    return {"_num": node}
+
+
+def _structural_num_expr(n: int) -> str:
+    return json.dumps(_structural_num(n), separators=(",", ":"))
 
 
 def _linked_trace_to_list(trace):
@@ -646,16 +666,16 @@ class TestRequestValidation:
         assert result["stall"] is False
         assert result["result"] == "A"
         assert trace[-1] == {
-            "step": 100,
+            "step": _structural_num(100),
             "state": "A",
             "projection": None,
             "max_steps": True,
         }
 
-    def test_run_trace_max_steps_explicit_integer_budget(self):
-        """Explicit integer max_steps is accepted as structural budget data."""
+    def test_run_trace_max_steps_explicit_structural_budget(self):
+        """Explicit max_steps is accepted only as structural budget data."""
         ctx = _service_boundary_effect(
-            _toggle_trace_request(1), max_algorithm_iterations=10,
+            _toggle_trace_request(_structural_num(1)), max_algorithm_iterations=10,
             emit_fn=_stub_emit, step=0, state={},
         )
         result = ctx["result"]
@@ -663,11 +683,27 @@ class TestRequestValidation:
         assert result["stall"] is False
         assert result["result"] == "B"
         assert trace[-1] == {
-            "step": 1,
+            "step": _structural_num(1),
             "state": "B",
             "projection": None,
             "max_steps": True,
         }
+
+    def test_run_trace_max_steps_rejects_dirty_structural_wrapper(self):
+        """StructuralNumbers max_steps wrapper must be exactly {'_num': ...}."""
+        with pytest.raises(RcxEngineError, match="StructuralNumbers numeral"):
+            _service_boundary_effect(
+                _toggle_trace_request({"_num": None, "junk": "dirty"}),
+                max_algorithm_iterations=10,
+                emit_fn=_stub_emit, step=0, state={},
+            )
+
+    def test_js_run_trace_max_steps_rejects_dirty_structural_wrapper(self):
+        """JS run_trace mirrors the exact {'_num': ...} wrapper requirement."""
+        result = _run_js_trace("{ _num: null, junk: 'dirty' }")
+        assert result["ok"] is False
+        assert result["error_code"] == "api.bad_request"
+        assert "StructuralNumbers numeral" in result["message"]
 
     @pytest.mark.parametrize(
         "bad_value",
@@ -695,7 +731,21 @@ class TestRequestValidation:
         """The hard cap is a fail-closed resource guard, not a silent clamp."""
         with pytest.raises(RcxEngineError) as exc:
             _service_boundary_effect(
-                _toggle_trace_request(10001), max_algorithm_iterations=10,
+                _toggle_trace_request(_structural_num(10001)), max_algorithm_iterations=10,
+                emit_fn=_stub_emit, step=0, state={},
+            )
+        assert exc.value.error_code == "api.bad_request"
+        assert "10000" in str(exc.value)
+
+    def test_run_trace_max_steps_over_cap_rejects_before_reduction(self, monkeypatch):
+        """Over-cap structural budgets must not run ADD/COMPARE just to reject."""
+        def reject_structural_step(*args, **kwargs):
+            raise AssertionError("over-cap max_steps used structural reduction")
+
+        monkeypatch.setattr(engine_pipeline, "_step_trusted", reject_structural_step)
+        with pytest.raises(RcxEngineError) as exc:
+            _service_boundary_effect(
+                _toggle_trace_request(_structural_num(10001)), max_algorithm_iterations=10,
                 emit_fn=_stub_emit, step=0, state={},
             )
         assert exc.value.error_code == "api.bad_request"
@@ -704,7 +754,7 @@ class TestRequestValidation:
     def test_run_trace_zero_budget_reports_exhaustion_boundary(self):
         """A zero explicit budget produces the trace exhaustion marker at step 0."""
         ctx = _service_boundary_effect(
-            _toggle_trace_request(0), max_algorithm_iterations=10,
+            _toggle_trace_request(_structural_num(0)), max_algorithm_iterations=10,
             emit_fn=_stub_emit, step=0, state={},
         )
         result = ctx["result"]
@@ -712,7 +762,7 @@ class TestRequestValidation:
         assert result["stall"] is False
         assert result["result"] == "A"
         assert trace == [{
-            "step": 0,
+            "step": _structural_num(0),
             "state": "A",
             "projection": None,
             "max_steps": True,
@@ -775,20 +825,20 @@ class TestRequestValidation:
         assert result["stall"] is False
         assert result["result"] == "A"
         assert result["last"] == {
-            "step": 100,
+            "step": _structural_num(100),
             "state": "A",
             "projection": None,
             "max_steps": True,
         }
 
-    def test_js_run_trace_max_steps_explicit_integer_budget(self):
-        """JS explicit integer max_steps is accepted as structural budget data."""
-        result = _run_js_trace("1")
+    def test_js_run_trace_max_steps_explicit_structural_budget(self):
+        """JS explicit max_steps is accepted only as structural budget data."""
+        result = _run_js_trace(_structural_num_expr(1))
         assert result["ok"] is True
         assert result["stall"] is False
         assert result["result"] == "B"
         assert result["last"] == {
-            "step": 1,
+            "step": _structural_num(1),
             "state": "B",
             "projection": None,
             "max_steps": True,
@@ -815,19 +865,19 @@ class TestRequestValidation:
 
     def test_js_run_trace_max_steps_over_cap_fails_closed(self):
         """JS hard cap is a fail-closed resource guard, not a silent clamp."""
-        result = _run_js_trace("10001")
+        result = _run_js_trace(_structural_num_expr(10001))
         assert result["ok"] is False
         assert result["error_code"] == "api.bad_request"
         assert "10000" in result["message"]
 
     def test_js_run_trace_zero_budget_reports_exhaustion_boundary(self):
         """JS zero explicit budget produces the trace exhaustion marker at step 0."""
-        result = _run_js_trace("0")
+        result = _run_js_trace(_structural_num_expr(0))
         assert result["ok"] is True
         assert result["stall"] is False
         assert result["result"] == "A"
         assert result["last"] == {
-            "step": 0,
+            "step": _structural_num(0),
             "state": "A",
             "projection": None,
             "max_steps": True,
@@ -1401,8 +1451,8 @@ class TestBehaviorPreservation:
             "operation": "run_trace",
             "input": {
                 "projections": simple_projs,
-                "value": {"x": 42},
-                "max_steps": 10,
+                "value": {"x": "forty_two"},
+                "max_steps": _structural_num(10),
             },
             "context": {},
             "inject_key": "trace_result",

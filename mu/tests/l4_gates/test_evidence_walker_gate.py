@@ -28,6 +28,10 @@ from rcx_pi.selfhost.seed_integrity import (
 )
 from tests.repo_root import REPO_ROOT
 
+ZERO = {"_num": None}
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
+
 
 @functools.lru_cache(maxsize=1)
 def _js_registry_snapshot() -> dict[str, dict[str, object]]:
@@ -196,7 +200,7 @@ class TestEvidenceWalkerWiringGate:
     def test_trace_with_projection_collects_entry(self):
         """Trace entry with projection → raw entry collected."""
         projs = load_verified_seed(get_seed_path("evidence_walker.v1.json"))["projections"]
-        trace = {"head": {"state": "a", "step": 0, "projection": "test.id"}, "tail": None}
+        trace = {"head": {"state": "a", "step": ZERO, "projection": "test.id"}, "tail": None}
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=20)
         assert "evidence_done" in result
@@ -211,7 +215,7 @@ class TestEvidenceWalkerWiringGate:
     def test_trace_without_projection_collects_entry(self):
         """Trace entry without projection → raw entry still collected."""
         projs = load_verified_seed(get_seed_path("evidence_walker.v1.json"))["projections"]
-        trace = {"head": {"state": "a", "step": 0}, "tail": None}
+        trace = {"head": {"state": "a", "step": ZERO}, "tail": None}
         wrapped = {"evidence_walk": {"trace": trace}}
         result, _trace, _stall = run_mu(projs, wrapped, max_steps=20)
         assert "evidence_done" in result
@@ -226,11 +230,11 @@ class TestEvidenceWalkerWiringGate:
         """Multi-entry trace → all entries collected."""
         projs = load_verified_seed(get_seed_path("evidence_walker.v1.json"))["projections"]
         trace = {
-            "head": {"state": "a", "step": 0, "projection": "p1"},
+            "head": {"state": "a", "step": ZERO, "projection": "p1"},
             "tail": {
-                "head": {"state": "b", "step": 1},
+                "head": {"state": "b", "step": ONE},
                 "tail": {
-                    "head": {"state": "c", "step": 2, "projection": "p2"},
+                    "head": {"state": "c", "step": TWO, "projection": "p2"},
                     "tail": None,
                 },
             },

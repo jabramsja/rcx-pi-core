@@ -83,7 +83,7 @@ run_python() {
   # No underscore-prefixed keys in JSON
   echo "-- no underscore-prefixed keys in JSON (non-standard Mu)"
   # Note: kernel/match/subst seeds use underscore-prefixed fields for state (_mode, _phase, etc.)
-  # Note: mu/closures/ seeds (recurrence, exhaustion) use underscore-prefixed fields for engine state
+  # Note: mu/closures/ seeds (recurrence, exhaustion, fix) use underscore-prefixed fields for engine state
   # Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
   # Note: mu/bridge/ seeds (bootstrap_structural) use underscore-prefixed fields for match state
   # Note: mu/utilities/ seeds (terminal_classify) use underscore-prefixed fields for wrapper keys (_tc, _tc_exit)
@@ -98,6 +98,7 @@ run_python() {
       grep -v 'subst.v2.json' | \
       grep -v 'recurrence.v1.json' | \
       grep -v 'exhaustion.v1.json' | \
+      grep -v 'fix.v1.json' | \
       grep -v 'rcx_engine.v1.json' | \
       grep -v 'enginenews.v1.json' | \
       grep -v 'exhaust.v1.json' | \
