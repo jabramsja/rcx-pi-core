@@ -1,0 +1,24 @@
+{
+  "wave_id": "surreals-as-structure-2026-06-26",
+  "repeat_run_speedup_ratio": 2.128476,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.237002,
+  "repeat_run_raw_seconds": [
+    0.504453,
+    0.237002
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.504453
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.741455
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-26T17:51:00Z",
+  "collector_version": "2.2.0"
+}
