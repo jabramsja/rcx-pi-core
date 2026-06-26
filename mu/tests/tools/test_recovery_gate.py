@@ -5430,6 +5430,715 @@ class TestTier3ShortCircuit:
         assert status["state"] == "tier3_exhausted"
 
 
+class TestTier3BotFindingsDurableEdit:
+    """PIPELINE-FIX-34: tier-3 bot_findings_pending requires + applies durable
+    structured edits.
+
+    A bot P1 finding is remediated by a durable file edit (action="edit" via
+    _apply_edit). When the recovery agent returns meta-envelope-only output
+    (a populated explanation but no durable edit -- action != "edit", empty
+    commands, or a non-edit "fix" such as a shell command), the loop must NOT
+    silently burn the iteration budget into the generic `tier3_exhausted`
+    terminal with indicator-only evidence. It records a DISTINCT, fail-CLOSED
+    terminal (recovered=False, exhausted=True, outcome="no_durable_edits",
+    state="tier3_no_durable_edits") so the existing exhausted=True ->
+    pipeline_hard_fail event fires (INV_TYPED_FAIL_CLOSED_OUTCOMES).
+
+    The SPLIT skip (exhausted=False) / escalate (exhausted=True) severity
+    semantics (Bot P1 fix, PR #792) are preserved unchanged for this class.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _mock_recovery_agent(self, monkeypatch):
+        install_mock_recovery_agent(monkeypatch)
+
+    @staticmethod
+    def _bot_result():
+        return {
+            "status": "bot_findings_pending",
+            "step": "bot_findings",
+            "failure_class": "bot_findings_pending",
+            "stderr": "P1 bot finding unresolved",
+            "stdout": "",
+        }
+
+    def test_bot_findings_pending_applies_durable_edit(self, tmp_path):
+        """action="edit" with valid commands is applied via _apply_edit and
+        remediates: the file is durably changed and recovery requests a retry.
+        """
+        target = tmp_path / "remediation_target.py"
+        target.write_text("BOT_FINDING_MARKER = 'unresolved'\n", encoding="utf-8")
+        claude_response = json.dumps({
+            "action": "edit",
+            "commands": [{
+                "file_path": "remediation_target.py",
+                "old_text": "BOT_FINDING_MARKER = 'unresolved'",
+                "new_text": "BOT_FINDING_MARKER = 'resolved'",
+            }],
+            "explanation": "remediate the P1 bot finding with a durable edit",
+        })
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response, pid=8050)
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-edit", max_iterations=3)
+
+        assert r["recovered"] is True
+        assert r["exhausted"] is False
+        assert r["iterations"] == 1
+        assert r["log"][0]["action"] == "edit"
+        # The durable edit was actually applied to the file.
+        assert target.read_text(encoding="utf-8") == "BOT_FINDING_MARKER = 'resolved'\n"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "retry_requested"
+        assert status["state"] == "tier3_retry_requested"
+        assert status["state"] != "tier3_no_durable_edits"
+
+    def test_bot_findings_pending_meta_envelope_only_edit_fails_closed(self, tmp_path):
+        """action="edit" with EMPTY commands (meta-envelope-only output) records
+        a DISTINCT fail-closed terminal -- NOT the generic silent tier3_exhausted
+        budget-burn -- and fires pipeline_hard_fail. It must terminate on the
+        first iteration without burning the remaining iteration budget.
+        """
+        claude_response = json.dumps({
+            "action": "edit",
+            "commands": [],
+            "explanation": "I analyzed the bot finding but produced no edit",
+        })
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=8100 + popen_call_count[0])
+
+        events = []
+
+        def fake_emit(repo_root, **kwargs):
+            events.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(events)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        with patch.object(rg_mod, "subprocess") as mock_sp, \
+             patch.object(rg_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-meta", max_iterations=3)
+
+        # Terminated on iter 1: did NOT burn the iteration budget.
+        assert popen_call_count[0] == 1
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+        assert r["log"][0]["no_durable_edits"] is True
+        assert r["log"][0]["action"] == "edit"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        # DISTINCT, fail-CLOSED terminal -- not the silent generic budget-burn.
+        assert status["outcome"] == "no_durable_edits"
+        assert status["state"] == "tier3_no_durable_edits"
+        assert status["state"] != "tier3_exhausted"
+        assert status["exhausted"] is True
+        # Fail-CLOSED: the exhausted=True branch fires the pipeline_hard_fail event.
+        event_types = [e["event_type"] for e in events]
+        assert "pipeline_hard_fail" in event_types
+        # The recovery log records the distinct typed outcome (not "exhausted").
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert entries[-1]["outcome"] == "no_durable_edits"
+        assert entries[-1]["action"] == "tier3_iter1_edit"
+
+    def test_bot_findings_pending_non_edit_shell_fix_fails_closed(self, tmp_path):
+        """A non-edit "fix" -- even a shell command that exits 0 -- is
+        indicator-only theater for a bot finding, not durable remediation.
+
+        Bridge round-2 (D2): the shell command must NEVER execute -- the gate
+        dispatches BEFORE the shell handler -- so it cannot mutate the tree and
+        then be recorded as no_durable_edits. Proven here by (a) a MUTATING shell
+        command whose target file is asserted unchanged and (b) subprocess.run
+        never being invoked.
+        """
+        target = tmp_path / "remediation_target.py"
+        target.write_text("BOT_FINDING_MARKER = 'unresolved'\n", encoding="utf-8")
+        claude_response = json.dumps({
+            "action": "shell",
+            "commands": [
+                "sed -i.bak s/unresolved/shell-mutated/ remediation_target.py"
+            ],
+            "explanation": "ran a shell mutation but applied no structured edit",
+        })
+        popen_call_count = [0]
+        run_calls = []
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=8300 + popen_call_count[0])
+
+        def tracking_run(*a, **kw):
+            run_calls.append(a)
+            return MagicMock(returncode=0, stdout="ok", stderr="")
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = tracking_run
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-shell", max_iterations=3)
+
+        assert popen_call_count[0] == 1
+        # The shell command was NEVER executed (gate blocks before dispatch).
+        # subprocess.run is still used for unrelated bookkeeping (git status),
+        # so assert specifically that the agent's shell command was not run.
+        ran_cmds = [a[0] for a in run_calls if a]
+        assert "sed -i.bak s/unresolved/shell-mutated/ remediation_target.py" not in ran_cmds
+        # The target file was NOT mutated, and no sed backup was created.
+        assert target.read_text(encoding="utf-8") == "BOT_FINDING_MARKER = 'unresolved'\n"
+        assert not (tmp_path / "remediation_target.py.bak").exists()
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+        assert r["log"][0]["no_durable_edits"] is True
+        assert r["log"][0]["action"] == "shell"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "no_durable_edits"
+        assert status["state"] == "tier3_no_durable_edits"
+        assert status["state"] != "tier3_retry_requested"
+
+    def test_bot_findings_pending_explanation_only_fails_closed(self, tmp_path):
+        """Bridge round-2 (D1): a meta-envelope-only response -- a populated
+        `explanation` with NO `action` (so _looks_like_recovery_agent_response
+        rejects it and parsing returns None) -- must fail CLOSED on the DISTINCT
+        no_durable_edits terminal on iter 1, NOT burn the iteration budget into
+        the generic silent tier3_exhausted.
+        """
+        # No "action" key -- this is the exact shape that stranded pager-w2.
+        claude_response = json.dumps({
+            "explanation": "I analyzed the bot finding but produced no edit",
+        })
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=8500 + popen_call_count[0])
+
+        events = []
+
+        def fake_emit(repo_root, **kwargs):
+            events.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(events)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        with patch.object(rg_mod, "subprocess") as mock_sp, \
+             patch.object(rg_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-explanation", max_iterations=3)
+
+        # Fail-fast on iter 1: did NOT burn the iteration budget into 3 retries.
+        assert popen_call_count[0] == 1
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+        assert r["log"][0]["no_durable_edits"] is True
+        assert r["log"][0]["action"] == "meta_envelope_only"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        # DISTINCT, fail-CLOSED terminal -- NOT the silent generic budget-burn.
+        assert status["outcome"] == "no_durable_edits"
+        assert status["state"] == "tier3_no_durable_edits"
+        assert status["state"] != "tier3_exhausted"
+        assert status["exhausted"] is True
+        event_types = [e["event_type"] for e in events]
+        assert "pipeline_hard_fail" in event_types
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert entries[-1]["outcome"] == "no_durable_edits"
+        assert entries[-1]["action"] == "tier3_iter1_meta_envelope_only"
+
+    def test_bot_findings_pending_partial_multi_edit_is_atomic(self, tmp_path):
+        """Bridge round-2 (D3): a multi-edit response whose first edit is valid
+        and second edit is invalid must NOT leave the first edit durably applied
+        while reporting no_durable_edits. _apply_edits_atomically validates all
+        edits in-memory first and commits all-or-nothing, so the file is left
+        UNCHANGED and the iteration fails closed.
+        """
+        target = tmp_path / "remediation_target.py"
+        target.write_text("BOT_FINDING_MARKER = 'unresolved'\n", encoding="utf-8")
+        claude_response = json.dumps({
+            "action": "edit",
+            "commands": [
+                {
+                    "file_path": "remediation_target.py",
+                    "old_text": "BOT_FINDING_MARKER = 'unresolved'",
+                    "new_text": "BOT_FINDING_MARKER = 'partially-resolved'",
+                },
+                {
+                    "file_path": "remediation_target.py",
+                    "old_text": "THIS_OLD_TEXT_DOES_NOT_EXIST",
+                    "new_text": "irrelevant",
+                },
+            ],
+            "explanation": "two edits; the second has a missing old_text",
+        })
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=8600 + popen_call_count[0])
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-partial", max_iterations=3)
+
+        assert popen_call_count[0] == 1
+        # NO partial durable edit: the file is byte-identical to the original.
+        assert target.read_text(encoding="utf-8") == "BOT_FINDING_MARKER = 'unresolved'\n"
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+        assert r["log"][0]["no_durable_edits"] is True
+        assert r["log"][0]["action"] == "edit"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "no_durable_edits"
+        assert status["state"] == "tier3_no_durable_edits"
+
+    def test_bot_findings_pending_multi_edit_all_valid_applies_atomically(self, tmp_path):
+        """The atomic apply commits EVERY edit when all are valid -- including
+        multiple edits to the same file (the in-memory copy is threaded forward)
+        and edits across multiple files -- and then requests a retry.
+        """
+        target_a = tmp_path / "target_a.py"
+        target_a.write_text("A = 'unresolved'\nB = 'unresolved'\n", encoding="utf-8")
+        target_b = tmp_path / "target_b.py"
+        target_b.write_text("C = 'unresolved'\n", encoding="utf-8")
+        claude_response = json.dumps({
+            "action": "edit",
+            "commands": [
+                {"file_path": "target_a.py",
+                 "old_text": "A = 'unresolved'", "new_text": "A = 'resolved'"},
+                {"file_path": "target_a.py",
+                 "old_text": "B = 'unresolved'", "new_text": "B = 'resolved'"},
+                {"file_path": "target_b.py",
+                 "old_text": "C = 'unresolved'", "new_text": "C = 'resolved'"},
+            ],
+            "explanation": "remediate across two files with three durable edits",
+        })
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *a, **kw: FakePopen(stdout=claude_response, pid=8700)
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-multi-ok", max_iterations=3)
+
+        assert r["recovered"] is True
+        assert r["exhausted"] is False
+        assert r["iterations"] == 1
+        assert target_a.read_text(encoding="utf-8") == "A = 'resolved'\nB = 'resolved'\n"
+        assert target_b.read_text(encoding="utf-8") == "C = 'resolved'\n"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "retry_requested"
+        assert status["state"] == "tier3_retry_requested"
+
+    def test_bot_findings_pending_deliberate_skip_stays_non_exhausted(self, tmp_path):
+        """SPLIT-severity preserved: a deliberate skip stays NON-exhausted (no
+        pipeline_hard_fail) even for bot_findings_pending. The no_durable_edits
+        terminal must NOT capture a legitimate skip.
+        """
+        claude_response = json.dumps({
+            "action": "skip",
+            "commands": [],
+            "explanation": "bot finding is non-blocking; cannot auto-remediate",
+        })
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=8200 + popen_call_count[0])
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-skip", max_iterations=3)
+
+        assert popen_call_count[0] == 1
+        assert r["recovered"] is False
+        assert r["exhausted"] is False
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "short_circuited_non_actionable"
+        assert status["state"] == "tier3_short_circuited"
+        assert status["state"] != "tier3_no_durable_edits"
+        assert status["exhausted"] is False
+
+    def test_bot_findings_pending_deliberate_escalate_stays_exhausted(self, tmp_path):
+        """SPLIT-severity preserved: a deliberate escalate stays EXHAUSTED
+        (pipeline_hard_fail fires) for bot_findings_pending, recorded as the
+        escalate short-circuit, NOT the no_durable_edits terminal.
+        """
+        claude_response = json.dumps({
+            "action": "escalate",
+            "commands": [],
+            "explanation": "human intervention required for this bot finding",
+        })
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=8400 + popen_call_count[0])
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-escalate", max_iterations=3)
+
+        assert popen_call_count[0] == 1
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "short_circuited_non_actionable"
+        assert status["state"] == "tier3_short_circuited"
+        assert status["state"] != "tier3_no_durable_edits"
+        assert status["exhausted"] is True
+
+    def test_bot_findings_pending_noop_edit_fails_closed(self, tmp_path):
+        """Bridge round-3 (D1) end-to-end: action="edit" whose only command is a
+        content-free no-op (file_path with no old_text/new_text) must NOT be
+        counted as a durable remediation. It records the DISTINCT, fail-CLOSED
+        no_durable_edits terminal (NOT retry_requested), leaves the target file
+        byte-identical, and fires pipeline_hard_fail.
+        """
+        target = tmp_path / "remediation_target.py"
+        target.write_text("BOT_FINDING_MARKER = 'unresolved'\n", encoding="utf-8")
+        # The exact theater shape: an "edit" action that names a file but carries
+        # no old_text/new_text, so str.replace would be a no-op.
+        claude_response = json.dumps({
+            "action": "edit",
+            "commands": [{"file_path": "remediation_target.py"}],
+            "explanation": "claimed a fix but emitted no actual edit text",
+        })
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=8800 + popen_call_count[0])
+
+        events = []
+
+        def fake_emit(repo_root, **kwargs):
+            events.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(events)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        with patch.object(rg_mod, "subprocess") as mock_sp, \
+             patch.object(rg_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-noop", max_iterations=3)
+
+        # Terminated on iter 1; the no-op was NOT counted as a durable retry.
+        assert popen_call_count[0] == 1
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+        assert r["log"][0]["no_durable_edits"] is True
+        assert r["log"][0]["action"] == "edit"
+        # The target file was NOT mutated by the no-op edit.
+        assert target.read_text(encoding="utf-8") == "BOT_FINDING_MARKER = 'unresolved'\n"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        # DISTINCT, fail-CLOSED terminal -- NOT a durable retry, NOT the silent burn.
+        assert status["outcome"] == "no_durable_edits"
+        assert status["state"] == "tier3_no_durable_edits"
+        assert status["state"] != "tier3_retry_requested"
+        assert status["state"] != "tier3_exhausted"
+        assert status["exhausted"] is True
+        # Fail-CLOSED: the exhausted=True branch fires the pipeline_hard_fail event.
+        assert "pipeline_hard_fail" in [e["event_type"] for e in events]
+
+    def test_bot_findings_pending_commands_null_fails_closed(self, tmp_path):
+        """Bridge round-3 (D2) end-to-end: action="edit" with commands=null must
+        fail closed on the no_durable_edits terminal WITHOUT crashing the loop.
+        """
+        claude_response = json.dumps({
+            "action": "edit",
+            "commands": None,
+            "explanation": "edit action but a null commands payload",
+        })
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=8900 + popen_call_count[0])
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, self._bot_result(), "w-bot-null", max_iterations=3)
+
+        # No crash: terminated cleanly on iter 1 with the distinct terminal.
+        assert popen_call_count[0] == 1
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+        assert r["log"][0]["no_durable_edits"] is True
+        assert r["log"][0]["action"] == "edit"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "no_durable_edits"
+        assert status["state"] == "tier3_no_durable_edits"
+        assert status["active"] is False
+        assert status["exhausted"] is True
+
+
+class TestApplyEditsAtomically:
+    """_apply_edits_atomically: all-or-nothing structured-edit batch apply.
+
+    The atomicity contract (PIPELINE-FIX-34 D3) and the path-safety contract
+    (mirrors _apply_edit) are locked at the unit level here, independent of the
+    tier-3 loop.
+    """
+
+    def test_empty_commands_is_not_applied(self, tmp_path):
+        applied, results = rg_mod._apply_edits_atomically([], tmp_path)  # ANTICHEAT_OK
+        assert applied is False
+        assert any("no structured edits" in m for m in results)
+
+    def test_single_valid_edit_applies(self, tmp_path):
+        target = tmp_path / "f.py"
+        target.write_text("x = 'a'\n", encoding="utf-8")
+        applied, _ = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [{"file_path": "f.py", "old_text": "x = 'a'", "new_text": "x = 'b'"}],
+            tmp_path,
+        )
+        assert applied is True
+        assert target.read_text(encoding="utf-8") == "x = 'b'\n"
+
+    def test_partial_failure_rolls_back_first_edit(self, tmp_path):
+        """First edit valid, second invalid -> NOTHING is written."""
+        target = tmp_path / "f.py"
+        target.write_text("x = 'a'\n", encoding="utf-8")
+        applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [
+                {"file_path": "f.py", "old_text": "x = 'a'", "new_text": "x = 'b'"},
+                {"file_path": "f.py", "old_text": "MISSING", "new_text": "z"},
+            ],
+            tmp_path,
+        )
+        assert applied is False
+        # The valid first edit was NOT durably written (validated in-memory only).
+        assert target.read_text(encoding="utf-8") == "x = 'a'\n"
+        assert any("old_text not found" in m for m in results)
+
+    def test_sequential_same_file_edits_compose(self, tmp_path):
+        target = tmp_path / "f.py"
+        target.write_text("A = 1\nB = 2\n", encoding="utf-8")
+        applied, _ = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [
+                {"file_path": "f.py", "old_text": "A = 1", "new_text": "A = 10"},
+                {"file_path": "f.py", "old_text": "B = 2", "new_text": "B = 20"},
+            ],
+            tmp_path,
+        )
+        assert applied is True
+        assert target.read_text(encoding="utf-8") == "A = 10\nB = 20\n"
+
+    def test_repo_escape_is_blocked_and_writes_nothing(self, tmp_path):
+        outside = tmp_path.parent / "outside_secret.py"
+        outside.write_text("secret = 1\n", encoding="utf-8")
+        try:
+            applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+                [{"file_path": "../outside_secret.py",
+                  "old_text": "secret = 1", "new_text": "secret = 2"}],
+                tmp_path,
+            )
+            assert applied is False
+            assert any("repo-escape blocked" in m for m in results)
+            assert outside.read_text(encoding="utf-8") == "secret = 1\n"
+        finally:
+            outside.unlink()
+
+    def test_git_internals_path_is_blocked(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+        applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [{"file_path": ".git/config", "old_text": "[core]", "new_text": "[evil]"}],
+            tmp_path,
+        )
+        assert applied is False
+        assert any("sensitive-path blocked" in m for m in results)
+        assert (tmp_path / ".git" / "config").read_text(encoding="utf-8") == "[core]\n"
+
+    def test_missing_file_blocks_whole_batch(self, tmp_path):
+        target = tmp_path / "exists.py"
+        target.write_text("x = 'a'\n", encoding="utf-8")
+        applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [
+                {"file_path": "exists.py", "old_text": "x = 'a'", "new_text": "x = 'b'"},
+                {"file_path": "missing.py", "old_text": "y", "new_text": "z"},
+            ],
+            tmp_path,
+        )
+        assert applied is False
+        # The valid edit to the existing file was rolled back / never written.
+        assert target.read_text(encoding="utf-8") == "x = 'a'\n"
+        assert any("file not found" in m for m in results)
+
+    def test_file_only_command_is_noop_and_not_applied(self, tmp_path):
+        """Bridge round-3 (D1): a content-free command (file_path only, no
+        old_text/new_text) is a no-op and must NOT count as a durable edit.
+        """
+        target = tmp_path / "f.py"
+        target.write_text("x = 'a'\n", encoding="utf-8")
+        applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [{"file_path": "f.py"}],
+            tmp_path,
+        )
+        assert applied is False
+        assert target.read_text(encoding="utf-8") == "x = 'a'\n"
+        assert any("empty/invalid old_text" in m for m in results)
+
+    def test_empty_old_text_is_not_applied(self, tmp_path):
+        """An empty old_text would make str.replace("", ...) a degenerate
+        prepend; it is rejected as not a real anchored edit, file untouched.
+        """
+        target = tmp_path / "f.py"
+        target.write_text("x = 'a'\n", encoding="utf-8")
+        applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [{"file_path": "f.py", "old_text": "", "new_text": "PREPEND\n"}],
+            tmp_path,
+        )
+        assert applied is False
+        assert target.read_text(encoding="utf-8") == "x = 'a'\n"
+        assert any("empty/invalid old_text" in m for m in results)
+
+    def test_noop_same_old_and_new_text_is_not_applied(self, tmp_path):
+        """new_text identical to the matched old_text changes nothing on disk and
+        is rejected rather than reported as a durable edit (bridge round-3 D1).
+        """
+        target = tmp_path / "f.py"
+        target.write_text("x = 'a'\n", encoding="utf-8")
+        applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [{"file_path": "f.py", "old_text": "x = 'a'", "new_text": "x = 'a'"}],
+            tmp_path,
+        )
+        assert applied is False
+        assert target.read_text(encoding="utf-8") == "x = 'a'\n"
+        assert any("no-op edit" in m for m in results)
+
+    def test_net_cancelling_edits_are_not_applied(self, tmp_path):
+        """A batch whose edits individually mutate but net back to the original
+        (A->B then B->A) writes byte-identical content and is rejected.
+        """
+        target = tmp_path / "f.py"
+        target.write_text("V = 'a'\n", encoding="utf-8")
+        applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [
+                {"file_path": "f.py", "old_text": "V = 'a'", "new_text": "V = 'b'"},
+                {"file_path": "f.py", "old_text": "V = 'b'", "new_text": "V = 'a'"},
+            ],
+            tmp_path,
+        )
+        assert applied is False
+        assert target.read_text(encoding="utf-8") == "V = 'a'\n"
+        assert any("net to the original" in m for m in results)
+
+    def test_commands_none_fails_closed_without_crashing(self, tmp_path):
+        """Bridge round-3 (D2): commands=None must fail closed (False, message),
+        NOT raise TypeError on iteration.
+        """
+        applied, results = rg_mod._apply_edits_atomically(None, tmp_path)  # ANTICHEAT_OK
+        assert applied is False
+        assert any("must be a list" in m for m in results)
+
+    def test_commands_non_list_fails_closed(self, tmp_path):
+        """A non-list commands payload (e.g. a dict) also fails closed."""
+        applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            {"file_path": "f.py"}, tmp_path)
+        assert applied is False
+        assert any("must be a list" in m for m in results)
+
+    def test_write_failure_leaves_no_partial_durable_mutation(self, tmp_path, monkeypatch):
+        """Bridge round-3 (D3): if a write fails partway through a multi-file
+        batch, NO file is left mutated -- the already-written file is rolled back
+        to its original and the in-flight file was never partially written
+        (atomic temp+os.replace removes the partial-write window).
+        """
+        a = tmp_path / "a.py"
+        a.write_text("A = 'old'\n", encoding="utf-8")
+        b = tmp_path / "b.py"
+        b.write_text("B = 'old'\n", encoding="utf-8")
+        real_replace = os.replace
+
+        def flaky_replace(src, dst, *args, **kwargs):
+            # Fail only the forward write that lands on b.py; permit a.py rollback.
+            if str(dst).endswith(f"{os.sep}b.py"):
+                raise OSError("simulated write failure on b.py")
+            return real_replace(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(rg_mod.os, "replace", flaky_replace)
+        applied, results = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [
+                {"file_path": "a.py", "old_text": "A = 'old'", "new_text": "A = 'new'"},
+                {"file_path": "b.py", "old_text": "B = 'old'", "new_text": "B = 'new'"},
+            ],
+            tmp_path,
+        )
+        assert applied is False
+        # No partial durable mutation: BOTH files are byte-identical to originals.
+        assert a.read_text(encoding="utf-8") == "A = 'old'\n"
+        assert b.read_text(encoding="utf-8") == "B = 'old'\n"
+        assert any("rolled back" in m for m in results)
+        # No stray temp files left behind by the failed/atomic writes.
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["a.py", "b.py"]
+
+    def test_executable_mode_is_preserved_across_atomic_edit(self, tmp_path):
+        """The atomic temp+replace write must not drop the target's executable
+        bit (a real git-visible mode change) -- mode is preserved.
+        """
+        script = tmp_path / "tool.sh"
+        script.write_text("#!/bin/sh\necho old\n", encoding="utf-8")
+        os.chmod(script, 0o755)
+        applied, _ = rg_mod._apply_edits_atomically(  # ANTICHEAT_OK
+            [{"file_path": "tool.sh", "old_text": "echo old", "new_text": "echo new"}],
+            tmp_path,
+        )
+        assert applied is True
+        assert script.read_text(encoding="utf-8") == "#!/bin/sh\necho new\n"
+        assert (script.stat().st_mode & 0o111) != 0  # executable bit retained
+
+
 class TestRecoveryPagerEvents:
     def test_status_helpers_emit_started_state_changed_failure_and_hard_fail(self, tmp_path):
         calls = []

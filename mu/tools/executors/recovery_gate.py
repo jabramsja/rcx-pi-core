@@ -5541,6 +5541,45 @@ def _build_diagnosis_prompt(
         else "\n"
     )
 
+    # PIPELINE-FIX-34 (2026-06-20): align the advertised action menu with the
+    # tier-3 bot_findings_pending gate, which requires a DURABLE structured edit.
+    # That gate (failure_class == BOT_FINDINGS_PENDING branch in
+    # _run_tier3_recovery_loop) dispatches BEFORE the generic shell/edit handlers,
+    # so a "shell" fix never executes and is recorded as the no_durable_edits
+    # hard-fail terminal. Advertising "shell" in the menu would let a COMPLIANT
+    # agent follow the prompt straight into that terminal. So for this class the
+    # menu is edit-only: drop "shell" and state the durable-edit contract.
+    # skip/escalate/delegate_implementer stay valid -- they are handled ABOVE the
+    # gate (deliberate-skip severity split, code-writing delegate path) and are
+    # left untouched.
+    bot_findings_pending = fc in (
+        FailureClass.BOT_FINDINGS_PENDING,
+        FailureClass.BOT_FINDINGS_PENDING.value,
+    )
+    if bot_findings_pending:
+        action_menu = """Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
+{"action": "edit"|"delegate_implementer"|"skip"|"escalate", "commands": [...], "explanation": "why"}
+
+This is a bot-finding remediation -- it is fixed ONLY by a durable file change.
+Return "edit" with the structured file edits (preferred), or
+"delegate_implementer" for a bounded code-writing repair. Do NOT return "shell":
+a passing shell command is indicator-only theater for a bot finding, not durable
+remediation, and the shell action is rejected as a no-durable-edit hard failure.
+
+- "edit": apply file edits (commands = [{"file_path": "...", "old_text": "...", "new_text": "..."}])
+- "delegate_implementer": request the existing phase_b_implementer code-writing actor for a bounded control-surface repair
+- "skip": cannot fix, return failure
+- "escalate": need human intervention"""
+    else:
+        action_menu = """Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
+{"action": "shell"|"edit"|"delegate_implementer"|"skip"|"escalate", "commands": [...], "explanation": "why"}
+
+- "shell": run shell commands to fix the issue
+- "edit": apply file edits (commands = [{"file_path": "...", "old_text": "...", "new_text": "..."}])
+- "delegate_implementer": request the existing phase_b_implementer code-writing actor for a bounded control-surface repair
+- "skip": cannot fix, return failure
+- "escalate": need human intervention"""
+
     prompt = f"""You are a pipeline recovery agent. A pipeline step has failed and you must diagnose and fix it.
 
 Failure class: {fc}
@@ -5565,14 +5604,7 @@ Do not run tools or shell commands yourself during this diagnosis turn.
 Use only the evidence above, decide the smallest honest next action, and
 return the JSON plan immediately.
 
-Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
-{{"action": "shell"|"edit"|"delegate_implementer"|"skip"|"escalate", "commands": [...], "explanation": "why"}}
-
-- "shell": run shell commands to fix the issue
-- "edit": apply file edits (commands = [{{"file_path": "...", "old_text": "...", "new_text": "..."}}])
-- "delegate_implementer": request the existing phase_b_implementer code-writing actor for a bounded control-surface repair
-- "skip": cannot fix, return failure
-- "escalate": need human intervention
+{action_menu}
 
 For "delegate_implementer", "commands" must contain exactly one object:
 {{
@@ -5778,6 +5810,149 @@ def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
         return True, f"edited {file_path}"
     except OSError as exc:
         return False, f"edit failed: {exc}"
+
+
+def _apply_edits_atomically(
+    commands: list[Any], repo_root: Path
+) -> tuple[bool, list[str]]:
+    """Apply a batch of structured edits ALL-OR-NOTHING.
+
+    Unlike calling ``_apply_edit`` per command -- which writes each edit to disk
+    immediately and so can leave PARTIAL durable edits when a later edit fails
+    (e.g. its ``old_text`` is absent) -- this validates every edit against an
+    in-memory working copy first and only commits to disk once EVERY edit
+    succeeds. A later edit targeting a file an earlier edit already changed sees
+    that earlier change (the in-memory copy is threaded forward), so sequential
+    same-file edits compose correctly.
+
+    A "durable" edit must actually change bytes on disk: an empty/missing
+    ``old_text`` (which would make ``str.replace`` a degenerate prepend/no-op),
+    a no-op edit whose ``new_text`` equals the matched text, and a batch whose
+    edits net back to the original content are all rejected fail-closed -- so a
+    content-free or no-op response can never be miscounted as remediation
+    (PIPELINE-FIX-34 bridge round-3 finding). A malformed ``commands`` payload
+    (non-list / JSON null) is likewise rejected rather than crashing.
+
+    Disk writes use the atomic temp-file+``os.replace`` primitive, so a failure
+    mid-write never leaves a target partially written; files already durably
+    replaced are rolled back to their pristine originals. A failed multi-edit
+    response can thus never report ``no_durable_edits`` while having durably
+    mutated a file, nor leave an in-flight partial write behind.
+
+    Returns ``(applied, results)`` where ``applied`` is True only if at least
+    one edit was provided, every edit was applied, AND the net on-disk effect is
+    a real change. Path-safety (repo containment, ``.git`` rejection) mirrors
+    ``_apply_edit`` exactly.
+    """
+    results: list[str] = []
+    staged: dict[Path, str] = {}     # resolved path -> post-edit content
+    originals: dict[Path, str] = {}  # resolved path -> pristine content
+    repo_resolved = repo_root.resolve()
+    git_dir = repo_resolved / ".git"
+    edit_count = 0
+    # Fail CLOSED on a malformed ``commands`` payload (an explicit JSON null or a
+    # non-list) instead of crashing on iteration with a TypeError (bridge round-3
+    # finding): the caller treats ``(False, ...)`` as no_durable_edits.
+    if not isinstance(commands, list):
+        results.append("commands must be a list of structured edits")
+        return False, results
+    for edit in commands:
+        if not isinstance(edit, dict):
+            results.append("rejected non-dict edit entry")
+            return False, results
+        edit_count += 1
+        raw_path = edit.get("file_path", "")
+        file_path = (repo_root / raw_path).resolve()
+        if (
+            not str(file_path).startswith(str(repo_resolved) + os.sep)
+            and file_path != repo_resolved
+        ):
+            results.append(
+                f"repo-escape blocked: {raw_path} resolves outside repo root"
+            )
+            return False, results
+        if str(file_path).startswith(str(git_dir) + os.sep) or file_path == git_dir:
+            results.append(f"sensitive-path blocked: {raw_path} targets .git/ internals")
+            return False, results
+        old_text = edit.get("old_text", "")
+        new_text = edit.get("new_text", "")
+        # A durable structured edit MUST name a non-empty anchor to replace. An
+        # empty/missing old_text makes ``old_text in content`` trivially true and
+        # ``str.replace("", ...)`` a degenerate prepend/no-op, so a content-free
+        # command (e.g. ``{"file_path": ...}`` only) would otherwise be counted
+        # as durable remediation (bridge round-3 finding). Reject it fail-closed.
+        if not isinstance(old_text, str) or old_text == "":
+            results.append(
+                f"empty/invalid old_text: edit for {raw_path} names no text to replace"
+            )
+            return False, results
+        if not isinstance(new_text, str):
+            results.append(f"invalid new_text for {raw_path}: must be a string")
+            return False, results
+        if file_path not in staged:
+            if not file_path.exists():
+                results.append(f"file not found: {file_path}")
+                return False, results
+            try:
+                pristine = file_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                results.append(f"edit failed: {exc}")
+                return False, results
+            staged[file_path] = pristine
+            originals[file_path] = pristine
+        content = staged[file_path]
+        if old_text not in content:
+            results.append(f"old_text not found in {file_path}")
+            return False, results
+        new_content = content.replace(old_text, new_text, 1)
+        # A no-op edit (new_text identical to the matched old_text) changes
+        # nothing on disk and is therefore not durable remediation (bridge
+        # round-3 finding). Reject it rather than report it as a durable edit.
+        if new_content == content:
+            results.append(
+                f"no-op edit for {raw_path}: new_text equals the replaced text"
+            )
+            return False, results
+        staged[file_path] = new_content
+        results.append(f"validated edit for {raw_path}")
+    if edit_count == 0:
+        results.append("no structured edits provided")
+        return False, results
+    # Net-change guard: at least one file's fully-edited content must differ from
+    # its pristine original. Catches a batch whose individual edits each mutate
+    # but cancel out (e.g. A->B then B->A on the same file), which would write
+    # byte-identical content and be miscounted as durable remediation.
+    if not any(staged[p] != originals[p] for p in staged):
+        results.append("no durable change: edits net to the original content")
+        return False, results
+    # Every edit validated against in-memory copies -- commit to disk via the
+    # atomic temp-file+os.replace primitive so a failure mid-write NEVER leaves a
+    # target partially written: the original stays intact until the atomic
+    # replace, and a failed replace leaves it untouched (no in-flight partial to
+    # roll back). Files already durably replaced are restored to their pristine
+    # originals, so the batch is all-or-nothing on disk even across multiple
+    # files. (Bridge round-3 finding: the prior plain ``write_text`` loop left
+    # the in-flight file partially mutated because it was not yet tracked for
+    # rollback -- the atomic write removes that partial-write window entirely.)
+    written: list[Path] = []
+    for file_path, content in staged.items():
+        try:
+            _atomic_write_text(file_path, content)
+            written.append(file_path)
+        except OSError as exc:
+            rolled_back = 0
+            for done in written:
+                try:
+                    _atomic_write_text(done, originals[done])
+                    rolled_back += 1
+                except OSError:
+                    pass
+            results.append(
+                f"edit write failed, rolled back {rolled_back} file(s): {exc}"
+            )
+            return False, results
+    results.append(f"applied {len(staged)} file edit(s)")
+    return True, results
 
 
 def _normalize_hybrid_repo_relative(raw_path: Any) -> str | None:
@@ -6888,6 +7063,68 @@ def _log_tier3_attempt(
     _save_recovery_log(repo_root, attempts)
 
 
+def _bot_findings_no_durable_edits_terminal(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    step: str,
+    fc: str,
+    iteration: int,
+    action: str,
+    detail: str,
+    explanation: str,
+    duration_s: float,
+    invocation_id: str,
+    loop_log: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Record the DISTINCT, fail-CLOSED terminal for a ``bot_findings_pending``
+    iteration that produced no durable structured edit.
+
+    ``recovered=False`` + ``exhausted=True`` so the existing ``exhausted=True``
+    branch of ``_finish_recovery_status`` fires the ``pipeline_hard_fail`` pager
+    event (INV_TYPED_FAIL_CLOSED_OUTCOMES); the ``no_durable_edits`` outcome and
+    ``tier3_no_durable_edits`` state are DISTINCT from the generic, silent
+    ``tier3_exhausted`` budget-burn so the no-durable-edits failure is
+    actionable rather than indistinguishable from iteration exhaustion.
+
+    Reuses this iteration's existing ``loop_log`` entry when present (one entry
+    per iteration, matching the retry/verify paths) else appends a fresh one.
+    """
+    if loop_log and loop_log[-1].get("iteration") == iteration:
+        loop_log[-1]["no_durable_edits"] = True
+        loop_log[-1]["explanation"] = explanation
+        loop_log[-1]["detail"] = detail
+    else:
+        loop_log.append({
+            "iteration": iteration,
+            "action": action,
+            "detail": detail,
+            "explanation": explanation,
+            "duration_s": duration_s,
+            "no_durable_edits": True,
+        })
+    _log_tier3_attempt(
+        repo_root, wave_id, step, fc, iteration,
+        action, "no_durable_edits", duration_s, detail,
+        invocation_id=invocation_id,
+    )
+    _finish_recovery_status(
+        repo_root,
+        recovered=False,
+        exhausted=True,
+        outcome="no_durable_edits",
+        action=action,
+        detail=detail,
+        state="tier3_no_durable_edits",
+    )
+    return {
+        "recovered": False,
+        "exhausted": True,
+        "iterations": iteration,
+        "log": loop_log,
+    }
+
+
 def _is_nonretryable_recovery_agent_failure(detail: str) -> bool:
     lowered = str(detail or "").lower()
     if not lowered:
@@ -7131,6 +7368,28 @@ def run_recovery_loop(
         response = _parse_recovery_agent_response(raw_response)
         if response is None:
             dur = round(time.monotonic() - iteration_t0, 3)
+            # PIPELINE-FIX-34 (2026-06-20): for bot_findings_pending a
+            # non-actionable / meta-envelope-only response (e.g. a populated
+            # `explanation` with no valid `action`, which _looks_like_recovery_
+            # agent_response rejects so parsing returns None) yields NO durable
+            # edit. Re-prompting the same agent burned the iteration budget into
+            # the generic, silent `tier3_exhausted` terminal with indicator-only
+            # evidence (bridge round-2 finding). Fail CLOSED on the DISTINCT
+            # no_durable_edits terminal instead so pipeline_hard_fail fires.
+            # Scoped to this class; every other class keeps the parse_error
+            # retry below.
+            if failure_class == FailureClass.BOT_FINDINGS_PENDING:
+                detail = (
+                    f"tier-3 bot_findings_pending iter {i + 1} returned a "
+                    f"non-actionable/meta-envelope-only response with no durable "
+                    f"structured edit: {raw_response[:160]}"
+                )
+                return _bot_findings_no_durable_edits_terminal(
+                    repo_root, wave_id=wave_id, step=step, fc=fc,
+                    iteration=i + 1, action="meta_envelope_only", detail=detail,
+                    explanation="", duration_s=dur, invocation_id=invocation_id,
+                    loop_log=loop_log,
+                )
             loop_log.append({
                 "iteration": i + 1, "action": "parse_error",
                 "detail": f"could not parse response: {raw_response[:200]}",
@@ -7152,6 +7411,15 @@ def run_recovery_loop(
         if not isinstance(response, dict):
             dur = round(time.monotonic() - iteration_t0, 3)
             detail = "recovery agent response must be a JSON object"
+            # Same fail-closed requirement for bot_findings_pending (defensive:
+            # _parse_recovery_agent_response only yields a dict or None today).
+            if failure_class == FailureClass.BOT_FINDINGS_PENDING:
+                return _bot_findings_no_durable_edits_terminal(
+                    repo_root, wave_id=wave_id, step=step, fc=fc,
+                    iteration=i + 1, action="meta_envelope_only", detail=detail,
+                    explanation="", duration_s=dur, invocation_id=invocation_id,
+                    loop_log=loop_log,
+                )
             loop_log.append({
                 "iteration": i + 1,
                 "action": "parse_error",
@@ -7396,7 +7664,67 @@ def run_recovery_loop(
             )
             continue
 
-        if action == "shell":
+        # PIPELINE-FIX-34 (2026-06-20): bot_findings_pending REQUIRES a durable
+        # structured edit. A bot P1 finding is only remediated by changing files
+        # (action="edit" with commands=[{file_path, old_text, new_text}]). This
+        # gate dispatches BEFORE the generic shell/edit handlers so a non-edit
+        # "fix" -- e.g. a shell command -- NEVER executes and mutates the tree
+        # (bridge round-2 D2): a passing shell command is indicator-only theater
+        # for a bot finding, not durable remediation. Edits are applied
+        # ALL-OR-NOTHING via _apply_edits_atomically so a failed multi-edit can
+        # never leave a partial durable edit behind while reporting failure
+        # (bridge round-2 D3). When no durable edit results (non-edit action, or
+        # an edit with empty/failed commands), record the DISTINCT, fail-CLOSED
+        # no_durable_edits terminal -- recovered=False + exhausted=True so the
+        # existing exhausted=True branch fires pipeline_hard_fail -- instead of
+        # silently burning the iteration budget into the generic tier3_exhausted
+        # (INV_TYPED_FAIL_CLOSED_OUTCOMES).
+        #
+        # Scoped to this class only; every other failure class keeps the generic
+        # shell/edit dispatch below unchanged. The deliberate `skip`
+        # (exhausted=False) / `escalate` (exhausted=True) split severity (Bot P1
+        # fix, PR #792), the anti-theater policy rejection, and the
+        # `delegate_implementer` code-writing path all short-circuit and
+        # return/continue ABOVE this point, so those legitimate non-edit recovery
+        # paths are left untouched.
+        if failure_class == FailureClass.BOT_FINDINGS_PENDING:
+            if action == "edit":
+                _update_recovery_status(
+                    repo_root,
+                    state="tier3_applying_edit",
+                )
+                action_applied, edit_results = _apply_edits_atomically(
+                    commands, repo_root
+                )
+                loop_log.append({
+                    "iteration": i + 1, "action": "edit",
+                    "results": edit_results, "detail": explanation,
+                    "duration_s": round(time.monotonic() - iteration_t0, 3)})
+            else:
+                # Non-edit action: do NOT execute it (no shell mutation, etc.).
+                action_applied = False
+            if not action_applied:
+                dur = round(time.monotonic() - iteration_t0, 3)
+                if action == "edit":
+                    detail = (
+                        f"tier-3 bot_findings_pending iter {i + 1}: action=\"edit\" "
+                        f"applied no durable structured edit (empty or failed "
+                        f"commands)"
+                    )
+                else:
+                    detail = (
+                        f"tier-3 bot_findings_pending iter {i + 1} returned non-edit "
+                        f"action={action!r}; bot remediation requires a durable "
+                        f"structured edit (action=\"edit\")"
+                    )
+                return _bot_findings_no_durable_edits_terminal(
+                    repo_root, wave_id=wave_id, step=step, fc=fc,
+                    iteration=i + 1, action=action, detail=detail,
+                    explanation=explanation, duration_s=dur,
+                    invocation_id=invocation_id, loop_log=loop_log,
+                )
+            # action == "edit" and applied -- fall through to verify/retry below.
+        elif action == "shell":
             cmd_results = []
             blocked = False
             executed = 0
@@ -9081,12 +9409,23 @@ def _load_recovery_status(repo_root: Path) -> dict[str, Any]:
 
 def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Preserve the destination's existing mode (e.g. an executable script's +x
+    # bit) across the temp-file+replace so an atomic edit never silently narrows
+    # permissions or drops the executable bit. A brand-new file keeps mkstemp's
+    # default 0600.
+    preserve_mode: Optional[int] = None
+    try:
+        preserve_mode = stat.S_IMODE(path.stat().st_mode)
+    except OSError:
+        preserve_mode = None
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as tmp:
             tmp.write(text)
             tmp.flush()
             os.fsync(tmp.fileno())
+        if preserve_mode is not None:
+            os.chmod(tmp_name, preserve_mode)
         os.replace(tmp_name, path)
     except Exception:
         try:
