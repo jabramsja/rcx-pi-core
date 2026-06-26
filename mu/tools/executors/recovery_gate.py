@@ -564,8 +564,6 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         for hint in fatal_codex_launch_hints
     ):
         return FailureClass.UNCLASSIFIED
-    if "test" in combined_lower and ("fail" in combined_lower or "error" in combined_lower):
-        return FailureClass.TEST_FAILURE
     review_crash_hints = (
         "bridge subprocess failed",
         "produced no stdout",
@@ -578,6 +576,10 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.AGENT_REVIEW_CRASH
     if status_failed and ("agent" in step_lower or "bridge" in step_lower):
         return FailureClass.AGENT_REVIEW_CRASH
+    if status_failed and _looks_like_engine_discipline_assert_set_failure(l4_signal):
+        return FailureClass.TEST_FAILURE
+    if "test" in combined_lower and ("fail" in combined_lower or "error" in combined_lower):
+        return FailureClass.TEST_FAILURE
     if status_failed:
         return FailureClass.UNKNOWN_ERROR
 
@@ -612,6 +614,29 @@ def _looks_like_handoff_receipt_builder_refresh_failure(signal: str) -> bool:
         "commit continuation missing handoff_sha",
     )
     return any(hint in lowered for hint in direct_hints)
+
+
+def _looks_like_engine_discipline_assert_set_failure(signal: str) -> bool:
+    """Return true for the engine-discipline pytest assertion family.
+
+    This is deliberately narrower than "any AssertionError": it requires the
+    structural engine discipline context and the source-line shape
+    ``assert set(...)`` that pytest includes for these shape checks.
+    """
+    lowered = signal.lower()
+    if "assertionerror" not in lowered:
+        return False
+    if not re.search(r"\bassert\s+set\s*\(", signal):
+        return False
+    return any(
+        hint in lowered
+        for hint in (
+            "test_engine_pipeline_discipline.py",
+            "engine pipeline discipline",
+            "engine-discipline",
+            "engine discipline",
+        )
+    )
 
 
 def _looks_like_local_gate_pytest_failure(step_lower: str, signal: str) -> bool:
