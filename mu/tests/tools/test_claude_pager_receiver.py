@@ -6,10 +6,18 @@ subprocess boundary -- no real ``claude`` process is ever spawned:
 1. atomic-enqueue quick-ack (durable queue file; no subprocess during enqueue;
    enqueue is not blocked by an in-flight delivery);
 2. serialized single-flight delivery (at most one child in flight);
-3. fresh ``claude -p`` delivery, NEVER ``--resume``;
+3. codex-parity delivery (resolved at delivery time by the pager's
+   ``resolve_claude_page_delivery``): ``claude --resume <monitor> -p`` INTO the
+   persistent dedicated monitor when it is set + distinct from the live
+   orchestrator + resumable; else a fresh, resume-less ``claude -p`` (monitor
+   unset / monitor == live orchestrator / resume failure) -- the live orchestrator
+   is NEVER resumed and a resume failure falls back to a fresh page (no page lost);
 4. ~120s timeout + process-group reap (SIGTERM to the child's group on timeout);
-5. delivery env via the pager's clobber-safe ``_claude_dispatch_env``
-   (``RCX_PIPELINE_SESSION=1`` set, ``RCX_CLAUDE_MONITOR`` cleared);
+5. delivery env per leg: a FRESH page uses the pager's clobber-safe
+   ``_claude_dispatch_env`` (``RCX_PIPELINE_SESSION=1`` set, ``RCX_CLAUDE_MONITOR``
+   cleared); a RESUME page uses ``_claude_monitor_resume_env``
+   (``RCX_CLAUDE_MONITOR=1`` set) so the resumed monitor re-writes its OWN
+   ``claude_monitor_session_id`` and never clobbers ``orchestrator_session_id``;
 6. exit-0 -> durable receipt vs non-zero/timeout -> fail-open re-queue;
 7. idempotency keyed by ``event_id`` ONLY (PR #1137 P2): distinct events that reuse
    a ``transition_key`` are each delivered, never collapsed;
@@ -102,6 +110,24 @@ def _receiver(tmp_path, **kwargs):
     kwargs.setdefault("bus_dir", ".agent_bus")
     kwargs.setdefault("timeout_s", 120.0)
     return receiver_mod.ClaudePagerReceiver(tmp_path, **kwargs)
+
+
+def _write_session_ids(tmp_path, *, monitor=None, live=None):
+    """Plant the session-id files the pager's delivery-time resolver reads.
+
+    The receiver's ``_resolve_delivery_plan`` borrows
+    ``pipeline_agent_pager.resolve_claude_page_delivery``, which reads
+    ``<repo>/.agent_bus/observability/{claude_monitor_session_id,orchestrator_session_id}``
+    against the receiver's repo_root + bus_dir. Writing these is the integration seam
+    that drives the resume-vs-fresh decision in the receiver tests (no monkeypatching of
+    the resolver -- the real resolver is exercised end-to-end).
+    """
+    obs = tmp_path / ".agent_bus" / "observability"
+    obs.mkdir(parents=True, exist_ok=True)
+    if monitor is not None:
+        (obs / "claude_monitor_session_id").write_text(monitor + "\n", encoding="utf-8")
+    if live is not None:
+        (obs / "orchestrator_session_id").write_text(live + "\n", encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- #
@@ -242,11 +268,13 @@ def test_deliveries_drain_in_fifo_order(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# (3) fresh ``claude -p`` -- never ``--resume``
+# (3) delivery argv: fresh ``claude -p`` vs resume-the-monitor ``claude --resume``
 # --------------------------------------------------------------------------- #
 
 
-def test_delivery_command_is_fresh_claude_p_never_resume(tmp_path, monkeypatch):
+def test_delivery_command_is_fresh_claude_p_when_no_resume_target(tmp_path, monkeypatch):
+    # With no resume target the argv is a fresh, resume-less page -- the
+    # MONITOR_UNSET / MONITOR_EQUALS_LIVE / resume-failure shape.
     _install_popen(monkeypatch, FakeProc)
     receiver = _receiver(tmp_path, claude_bin="claude")
 
@@ -260,7 +288,35 @@ def test_delivery_command_is_fresh_claude_p_never_resume(tmp_path, monkeypatch):
     assert "-r" not in command
 
 
-def test_dispatched_command_never_carries_resume(tmp_path, monkeypatch):
+def test_delivery_command_resumes_monitor_when_resume_session_id_given(tmp_path, monkeypatch):
+    # Codex-parity argv: a non-empty resume target pages INTO that session.
+    _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path, claude_bin="claude")
+
+    command = receiver.delivery_command(
+        {"event_id": "E1", "summary": "s"}, resume_session_id="sess-monitor"
+    )
+
+    assert command[0] == "claude"
+    assert command[1] == "--resume"
+    assert command[2] == "sess-monitor"
+    assert command[3] == "-p"
+    # The prompt is the shared page body (same as the fresh leg) -- the resume changes
+    # only the delivery TARGET and mechanically disables tools, not the prompt.
+    prompt_index = command.index("-p") + 1
+    assert "event_id: E1\n" in command[prompt_index] + "\n"
+    disallowed_index = command.index("--disallowedTools")
+    assert disallowed_index > prompt_index
+    assert command[disallowed_index + 1 :] == ["Bash", "Edit", "Write", "NotebookEdit"]
+    # A blank/whitespace resume id degrades to a fresh page (never ``--resume ''``).
+    blank = receiver.delivery_command({"event_id": "E1"}, resume_session_id="   ")
+    assert blank[1] == "-p"
+    assert "--resume" not in blank
+    assert "--disallowedTools" not in blank
+
+
+def test_dispatched_command_is_fresh_when_no_monitor_configured(tmp_path, monkeypatch):
+    # No monitor session-id file in this bus -> the delivery-time resolver elects fresh.
     recorder = _install_popen(monkeypatch, FakeProc)
     receiver = _receiver(tmp_path)
     receiver.enqueue({"event_id": "E1"})
@@ -272,6 +328,27 @@ def test_dispatched_command_never_carries_resume(tmp_path, monkeypatch):
     assert command[1] == "-p"
     assert "--resume" not in command
     # Child runs in its own session/process-group so a timeout can reap the group.
+    assert recorder.start_new_sessions[0] is True
+
+
+def test_dispatched_command_resumes_monitor_when_configured(tmp_path, monkeypatch):
+    # A dedicated monitor id, distinct from the live orchestrator, present in this bus ->
+    # the page is delivered INTO that monitor (``claude --resume <monitor> -p``).
+    recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=0))
+    _write_session_ids(tmp_path, monitor="sess-monitor", live="sess-live")
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "E1"})
+
+    result = receiver.deliver_once()
+
+    assert recorder.call_count == 1
+    command = recorder.commands[0]
+    assert command[:3] == [receiver.claude_bin, "--resume", "sess-monitor"]
+    assert command[3] == "-p"
+    # The delivery is recorded with the resume mode + the monitor it paged into.
+    assert result["status"] == "delivered"
+    assert result["ack"]["mode"] == "resume"
+    assert result["ack"]["monitor_session_id"] == "sess-monitor"
     assert recorder.start_new_sessions[0] is True
 
 
@@ -338,6 +415,25 @@ def test_dispatch_passes_clobber_safe_env_to_subprocess(tmp_path, monkeypatch):
     assert env is not None
     assert env["RCX_PIPELINE_SESSION"] == "1"
     assert "RCX_CLAUDE_MONITOR" not in env
+
+
+def test_resume_delivery_passes_monitor_env_to_subprocess(tmp_path, monkeypatch):
+    # No-clobber on the RESUME leg: the resumed monitor's child gets
+    # RCX_CLAUDE_MONITOR=1 (so its SessionStart re-writes claude_monitor_session_id,
+    # NOT orchestrator_session_id) AND the pipeline-owned marker.
+    recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=0))
+    _write_session_ids(tmp_path, monitor="sess-monitor", live="sess-live")
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "E1"})
+
+    receiver.deliver_once()
+
+    assert recorder.call_count == 1
+    assert recorder.commands[0][:2] == [receiver.claude_bin, "--resume"]
+    env = recorder.envs[0]
+    assert env is not None
+    assert env["RCX_CLAUDE_MONITOR"] == "1"
+    assert env["RCX_PIPELINE_SESSION"] == "1"
 
 
 # --------------------------------------------------------------------------- #
@@ -631,3 +727,192 @@ def test_ensure_draining_fails_closed_when_spawn_raises(tmp_path, monkeypatch):
 
     with pytest.raises(receiver_mod.ClaudePagerReceiverError):
         receiver.ensure_draining()
+
+
+# --------------------------------------------------------------------------- #
+# (9) codex-parity: deliver INTO the persistent warm monitor (claude --resume)
+# --------------------------------------------------------------------------- #
+
+
+def test_resume_delivery_into_monitor_when_set_distinct_resumable(tmp_path, monkeypatch):
+    """A set + distinct + resumable monitor -> the page is a turn IN that monitor.
+
+    Codex-parity: just as the codex leg issues each pager turn into the shared autoping
+    thread, the claude leg delivers ``claude --resume <claude_monitor_session_id> -p`` --
+    INTO the persistent warm monitor -- and records a durable exit-0 receipt with the
+    resume mode. The whole flow reuses the existing async drain + receipt machinery.
+    """
+    recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=0))
+    _write_session_ids(tmp_path, monitor="sess-monitor", live="sess-live-distinct")
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "RESUMED", "transition_key": "TK"})
+
+    result = receiver.run_until_empty()
+
+    assert recorder.call_count == 1
+    command = recorder.commands[0]
+    assert command[:3] == [receiver.claude_bin, "--resume", "sess-monitor"]
+    assert command[3] == "-p"
+    disallowed_index = command.index("--disallowedTools")
+    assert disallowed_index > command.index("-p")
+    assert command[disallowed_index + 1 :] == ["Bash", "Edit", "Write", "NotebookEdit"]
+    assert [r["status"] for r in result] == ["delivered"]
+    assert "RESUMED" in receiver.delivered_event_ids()
+    assert receiver.queued_event_ids() == []
+    # The durable receipt carries the resume provenance.
+    receipt_text = receiver.receipts_path.read_text(encoding="utf-8")
+    assert "RESUMED" in receipt_text
+    assert "resume" in receipt_text
+    assert "sess-monitor" in receipt_text
+
+
+def test_fresh_fallback_when_monitor_unset(tmp_path, monkeypatch):
+    # No monitor file -> MONITOR_UNSET -> fresh, resume-less page (mode ``direct``).
+    recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=0))
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "UNSET"})
+
+    result = receiver.deliver_once()
+
+    assert "--resume" not in recorder.commands[0]
+    assert result["ack"]["mode"] == "direct"
+    assert "monitor_session_id" not in result["ack"]
+
+
+def test_fresh_fallback_when_monitor_equals_live_never_resumes_orchestrator(tmp_path, monkeypatch):
+    """MONITOR_EQUALS_LIVE: the monitor id equals the live orchestrator id.
+
+    The live orchestrator must NEVER be a ``claude --resume`` target (pager != autoping).
+    When the dedicated monitor id transiently equals the live orchestrator id the leg pages
+    fresh -- it never resumes that shared id.
+    """
+    recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=0))
+    _write_session_ids(tmp_path, monitor="sess-same", live="sess-same")
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "EQ"})
+
+    result = receiver.deliver_once()
+
+    command = recorder.commands[0]
+    assert "--resume" not in command
+    assert "sess-same" not in command  # the shared live id is never on the argv
+    assert result["ack"]["mode"] == "direct"
+
+
+def test_resume_failure_falls_back_to_fresh_page_same_delivery(tmp_path, monkeypatch):
+    """Resume failure (stale/dead monitor) -> fresh ``claude -p`` fallback, same delivery.
+
+    Mirrors the codex leg starting a NEW thread on a stale-thread error: a failed resume
+    (here a non-zero ``claude --resume`` exit) must not drop the page -- the receiver falls
+    back to a fresh, resume-less page within the SAME delivery so the page is still
+    delivered (and the live orchestrator is never touched). Two children run, serialized
+    under the single delivery lock.
+    """
+    exit_codes = iter([7, 0])  # resume fails, fresh fallback succeeds
+    recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=next(exit_codes)))
+    _write_session_ids(tmp_path, monitor="sess-stale", live="sess-live")
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "STALE"})
+
+    result = receiver.deliver_once()
+
+    assert recorder.call_count == 2
+    assert recorder.commands[0][:2] == [receiver.claude_bin, "--resume"]
+    assert "--disallowedTools" in recorder.commands[0]
+    assert "--resume" not in recorder.commands[1]
+    assert "--disallowedTools" not in recorder.commands[1]
+    # The fresh fallback uses the clobber-safe fresh env (RCX_CLAUDE_MONITOR cleared).
+    assert "RCX_CLAUDE_MONITOR" not in recorder.envs[1]
+    assert result["status"] == "delivered"
+    assert result["ack"]["mode"] == "direct"
+    assert result["ack"]["resume_fallback_from"] == "sess-stale"
+    assert "STALE" in receiver.delivered_event_ids()
+
+
+def test_resume_and_fresh_fallback_both_fail_requeues_fail_open(tmp_path, monkeypatch):
+    # Resume fails AND the fresh fallback fails -> fail-open re-queue (no page lost), with a
+    # combined error naming both failures. Nothing is marked delivered.
+    recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=7))
+    _write_session_ids(tmp_path, monitor="sess-stale", live="sess-live")
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "LOST?"})
+
+    result = receiver.deliver_once()
+
+    assert recorder.call_count == 2  # resume attempt + fresh fallback attempt
+    assert result["status"] == "requeued"
+    assert "--resume sess-stale failed" in result["error"]
+    assert "fresh page fallback also failed" in result["error"]
+    assert "LOST?" in receiver.queued_event_ids()
+    assert receiver.delivered_event_ids() == set()
+
+
+def test_resume_delivery_preserves_event_id_dedup(tmp_path, monkeypatch):
+    # event_id-only idempotency is unchanged by the resume leg: a delivered resume page is
+    # not re-delivered when its event is re-enqueued (terminal duplicate).
+    recorder = _install_popen(monkeypatch, lambda: FakeProc(exit_code=0))
+    _write_session_ids(tmp_path, monitor="sess-monitor", live="sess-live")
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "ONCE"})
+    receiver.run_until_empty()
+    assert recorder.call_count == 1
+
+    again = receiver.enqueue({"event_id": "ONCE"})
+    assert again["status"] == "duplicate_delivered"
+    assert receiver.run_until_empty() == []
+    assert recorder.call_count == 1
+
+
+def test_serialized_single_flight_holds_with_monitor_resume(tmp_path, monkeypatch):
+    # Single-flight is preserved on the resume leg: at most one claude child in flight.
+    state = {"active": 0, "max": 0}
+    guard = threading.Lock()
+
+    def record_concurrency():
+        with guard:
+            state["active"] += 1
+            state["max"] = max(state["max"], state["active"])
+        time.sleep(0.05)
+        with guard:
+            state["active"] -= 1
+
+    recorder = _install_popen(
+        monkeypatch,
+        lambda: FakeProc(exit_code=0, on_wait=record_concurrency),
+    )
+    _write_session_ids(tmp_path, monitor="sess-monitor", live="sess-live")
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "A"})
+    receiver.enqueue({"event_id": "B"})
+
+    threads = [threading.Thread(target=receiver.deliver_once) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5.0)
+        assert not thread.is_alive()
+
+    assert state["max"] == 1  # never two claude children at once, resume leg included
+    assert receiver.delivered_event_ids() == {"A", "B"}
+
+
+def test_ensure_draining_spawn_is_monitor_independent(tmp_path, monkeypatch):
+    """Resolution is at DELIVERY time, not spawn time: the drain-spawn argv carries no
+    monitor/resume args even when a monitor is configured.
+
+    ``ensure_draining`` only starts the bounded ``--once`` drainer; the drainer itself
+    resolves resume-vs-fresh per page. So the spawn command must stay the plain
+    ``<python> claude_pager_receiver.py --repo-root ... --bus-dir ... --once`` regardless of
+    the monitor id, keeping the ack-budget-critical enqueue+spawn path free of session
+    resolution.
+    """
+    recorder = _install_popen(monkeypatch, FakeProc)
+    _write_session_ids(tmp_path, monitor="sess-monitor", live="sess-live")
+    receiver = _receiver(tmp_path)
+
+    receiver.ensure_draining()
+
+    command = recorder.commands[0]
+    assert "--once" in command
+    assert "--resume" not in command
+    assert "sess-monitor" not in command
