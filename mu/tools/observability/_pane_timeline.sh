@@ -387,7 +387,7 @@ repo_bridge_agent_for_role() {
 }
 
 render_autoping_status() {
-  python3 - "$REPO_ROOT" <<'PY' 2>/dev/null
+  python3 - "$REPO_ROOT" "$BUS_DIR" <<'PY' 2>/dev/null
 from __future__ import annotations
 
 import json
@@ -398,6 +398,7 @@ from pathlib import Path
 import sys
 
 repo_root = Path(sys.argv[1]).resolve()
+expected_bus_dir = sys.argv[2]
 codex_home_raw = os.environ.get("RCX_CODEX_HOME") or os.environ.get("CODEX_HOME")
 codex_home = Path(codex_home_raw).expanduser() if codex_home_raw else Path.home() / ".codex"
 state_dir = codex_home / "state"
@@ -482,6 +483,12 @@ for state_path in state_dir.glob("rcx_autoping_*.json"):
         continue
     if not isinstance(payload, dict):
         continue
+    payload_bus_dir = str(payload.get("bus_dir") or "").strip()
+    if payload_bus_dir:
+        if payload_bus_dir != expected_bus_dir:
+            continue
+    elif expected_bus_dir != ".agent_bus":
+        continue
     bridge_state = payload.get("bridge_state")
     if not isinstance(bridge_state, dict):
         continue
@@ -538,6 +545,15 @@ parts.append(f"status {status}")
 
 print("AUTOPING\t" + " | ".join(parts))
 detail_parts = []
+payload_bus_dir = str(payload.get("bus_dir") or "").strip()
+if payload_bus_dir:
+    detail_parts.append(f"bus {payload_bus_dir}")
+tmux_session = str(payload.get("tmux_session") or "").strip()
+if tmux_session:
+    detail_parts.append(f"tmux {tmux_session}")
+tmux_pane = str(payload.get("tmux_pane") or "").strip()
+if tmux_pane:
+    detail_parts.append(f"pane {tmux_pane}")
 thread_id = short_id(payload.get("thread_id"))
 if thread_id:
     detail_parts.append(f"thread {thread_id}")
@@ -955,6 +971,8 @@ PY
     echo -e "  ${DIM}${now}${RESET}  ${PURPLE}← $(bridge_agent_display_name_for_agent "$impl_agent") implementing now${RESET}"
   elif repo_has_process "run_review.py"; then
     echo -e "  ${DIM}${now}${RESET}  ${CYAN}← SDK review agents checking this worktree now${RESET}"
+  elif repo_has_any_process "meta_bridge_supervisor" "bridge_supervisor"; then
+    echo -e "  ${DIM}${now}${RESET}  ${YELLOW}← bridge supervisor reviewing in this worktree now${RESET}"
   elif repo_has_any_process "phase_a_executor" "phase_b_executor" "commit_executor" "executor_dispatch"; then
     echo -e "  ${DIM}${now}${RESET}  ${CYAN}← pipeline executor working in this worktree now${RESET}"
   else

@@ -148,12 +148,30 @@ if [ ! -f "$WINDOW_SCRIPT" ]; then
     exit 1
 fi
 
-THREAD_SLUG="$(printf '%s' "$THREAD_ID" | tr -c 'A-Za-z0-9_.-' '_')"
+THREAD_SLUG="$(python3 - "$THREAD_ID" "$REPO" "$BUS_DIR" "$TMUX_SESSION" "$TMUX_PANE" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+
+def slug(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+
+thread_id, repo, bus_dir, tmux_session, tmux_pane = sys.argv[1:6]
+identity = "|".join((str(Path(repo).expanduser().resolve()), bus_dir, tmux_session, tmux_pane))
+print(f"{slug(thread_id)}__{slug(identity)}")
+PY
+)"
 STATE_DIR="${RCX_CODEX_HOME:-$HOME/.codex}/state"
 LOG_DIR="${RCX_CODEX_HOME:-$HOME/.codex}/log/autoping"
 STATE_PATH="$STATE_DIR/rcx_autoping_${THREAD_SLUG}.json"
 SUMMARY_PATH="$STATE_DIR/rcx_autoping_${THREAD_SLUG}_summary.txt"
 RUNNER_LOG="$LOG_DIR/rcx_autoping_${THREAD_SLUG}.runner.log"
+LEGACY_THREAD_SLUG="$(printf '%s' "$THREAD_ID" | tr -c 'A-Za-z0-9_.-' '_')"
+LEGACY_STATE_PATH="$STATE_DIR/rcx_autoping_${LEGACY_THREAD_SLUG}.json"
 mkdir -p "$STATE_DIR" "$LOG_DIR"
 
 process_is_recorded_autoping_watcher() {
@@ -232,9 +250,10 @@ stop_recorded_autoping_watcher() {
     fi
 }
 
-existing_pid=""
-if [ -f "$STATE_PATH" ]; then
-    existing_pid="$(python3 - <<'PY' "$STATE_PATH"
+read_autoping_pid_from_state() {
+    local path="$1"
+    [ -f "$path" ] || return 0
+    python3 - <<'PY' "$path"
 import json, sys
 from pathlib import Path
 path = Path(sys.argv[1])
@@ -246,7 +265,12 @@ else:
     pid = payload.get("watcher_pid") or payload.get("active_pid")
     print("" if pid in (None, "") else str(pid))
 PY
-)"
+}
+
+existing_pid="$(read_autoping_pid_from_state "$STATE_PATH")"
+legacy_pid=""
+if [ "$LEGACY_STATE_PATH" != "$STATE_PATH" ]; then
+    legacy_pid="$(read_autoping_pid_from_state "$LEGACY_STATE_PATH")"
 fi
 
 tmux_session_active=0
@@ -278,6 +302,10 @@ if [ -n "$existing_pid" ] && ps -p "$existing_pid" > /dev/null 2>&1; then
     else
         stop_recorded_autoping_watcher "$existing_pid" "force restart"
     fi
+fi
+
+if [ -n "$legacy_pid" ] && [ "$legacy_pid" != "$existing_pid" ] && ps -p "$legacy_pid" > /dev/null 2>&1; then
+    stop_recorded_autoping_watcher "$legacy_pid" "legacy thread-only state-key migration"
 fi
 
 cleanup_orphaned_autoping_execs() {

@@ -26,6 +26,10 @@ from rcx_pi.selfhost.eval_seed import step as eval_step
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
 
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
+THREE = {"_num": {"xI": {"xH": None}}}
+
 
 # =============================================================================
 # Test: step_mu Uses Kernel Projections
@@ -91,13 +95,13 @@ class TestStepMuUsesKernelProjections:
         # 1. step_kernel_mu with return_meta proves kernel processes input
         meta = step_kernel_mu(
             [{"pattern": {"var": "x"}, "body": {"result": {"var": "x"}}}],
-            42,
+            ONE,
             return_meta=True,
         )
         assert isinstance(meta, dict)
         assert "output" in meta and "stall" in meta
         assert meta["stall"] is False
-        assert meta["output"] == {"result": 42}
+        assert meta["output"] == {"result": ONE}
 
         # 2. Manually verify kernel entry state is processed by kernel projections
         entry_state = {"_step": 42, "_projs": None}
@@ -200,9 +204,9 @@ class TestProjectionOrderEnforcedAtRuntime:
         domain_projs = [
             {"id": "double", "pattern": {"var": "x"}, "body": {"doubled": {"var": "x"}}}
         ]
-        result = step_kernel_mu(domain_projs, 42)
+        result = step_kernel_mu(domain_projs, ONE)
         # Should match and transform
-        assert result == {"doubled": 42}
+        assert result == {"doubled": ONE}
 
 
 # =============================================================================
@@ -514,22 +518,22 @@ class TestFullPipelineIntegration:
             {"pattern": {"var": "x"}, "body": {"wrapped": {"var": "x"}}}
         ]
 
-        result = step_mu(projections, 42)
+        result = step_mu(projections, ONE)
 
-        assert result == {"wrapped": 42}
+        assert result == {"wrapped": ONE}
 
     def test_first_match_wins_through_kernel(self):
         """First matching projection wins (kernel selection is correct)."""
         projections = [
-            {"pattern": 1, "body": "first"},
-            {"pattern": 1, "body": "second"},  # Same pattern, should never match
-            {"pattern": 2, "body": "third"},
+            {"pattern": ONE, "body": "first"},
+            {"pattern": ONE, "body": "second"},  # Same pattern, should never match
+            {"pattern": TWO, "body": "third"},
         ]
 
-        result = step_mu(projections, 1)
+        result = step_mu(projections, ONE)
         assert result == "first"
 
-        result = step_mu(projections, 2)
+        result = step_mu(projections, TWO)
         assert result == "third"
 
     def test_variable_binding_through_kernel(self):
@@ -541,9 +545,9 @@ class TestFullPipelineIntegration:
             }
         ]
 
-        result = step_mu(projections, {"x": 10, "y": 20})
+        result = step_mu(projections, {"x": ONE, "y": TWO})
 
-        assert result == {"sum_desc": {"first": 10, "second": 20}}
+        assert result == {"sum_desc": {"first": ONE, "second": TWO}}
 
     def test_nested_structure_transformation(self):
         """Nested structures transform correctly through kernel."""
@@ -554,12 +558,12 @@ class TestFullPipelineIntegration:
             }
         ]
 
-        input_val = {"data": {"nested": {"deep": [1, 2, 3]}}}
+        input_val = {"data": {"nested": {"deep": [ONE, TWO, THREE]}}}
         result = step_mu(projections, input_val)
 
         assert result == {
             "result": {
-                "data": {"nested": {"deep": [1, 2, 3]}},
+                "data": {"nested": {"deep": [ONE, TWO, THREE]}},
                 "processed": True
             }
         }

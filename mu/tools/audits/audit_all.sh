@@ -182,14 +182,14 @@ echo "-- no underscore-prefixed keys in JSON (non-standard Mu)"
 # Note: _marker is allowed - it's a security feature for done-wrapper spoofing prevention
 # Note: _type is allowed - Phase 6c type tags for list/dict disambiguation
 # Note: kernel/match/subst seeds use underscore-prefixed fields for state (_mode, _phase, etc.)
-# Note: mu/closures/ seeds (recurrence, exhaustion) use underscore-prefixed fields for engine state
+# Note: mu/closures/ seeds (recurrence, exhaustion, fix) use underscore-prefixed fields for engine state
 # Note: mu/programs/ seeds (rcx_engine) use underscore-prefixed fields for engine state
 # Note: mu/bridge/ seeds (bootstrap_structural) use underscore-prefixed fields for match state
 # Note: mu/host/python is a symlink to rcx_pi/selfhost - exclude it to avoid scanning Python files
 # Note: mu/stage0/examples/ Stage0 VM bundles use underscore-prefixed fields for state (_mode, _status, _bindings, etc.)
 # Note: mu/stage0/compiled/ compiled bundles inherit underscore keys from source seeds (mechanically derived)
 # Note: mu/tests/fixtures/ test vectors intentionally use underscore keys for kernel-internal state
-! grep -RInE --include='*.json' '"_[a-zA-Z]+":' mu/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'recurrence.v1.json' | grep -v 'exhaustion.v1.json' | grep -v 'rcx_engine.v1.json' | grep -v 'enginenews.v1.json' | grep -v 'exhaust.v1.json' | grep -v 'bootstrap_structural.v1.json' | grep -v 'terminal_classify.v1.json' | grep -v 'mu/stage0/examples/' | grep -v 'mu/stage0/compiled/' | grep -v 'mu/tests/fixtures/' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
+! grep -RInE --include='*.json' '"_[a-zA-Z]+":' mu/ 2>/dev/null | grep -v '"_marker":' | grep -v '"_type":' | grep -v 'kernel.v1.json' | grep -v 'match.v2.json' | grep -v 'subst.v2.json' | grep -v 'recurrence.v1.json' | grep -v 'exhaustion.v1.json' | grep -v 'fix.v1.json' | grep -v 'rcx_engine.v1.json' | grep -v 'enginenews.v1.json' | grep -v 'exhaust.v1.json' | grep -v 'bootstrap_structural.v1.json' | grep -v 'terminal_classify.v1.json' | grep -v 'mu/stage0/examples/' | grep -v 'mu/stage0/compiled/' | grep -v 'mu/tests/fixtures/' || { echo "Found non-standard underscore keys in JSON"; exit 1; }
 TIME_ANTICHEAT=$((SECONDS - PHASE_START))
 
 PHASE_START=$SECONDS

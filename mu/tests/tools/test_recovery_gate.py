@@ -1070,6 +1070,148 @@ class TestTierMapping:
         assert tier4 == {FailureClass.TERMINAL_POLICY, FailureClass.UNCLASSIFIED}
 
 
+class TestTransientRateLimitRecovery:
+    """A transient adapter rate/session/spend/usage limit must classify as a
+    DEDICATED sibling transient class and recover via a REAL bounded,
+    reset-aware back-off WAIT — not the no-op TRANSIENT_KILL handler, not an
+    immediate retry, never an unbounded wait. Wave
+    pipeline-fix-31-transient-rate-limit-recovery-2026-06-21."""
+
+    # The exact envelope shape observed stranding PR #1140.
+    _SESSION_LIMIT_RESULT = {
+        "status": "error",
+        "step": "implementer",
+        "errors": [
+            "Implementer failed: error (exit=1): Adapter 'claude' exited 1. "
+            "Output tail:\nYou've hit your session limit - resets 3:50am"
+        ],
+    }
+
+    def test_session_limit_classifies_as_transient_rate_limit(self):
+        fc = rg_mod.classify_failure(self._SESSION_LIMIT_RESULT)
+        assert fc == FailureClass.TRANSIENT_RATE_LIMIT
+        # Precisely NOT the no-op kill class, and NOT a tier-3 class that would
+        # exhaust recovery (the pre-fix behavior that stranded the wave).
+        assert fc != FailureClass.TRANSIENT_KILL
+        assert fc != FailureClass.TEST_FAILURE
+        assert fc != FailureClass.UNKNOWN_ERROR
+        assert fc != FailureClass.AGENT_REVIEW_CRASH
+        assert rg_mod.tier_for(fc) == 2
+
+    @pytest.mark.parametrize("message", [
+        "You've hit your session limit - resets 3:50am",
+        "Claude usage limit reached",
+        "rate_limit_error: please slow down",
+        "429 Too Many Requests",
+        "You exceeded your current quota",
+        "5-hour limit reached ∙ resets 3pm",
+    ])
+    def test_known_provider_limit_phrasings_classify_transient(self, message):
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "exit_code": 1,
+            "stderr": f"Adapter 'claude' exited 1. {message}",
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.TRANSIENT_RATE_LIMIT
+
+    def test_generic_failure_without_limit_phrasing_not_misclassified(self):
+        # Precision guard: a genuine failure that merely says "error", or that
+        # mentions a bare "limit" without provider-quota phrasing, must NOT be
+        # swept into the transient class (that would mask a real bug).
+        assert rg_mod.classify_failure(
+            {"status": "error", "step": "some_step",
+             "stderr": "something unexpected went wrong"}
+        ) != FailureClass.TRANSIENT_RATE_LIMIT
+        assert rg_mod.classify_failure(
+            {"status": "error", "step": "some_step",
+             "stderr": "recursion limit while building the graph"}
+        ) != FailureClass.TRANSIENT_RATE_LIMIT
+
+    def test_kill_code_behavior_unchanged(self):
+        # A real kill code stays TRANSIENT_KILL — the new class never steals it.
+        assert rg_mod.classify_failure(
+            {"status": "failed", "exit_code": -9, "stderr": "", "step": "impl"}
+        ) == FailureClass.TRANSIENT_KILL
+
+    def test_handler_waits_until_parsed_reset_time(self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        # now = 03:40 local; "resets 3:50am" => a reset-driven 10-minute wait
+        # (600s) — neither the 60s fixed default nor the 1800s hard cap.
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 3, 40, 0))
+        fix = rg_mod.fix_transient_rate_limit(
+            tmp_path, result=self._SESSION_LIMIT_RESULT)
+        assert fix["fixed"] is True
+        assert fix["action"] == "rate_limit_backoff"
+        # A REAL wait happened inside the handler (one injected sleep call),
+        # driven by the parsed reset time, positive and within the hard cap.
+        assert slept == [600.0]
+        assert 0 < slept[0] <= rg_mod.RATE_LIMIT_BACKOFF_MAX_S
+
+    def test_handler_caps_wait_at_bounded_maximum(self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        # now = 00:00; "resets 3:50am" is ~3h50m away => clamped to the hard cap.
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 0, 0, 0))
+        rg_mod.fix_transient_rate_limit(
+            tmp_path, result=self._SESSION_LIMIT_RESULT)
+        assert slept == [rg_mod.RATE_LIMIT_BACKOFF_MAX_S]
+
+    def test_handler_rolls_past_reset_to_tomorrow_and_stays_bounded(
+        self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        # now = 04:00, after 3:50am today => reset rolls to tomorrow => ~23h50m
+        # => still clamped to the hard cap (never unbounded).
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 4, 0, 0))
+        rg_mod.fix_transient_rate_limit(
+            tmp_path, result=self._SESSION_LIMIT_RESULT)
+        assert slept == [rg_mod.RATE_LIMIT_BACKOFF_MAX_S]
+
+    def test_handler_fixed_backoff_when_no_reset_time(self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 12, 0, 0))
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "stderr": "Adapter 'claude' exited 1. Claude usage limit reached",
+        }
+        rg_mod.fix_transient_rate_limit(tmp_path, result=result)
+        # No parseable reset => fixed bounded back-off (positive, within cap).
+        assert slept == [rg_mod.RATE_LIMIT_BACKOFF_DEFAULT_S]
+        assert 0 < slept[0] <= rg_mod.RATE_LIMIT_BACKOFF_MAX_S
+
+    def test_transient_rate_limit_has_bounded_attempt_budget(self):
+        # A couple of bounded waits can span a reset window (analogous to
+        # UPSTREAM_CONNECTIVITY), but the budget is still BOUNDED.
+        budget = rg_mod._max_attempts_for_failure(  # ANTICHEAT_OK
+            FailureClass.TRANSIENT_RATE_LIMIT)
+        assert budget == 6  # ANTICHEAT_OK
+        assert budget > rg_mod.MAX_ATTEMPTS_PER_TUPLE  # ANTICHEAT_OK
+
+    def test_tier2_transient_rate_limit_recovers_via_backoff(
+        self, tmp_path, monkeypatch):
+        slept: list[float] = []
+        monkeypatch.setattr(rg_mod, "_rate_limit_sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(
+            rg_mod, "_rate_limit_now", lambda: datetime(2026, 6, 21, 3, 40, 0))
+        r = rg_mod.attempt_recovery(
+            tmp_path, dict(self._SESSION_LIMIT_RESULT), "w-rate-limit")
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == FailureClass.TRANSIENT_RATE_LIMIT.value
+        assert r["action"] == "rate_limit_backoff"
+        # End-to-end proof: the bounded reset-aware WAIT was realized inside the
+        # handler (one injected sleep), NOT an immediate retry by the dispatcher.
+        assert slept == [600.0]
+
+
 class TestFixHandoffReceiptBuilderRefresh:
     def _write_routing_record(
         self,
@@ -3304,6 +3446,7 @@ class TestTier2FixesMap:
             rg_mod.FailureClass.STALE_ACTIVE_ITEMS,
             rg_mod.FailureClass.HANDOFF_RECEIPT_BUILDER_REFRESH,
             rg_mod.FailureClass.UPSTREAM_CONNECTIVITY,
+            rg_mod.FailureClass.TRANSIENT_RATE_LIMIT,
             rg_mod.FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP,
             rg_mod.FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP,
             rg_mod.FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP,
@@ -9975,7 +10118,16 @@ esac
         codex_home = tmp_path / "codex-home"
         state_dir = codex_home / "state"
         state_dir.mkdir(parents=True)
-        state_path = state_dir / "rcx_autoping_thread-123.json"
+        identity = "|".join(
+            (
+                str(repo_root.expanduser().resolve()),
+                ".agent_bus",
+                "rcx-pipeline",
+                "rcx-pipeline:1.3",
+            )
+        )
+        state_slug = f"thread-123__{re.sub(r'[^A-Za-z0-9_.-]+', '_', identity)}"
+        state_path = state_dir / f"rcx_autoping_{state_slug}.json"
         unrelated = subprocess.Popen(["sleep", "60"])
         tmux_log = tmp_path / "tmux.log"
         tmux_bin = tmp_path / "tmux-bin"
@@ -10054,6 +10206,86 @@ esac
                 unrelated.terminate()
                 unrelated.wait(timeout=5)
             if "existing" in locals() and existing.poll() is None:
+                existing.terminate()
+                existing.wait(timeout=5)
+
+    def test_ensure_codex_autoping_stops_legacy_thread_state_watcher(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        launcher_dir = repo_root / "tools" / "session"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        launcher = launcher_dir / "ensure_codex_autoping.sh"
+        launcher.write_text(
+            (_REPO_ROOT / "mu" / "tools" / "session" / "ensure_codex_autoping.sh").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | 0o111)
+        watch_script = launcher_dir / "codex_autoping_watch.py"
+        watch_script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
+        window_script = launcher_dir / "codex_autoping_window.sh"
+        window_script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        window_script.chmod(window_script.stat().st_mode | 0o111)
+
+        codex_home = tmp_path / "codex-home"
+        state_dir = codex_home / "state"
+        state_dir.mkdir(parents=True)
+        legacy_state_path = state_dir / "rcx_autoping_thread-123.json"
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = tmp_path / "tmux-bin"
+        tmux_bin.mkdir()
+        self._write_executable(
+            tmux_bin / "tmux",
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            f"printf '%s\\n' \"$*\" >> {tmux_log!s}\n"
+            "case \"${1:-}\" in\n"
+            "  has-session) exit 0 ;;\n"
+            "  list-windows) printf 'bash\\n'; exit 0 ;;\n"
+            "  new-window) exit 0 ;;\n"
+            "  respawn-window) exit 0 ;;\n"
+            "  *) exit 1 ;;\n"
+            "esac\n",
+        )
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{os.environ['PATH']}",
+            "RCX_CODEX_HOME": str(codex_home),
+            "RCX_PIPELINE_SESSION": "0",
+        }
+
+        existing = subprocess.Popen(
+            [
+                sys.executable,
+                str(watch_script),
+                "--repo-root",
+                str(repo_root),
+                "--thread-id",
+                "thread-123",
+                "--interval",
+                "60",
+            ]
+        )
+        try:
+            legacy_state_path.write_text(
+                json.dumps({"thread_id": "thread-123", "watcher_pid": existing.pid}) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                ["bash", str(launcher), "--repo", str(repo_root), "--thread-id", "thread-123"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=10,
+            )
+
+            assert result.returncode == 0
+            assert "legacy thread-only state-key migration" in result.stdout
+            assert "ACTIVE in tmux-managed AUTO-PING window" in result.stdout
+            assert "new-window -d -t rcx-pipeline -n AUTO-PING" in tmux_log.read_text(encoding="utf-8")
+            assert existing.wait(timeout=5) != 0
+        finally:
+            if existing.poll() is None:
                 existing.terminate()
                 existing.wait(timeout=5)
 
@@ -11846,6 +12078,36 @@ fi
             ),
             encoding="utf-8",
         )
+        pager_state = active / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
+        pager_state.parent.mkdir(parents=True, exist_ok=True)
+        pager_state.write_text(
+            json.dumps(
+                {
+                    "dispatcher": {
+                        "active": False,
+                        "pid": 0,
+                        "updated_at": "2026-06-22T19:10:00+00:00",
+                        "last_dispatch": {
+                            "event_id": "evt-active",
+                            "event_type": "recovery_state_changed",
+                            "wave_id": "wave-active",
+                            "task_id": "[PIPELINE-AGENT-PAGER]",
+                            "phase": "recovery",
+                            "state": "tier3_waiting_on_agent",
+                            "transition_key": "recovery-tier3",
+                            "summary": "Recovery moved to tier3_waiting_on_agent and woke dispatcher.",
+                            "target": "codex",
+                            "attempted_at": "2026-06-22T19:09:55+00:00",
+                            "completed_at": "2026-06-22T19:09:56+00:00",
+                            "acknowledged": True,
+                            "error": "",
+                        },
+                    }
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
         worktree_output = (
             f"worktree {quiet}\n"
@@ -11864,6 +12126,7 @@ fi
         env = os.environ | {
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "RCX_PANE_ONESHOT": "1",
+            "RCX_PANE_MAX_LINES": "24",
             "TERM": "xterm",
         }
 
@@ -11879,8 +12142,18 @@ fi
         assert result.returncode == 0
         clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
         assert "Watching: jabramsja/active-wave" in clean_stdout
-        assert "ACTIVE — Tier 3 recovery" in clean_stdout
-        assert "Problem: a review subprocess crashed" in clean_stdout
+        assert (
+            "ACTIVE — Tier 3 recovery" in clean_stdout
+            or "Recovery active: tier 3 / agent_review_crash" in clean_stdout
+        )
+        assert (
+            "Problem: a review subprocess crashed" in clean_stdout
+            or "agent_review_crash" in clean_stdout
+        )
+        assert "Last pager wake:" in clean_stdout
+        assert "recovery_state_changed" in clean_stdout
+        assert "target codex" in clean_stdout
+        assert len(clean_stdout.splitlines()) <= 24
 
     def test_pane_processes_shows_last_pager_wake_line(self, tmp_path):
         repo_root = tmp_path / "repo"
@@ -17757,6 +18030,59 @@ _STEP14_INNER_PAYLOAD = {
     "failure_class": "pr_conflicting",
     "auto_resolve_action": "aborted",
 }
+
+
+class TestClassifyEngineDisciplineAssertSet:
+    def test_engine_discipline_assert_set_is_test_failure(self):
+        result = {
+            "status": "failed",
+            "step": "phase_b",
+            "stderr": (
+                "mu/tests/structural/test_engine_pipeline_discipline.py:996: "
+                "AssertionError: assert set(result.keys()) == engine_keys"
+            ),
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.TEST_FAILURE
+
+    def test_pr_conflict_signal_still_wins_over_assert_set_text(self):
+        result = {
+            "status": "error",
+            "step": "ensure_review_clear_and_merge",
+            "stdout": (
+                "mergeStateStatus=DIRTY for PR #1139\n"
+                "mu/tests/structural/test_engine_pipeline_discipline.py:996: "
+                "AssertionError: assert set(result.keys()) == engine_keys"
+            ),
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.PR_CONFLICTING
+
+    def test_l4_contract_signal_still_wins_over_assert_set_text(self):
+        result = {
+            "status": "failed",
+            "step": "pre_push",
+            "stderr": (
+                "L4 execution contract violation: use FOUNDER_OVERRIDE\n"
+                "mu/tests/structural/test_engine_pipeline_discipline.py:996: "
+                "AssertionError: assert set(result.keys()) == engine_keys"
+            ),
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.L4_CONTRACT_VIOLATION
+
+    def test_bridge_subprocess_assert_set_is_agent_review_crash(self):
+        result = {
+            "status": "failed",
+            "step": "bridge_subprocess",
+            "stderr": (
+                "Bridge subprocess failed in round 1 (exit=1). "
+                "mu/tests/structural/test_engine_pipeline_discipline.py:996: "
+                "AssertionError: assert set(result.keys()) == engine_keys"
+            ),
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.AGENT_REVIEW_CRASH
 
 
 class TestClassifyPrConflicting:

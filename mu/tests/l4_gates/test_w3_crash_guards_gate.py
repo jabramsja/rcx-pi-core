@@ -252,10 +252,10 @@ class TestF25JsStage0MatchEmptyVar:
         js_script = (
             "const { stage0Match, stage0Substitute } = require('./mu/host/js/core/bootstrap_core');\n"
             "const pattern = {outer: {left: {var: 'x'}, right: {var: 'x'}}};\n"
-            "const value = {outer: {left: 7, right: 7}};\n"
+            "const value = {outer: {left: 'seven', right: 'seven'}};\n"
             "const bindings = stage0Match(pattern, value);\n"
             "const output = stage0Substitute({ok: true, value: {var: 'x'}}, bindings);\n"
-            "if (JSON.stringify(output) !== JSON.stringify({ok: true, value: 7})) {\n"
+            "if (JSON.stringify(output) !== JSON.stringify({ok: true, value: 'seven'})) {\n"
             "  process.stderr.write('FAIL: got ' + JSON.stringify(output));\n"
             "  process.exit(1);\n"
             "}\n"

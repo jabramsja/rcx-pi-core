@@ -2763,6 +2763,27 @@ def _codex_autoping_thread_slug(thread_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", thread_id)
 
 
+def _codex_autoping_state_slug(thread_id: str, identity=None) -> str:
+    thread_slug = _codex_autoping_thread_slug(thread_id)
+    if identity is None:
+        return thread_slug
+    repo_root = str(getattr(identity, "repo_root", "") or "").strip()
+    if not repo_root:
+        active_bus_root = getattr(identity, "active_bus_root", None)
+        if active_bus_root is not None:
+            try:
+                repo_root = str(Path(active_bus_root).expanduser().resolve().parent)
+            except OSError:
+                repo_root = str(Path(active_bus_root).expanduser().absolute().parent)
+    bus_dir = str(getattr(identity, "bus_dir", "") or "").strip()
+    tmux_session = str(getattr(identity, "tmux_session", "") or "").strip()
+    tmux_pane = f"{tmux_session}:1.3" if tmux_session else ""
+    if not (repo_root and bus_dir and tmux_session and tmux_pane):
+        return thread_slug
+    identity_text = "|".join((str(Path(repo_root).expanduser().resolve()), bus_dir, tmux_session, tmux_pane))
+    return f"{thread_slug}__{_codex_autoping_thread_slug(identity_text)}"
+
+
 def _pid_alive(pid_value: object) -> bool:
     try:
         pid = int(str(pid_value))
@@ -2779,8 +2800,8 @@ def _pid_alive(pid_value: object) -> bool:
     return True
 
 
-def _codex_autoping_state_path(codex_home: Path, thread_id: str) -> Path:
-    return codex_home / "state" / f"rcx_autoping_{_codex_autoping_thread_slug(thread_id)}.json"
+def _codex_autoping_state_path(codex_home: Path, thread_id: str, identity=None) -> Path:
+    return codex_home / "state" / f"rcx_autoping_{_codex_autoping_state_slug(thread_id, identity)}.json"
 
 
 def _codex_autoping_identity_mismatch(payload: dict[str, object], identity) -> str | None:
@@ -2814,7 +2835,7 @@ def _codex_autoping_identity_mismatch(payload: dict[str, object], identity) -> s
 
 
 def _codex_autoping_health(codex_home: Path, thread_id: str, identity=None) -> tuple[bool, str]:
-    state_path = _codex_autoping_state_path(codex_home, thread_id)
+    state_path = _codex_autoping_state_path(codex_home, thread_id, identity=identity)
     raw = _read_text(state_path)
     if raw is None:
         return False, f"missing Codex autoping state: {state_path}"

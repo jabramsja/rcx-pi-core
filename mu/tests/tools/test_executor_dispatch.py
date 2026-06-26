@@ -15784,3 +15784,58 @@ class TestLaneMonitorLifecycle:
              patch.object(dispatch_mod, "_tmux_kill_session"):
             monitor.cleanup()
         assert mock_term.call_args.args[0] == [700]
+
+
+class TestChainFounderOverrideCarryForward:
+    """The A->B chain rebuild must propagate a wave's declared FOUNDER_OVERRIDE.
+
+    Bridge round-2 DEFECT regression: ``_continue_successful_executor_chain``
+    rebuilt ``phase_b_routing`` from a fixed field set and dropped the
+    launch-persisted ``founder_override``. On the normal chained path the
+    commit-executor Step-5e growth-cap auto-bump then read an empty token via
+    ``_extract_founder_override_from_routing_record`` and a gate-authoring wave
+    stranded ``no_founder_override``. The rebuild now carries the override
+    forward via ``_carry_forward_founder_override``.
+    """
+
+    def test_carries_bare_founder_override_field(self):
+        carried = dispatch_mod._carry_forward_founder_override(  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+            {"founder_override": "demo-chain-wave-2026-06-21", "task_id": "[T]"}
+        )
+        assert carried == {"founder_override": "demo-chain-wave-2026-06-21"}
+
+    def test_carries_founder_override_token_field(self):
+        carried = dispatch_mod._carry_forward_founder_override(  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+            {"founder_override_token": "demo-chain-wave-2026-06-21"}
+        )
+        assert carried == {"founder_override_token": "demo-chain-wave-2026-06-21"}
+
+    def test_absent_or_blank_override_yields_empty_dict(self):
+        # Backward-compat: records without a declared override (e.g. the
+        # surface-retry path, which builds the record from CLI args) carry
+        # nothing, so the rebuilt dict is byte-unchanged from before the fix.
+        assert dispatch_mod._carry_forward_founder_override({}) == {}  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+        assert dispatch_mod._carry_forward_founder_override(None) == {}  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+        assert dispatch_mod._carry_forward_founder_override({"founder_override": "   "}) == {}  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+
+    def test_rebuilt_phase_b_routing_feeds_commit_extractor(self):
+        # The same spread the chain applies to phase_b_routing yields a dict
+        # whose ``founder_override`` is exactly what the commit-flow extractor
+        # (the Step-5e auto-bump source) reads back — closing the chained-path
+        # gap end-to-end at the dict level.
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "wave_name": "demo-chain-wave-2026-06-21",
+            "task_id": "[T]",
+            "founder_override": "demo-chain-wave-2026-06-21",
+        }
+        phase_b_routing = {
+            "decision": "ROUTE_PHASE_B",
+            "wave_name": record["wave_name"],
+            "task_id": record["task_id"],
+            "summary": "Chained from Phase A convergence",
+            "next_candidates": [],
+            **dispatch_mod._carry_forward_founder_override(record),  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+        }
+        assert phase_b_routing["founder_override"] == "demo-chain-wave-2026-06-21"
+        assert commit_mod._extract_founder_override_from_routing_record(phase_b_routing, REPO_ROOT) == "demo-chain-wave-2026-06-21"  # ANTICHEAT_OK: asserts the carried field is the exact one the commit extractor reads

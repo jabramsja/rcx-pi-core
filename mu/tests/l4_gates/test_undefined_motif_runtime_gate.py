@@ -37,6 +37,7 @@ from rcx_pi.selfhost.mu_type import mu_hash_cached
 # ---------------------------------------------------------------------------
 PY_RUNTIME = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
 JS_RUNTIME = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
+ONE = {"_num": {"xH": None}}
 
 
 def _read_all_js_source() -> str:
@@ -199,7 +200,7 @@ class TestContractSplitLock:
             "body": {"ok": {"var": "v"}},
         }
         meta = step_kernel_mu(
-            [proj], {"x": 42},
+            [proj], {"x": ONE},
             return_meta=True, max_steps=100,
         )
         assert meta["stall"] is False

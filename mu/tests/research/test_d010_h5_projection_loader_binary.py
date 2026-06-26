@@ -632,8 +632,9 @@ class TestBoundaryLock:
             # Walk the entire structure collecting types
             _collect_types(data, seed_types)
 
-        # These are the types we expect in production seeds
-        expected_types = {type(None), bool, int, str, list, dict}
+        # Stage 4 production seeds encode matcher-facing numbers structurally;
+        # host int codec coverage remains in the golden binary fixtures below.
+        expected_types = {type(None), bool, str, list, dict}
         assert seed_types == expected_types, (
             f"Unexpected types in seeds: {seed_types - expected_types} "
             f"or missing types: {expected_types - seed_types}"

@@ -62,7 +62,7 @@ class TestExecutionLayerTruth:
         )
 
         # step() produces a result (it works), but there's no way to observe it
-        result = step(engine_projections, {"value": 1})
+        result = step(engine_projections, {"value": "one"})
         assert result is not None, "step() must produce a result"
 
     def test_l2_engine_produces_boundary_events(self, identity_projections):
@@ -72,7 +72,7 @@ class TestExecutionLayerTruth:
         events at each iteration boundary.
         """
         observer = []
-        run_engine_pipeline(identity_projections, {"value": 1}, observer=observer)
+        run_engine_pipeline(identity_projections, {"value": "one"}, observer=observer)
 
         # Must have at least one step_boundary event
         step_events = [e for e in observer if e["event_name"] == "step_boundary"]
@@ -103,7 +103,7 @@ class TestExecutionLayerTruth:
         run_hemisphere_routing / run_engine_with_routing.
         """
         observer = []
-        run_engine_pipeline(identity_projections, {"value": 1}, observer=observer)
+        run_engine_pipeline(identity_projections, {"value": "one"}, observer=observer)
 
         # All event names must be in the valid engine set
         for event in observer:
@@ -120,12 +120,12 @@ class TestExecutionLayerTruth:
         This is the falsifiability proof.
         """
         # L0: step() — no observer, returns raw result
-        l0_result = step(identity_projections, {"value": 1})
+        l0_result = step(identity_projections, {"value": "one"})
 
         # L2: run_engine_pipeline — observer captures events
         observer = []
         l2_result = run_engine_pipeline(
-            identity_projections, {"value": 1}, observer=observer,
+            identity_projections, {"value": "one"}, observer=observer,
         )
 
         # The evidence distinction: L2 has observer events, L0 cannot

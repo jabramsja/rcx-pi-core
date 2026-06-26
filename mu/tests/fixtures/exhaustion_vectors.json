@@ -12,7 +12,7 @@
       "input": {
         "_detect_exhaustion": {
           "trace": {
-            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "head": {"step": {"_num": null}, "state": "A", "projection": "op1"},
             "tail": null
           },
           "frozen": null,
@@ -33,17 +33,17 @@
       "input": {
         "_detect_exhaustion": {
           "trace": {
-            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "head": {"step": {"_num": null}, "state": "A", "projection": "op1"},
             "tail": {
-              "head": {"step": 1, "state": "B", "projection": "op1"},
+              "head": {"step": {"_num": {"xH": null}}, "state": "B", "projection": "op1"},
               "tail": {
-                "head": {"step": 2, "state": "C", "projection": "op1"},
+                "head": {"step": {"_num": {"xO": {"xH": null}}}, "state": "C", "projection": "op1"},
                 "tail": null
               }
             }
           },
           "frozen": null,
-          "tau_step": 0,
+          "tau_step": {"_num": null},
           "operator_ids": {"head": "op1", "tail": null}
         }
       },
@@ -60,14 +60,14 @@
       "input": {
         "_detect_exhaustion": {
           "trace": {
-            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "head": {"step": {"_num": null}, "state": "A", "projection": "op1"},
             "tail": {
-              "head": {"step": 1, "state": "B", "projection": "op2"},
+              "head": {"step": {"_num": {"xH": null}}, "state": "B", "projection": "op2"},
               "tail": null
             }
           },
           "frozen": null,
-          "tau_step": 0,
+          "tau_step": {"_num": null},
           "operator_ids": {"head": "op1", "tail": {"head": "op2", "tail": null}}
         }
       },
@@ -84,14 +84,14 @@
       "input": {
         "_detect_exhaustion": {
           "trace": {
-            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "head": {"step": {"_num": null}, "state": "A", "projection": "op1"},
             "tail": {
-              "head": {"step": 1, "state": "B", "projection": "op1"},
+              "head": {"step": {"_num": {"xH": null}}, "state": "B", "projection": "op1"},
               "tail": null
             }
           },
           "frozen": {"head": "op1", "tail": null},
-          "tau_step": 0,
+          "tau_step": {"_num": null},
           "operator_ids": {"head": "op1", "tail": null}
         }
       },
@@ -108,11 +108,11 @@
       "input": {
         "_detect_exhaustion": {
           "trace": {
-            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "head": {"step": {"_num": null}, "state": "A", "projection": "op1"},
             "tail": null
           },
           "frozen": null,
-          "tau_step": 99,
+          "tau_step": {"_num": {"xI": {"xH": null}}},
           "operator_ids": {"head": "op1", "tail": null}
         }
       },
@@ -129,14 +129,14 @@
       "input": {
         "_detect_exhaustion": {
           "trace": {
-            "head": {"step": 0, "state": "A", "projection": "op1"},
+            "head": {"step": {"_num": null}, "state": "A", "projection": "op1"},
             "tail": {
-              "head": {"step": 1, "state": "B", "projection": "op1"},
+              "head": {"step": {"_num": {"xH": null}}, "state": "B", "projection": "op1"},
               "tail": null
             }
           },
           "frozen": null,
-          "tau_step": 1,
+          "tau_step": {"_num": {"xH": null}},
           "operator_ids": {"head": "op1", "tail": null}
         }
       },

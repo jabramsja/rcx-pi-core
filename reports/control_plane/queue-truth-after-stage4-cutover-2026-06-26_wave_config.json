@@ -1,0 +1,62 @@
+{
+  "wave_id": "queue-truth-after-stage4-cutover-2026-06-26",
+  "title": "Queue Truth After Stage4 Cutover 2026-06-26",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Clean up stale active-queue wording after the Stage 4 matcher cutover and pager/autoping/tmux truthfulness hardening evidence. Current dev includes PR #1150 with the Stage 4 StructuralNumbers matcher-domain cutover implementation and gates. Repo-local proof for pager/autoping/tmux truthfulness hardening is commit 778da1c3d3d0332a2aeb0aac80c2b259dad04183 with subject fix: harden pager autoping tmux truthfulness; local git metadata does not mechanically identify that commit as PR #1151. Update STATUS.md and TASKS.md so the active queue no longer lists the already-landed int-first matcher cutover as pending, avoids unsupported PR #1151 merged wording, and makes the next actionable queue item the Stage 4 red-team before pipeline hardening and the #1139/#1140 conflict-refresh packets.",
+  "date": "2026-06-26",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/queue-truth-after-stage4-cutover-2026-06-26.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id queue-truth-after-stage4-cutover-2026-06-26 --output reports/l4_wave_indicators/queue-truth-after-stage4-cutover-2026-06-26.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 pytest mu/tests/structural/test_status_md_grounding.py tests/docs/test_debt_truth_gate.py -q && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id queue-truth-after-stage4-cutover-2026-06-26 --wave-class L4_ENABLER && git diff --check",
+  "evidence_delta": "(1) TASKS.md active queue reflects code truth: PR #1150/current tree contain the Stage 4 numeric matcher cutover and its gates, so the next active item is Stage 4 red-team. (2) STATUS.md and TASKS.md ground pager/autoping/tmux truthfulness hardening in commit 778da1c3d3d0332a2aeb0aac80c2b259dad04183 with subject fix: harden pager autoping tmux truthfulness, without claiming PR #1151. (3) Pipeline hardening and #1139/#1140 remain queued after the red-team step.",
+  "progress_proof_before": "The active queue still listed Stage 4 int-first matcher cutover as pending and launcher/tracker wording contained unsupported PR #1151 merged claims, while git log --oneline --decorate -n 30 --grep=1151 --all returns no local match and git show -s --format=fuller 778da1c3 proves only the hardening commit subject.",
+  "progress_proof_after": "The active queue points at the current dev truth, with already-landed Stage 4 cutover and observability hardening removed from pending work and the next actionable queue item clearly set to Stage 4 red-team.",
+  "structural_artifact_ref": "TASKS.md; STATUS.md; reports/l4_wave_indicators/queue-truth-after-stage4-cutover-2026-06-26.json",
+  "scope_summary": "Docs/control-plane queue truth sync only. Do not modify runtime, substrate, seeds, JS/Python implementation, or test semantics in this wave.",
+  "scope_items": [
+    "TASKS.md (MODIFY) -- remove the already-landed int-first matcher cutover from the pending queue, remove or qualify unsupported PR #1151 merged wording, and keep the remaining priority order explicit.",
+    "STATUS.md (MODIFY) -- update last-updated and next-milestone text so Stage 4 red-team is the next active work, without describing PR #1151 as merged unless repo-local evidence mechanically proves that PR number.",
+    "reports/l4_wave_indicators/queue-truth-after-stage4-cutover-2026-06-26.json (GENERATED) -- indicator artifact for this L4_ENABLER queue-truth wave.",
+    "reports/control_plane/queue-truth-after-stage4-cutover-2026-06-26_2026-06-26.md (GENERATED) -- launcher-created control packet.",
+    "reports/control_plane/queue-truth-after-stage4-cutover-2026-06-26_wave_config.json (KEEP) -- launcher config for this wave."
+  ],
+  "work_items": [
+    "Reproduce bounded doc-accuracy truth before editing: the targeted TASKS tracker note authorizes this wave, git log --oneline --decorate -n 30 --grep=1151 --all returns no PR #1151 match, git show -s --format=fuller 778da1c3 identifies pager/autoping/tmux hardening without PR #1151 metadata, and the Stage 4 matcher cutover gates exist in the current tree.",
+    "Update TASKS.md PROGRAM QUEUE so Wave B is not listed as pending when the live runtime and tests already contain it.",
+    "Update STATUS.md next milestone wording so autonomous execution continues with Stage 4 red-team, then pipeline hardening with #1139/#1140 conflict-refresh packets.",
+    "Keep all runtime and test files untouched; this is not an implementation or gate-changing wave.",
+    "Collect the L4 indicator artifact and run the configured evidence command."
+  ],
+  "constraints": [
+    "Use launch_wave.py, executor_dispatch, Phase A, Phase B, bridge review, and commit executor for this wave.",
+    "Do not edit runtime, substrate, seed, or test behavior in this cleanup wave.",
+    "Do not mark the later Stage 4 red-team, pipeline hardening, #1139, or #1140 items complete.",
+    "Do not manually rebase, refresh, or merge #1139 or #1140; keep them queued for the pipeline hardening/conflict-refresh path.",
+    "The cleanup must be evidence-backed by current dev commits and current test/source surfaces, not by historical summaries."
+  ],
+  "stop_conditions": [
+    "Halt as NEEDS_RESCOPING if runtime or substrate edits are required.",
+    "Halt as DOC_ACCURACY if evidence shows the Stage 4 numeric matcher cutover is not actually present in current dev.",
+    "Halt if L4_ENABLER contract validation requires touching runtime files.",
+    "Do not commit without docs consistency, tracker grounding tests, L4 contract validation, indicator collection, bridge review, and commit-executor handling."
+  ],
+  "acceptance_criteria": [
+    "TASKS.md pending queue starts with Stage 4 red-team, followed by pipeline hardening and #1139/#1140 conflict-refresh work.",
+    "STATUS.md and TASKS.md do not describe PR #1151 as merged unless additional repo-local evidence mechanically proves that PR number; pager/autoping/tmux truthfulness hardening is referenced by commit 778da1c3d3d0332a2aeb0aac80c2b259dad04183 or left as non-PR-numbered local/origin-dev hardening evidence.",
+    "The already-landed Stage 4 int-first matcher cutover is referenced as completed by PR #1150, not left as pending work.",
+    "The remaining queue order for surreals, recursive ordinals, W-types, coinduction, fixpoint, and optimization-last remains intact.",
+    "Evidence command and L4 indicator collection pass."
+  ],
+  "request_for_agent": "Implement the narrow docs/control-plane queue-truth cleanup. Reproduce current dev truth, then update TASKS.md and STATUS.md only enough to remove the already-landed Stage 4 int-first matcher cutover from pending work, avoid unsupported PR #1151 merged claims, and set Stage 4 red-team as the next active queue item. Keep runtime, substrate, seed, and test behavior untouched. Preserve pipeline hardening and #1139/#1140 conflict-refresh as later queued work. Collect the indicator artifact and run the configured evidence command.",
+  "request_for_claude": "Compatibility input only: this wave is pinned to Codex implementer, Codex reviewer, and Codex pager route. Do not route implementation, review, or pager handling to Claude.",
+  "authorization_note": "Founder-directed autonomous cleanup of stale active queue after merged Stage 4 and pager/autoping/tmux hardening evidence. The founder asked to clean stale state and continue queued work without another founder decision.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Queue truth cleanup after PR #1150 and repo-local pager/autoping/tmux hardening evidence before Stage 4 red-team.",
+  "tracked_packet": "reports/control_plane/queue-truth-after-stage4-cutover-2026-06-26_2026-06-26.md"
+}

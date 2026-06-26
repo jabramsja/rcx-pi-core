@@ -50,20 +50,62 @@ class TestStage0ListBranchRemoved:
     """Stage 0 match must NOT have list-handling code (dead code after normalization)."""
 
     def test_stage0_match_no_isinstance_list(self):
-        """_stage0_match must not check isinstance(pattern, list)."""
+        """_stage0_match must not check isinstance(PATTERN, list).
+
+        Relaxed P7W4 fence — symmetric-fence resolution, founder-approved
+        2026-06-21 (FOUNDER_OVERRIDE:stage0-content-addressed-symmetric-fence-2026-06-21c).
+        Mirrors the JS fence ``test_js_stage0_match_no_array_branch`` scope:
+        forbid ONLY the pattern-side list dispatch; PERMIT exactly one input-side
+        ``isinstance(input_value, list)`` reject-guard plus the Stage 4
+        ``candidate`` scan that rejects host numeric leaves before variable
+        binding (the analog of the JS input-side ``Array.isArray(input)``
+        fail-close that stage0Match relies on after the scalar branches
+        collapse to a content-addressed hash). The
+        no-scalar-isinstance + content-hash reduction thesis is proved by
+        test_stage0_content_addressed_collapse_gate.py.
+        """
         source = _get_function_source(_stage0_match)
         tree = ast.parse(source)
+        input_side_guards = 0
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name) and node.func.id == "isinstance":
-                    if len(node.args) >= 2:
-                        # Check if second arg is 'list' or tuple containing 'list'
-                        arg = node.args[1]
-                        if isinstance(arg, ast.Name) and arg.id == "list":
-                            pytest.fail(
-                                "_stage0_match still has isinstance(x, list) check "
-                                "(P7W4: list branch should be removed)"
-                            )
+            if not isinstance(node, ast.Call):
+                continue
+            if not (isinstance(node.func, ast.Name) and node.func.id == "isinstance"):
+                continue
+            if len(node.args) < 2:
+                continue
+            # Collect the type name(s) — handle isinstance(x, list) and
+            # isinstance(x, (list, ...)).
+            type_arg = node.args[1]
+            if isinstance(type_arg, ast.Name):
+                type_names = [type_arg.id]
+            elif isinstance(type_arg, ast.Tuple):
+                type_names = [e.id for e in type_arg.elts if isinstance(e, ast.Name)]
+            else:
+                type_names = []
+            if "list" not in type_names:
+                continue
+            # This isinstance dispatches on `list` — classify by subject.
+            subject = node.args[0]
+            subject_name = subject.id if isinstance(subject, ast.Name) else "<expr>"
+            if subject_name == "pattern":
+                pytest.fail(
+                    "_stage0_match has pattern-side isinstance(pattern, list) "
+                    "(relaxed P7W4 fence still forbids pattern-side list dispatch)"
+                )
+            elif subject_name == "input_value":
+                input_side_guards += 1
+            elif subject_name == "candidate":
+                continue
+            else:
+                pytest.fail(
+                    f"_stage0_match has isinstance({subject_name}, list) on an "
+                    f"unexpected subject (only one input-side input_value reject-guard permitted)"
+                )
+        assert input_side_guards <= 1, (
+            f"_stage0_match has {input_side_guards} input-side list guards "
+            f"(symmetric fence permits at most one input-side reject-guard)"
+        )
 
     def test_stage0_match_no_len_zip(self):
         """_stage0_match must not use len() or zip() (eliminated with list branch)."""

@@ -181,12 +181,12 @@ structural form that fits.
 - **Reduction, not addition (`rule_11`).** This collapses host type-dispatch + host
   arithmetic into structural Mu; it is a structural reduction, the parity-preserving
   boundary tightening the behavioral protocol prefers.
-- **`NorthStarSemantics.v0.md` reconciliation.** §B ("Zero Canonicalization") is stale —
-  it claims `json.dumps` canonicalizes `+0/−0` and `mu_hash_cached(+0)==mu_hash_cached(−0)`,
-  both false in code; §B.1 (the two-hash control/data split) is accurate. Under structural
-  numbers, signed-zero is simply not representable as a distinct integer (`0 = {"_num":
-  null}` is unique), so the zero-canonicalization problem dissolves for numbers. NorthStar
-  §B should be corrected in the matcher-cutover wave.
+- **`NorthStarSemantics.v0.md` reconciliation.** The 2026-06-22 cutover corrects §B
+  from host zero-canonicalization to Structural Numeric Zero Policy: semantic numeric
+  zero is the StructuralNumbers numeral `{"_num": null}`, host numeric zero leaves are
+  invalid matcher-domain data, and §B.1 remains the accurate control-channel hash split.
+  Under structural numbers, signed-zero is not representable as a distinct integer, so
+  the zero-canonicalization problem dissolves for matcher-facing numeric facts.
 
 ---
 
@@ -270,24 +270,23 @@ production-grade form.
 
 ## 9. Stage 4 design: integer-first matcher cutover
 
-**Scope.** This section is the bounded, design-only specification for the §8 Stage 4
-matcher cutover, authored after Stages 1–3 (foundation, codec, add, compare, multiply,
-subtract, gcd, exact rationals) landed. It specifies *what* the cutover must do; it does
-**not** implement it. Implementation is the separate next wave (`STAGE4-INT-FIRST-CUTOVER`),
-which owns every runtime, seed, projection, JS-production, and `NorthStarSemantics.v0.md`
-edit named below. Nothing in this section changes runtime behavior.
+**Scope.** This section was the bounded specification for the §8 Stage 4 matcher cutover,
+authored after Stages 1–3 (foundation, codec, add, compare, multiply, subtract, gcd,
+exact rationals) landed. The 2026-06-22 `stage4-loop-struct-2026-06-22` implementation
+wave applies that cutover to the named runtime, seed, gate, and `NorthStarSemantics.v0.md`
+surfaces while preserving the accepted boundary: host loops may remain physical execution
+watchdogs, but matcher-visible numeric facts are StructuralNumbers Mu data.
 
 ### 9.1 The exact dispatch being replaced (both substrates)
 
-In Python `_stage0_match` (`mu/host/python/rcx_pi/selfhost/eval_seed.py`), after the
-variable and `None` cases, scalar patterns are dispatched through four host type-checks —
-`isinstance(pattern, bool)`, `isinstance(pattern, int)`, `isinstance(pattern, float)`,
-`isinstance(pattern, str)` — before the structural `isinstance(pattern, dict)` branch. The
-JS mirror `stage0Match` (`mu/host/js/core/bootstrap_core.js`) collapses the four into a
-single `typeof pattern !== 'object'` primitive branch (leaf compared with `===`) ahead of
-its object branch. These scalar branches are the residual `@host_builtin` type-dispatch
-named in §2.1; the `None`, variable, and dict branches are not scalar host-type semantics
-and are outside the cutover's removal set.
+Before the cutover, Python `_stage0_match`
+(`mu/host/python/rcx_pi/selfhost/eval_seed.py`) had already collapsed the former explicit
+bool/int/float/str scalar equality branches into a content-hash leaf path, but that path
+still admitted host `int`/`float` leaves through variable binding and content-hash equality.
+The JS mirror `stage0Match` (`mu/host/js/core/bootstrap_core.js`) still had a primitive
+`typeof pattern !== 'object'` branch. Stage 4 narrows both substrates so host numeric
+leaves fail closed before variable binding or content-hash equality; StructuralNumbers
+numerals route through the object/dict branch.
 
 Grounded leaf reality (kernel-relevant seeds): **float leaves are absent** — the float
 branch is already dead on the seed path, exactly as the raw-list branch was before P7W4
@@ -309,8 +308,8 @@ inside a numeral, and compares `null` leaves via the `None` branch. The cutover 
    branch.
 2. **Migrates the enumerable integer leaves** in `fix.v1.json` / `rcx_engine.v1.json` to
    numeral form in the *same* wave, so no host integer is left for the removed branch to
-   match. (Computed integers use the §7 codec; the static seed leaves are migrated directly
-   because they are a small enumerable set.)
+   match. The static seed leaves are migrated directly because they are a small enumerable
+   set; no matcher-path codec shim or compatibility wrapper is landed.
 3. **Adds an input-domain invariant gate** — "no host `int`/`float` leaf reaches the
    matcher" — the numeric analogue of P7W4's seed-no-raw-array assertion, so the removed
    branches stay dead-by-construction (a stray host scalar falls through to `NO_MATCH`, the
@@ -352,9 +351,10 @@ to numbers-only, classify it honestly (an enabler step recording a host-type-*se
 reduction via a finer evidence metric) rather than asserting a marker-count decrease the
 ratchet will read as zero.
 
-### 9.4 The `NorthStarSemantics.v0.md` §B correction (specified here, applied in the cutover wave)
+### 9.4 The `NorthStarSemantics.v0.md` §B correction (applied in the cutover wave)
 
-§B ("Zero Canonicalization") is stale and must be corrected. Command-reproduced facts:
+The pre-cutover §B ("Zero Canonicalization") was stale; the 2026-06-22 cutover
+applies the correction. Command-reproduced facts:
 `json.dumps(0.0) == "0.0"` but `json.dumps(-0.0) == "-0.0"`, so the **data** hash
 `mu_hash_cached(+0.0)` does **not** equal `mu_hash_cached(-0.0)` in Python — §B's policy
 ("core identity and hash operations canonicalize `+0`/`-0`"), its constraints 1–2, and its
@@ -363,16 +363,16 @@ are all false for the data hash. The accurate canonicalizer is §B.1's **control
 (`mu_hash_control`), which intentionally int-casts integer-valued and signed-zero floats;
 §B.1 is correct and stays.
 
-The correction the cutover wave applies to §B (not this wave — `NorthStarSemantics.v0.md`
-is out of scope here): (1) retract the claim that the data hash canonicalizes signed zero,
-and state that canonicalization lives only in the control-channel hash (§B.1); (2) record
-that the data path must **not** canonicalize `-0 → +0` — that needs a host primitive and was
-bridge-rejected (see the Stage 0 signed-zero finding), so opposite-sign zeros correctly
-`NO_MATCH` in both substrates, which is parity-safe; (3) note that under structural numbers
-the question is **moot for the numeric domain** — signed zero is not a representable integer
-(`0 = {"_num": null}` is unique; `N0`/`Z0` carry no sign) and floats are forbidden, so no
-`-0` numeral exists. Any residual zero-canonicalization concern is confined to non-numeric
-host-float boundary inputs, which §3.4 already places out of scope.
+The cutover wave applies the correction in `NorthStarSemantics.v0.md`: (1) retract the
+claim that the data hash canonicalizes signed zero, and state that canonicalization lives
+only in the control-channel hash (§B.1); (2) record that the data path must **not**
+canonicalize `-0 → +0` — that needs a host primitive and was bridge-rejected (see the
+Stage 0 signed-zero finding), so host numeric zero leaves now fail closed in matcher-facing
+data; (3) note that under structural numbers the question is **moot for the numeric
+domain** — signed zero is not a representable integer (`0 = {"_num": null}` is unique;
+`N0`/`Z0` carry no sign) and floats are forbidden, so no `-0` numeral exists. Any residual
+zero-canonicalization concern is confined to non-numeric host-float boundary inputs, which
+§3.4 already places out of scope.
 
 ### 9.5 Cross-substrate parity preservation
 
@@ -430,13 +430,15 @@ lane):
   may retire the lane's raw-list fail-close requirement entirely if the program commits to
   structuralizing bool/str rather than hash-collapsing them.
 
-### 9.7 Design-only boundary
+### 9.7 Cutover implementation status
 
-This wave produces design content only. The cutover wave owns: the `_stage0_match` /
-`stage0Match` branch removal, the seed integer-leaf migration, the input-domain invariant
-gate, the bool/str + dict/key structuralization that makes the marker clear real, the
-cross-substrate matcher-parity gate, the non-linear-binding comment update, and the
-`NorthStarSemantics.v0.md` §B rewrite. None of those files are modified here.
+The 2026-06-22 cutover wave owns and applies the `_stage0_match` / `stage0Match`
+numeric-domain narrowing, the seed integer-leaf migration, the input-domain invariant
+gate, the cross-substrate matcher-parity gate, the non-linear-binding comment update, and
+the `NorthStarSemantics.v0.md` §B rewrite. Bool/string leaves intentionally remain on the
+non-numeric content-hash path until a later structuralization wave; the Stage 4 marker is
+made clear-real by proving StructuralNumbers numerals bind through dict/object traversal
+while stray host numeric leaves fail closed in both substrates.
 
 ---
 
@@ -456,6 +458,6 @@ von Neumann ordinals (`n = n ∪ {n}`; ordinal arithmetic).
 `mu_hash_cached`) · `mu/host/js/core/types.js` (`muHashCached`, `-0` special case) ·
 `mu/docs/core/TypedNumericEnvelopes.v0.md` (P6, the easy path superseded) ·
 `roadmap/ContentAddressedMu.md` (hash-identity = free equality) ·
-`mu/docs/core/NorthStarSemantics.v0.md` (§B stale; §B.1 two-hash accurate) ·
+`mu/docs/core/NorthStarSemantics.v0.md` (§B corrected; §B.1 two-hash accurate) ·
 `mu/docs/core/RCXEngine.v0.md` + `RCXEngineNew.pdf` (von Neumann ordinals — engine
 foundation to bridge by isomorphism).

@@ -27,6 +27,7 @@ from rcx_pi.selfhost.step_mu import KERNEL_RESERVED_FIELDS
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
 
 from tests.conftest import run_until_stable
+from tests.helpers.structural_numbers import sn
 
 
 # JSON null -> Python None alias
@@ -98,7 +99,7 @@ class TestEngineInit:
         assert "_boundary_request" in result, f"Expected _boundary_request, got: {result}"
         req = result["_boundary_request"]
         assert req["operation"] == "run_trace"
-        assert req["input"]["max_steps"] == 100  # default
+        assert req["input"]["max_steps"] == sn(100)  # default
         assert req["context"]["_mode"] == "engine"
         assert req["context"]["_frozen"] is None
         assert req["inject_key"] == "_trace_result"
@@ -109,7 +110,7 @@ class TestEngineInit:
             "_run_engine": {
                 "projections": [{"pattern": "A", "body": "B"}],
                 "input": "A",
-                "max_steps": 50,
+                "max_steps": sn(50),
                 "frozen": {"head": "op1", "tail": None}
             }
         }
@@ -118,7 +119,7 @@ class TestEngineInit:
 
         req = result["_boundary_request"]
         assert req["operation"] == "run_trace"
-        assert req["input"]["max_steps"] == 50
+        assert req["input"]["max_steps"] == sn(50)
         assert req["context"]["_frozen"] == {"head": "op1", "tail": None}
 
 
@@ -137,7 +138,7 @@ class TestEnginePhaseTransitions:
         input_data = {
             "_mode": "engine",
             "_frozen": None,
-            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": sn(100)},
             "_trace_result": {
                 "result": "B",
                 "trace": {
@@ -166,7 +167,7 @@ class TestEnginePhaseTransitions:
             "_frozen": None,
             "_stall": False,
             "_raw_trace": {"head": {"step": 0, "state": "A", "projection": "to_b"}, "tail": None},
-            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": sn(100)},
             "_hashed_trace": {"head": {"step": 0, "state": "A", "state_hash": "abc", "projection": "to_b"}, "tail": None}
         }
 
@@ -194,7 +195,7 @@ class TestEnginePhaseTransitions:
                     "tail": None
                 }
             },
-            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": sn(100)},
             "_recurrence_result": {
                 "closure_detected": True,
                 "tau_step": 2,
@@ -223,7 +224,7 @@ class TestEnginePhaseTransitions:
             "_closure_detected": True,
             "_tau_step": 2,
             "_final_result": "final_value",
-            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": sn(100)},
             "_exhaustion_result": {
                 "exhaustion_detected": False,
                 "operator_to_freeze": None,
@@ -284,7 +285,7 @@ class TestFullEngineCycle:
         input_data = {
             "_mode": "engine",
             "_frozen": None,
-            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": sn(100)},
             "_trace_result": {
                 "result": "final",
                 "trace": {"head": {"step": 0, "state": "A", "projection": "p1"}, "tail": None},
@@ -368,7 +369,7 @@ class TestEngineEdgeCases:
         input_data = {
             "_mode": "engine",
             "_frozen": None,
-            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": sn(100)},
             "_trace_result": {
                 "result": "A",  # Same as input (stalled immediately)
                 "trace": None,  # No steps taken
@@ -392,7 +393,7 @@ class TestEngineEdgeCases:
             "_closure_detected": True,
             "_tau_step": 2,
             "_final_result": "final_value",
-            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": 100},
+            "_config": {"projections": [{"pattern": "A", "body": "B"}], "max_steps": sn(100)},
             "_exhaustion_result": {
                 "exhaustion_detected": False,
                 "operator_to_freeze": None,
@@ -413,7 +414,7 @@ class TestEngineEdgeCases:
             "_run_engine": {
                 "projections": [{"pattern": "A", "body": "B"}],
                 "input": "A",
-                "max_steps": 100,
+                "max_steps": sn(100),
                 "frozen": {"head": "pre_frozen_op", "tail": None}
             }
         }
@@ -457,6 +458,7 @@ class TestCombinedProjectionOrder:
 # =============================================================================
 
 
+@pytest.mark.slow
 class TestFixIntegrationEvidence:
     """E1→E4 evidence: prove the engine Fix mechanism works for stalled states.
 
@@ -471,7 +473,7 @@ class TestFixIntegrationEvidence:
     # A structured graph that deterministically stalls under identity projection.
     # Fix(G) adds a minimal edge to break the structural stall.
     STALL_INPUT = {
-        "graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]},
+        "graph": {"vertices": ["v1", "v2"], "edges": [{"src": "v1", "dst": "v2"}]},
     }
 
     # Identity projection: maps any input to itself. Guarantees stall.
@@ -539,8 +541,8 @@ class TestFixIntegrationEvidence:
 
         # tau_step is valid
         tau_step = result["tau_step"]
-        assert isinstance(tau_step, int) and tau_step >= 0, (
-            f"tau_step must be a non-negative int, got: {tau_step!r}"
+        assert isinstance(tau_step, dict) and set(tau_step.keys()) == {"_num"}, (
+            f"tau_step must be a StructuralNumbers numeral, got: {tau_step!r}"
         )
 
         # mu_hash of value is computable (valid Mu structure)
@@ -550,6 +552,7 @@ class TestFixIntegrationEvidence:
         )
 
 
+@pytest.mark.slow
 class TestFixSeedExecution:
     """Smoke tests: fix.v1.json executes through algorithm runtime.
 
@@ -569,8 +572,8 @@ class TestFixSeedExecution:
             "apply_fix": {
                 "stalled_state": stalled_state,
                 "stall_hash": "abc123",
-                "tau_step": 1,
-                "engine_iteration": 0,
+                "tau_step": sn(1),
+                "engine_iteration": sn(0),
             }
         }
         # Fix is a 2-step pipeline (init → route), loop until stall
@@ -585,7 +588,7 @@ class TestFixSeedExecution:
     def test_fix_edge_add_for_graph_with_edges(self, fix_projections):
         """Graph with vertices+edges routes to fix.edge_add."""
         reset_step_budget()
-        state = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
+        state = {"graph": {"vertices": ["v1", "v2"], "edges": [{"src": "v1", "dst": "v2"}]}}
         result = self._run_fix(fix_projections, state)
         assert result["fix_applied"] is True
         assert result["fix_type"] == "edge_add"
@@ -594,7 +597,7 @@ class TestFixSeedExecution:
     def test_fix_vertex_add_for_graph_without_edges(self, fix_projections):
         """Graph without edges routes to fix.vertex_add."""
         reset_step_budget()
-        state = {"graph": {"vertices": [1, 2, 3]}}
+        state = {"graph": {"vertices": ["v1", "v2", "v3"]}}
         result = self._run_fix(fix_projections, state)
         assert result["fix_applied"] is True
         assert result["fix_type"] == "vertex_add"
@@ -603,13 +606,14 @@ class TestFixSeedExecution:
     def test_fix_pass_through_for_non_graph(self, fix_projections):
         """Non-graph state routes to fix.pass_through."""
         reset_step_budget()
-        state = {"value": 42, "status": "stalled"}
+        state = {"value": "payload", "status": "stalled"}
         result = self._run_fix(fix_projections, state)
         assert result["fix_applied"] is False
         assert result["fix_type"] == "none"
         assert result["fixed_state"] == state
 
 
+@pytest.mark.slow
 class TestEngineFixIntegration:
     """E4: Verify fix.v1.json is wired into the engine pipeline."""
 
@@ -624,7 +628,7 @@ class TestEngineFixIntegration:
 
         from rcx_pi.selfhost.mu_type import mu_hash
 
-        graph_input = {"graph": {"vertices": [1, 2], "edges": [{"src": 1, "dst": 2}]}}
+        graph_input = {"graph": {"vertices": ["v1", "v2"], "edges": [{"src": "v1", "dst": "v2"}]}}
         reset_step_budget()
         result = run_engine_pipeline(
             self.IDENTITY_PROJS, graph_input, max_steps=5,
@@ -647,7 +651,7 @@ class TestEngineFixIntegration:
         from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
 
 
-        scalar_input = {"value": 42, "status": "test"}
+        scalar_input = {"value": "payload", "status": "test"}
         reset_step_budget()
         result = run_engine_pipeline(
             self.IDENTITY_PROJS, scalar_input, max_steps=5,
@@ -668,9 +672,9 @@ class TestEngineFixIntegration:
              "body": {"result": {"var": "n"}, "doubled": {"var": "n"}}},
         ]
         reset_step_budget()
-        result = run_engine_pipeline(projs, {"op": "double", "value": 42}, max_steps=10, use_boot1_recursive=False)
+        result = run_engine_pipeline(projs, {"op": "double", "value": "payload"}, max_steps=10, use_boot1_recursive=False)
         assert result["stall"] is True  # stalls after one transform
-        assert result["value"] == {"result": 42, "doubled": 42}
+        assert result["value"] == {"result": "payload", "doubled": "payload"}
 
 
 # =============================================================================
@@ -738,7 +742,7 @@ class TestLoopTrampolineProjectionLevel:
             "_final_result": {"computed": "result"},
             "_config": {
                 "projections": self.TEST_PROJS,
-                "max_steps": 100
+                "max_steps": sn(100)
             },
             "_exhaustion_result": {
                 "exhaustion_detected": True,
@@ -757,7 +761,7 @@ class TestLoopTrampolineProjectionLevel:
         re_entry = result["_run_engine"]
         assert re_entry["projections"] == self.TEST_PROJS
         assert re_entry["input"] == {"computed": "result"}
-        assert re_entry["max_steps"] == 100
+        assert re_entry["max_steps"] == sn(100)
         assert re_entry["frozen"] == {"head": "op1", "tail": None}
 
     def test_continue_produces_terminal(self, engine_projections):
@@ -768,10 +772,10 @@ class TestLoopTrampolineProjectionLevel:
             "_stall": False,
             "_closure_detected": False,
             "_tau_step": None,
-            "_final_result": {"value": 42},
+            "_final_result": {"value": "payload"},
             "_config": {
                 "projections": self.TEST_PROJS,
-                "max_steps": 100
+                "max_steps": sn(100)
             },
             "_exhaustion_result": {
                 "exhaustion_detected": False,
@@ -793,10 +797,10 @@ class TestLoopTrampolineProjectionLevel:
             "_stall": False,
             "_closure_detected": True,
             "_tau_step": 3,
-            "_final_result": {"value": 99},
+            "_final_result": {"value": "ninety-nine"},
             "_config": {
                 "projections": self.TEST_PROJS,
-                "max_steps": 50
+                "max_steps": sn(50)
             },
             "_exhaustion_result": {
                 "exhaustion_detected": True,
@@ -817,10 +821,10 @@ class TestLoopTrampolineProjectionLevel:
             "_stall": False,
             "_closure_detected": False,
             "_tau_step": None,
-            "_final_result": {"value": 42},
+            "_final_result": {"value": "payload"},
             "_config": {
                 "projections": self.TEST_PROJS,
-                "max_steps": 100
+                "max_steps": sn(100)
             },
             "_exhaustion_result": {
                 "exhaustion_detected": False,
@@ -842,10 +846,10 @@ class TestLoopTrampolineProjectionLevel:
             "_stall": True,
             "_closure_detected": True,
             "_tau_step": 5,
-            "_final_result": {"value": 42},
+            "_final_result": {"value": "payload"},
             "_config": {
                 "projections": self.TEST_PROJS,
-                "max_steps": 100
+                "max_steps": sn(100)
             },
             "_exhaustion_result": {
                 "exhaustion_detected": True,
@@ -880,7 +884,7 @@ class TestLoopTrampolineProjectionLevel:
             "_final_result": {"computed": "result"},
             "_config": {
                 "projections": self.TEST_PROJS,
-                "max_steps": 100
+                "max_steps": sn(100)
             },
             "_exhaustion_result": {
                 "exhaustion_detected": True,
@@ -914,7 +918,7 @@ class TestLoopPipelineLevel:
         """L3/L5: pipeline produces terminal result within iteration bounds."""
         result = run_engine_pipeline(
             self.IDENTITY_PROJS,
-            {"value": 42},
+            {"value": "payload"},
             max_steps=10,
             max_engine_iterations=20,
             use_boot1_recursive=False,

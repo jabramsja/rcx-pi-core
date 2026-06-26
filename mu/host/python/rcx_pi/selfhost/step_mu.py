@@ -124,6 +124,135 @@ _hemi_key_sets_cache: tuple | None = None
 _EXPECTED_HEMISPHERE_KEYS = frozenset({"r_null", "r_inf", "r_a", "lobes", "sink"})  # AST_OK: constant — fail-closed guard
 
 
+_SN_ZERO: Mu = {"_num": None}
+_SN_ONE: Mu = {"_num": {"xH": None}}
+_SN_C0: Mu = {"carry0": None}
+_SN_C1: Mu = {"carry1": None}
+_SN_END: Mu = {"end": None}
+_SN_SEED: Mu = {"seed": None}
+_SN_LT: Mu = {"lt": None}
+_SN_EQ: Mu = {"eq": None}
+_SN_GT: Mu = {"gt": None}
+_SN_PROJECTION_STEP_LIMIT = 2000
+
+_STRUCTURAL_NUMBER_ADD_PROJECTIONS_LIST: list[Mu] = [
+    {"pattern": {"_add": {"a": {"_num": None}, "b": {"var": "b"}}}, "body": {"var": "b"}},
+    {"pattern": {"_add": {"a": {"var": "a"}, "b": {"_num": None}}}, "body": {"var": "a"}},
+    {
+        "pattern": {"_add": {"a": {"_num": {"var": "pa"}}, "b": {"_num": {"var": "pb"}}}},
+        "body": {"_bits": {"a": {"var": "pa"}, "b": {"var": "pb"}, "c": _SN_C0, "acc": _SN_END}},
+    },
+]
+_SN_ADD_FORMS_A = {
+    "O": ({"xO": {"var": "ra"}}, {"var": "ra"}, "o"),
+    "I": ({"xI": {"var": "ra"}}, {"var": "ra"}, "i"),
+    "H": ({"xH": None}, None, "i"),
+    "Z": (None, None, "o"),
+}
+_SN_ADD_FORMS_B = {
+    "O": ({"xO": {"var": "rb"}}, {"var": "rb"}, "o"),
+    "I": ({"xI": {"var": "rb"}}, {"var": "rb"}, "i"),
+    "H": ({"xH": None}, None, "i"),
+    "Z": (None, None, "o"),
+}
+_SN_CARRY_FORMS = {"0": _SN_C0, "1": _SN_C1}
+_SN_FULL_ADDER = {
+    ("o", "o", "0"): ("o", _SN_C0),
+    ("o", "o", "1"): ("i", _SN_C0),
+    ("o", "i", "0"): ("i", _SN_C0),
+    ("o", "i", "1"): ("o", _SN_C1),
+    ("i", "o", "0"): ("i", _SN_C0),
+    ("i", "o", "1"): ("o", _SN_C1),
+    ("i", "i", "0"): ("o", _SN_C1),
+    ("i", "i", "1"): ("i", _SN_C1),
+}
+for _sn_af, (_sn_a_pat, _sn_a_rest, _sn_a_bit) in _SN_ADD_FORMS_A.items():
+    for _sn_bf, (_sn_b_pat, _sn_b_rest, _sn_b_bit) in _SN_ADD_FORMS_B.items():
+        for _sn_carry_name, _sn_carry_pat in _SN_CARRY_FORMS.items():
+            if _sn_af == "Z" and _sn_bf == "Z" and _sn_carry_name == "0":
+                _STRUCTURAL_NUMBER_ADD_PROJECTIONS_LIST.append({
+                    "pattern": {"_bits": {"a": None, "b": None, "c": _SN_C0, "acc": {"var": "acc"}}},
+                    "body": {"_fold": {"acc": {"var": "acc"}, "num": _SN_SEED}},
+                })
+                continue
+            _sn_out_bit, _sn_carry_out = _SN_FULL_ADDER[(_sn_a_bit, _sn_b_bit, _sn_carry_name)]
+            _STRUCTURAL_NUMBER_ADD_PROJECTIONS_LIST.append({
+                "pattern": {"_bits": {"a": _sn_a_pat, "b": _sn_b_pat, "c": _sn_carry_pat, "acc": {"var": "acc"}}},
+                "body": {
+                    "_bits": {
+                        "a": _sn_a_rest,
+                        "b": _sn_b_rest,
+                        "c": _sn_carry_out,
+                        "acc": {_sn_out_bit: {"var": "acc"}},
+                    }
+                },
+            })
+_STRUCTURAL_NUMBER_ADD_PROJECTIONS_LIST.extend((
+    {"pattern": {"_fold": {"acc": {"i": {"var": "rest"}}, "num": _SN_SEED}},
+     "body": {"_fold": {"acc": {"var": "rest"}, "num": {"xH": None}}}},
+    {"pattern": {"_fold": {"acc": {"i": {"var": "rest"}}, "num": {"var": "n"}}},
+     "body": {"_fold": {"acc": {"var": "rest"}, "num": {"xI": {"var": "n"}}}}},
+    {"pattern": {"_fold": {"acc": {"o": {"var": "rest"}}, "num": {"var": "n"}}},
+     "body": {"_fold": {"acc": {"var": "rest"}, "num": {"xO": {"var": "n"}}}}},
+    {"pattern": {"_fold": {"acc": {"end": None}, "num": {"var": "n"}}},
+     "body": {"_num": {"var": "n"}}},
+))
+_STRUCTURAL_NUMBER_ADD_PROJECTIONS = tuple(_STRUCTURAL_NUMBER_ADD_PROJECTIONS_LIST)
+_STRUCTURAL_NUMBER_COMPARE_PROJECTIONS: tuple[Mu, ...] = (
+    {"pattern": {"_cmp": {"a": {"_num": None}, "b": {"_num": None}}}, "body": {"_ord": _SN_EQ}},
+    {"pattern": {"_cmp": {"a": {"_num": None}, "b": {"_num": {"var": "pb"}}}}, "body": {"_ord": _SN_LT}},
+    {"pattern": {"_cmp": {"a": {"_num": {"var": "pa"}}, "b": {"_num": None}}}, "body": {"_ord": _SN_GT}},
+    {
+        "pattern": {"_cmp": {"a": {"_num": {"var": "pa"}}, "b": {"_num": {"var": "pb"}}}},
+        "body": {"_cc": {"a": {"var": "pa"}, "b": {"var": "pb"}, "r": _SN_EQ}},
+    },
+    {"pattern": {"_cc": {"a": {"xI": {"var": "pa"}}, "b": {"xI": {"var": "pb"}}, "r": {"var": "r"}}},
+     "body": {"_cc": {"a": {"var": "pa"}, "b": {"var": "pb"}, "r": {"var": "r"}}}},
+    {"pattern": {"_cc": {"a": {"xI": {"var": "pa"}}, "b": {"xO": {"var": "pb"}}, "r": {"var": "r"}}},
+     "body": {"_cc": {"a": {"var": "pa"}, "b": {"var": "pb"}, "r": _SN_GT}}},
+    {"pattern": {"_cc": {"a": {"xI": {"var": "pa"}}, "b": {"xH": None}, "r": {"var": "r"}}},
+     "body": {"_ord": _SN_GT}},
+    {"pattern": {"_cc": {"a": {"xO": {"var": "pa"}}, "b": {"xI": {"var": "pb"}}, "r": {"var": "r"}}},
+     "body": {"_cc": {"a": {"var": "pa"}, "b": {"var": "pb"}, "r": _SN_LT}}},
+    {"pattern": {"_cc": {"a": {"xO": {"var": "pa"}}, "b": {"xO": {"var": "pb"}}, "r": {"var": "r"}}},
+     "body": {"_cc": {"a": {"var": "pa"}, "b": {"var": "pb"}, "r": {"var": "r"}}}},
+    {"pattern": {"_cc": {"a": {"xO": {"var": "pa"}}, "b": {"xH": None}, "r": {"var": "r"}}},
+     "body": {"_ord": _SN_GT}},
+    {"pattern": {"_cc": {"a": {"xH": None}, "b": {"xI": {"var": "pb"}}, "r": {"var": "r"}}},
+     "body": {"_ord": _SN_LT}},
+    {"pattern": {"_cc": {"a": {"xH": None}, "b": {"xO": {"var": "pb"}}, "r": {"var": "r"}}},
+     "body": {"_ord": _SN_LT}},
+    {"pattern": {"_cc": {"a": {"xH": None}, "b": {"xH": None}, "r": {"var": "r"}}},
+     "body": {"_ord": {"var": "r"}}},
+)
+
+# Public parity surface aligned with mu/host/js/engine/kernel.js exports.
+SN_ONE = _SN_ONE
+SN_PROJECTION_STEP_LIMIT = _SN_PROJECTION_STEP_LIMIT
+STRUCTURAL_NUMBER_ADD_PROJECTIONS = _STRUCTURAL_NUMBER_ADD_PROJECTIONS
+STRUCTURAL_NUMBER_COMPARE_PROJECTIONS = _STRUCTURAL_NUMBER_COMPARE_PROJECTIONS
+
+del (
+    _STRUCTURAL_NUMBER_ADD_PROJECTIONS_LIST,
+    _SN_ADD_FORMS_A,
+    _SN_ADD_FORMS_B,
+    _SN_CARRY_FORMS,
+    _SN_FULL_ADDER,
+    _sn_af,
+    _sn_a_pat,
+    _sn_a_rest,
+    _sn_a_bit,
+    _sn_bf,
+    _sn_b_pat,
+    _sn_b_rest,
+    _sn_b_bit,
+    _sn_carry_name,
+    _sn_carry_pat,
+    _sn_out_bit,
+    _sn_carry_out,
+)
+
+
 def _load_hemisphere_keys() -> tuple[tuple[str, ...], frozenset[str]]:  # AST_OK: infra — seed-derived hemisphere keys
     """Derive hemisphere key order + frozenset from hemispheres.v1.json (cached).
 
@@ -352,6 +481,7 @@ ALGORITHM_RUNTIME_ALLOWED_UNDERSCORE_FIELDS = (
         "_current",
         "_frozen",
         "_mode",
+        "_num",
         "_operator_ids",
         "_phase",
         "_result",
@@ -2797,7 +2927,7 @@ def run_mu_structural(
 
     Each trace entry is:
     {
-        "step": int,
+        "step": {"_num": ...},  # StructuralNumbers numeral
         "state": value_at_step,
         "projection": id_or_null  # Which projection matched (null = stall)
     }
@@ -2830,6 +2960,7 @@ def run_mu_structural(
 
     trace_entries = []
     current = initial
+    structural_step = _SN_ZERO
     # INVARIANT: step_kernel_mu(return_packet=True) returns new structures — current_hash caching is safe.
     current_hash = mu_hash_control_cached(initial, "run_mu_structural")
 
@@ -2845,6 +2976,7 @@ def run_mu_structural(
                 return_meta=True,
             )
             result = meta["output"]
+
             # Resolve matched projection ID: use Stage 0 match (proven equivalent
             # to match.v2 by 33 parity tests in test_self_hosting_v0.py).
             # First-match-wins: the first projection whose pattern matches current
@@ -2860,19 +2992,40 @@ def run_mu_structural(
                             break
 
             validator(result, "run_mu_structural output")
+            next_structural_step = None
             if trace_output:
                 trace_entries.append({
-                    "step": i,
+                    "step": structural_step,
                     "state": current,
                     "projection": matched_id
                 })
+                _sn_state = {"_add": {"a": structural_step, "b": _SN_ONE}}
+                _sn_state_hash = mu_hash_control_cached(_sn_state, "run_mu_structural.trace_step.initial")
+                for _sn_guard in range(_SN_PROJECTION_STEP_LIMIT):
+                    _sn_result = _step_trusted(_STRUCTURAL_NUMBER_ADD_PROJECTIONS, _sn_state)
+                    _sn_result_hash = mu_hash_control_cached(_sn_result, "run_mu_structural.trace_step.stall")
+                    if _sn_result_hash == _sn_state_hash:
+                        next_structural_step = _sn_result
+                        break
+                    _sn_state = _sn_result
+                    _sn_state_hash = _sn_result_hash
+                else:
+                    raise RcxEngineError(
+                        "execution.max_steps",
+                        "run_mu_structural.trace_step: StructuralNumbers projection did not settle",
+                    )
+                if not isinstance(next_structural_step, dict) or set(next_structural_step.keys()) != {"_num"}:  # AST_OK: infra — StructuralNumbers trace-step result guard
+                    raise RcxEngineError(
+                        "execution.invalid_result",
+                        "run_mu_structural.trace_step: StructuralNumbers ADD produced malformed numeral",
+                    )
 
             # Check for stall (no change)
             result_hash = mu_hash_control_cached(result, "run_mu_structural.stall")
             if result_hash == current_hash:
                 if trace_output:
                     trace_entries.append({
-                        "step": i + 1,
+                        "step": next_structural_step,
                         "state": result,
                         "projection": None,
                         "stall": True
@@ -2886,11 +3039,13 @@ def run_mu_structural(
 
             current = result
             current_hash = result_hash
+            if trace_output:
+                structural_step = next_structural_step
 
         # Hit max steps without stall
         if trace_output:
             trace_entries.append({
-                "step": max_steps,
+                "step": structural_step,
                 "state": current,
                 "projection": None,
                 "max_steps": True
