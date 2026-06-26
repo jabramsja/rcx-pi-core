@@ -1,0 +1,72 @@
+{
+  "wave_id": "program-queue-postmerge-selector-truth-2026-06-26",
+  "title": "Program Queue Postmerge Selector Truth 2026-06-26",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Repair the commit-executor post-merge queue selector so it cannot mark the active queue empty when TASKS.md still contains PROGRAM QUEUE work. Also refresh STATUS.md and TASKS.md after PR #1158, PR #1139, and PR #1140 are all on current dev, so the active queue advances from the already-merged Surreals wave to recursive ordinals as the next autonomous structural item.",
+  "date": "2026-06-26",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/program-queue-postmerge-selector-truth-2026-06-26.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id program-queue-postmerge-selector-truth-2026-06-26 --output reports/l4_wave_indicators/program-queue-postmerge-selector-truth-2026-06-26.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "python3 -m py_compile mu/tools/executors/commit_executor.py && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_post_merge_cleanup.py --tb=short && ./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id program-queue-postmerge-selector-truth-2026-06-26 --wave-class L4_ENABLER && git diff --check",
+  "evidence_delta": "(1) commit_executor post-merge refresh detects simple TASKS.md PROGRAM QUEUE entries and does not write founder-ordered-post-merge-queue-empty while active work remains. (2) A regression proves a numbered PROGRAM QUEUE entry without Wave ID or Packet still produces a bounded next candidate. (3) STATUS.md and TASKS.md reflect current dev chronology: PR #1158 completed Surreals, PR #1139 and PR #1140 are merged, and recursive ordinals are the next structural queue item with optimization still last.",
+  "progress_proof_before": "Current dev is at merge commit 9f9a3771 after PR #1140, with PR #1139 at 3d66abeb and PR #1158 Surreals at f8ebbd06 in git log. TASKS.md still lists Surreals as item 1, STATUS.md still names Surreals as next, and .agent_bus/meta/post_merge_package.json says founder-ordered-post-merge-queue-empty because commit_executor._founder_ordered_queue_entries only accepts TASKS lines with Wave ID and Packet metadata.",
+  "progress_proof_after": "The post-merge selector recognizes active PROGRAM QUEUE work, writes a non-empty next candidate for the next simple queue item, and active docs agree that Surreals is complete and recursive ordinals is next.",
+  "structural_artifact_ref": "mu/tools/executors/commit_executor.py; mu/tests/tools/test_commit_executor_post_merge_cleanup.py; TASKS.md; STATUS.md; reports/l4_wave_indicators/program-queue-postmerge-selector-truth-2026-06-26.json",
+  "post_gate_contract_sweep": "python3 -m py_compile mu/tools/executors/commit_executor.py && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_post_merge_cleanup.py --tb=short && ./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id program-queue-postmerge-selector-truth-2026-06-26 --wave-class L4_ENABLER && git diff --check",
+  "scope_summary": "Pipeline/control-plane root fix plus active tracker truth only. Touch commit_executor post-merge queue selection, focused post-merge cleanup tests, TASKS.md, STATUS.md, this launcher config, generated packet, and indicator artifact. Do not implement recursive ordinals, W-types, coinduction, fixpoint, optimization, runtime semantics, substrate semantics, seeds, registries, projection behavior, pager/autoping, or tmux changes in this wave.",
+  "scope_items": [
+    "mu/tools/executors/commit_executor.py (MODIFY) -- add PROGRAM QUEUE fallback parsing for post-merge package refresh while preserving existing founder-ordered packet behavior.",
+    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py (MODIFY) -- regression for a simple numbered PROGRAM QUEUE item without Wave ID or Packet metadata producing a non-empty next candidate.",
+    "TASKS.md (MODIFY) -- refresh active queue truth after PR #1158, PR #1139, and PR #1140; remove merged Surreals from pending item 1 and make recursive ordinals the next active structural item.",
+    "STATUS.md (MODIFY) -- update last-updated, next-milestone, and active-next wording to match TASKS.md while preserving Phase 8c/L4 debt posture.",
+    "reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_wave_config.json (KEEP) -- launcher config for this repair wave.",
+    "reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_2026-06-26.md (GENERATED) -- launcher-created control packet.",
+    "reports/l4_wave_indicators/program-queue-postmerge-selector-truth-2026-06-26.json (GENERATED) -- indicator artifact for this wave."
+  ],
+  "work_items": [
+    "Reproduce the selector defect from current repo truth: TASKS.md has PROGRAM QUEUE items, but .agent_bus/meta/post_merge_package.json says founder-ordered-post-merge-queue-empty after merge commit 9f9a3771.",
+    "Keep the existing founder-ordered Wave ID plus Packet selector behavior intact for old packetized queues.",
+    "Add a bounded fallback for TASKS.md PROGRAM QUEUE numbered entries that parses only the PROGRAM QUEUE section and ignores DROPPED, PARKED, governance, and Ra history.",
+    "For simple PROGRAM QUEUE entries, derive a stable normalized wave id from the entry label and queue text. If a matching reports/control_plane/*_wave_config.json exists, use its tracked_packet and request text. If no config exists yet, still write a non-empty bounded next candidate with a clear request to launch or prepare that queue item through launch_wave.py instead of reporting queue empty.",
+    "Ensure completed simple items are not selected after docs mark them complete or remove them from the PROGRAM QUEUE.",
+    "Update tests to prove the exact failure mode: completed founder-ordered packets plus a live simple PROGRAM QUEUE item must result in post_merge_queue_empty false and a next candidate for that simple item.",
+    "Refresh TASKS.md and STATUS.md using current git evidence: PR #1158 completed Surreals, PR #1139 is merged, PR #1140 is merged, recursive ordinals is next, and optimization remains LAST.",
+    "Run the configured evidence command, collect the indicator artifact, and leave commit, push, PR, review, CI, merge, receipts, and post-merge refresh to the commit executor."
+  ],
+  "constraints": [
+    "Use launch_wave.py, executor_dispatch, Phase A, Phase B, bridge review, and commit executor for this wave.",
+    "Do not manually commit, manually author receipts, manually perform phase handoff, or manually run a direct git commit.",
+    "Implementer, reviewer, and pager route are Codex; Codex 5.5 xhigh defaults come from executor_config.json.",
+    "No runtime, substrate, seed, registry, projection, JavaScript parity, recursive ordinal implementation, W-type implementation, coinduction, fixpoint, optimization, pager/autoping, or tmux behavior changes are authorized.",
+    "Do not broaden the post-merge selector into arbitrary markdown scraping; it must be section-bounded and conservative.",
+    "Do not report queue empty when active PROGRAM QUEUE items remain.",
+    "Optimization remains LAST."
+  ],
+  "stop_conditions": [
+    "Halt as DEFECT if the fallback selects DROPPED, PARKED, Ra, governance, historical, or completed items.",
+    "Halt as DEFECT if old founder-ordered packet selection regresses.",
+    "Halt as DOC_ACCURACY if git evidence does not prove PR #1158, PR #1139, and PR #1140 are merged on current dev.",
+    "Halt as POLICY_BOUND if implementing the next math structure is required inside this selector repair wave.",
+    "Do not commit without focused tests, docs consistency, staged L4 contract validation, indicator collection, bridge review, and commit-executor handling."
+  ],
+  "acceptance_criteria": [
+    "commit_executor post-merge refresh returns post_merge_queue_empty false when TASKS.md has a live simple PROGRAM QUEUE item even if founder-ordered packet entries are absent or completed.",
+    "The generated post-merge package contains a bounded next candidate for the simple PROGRAM QUEUE item and a request that keeps execution on launch_wave.py / dispatcher / commit_executor surfaces.",
+    "Existing founder-ordered queue tests still pass.",
+    "TASKS.md pending PROGRAM QUEUE starts with recursive ordinals as structure and preserves W-types / inductive types, coinduction, fixpoint, and optimization LAST.",
+    "STATUS.md agrees with TASKS.md and preserves Phase 8c/L4 debt counts and posture.",
+    "No runtime/substrate/seed/registry/projection/parity/pager/autoping/tmux files are touched."
+  ],
+  "request_for_agent": "Run the pipeline repair wave. Fix commit_executor post-merge queue selection so simple TASKS.md PROGRAM QUEUE entries cannot be missed, add focused regressions, and refresh STATUS.md/TASKS.md after PR #1158, PR #1139, and PR #1140. Keep the diff bounded to control-plane selector logic, tests, active docs, this launcher packet/config, and indicator artifact. Do not implement the recursive ordinal wave inside this repair.",
+  "request_for_claude": "Compatibility input only: this wave is pinned to Codex implementer, Codex reviewer, and Codex pager route. Do not route implementation, review, or pager handling to Claude.",
+  "authorization_note": "Founder-directed autonomous cleanup of stale queue truth and structural pipeline root fix after the post-merge package falsely reported an empty queue while TASKS.md still had PROGRAM QUEUE items. Founder also directed use of the builder and commit supervisor, and no manual commit process.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Root-fix commit_executor post-merge PROGRAM QUEUE selection and refresh active tracker truth after merged Surreals, PR #1139, and PR #1140.",
+  "tracked_packet": "reports/control_plane/program-queue-postmerge-selector-truth-2026-06-26_2026-06-26.md"
+}

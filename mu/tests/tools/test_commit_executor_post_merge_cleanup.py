@@ -525,6 +525,99 @@ def test_post_merge_package_refresh_closes_completed_only_queue(tmp_path):
     assert result["post_merge_queue_empty"] is True
 
 
+def test_post_merge_package_refresh_falls_back_to_simple_program_queue_item(tmp_path):
+    repo = _init_repo(tmp_path)
+    completed_packet = (
+        "reports/control_plane/"
+        "founder_ordered_redteam_docs_non_blocking_remediation_2026-05-06.md"
+    )
+    _write_queue_packet(repo, completed_packet, "COMPLETED")
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            "1. **Surreals** as structure. COMPLETED.\n"
+            "2. **Recursive ordinals** as structure.\n"
+            "3. **Optimization** -- LAST.\n\n"
+            "**DROPPED (do not pursue):** large cardinals.\n"
+            "**PARKED (needs splitting before retry):** bridge-lock fix.\n\n"
+            "---\n\n"
+            "## Ra\n"
+            "  4. **[FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION] "
+            "COMPLETED.** Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06`. "
+            "Class: `L4_ENABLER`. Category: docs. "
+            f"Packet: `{completed_packet}`.\n"
+        ),
+        encoding="utf-8",
+    )
+    result = {"pr_number": "1140"}
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result=result,
+        merge_sha="9f9a3771",
+        log=_noop_log,
+    )
+
+    candidate = package["next_candidates"][0]
+    assert package["wave_name"] == "recursive-ordinals-as-structure"
+    assert package["next_candidates"] == [candidate]
+    assert candidate["candidate"] == "recursive-ordinals-as-structure"
+    assert candidate["bounded"] is True
+    assert candidate["tracked_packet"] == ""
+    assert "launch_wave.py" in candidate["request_for_claude"]
+    assert "executor_dispatch.py" in candidate["request_for_claude"]
+    assert "commit_executor.py" in candidate["request_for_claude"]
+    assert "post-merge queue empty" in candidate["request_for_claude"]
+    assert "large cardinals" not in json.dumps(package)
+    assert "bridge-lock" not in json.dumps(package)
+    assert "Surreals" not in package["tracker_state_summary"]
+    assert result["post_merge_next_wave"] == "recursive-ordinals-as-structure"
+    assert result["post_merge_queue_empty"] is False
+
+
+def test_post_merge_package_refresh_uses_matching_program_queue_config(tmp_path):
+    repo = _init_repo(tmp_path)
+    packet = "reports/control_plane/surreals-as-structure-2026-06-26_2026-06-26.md"
+    config = "reports/control_plane/surreals-as-structure-2026-06-26_wave_config.json"
+    (repo / config).parent.mkdir(parents=True, exist_ok=True)
+    (repo / config).write_text(
+        json.dumps(
+            {
+                "wave_id": "surreals-as-structure-2026-06-26",
+                "tracked_packet": packet,
+                "request_for_agent": "Run the Surreals launcher packet only.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            "1. **Surreals** as structure.\n"
+            "2. **Recursive ordinals** as structure.\n\n"
+            "---\n\n"
+            "## Ra\n"
+        ),
+        encoding="utf-8",
+    )
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "1158"},
+        merge_sha="f8ebbd06",
+        log=_noop_log,
+    )
+
+    candidate = package["next_candidates"][0]
+    assert package["wave_name"] == "surreals-as-structure-2026-06-26"
+    assert candidate["tracked_packet"] == packet
+    assert "Run the Surreals launcher packet only." in candidate["request_for_claude"]
+    assert "launch_wave.py" in candidate["request_for_claude"]
+
+
 def test_skips_when_cleanup_root_not_on_base_branch(tmp_path):
     repo = _init_repo(tmp_path)
     wave_id = "test-wave-wrong-branch-2026-04-17"
