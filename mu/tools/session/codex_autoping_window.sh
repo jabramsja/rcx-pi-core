@@ -91,7 +91,23 @@ if [ -z "$TMUX_PANE" ]; then
     TMUX_PANE="$TMUX_SESSION:1.3"
 fi
 
-THREAD_SLUG="$(printf '%s' "$THREAD_ID" | tr -c 'A-Za-z0-9_.-' '_')"
+THREAD_SLUG="$(python3 - "$THREAD_ID" "$REPO" "$BUS_DIR" "$TMUX_SESSION" "$TMUX_PANE" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+
+def slug(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+
+thread_id, repo, bus_dir, tmux_session, tmux_pane = sys.argv[1:6]
+identity = "|".join((str(Path(repo).expanduser().resolve()), bus_dir, tmux_session, tmux_pane))
+print(f"{slug(thread_id)}__{slug(identity)}")
+PY
+)"
 STATE_DIR="${RCX_CODEX_HOME:-$HOME/.codex}/state"
 LOG_DIR="${RCX_CODEX_HOME:-$HOME/.codex}/log/autoping"
 STATE_PATH="$STATE_DIR/rcx_autoping_${THREAD_SLUG}.json"
@@ -544,6 +560,11 @@ printf '[autoping-launch] watcher_pid=%s\n' "$WATCHER_PID"
 while true; do
     ensure_watcher
     printf '\033[H\033[2J'
-    python3 "$RENDER_SCRIPT" --thread-id "$THREAD_ID"
+    python3 "$RENDER_SCRIPT" \
+        --thread-id "$THREAD_ID" \
+        --repo-root "$REPO" \
+        --bus-dir "$BUS_DIR" \
+        --tmux-session "$TMUX_SESSION" \
+        --tmux-pane "$TMUX_PANE"
     sleep 2
 done

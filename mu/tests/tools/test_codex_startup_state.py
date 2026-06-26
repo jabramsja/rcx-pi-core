@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -49,11 +50,35 @@ def _write_monitor_identity_config(repo_root, lanes):
     )
 
 
-def _write_autoping_state(codex_home, thread_id: str, **overrides):
-    state_path = (
-        codex_home
-        / "state"
-        / f"rcx_autoping_{_autoping_thread_slug(thread_id)}.json"
+def _autoping_state_path(
+    codex_home,
+    thread_id: str,
+    *,
+    repo_root=None,
+    bus_dir: str = ".agent_bus",
+    tmux_session: str = "rcx-pipeline",
+):
+    if repo_root is None:
+        slug = _autoping_thread_slug(thread_id)
+    else:
+        identity = SimpleNamespace(
+            active_bus_root=repo_root / bus_dir,
+            bus_dir=bus_dir,
+            tmux_session=tmux_session,
+        )
+        slug = startup_mod._codex_autoping_state_slug(thread_id, identity)  # ANTICHEAT_OK: path contract test helper
+    return codex_home / "state" / f"rcx_autoping_{slug}.json"
+
+
+def _write_autoping_state(codex_home, thread_id: str, *, repo_root=None, **overrides):
+    bus_dir = str(overrides.get("bus_dir") or ".agent_bus")
+    tmux_session = str(overrides.get("tmux_session") or "rcx-pipeline")
+    state_path = _autoping_state_path(
+        codex_home,
+        thread_id,
+        repo_root=repo_root,
+        bus_dir=bus_dir,
+        tmux_session=tmux_session,
     )
     state_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -65,6 +90,31 @@ def _write_autoping_state(codex_home, thread_id: str, **overrides):
     payload.update(overrides)
     state_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
     return state_path
+
+
+def test_codex_autoping_state_path_includes_monitor_identity(tmp_path):
+    codex_home = tmp_path / ".codex"
+    repo_root = tmp_path / "repo"
+    identity = SimpleNamespace(
+        active_bus_root=repo_root / ".agent_bus-alpha",
+        bus_dir=".agent_bus-alpha",
+        tmux_session="rcx-alpha",
+    )
+
+    path = startup_mod._codex_autoping_state_path(  # ANTICHEAT_OK: state-key contract test
+        codex_home,
+        "thread-same",
+        identity=identity,
+    )
+    old_path = startup_mod._codex_autoping_state_path(  # ANTICHEAT_OK: legacy path contrast
+        codex_home,
+        "thread-same",
+    )
+
+    assert path != old_path
+    assert "thread-same__" in path.name
+    assert ".agent_bus-alpha" in path.name
+    assert "rcx-alpha" in path.name
 
 
 def test_founder_learning_snapshot_preserves_fixed_entry_dates(tmp_path):
@@ -1842,7 +1892,14 @@ def test_codex_autoping_accepts_live_state(monkeypatch, tmp_path):
     codex_home = tmp_path / ".codex"
     monkeypatch.delenv("RCX_PIPELINE_SESSION", raising=False)
     monkeypatch.setenv("CODEX_THREAD_ID", thread_id)
-    _write_autoping_state(codex_home, thread_id)
+    _write_autoping_state(
+        codex_home,
+        thread_id,
+        repo_root=tmp_path,
+        bus_dir=".agent_bus",
+        tmux_session="rcx-pipeline",
+        tmux_pane="rcx-pipeline:1.3",
+    )
 
     result = startup_mod._ensure_codex_autoping(tmp_path, codex_home)  # ANTICHEAT_OK: tool unit test
 
@@ -1885,6 +1942,7 @@ def test_codex_autoping_restarts_named_lane_when_live_state_lacks_identity(monke
         _write_autoping_state(
             codex_home,
             thread_id,
+            repo_root=repo_root,
             status="idle_unchanged_state",
             active_mode="resume",
             bus_dir=".agent_bus-alpha",
@@ -1931,9 +1989,13 @@ def test_codex_autoping_context_exhausted_restarts_recovery(monkeypatch, tmp_pat
     _write_autoping_state(
         codex_home,
         thread_id,
+        repo_root=repo_root,
         status="context_exhausted",
         last_exit_code=1,
         last_summary="autoping wake failed: current Codex thread context window is exhausted",
+        bus_dir=".agent_bus",
+        tmux_session="rcx-pipeline",
+        tmux_pane="rcx-pipeline:1.3",
     )
 
     def fake_run(cmd, *, cwd=None, timeout=60):
@@ -1941,10 +2003,14 @@ def test_codex_autoping_context_exhausted_restarts_recovery(monkeypatch, tmp_pat
         _write_autoping_state(
             codex_home,
             thread_id,
+            repo_root=repo_root,
             status="fresh_exec_ping_dispatched",
             last_exit_code=None,
             active_mode="fresh_exec_after_context_exhaustion",
             primary_thread_context_exhausted=True,
+            bus_dir=".agent_bus",
+            tmux_session="rcx-pipeline",
+            tmux_pane="rcx-pipeline:1.3",
         )
         return subprocess.CompletedProcess(cmd, 0, "Codex autoping: ACTIVE\n", "")
 
@@ -1987,7 +2053,14 @@ def test_codex_autoping_recovers_missing_state(monkeypatch, tmp_path):
 
     def fake_run(cmd, *, cwd=None, timeout=60):
         calls.append(cmd)
-        _write_autoping_state(codex_home, thread_id)
+        _write_autoping_state(
+            codex_home,
+            thread_id,
+            repo_root=repo_root,
+            bus_dir=".agent_bus",
+            tmux_session="rcx-pipeline",
+            tmux_pane="rcx-pipeline:1.3",
+        )
         return subprocess.CompletedProcess(cmd, 0, "Codex autoping: ACTIVE\n", "")
 
     monkeypatch.setattr(startup_mod, "_run", fake_run)

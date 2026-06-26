@@ -96,6 +96,25 @@ def _slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
 
 
+def _autoping_state_slug(
+    *,
+    thread_id: str,
+    repo_root: Path,
+    bus_dir: str,
+    tmux_session: str,
+    tmux_pane: str,
+) -> str:
+    identity = "|".join(
+        (
+            str(repo_root.expanduser().resolve()),
+            bus_dir,
+            tmux_session,
+            tmux_pane,
+        )
+    )
+    return f"{_slug(thread_id)}__{_slug(identity)}"
+
+
 def _validate_bus_dir(value: str | None) -> str:
     raw = (value or DEFAULT_BUS_DIR).strip().rstrip("/")
     if (
@@ -370,6 +389,7 @@ def _bridge_state_signature(bridge_state: dict[str, object], tmux_tail: list[str
     payload = {
         "job": bridge_state.get("job"),
         "turn": bridge_state.get("turn"),
+        "bus_dir": bridge_state.get("bus_dir"),
         "wave_root": bridge_state.get("wave_root"),
         "tmux_tail": [line for line in tmux_tail if line.strip()],
     }
@@ -679,7 +699,13 @@ def main() -> int:
     state_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    thread_slug = _slug(args.thread_id)
+    thread_slug = _autoping_state_slug(
+        thread_id=args.thread_id,
+        repo_root=repo_root,
+        bus_dir=bus_dir,
+        tmux_session=args.tmux_session,
+        tmux_pane=args.tmux_pane,
+    )
     state_path = state_dir / f"rcx_autoping_{thread_slug}.json"
     summary_path = state_dir / f"rcx_autoping_{thread_slug}_summary.txt"
 
@@ -695,6 +721,7 @@ def main() -> int:
             "updated_at": _now(),
             "watcher_pid": os.getpid(),
             "thread_id": args.thread_id,
+            "state_key": thread_slug,
             "status": initial_status,
             "active_pid": None,
             "active_log": None,

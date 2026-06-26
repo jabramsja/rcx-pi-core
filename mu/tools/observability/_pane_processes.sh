@@ -610,7 +610,7 @@ render_autoping_attention_line() {
   if [ "$FAST_ONESHOT" = "1" ] && [ -z "${RCX_CODEX_HOME:-}" ] && [ -z "${CODEX_HOME:-}" ]; then
     return 0
   fi
-  python3 - "$REPO_ROOT" <<'PY' 2>/dev/null
+  python3 - "$REPO_ROOT" "$BUS_DIR" <<'PY' 2>/dev/null
 from __future__ import annotations
 
 import json
@@ -620,6 +620,7 @@ from pathlib import Path
 import sys
 
 repo_root = Path(sys.argv[1]).resolve()
+expected_bus_dir = sys.argv[2]
 codex_home_raw = os.environ.get("RCX_CODEX_HOME") or os.environ.get("CODEX_HOME")
 codex_home = Path(codex_home_raw).expanduser() if codex_home_raw else Path.home() / ".codex"
 state_dir = codex_home / "state"
@@ -665,6 +666,12 @@ for state_path in state_dir.glob("rcx_autoping_*.json"):
     except (OSError, json.JSONDecodeError):
         continue
     if not isinstance(payload, dict):
+        continue
+    payload_bus_dir = str(payload.get("bus_dir") or "").strip()
+    if payload_bus_dir:
+        if payload_bus_dir != expected_bus_dir:
+            continue
+    elif expected_bus_dir != ".agent_bus":
         continue
     if payload.get("status") != "attention_required":
         continue
