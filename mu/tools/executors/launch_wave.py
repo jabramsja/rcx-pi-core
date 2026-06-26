@@ -689,19 +689,26 @@ def setup_bridge_config(
     return synced
 
 
+def _committed_executor_role_overrides(repo_root: Path) -> dict[str, Any]:
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    if not config_path.exists():
+        return {}
+    raw_overrides = json.loads(config_path.read_text(encoding="utf-8"))
+    # Validate object shape while preserving raw precedence for legacy-only configs:
+    # merged defaults would add default role_agents and mask legacy backend fields.
+    _ec.merge_executor_config_overrides(raw_overrides)
+    return raw_overrides
+
+
 def _max_turns_target_agents(repo_root: Path, config: WaveConfig) -> list[str]:
-    executor_config = _ec.load_executor_config(repo_root)
-    implementer = config.implementer_agent or _ec.resolve_role_agent(
-        executor_config,
+    committed_overrides = _committed_executor_role_overrides(repo_root)
+    implementer = config.implementer_agent or _ec.resolve_committed_role_agent(
+        committed_overrides,
         "implementer",
-        raw_overrides=executor_config,
-        use_env_overrides=False,
     )
-    reviewer = config.reviewer_agent or _ec.resolve_role_agent(
-        executor_config,
+    reviewer = config.reviewer_agent or _ec.resolve_committed_role_agent(
+        committed_overrides,
         "reviewer",
-        raw_overrides=executor_config,
-        use_env_overrides=False,
     )
     return sorted({agent for agent in (implementer, reviewer) if agent})
 
