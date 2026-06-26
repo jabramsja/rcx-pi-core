@@ -9,8 +9,8 @@
         "pattern": {"op": "double", "value": {"var": "n"}},
         "body": {"result": {"var": "n"}, "doubled": {"var": "n"}}
       },
-      "input": {"op": "double", "value": 42},
-      "expected_output": {"result": 42, "doubled": 42},
+      "input": {"op": "double", "value": {"_num": {"xH": null}}},
+      "expected_output": {"result": {"_num": {"xH": null}}, "doubled": {"_num": {"xH": null}}},
       "expected_stall": true
     },
     {
@@ -20,8 +20,8 @@
         "pattern": {"op": "triple", "value": {"var": "n"}},
         "body": {"result": {"var": "n"}}
       },
-      "input": {"op": "double", "value": 42},
-      "expected_output": {"op": "double", "value": 42},
+      "input": {"op": "double", "value": {"_num": {"xH": null}}},
+      "expected_output": {"op": "double", "value": {"_num": {"xH": null}}},
       "expected_stall": true
     },
     {
@@ -81,13 +81,13 @@
     },
     {
       "id": "numeric_types",
-      "description": "Integer and float values",
+      "description": "StructuralNumbers numeral values",
       "projection": {
         "pattern": {"int_val": {"var": "i"}, "float_val": {"var": "f"}},
         "body": {"int": {"var": "i"}, "float": {"var": "f"}}
       },
-      "input": {"int_val": 42, "float_val": 3.14159},
-      "expected_output": {"int": 42, "float": 3.14159},
+      "input": {"int_val": {"_num": {"xH": null}}, "float_val": {"_num": {"xO": {"xH": null}}}},
+      "expected_output": {"int": {"_num": {"xH": null}}, "float": {"_num": {"xO": {"xH": null}}}},
       "expected_stall": true
     },
     {
@@ -97,8 +97,8 @@
         "pattern": {"var": "anything"},
         "body": {"wrapped": {"var": "anything"}}
       },
-      "input": {"complex": [1, 2, {"nested": true}]},
-      "expected_output": {"wrapped": {"complex": [1, 2, {"nested": true}]}},
+      "input": {"complex": [{"_num": {"xH": null}}, {"_num": {"xO": {"xH": null}}}, {"nested": true}]},
+      "expected_output": {"wrapped": {"complex": [{"_num": {"xH": null}}, {"_num": {"xO": {"xH": null}}}, {"nested": true}]}},
       "expected_stall": true
     },
     {
@@ -119,8 +119,8 @@
         "pattern": {"items": {"var": "list"}},
         "body": {"saved": {"var": "list"}}
       },
-      "input": {"items": [1, "two", true, null, {"key": "value"}]},
-      "expected_output": {"saved": [1, "two", true, null, {"key": "value"}]},
+      "input": {"items": [{"_num": {"xH": null}}, "two", true, null, {"key": "value"}]},
+      "expected_output": {"saved": [{"_num": {"xH": null}}, "two", true, null, {"key": "value"}]},
       "expected_stall": true
     },
     {
@@ -136,35 +136,35 @@
     },
     {
       "id": "negative_numbers",
-      "description": "Negative integers and floats",
+      "description": "Structural numeral pair",
       "projection": {
         "pattern": {"x": {"var": "a"}, "y": {"var": "b"}},
         "body": {"values": [{"var": "a"}, {"var": "b"}]}
       },
-      "input": {"x": -42, "y": -3.14},
-      "expected_output": {"values": [-42, -3.14]},
+      "input": {"x": {"_num": {"xH": null}}, "y": {"_num": {"xO": {"xH": null}}}},
+      "expected_output": {"values": [{"_num": {"xH": null}}, {"_num": {"xO": {"xH": null}}}]},
       "expected_stall": true
     },
     {
       "id": "zero_values",
-      "description": "Zero as integer and float",
+      "description": "Zero as a StructuralNumbers numeral",
       "projection": {
         "pattern": {"int_zero": {"var": "i"}, "float_zero": {"var": "f"}},
         "body": {"zeros": [{"var": "i"}, {"var": "f"}]}
       },
-      "input": {"int_zero": 0, "float_zero": 0.0},
-      "expected_output": {"zeros": [0, 0.0]},
+      "input": {"int_zero": {"_num": null}, "float_zero": {"_num": null}},
+      "expected_output": {"zeros": [{"_num": null}, {"_num": null}]},
       "expected_stall": true
     },
     {
       "id": "large_integer",
-      "description": "Large integer near JS MAX_SAFE_INTEGER (2^53)",
+      "description": "Nested StructuralNumbers numeral",
       "projection": {
         "pattern": {"big": {"var": "n"}},
         "body": {"echo": {"var": "n"}}
       },
-      "input": {"big": 9007199254740991},
-      "expected_output": {"echo": 9007199254740991},
+      "input": {"big": {"_num": {"xI": {"xH": null}}}},
+      "expected_output": {"echo": {"_num": {"xI": {"xH": null}}}},
       "expected_stall": true
     },
     {
@@ -207,8 +207,8 @@
         "pattern": {"var": "d"},
         "body": {"echo": {"var": "d"}}
       },
-      "input": {"zzz": 1, "aaa": 2, "中文": 3},
-      "expected_output": {"echo": {"zzz": 1, "aaa": 2, "中文": 3}},
+      "input": {"zzz": {"_num": {"xH": null}}, "aaa": {"_num": {"xO": {"xH": null}}}, "中文": {"_num": {"xI": {"xH": null}}}},
+      "expected_output": {"echo": {"zzz": {"_num": {"xH": null}}, "aaa": {"_num": {"xO": {"xH": null}}}, "中文": {"_num": {"xI": {"xH": null}}}}},
       "expected_stall": true
     },
     {

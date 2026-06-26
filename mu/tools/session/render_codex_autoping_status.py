@@ -19,6 +19,27 @@ def _slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
 
 
+def _autoping_state_slug(
+    *,
+    thread_id: str,
+    repo_root: str | None,
+    bus_dir: str | None,
+    tmux_session: str | None,
+    tmux_pane: str | None,
+) -> str:
+    if not (repo_root and bus_dir and tmux_session and tmux_pane):
+        return _slug(thread_id)
+    identity = "|".join(
+        (
+            str(Path(repo_root).expanduser().resolve()),
+            bus_dir,
+            tmux_session,
+            tmux_pane,
+        )
+    )
+    return f"{_slug(thread_id)}__{_slug(identity)}"
+
+
 def _read_json(path: Path) -> dict[str, object]:
     if not path.exists():
         return {}
@@ -54,6 +75,10 @@ def _stringify(value: object) -> str:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render WorkingRCX autoping pane status")
     parser.add_argument("--thread-id", required=True)
+    parser.add_argument("--repo-root")
+    parser.add_argument("--bus-dir")
+    parser.add_argument("--tmux-session")
+    parser.add_argument("--tmux-pane")
     parser.add_argument("--log-tail-lines", type=int, default=8)
     return parser.parse_args()
 
@@ -61,7 +86,13 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     codex_home = _codex_home()
-    thread_slug = _slug(args.thread_id)
+    thread_slug = _autoping_state_slug(
+        thread_id=args.thread_id,
+        repo_root=args.repo_root,
+        bus_dir=args.bus_dir,
+        tmux_session=args.tmux_session,
+        tmux_pane=args.tmux_pane,
+    )
     state_path = codex_home / "state" / f"rcx_autoping_{thread_slug}.json"
     summary_path = codex_home / "state" / f"rcx_autoping_{thread_slug}_summary.txt"
     runner_log = codex_home / "log" / "autoping" / f"rcx_autoping_{thread_slug}.runner.log"

@@ -21,6 +21,7 @@ from hypothesis import strategies as st
 from rcx_pi.selfhost.step_mu import run_mu_structural, list_to_linked
 from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.kernel import reset_step_budget
+from tests.helpers.structural_numbers import SN_ONE, SN_ZERO
 
 
 # =============================================================================
@@ -353,11 +354,11 @@ class TestOscillationDetection:
     def test_numeric_oscillation_captured(self):
         """0→1→0 oscillation captured in trace."""
         toggle = [
-            {"id": "inc", "pattern": 0, "body": 1},
-            {"id": "dec", "pattern": 1, "body": 0},
+            {"id": "inc", "pattern": SN_ZERO, "body": SN_ONE},
+            {"id": "dec", "pattern": SN_ONE, "body": SN_ZERO},
         ]
 
-        result = run_mu_structural(toggle, 0, max_steps=10)
+        result = run_mu_structural(toggle, SN_ZERO, max_steps=10)
 
         # Should not stall (always transforming)
         assert result["stall"] is False
@@ -372,17 +373,17 @@ class TestOscillationDetection:
 
         # Pattern: 0, 1, 0, 1, ...
         for i, state in enumerate(states[:-1]):  # Skip last (may be partial)
-            assert state == i % 2
+            assert mu_equal(state, SN_ZERO if i % 2 == 0 else SN_ONE)
 
-    @given(initial=st.sampled_from(["A", "B", 0, 1]))
+    @given(initial=st.sampled_from(["A", "B", SN_ZERO, SN_ONE]))
     @settings(max_examples=20, deadline=None)
     def test_oscillation_projections_recorded(self, initial):
         """Projection IDs are recorded during oscillation."""
         toggle = [
             {"id": "step_a", "pattern": "A", "body": "B"},
             {"id": "step_b", "pattern": "B", "body": "A"},
-            {"id": "step_0", "pattern": 0, "body": 1},
-            {"id": "step_1", "pattern": 1, "body": 0},
+            {"id": "step_0", "pattern": SN_ZERO, "body": SN_ONE},
+            {"id": "step_1", "pattern": SN_ONE, "body": SN_ZERO},
         ]
 
         result = run_mu_structural(toggle, initial, max_steps=10)
@@ -428,22 +429,22 @@ class TestEdgeCases:
     def test_max_steps_one(self):
         """max_steps=1 terminates after one step."""
         toggle = [
-            {"id": "to_1", "pattern": 0, "body": 1},
-            {"id": "to_0", "pattern": 1, "body": 0},
+            {"id": "to_1", "pattern": SN_ZERO, "body": SN_ONE},
+            {"id": "to_0", "pattern": SN_ONE, "body": SN_ZERO},
         ]
 
-        result = run_mu_structural(toggle, 0, max_steps=1)
+        result = run_mu_structural(toggle, SN_ZERO, max_steps=1)
         assert result["steps"] == 1
 
     def test_single_transformation(self):
         """Single successful transformation then stall."""
-        once = [{"id": "double", "pattern": 0, "body": 1}]
+        once = [{"id": "double", "pattern": SN_ZERO, "body": SN_ONE}]
 
-        result = run_mu_structural(once, 0, max_steps=10)
+        result = run_mu_structural(once, SN_ZERO, max_steps=10)
 
         # First step: 0 → 1
         # Second step: 1 doesn't match, stall
-        assert result["result"] == 1
+        assert mu_equal(result["result"], SN_ONE)
         assert result["stall"] is True
         assert result["steps"] == 2
 

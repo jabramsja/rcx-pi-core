@@ -110,7 +110,7 @@ def python_boot1_reentry_events():
             return {"_run_engine": {
                 "projections": [],
                 "input": {"reentry_observer_test": True},
-                "max_steps": 10,
+                "max_steps": {"_num": {"xO": {"xI": {"xO": {"xH": None}}}}},
                 "frozen": None,
             }}
         return result
@@ -137,7 +137,7 @@ class TestPythonBoot1StepMonotonicity:
         # Chain projections produce multiple engine steps ending in closure
         evidence = cached_python_pipeline(
             projections=_CHAIN_PROJECTIONS,
-            input_value={"a": 1},
+            input_value={"a": "one"},
             max_steps=100,
             boot1_mode="true",
             max_engine_iterations=20,
@@ -156,7 +156,7 @@ class TestPythonBoot1StepMonotonicity:
         # Chain projections with low budget — exhausts before reaching terminal
         try:
             run_engine_pipeline(
-                _CHAIN_PROJECTIONS, {"a": 1},
+                _CHAIN_PROJECTIONS, {"a": "one"},
                 use_boot1_recursive=True,
                 max_engine_iterations=max_iters,
                 observer=events,
@@ -202,7 +202,8 @@ class TestJsBoot1StepMonotonicity:
         """JS Boot1 multi-step produces monotonic, consistently-grouped step values."""
         resp = _run_cached_js_json_api({
             "action": "run_engine_pipeline",
-            "input": {"value": 42},
+            "projections": _CHAIN_PROJECTIONS,
+            "input": {"a": "one"},
             "boot1LoopMode": True,
             "maxEngineIterations": 20,
             "observer": True,
@@ -229,7 +230,7 @@ class TestJsBoot1StepMonotonicity:
         resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": chain_projs,
-            "input": {"a": 1},
+            "input": {"a": "one"},
             "boot1LoopMode": True,
             "maxEngineIterations": max_iters,
             "observer": True,

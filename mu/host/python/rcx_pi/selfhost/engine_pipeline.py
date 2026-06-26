@@ -47,6 +47,10 @@ from .step_mu import (
     run_mu_structural,
     run_algorithm_meta_circular,
     _run_sub_algorithm,
+    _STRUCTURAL_NUMBER_ADD_PROJECTIONS,
+    _SN_ZERO,
+    _SN_ONE,
+    _SN_PROJECTION_STEP_LIMIT,
     _get_hemisphere_keys,
     _get_hemisphere_key_order,
     _load_tc_projections,
@@ -59,6 +63,8 @@ from .step_mu import (
 
 # Cached loader for engine seed (A10: boundary dispatch authority displacement)
 _load_engine_projections, _clear_engine_proj_cache = make_projection_loader("rcx_engine.v1.json")
+_MAX_BOUNDARY_TRACE_STEPS = 10000
+
 
 # Boundary operation set — seed-derived from rcx_engine.v1.json (A10 displacement).
 # Authority lives in engine projection bodies (body._boundary_request.operation).
@@ -154,6 +160,54 @@ def _validate_reentry_payload(payload: object, context: str) -> None:
                 "input.invalid_type",
                 f"{context}: re-entry payload 'frozen' is not valid Mu, "
                 f"got {type(frozen).__name__}",
+            )
+    if "max_steps" in payload:
+        max_steps = payload["max_steps"]
+        if not isinstance(max_steps, dict) or set(max_steps.keys()) != {"_num"}:
+            raise RcxEngineError(
+                "input.invalid_type",
+                f"{context}: re-entry payload 'max_steps' must be a "
+                f"StructuralNumbers numeral, got {type(max_steps).__name__}",
+            )
+        _sn_node = max_steps["_num"]
+        _sn_seen_nodes: set[int] = set()
+        while _sn_node is not None:
+            if not isinstance(_sn_node, dict):
+                raise RcxEngineError(
+                    "input.invalid_type",
+                    f"{context}: re-entry payload 'max_steps' malformed StructuralNumbers numeral",
+                )
+            _sn_node_id = id(_sn_node)
+            if _sn_node_id in _sn_seen_nodes:
+                raise RcxEngineError(
+                    "input.invalid_type",
+                    f"{context}: re-entry payload 'max_steps' cyclic StructuralNumbers numeral",
+                )
+            _sn_seen_nodes.add(_sn_node_id)
+            if len(_sn_node) != 1:
+                raise RcxEngineError(
+                    "input.invalid_type",
+                    f"{context}: re-entry payload 'max_steps' numeral node must have one key",
+                )
+            _sn_digit_key, _sn_digit_value = next(iter(_sn_node.items()))
+            if _sn_digit_key == "xH":
+                if _sn_digit_value is not None:
+                    raise RcxEngineError(
+                        "input.invalid_type",
+                        f"{context}: re-entry payload 'max_steps' malformed xH terminator",
+                    )
+                break
+            if _sn_digit_key in ("xI", "xO"):
+                if _sn_digit_value is None:
+                    raise RcxEngineError(
+                        "input.invalid_type",
+                        f"{context}: re-entry payload 'max_steps' malformed StructuralNumbers numeral",
+                    )
+                _sn_node = _sn_digit_value
+                continue
+            raise RcxEngineError(
+                "input.invalid_type",
+                f"{context}: re-entry payload 'max_steps' malformed StructuralNumbers digit",
             )
     validate_no_kernel_reserved_fields(payload["input"], f"{context} input")
     if frozen is not None:
@@ -517,7 +571,7 @@ def _is_engine_terminal(value: Mu) -> bool:  # AST_OK: infra — engine terminal
     return classify_terminal_kind(value) == "engine_terminal"
 
 
-def _classify_engine_step(next_state: Mu, state: Mu) -> tuple:  # AST_OK: infra — pure engine transition classifier
+def _classify_engine_step(next_state: Mu, state: Mu) -> tuple:
     """Classify one engine step output as a transition type.
 
     Pure function — no observer emissions, no validation, no error raising.
@@ -704,31 +758,62 @@ def _boundary_op_run_trace(request, req_input, max_algorithm_iterations):
             raise RcxEngineError("api.bad_request",
                 f"run_trace projection[{i}] must have 'pattern' and 'body' keys")
     # max_steps boundary contract: absent key defaults to the bootstrap clock.
-    # Explicit values are structural integer budget data and fail closed if dirty.
+    # Explicit values are StructuralNumbers budget data and fail closed if dirty.
     if "max_steps" in req_input:
         max_steps = req_input["max_steps"]
-        if isinstance(max_steps, bool):
-            raise RcxEngineError("api.bad_request",
-                "run_trace input 'max_steps' must be an integer, got bool")
-        if isinstance(max_steps, int):
-            trace_max_steps = max_steps
-        elif (
-            isinstance(max_steps, float)
-            and max_steps == max_steps
-            and abs(max_steps) != float("inf")
-            and max_steps.is_integer()
-        ):
-            trace_max_steps = int(max_steps)
+        if not isinstance(max_steps, dict) or set(max_steps.keys()) != {"_num"}:
+            raise RcxEngineError(
+                "api.bad_request",
+                f"run_trace input 'max_steps' must be a StructuralNumbers numeral, got {type(max_steps).__name__}",
+            )
+        _sn_node = max_steps["_num"]
+        if _sn_node is None:
+            trace_max_steps = 0
         else:
-            raise RcxEngineError("api.bad_request",
-                f"run_trace input 'max_steps' must be an integer, got {type(max_steps).__name__}")
-        if trace_max_steps < 0:
-            raise RcxEngineError("api.bad_request",
-                f"run_trace input 'max_steps' must be >= 0, got {trace_max_steps}")
+            trace_max_steps = 0
+            _sn_weight = 1
+            _sn_seen_nodes: set[int] = set()
+            while True:
+                if not isinstance(_sn_node, dict):
+                    raise RcxEngineError("api.bad_request", "run_trace input 'max_steps' malformed StructuralNumbers numeral")
+                _sn_node_id = id(_sn_node)
+                if _sn_node_id in _sn_seen_nodes:
+                    raise RcxEngineError("api.bad_request", "run_trace input 'max_steps' cyclic StructuralNumbers numeral")
+                _sn_seen_nodes.add(_sn_node_id)
+                if len(_sn_node) != 1:
+                    raise RcxEngineError("api.bad_request", "run_trace input 'max_steps' numeral node must have one key")
+                _sn_digit_key, _sn_digit_value = next(iter(_sn_node.items()))
+                if _sn_digit_key == "xH":
+                    if _sn_digit_value is not None:
+                        raise RcxEngineError("api.bad_request", "run_trace input 'max_steps' malformed xH terminator")
+                    trace_max_steps = trace_max_steps + _sn_weight
+                    if trace_max_steps > _MAX_BOUNDARY_TRACE_STEPS:
+                        raise RcxEngineError(
+                            "api.bad_request",
+                            f"run_trace input 'max_steps' exceeds boundary cap of {_MAX_BOUNDARY_TRACE_STEPS}",
+                        )
+                    break
+                if _sn_digit_key == "xI":
+                    trace_max_steps = trace_max_steps + _sn_weight
+                    if trace_max_steps > _MAX_BOUNDARY_TRACE_STEPS:
+                        raise RcxEngineError(
+                            "api.bad_request",
+                            f"run_trace input 'max_steps' exceeds boundary cap of {_MAX_BOUNDARY_TRACE_STEPS}",
+                        )
+                elif _sn_digit_key != "xO":
+                    raise RcxEngineError("api.bad_request", "run_trace input 'max_steps' malformed StructuralNumbers digit")
+                if not isinstance(_sn_digit_value, dict):
+                    raise RcxEngineError("api.bad_request", "run_trace input 'max_steps' malformed StructuralNumbers numeral")
+                _sn_node = _sn_digit_value
+                _sn_weight = _sn_weight * 2
+                if _sn_weight > _MAX_BOUNDARY_TRACE_STEPS:
+                    raise RcxEngineError(
+                        "api.bad_request",
+                        f"run_trace input 'max_steps' exceeds boundary cap of {_MAX_BOUNDARY_TRACE_STEPS}",
+                    )
     else:
         trace_max_steps = 100
     # HF2 parity: hard resource cap to prevent unbounded trace (matches JS MAX_BOUNDARY_TRACE_STEPS).
-    _MAX_BOUNDARY_TRACE_STEPS = 10000
     if trace_max_steps > _MAX_BOUNDARY_TRACE_STEPS:
         raise RcxEngineError("api.bad_request",
             f"run_trace input 'max_steps' exceeds boundary cap of {_MAX_BOUNDARY_TRACE_STEPS}")
@@ -1036,7 +1121,46 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
     remaining_iterations = max_engine_iterations
     cur_projections = projections
     cur_input = input_value
-    cur_max_steps = max_steps
+    if isinstance(max_steps, bool) or not isinstance(max_steps, int):
+        raise RcxEngineError(
+            "api.bad_request",
+            f"max_steps must be a non-negative integer watchdog, got {type(max_steps).__name__}",
+        )
+    if max_steps < 0:
+        raise RcxEngineError(
+            "api.bad_request",
+            f"max_steps must be >= 0, got {max_steps}",
+        )
+    cur_max_steps = _SN_ZERO
+    for _ in range(max_steps):
+        _sn_add_state = {"_add": {"a": cur_max_steps, "b": _SN_ONE}}
+        _sn_add_hash = mu_hash_control_cached(
+            _sn_add_state,
+            "run_engine_pipeline max_steps.structural_add.initial",
+        )
+        _sn_add_result = None
+        for _sn_guard in range(_SN_PROJECTION_STEP_LIMIT):
+            _sn_result = _step_trusted(_STRUCTURAL_NUMBER_ADD_PROJECTIONS, _sn_add_state)
+            _sn_result_hash = mu_hash_control_cached(
+                _sn_result,
+                "run_engine_pipeline max_steps.structural_add.stall",
+            )
+            if _sn_result_hash == _sn_add_hash:
+                _sn_add_result = _sn_result
+                break
+            _sn_add_state = _sn_result
+            _sn_add_hash = _sn_result_hash
+        if _sn_add_result is None:
+            raise RcxEngineError(
+                "execution.max_steps",
+                "run_engine_pipeline max_steps: StructuralNumbers add projection did not settle",
+            )
+        cur_max_steps = _sn_add_result
+        if not isinstance(cur_max_steps, dict) or set(cur_max_steps.keys()) != {"_num"}:
+            raise RcxEngineError(
+                "execution.invalid_result",
+                "run_engine_pipeline max_steps: StructuralNumbers ADD produced malformed numeral",
+            )
     cur_frozen = frozen
 
     # Observer event helper — uses mutable depth counter, preserves ts across re-entry
@@ -1253,6 +1377,47 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
         max_engine_iterations = max_iterations
         max_algorithm_iterations = max_iterations
 
+    if isinstance(max_steps, bool) or not isinstance(max_steps, int):
+        raise RcxEngineError(
+            "api.bad_request",
+            f"max_steps must be a non-negative integer watchdog, got {type(max_steps).__name__}",
+        )
+    if max_steps < 0:
+        raise RcxEngineError(
+            "api.bad_request",
+            f"max_steps must be >= 0, got {max_steps}",
+        )
+    structural_max_steps = _SN_ZERO
+    for _ in range(max_steps):
+        _sn_add_state = {"_add": {"a": structural_max_steps, "b": _SN_ONE}}
+        _sn_add_hash = mu_hash_control_cached(
+            _sn_add_state,
+            "run_engine_pipeline_recursive max_steps.structural_add.initial",
+        )
+        _sn_add_result = None
+        for _sn_guard in range(_SN_PROJECTION_STEP_LIMIT):
+            _sn_result = _step_trusted(_STRUCTURAL_NUMBER_ADD_PROJECTIONS, _sn_add_state)
+            _sn_result_hash = mu_hash_control_cached(
+                _sn_result,
+                "run_engine_pipeline_recursive max_steps.structural_add.stall",
+            )
+            if _sn_result_hash == _sn_add_hash:
+                _sn_add_result = _sn_result
+                break
+            _sn_add_state = _sn_result
+            _sn_add_hash = _sn_result_hash
+        if _sn_add_result is None:
+            raise RcxEngineError(
+                "execution.max_steps",
+                "run_engine_pipeline_recursive max_steps: StructuralNumbers add projection did not settle",
+            )
+        structural_max_steps = _sn_add_result
+        if not isinstance(structural_max_steps, dict) or set(structural_max_steps.keys()) != {"_num"}:
+            raise RcxEngineError(
+                "execution.invalid_result",
+                "run_engine_pipeline_recursive max_steps: StructuralNumbers ADD produced malformed numeral",
+            )
+
     # Meta path: capture observer events for iteration count, derive reason from result.
     # Internal functions and 8-key terminal shape are unchanged.
     if return_meta:
@@ -1322,7 +1487,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
         _obs_ts[0] += 1
 
     # Feed engine its initial input (always use full config form → engine.init_config)
-    state: Mu = {"_run_engine": {"projections": projections, "input": input_value, "max_steps": max_steps, "frozen": frozen}}
+    state: Mu = {"_run_engine": {"projections": projections, "input": input_value, "max_steps": structural_max_steps, "frozen": frozen}}
 
     # Generic effect handler loop
     for iteration in range(max_engine_iterations):  # AST_OK: infra — boundary host loop iteration

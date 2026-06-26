@@ -23,6 +23,10 @@ from rcx_pi.selfhost.step_mu import run_algorithm_meta_circular
 from rcx_pi.selfhost.mu_type import mu_equal, mu_hash
 from rcx_pi.selfhost.kernel import reset_step_budget
 
+ZERO = {"_num": None}
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
+
 
 def _load_recurrence_v2_projections() -> list:
     seed = load_verified_seed(get_seed_path("recurrence.v2.json"))
@@ -107,9 +111,9 @@ class TestRecurrenceV2ClosureDetection:
         hash_a = mu_hash(state_a)
         hash_b = mu_hash(state_b)
         entries = [
-            {"step": 0, "state": state_a, "state_hash": hash_a, "projection": None, "stall": True},
-            {"step": 1, "state": state_b, "state_hash": hash_b, "projection": None, "stall": True},
-            {"step": 2, "state": state_a, "state_hash": hash_a, "projection": None, "stall": True},
+            {"step": ZERO, "state": state_a, "state_hash": hash_a, "projection": None, "stall": True},
+            {"step": ONE, "state": state_b, "state_hash": hash_b, "projection": None, "stall": True},
+            {"step": TWO, "state": state_a, "state_hash": hash_a, "projection": None, "stall": True},
         ]
         trace = _build_trace_with_hashes(entries)
         input_val = {"_detect_closure": {"trace": trace, "result": state_a}}
@@ -122,9 +126,10 @@ class TestRecurrenceV2ClosureDetection:
         """A trace with all unique state hashes must produce closure_detected=False."""
         projs = _load_recurrence_v2_projections()
         states = [{"value": f"unique_{i}"} for i in range(3)]
+        steps = [ZERO, ONE, TWO]
         entries = [
-            {"step": i, "state": s, "state_hash": mu_hash(s), "projection": None, "stall": True}
-            for i, s in enumerate(states)
+            {"step": step, "state": s, "state_hash": mu_hash(s), "projection": None, "stall": True}
+            for step, s in zip(steps, states)
         ]
         trace = _build_trace_with_hashes(entries)
         input_val = {"_detect_closure": {"trace": trace, "result": states[-1]}}
@@ -142,7 +147,7 @@ class TestRecurrenceV2ResultShape:
         projs = _load_recurrence_v2_projections()
         state = {"value": "X"}
         entries = [
-            {"step": 0, "state": state, "state_hash": mu_hash(state), "projection": None, "stall": True},
+            {"step": ZERO, "state": state, "state_hash": mu_hash(state), "projection": None, "stall": True},
         ]
         trace = _build_trace_with_hashes(entries)
         input_val = {"_detect_closure": {"trace": trace, "result": state}}

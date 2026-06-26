@@ -27,6 +27,19 @@ import subprocess
 # JSON null -> Python None alias for readability
 null = None
 
+
+def _sn_positive(n: int):
+    if n == 1:
+        return {"xH": None}
+    half = _sn_positive(n // 2)
+    return {"xO" if n % 2 == 0 else "xI": half}
+
+
+def _sn(n: int):
+    if n < 0:
+        raise ValueError("test helper only supports non-negative structural numbers")
+    return {"_num": None if n == 0 else _sn_positive(n)}
+
 # Root directory of the project (symlink-safe — see tests/repo_root.py)
 from tests.repo_root import REPO_ROOT as ROOT
 
@@ -140,7 +153,7 @@ class TestExhaustionEdgeCases:
             "_detect_exhaustion": {
                 "trace": null,
                 "frozen": null,
-                "tau_step": 0,
+                "tau_step": _sn(0),
                 "operator_ids": null
             }
         }
@@ -161,9 +174,9 @@ class TestExhaustionEdgeCases:
         input_data = {
             "_detect_exhaustion": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "op2"},
+                    "head": {"step": _sn(0), "state": "A", "projection": "op2"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "op2"},
+                        "head": {"step": _sn(1), "state": "B", "projection": "op2"},
                         "tail": null
                     }
                 },
@@ -171,7 +184,7 @@ class TestExhaustionEdgeCases:
                     "head": "op1",
                     "tail": {"head": "op3", "tail": null}
                 },
-                "tau_step": 0,
+                "tau_step": _sn(0),
                 "operator_ids": {
                     "head": "op1",
                     "tail": {"head": "op2", "tail": {"head": "op3", "tail": null}}
@@ -501,27 +514,27 @@ function runNegativeControls() {
     { id: 'multi.3', pattern: { phase: 'c' }, body: { phase: 'done' } },
   ]);
   const chainProjections = trustMu([
-    { id: 'chain.1', pattern: { n: 0 }, body: { n: 1 } },
-    { id: 'chain.2', pattern: { n: 1 }, body: { n: 2 } },
-    { id: 'chain.3', pattern: { n: 2 }, body: { n: 3 } },
-    { id: 'chain.4', pattern: { n: 3 }, body: { n: 4 } },
-    { id: 'chain.5', pattern: { n: 4 }, body: { n: 5 } },
+    { id: 'chain.1', pattern: { n: 'zero' }, body: { n: 'one' } },
+    { id: 'chain.2', pattern: { n: 'one' }, body: { n: 'two' } },
+    { id: 'chain.3', pattern: { n: 'two' }, body: { n: 'three' } },
+    { id: 'chain.4', pattern: { n: 'three' }, body: { n: 'four' } },
+    { id: 'chain.5', pattern: { n: 'four' }, body: { n: 'five' } },
   ]);
   const chainStep = state => step(chainProjections, state);
   const recursiveSource = recursiveRun.toString();
 
   return {
     singleMulti: singleStepRun(multiProjections, trustMu({ phase: 'a' })),
-    singleChain: singleStepRun(chainProjections, trustMu({ n: 0 })),
+    singleChain: singleStepRun(chainProjections, trustMu({ n: 'zero' })),
     unrolled3Multi: unrolledRun3(multiProjections, trustMu({ phase: 'a' })),
-    unrolled3Chain: unrolledRun3(chainProjections, trustMu({ n: 0 })),
+    unrolled3Chain: unrolledRun3(chainProjections, trustMu({ n: 'zero' })),
     unrolled5Multi: unrolledRun5(multiProjections, trustMu({ phase: 'a' })),
     recursiveMulti: recursiveRun(multiProjections, trustMu({ phase: 'a' })),
     recursiveSourceHasSelfCall: /return recursiveRun\(/.test(recursiveSource),
     recursiveSourceHasFuel: /\bfuel\b/.test(recursiveSource),
     recursiveSourceHasBound: /\bbound\b|\bmaxSteps\b|\blimit\b/.test(recursiveSource),
-    compose3Chain: composeN(chainStep, 3)(trustMu({ n: 0 })),
-    compose5Chain: composeN(chainStep, 5)(trustMu({ n: 0 })),
+    compose3Chain: composeN(chainStep, 3)(trustMu({ n: 'zero' })),
+    compose5Chain: composeN(chainStep, 5)(trustMu({ n: 'zero' })),
     composeSourceHasLoop: /for\s*\(/.test(composeN.toString()),
   };
 }
@@ -770,7 +783,7 @@ def _extract_js_function(source: str, name: str) -> str:
             D006.V2_INPUT,
             10,
             "stall",
-            {"status": "done", "value": 1},
+            {"status": "done", "value": "one"},
         ),
         (
             "multi_step_convergence",
@@ -786,7 +799,7 @@ def _extract_js_function(source: str, name: str) -> str:
             D006.V4_INPUT,
             D006.V4_FUEL,
             "fuel_exhausted",
-            {"n": 3},
+            {"n": "three"},
         ),
         (
             "nested_mu_structure",
@@ -794,7 +807,7 @@ def _extract_js_function(source: str, name: str) -> str:
             D006.V5_INPUT,
             10,
             "stall",
-            {"result": "unwrapped", "depth": 2},
+            {"result": "unwrapped", "depth": "two"},
         ),
         ("zero_fuel", D006.V2_PROJECTIONS, D006.V2_INPUT, 0, "fuel_exhausted", D006.V2_INPUT),
         ("one_fuel", D006.V3_PROJECTIONS, D006.V3_INPUT, 1, "fuel_exhausted", {"phase": "b"}),
@@ -856,7 +869,7 @@ def test_js_d006_production_step_kernel_meta_reports_remaining_kernel_fuel():
     )
     assert meta["termination_reason"] == "projection_applied"
     assert meta["stall"] is False
-    assert meta["output"] == {"status": "done", "value": 1}
+    assert meta["output"] == {"status": "done", "value": "one"}
     assert meta["fuel_supplied"] is True
     assert meta["fuel_exhausted"] is False
     assert 0 < meta["steps_used"] < fuel_count
@@ -971,7 +984,7 @@ def test_js_d006_single_step_negative_control_fails_multi_step():
     assert controls["singleMulti"] == D007.single_step_run(D007.MULTI_PROJECTIONS, D007.MULTI_INPUT)
     assert controls["singleMulti"] != D007.MULTI_EXPECTED
     assert controls["singleMulti"] == {"phase": "b"}
-    assert controls["singleChain"] == {"n": 1}
+    assert controls["singleChain"] == {"n": "one"}
 
 
 def test_js_d006_fixed_unroll_negative_control_is_not_general():
@@ -980,7 +993,7 @@ def test_js_d006_fixed_unroll_negative_control_is_not_general():
     assert controls["unrolled3Multi"] == D007.MULTI_EXPECTED
     assert controls["unrolled3Chain"] == D007.unrolled_run_3(D007.CHAIN_PROJECTIONS, D007.CHAIN_INPUT)
     assert controls["unrolled3Chain"] != D007.CHAIN_EXPECTED
-    assert controls["unrolled3Chain"] == {"n": 3}
+    assert controls["unrolled3Chain"] == {"n": "three"}
     assert controls["unrolled5Multi"] == D007.unrolled_run_5(D007.MULTI_PROJECTIONS, D007.MULTI_INPUT)
 
 

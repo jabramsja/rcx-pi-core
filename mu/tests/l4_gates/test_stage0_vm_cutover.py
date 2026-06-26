@@ -32,6 +32,7 @@ from rcx_pi.selfhost.stage0_vm import _mu_deep_equal, stage0_vm_step  # ANTICHEA
 
 
 _STAGE0_MATCH_BOOTSTRAP_PREFIX = "host_builtin:_stage0_match: Host builtin: "
+ONE = {"_num": {"xH": None}}
 
 
 def _stage0_match_bootstrap_marker_reason():
@@ -106,8 +107,8 @@ class TestShadowModeEndToEnd:
     def test_dict_rewrite(self):
         """Dict input rewritten by domain projection."""
         proj = {"id": "test.dict", "pattern": {"x": {"var": "v"}}, "body": {"y": {"var": "v"}}}
-        result = step_kernel_mu([proj], {"x": 42})
-        assert result == {"y": 42}
+        result = step_kernel_mu([proj], {"x": ONE})
+        assert result == {"y": ONE}
 
     def test_multi_projection_first_match_wins(self):
         """First matching projection wins — ordering preserved."""
@@ -355,8 +356,8 @@ class TestCutoverTruePath:
     def test_dict_rewrite_cutover(self, cutover_mode):
         """Dict pattern matching under cutover=True."""
         proj = {"id": "test.cut_dict", "pattern": {"x": {"var": "v"}}, "body": {"y": {"var": "v"}}}
-        result = step_kernel_mu([proj], {"x": 42})
-        assert result == {"y": 42}
+        result = step_kernel_mu([proj], {"x": ONE})
+        assert result == {"y": ONE}
 
     def test_first_match_wins_cutover(self, cutover_mode):
         """First-match-wins ordering preserved under cutover=True."""
@@ -390,7 +391,7 @@ class TestCutoverTruePath:
         """VM cutover output matches host-path output on same input."""
         import rcx_pi.selfhost.step_mu as mod
         proj = {"id": "test.cut_shadow", "pattern": {"x": {"var": "v"}}, "body": {"result": {"var": "v"}}}
-        inp = {"x": 99}
+        inp = {"x": "ninety_nine"}
 
         # Host path (explicitly disable cutover)
         monkeypatch.setattr(mod, "_STAGE0_VM_CUTOVER", False)

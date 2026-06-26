@@ -13,9 +13,15 @@ const { isValidMu, muHash, muHashCached, muHashControl, muHashControlCached } = 
 const muContainers = require('../core/container_factory');
 const { normalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
-const { step } = require('../core/bootstrap_core');
+const { step, _stepTrusted } = require('../core/bootstrap_core');
 const { isTerminalShape, isEngineTerminal, deriveEngineExitReason, setsEqual } = require('../core/terminal_classification');
 const { stepKernel, runStructural, _vmConfigTrust } = require('./kernel');
+const {
+  STRUCTURAL_NUMBER_ADD_PROJECTIONS,
+  SN_ZERO,
+  SN_ONE,
+  SN_PROJECTION_STEP_LIMIT,
+} = require('./kernel');
 const seedLoader = require('../core/seed_loader');
 
 // JS built-in property names that must never be used as inject_key.
@@ -261,17 +267,68 @@ function boundaryOpRunTrace(kernelProjections, seedProjectionMap, request, reqIn
     }
   }
   // max_steps boundary contract: absent key defaults to the bootstrap clock.
-  // Explicit values are structural integer budget data and fail closed if dirty.
+  // Explicit values are StructuralNumbers budget data and fail closed if dirty.
   let traceMaxSteps = 100;
   if (Object.hasOwn(reqInput, 'max_steps')) {
-    traceMaxSteps = reqInput.max_steps;
-    if (typeof traceMaxSteps !== 'number' || !Number.isFinite(traceMaxSteps) || !Number.isInteger(traceMaxSteps)) {
+    const maxSteps = reqInput.max_steps;
+    if (maxSteps === null || typeof maxSteps !== 'object' || Array.isArray(maxSteps) ||
+        !Object.hasOwn(maxSteps, '_num') ||
+        Object.getOwnPropertyNames(maxSteps).length !== 1 ||
+        Object.getOwnPropertySymbols(maxSteps).length !== 0) {
       throw new RcxError('api.bad_request',
-        `run_trace input 'max_steps' must be an integer, got ${typeof traceMaxSteps}`);
+        `run_trace input 'max_steps' must be a StructuralNumbers numeral, got ${maxSteps === null ? 'null' : Array.isArray(maxSteps) ? 'array' : typeof maxSteps}`);
     }
-    if (traceMaxSteps < 0) {
-      throw new RcxError('api.bad_request',
-        `run_trace input 'max_steps' must be >= 0, got ${traceMaxSteps}`);
+    let snNode = maxSteps._num;
+    if (snNode === null) {
+      traceMaxSteps = 0;
+    } else {
+      traceMaxSteps = 0;
+      let snWeight = 1;
+      const snSeenNodes = [];
+      while (true) {
+        if (snNode === null || typeof snNode !== 'object' || Array.isArray(snNode)) {
+          throw new RcxError('api.bad_request', "run_trace input 'max_steps' malformed StructuralNumbers numeral");
+        }
+        if (snSeenNodes.includes(snNode)) {
+          throw new RcxError('api.bad_request', "run_trace input 'max_steps' cyclic StructuralNumbers numeral");
+        }
+        snSeenNodes.push(snNode);
+        const snNames = Object.getOwnPropertyNames(snNode);
+        if (snNames.length !== 1 || Object.getOwnPropertySymbols(snNode).length !== 0) {
+          throw new RcxError('api.bad_request', "run_trace input 'max_steps' numeral node must have one key");
+        }
+        const snDigitKey = snNames[0];
+        const snDigitValue = snNode[snDigitKey];
+        if (snDigitKey === 'xH') {
+          if (snDigitValue !== null) {
+            throw new RcxError('api.bad_request', "run_trace input 'max_steps' malformed xH terminator");
+          }
+          traceMaxSteps += snWeight;
+          if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) {
+            throw new RcxError('api.bad_request',
+              `run_trace input 'max_steps' exceeds boundary cap of ${MAX_BOUNDARY_TRACE_STEPS}`);
+          }
+          break;
+        }
+        if (snDigitKey === 'xI') {
+          traceMaxSteps += snWeight;
+          if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) {
+            throw new RcxError('api.bad_request',
+              `run_trace input 'max_steps' exceeds boundary cap of ${MAX_BOUNDARY_TRACE_STEPS}`);
+          }
+        } else if (snDigitKey !== 'xO') {
+          throw new RcxError('api.bad_request', "run_trace input 'max_steps' malformed StructuralNumbers digit");
+        }
+        if (snDigitValue === null || typeof snDigitValue !== 'object' || Array.isArray(snDigitValue)) {
+          throw new RcxError('api.bad_request', "run_trace input 'max_steps' malformed StructuralNumbers numeral");
+        }
+        snNode = snDigitValue;
+        snWeight *= 2;
+        if (snWeight > MAX_BOUNDARY_TRACE_STEPS) {
+          throw new RcxError('api.bad_request',
+            `run_trace input 'max_steps' exceeds boundary cap of ${MAX_BOUNDARY_TRACE_STEPS}`);
+        }
+      }
     }
   }
   if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) {
@@ -554,6 +611,60 @@ function validateReentryPayload(payload, context) {
     if (!isValidMu(payload.frozen)) {
       throw new RcxError('input.invalid_type',
         `${context}: re-entry payload 'frozen' is not valid Mu, got ${typeof payload.frozen}`
+      );
+    }
+  }
+  if ('max_steps' in payload) {
+    const maxSteps = payload.max_steps;
+    if (maxSteps === null || typeof maxSteps !== 'object' || Array.isArray(maxSteps) ||
+        !Object.hasOwn(maxSteps, '_num') ||
+        Object.getOwnPropertyNames(maxSteps).length !== 1 ||
+        Object.getOwnPropertySymbols(maxSteps).length !== 0) {
+      throw new RcxError('input.invalid_type',
+        `${context}: re-entry payload 'max_steps' must be a StructuralNumbers numeral, got ${maxSteps === null ? 'null' : Array.isArray(maxSteps) ? 'array' : typeof maxSteps}`
+      );
+    }
+    let snNode = maxSteps._num;
+    const snSeenNodes = [];
+    while (snNode !== null) {
+      if (snNode === null || typeof snNode !== 'object' || Array.isArray(snNode)) {
+        throw new RcxError('input.invalid_type',
+          `${context}: re-entry payload 'max_steps' malformed StructuralNumbers numeral`
+        );
+      }
+      if (snSeenNodes.includes(snNode)) {
+        throw new RcxError('input.invalid_type',
+          `${context}: re-entry payload 'max_steps' cyclic StructuralNumbers numeral`
+        );
+      }
+      snSeenNodes.push(snNode);
+      const snNames = Object.getOwnPropertyNames(snNode);
+      if (snNames.length !== 1 || Object.getOwnPropertySymbols(snNode).length !== 0) {
+        throw new RcxError('input.invalid_type',
+          `${context}: re-entry payload 'max_steps' numeral node must have one key`
+        );
+      }
+      const snDigitKey = snNames[0];
+      const snDigitValue = snNode[snDigitKey];
+      if (snDigitKey === 'xH') {
+        if (snDigitValue !== null) {
+          throw new RcxError('input.invalid_type',
+            `${context}: re-entry payload 'max_steps' malformed xH terminator`
+          );
+        }
+        break;
+      }
+      if (snDigitKey === 'xI' || snDigitKey === 'xO') {
+        if (snDigitValue === null) {
+          throw new RcxError('input.invalid_type',
+            `${context}: re-entry payload 'max_steps' malformed StructuralNumbers numeral`
+          );
+        }
+        snNode = snDigitValue;
+        continue;
+      }
+      throw new RcxError('input.invalid_type',
+        `${context}: re-entry payload 'max_steps' malformed StructuralNumbers digit`
       );
     }
   }
@@ -999,6 +1110,40 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
       `observer must be array or null, got ${typeof observer}`);
   }
 
+  if (typeof maxSteps !== 'number' || maxSteps !== maxSteps ||
+      maxSteps === Infinity || maxSteps === -Infinity ||
+      maxSteps % 1 !== 0 || maxSteps < 0) {
+    throw new RcxError('api.bad_request',
+      `maxSteps must be a non-negative integer watchdog, got ${typeof maxSteps}`);
+  }
+  let structuralMaxSteps = SN_ZERO;
+  for (let snIndex = 0; snIndex < maxSteps; snIndex++) {
+    let snAddState = muContainers.record([['_add', muContainers.record([['a', structuralMaxSteps], ['b', SN_ONE]])]]);
+    let snAddHash = muHashControlCached(snAddState, 'runEnginePipeline maxSteps.structural_add.initial');
+    let snAddResult = null;
+    for (let snGuard = 0; snGuard < SN_PROJECTION_STEP_LIMIT; snGuard++) {
+      const snResult = _stepTrusted(STRUCTURAL_NUMBER_ADD_PROJECTIONS, snAddState);
+      const snResultHash = muHashControlCached(snResult, 'runEnginePipeline maxSteps.structural_add.stall');
+      if (snResultHash === snAddHash) {
+        snAddResult = snResult;
+        break;
+      }
+      snAddState = snResult;
+      snAddHash = snResultHash;
+    }
+    if (snAddResult === null) {
+      throw new RcxError('execution.max_steps',
+        'runEnginePipeline maxSteps: StructuralNumbers add projection did not settle');
+    }
+    if (snAddResult === null || typeof snAddResult !== 'object' ||
+        Array.isArray(snAddResult) || !Object.hasOwn(snAddResult, '_num') ||
+        Object.keys(snAddResult).length !== 1) {
+      throw new RcxError('execution.invalid_result',
+        'runEnginePipeline maxSteps: StructuralNumbers ADD produced malformed numeral');
+    }
+    structuralMaxSteps = snAddResult;
+  }
+
   let obsTs = 0;
   function emit(eventName, stepNum, stateVal, errorCode, extra) {
     if (observer === null) return;
@@ -1021,7 +1166,7 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
     ['_run_engine', muContainers.record([
       ['projections', projections],
       ['input', inputValue],
-      ['max_steps', maxSteps],
+      ['max_steps', structuralMaxSteps],
       ['frozen', frozen],
     ])],
   ]);
@@ -1114,33 +1259,50 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
       `observer must be array or null, got ${typeof observer}`);
   }
 
+  if (typeof maxSteps !== 'number' || maxSteps !== maxSteps ||
+      maxSteps === Infinity || maxSteps === -Infinity ||
+      maxSteps % 1 !== 0 || maxSteps < 0) {
+    throw new RcxError('api.bad_request',
+      `maxSteps must be a non-negative integer watchdog, got ${typeof maxSteps}`);
+  }
+  let structuralMaxSteps = SN_ZERO;
+  for (let snIndex = 0; snIndex < maxSteps; snIndex++) {
+    let snAddState = muContainers.record([['_add', muContainers.record([['a', structuralMaxSteps], ['b', SN_ONE]])]]);
+    let snAddHash = muHashControlCached(snAddState, 'runEnginePipelineRecursive maxSteps.structural_add.initial');
+    let snAddResult = null;
+    for (let snGuard = 0; snGuard < SN_PROJECTION_STEP_LIMIT; snGuard++) {
+      const snResult = _stepTrusted(STRUCTURAL_NUMBER_ADD_PROJECTIONS, snAddState);
+      const snResultHash = muHashControlCached(snResult, 'runEnginePipelineRecursive maxSteps.structural_add.stall');
+      if (snResultHash === snAddHash) {
+        snAddResult = snResult;
+        break;
+      }
+      snAddState = snResult;
+      snAddHash = snResultHash;
+    }
+    if (snAddResult === null) {
+      throw new RcxError('execution.max_steps',
+        'runEnginePipelineRecursive maxSteps: StructuralNumbers add projection did not settle');
+    }
+    if (snAddResult === null || typeof snAddResult !== 'object' ||
+        Array.isArray(snAddResult) || !Object.hasOwn(snAddResult, '_num') ||
+        Object.keys(snAddResult).length !== 1) {
+      throw new RcxError('execution.invalid_result',
+        'runEnginePipelineRecursive maxSteps: StructuralNumbers ADD produced malformed numeral');
+    }
+    structuralMaxSteps = snAddResult;
+  }
+
   let depth = recursionDepth ?? 0;
   const initialDepth = depth;
   let remainingIterations = maxEngineIterations;
   let curProjections = projections;
   let curInput = inputValue;
-  let curMaxSteps = maxSteps;
+  let curMaxSteps = structuralMaxSteps;
   let curFrozen = frozen;
 
   let obsTs = 0;
   let totalIterations = 0;
-  const emit = function(eventName, stepNum, stateVal, errorCode, extra) {
-    if (observer === null) return;
-    let stateHash = null;
-    try { stateHash = muHash(stateVal); } catch (_) { /* ignore */ }
-    const event = {
-      event_name: eventName,
-      step: stepNum,
-      state_hash: stateHash,
-      error_code: errorCode ?? null,
-      substrate: 'js',
-      timestamp: obsTs,
-      boot1_depth: depth,
-    };
-    if (extra) Object.assign(event, extra);
-    observer.push(event);
-    obsTs++;
-  };
 
   while (true) {
     if (depth >= BOOT1_MAX_REENTRY_DEPTH) {
@@ -1239,6 +1401,24 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
     throw new RcxError('engine.exhausted',
       `Boot1 engine pipeline exhausted ${remainingIterations} iterations (depth ${depth}).`
     );
+  }
+
+  function emit(eventName, stepNum, stateVal, errorCode, extra) {
+    if (observer === null) return;
+    let stateHash = null;
+    try { stateHash = muHash(stateVal); } catch (_) { /* ignore */ }
+    const event = {
+      event_name: eventName,
+      step: stepNum,
+      state_hash: stateHash,
+      error_code: errorCode ?? null,
+      substrate: 'js',
+      timestamp: obsTs,
+      boot1_depth: depth,
+    };
+    if (extra) Object.assign(event, extra);
+    observer.push(event);
+    obsTs++;
   }
 }
 

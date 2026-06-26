@@ -30,6 +30,8 @@ pytestmark = pytest.mark.slow
 
 ROOT = REPO_ROOT
 FIXTURES = ROOT / "tests" / "fixtures"
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
 
 
 def _load_projections(seed_name: str) -> list[dict]:
@@ -109,7 +111,7 @@ def test_gate5_run_mu_structural_matches_bridge_nonlinear_semantics():
             "body": "ok",
         }
     ]
-    input_value = {"a": 1, "b": 2}
+    input_value = {"a": ONE, "b": TWO}
 
     trace_result = run_mu_structural(projections, input_value, max_steps=3)
     bridge_result = step_kernel_mu(
@@ -132,7 +134,7 @@ def test_gate5_run_mu_structural_records_projection_id_via_bridge_path():
             "body": "ok",
         }
     ]
-    input_value = {"a": 1, "b": 1}
+    input_value = {"a": ONE, "b": ONE}
 
     trace_result = run_mu_structural(projections, input_value, max_steps=3)
     first_entry = trace_result["trace"]["head"]
@@ -142,7 +144,7 @@ def test_gate5_run_mu_structural_records_projection_id_via_bridge_path():
 
 def test_gate5_run_mu_structural_identity_match_keeps_projection_id():
     projections = [{"id": "identity", "pattern": {"var": "x"}, "body": {"var": "x"}}]
-    trace_result = run_mu_structural(projections, {"x": 1}, max_steps=3)
+    trace_result = run_mu_structural(projections, {"x": ONE}, max_steps=3)
     first_entry = trace_result["trace"]["head"]
     assert first_entry["projection"] == "identity"
 
@@ -176,6 +178,34 @@ def _run_js_structural_trace(projections, input_value, max_steps=10):
     return last
 
 
+def test_gate5_host_integer_projection_does_not_use_trace_eval_step_fallback():
+    """Host integer leaves must fail closed in the bridge-backed trace runner."""
+    projections = [{"id": "host_int_projection", "pattern": 1, "body": 2}]
+    input_value = 1
+
+    kernel_meta = step_kernel_mu(
+        projections,
+        input_value,
+        max_steps=2,
+        kernel_mode="bridge",
+        validation_mode="domain",
+        return_meta=True,
+    )
+    py_trace = run_mu_structural(projections, input_value, max_steps=2)
+    js_trace = _run_js_structural_trace(projections, input_value, max_steps=2)
+
+    assert kernel_meta["termination_reason"] == "max_steps_exhausted"
+    assert kernel_meta["output"] == input_value
+    assert py_trace["result"] == input_value
+    assert py_trace["stall"] is True
+    assert py_trace["steps"] == 1
+    assert py_trace["trace"]["head"]["projection"] is None
+    assert js_trace["result"] == input_value
+    assert js_trace["stall"] is True
+    assert js_trace["steps"] == 1
+    assert js_trace["trace"][0]["projection"] is None
+
+
 def test_gate5_cross_substrate_identity_trace_projection_id():
     """Identity projection must keep projection ID in trace on BOTH substrates.
 
@@ -184,7 +214,7 @@ def test_gate5_cross_substrate_identity_trace_projection_id():
     Fix: JS uses kernel terminal state (_stall field) like Python.
     """
     projections = [{"id": "identity", "pattern": {"var": "x"}, "body": {"var": "x"}}]
-    input_value = {"x": 1}
+    input_value = {"x": ONE}
 
     # Python
     py_trace = run_mu_structural(projections, input_value, max_steps=5)
@@ -212,7 +242,7 @@ def test_gate5_cross_substrate_transform_trace_projection_id():
         {"id": "double", "pattern": {"op": "double", "value": {"var": "v"}},
          "body": {"op": "doubled", "value": {"var": "v"}}},
     ]
-    input_value = {"op": "double", "value": 42}
+    input_value = {"op": "double", "value": ONE}
 
     # Python
     py_trace = run_mu_structural(projections, input_value, max_steps=5)

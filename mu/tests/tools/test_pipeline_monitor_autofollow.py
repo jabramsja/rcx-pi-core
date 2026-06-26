@@ -22,6 +22,7 @@ mu/tests/tools/test_pipeline_monitor_autofollow.py``
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -962,6 +963,76 @@ def _prepare_pane_workdir(tmp_path: Path, pane_script: str) -> Path:
         timeout=_TIMEOUT_S,
     )
     return work
+
+
+def test_pane4_autoping_filters_state_by_selected_bus(tmp_path):
+    work = _prepare_pane_workdir(tmp_path, "_pane_timeline.sh")
+    _write_pair_stub(work, emit_lines=[str(work), ".agent_bus-stage4loop"])
+    codex_home = tmp_path / "codex-home"
+    state_dir = codex_home / "state"
+    state_dir.mkdir(parents=True)
+    wrong_summary = state_dir / "wrong_summary.txt"
+    right_summary = state_dir / "right_summary.txt"
+    wrong_summary.write_text("wrong bus summary must not render\n", encoding="utf-8")
+    right_summary.write_text("right bus summary must render\n", encoding="utf-8")
+
+    common = {
+        "thread_id": "thread-pane",
+        "watcher_pid": os.getpid(),
+        "bridge_state": {"wave_root": str(work)},
+        "last_dispatched_pid": os.getpid(),
+    }
+    (state_dir / "rcx_autoping_wrong.json").write_text(
+        json.dumps(
+            common
+            | {
+                "bus_dir": ".agent_bus",
+                "tmux_session": "rcx-pipeline",
+                "tmux_pane": "rcx-pipeline:1.3",
+                "status": "wrong_bus_newer",
+                "updated_at": "2026-06-26T12:01:00+00:00",
+                "summary_path": str(wrong_summary),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (state_dir / "rcx_autoping_right.json").write_text(
+        json.dumps(
+            common
+            | {
+                "bus_dir": ".agent_bus-stage4loop",
+                "tmux_session": "rcx-stage4-loop",
+                "tmux_pane": "rcx-stage4-loop:1.3",
+                "status": "right_bus_older",
+                "updated_at": "2026-06-26T12:00:00+00:00",
+                "summary_path": str(right_summary),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "./_pane_timeline.sh"],
+        cwd=work,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "BUS_DIR": ".agent_bus-stage4loop",
+            "RCX_AGENT_BUS_DIR": ".agent_bus-stage4loop",
+            "RCX_CODEX_HOME": str(codex_home),
+            "RCX_PANE_ONESHOT": "1",
+        },
+        timeout=_TIMEOUT_S,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "bus .agent_bus-stage4loop" in result.stdout
+    assert "right bus summary must render" in result.stdout
+    assert "wrong bus summary must not render" not in result.stdout
+    assert "wrong_bus_newer" not in result.stdout
 
 
 @pytest.mark.parametrize("pane_script,path_var", sorted(_PANE_SCRIPTS.items()))

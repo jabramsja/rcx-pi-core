@@ -2356,6 +2356,124 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
  *
  * BOUNDARY: Trace infrastructure — off kernel path. Reclassified P7W5: was host iteration marker.
  */
+const snVar = name => ({ var: name });
+const SN_ZERO = muContainers.record([['_num', null]]);
+const SN_ONE = muContainers.record([['_num', muContainers.record([['xH', null]])]]);
+const SN_C0 = { carry0: null };
+const SN_C1 = { carry1: null };
+const SN_END = { end: null };
+const SN_SEED = { seed: null };
+const SN_LT = { lt: null };
+const SN_EQ = { eq: null };
+const SN_GT = { gt: null };
+const SN_PROJECTION_STEP_LIMIT = 2000;
+
+const STRUCTURAL_NUMBER_ADD_PROJECTIONS = [
+  { pattern: { _add: { a: { _num: null }, b: snVar('b') } }, body: snVar('b') },
+  { pattern: { _add: { a: snVar('a'), b: { _num: null } } }, body: snVar('a') },
+  {
+    pattern: { _add: { a: { _num: snVar('pa') }, b: { _num: snVar('pb') } } },
+    body: { _bits: { a: snVar('pa'), b: snVar('pb'), c: SN_C0, acc: SN_END } },
+  },
+];
+const SN_ADD_FORMS_A = {
+  O: [{ xO: snVar('ra') }, snVar('ra'), 'o'],
+  I: [{ xI: snVar('ra') }, snVar('ra'), 'i'],
+  H: [{ xH: null }, null, 'i'],
+  Z: [null, null, 'o'],
+};
+const SN_ADD_FORMS_B = {
+  O: [{ xO: snVar('rb') }, snVar('rb'), 'o'],
+  I: [{ xI: snVar('rb') }, snVar('rb'), 'i'],
+  H: [{ xH: null }, null, 'i'],
+  Z: [null, null, 'o'],
+};
+const SN_CARRY_FORMS = { 0: SN_C0, 1: SN_C1 };
+const SN_FULL_ADDER = {
+  'o/o/0': ['o', SN_C0],
+  'o/o/1': ['i', SN_C0],
+  'o/i/0': ['i', SN_C0],
+  'o/i/1': ['o', SN_C1],
+  'i/o/0': ['i', SN_C0],
+  'i/o/1': ['o', SN_C1],
+  'i/i/0': ['o', SN_C1],
+  'i/i/1': ['i', SN_C1],
+};
+for (const [snAf, [snAPat, snARest, snABit]] of Object.entries(SN_ADD_FORMS_A)) {
+  for (const [snBf, [snBPat, snBRest, snBBit]] of Object.entries(SN_ADD_FORMS_B)) {
+    for (const [snCarryName, snCarryPat] of Object.entries(SN_CARRY_FORMS)) {
+      if (snAf === 'Z' && snBf === 'Z' && snCarryName === '0') {
+        STRUCTURAL_NUMBER_ADD_PROJECTIONS.push({
+          pattern: { _bits: { a: null, b: null, c: SN_C0, acc: snVar('acc') } },
+          body: { _fold: { acc: snVar('acc'), num: SN_SEED } },
+        });
+        continue;
+      }
+      const [snOutBit, snCarryOut] = SN_FULL_ADDER[`${snABit}/${snBBit}/${snCarryName}`];
+      STRUCTURAL_NUMBER_ADD_PROJECTIONS.push({
+        pattern: { _bits: { a: snAPat, b: snBPat, c: snCarryPat, acc: snVar('acc') } },
+        body: {
+          _bits: {
+            a: snARest,
+            b: snBRest,
+            c: snCarryOut,
+            acc: { [snOutBit]: snVar('acc') },
+          },
+        },
+      });
+    }
+  }
+}
+STRUCTURAL_NUMBER_ADD_PROJECTIONS.push(
+  {
+    pattern: { _fold: { acc: { i: snVar('rest') }, num: SN_SEED } },
+    body: { _fold: { acc: snVar('rest'), num: { xH: null } } },
+  },
+  {
+    pattern: { _fold: { acc: { i: snVar('rest') }, num: snVar('n') } },
+    body: { _fold: { acc: snVar('rest'), num: { xI: snVar('n') } } },
+  },
+  {
+    pattern: { _fold: { acc: { o: snVar('rest') }, num: snVar('n') } },
+    body: { _fold: { acc: snVar('rest'), num: { xO: snVar('n') } } },
+  },
+  {
+    pattern: { _fold: { acc: { end: null }, num: snVar('n') } },
+    body: { _num: snVar('n') },
+  },
+);
+Object.freeze(STRUCTURAL_NUMBER_ADD_PROJECTIONS);
+const STRUCTURAL_NUMBER_COMPARE_PROJECTIONS = Object.freeze([
+  { pattern: { _cmp: { a: { _num: null }, b: { _num: null } } }, body: { _ord: SN_EQ } },
+  { pattern: { _cmp: { a: { _num: null }, b: { _num: snVar('pb') } } }, body: { _ord: SN_LT } },
+  { pattern: { _cmp: { a: { _num: snVar('pa') }, b: { _num: null } } }, body: { _ord: SN_GT } },
+  {
+    pattern: { _cmp: { a: { _num: snVar('pa') }, b: { _num: snVar('pb') } } },
+    body: { _cc: { a: snVar('pa'), b: snVar('pb'), r: SN_EQ } },
+  },
+  { pattern: { _cc: { a: { xI: snVar('pa') }, b: { xI: snVar('pb') }, r: snVar('r') } },
+    body: { _cc: { a: snVar('pa'), b: snVar('pb'), r: snVar('r') } } },
+  { pattern: { _cc: { a: { xI: snVar('pa') }, b: { xO: snVar('pb') }, r: snVar('r') } },
+    body: { _cc: { a: snVar('pa'), b: snVar('pb'), r: SN_GT } } },
+  { pattern: { _cc: { a: { xI: snVar('pa') }, b: { xH: null }, r: snVar('r') } },
+    body: { _ord: SN_GT } },
+  { pattern: { _cc: { a: { xO: snVar('pa') }, b: { xI: snVar('pb') }, r: snVar('r') } },
+    body: { _cc: { a: snVar('pa'), b: snVar('pb'), r: SN_LT } } },
+  { pattern: { _cc: { a: { xO: snVar('pa') }, b: { xO: snVar('pb') }, r: snVar('r') } },
+    body: { _cc: { a: snVar('pa'), b: snVar('pb'), r: snVar('r') } } },
+  { pattern: { _cc: { a: { xO: snVar('pa') }, b: { xH: null }, r: snVar('r') } },
+    body: { _ord: SN_GT } },
+  { pattern: { _cc: { a: { xH: null }, b: { xI: snVar('pb') }, r: snVar('r') } },
+    body: { _ord: SN_LT } },
+  { pattern: { _cc: { a: { xH: null }, b: { xO: snVar('pb') }, r: snVar('r') } },
+    body: { _ord: SN_LT } },
+  { pattern: { _cc: { a: { xH: null }, b: { xH: null }, r: snVar('r') } },
+    body: { _ord: snVar('r') } },
+]);
+
+/**
+ * BOUNDARY: Trace infrastructure — off kernel path. Reclassified P7W5.
+ */
 function runStructural(kernelProjections, domainProjections, input, maxSteps = 10000, vmConfig = null) {
   vmConfig = _vmConfigTrust.validate(vmConfig);
   if (!isValidMu(input)) {
@@ -2398,6 +2516,7 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
 
   const traceEntries = muContainers.list();
   let current = input;
+  let structuralStep = SN_ZERO;
   let currentHash = muHashControlCached(input, 'runStructural');
 
   for (let i = 0; i < maxSteps; i++) {
@@ -2443,16 +2562,39 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
 
     validateNoKernelReservedFields(result, 'runStructural output');
     const traceEntry = muContainers.record([
-      ['step', i],
+      ['step', structuralStep],
       ['state', current],
       ['projection', matchedId],
     ]);
     traceEntries.push(traceEntry);
+    let nextStructuralStep = null;
+    let snState = muContainers.record([['_add', muContainers.record([['a', structuralStep], ['b', SN_ONE]])]]);
+    let snStateHash = muHashControlCached(snState, 'runStructural.trace_step.initial');
+    for (let snGuard = 0; snGuard < SN_PROJECTION_STEP_LIMIT; snGuard++) {
+      const snResult = _stepTrusted(STRUCTURAL_NUMBER_ADD_PROJECTIONS, snState);
+      const snResultHash = muHashControlCached(snResult, 'runStructural.trace_step.stall');
+      if (snResultHash === snStateHash) {
+        nextStructuralStep = snResult;
+        break;
+      }
+      snState = snResult;
+      snStateHash = snResultHash;
+    }
+    if (nextStructuralStep === null) {
+      throw new RcxError('execution.max_steps',
+        'runStructural.trace_step: StructuralNumbers projection did not settle');
+    }
+    if (nextStructuralStep === null || typeof nextStructuralStep !== 'object' ||
+        Array.isArray(nextStructuralStep) || !Object.hasOwn(nextStructuralStep, '_num') ||
+        Object.keys(nextStructuralStep).length !== 1) {
+      throw new RcxError('execution.invalid_result',
+        'runStructural.trace_step: StructuralNumbers ADD produced malformed numeral');
+    }
 
     const resultHash = muHashControlCached(result, 'runStructural.stall');
     if (resultHash === currentHash) {
       const stallEntry = muContainers.record([
-        ['step', i + 1],
+        ['step', nextStructuralStep],
         ['state', result],
         ['projection', null],
         ['stall', true],
@@ -2468,10 +2610,11 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
 
     current = result;
     currentHash = resultHash;
+    structuralStep = nextStructuralStep;
   }
 
   const maxEntry = muContainers.record([
-    ['step', maxSteps],
+    ['step', structuralStep],
     ['state', current],
     ['projection', null],
     ['max_steps', true],
@@ -2498,6 +2641,11 @@ module.exports = {
   stepKernel,
   runStructural,
   stepKernelStructural,
+  STRUCTURAL_NUMBER_ADD_PROJECTIONS,
+  STRUCTURAL_NUMBER_COMPARE_PROJECTIONS,
+  SN_ZERO,
+  SN_ONE,
+  SN_PROJECTION_STEP_LIMIT,
   // Internal: exported for pipeline.js canonical kernel step
   _stepKernelCore,
   _vmConfigTrust,

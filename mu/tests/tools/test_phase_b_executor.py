@@ -949,7 +949,12 @@ class TestLoadExecutorConfig:
         assert config["backends"]["phase_b_executor"] == config["role_agents"]["implementer"]
         assert config["hybrid_recovery_enabled"] is True
 
-    def test_existing_config_loaded(self, tmp_path):
+    def test_existing_config_loaded(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", raising=False)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         config_dir.mkdir(parents=True)
         config_file = config_dir / "executor_config.json"
@@ -2845,6 +2850,15 @@ class TestMaintenanceTrackerMetadataPropagation:
             ],
             "Stage0 VM attempt_trace closes coverage reconstruction from host bundle order.",
         ) == "host_debt_reduction"
+
+    def test_structural_workload_target_preserves_explicit_plan_target(self):
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [
+                "mu/host/python/rcx_pi/selfhost/engine_pipeline.py",
+                "mu/host/js/engine/pipeline.js",
+            ],
+            "workload_target: rcx_engine_cycle\nengine_pipeline structuralization",
+        ) == "rcx_engine_cycle"
 
     def test_structural_workload_target_prioritizes_specific_targets_before_generic_coverage(self):
         assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
@@ -4985,6 +4999,34 @@ class TestFinalPytestGate:
         assert "tools/checks/enforce_l4_execution_contract.py --staged" not in note
         assert "tools/checks/enforce_l4_execution_contract.py --files" in note
         assert "reports/l4_wave_indicators/post-redteam-engine-state-scheduler-reduction-2026-04-30.json --wave-id" in note
+
+    def test_structural_tracker_note_preserves_explicit_packet_workload_target(self):
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id="stage4-loop-struct-2026-06-22",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/stage4-loop-struct-2026-06-22_2026-06-22.md",
+            plan_content=(
+                "Class: L4_STRUCTURAL\n"
+                "workload_target: rcx_engine_cycle\n"
+                "engine_pipeline structuralization\n"
+            ),
+            changed_files=[
+                "mu/host/python/rcx_pi/selfhost/engine_pipeline.py",
+                "mu/host/js/engine/pipeline.js",
+                "mu/tests/structural/test_rcx_engine_workload_contract.py",
+            ],
+            test_files=[
+                "mu/tests/structural/test_rcx_engine_workload_contract.py",
+            ],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/r.json",
+            bridge_rounds=15,
+            reentry=False,
+        )
+
+        assert "workload_target: rcx_engine_cycle" in note
+        assert "workload_target: host_debt_reduction" not in note
 
     def test_structural_tracker_note_l4_files_command_includes_indicator_artifact(self):
         wave_id = "n3-kernel-driver-mu-driver-boundary-design-2026-05-20"
@@ -9890,8 +9932,111 @@ class TestResumeNeedsPhaseB:
         assert result["status"] == "commit_ready", result
         assert mock_impl.invoke_implementer.call_count >= 2
 
-    def test_line_ref_lint_rejects_post_bridge_packet_drift_before_final_pytest(self, tmp_path):
-        """Post-bridge control-packet file:line drift blocks before final pytest/supervisor."""
+    def test_control_packet_line_ref_normalized_to_name_only_no_strand(self, tmp_path):
+        """A control-packet extension-colon-digit ref is normalized to name-only; the lint then passes (no strand).
+
+        Regression for pipeline-fix-25: an implementer addressing a line-cited
+        finding writes ``TASKS.md:128`` / ``loader.py:42:7`` into the packet. The
+        producing executor normalizes the packet to the compliant name-only form
+        *before* the fail-closed lint, so the wave self-heals instead of
+        stranding (tier-3 recovery cannot remove an edit-gated control-plane ref).
+        """
+        repo = tmp_path / "repo"
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        packet = repo / plan_path
+        packet.write_text(
+            "# Plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Purpose: address finding citing TASKS.md:128 and loader.py:42:7.\n",
+            encoding="utf-8",
+        )
+        changed_files = [plan_path]
+
+        # Pre-normalization: the lint would strand (line-ref present).
+        pre = pb_mod._control_packet_line_ref_lint_error(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+        assert pre is not None
+        assert "TASKS.md:128" in pre
+
+        # The producing executor normalizes its own packet in place.
+        pb_mod._normalize_control_packet_line_refs(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+
+        # The packet ends line-ref-free on disk; the name-only form is preserved
+        # (file:line and file:line:col both collapse to the bare name).
+        text = packet.read_text(encoding="utf-8")
+        assert "TASKS.md:128" not in text
+        assert "loader.py:42" not in text
+        assert "TASKS.md" in text
+        assert "loader.py" in text
+
+        # The lint now returns no error: the no-line-refs invariant holds and the
+        # wave does not strand.
+        post = pb_mod._control_packet_line_ref_lint_error(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+        assert post is None
+
+    def test_control_packet_line_range_ref_normalized_no_malformed_residue(self, tmp_path):
+        """A line-RANGE/list/col citation collapses to name-only with no malformed residue.
+
+        Regression for pipeline-fix-25 bridge round 2: the earlier normalizer
+        consumed only ``:<line>`` colon-digit groups, so a range citation
+        ``loader.py:42-45`` lost its ``:42`` but kept the dangling ``-45`` --
+        leaving the malformed ``loader.py-45`` residue. The lint then PASSED on
+        it (it is no longer ``.<ext>:<digit>``) and the wave silently shipped a
+        broken ref. The full numeric-tail normalizer collapses range, list, and
+        col forms to the bare name in one pass, and the lint stays clean.
+        """
+        repo = tmp_path / "repo"
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        packet = repo / plan_path
+        packet.write_text(
+            "# Plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Refs: loader.py:42-45 and TASKS.md:128.\n"
+            "List: parser.py:10,14,20 col eval_step.js:7:3.\n",
+            encoding="utf-8",
+        )
+        changed_files = [plan_path]
+
+        # Pre-normalization: the lint strands on the range/list/col citations.
+        pre = pb_mod._control_packet_line_ref_lint_error(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+        assert pre is not None
+        assert "loader.py:42-45" in pre
+
+        # The producing executor normalizes its own packet in place.
+        pb_mod._normalize_control_packet_line_refs(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+
+        text = packet.read_text(encoding="utf-8")
+        # Every name-only head survives; every numeric tail (range, list, col) is gone.
+        assert "loader.py" in text
+        assert "TASKS.md" in text
+        assert "parser.py" in text
+        assert "eval_step.js" in text
+        # No malformed residue: the range's trailing ``-45`` must NOT survive,
+        # and no citation digits or separators remain anywhere in the packet.
+        assert "loader.py-45" not in text
+        assert "-45" not in text
+        assert ":42" not in text and ":128" not in text
+        assert "10,14,20" not in text and ":7:3" not in text
+
+        # The lint is clean post-normalization: the wave self-heals (no strand).
+        post = pb_mod._control_packet_line_ref_lint_error(  # ANTICHEAT_OK: testing internal executor functions
+            repo, plan_path=plan_path, changed_files=changed_files,
+        )
+        assert post is None
+
+    def test_line_ref_lint_normalizes_post_bridge_packet_drift_before_final_pytest(self, tmp_path):
+        """Post-bridge control-packet file:line drift self-heals (normalized to name-only) instead of stranding."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -9926,15 +10071,24 @@ class TestResumeNeedsPhaseB:
              patch.object(pb_mod, "_select_pytest_gate_files", return_value=[test_path]), \
              patch.object(pb_mod, "_run_pytest_on_files", side_effect=final_pytest), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"), \
              patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
             result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=2)
 
-        assert result["status"] == "error"
-        assert result["step"] == "control_packet_line_ref_lint"
-        assert "phase_b_executor.py:42" in result["errors"][0]
-        final_pytest.assert_not_called()
-        supervisor.assert_not_called()
+        # New behavior: the implementer-added line-ref self-heals to name-only,
+        # so the wave finalizes (commit_ready) instead of stranding at the lint.
+        # ``step`` is only set on error, so its absence is itself proof of no strand.
+        assert result["status"] == "commit_ready", result
+        assert result.get("step") != "control_packet_line_ref_lint", result
+        # The packet ends line-ref-free on disk (normalized to name-only).
+        packet_text = (repo / plan_path).read_text(encoding="utf-8")
+        assert "phase_b_executor.py:42" not in packet_text
+        assert "phase_b_executor.py" in packet_text
+        # Self-heal proceeds past the lint into final pytest + supervisor finalization.
+        final_pytest.assert_called()
+        supervisor.assert_called()
 
     def test_resume_from_bridge_converged_rehydrates_dirty_baseline_into_package(self, tmp_path):
         """Legacy saved state without baseline tracking must still rebuild an honest supervisor package."""
@@ -12239,7 +12393,7 @@ class TestSdkReviewDepthContract:
             pb_mod._resolve_bridge_turn_timeout({"bridge_turn_timeouts": {"phase_b": -1}}, "phase_b", 300)  # ANTICHEAT_OK: testing config resolver
 
     def test_phase_b_pytest_gate_timeout_allows_pre_push_budget(self):
-        assert pb_mod.resolve_pytest_gate_timeout(18000) == 2400
+        assert pb_mod.resolve_pytest_gate_timeout(18000) == 7200
 
     def test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values(self):
         assert pb_mod.resolve_pytest_gate_timeout(0) == 300

@@ -40,19 +40,19 @@ class TestApplyMuParityWithApplyProjection:
 
     def test_literal_match(self):
         """Literal pattern matches literal value."""
-        proj = {"pattern": 42, "body": "matched"}
+        proj = {"pattern": "literal", "body": "matched"}
 
-        py_result = apply_projection(proj, 42)
-        mu_result = apply_mu(proj, 42)
+        py_result = apply_projection(proj, "literal")
+        mu_result = apply_mu(proj, "literal")
 
         assert py_result == mu_result == "matched"
 
     def test_literal_no_match(self):
         """Literal pattern doesn't match different value."""
-        proj = {"pattern": 42, "body": "matched"}
+        proj = {"pattern": "literal", "body": "matched"}
 
-        py_result = apply_projection(proj, 99)
-        mu_result = apply_mu(proj, 99)
+        py_result = apply_projection(proj, "other")
+        mu_result = apply_mu(proj, "other")
 
         assert py_result is NO_MATCH
         assert mu_result is NO_MATCH
@@ -61,10 +61,10 @@ class TestApplyMuParityWithApplyProjection:
         """Variable pattern captures value."""
         proj = {"pattern": {"var": "x"}, "body": {"result": {"var": "x"}}}
 
-        py_result = apply_projection(proj, 42)
-        mu_result = apply_mu(proj, 42)
+        py_result = apply_projection(proj, "captured")
+        mu_result = apply_mu(proj, "captured")
 
-        _assert_mu_parity(py_result, mu_result, {"result": 42})
+        _assert_mu_parity(py_result, mu_result, {"result": "captured"})
 
     def test_nested_pattern(self):
         """Nested pattern with multiple variables."""
@@ -72,12 +72,12 @@ class TestApplyMuParityWithApplyProjection:
             "pattern": {"a": {"var": "x"}, "b": {"var": "y"}},
             "body": {"first": {"var": "x"}, "second": {"var": "y"}}
         }
-        value = {"a": 1, "b": 2}
+        value = {"a": "one", "b": "two"}
 
         py_result = apply_projection(proj, value)
         mu_result = apply_mu(proj, value)
 
-        _assert_mu_parity(py_result, mu_result, {"first": 1, "second": 2})
+        _assert_mu_parity(py_result, mu_result, {"first": "one", "second": "two"})
 
     def test_list_pattern(self):
         """List pattern captures elements."""
@@ -85,12 +85,12 @@ class TestApplyMuParityWithApplyProjection:
             "pattern": [{"var": "head"}, {"var": "tail"}],
             "body": {"h": {"var": "head"}, "t": {"var": "tail"}}
         }
-        value = [1, 2]
+        value = ["one", "two"]
 
         py_result = apply_projection(proj, value)
         mu_result = apply_mu(proj, value)
 
-        _assert_mu_parity(py_result, mu_result, {"h": 1, "t": 2})
+        _assert_mu_parity(py_result, mu_result, {"h": "one", "t": "two"})
 
 
 class TestStepMuParityWithStep:
@@ -99,48 +99,48 @@ class TestStepMuParityWithStep:
     def test_first_projection_matches(self):
         """First projection matches, should apply it."""
         projections = [
-            {"pattern": 42, "body": "first"},
+            {"pattern": "literal", "body": "first"},
             {"pattern": {"var": "x"}, "body": "second"}
         ]
 
-        py_result = step(projections, 42)
-        mu_result = step_mu(projections, 42)
+        py_result = step(projections, "literal")
+        mu_result = step_mu(projections, "literal")
 
         assert py_result == mu_result == "first"
 
     def test_second_projection_matches(self):
         """First doesn't match, second does."""
         projections = [
-            {"pattern": 99, "body": "first"},
+            {"pattern": "other", "body": "first"},
             {"pattern": {"var": "x"}, "body": "second"}
         ]
 
-        py_result = step(projections, 42)
-        mu_result = step_mu(projections, 42)
+        py_result = step(projections, "literal")
+        mu_result = step_mu(projections, "literal")
 
         assert py_result == mu_result == "second"
 
     def test_no_projection_matches(self):
         """None match, returns input (stall)."""
         projections = [
-            {"pattern": 99, "body": "first"},
-            {"pattern": 100, "body": "second"}
+            {"pattern": "other", "body": "first"},
+            {"pattern": "another", "body": "second"}
         ]
 
-        py_result = step(projections, 42)
-        mu_result = step_mu(projections, 42)
+        py_result = step(projections, "literal")
+        mu_result = step_mu(projections, "literal")
 
         # Stall: return input unchanged
-        assert py_result == mu_result == 42
+        assert py_result == mu_result == "literal"
 
     def test_empty_projections(self):
         """Empty projections list returns input (stall)."""
         projections = []
 
-        py_result = step(projections, 42)
-        mu_result = step_mu(projections, 42)
+        py_result = step(projections, "literal")
+        mu_result = step_mu(projections, "literal")
 
-        assert py_result == mu_result == 42
+        assert py_result == mu_result == "literal"
 
     def test_variable_substitution(self):
         """Variable captured and substituted correctly."""
@@ -148,12 +148,12 @@ class TestStepMuParityWithStep:
             {"pattern": {"op": "inc", "val": {"var": "n"}},
              "body": {"op": "result", "val": {"var": "n"}}}
         ]
-        value = {"op": "inc", "val": 5}
+        value = {"op": "inc", "val": "five"}
 
         py_result = step(projections, value)
         mu_result = step_mu(projections, value)
 
-        _assert_mu_parity(py_result, mu_result, {"op": "result", "val": 5})
+        _assert_mu_parity(py_result, mu_result, {"op": "result", "val": "five"})
 
 
 class TestStepMuComplexCases:
@@ -201,22 +201,22 @@ class TestStepMuComplexCases:
                 "body": {"sum": [{"var": "x"}, {"var": "y"}, {"var": "z"}]}
             }
         ]
-        value = {"a": 1, "b": 2, "c": 3}
+        value = {"a": "one", "b": "two", "c": "three"}
 
         py_result = step(projections, value)
         mu_result = step_mu(projections, value)
 
-        _assert_mu_parity(py_result, mu_result, {"sum": [1, 2, 3]})
+        _assert_mu_parity(py_result, mu_result, {"sum": ["one", "two", "three"]})
 
     def test_projection_order_matters(self):
         """First matching projection wins."""
         projections = [
             {"pattern": {"var": "x"}, "body": "catch_all"},
-            {"pattern": 42, "body": "specific"}  # Never reached
+            {"pattern": "literal", "body": "specific"}  # Never reached
         ]
 
-        py_result = step(projections, 42)
-        mu_result = step_mu(projections, 42)
+        py_result = step(projections, "literal")
+        mu_result = step_mu(projections, "literal")
 
         # First projection (catch-all) wins
         assert py_result == mu_result == "catch_all"
@@ -267,17 +267,32 @@ class TestStepMuEdgeCases:
         mu2 = step_mu(projections, "world")
         _assert_mu_parity(py2, mu2, {"echoed": "world"})
 
-    def test_numeric_values(self):
-        """Numeric value handling (int and float)."""
+    def test_host_numeric_values_fail_closed(self):
+        """Raw host numeric leaves fail closed on the structural path."""
         projections = [
             {"pattern": 42, "body": "int_42"},
             {"pattern": 3.14, "body": "pi"},
             {"pattern": {"var": "n"}, "body": {"number": {"var": "n"}}}
         ]
 
-        assert step(projections, 42) == step_mu(projections, 42) == "int_42"
-        assert step(projections, 3.14) == step_mu(projections, 3.14) == "pi"
-        _assert_mu_parity(step(projections, 99), step_mu(projections, 99), {"number": 99})
+        assert step(projections, 42) == "int_42"
+        assert step_mu(projections, 42) == 42
+        assert step(projections, 3.14) == "pi"
+        assert step_mu(projections, 3.14) == 3.14
+        assert step(projections, 99) == {"number": 99}
+        assert step_mu(projections, 99) == 99
+
+    def test_structural_numeric_values_preserve_parity(self):
+        """StructuralNumbers numerals remain ordinary Mu values."""
+        zero = {"_num": None}
+        one = {"_num": {"xH": None}}
+        projections = [
+            {"pattern": zero, "body": "zero"},
+            {"pattern": {"_num": {"var": "n"}}, "body": {"number": {"var": "n"}}},
+        ]
+
+        assert step(projections, zero) == step_mu(projections, zero) == "zero"
+        _assert_mu_parity(step(projections, one), step_mu(projections, one), {"number": {"xH": None}})
 
 
 class TestStepMuErrors:
@@ -325,16 +340,16 @@ class TestStepMuErrors:
         - step_mu(): Returns {"_error": "unbound_variable", "_name": <name>}
         """
         projections = [
-            {"pattern": 42, "body": {"result": {"var": "unbound"}}}
+            {"pattern": "literal", "body": {"result": {"var": "unbound"}}}
         ]
 
         # Python step still raises KeyError
         with pytest.raises(KeyError):
-            step(projections, 42)
+            step(projections, "literal")
 
         # Structural step_mu produces error value (not stall)
         # Body is {"result": {"var": "unbound"}} — error nests inside "result" key
-        result = step_mu(projections, 42)
+        result = step_mu(projections, "literal")
         assert isinstance(result, dict)
         error_value = result.get("result")
         assert isinstance(error_value, dict)

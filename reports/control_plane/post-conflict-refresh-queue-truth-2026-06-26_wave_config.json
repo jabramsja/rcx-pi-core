@@ -1,0 +1,70 @@
+{
+  "wave_id": "post-conflict-refresh-queue-truth-2026-06-26",
+  "title": "Post Conflict Refresh Queue Truth 2026-06-26",
+  "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+  "purpose": "Refresh TASKS.md and STATUS.md after the pipeline-hardening wave and the #1139/#1140 conflict-refresh waves landed, so the active autonomous queue no longer presents completed pipeline cleanup as pending. Prepare a launcher-compatible Surreals-as-structure config for the next structural wave, but do not launch or implement Surreals inside this cleanup wave.",
+  "date": "2026-06-26",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/post-conflict-refresh-queue-truth-2026-06-26.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id post-conflict-refresh-queue-truth-2026-06-26 --output reports/l4_wave_indicators/post-conflict-refresh-queue-truth-2026-06-26.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "./tools/checks/check_docs_consistency.sh && PYTHONHASHSEED=0 python3 -m pytest -q tests/docs/test_doc_freshness.py tests/docs/test_manifest_discoverability.py tests/docs/test_debt_truth_gate.py mu/tests/structural/test_status_md_grounding.py --tb=short && PYTHONPATH=mu/tools/executors python3 -c \"from pathlib import Path; import launch_wave; cfg = launch_wave.load_wave_config(Path('reports/control_plane/surreals-as-structure-2026-06-26_wave_config.json')); errors = cfg.validate(Path('.')); assert not errors, errors\" && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id post-conflict-refresh-queue-truth-2026-06-26 --wave-class L4_ENABLER && git diff --check",
+  "evidence_delta": "(1) TASKS.md marks pipeline hardening PR #1154, PR #1139 conflict refresh via PR #1155, and PR #1140 conflict refresh via PR #1156 as completed queue work. (2) TASKS.md makes Surreals as structure the current next autonomous structural item, preserving recursive ordinals, W-types / inductive types, coinduction, fixpoint, and optimization-last order. (3) STATUS.md points at the same current queue truth and no longer says pipeline hardening/#1139/#1140 are the next milestone. (4) A validated launcher config exists for the next Surreals wave, but no Surreals implementation is launched in this cleanup wave.",
+  "progress_proof_before": "Current dev is at merge commit f62064b5 after PR #1156; git log also shows PR #1155 and PR #1154 merged. TASKS.md still lists pipeline hardening as item 1 in the active program queue, and STATUS.md still says the next milestone is pipeline hardening including #1139/#1140 packets.",
+  "progress_proof_after": "The active queue distinguishes completed conflict-refresh/pipeline-hardening work from remaining structural work, STATUS.md agrees with TASKS.md, and a schema-valid Surreals launcher config is ready for the next autonomous wave.",
+  "structural_artifact_ref": "TASKS.md; STATUS.md; reports/control_plane/surreals-as-structure-2026-06-26_wave_config.json",
+  "scope_summary": "Docs/control-plane truth sync only. Update active queue/status truth after #1154/#1155/#1156, and create the next Surreals launcher config as a control-plane artifact. Do not edit runtime, substrate, seed, registry, projection, parity, StructuralNumbers semantics, pager/autoping, tmux, or production Mu behavior.",
+  "scope_items": [
+    "TASKS.md (MODIFY) -- refresh the active PROGRAM QUEUE so completed pipeline hardening/#1139/#1140 conflict-refresh work is no longer pending and Surreals is the current next item.",
+    "STATUS.md (MODIFY) -- update last-updated and next-milestone wording to point at the refreshed queue and Surreals-next status without changing Phase 8c/L4 debt truth.",
+    "reports/control_plane/post-conflict-refresh-queue-truth-2026-06-26_wave_config.json (NEW) -- launcher config for this cleanup wave.",
+    "reports/control_plane/post-conflict-refresh-queue-truth-2026-06-26_2026-06-26.md (GENERATED) -- launcher-created control packet.",
+    "reports/control_plane/surreals-as-structure-2026-06-26_wave_config.json (CREATE) -- validated launcher config for the next Surreals structural wave; do not launch it inside this cleanup wave.",
+    "reports/l4_wave_indicators/post-conflict-refresh-queue-truth-2026-06-26.json (GENERATED) -- indicator artifact from the configured collection command."
+  ],
+  "work_items": [
+    "Ground the queue update in direct git evidence: PR #1154 merge commit 751b994f, PR #1155 merge commit bb7bc171, and PR #1156 merge commit f62064b5 are on current dev.",
+    "Update TASKS.md active PROGRAM QUEUE so pipeline hardening and #1139/#1140 conflict refresh are recorded as completed immediate queue work, not pending item 1.",
+    "Set the remaining active order to Surreals as structure, recursive ordinals as structure, W-types / inductive types, coinduction, fixpoint, and optimization LAST.",
+    "Update STATUS.md next-milestone wording to match TASKS.md, preserving the current Phase 8c/L4 posture and debt counts unless mechanically revalidated.",
+    "Create reports/control_plane/surreals-as-structure-2026-06-26_wave_config.json for the next wave. The config must pin implementer_agent=codex, reviewer_agent=codex, pager_route=codex, use Codex 5.5 xhigh defaults from executor_config, and keep optimization out of scope.",
+    "The Surreals config must be a bounded first structural step: author a SurrealNumbers design/spec plus a focused foundation gate or equivalent evidence plan, with no production runtime/substrate/seed edits unless the future Phase A explicitly narrows them under review.",
+    "Validate the Surreals config by loading it with launch_wave.WaveConfig validation only; do not run launch_wave on that config and do not generate a Surreals packet/tracker note in this cleanup wave.",
+    "Run the configured evidence command and collect the L4 indicator artifact."
+  ],
+  "constraints": [
+    "Use launch_wave.py and executor_dispatch for this wave.",
+    "Do not manually implement the TASKS.md/STATUS.md cleanup outside the pipeline after this launcher config is created unless the pipeline fails and the failure is captured as a precise structural follow-up.",
+    "Do not launch the Surreals wave, recursive ordinals wave, W-types wave, coinduction wave, fixpoint wave, or optimization wave from inside this cleanup wave.",
+    "Do not touch runtime, substrate, seed, scheduler, registry, projection, JavaScript parity, StructuralNumbers semantic tests, role selection code, bridge defaults, pager/autoping behavior, or tmux scripts.",
+    "Do not rewrite historical Ra tracker ledgers or compact unrelated TASKS.md history.",
+    "Do not claim new Surreals semantic closure in this cleanup wave; only the launcher config for the next Surreals wave is in scope.",
+    "Optimization remains LAST."
+  ],
+  "stop_conditions": [
+    "Stop done when TASKS.md and STATUS.md agree on the refreshed queue, the Surreals launcher config exists and validates, docs consistency and focused docs tests pass, strict staged L4 validation passes, the indicator artifact is collected, and commit/push/PR are handled through the commit executor.",
+    "Halt as DOC_ACCURACY if direct git evidence does not prove PR #1154, PR #1155, and PR #1156 are merged on current dev.",
+    "Halt as NEEDS_RESCOPING if the cleanup requires broader TASKS.md compaction beyond active queue/status truth.",
+    "Halt as POLICY_BOUND if preparing the Surreals config would require changing production runtime semantics inside this cleanup wave.",
+    "Do not commit without a real tracked source artifact and gate-green evidence."
+  ],
+  "acceptance_criteria": [
+    "TASKS.md no longer presents pipeline hardening, PR #1139 conflict refresh, or PR #1140 conflict refresh as uncompleted active work.",
+    "TASKS.md identifies Surreals as structure as the current next autonomous structural wave and preserves the remaining order through optimization LAST.",
+    "STATUS.md references the refreshed active queue and this packet while leaving Phase 8c/L4 debt truth unchanged.",
+    "reports/control_plane/surreals-as-structure-2026-06-26_wave_config.json exists, parses as JSON, loads as a WaveConfig, validates with no launch_wave config errors, and is not launched by this cleanup wave.",
+    "No runtime/substrate/seed/registry/projection/parity/pager/autoping/tmux files are touched.",
+    "reports/l4_wave_indicators/post-conflict-refresh-queue-truth-2026-06-26.json is collected."
+  ],
+  "request_for_agent": "Implement a bounded docs/control-plane truth sync through the pipeline: refresh TASKS.md and STATUS.md after the landed pipeline-hardening and #1139/#1140 conflict-refresh waves; make Surreals the current next structural item; create and validate, but do not launch, the Surreals-as-structure launcher config for the next wave; run the configured evidence command; collect the indicator artifact; keep the diff out of runtime/substrate/seed/parity/pager/autoping/tmux surfaces.",
+  "request_for_claude": "Compatibility input only: this wave is pinned to Codex implementer, Codex reviewer, and Codex pager route. Do not route implementation, review, or pager handling to Claude.",
+  "authorization_note": "Founder-directed 2026-06-26 queue continuation: cleanup stale queue truth after #1139/#1140 merge, then continue remaining structural waves autonomously with Codex 5.5 xhigh implementer/reviewer and optimization last.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Docs/control-plane queue truth refresh after #1154/#1155/#1156, preparing Surreals as the next autonomous wave.",
+  "tracked_packet": "reports/control_plane/post-conflict-refresh-queue-truth-2026-06-26_2026-06-26.md"
+}

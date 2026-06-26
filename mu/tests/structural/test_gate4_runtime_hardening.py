@@ -22,6 +22,8 @@ from rcx_pi.selfhost.kernel import get_step_budget, reset_step_budget
 
 pytestmark = [pytest.mark.slow]
 
+ONE = {"_num": {"xH": None}}
+
 
 class DummyBudget:
     """Shared mock budget for tests that monkeypatch get_step_budget."""
@@ -132,7 +134,7 @@ def test_run_mu_structural_projection_id_probe_is_budget_neutral():
             "body": {"op": "done", "v": {"var": "x"}},
         }
     ]
-    value = {"op": "double", "v": 7}
+    value = {"op": "double", "v": ONE}
 
     # Baseline: one bridge kernel step cost
     reset_step_budget()
@@ -184,20 +186,20 @@ def test_step_kernel_mu_return_meta_stall_false_on_match():
             "body": {"ok": {"var": "v"}},
         }
     ]
-    meta = step_kernel_mu(projections, {"x": 1}, return_meta=True)
+    meta = step_kernel_mu(projections, {"x": ONE}, return_meta=True)
     assert isinstance(meta, dict)
     assert meta["stall"] is False
-    assert meta["output"] == {"ok": 1}
+    assert meta["output"] == {"ok": ONE}
 
 
 def test_match_mu_allows_shared_substructures_without_false_cycle():
     # Shared (aliased) sub-structures are not cycles and should not be rejected.
     shared_var = {"var": "v"}
     pattern = {"0": shared_var, "00": shared_var}
-    value = {"0": 1, "00": 1}
+    value = {"0": ONE, "00": ONE}
     result = match_mu(pattern, value)
     assert isinstance(result, dict)
-    assert result.get("v") == 1
+    assert result.get("v") == ONE
 
 
 def test_run_algorithm_meta_circular_defaults_to_structural_kernel(monkeypatch):

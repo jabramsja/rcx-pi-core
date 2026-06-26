@@ -36,9 +36,9 @@
       "input": {
         "route_hemisphere": {
           "engine_result": {
-            "value": 42,
+            "value": "forty_two",
             "closure_detected": true,
-            "tau_step": 3,
+            "tau_step": {"_num": {"xI": {"xH": null}}},
             "exhaustion_detected": false,
             "operator_frozen": null,
             "frozen_set": null,
@@ -53,7 +53,7 @@
       },
       "expected_target": "r_a",
       "expected_entry": {
-        "state": 42,
+        "state": "forty_two",
         "closure_flag": true,
         "origin": "engine"
       }
@@ -94,7 +94,7 @@
           "engine_result": {
             "value": null,
             "closure_detected": true,
-            "tau_step": 5,
+            "tau_step": {"_num": {"xI": {"xO": {"xH": null}}}},
             "exhaustion_detected": false,
             "operator_frozen": null,
             "frozen_set": null,
@@ -120,7 +120,7 @@
       "input": {
         "route_hemisphere": {
           "engine_result": {
-            "value": {"a": 1, "b": {"c": 2}},
+            "value": {"a": "one", "b": {"c": "two"}},
             "closure_detected": false,
             "tau_step": null,
             "exhaustion_detected": false,
@@ -137,7 +137,7 @@
       },
       "expected_target": "lobes",
       "expected_entry": {
-        "state": {"a": 1, "b": {"c": 2}},
+        "state": {"a": "one", "b": {"c": "two"}},
         "closure_flag": false,
         "origin": "engine"
       }
@@ -181,7 +181,7 @@
       "input": {
         "route_hemisphere": {
           "engine_result": {
-            "value": 99,
+            "value": "ninety_nine",
             "closure_detected": false,
             "tau_step": null,
             "exhaustion_detected": true,
@@ -198,7 +198,7 @@
       },
       "expected_target": "sink",
       "expected_entry": {
-        "state": 99,
+        "state": "ninety_nine",
         "closure_flag": false,
         "origin": "engine"
       }

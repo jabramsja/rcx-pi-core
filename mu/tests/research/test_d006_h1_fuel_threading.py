@@ -135,11 +135,11 @@ def fuel_run(projections, state, fuel):
 V1_PROJECTIONS = [
     {"id": "v1.only", "pattern": {"key": "nonexistent"}, "body": {"result": "found"}}
 ]
-V1_INPUT = {"different_key": 42}
+V1_INPUT = {"different_key": "forty_two"}
 
 # V2: Single match — one projection fires once, then stalls
 V2_PROJECTIONS = [
-    {"id": "v2.transform", "pattern": {"status": "ready"}, "body": {"status": "done", "value": 1}}
+    {"id": "v2.transform", "pattern": {"status": "ready"}, "body": {"status": "done", "value": "one"}}
 ]
 V2_INPUT = {"status": "ready"}
 
@@ -153,13 +153,13 @@ V3_INPUT = {"phase": "a"}
 
 # V4: Fuel exhaustion — would take 10 steps but only gets 3 fuel
 V4_PROJECTIONS = [
-    {"id": "v4.inc", "pattern": {"n": 0}, "body": {"n": 1}},
-    {"id": "v4.inc2", "pattern": {"n": 1}, "body": {"n": 2}},
-    {"id": "v4.inc3", "pattern": {"n": 2}, "body": {"n": 3}},
-    {"id": "v4.inc4", "pattern": {"n": 3}, "body": {"n": 4}},
-    {"id": "v4.inc5", "pattern": {"n": 4}, "body": {"n": 5}},
+    {"id": "v4.inc", "pattern": {"n": "zero"}, "body": {"n": "one"}},
+    {"id": "v4.inc2", "pattern": {"n": "one"}, "body": {"n": "two"}},
+    {"id": "v4.inc3", "pattern": {"n": "two"}, "body": {"n": "three"}},
+    {"id": "v4.inc4", "pattern": {"n": "three"}, "body": {"n": "four"}},
+    {"id": "v4.inc5", "pattern": {"n": "four"}, "body": {"n": "five"}},
 ]
-V4_INPUT = {"n": 0}
+V4_INPUT = {"n": "zero"}
 V4_FUEL = 3  # Only 3 steps, will exhaust before reaching n=5
 
 # V5: Nested structure — complex Mu data
@@ -167,7 +167,7 @@ V5_PROJECTIONS = [
     {
         "id": "v5.unwrap",
         "pattern": {"outer": {"inner": {"value": "wrapped"}}},
-        "body": {"result": "unwrapped", "depth": 2},
+        "body": {"result": "unwrapped", "depth": "two"},
     }
 ]
 V5_INPUT = {"outer": {"inner": {"value": "wrapped"}}}
@@ -193,7 +193,7 @@ class TestH1SuccessCriteria:
         fuel = make_fuel(10)
         result, trace, reason = fuel_run(V2_PROJECTIONS, V2_INPUT, fuel)
         assert reason == "stall"
-        assert result == {"status": "done", "value": 1}
+        assert result == {"status": "done", "value": "one"}
 
     def test_v3_multi_step_convergence(self):
         """V3: Three steps (a->b->c->done) then stall."""
@@ -210,15 +210,15 @@ class TestH1SuccessCriteria:
         fuel = make_fuel(V4_FUEL)
         result, trace, reason = fuel_run(V4_PROJECTIONS, V4_INPUT, fuel)
         assert reason == "fuel_exhausted"
-        # With 3 fuel nodes, should reach n=3 (3 steps: 0->1->2->3)
-        assert result == {"n": 3}
+        # With 3 fuel nodes, should reach "three" after three transitions.
+        assert result == {"n": "three"}
 
     def test_v5_nested_structure(self):
         """V5: Complex nested Mu data matches and transforms correctly."""
         fuel = make_fuel(10)
         result, trace, reason = fuel_run(V5_PROJECTIONS, V5_INPUT, fuel)
         assert reason == "stall"
-        assert result == {"result": "unwrapped", "depth": 2}
+        assert result == {"result": "unwrapped", "depth": "two"}
 
 
 class TestH1ParityWithRunMu:

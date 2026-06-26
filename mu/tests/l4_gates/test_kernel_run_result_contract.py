@@ -34,6 +34,10 @@ VALID_TERM_REASONS = {
 }
 FUEL_FIELDS = {"fuel_supplied", "fuel_remaining", "fuel_exhausted"}
 PACKET_FIELDS = {"kind", "result", "continuation"}
+ZERO = {"_num": None}
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
+THREE = {"_num": {"xI": {"xH": None}}}
 CONTINUATION_FIELDS = {
     "tag",
     "version",
@@ -81,8 +85,8 @@ class TestKernelRunResultPython:
     def test_raw_step_kernel_returns_packet_shape(self):
         """Raw Python kernel-driver call returns terminal-or-continuation packet."""
         packet = step_kernel_mu(
-            [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            {"x": 1},
+            [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            {"x": ONE},
             max_steps=100,
             return_packet=True,
         )
@@ -105,8 +109,8 @@ class TestKernelRunResultPython:
     def test_raw_step_kernel_terminal_packet_carries_kernel_run_result(self):
         """Terminal packets carry the existing KernelRunResult unchanged."""
         packet = step_kernel_mu(
-            [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            {"x": 1},
+            [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            {"x": ONE},
             kernel_fuel=None,
             max_steps=100,
             return_packet=True,
@@ -120,8 +124,8 @@ class TestKernelRunResultPython:
     def test_continuation_resume_rejects_terminal_metadata_claim(self):
         """Continuation packets must not smuggle terminal result metadata."""
         packet = step_kernel_mu(
-            [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            {"x": 1},
+            [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            {"x": ONE},
             max_steps=100,
             return_packet=True,
         )
@@ -135,8 +139,8 @@ class TestKernelRunResultPython:
 
         with pytest.raises(ValueError, match="terminal metadata"):
             step_kernel_mu(
-                [{"pattern": {"x": 1}, "body": {"x": 2}}],
-                {"x": 1},
+                [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+                {"x": ONE},
                 continuation_state=forged,
                 return_packet=True,
                 max_steps=100,
@@ -145,8 +149,8 @@ class TestKernelRunResultPython:
     def test_continuation_resume_rejects_unsupplied_projection_state(self):
         """Continuation resume must not execute projections absent from the call."""
         forged_projection = {
-            "pattern": step_mu_mod.normalize_for_match({"x": 1}),
-            "body": step_mu_mod.normalize_for_match({"x": 2}),
+            "pattern": step_mu_mod.normalize_for_match({"x": ONE}),
+            "body": step_mu_mod.normalize_for_match({"x": TWO}),
         }
         state = {
             "tag": "kernel_driver_continuation_state",
@@ -175,11 +179,11 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_broader_matching_prefix_projection(self):
         """Continuation resume must not skip an earlier matching caller projection."""
-        first = {"pattern": {"x": 1}, "body": {"winner": "first"}}
-        second = {"pattern": {"x": 1}, "body": {"winner": "second"}}
+        first = {"pattern": {"x": ONE}, "body": {"winner": "first"}}
+        second = {"pattern": {"x": ONE}, "body": {"winner": "second"}}
         packet = step_kernel_mu(
             [second],
-            {"x": 1},
+            {"x": ONE},
             return_packet=True,
             max_steps=100,
         )
@@ -188,7 +192,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="kernel_state"):
             step_kernel_mu(
                 [first, second],
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=packet["continuation"],
                 return_packet=True,
                 max_steps=100,
@@ -199,7 +203,7 @@ class TestKernelRunResultPython:
         first = {"pattern": {"x": {"var": "v"}}, "body": {"winner": {"var": "v"}}}
         second = {"pattern": {"x": {"var": "v"}}, "body": {"shadow": {"var": "v"}}}
         projs = [first, second]
-        inp = {"x": 1}
+        inp = {"x": ONE}
         packet = step_kernel_mu(projs, inp, return_packet=True, max_steps=100)
         assert packet["kind"] == "continuation"
         packet = step_kernel_mu(
@@ -234,7 +238,7 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_forged_later_phase_projection_state(self):
         """Continuation resume must reject later states whose selected projection no longer matches."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
         forged = {
             "tag": "kernel_driver_continuation_state",
             "version": 1,
@@ -243,12 +247,12 @@ class TestKernelRunResultPython:
                 "_status": "success",
                 "_bindings": None,
                 "_match_ctx": {
-                    "_input": step_mu_mod.normalize_for_match({"x": 0}),
-                    "_body": step_mu_mod.normalize_for_match({"x": 2}),
+                    "_input": step_mu_mod.normalize_for_match({"x": ZERO}),
+                    "_body": step_mu_mod.normalize_for_match({"x": TWO}),
                     "_remaining": None,
                 },
             },
-            "domain_input": {"x": 0},
+            "domain_input": {"x": ZERO},
             "projection_cursor": None,
             "remaining_fuel": None,
             "fuel_mode": "omitted_compatibility",
@@ -260,7 +264,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="kernel_state"):
             step_kernel_mu(
                 projs,
-                {"x": 0},
+                {"x": ZERO},
                 continuation_state=forged,
                 return_packet=True,
                 max_steps=100,
@@ -268,7 +272,7 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_forged_match_no_match_for_matching_projection(self):
         """Continuation resume must reject no_match when the selected projection matches."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
         forged = {
             "tag": "kernel_driver_continuation_state",
             "version": 1,
@@ -276,12 +280,12 @@ class TestKernelRunResultPython:
                 "_mode": "match_done",
                 "_status": "no_match",
                 "_match_ctx": {
-                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
-                    "_body": step_mu_mod.normalize_for_match({"x": 2}),
+                    "_input": step_mu_mod.normalize_for_match({"x": ONE}),
+                    "_body": step_mu_mod.normalize_for_match({"x": TWO}),
                     "_remaining": None,
                 },
             },
-            "domain_input": {"x": 1},
+            "domain_input": {"x": ONE},
             "projection_cursor": None,
             "remaining_fuel": None,
             "fuel_mode": "omitted_compatibility",
@@ -293,7 +297,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="kernel_state"):
             step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=forged,
                 return_packet=True,
                 max_steps=100,
@@ -301,7 +305,7 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_forged_match_success_precursor(self):
         """Packet mode must not advance a forged match state into success."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
         forged = {
             "tag": "kernel_driver_continuation_state",
             "version": 1,
@@ -312,12 +316,12 @@ class TestKernelRunResultPython:
                 "bindings": None,
                 "stack": None,
                 "_match_ctx": {
-                    "_input": step_mu_mod.normalize_for_match({"x": 0}),
-                    "_body": step_mu_mod.normalize_for_match({"x": 2}),
+                    "_input": step_mu_mod.normalize_for_match({"x": ZERO}),
+                    "_body": step_mu_mod.normalize_for_match({"x": TWO}),
                     "_remaining": None,
                 },
             },
-            "domain_input": {"x": 0},
+            "domain_input": {"x": ZERO},
             "projection_cursor": None,
             "remaining_fuel": None,
             "fuel_mode": "omitted_compatibility",
@@ -329,7 +333,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="kernel_state"):
             step_kernel_mu(
                 projs,
-                {"x": 0},
+                {"x": ZERO},
                 continuation_state=forged,
                 return_packet=True,
                 max_steps=100,
@@ -337,19 +341,19 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_forged_subst_done_result(self):
         """Continuation resume must not trust a caller-supplied subst_done result."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
         state = {
             "tag": "kernel_driver_continuation_state",
             "version": 1,
             "kernel_state": {
                 "_mode": "subst_done",
-                "_result": step_mu_mod.normalize_for_match({"x": 999}),
+                "_result": step_mu_mod.normalize_for_match({"x": THREE}),
                 "_subst_ctx": {
-                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
+                    "_input": step_mu_mod.normalize_for_match({"x": ONE}),
                     "_remaining": None,
                 },
             },
-            "domain_input": {"x": 1},
+            "domain_input": {"x": ONE},
             "projection_cursor": None,
             "remaining_fuel": None,
             "fuel_mode": "omitted_compatibility",
@@ -361,7 +365,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="kernel_state"):
             step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=state,
                 return_packet=True,
                 max_steps=100,
@@ -369,22 +373,22 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_forged_final_subst_result_focus(self):
         """Continuation resume must bind final subst result focus to the selected body."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
         state = {
             "tag": "kernel_driver_continuation_state",
             "version": 1,
             "kernel_state": {
                 "mode": "subst",
                 "phase": "result",
-                "focus": step_mu_mod.normalize_for_match({"x": 999}),
+                "focus": step_mu_mod.normalize_for_match({"x": THREE}),
                 "bindings": None,
                 "context": None,
                 "_subst_ctx": {
-                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
+                    "_input": step_mu_mod.normalize_for_match({"x": ONE}),
                     "_remaining": None,
                 },
             },
-            "domain_input": {"x": 1},
+            "domain_input": {"x": ONE},
             "projection_cursor": None,
             "remaining_fuel": None,
             "fuel_mode": "omitted_compatibility",
@@ -396,7 +400,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="kernel_state"):
             step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=state,
                 return_packet=True,
                 max_steps=100,
@@ -404,8 +408,8 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_watchdog_cap_tampering(self):
         """Continuation watchdog metadata must stay bound to the supplied watchdog."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        packet = step_kernel_mu(projs, {"x": 1}, max_steps=2, return_packet=True)
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        packet = step_kernel_mu(projs, {"x": ONE}, max_steps=2, return_packet=True)
         assert packet["kind"] == "continuation"
 
         forged = deepcopy(packet["continuation"])
@@ -414,7 +418,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="watchdog_cap"):
             step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=forged,
                 return_packet=True,
                 max_steps=2,
@@ -422,8 +426,8 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_boolean_versions(self):
         """Python continuation version fields must reject bools like JS strict equality."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        packet = step_kernel_mu(projs, {"x": 1}, max_steps=2, return_packet=True)
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        packet = step_kernel_mu(projs, {"x": ONE}, max_steps=2, return_packet=True)
         assert packet["kind"] == "continuation"
         assert packet["continuation"]["projection_cursor"] is not None
 
@@ -432,7 +436,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="version mismatch"):
             step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=forged,
                 return_packet=True,
                 max_steps=2,
@@ -443,7 +447,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="version mismatch"):
             step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=forged,
                 return_packet=True,
                 max_steps=2,
@@ -451,8 +455,8 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_primitive_kernel_state_with_projection_cursor(self):
         """Python continuation resume rejects scalar kernel_state values carrying cursor authority."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        packet = step_kernel_mu(projs, {"x": 1}, max_steps=100, return_packet=True)
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        packet = step_kernel_mu(projs, {"x": ONE}, max_steps=100, return_packet=True)
         assert packet["kind"] == "continuation"
 
         forged = deepcopy(packet["continuation"])
@@ -461,7 +465,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="kernel_state"):
             step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=forged,
                 return_packet=True,
                 max_steps=100,
@@ -497,7 +501,7 @@ class TestKernelRunResultPython:
             "tag": "kernel_driver_continuation_state",
             "version": 1,
             "kernel_state": kernel_state,
-            "domain_input": {"x": 1},
+            "domain_input": {"x": ONE},
             "projection_cursor": None,
             "remaining_fuel": None,
             "fuel_mode": "omitted_compatibility",
@@ -508,8 +512,8 @@ class TestKernelRunResultPython:
 
         with pytest.raises(ValueError, match="kernel_state"):
             step_kernel_mu(
-                [{"pattern": {"x": 1}, "body": {"x": 2}}],
-                {"x": 1},
+                [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+                {"x": ONE},
                 continuation_state=state,
                 return_packet=True,
                 max_steps=100,
@@ -517,8 +521,8 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_steps_used_cursor_tampering(self):
         """Python continuation resume rejects steps_used values not bound to the cursor."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        packet = step_kernel_mu(projs, {"x": 1}, max_steps=100, return_packet=True)
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        packet = step_kernel_mu(projs, {"x": ONE}, max_steps=100, return_packet=True)
         assert packet["kind"] == "continuation"
 
         forged = deepcopy(packet["continuation"])
@@ -527,7 +531,7 @@ class TestKernelRunResultPython:
         with pytest.raises(ValueError, match="steps_used"):
             step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=forged,
                 return_packet=True,
                 max_steps=100,
@@ -535,12 +539,12 @@ class TestKernelRunResultPython:
 
     def test_continuation_resume_rejects_steps_used_null_cursor_tampering(self):
         """Python continuation resume rejects cursorless steps_used tampering."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        packet = step_kernel_mu(projs, {"x": 1}, max_steps=100, return_packet=True)
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        packet = step_kernel_mu(projs, {"x": ONE}, max_steps=100, return_packet=True)
         assert packet["kind"] == "continuation"
         packet = step_kernel_mu(
             projs,
-            {"x": 1},
+            {"x": ONE},
             continuation_state=packet["continuation"],
             return_packet=True,
             max_steps=100,
@@ -555,7 +559,7 @@ class TestKernelRunResultPython:
             with pytest.raises(ValueError, match="steps_used"):
                 step_kernel_mu(
                     projs,
-                    {"x": 1},
+                    {"x": ONE},
                     continuation_state=forged,
                     return_packet=True,
                     max_steps=100,
@@ -564,7 +568,7 @@ class TestKernelRunResultPython:
     def test_continuation_resume_rejects_subst_null_bindings_when_required(self):
         """Python continuation resume rejects null subst bindings for a bound projection."""
         projs = [{"pattern": {"x": {"var": "v"}}, "body": {"y": {"var": "v"}}}]
-        packet = step_kernel_mu(projs, {"x": 1}, max_steps=100, return_packet=True)
+        packet = step_kernel_mu(projs, {"x": ONE}, max_steps=100, return_packet=True)
         for _ in range(40):
             assert packet["kind"] == "continuation"
             kernel_state = packet["continuation"]["kernel_state"]
@@ -574,7 +578,7 @@ class TestKernelRunResultPython:
                 with pytest.raises(ValueError, match="kernel_state"):
                     step_kernel_mu(
                         projs,
-                        {"x": 1},
+                        {"x": ONE},
                         continuation_state=forged,
                         return_packet=True,
                         max_steps=100,
@@ -582,7 +586,7 @@ class TestKernelRunResultPython:
                 break
             packet = step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=packet["continuation"],
                 return_packet=True,
                 max_steps=100,
@@ -602,7 +606,7 @@ class TestKernelRunResultPython:
     )
     def test_continuation_resume_rejects_malformed_phase_fields(self, case_name, expected_error):
         """Python continuation resume rejects supplied null/missing phase fields like JS."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
         state = {
             "tag": "kernel_driver_continuation_state",
             "version": 1,
@@ -611,16 +615,16 @@ class TestKernelRunResultPython:
                 "_status": "success",
                 "_bindings": None,
                 "_match_ctx": {
-                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
-                    "_body": step_mu_mod.normalize_for_match({"x": 2}),
+                    "_input": step_mu_mod.normalize_for_match({"x": ONE}),
+                    "_body": step_mu_mod.normalize_for_match({"x": TWO}),
                     "_remaining": None,
                 },
                 "_subst_ctx": {
-                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
+                    "_input": step_mu_mod.normalize_for_match({"x": ONE}),
                     "_remaining": None,
                 },
             },
-            "domain_input": {"x": 1},
+            "domain_input": {"x": ONE},
             "projection_cursor": None,
             "remaining_fuel": None,
             "fuel_mode": "omitted_compatibility",
@@ -645,7 +649,7 @@ class TestKernelRunResultPython:
         with pytest.raises((TypeError, ValueError), match=expected_error):
             step_kernel_mu(
                 projs,
-                {"x": 1},
+                {"x": ONE},
                 continuation_state=state,
                 return_packet=True,
                 max_steps=100,
@@ -653,18 +657,18 @@ class TestKernelRunResultPython:
 
     def test_projection_applied_shape(self):
         """Successful projection produces all required fields."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        meta = step_kernel_mu(projs, {"x": 1}, return_meta=True)
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        meta = step_kernel_mu(projs, {"x": ONE}, return_meta=True)
         assert isinstance(meta, dict)
         assert REQUIRED_FIELDS <= set(meta.keys()), f"Missing fields: {REQUIRED_FIELDS - set(meta.keys())}"
         assert meta["termination_reason"] in VALID_TERM_REASONS
         assert meta["termination_reason"] == "projection_applied"
         assert meta["stall"] is False
-        assert meta["output"] == {"x": 2}
+        assert meta["output"] == {"x": TWO}
 
     def test_kernel_stall_shape(self):
         """No matching projection produces kernel_stall with undefined_motif."""
-        meta = step_kernel_mu([], {"x": 1}, return_meta=True)
+        meta = step_kernel_mu([], {"x": ONE}, return_meta=True)
         assert REQUIRED_FIELDS <= set(meta.keys())
         assert meta["termination_reason"] == "kernel_stall"
         assert meta["stall"] is True
@@ -674,7 +678,7 @@ class TestKernelRunResultPython:
     def test_stall_shape(self):
         """Stall (kernel_stall or hash_stall) produces stall=True with required fields."""
         # No projections -> kernel_stall (no projection matches)
-        meta = step_kernel_mu([], {"x": 1}, return_meta=True)
+        meta = step_kernel_mu([], {"x": ONE}, return_meta=True)
         assert REQUIRED_FIELDS <= set(meta.keys())
         assert meta["termination_reason"] in ("hash_stall", "kernel_stall")
         assert meta["stall"] is True
@@ -737,21 +741,21 @@ class TestKernelRunResultPython:
         monkeypatch.setattr(step_mu_mod, "normalize_for_match", counting_normalize_for_match)
 
         meta = step_kernel_mu(
-            [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            {"x": 1},
+            [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            {"x": ONE},
             return_meta=True,
             max_steps=100,
         )
 
         assert meta["termination_reason"] == "projection_applied"
-        assert meta["output"] == {"x": 2}
+        assert meta["output"] == {"x": TWO}
         assert counts["normalize_projection"] == 1
         assert counts["normalize_for_match"] <= 4
 
     def test_direct_packet_resume_keeps_public_boundary_normalization(self, monkeypatch):
         """External return_packet resume still enters the public resume boundary."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        packet = step_kernel_mu(projs, {"x": 1}, return_packet=True, max_steps=100)
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        packet = step_kernel_mu(projs, {"x": ONE}, return_packet=True, max_steps=100)
         assert packet["kind"] == "continuation"
 
         counts = {"normalize_projection": 0}
@@ -764,7 +768,7 @@ class TestKernelRunResultPython:
         monkeypatch.setattr(step_mu_mod, "normalize_projection", counting_normalize_projection)
         resumed = step_kernel_mu(
             projs,
-            {"x": 1},
+            {"x": ONE},
             continuation_state=packet["continuation"],
             return_packet=True,
             max_steps=100,
@@ -776,8 +780,8 @@ class TestKernelRunResultPython:
     def test_kernel_fuel_zero_exhausts_before_attempting_step(self):
         """Python kernel fuel uses explicit empty Mu fuel as execution authority."""
         meta = step_kernel_mu(
-            [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            {"x": 1},
+            [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            {"x": ONE},
             return_meta=True,
             max_steps=100,
             kernel_fuel=None,
@@ -785,7 +789,7 @@ class TestKernelRunResultPython:
         assert REQUIRED_FIELDS <= set(meta.keys())
         assert meta["termination_reason"] == "fuel_exhausted"
         assert meta["stall"] is True
-        assert meta["output"] == {"x": 1}
+        assert meta["output"] == {"x": ONE}
         assert meta["steps_used"] == 0
         assert meta["max_steps"] == 100
         assert meta["fuel_supplied"] is True
@@ -851,8 +855,8 @@ class TestKernelRunResultPython:
         """Python rejects non-finite watchdog values before the fuel driver can run."""
         with pytest.raises(ValueError, match="max_steps"):
             step_kernel_mu(
-                [{"pattern": {"x": 1}, "body": {"x": 2}}],
-                {"x": 1},
+                [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+                {"x": ONE},
                 return_meta=True,
                 max_steps=bad_max_steps,
                 kernel_fuel=_make_kernel_fuel(2),
@@ -874,8 +878,8 @@ class TestKernelRunResultPython:
         """Python successful projection returns remaining Mu fuel."""
         fuel_count = 80
         meta = step_kernel_mu(
-            [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            {"x": 1},
+            [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            {"x": ONE},
             return_meta=True,
             max_steps=100,
             kernel_fuel=_make_kernel_fuel(fuel_count),
@@ -883,7 +887,7 @@ class TestKernelRunResultPython:
         assert REQUIRED_FIELDS <= set(meta.keys())
         assert meta["termination_reason"] == "projection_applied"
         assert meta["stall"] is False
-        assert meta["output"] == {"x": 2}
+        assert meta["output"] == {"x": TWO}
         assert meta["fuel_supplied"] is True
         assert meta["fuel_exhausted"] is False
         assert 0 < meta["steps_used"] < fuel_count
@@ -916,8 +920,8 @@ class TestKernelRunResultPython:
         """Python validates the full fuel list before returning remaining fuel."""
         with pytest.raises(TypeError, match="kernel_fuel"):
             step_kernel_mu(
-                [{"pattern": {"x": 1}, "body": {"x": 2}}],
-                {"x": 1},
+                [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+                {"x": ONE},
                 return_meta=True,
                 max_steps=100,
                 kernel_fuel={"head": None, "tail": 0},
@@ -926,8 +930,8 @@ class TestKernelRunResultPython:
     def test_undefined_motif_only_on_kernel_stall(self):
         """undefined_motif must NOT be present on non-kernel_stall results."""
         # projection_applied
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        meta = step_kernel_mu(projs, {"x": 1}, return_meta=True)
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        meta = step_kernel_mu(projs, {"x": ONE}, return_meta=True)
         assert "undefined_motif" not in meta, "undefined_motif must not appear on projection_applied"
 
         # max_steps_exhausted
@@ -940,9 +944,9 @@ class TestKernelRunResultPython:
 
     def test_return_meta_false_returns_bare_output(self):
         """return_meta=False returns bare Mu value, not KernelRunResult dict."""
-        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        result = step_kernel_mu(projs, {"x": 1}, return_meta=False)
-        assert result == {"x": 2}
+        projs = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        result = step_kernel_mu(projs, {"x": ONE}, return_meta=False)
+        assert result == {"x": TWO}
         assert not isinstance(result, dict) or "termination_reason" not in result
 
 
@@ -972,8 +976,8 @@ function trust(value) {
 }
 const packet = stepKernel(
   [],
-  trust({ x: 1 }),
-  [{ pattern: trust({ x: 1 }), body: trust({ x: 2 }) }],
+  trust({ x: 'one' }),
+  [{ pattern: trust({ x: 'one' }), body: trust({ x: 'two' }) }],
   { returnPacket: true, maxSteps: 1 }
 );
 console.log(JSON.stringify(Object.keys(packet).sort()));
@@ -1049,8 +1053,8 @@ function trust(value) {
   return value;
 }
 const forgedProjection = muContainers.record([
-  ['pattern', normalize(trust({ x: 1 }))],
-  ['body', normalize(trust({ x: 2 }))],
+  ['pattern', normalize(trust({ x: 'one' }))],
+  ['body', normalize(trust({ x: 'two' }))],
 ]);
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
@@ -1106,17 +1110,17 @@ function trust(value) {
   return value;
 }
 const projection = muContainers.record([
-  ['pattern', normalize(trust({ x: 1 }))],
-  ['body', normalize(trust({ x: 2 }))],
+  ['pattern', normalize(trust({ x: 'one' }))],
+  ['body', normalize(trust({ x: 'two' }))],
 ]);
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
   ['version', 1],
   ['kernel_state', muContainers.record([
-    ['_step', normalize(trust({ x: 1 }))],
+    ['_step', normalize(trust({ x: 'one' }))],
     ['_projs', listToLinked([projection])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', null],
   ['remaining_fuel', null],
   ['fuel_mode', 'omitted_compatibility'],
@@ -1131,8 +1135,8 @@ const state = muContainers.record([
 try {
   stepKernel(
     [],
-    trust({ x: 1 }),
-    [trust({ pattern: { x: 1 }, body: { x: 2 } })],
+    trust({ x: 'one' }),
+    [trust({ pattern: { x: 'one' }, body: { x: 'two' } })],
     { continuationState: state, returnMeta: true, maxSteps: 100 }
   );
   console.log(JSON.stringify({ success: true }));
@@ -1194,9 +1198,9 @@ stage0Vm.validateBundle(matchBundle);
 stage0Vm.validateBundle(substBundle);
 const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
 const vmConfig = { kernelBundle, bridgeBundle: null, matchBundle, substBundle };
-const first = trust({ pattern: { x: 1 }, body: { winner: 'first' } });
-const second = trust({ pattern: { x: 1 }, body: { winner: 'second' } });
-const input = trust({ x: 1 });
+const first = trust({ pattern: { x: 'one' }, body: { winner: 'first' } });
+const second = trust({ pattern: { x: 'one' }, body: { winner: 'second' } });
+const input = trust({ x: 'one' });
 let packet = stepKernel(
   allProjections,
   input,
@@ -1251,9 +1255,9 @@ const kernel = seed('kernel.v1.json');
 const matchSeed = seed('match.v2.json');
 const substSeed = seed('subst.v2.json');
 const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
-const input = trust({ x: 1 });
-const first = trust({ pattern: { x: 1 }, body: { winner: 'first' } });
-const second = trust({ pattern: { x: 1 }, body: { winner: 'second' } });
+const input = trust({ x: 'one' });
+const first = trust({ pattern: { x: 'one' }, body: { winner: 'first' } });
+const second = trust({ pattern: { x: 'one' }, body: { winner: 'second' } });
 let packet = stepKernel(
   allProjections,
   input,
@@ -1333,9 +1337,9 @@ const kernel = seed('kernel.v1.json');
 const matchSeed = seed('match.v2.json');
 const substSeed = seed('subst.v2.json');
 const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
-const input = trust({ x: 1 });
-const first = trust({ pattern: { x: 1 }, body: { winner: 'first' } });
-const second = trust({ pattern: { x: 1 }, body: { winner: 'second' } });
+const input = trust({ x: 'one' });
+const first = trust({ pattern: { x: 'one' }, body: { winner: 'first' } });
+const second = trust({ pattern: { x: 'one' }, body: { winner: 'second' } });
 const packet = stepKernel(
   allProjections,
   input,
@@ -1381,7 +1385,7 @@ function trust(value) {
   }
   return value;
 }
-const projection = trust({ pattern: { x: 1 }, body: { accepted: true } });
+const projection = trust({ pattern: { x: 'one' }, body: { accepted: true } });
 const normalizedProjection = normalizeProjection(projection);
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
@@ -1389,10 +1393,10 @@ const state = muContainers.record([
   ['kernel_state', muContainers.record([
     ['_mode', 'kernel'],
     ['_phase', 'try'],
-    ['_input', normalize(trust({ x: 999 }))],
+    ['_input', normalize(trust({ x: 'forged' }))],
     ['_remaining', listToLinked([normalizedProjection])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', muContainers.record([
     ['tag', 'kernel_projection_cursor'],
     ['version', 1],
@@ -1412,7 +1416,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     [],
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [projection],
     {
       continuationState: state,
@@ -1457,16 +1461,16 @@ const state = muContainers.record([
     ['_status', 'success'],
     ['_bindings', muContainers.record([
       ['name', 'v'],
-      ['value', 999],
+      ['value', 'forged'],
       ['rest', null],
     ])],
     ['_match_ctx', muContainers.record([
-      ['_input', normalize(trust({ x: 1 }))],
+      ['_input', normalize(trust({ x: 'one' }))],
       ['_body', normalize(trust({ y: { var: 'v' } }))],
       ['_remaining', null],
     ])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', null],
   ['remaining_fuel', null],
   ['fuel_mode', 'omitted_compatibility'],
@@ -1481,7 +1485,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     [],
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [projection],
     {
       continuationState: state,
@@ -1540,17 +1544,17 @@ const state = muContainers.record([
     ['value_focus', null],
     ['bindings', muContainers.record([
       ['name', 'v'],
-      ['value', 999],
+      ['value', 'forged'],
       ['rest', null],
     ])],
     ['stack', null],
     ['_match_ctx', muContainers.record([
-      ['_input', normalize(trust({ x: 1 }))],
+      ['_input', normalize(trust({ x: 'one' }))],
       ['_body', normalize(trust({ y: { var: 'v' } }))],
       ['_remaining', null],
     ])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', null],
   ['remaining_fuel', null],
   ['fuel_mode', 'omitted_compatibility'],
@@ -1565,7 +1569,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     matchProjections,
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [projection],
     {
       continuationState: state,
@@ -1623,16 +1627,16 @@ const state = muContainers.record([
   ['kernel_state', muContainers.record([
     ['mode', 'match'],
     ['pattern_focus', muContainers.record([['var', 'v']])],
-    ['value_focus', 999],
+    ['value_focus', 'forged'],
     ['bindings', null],
     ['stack', null],
     ['_match_ctx', muContainers.record([
-      ['_input', normalize(trust({ x: 1 }))],
+      ['_input', normalize(trust({ x: 'one' }))],
       ['_body', normalize(trust({ y: { var: 'v' } }))],
       ['_remaining', null],
     ])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', null],
   ['remaining_fuel', null],
   ['fuel_mode', 'omitted_compatibility'],
@@ -1647,7 +1651,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     allProjections,
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [projection],
     {
       continuationState: state,
@@ -1684,7 +1688,7 @@ function trust(value) {
   }
   return value;
 }
-const input = trust({ x: 1 });
+const input = trust({ x: 'one' });
 const normalizedInput = normalize(input);
 const projection = normalizeProjection(trust({ pattern: { x: { var: 'v' } }, body: { y: { var: 'v' } } }));
 const kernelInput = muContainers.record([
@@ -1702,7 +1706,7 @@ const state = muContainers.record([
   ['kernel_state', muContainers.record([
     ['mode', 'match'],
     ['pattern_focus', muContainers.record([['var', 'v']])],
-    ['value_focus', 999],
+    ['value_focus', 'forged'],
     ['bindings', null],
     ['stack', null],
     ['_match_ctx', muContainers.record([
@@ -1764,9 +1768,9 @@ function trust(value) {
   }
   return value;
 }
-const input = trust({ x: 2 });
+const input = trust({ x: 'two' });
 const normalizedInput = normalize(input);
-const projection = normalizeProjection(trust({ pattern: { x: 1 }, body: { accepted: true } }));
+const projection = normalizeProjection(trust({ pattern: { x: 'one' }, body: { accepted: true } }));
 const projectionRecord = muContainers.record([
   ['pattern', projection.pattern],
   ['body', projection.body],
@@ -1871,11 +1875,11 @@ const state = muContainers.record([
     ])],
     ['context', null],
     ['_subst_ctx', muContainers.record([
-      ['_input', normalize(trust({ x: 1 }))],
+      ['_input', normalize(trust({ x: 'one' }))],
       ['_remaining', null],
     ])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', null],
   ['remaining_fuel', null],
   ['fuel_mode', 'omitted_compatibility'],
@@ -1890,7 +1894,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     [],
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [projection],
     {
       continuationState: state,
@@ -1926,7 +1930,7 @@ function trust(value) {
   }
   return value;
 }
-const projection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const projection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
   ['version', 1],
@@ -1937,11 +1941,11 @@ const state = muContainers.record([
     ['bindings', null],
     ['context', null],
     ['_subst_ctx', muContainers.record([
-      ['_input', normalize(trust({ x: 1 }))],
+      ['_input', normalize(trust({ x: 'one' }))],
       ['_remaining', null],
     ])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', null],
   ['remaining_fuel', null],
   ['fuel_mode', 'omitted_compatibility'],
@@ -1956,7 +1960,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     [],
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [projection],
     {
       continuationState: state,
@@ -1997,7 +2001,7 @@ const state = muContainers.record([
   ['version', 1],
   ['kernel_state', muContainers.record([
     ['_mode', 'subst_done'],
-    ['_result', normalize(trust({ x: 2 }))],
+    ['_result', normalize(trust({ x: 'two' }))],
     ['_subst_ctx', muContainers.record([
       ['_input', normalize(trust({ x: 0 }))],
       ['_remaining', null],
@@ -2019,7 +2023,7 @@ try {
   stepKernel(
     [],
     trust({ x: 0 }),
-    [trust({ pattern: { x: 1 }, body: { x: 2 } })],
+    [trust({ pattern: { x: 'one' }, body: { x: 'two' } })],
     { continuationState: state, returnPacket: true, maxSteps: 100 }
   );
   console.log(JSON.stringify({ success: true }));
@@ -2082,7 +2086,7 @@ stage0Vm.validateBundle(matchBundle);
 stage0Vm.validateBundle(substBundle);
 const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
 const vmConfig = { kernelBundle, bridgeBundle: null, matchBundle, substBundle };
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
   ['version', 1],
@@ -2090,12 +2094,12 @@ const state = muContainers.record([
     ['_mode', 'match_done'],
     ['_status', 'no_match'],
     ['_match_ctx', muContainers.record([
-      ['_input', normalize(trust({ x: 1 }))],
-      ['_body', normalize(trust({ x: 2 }))],
+      ['_input', normalize(trust({ x: 'one' }))],
+      ['_body', normalize(trust({ x: 'two' }))],
       ['_remaining', null],
     ])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', null],
   ['remaining_fuel', null],
   ['fuel_mode', 'omitted_compatibility'],
@@ -2110,7 +2114,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     allProjections,
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [domainProjection],
     { continuationState: state, returnPacket: true, maxSteps: 100, vmConfig }
   );
@@ -2174,7 +2178,7 @@ stage0Vm.validateBundle(matchBundle);
 stage0Vm.validateBundle(substBundle);
 const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
 const vmConfig = { kernelBundle, bridgeBundle: null, matchBundle, substBundle };
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
   ['version', 1],
@@ -2186,7 +2190,7 @@ const state = muContainers.record([
     ['stack', null],
     ['_match_ctx', muContainers.record([
       ['_input', normalize(trust({ x: 0 }))],
-      ['_body', normalize(trust({ x: 2 }))],
+      ['_body', normalize(trust({ x: 'two' }))],
       ['_remaining', null],
     ])],
   ])],
@@ -2236,19 +2240,19 @@ function trust(value) {
   }
   return value;
 }
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
   ['version', 1],
   ['kernel_state', muContainers.record([
     ['_mode', 'subst_done'],
-    ['_result', normalize(trust({ x: 999 }))],
+    ['_result', normalize(trust({ x: 'forged' }))],
     ['_subst_ctx', muContainers.record([
-      ['_input', normalize(trust({ x: 1 }))],
+      ['_input', normalize(trust({ x: 'one' }))],
       ['_remaining', null],
     ])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', null],
   ['remaining_fuel', null],
   ['fuel_mode', 'omitted_compatibility'],
@@ -2263,7 +2267,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     [],
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [domainProjection],
     { continuationState: state, returnPacket: true, maxSteps: 100 }
   );
@@ -2294,22 +2298,22 @@ function trust(value) {
   }
   return value;
 }
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
   ['version', 1],
   ['kernel_state', muContainers.record([
     ['mode', 'subst'],
     ['phase', 'result'],
-    ['focus', normalize(trust({ x: 999 }))],
+    ['focus', normalize(trust({ x: 'forged' }))],
     ['bindings', null],
     ['context', null],
     ['_subst_ctx', muContainers.record([
-      ['_input', normalize(trust({ x: 1 }))],
+      ['_input', normalize(trust({ x: 'one' }))],
       ['_remaining', null],
     ])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', null],
   ['remaining_fuel', null],
   ['fuel_mode', 'omitted_compatibility'],
@@ -2324,7 +2328,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     [],
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [domainProjection],
     { continuationState: state, returnPacket: true, maxSteps: 100 }
   );
@@ -2355,7 +2359,7 @@ function trust(value) {
   }
   return value;
 }
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const kernelProjection = normalizeProjection(domainProjection);
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
@@ -2363,10 +2367,10 @@ const state = muContainers.record([
   ['kernel_state', muContainers.record([
     ['_mode', 'kernel'],
     ['_phase', 'try'],
-    ['_input', normalize(trust({ x: 1 }))],
+    ['_input', normalize(trust({ x: 'one' }))],
     ['_remaining', listToLinked([kernelProjection])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', muContainers.record([
     ['tag', 'kernel_projection_cursor'],
     ['version', 1],
@@ -2386,7 +2390,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     [],
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [domainProjection],
     { continuationState: state, returnPacket: true, maxSteps: 1 }
   );
@@ -2417,7 +2421,7 @@ function trust(value) {
   }
   return value;
 }
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const kernelProjection = normalizeProjection(domainProjection);
 const state = muContainers.record([
   ['tag', 'kernel_driver_continuation_state'],
@@ -2425,10 +2429,10 @@ const state = muContainers.record([
   ['kernel_state', muContainers.record([
     ['_mode', 'kernel'],
     ['_phase', 'try'],
-    ['_input', normalize(trust({ x: 1 }))],
+    ['_input', normalize(trust({ x: 'one' }))],
     ['_remaining', listToLinked([kernelProjection])],
   ])],
-  ['domain_input', trust({ x: 1 })],
+  ['domain_input', trust({ x: 'one' })],
   ['projection_cursor', muContainers.record([
     ['tag', 'kernel_projection_cursor'],
     ['version', 1],
@@ -2448,7 +2452,7 @@ const state = muContainers.record([
 try {
   stepKernel(
     [],
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [domainProjection],
     { continuationState: state, returnPacket: true, maxSteps: 1 }
   );
@@ -2489,10 +2493,10 @@ const kernel = seed('kernel.v1.json');
 const matchSeed = seed('match.v2.json');
 const substSeed = seed('subst.v2.json');
 const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const packet = stepKernel(
   allProjections,
-  trust({ x: 1 }),
+  trust({ x: 'one' }),
   [domainProjection],
   { returnPacket: true, maxSteps: 100 }
 );
@@ -2500,7 +2504,7 @@ packet.continuation.kernel_state = 'forged_non_state';
 try {
   stepKernel(
     allProjections,
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [domainProjection],
     { continuationState: packet.continuation, returnPacket: true, maxSteps: 100 }
   );
@@ -2602,7 +2606,7 @@ function trust(value) {
   }
   return value;
 }
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const malformedKernelStates = [
   muContainers.record([['foo', 'bar']]),
   muContainers.record([['_mode', 'bogus']]),
@@ -2613,7 +2617,7 @@ for (const kernelState of malformedKernelStates) {
     ['tag', 'kernel_driver_continuation_state'],
     ['version', 1],
     ['kernel_state', kernelState],
-    ['domain_input', trust({ x: 1 })],
+    ['domain_input', trust({ x: 'one' })],
     ['projection_cursor', null],
     ['remaining_fuel', null],
     ['fuel_mode', 'omitted_compatibility'],
@@ -2628,7 +2632,7 @@ for (const kernelState of malformedKernelStates) {
   try {
     stepKernel(
       [],
-      trust({ x: 1 }),
+      trust({ x: 'one' }),
       [domainProjection],
       { continuationState: state, returnPacket: true, maxSteps: 100 }
     );
@@ -2671,10 +2675,10 @@ const kernel = seed('kernel.v1.json');
 const matchSeed = seed('match.v2.json');
 const substSeed = seed('subst.v2.json');
 const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const packet = stepKernel(
   allProjections,
-  trust({ x: 1 }),
+  trust({ x: 'one' }),
   [domainProjection],
   { returnPacket: true, maxSteps: 100 }
 );
@@ -2682,7 +2686,7 @@ packet.continuation.steps_used = 100;
 try {
   stepKernel(
     allProjections,
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [domainProjection],
     { continuationState: packet.continuation, returnPacket: true, maxSteps: 100 }
   );
@@ -2723,16 +2727,16 @@ const kernel = seed('kernel.v1.json');
 const matchSeed = seed('match.v2.json');
 const substSeed = seed('subst.v2.json');
 const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
-const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const domainProjection = trust({ pattern: { x: 'one' }, body: { x: 'two' } });
 const first = stepKernel(
   allProjections,
-  trust({ x: 1 }),
+  trust({ x: 'one' }),
   [domainProjection],
   { returnPacket: true, maxSteps: 100 }
 );
 const second = stepKernel(
   allProjections,
-  trust({ x: 1 }),
+  trust({ x: 'one' }),
   [domainProjection],
   { continuationState: first.continuation, returnPacket: true, maxSteps: 100 }
 );
@@ -2743,7 +2747,7 @@ for (const forgedStepsUsed of [0, 1, 100]) {
   try {
     stepKernel(
       allProjections,
-      trust({ x: 1 }),
+      trust({ x: 'one' }),
       [domainProjection],
       { continuationState: second.continuation, returnPacket: true, maxSteps: 100 }
     );
@@ -2799,7 +2803,7 @@ const allProjections = muContainers.list([...kernel.projections, ...matchSeed.pr
 const domainProjection = trust({ pattern: { x: { var: 'v' } }, body: { y: { var: 'v' } } });
 let packet = stepKernel(
   allProjections,
-  trust({ x: 1 }),
+  trust({ x: 'one' }),
   [domainProjection],
   { returnPacket: true, maxSteps: 100 }
 );
@@ -2813,7 +2817,7 @@ for (let i = 0; i < 40; i++) {
     try {
       stepKernel(
         allProjections,
-        trust({ x: 1 }),
+        trust({ x: 'one' }),
         [domainProjection],
         { continuationState: packet.continuation, returnPacket: true, maxSteps: 100 }
       );
@@ -2824,7 +2828,7 @@ for (let i = 0; i < 40; i++) {
   }
   packet = stepKernel(
     allProjections,
-    trust({ x: 1 }),
+    trust({ x: 'one' }),
     [domainProjection],
     { continuationState: packet.continuation, returnPacket: true, maxSteps: 100 }
   );
@@ -2844,8 +2848,8 @@ console.log(JSON.stringify({ found, error }));
         """JS live kernel produces KernelRunResult on successful projection."""
         meta = self._run_json_api({
             "action": "step_kernel_meta",
-            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            "input": {"x": 1},
+            "projections": [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            "input": {"x": ONE},
             "maxSteps": 100,
         })
         assert REQUIRED_FIELDS <= set(meta.keys()), f"JS missing: {REQUIRED_FIELDS - set(meta.keys())}"
@@ -2860,7 +2864,7 @@ console.log(JSON.stringify({ found, error }));
         meta = self._run_json_api({
             "action": "step_kernel_meta",
             "projections": [],
-            "input": {"x": 1},
+            "input": {"x": ONE},
             "maxSteps": 100,
         })
         assert REQUIRED_FIELDS <= set(meta.keys())
@@ -2887,15 +2891,15 @@ console.log(JSON.stringify({ found, error }));
         """JS live kernel consumes no step when caller supplies empty Mu fuel."""
         meta = self._run_json_api({
             "action": "step_kernel_meta",
-            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            "input": {"x": 1},
+            "projections": [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            "input": {"x": ONE},
             "maxSteps": 100,
             "kernelFuel": None,
         })
         assert REQUIRED_FIELDS <= set(meta.keys())
         assert meta["termination_reason"] == "fuel_exhausted"
         assert meta["stall"] is True
-        assert meta["output"] == {"x": 1}
+        assert meta["output"] == {"x": ONE}
         assert meta["steps_used"] == 0
         assert meta["max_steps"] == 100
         assert meta["fuel_supplied"] is True
@@ -2967,15 +2971,15 @@ console.log(JSON.stringify({ found, error }));
         fuel_count = 80
         meta = self._run_json_api({
             "action": "step_kernel_meta",
-            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            "input": {"x": 1},
+            "projections": [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            "input": {"x": ONE},
             "maxSteps": 100,
             "kernelFuel": _make_kernel_fuel(fuel_count),
         })
         assert REQUIRED_FIELDS <= set(meta.keys())
         assert meta["termination_reason"] == "projection_applied"
         assert meta["stall"] is False
-        assert meta["output"] == {"x": 2}
+        assert meta["output"] == {"x": TWO}
         assert meta["fuel_supplied"] is True
         assert meta["fuel_exhausted"] is False
         assert 0 < meta["steps_used"] < fuel_count
@@ -2983,8 +2987,8 @@ console.log(JSON.stringify({ found, error }));
 
     def test_kernel_fuel_success_shared_result_matches_python(self):
         """Fuel-backed JS success preserves the Python/JS KernelRunResult contract."""
-        projections = [{"pattern": {"x": 1}, "body": {"x": 2}}]
-        input_value = {"x": 1}
+        projections = [{"pattern": {"x": ONE}, "body": {"x": TWO}}]
+        input_value = {"x": ONE}
         max_steps = 100
         fuel_count = 80
 
@@ -3060,8 +3064,8 @@ console.log(JSON.stringify({ found, error }));
         """JSON API fuel is fail-closed as Mu head/tail linked-list data."""
         resp = self._run_json_api_response({
             "action": "step_kernel_meta",
-            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            "input": {"x": 1},
+            "projections": [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            "input": {"x": ONE},
             "maxSteps": 100,
             "kernelFuel": kernel_fuel,
         })
@@ -3074,14 +3078,14 @@ console.log(JSON.stringify({ found, error }));
         # JS projection_applied via live seeded kernel
         js_meta = self._run_json_api({
             "action": "step_kernel_meta",
-            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
-            "input": {"x": 1},
+            "projections": [{"pattern": {"x": ONE}, "body": {"x": TWO}}],
+            "input": {"x": ONE},
         })
         js_fields = set(js_meta.keys())
 
         # Python projection_applied
         py_meta = step_kernel_mu(
-            [{"pattern": {"x": 1}, "body": {"x": 2}}], {"x": 1}, return_meta=True
+            [{"pattern": {"x": ONE}, "body": {"x": TWO}}], {"x": ONE}, return_meta=True
         )
         py_fields = set(py_meta.keys())
 

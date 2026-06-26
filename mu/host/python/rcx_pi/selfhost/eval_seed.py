@@ -14,7 +14,7 @@ See mu/docs/core/EVAL_SEED.v0.md for specification.
 
 from __future__ import annotations
 
-from .mu_type import Mu, assert_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH, consume_budget, _NO_BUDGET
+from .mu_type import Mu, assert_mu, is_mu, mark_bootstrap, mu_hash_cached, MAX_MU_DEPTH, consume_budget, _NO_BUDGET
 
 
 # _is_kernel_internal_state and its supporting constants (_VALID_MU_TYPES,
@@ -461,9 +461,10 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
             sub_bindings = _match_inner(p_elem, i_elem, _depth + 1)
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
-            # Non-linear conflict check (same variable, different value)
-            # Use mu_hash_cached (NOT mu_hash_control_cached) — control hash
-            # canonicalizes 0.0→0 which breaks int/float type distinction.
+            # Non-linear conflict check (same variable, different value).
+            # Use content hash, not control hash: conflict detection compares
+            # structural data identity, while numeric leaves on the Stage 4
+            # path are StructuralNumbers numerals rather than host int/float.
             for k in sub_bindings:
                 if k in bindings:
                     if mu_hash_cached(bindings[k]) != mu_hash_cached(sub_bindings[k]):
@@ -493,9 +494,10 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
             sub_bindings = _match_inner(pattern[key], input_value[key], _depth + 1)
             if sub_bindings is NO_MATCH:
                 return NO_MATCH
-            # Non-linear conflict check (same variable, different value)
-            # Use mu_hash_cached (NOT mu_hash_control_cached) — control hash
-            # canonicalizes 0.0→0 which breaks int/float type distinction.
+            # Non-linear conflict check (same variable, different value).
+            # Use content hash, not control hash: conflict detection compares
+            # structural data identity, while numeric leaves on the Stage 4
+            # path are StructuralNumbers numerals rather than host int/float.
             for k in sub_bindings:
                 if k in bindings:
                     if mu_hash_cached(bindings[k]) != mu_hash_cached(sub_bindings[k]):
@@ -537,14 +539,38 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
         pattern, input_value, depth = work.pop()
         if depth > MAX_MU_DEPTH:
             return NO_MATCH
+        # Stage 4 StructuralNumbers cutover: host numeric leaves are no longer
+        # matcher-domain data. A stray int/float leaf fails closed before it can
+        # bind through a variable site or match through content-hash equality.
+        if (
+            (isinstance(pattern, (int, float)) and not isinstance(pattern, bool))
+            or (isinstance(input_value, (int, float)) and not isinstance(input_value, bool))
+        ):
+            return NO_MATCH
         # Variable site
         if is_var(pattern):
             name = pattern["var"]
             if not name:
                 return NO_MATCH
+            pending_numeric_check = [(input_value, False)]
+            active_numeric_check_containers, finished_numeric_check_containers = [], []
+            while pending_numeric_check:
+                candidate, exiting = pending_numeric_check.pop()
+                if isinstance(candidate, (int, float)) and not isinstance(candidate, bool): return NO_MATCH
+                if not isinstance(candidate, (dict, list)): continue
+                candidate_id = id(candidate)
+                if exiting:
+                    active_numeric_check_containers.remove(candidate_id); finished_numeric_check_containers.append(candidate_id); continue
+                if candidate_id in active_numeric_check_containers: return NO_MATCH
+                if candidate_id in finished_numeric_check_containers: continue
+                active_numeric_check_containers.append(candidate_id); pending_numeric_check.append((candidate, True))
+                values = candidate.values() if isinstance(candidate, dict) else candidate
+                for child in values: pending_numeric_check.append((child, False))
             if name in current:
-                # Use mu_hash_cached (NOT mu_hash_control_cached) — control hash
-                # canonicalizes 0.0→0 which breaks int/float type distinction.
+                # Use content hash, NOT mu_hash_control_cached: conflict
+                # detection compares structural data identity. Numeric leaves on
+                # the Stage 4 path are StructuralNumbers numerals, not host
+                # int/float.
                 if mu_hash_cached(current[name]) != mu_hash_cached(input_value):
                     return NO_MATCH
                 continue
@@ -555,34 +581,10 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
             if input_value is None:
                 continue
             return NO_MATCH
-        # Bool (before int — bool is subclass of int)
-        if isinstance(pattern, bool):
-            if isinstance(input_value, bool) and pattern == input_value:
-                continue
-            return NO_MATCH
-        # Int
-        if isinstance(pattern, int):
-            if isinstance(input_value, int) and not isinstance(input_value, bool):
-                if pattern == input_value:
-                    continue
-            return NO_MATCH
-        # Float
-        if isinstance(pattern, float):
-            if isinstance(input_value, float) and pattern == input_value:
-                continue
-            return NO_MATCH
-        # String
-        if isinstance(pattern, str):
-            if isinstance(input_value, str) and pattern == input_value:
-                continue
-            return NO_MATCH
-        # List branch REMOVED (P7W4): After normalization, all lists become
-        # head/tail linked lists (dicts). No kernel-path code passes raw
-        # Python lists to _stage0_match. Verified: zero seed patterns/bodies
-        # contain raw arrays. If a raw list reaches here, it falls through to
-        # NO_MATCH (correct behavior).
-
-        # Dict (Gate-3: allow pattern to omit _type when input has _type="list")
+        # Compound dict (Gate-3: allow pattern to omit _type when input has
+        # _type="list"). Resolved above the scalar content-hash so dict patterns
+        # bind through the worklist instead of hashing. Logic UNCHANGED; only
+        # reordered ahead of the collapsed scalar branch.
         if isinstance(pattern, dict):
             if not isinstance(input_value, dict):
                 return NO_MATCH
@@ -597,6 +599,19 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
             for key in reversed(tuple(pattern)):
                 work.append((pattern[key], input_value[key], depth + 1))
             continue
+        # Input-side raw-list fail-close — the symmetric analog of JS
+        # stage0Match's Array.isArray(input) guard. A raw list at a
+        # non-var/non-dict site never matches; this restores NO_MATCH for raw
+        # lists once the scalar branches collapse to a content hash. Pattern-side
+        # list dispatch stays forbidden (P7W4 relaxed fence: input-side only).
+        if isinstance(input_value, list):
+            return NO_MATCH
+        # Non-numeric scalar content-addressed equality. Stage 4 removes host
+        # int/float leaves from the matcher domain; bool/string leaves retain
+        # the existing content-hash path until they are structuralized.
+        if is_mu(pattern) and is_mu(input_value):
+            if mu_hash_cached(pattern) == mu_hash_cached(input_value):
+                continue
         return NO_MATCH
     return current
 

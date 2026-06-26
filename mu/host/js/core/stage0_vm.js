@@ -311,23 +311,35 @@ function safeMuCopy(value, rejectNonMu = false, context = 'Deep copy') {
   }
 }
 
+const MATCHER_NUMERIC_CUTOVER_SOURCES = new Set([
+  'match.v2.json',
+  'bootstrap_structural.v1.json',
+]);
+
 // ---------------------------------------------------------------------------
 // Float scanner (iterative, depth-bounded)
 // ---------------------------------------------------------------------------
-function checkNoFloats(value) {
+function checkNoFloats(
+  value, rejectNumbers = false, depthLimit = MAX_TEMPLATE_DEPTH) {
   // Validate literal values: Mu-domain only, no floats. Iterative + depth-bounded.
   // Mu value domain: null, boolean, number (integer), string, plain object, array.
   // Non-Mu types (BigInt, Symbol, function, undefined, Set, Map, etc.) are rejected.
-  const stack = [[value, 0]];
+  const stack = [[value, 0, false]];
+  const activeContainers = new WeakSet();  // AST_OK_JS: path-local cycle detection for fail-closed literal scan
+  const finishedContainers = new WeakSet();  // AST_OK_JS: acyclic sharing memo for fail-closed literal scan
   while (stack.length > 0) {
-    const [v, depth] = stack.pop();
-    if (depth > MAX_TEMPLATE_DEPTH) {
+    const [v, depth, exiting] = stack.pop();
+    if (depthLimit !== null && depth > depthLimit) {
       throw new Error(
-        `Literal value depth exceeded (${MAX_TEMPLATE_DEPTH})`);
+        `Literal value depth exceeded (${depthLimit})`);
     }
     if (typeof v === 'number' && !Number.isInteger(v)) {
       throw new Error(
         `Float values unsupported in Stage0 IR v1: ${v}`);
+    }
+    if (rejectNumbers && typeof v === 'number') {
+      throw new Error(
+        `Host numeric values unsupported in matcher domain: ${v}`);
     }
     if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
       // Reject non-plain objects (Set, Map, Date, boxed primitives, etc.)
@@ -340,8 +352,19 @@ function checkNoFloats(value) {
         throw new Error(
           'Non-Mu value type in literal: object with symbol keys');
       }
+      if (exiting) {
+        activeContainers.delete(v);
+        finishedContainers.add(v);
+        continue;
+      }
+      if (activeContainers.has(v)) {
+        throw new Error('Cyclic literal value unsupported');
+      }
+      if (finishedContainers.has(v)) continue;
+      activeContainers.add(v);
+      stack.push([v, depth, true]);
       for (const child of Object.values(v)) {
-        stack.push([child, depth + 1]);
+        stack.push([child, depth + 1, false]);
       }
     } else if (Array.isArray(v)) {
       // Reject array subclasses (parity with Python type(x) is list)
@@ -349,8 +372,19 @@ function checkNoFloats(value) {
         throw new Error(
           `Non-Mu value type in literal: ${v.constructor ? v.constructor.name : 'Array subclass'}`);
       }
+      if (exiting) {
+        activeContainers.delete(v);
+        finishedContainers.add(v);
+        continue;
+      }
+      if (activeContainers.has(v)) {
+        throw new Error('Cyclic literal value unsupported');
+      }
+      if (finishedContainers.has(v)) continue;
+      activeContainers.add(v);
+      stack.push([v, depth, true]);
       for (const child of v) {
-        stack.push([child, depth + 1]);
+        stack.push([child, depth + 1, false]);
       }
     } else if (v !== null && typeof v !== 'boolean' &&
                typeof v !== 'number' && typeof v !== 'string') {
@@ -826,6 +860,8 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
   let opCount = 0;
   let attemptCount = 0;
   const attemptedProgramIds = [];
+  const matcherNumericCutover =
+    MATCHER_NUMERIC_CUTOVER_SOURCES.has(bundle.source_seed);
 
   for (const programId of order) {
     const program = programMap[programId];
@@ -883,6 +919,16 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
         if (failed) break;
         for (const [k, allowed] of Object.entries(optionalConstraints)) {
           if (actual.has(k)) {
+            if (matcherNumericCutover) {
+              try {
+                checkNoFloats(val[k], true, null);
+                for (const av of allowed) {
+                  checkNoFloats(av, true, null);
+                }
+              } catch (e) {
+                failed = true; break;
+              }
+            }
             if (!allowed.some(av => safeMuDeepEqual(val[k], av))) {
               failed = true; break;
             }
@@ -894,6 +940,16 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
       // ---- check_equal ----
       else if (op === 'check_equal') {
         const [val, ok] = resolvePath(inputRoot, opSpec.path);
+        if (matcherNumericCutover) {
+          try {
+            if (ok) {
+              checkNoFloats(val, true, null);
+            }
+            checkNoFloats(opSpec.value, true, null);
+          } catch (e) {
+            failed = true; break;
+          }
+        }
         if (!ok || !safeMuDeepEqual(val, opSpec.value)) {
           failed = true; break;
         }
@@ -908,6 +964,14 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
           throw new Stage0VMError(
             `check_captured_equal: '${cname}' not yet captured ` +
             `in program '${programId}'`);
+        }
+        if (matcherNumericCutover) {
+          try {
+            checkNoFloats(val, true, null);
+            checkNoFloats(captures[cname], true, null);
+          } catch (e) {
+            failed = true; break;
+          }
         }
         if (!safeMuDeepEqual(val, captures[cname])) {
           failed = true; break;
@@ -924,7 +988,16 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
             `capture_path: duplicate capture '${name}' ` +
             `in program '${programId}'`);
         }
-        captures[name] = safeMuCopy(val, true, 'capture_path');
+        if (matcherNumericCutover) {
+          try {
+            checkNoFloats(val, true, null);
+            captures[name] = safeMuCopy(val, true, 'capture_path');
+          } catch (e) {
+            failed = true; break;
+          }
+        } else {
+          captures[name] = safeMuCopy(val, true, 'capture_path');
+        }
       }
 
       // ---- write_path ----

@@ -26,6 +26,7 @@ from tests.hemisphere_helpers import (
     empty_hemispheres as _empty_hemispheres,
     route as _route,
 )
+from tests.helpers.structural_numbers import sn
 
 
 # Root directory of the project (symlink-safe — see tests/repo_root.py)
@@ -60,7 +61,7 @@ class TestHemisphereInit:
 
     def test_init_extracts_value_and_closure(self):
         projs = _load_hemisphere_projections()
-        er = _make_engine_result(value=42, closure_detected=True)
+        er = _make_engine_result(value="answer", closure_detected=True)
         input_val = {
             "route_hemisphere": {
                 "engine_result": er,
@@ -70,7 +71,7 @@ class TestHemisphereInit:
         # Single step should produce classify state
         result = step_mu(projs, input_val)
         assert result["hemi_mode"] == "classify"
-        assert result["hemi_value"] == 42
+        assert result["hemi_value"] == "answer"
         assert result["hemi_closure"] is True
         assert "hemi_exhaustion" in result
         assert "hemi_stall" in result
@@ -110,9 +111,9 @@ class TestHemisphereClassify:
 
     def test_closure_routes_to_r_a(self):
         projs = _load_hemisphere_projections()
-        result = _route(projs, _make_engine_result(value=42, closure_detected=True))
+        result = _route(projs, _make_engine_result(value="closed", closure_detected=True))
         assert result["r_a"] is not None
-        assert result["r_a"][0]["state"] == 42
+        assert result["r_a"][0]["state"] == "closed"
         assert result["r_a"][0]["closure_flag"] is True
         assert result["lobes"] is None
         assert result["r_null"] is None
@@ -125,18 +126,19 @@ class TestHemisphereClassify:
         assert result["r_null"] is None
         assert result["r_a"] is None
 
-    def test_integer_value_routes_to_lobes(self):
+    def test_structural_number_value_routes_to_lobes(self):
         projs = _load_hemisphere_projections()
-        result = _route(projs, _make_engine_result(value=99))
+        value = sn(99)
+        result = _route(projs, _make_engine_result(value=value))
         assert result["lobes"] is not None
-        assert result["lobes"][0]["state"] == 99
+        assert mu_equal(result["lobes"][0]["state"], value)
 
     def test_nested_dict_routes_to_lobes(self):
         projs = _load_hemisphere_projections()
-        nested = {"a": 1, "b": {"c": 2}}
+        nested = {"a": sn(1), "b": {"c": sn(2)}}
         result = _route(projs, _make_engine_result(value=nested))
         assert result["lobes"] is not None
-        assert result["lobes"][0]["state"] == nested
+        assert mu_equal(result["lobes"][0]["state"], nested)
 
     def test_exhaustion_routes_to_sink(self):
         projs = _load_hemisphere_projections()
@@ -327,9 +329,10 @@ class TestHemisphereEntrySchema:
 
     def test_entry_preserves_value(self):
         projs = _load_hemisphere_projections()
-        result = _route(projs, _make_engine_result(value={"complex": [1, 2, 3]}))
+        value = {"complex": [sn(1), sn(2), sn(3)]}
+        result = _route(projs, _make_engine_result(value=value))
         entry = result["lobes"][0]
-        assert entry["state"] == {"complex": [1, 2, 3]}
+        assert mu_equal(entry["state"], value)
 
 
 # =============================================================================
@@ -350,7 +353,7 @@ class TestHemisphereEndToEnd:
         assert len(h["r_null"]) == 1
 
         # Route closure -> r_a
-        h = _route(projs, _make_engine_result(value=42, closure_detected=True), hemispheres=h)
+        h = _route(projs, _make_engine_result(value="closed", closure_detected=True), hemispheres=h)
         assert len(h["r_a"]) == 1
 
         # Route default -> lobes

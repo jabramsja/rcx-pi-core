@@ -259,12 +259,12 @@
     "hash_trace": {
       "type": "operation",
       "requires_error_edges": true,
-      "required_args": {"trace": {"head": {"state": "a", "step": 0}, "tail": null}},
+      "required_args": {"trace": {"head": {"state": "a", "step": {"_num": null}}, "tail": null}},
       "optional_args": {"maxEntries": 10000},
       "edge_args": [
         {
           "description": "Trace exceeding maxEntries cap",
-          "args": {"trace": {"head": {"state": "a", "step": 0}, "tail": {"head": {"state": "b", "step": 1}, "tail": null}}, "maxEntries": 1},
+          "args": {"trace": {"head": {"state": "a", "step": {"_num": null}}, "tail": {"head": {"state": "b", "step": {"_num": {"xH": null}}}, "tail": null}}, "maxEntries": 1},
           "expected_error_code": "trace.overcap"
         }
       ]
@@ -272,7 +272,7 @@
     "run_hemisphere_routing": {
       "type": "operation",
       "requires_error_edges": true,
-      "required_args": {"engine_result": {"value": null, "closure_detected": false, "tau_step": 0, "exhaustion_detected": false, "operator_frozen": false, "frozen_set": null, "action": "continue", "stall": false}, "hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}},
+      "required_args": {"engine_result": {"value": null, "closure_detected": false, "tau_step": null, "exhaustion_detected": false, "operator_frozen": false, "frozen_set": null, "action": "continue", "stall": false}, "hemispheres": {"r_null": null, "r_inf": null, "r_a": null, "lobes": null, "sink": null}},
       "optional_args": {},
       "edge_args": [
         {

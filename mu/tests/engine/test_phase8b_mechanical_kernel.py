@@ -246,8 +246,8 @@ class TestSimplifiedLoop:
     def test_simple_match_and_transform(self):
         """Basic projection matching works."""
         projections = [{"pattern": {"var": "x"}, "body": {"doubled": {"var": "x"}}}]
-        result = step_mu(projections, 42)
-        assert result == {"doubled": 42}
+        result = step_mu(projections, "payload")
+        assert result == {"doubled": "payload"}
 
     def test_no_match_returns_original(self):
         """No matching projection returns input unchanged."""
@@ -266,7 +266,7 @@ class TestSimplifiedLoop:
             {"pattern": {"var": "x"}, "body": "first"},
             {"pattern": {"var": "y"}, "body": "second"},
         ]
-        result = step_mu(projections, 42)
+        result = step_mu(projections, "payload")
         assert result == "first"
 
     def test_fallthrough_to_second(self):
@@ -275,14 +275,14 @@ class TestSimplifiedLoop:
             {"pattern": {"specific": "value"}, "body": "first"},
             {"pattern": {"var": "x"}, "body": "second"},
         ]
-        result = step_mu(projections, 42)
+        result = step_mu(projections, "payload")
         assert result == "second"
 
     def test_list_transformation(self):
         """Lists are properly normalized and denormalized."""
         projections = [{"pattern": {"var": "x"}, "body": {"wrapped": {"var": "x"}}}]
-        result = step_mu(projections, [1, 2, 3])
-        assert result == {"wrapped": [1, 2, 3]}
+        result = step_mu(projections, ["one", "two", "three"])
+        assert result == {"wrapped": ["one", "two", "three"]}
 
     def test_nested_dict_transformation(self):
         """Nested dicts are properly handled."""
@@ -312,8 +312,8 @@ class TestParityWithPreviousBehavior:
         {"_error": "unbound_variable", "_name": <varname>} instead of silently
         stalling. This is the correct structural behavior — errors are values.
         """
-        projections = [{"pattern": 42, "body": {"var": "unbound"}}]
-        result = step_mu(projections, 42)
+        projections = [{"pattern": "literal", "body": {"var": "unbound"}}]
+        result = step_mu(projections, "literal")
         # Structural path: subst.lookup.exhausted produces error value
         assert isinstance(result, dict)
         assert result.get("_error") == "unbound_variable"

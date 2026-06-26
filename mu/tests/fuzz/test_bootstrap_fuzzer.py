@@ -36,6 +36,7 @@ from rcx_pi.selfhost.eval_seed import (
     NO_MATCH,
 )
 from rcx_pi.selfhost.step_mu import run_mu
+from tests.helpers.structural_numbers import SN_ONE, SN_ZERO
 
 
 # =============================================================================
@@ -407,11 +408,11 @@ class TestKnownLimitations:
         """KNOWN LIMITATION: Oscillation (A->B->A) not detected, hits max_steps."""
         # Projection that toggles between two states
         toggle = [
-            {"pattern": 0, "body": 1},
-            {"pattern": 1, "body": 0},
+            {"pattern": SN_ZERO, "body": SN_ONE},
+            {"pattern": SN_ONE, "body": SN_ZERO},
         ]
 
-        result, trace, is_stall = run_mu(toggle, 0, max_steps=50)
+        result, trace, is_stall = run_mu(toggle, SN_ZERO, max_steps=50)
 
         # DOCUMENTS CURRENT BEHAVIOR: Oscillation not detected
         # Should hit max_steps, not stall

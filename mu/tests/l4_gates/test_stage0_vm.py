@@ -77,6 +77,10 @@ def _subst_ctx():
     return {"projection_id": "test"}
 
 
+ONE = {"_num": {"xH": None}}
+TWO = {"_num": {"xO": {"xH": None}}}
+
+
 # ---------------------------------------------------------------------------
 # Source-path parity helper
 # ---------------------------------------------------------------------------
@@ -346,14 +350,14 @@ class TestMatchVMStep:
 
     def test_match_wrap(self, match_bundle):
         """match.wrap: entry point wraps raw request into state."""
-        inp = {"match": {"pattern": 42, "value": 42}, "_match_ctx": _match_ctx()}
+        inp = {"match": {"pattern": ONE, "value": ONE}, "_match_ctx": _match_ctx()}
         r = stage0_vm_step(match_bundle, inp)
         assert r["status"] == "match"
         assert r["matched_program_id"] == "match.wrap"
         root = r["root"]
         assert root["mode"] == "match"
-        assert root["pattern_focus"] == 42
-        assert root["value_focus"] == 42
+        assert root["pattern_focus"] == ONE
+        assert root["value_focus"] == ONE
         assert root["bindings"] is None
         assert root["stack"] is None
         assert root["_match_ctx"] == _match_ctx()
@@ -361,7 +365,7 @@ class TestMatchVMStep:
     def test_match_equal_same(self, match_bundle):
         """match.equal: non-linear check passes (same value)."""
         inp = {
-            "mode": "match", "pattern_focus": 42, "value_focus": 42,
+            "mode": "match", "pattern_focus": ONE, "value_focus": ONE,
             "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
         }
         r = stage0_vm_step(match_bundle, inp)
@@ -374,7 +378,7 @@ class TestMatchVMStep:
     def test_match_equal_mismatch_falls_to_fail(self, match_bundle):
         """match.equal fails, match.fail catches."""
         inp = {
-            "mode": "match", "pattern_focus": 42, "value_focus": 99,
+            "mode": "match", "pattern_focus": ONE, "value_focus": TWO,
             "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
         }
         r = stage0_vm_step(match_bundle, inp)
@@ -387,7 +391,7 @@ class TestMatchVMStep:
         """match.var: variable site binds any value."""
         inp = {
             "mode": "match", "pattern_focus": {"var": "x"},
-            "value_focus": 42, "bindings": None, "stack": None,
+            "value_focus": ONE, "bindings": None, "stack": None,
             "_match_ctx": _match_ctx(),
         }
         r = stage0_vm_step(match_bundle, inp)
@@ -397,7 +401,7 @@ class TestMatchVMStep:
         assert root["pattern_focus"] is None
         assert root["value_focus"] is None
         assert root["bindings"]["name"] == "x"
-        assert root["bindings"]["value"] == 42
+        assert root["bindings"]["value"] == ONE
         assert root["bindings"]["rest"] is None
 
     def test_match_typed_descend(self, match_bundle):
@@ -409,22 +413,22 @@ class TestMatchVMStep:
         inp = {
             "mode": "match",
             "pattern_focus": {"_type": "list", "head": {"var": "h"}, "tail": {"var": "t"}},
-            "value_focus": {"_type": "list", "head": 1, "tail": None},
+            "value_focus": {"_type": "list", "head": ONE, "tail": None},
             "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
         }
         r = stage0_vm_step(match_bundle, inp)
         assert r["matched_program_id"] == "match.typed.descend"
         root = r["root"]
         assert root["pattern_focus"] == {"var": "h"}
-        assert root["value_focus"] == 1
+        assert root["value_focus"] == ONE
         assert root["stack"]["head"]["type"] == "pair"
 
     def test_match_typed_descend_type_mismatch(self, match_bundle):
         """Type mismatch: typed.descend fails, falls to fail."""
         inp = {
             "mode": "match",
-            "pattern_focus": {"_type": "list", "head": 1, "tail": None},
-            "value_focus": {"_type": "dict", "head": 1, "tail": None},
+            "pattern_focus": {"_type": "list", "head": ONE, "tail": None},
+            "value_focus": {"_type": "dict", "head": ONE, "tail": None},
             "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
         }
         r = stage0_vm_step(match_bundle, inp)
@@ -470,7 +474,7 @@ class TestMatchVMStep:
         """match.done: null focuses, null stack → success."""
         inp = {
             "mode": "match", "pattern_focus": None, "value_focus": None,
-            "bindings": {"name": "x", "value": 42, "rest": None},
+            "bindings": {"name": "x", "value": ONE, "rest": None},
             "stack": None, "_match_ctx": _match_ctx(),
         }
         r = stage0_vm_step(match_bundle, inp)
@@ -714,7 +718,7 @@ class TestTransactionModel:
     def test_failed_program_leaves_focus_unchanged(self, match_bundle):
         """Failed match programs must not alter the input value."""
         inp = {
-            "mode": "match", "pattern_focus": 42, "value_focus": 99,
+            "mode": "match", "pattern_focus": ONE, "value_focus": TWO,
             "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
         }
         # match.equal will fail (42 != 99), then match.fail catches.
@@ -817,8 +821,8 @@ class TestMultiStepSequences:
     """End-to-end sequences exercising multiple programs in sequence."""
 
     def test_match_literal_sequence(self, match_bundle):
-        """match.wrap → match.equal → match.done (literal 42 == 42)."""
-        inp = {"match": {"pattern": 42, "value": 42}, "_match_ctx": _match_ctx()}
+        """match.wrap -> match.equal -> match.done (structural numeral equality)."""
+        inp = {"match": {"pattern": ONE, "value": ONE}, "_match_ctx": _match_ctx()}
         result = stage0_vm_run(match_bundle, inp)
         assert result["status"] == "complete"
         steps = result["steps"]
@@ -831,8 +835,8 @@ class TestMultiStepSequences:
         assert final["_status"] == "success"
 
     def test_match_literal_mismatch_sequence(self, match_bundle):
-        """match.wrap → match.fail (literal 42 != 99)."""
-        inp = {"match": {"pattern": 42, "value": 99}, "_match_ctx": _match_ctx()}
+        """match.wrap -> match.fail (distinct structural numerals)."""
+        inp = {"match": {"pattern": ONE, "value": TWO}, "_match_ctx": _match_ctx()}
         result = stage0_vm_run(match_bundle, inp)
         steps = result["steps"]
         assert len(steps) == 2
@@ -841,9 +845,9 @@ class TestMultiStepSequences:
         assert result["root"]["_status"] == "no_match"
 
     def test_match_var_sequence(self, match_bundle):
-        """match.wrap → match.var → match.done (bind x=42)."""
+        """match.wrap -> match.var -> match.done (bind structural numeral)."""
         inp = {
-            "match": {"pattern": {"var": "x"}, "value": 42},
+            "match": {"pattern": {"var": "x"}, "value": ONE},
             "_match_ctx": _match_ctx(),
         }
         result = stage0_vm_run(match_bundle, inp)
@@ -855,7 +859,7 @@ class TestMultiStepSequences:
         final = result["root"]
         assert final["_status"] == "success"
         assert final["_bindings"]["name"] == "x"
-        assert final["_bindings"]["value"] == 42
+        assert final["_bindings"]["value"] == ONE
 
     def test_subst_primitive_sequence(self, subst_bundle):
         """subst.wrap → subst.primitive → subst.done (literal body)."""
@@ -952,7 +956,7 @@ class TestParityVsSourcePath:
             assert _mu_deep_equal(inp, source_result)  # both stall
 
     def test_parity_match_wrap(self, match_bundle, match_v2_projections):
-        inp = {"match": {"pattern": 42, "value": 42}, "_match_ctx": _match_ctx()}
+        inp = {"match": {"pattern": "forty_two", "value": "forty_two"}, "_match_ctx": _match_ctx()}
         self._check_match_parity(match_bundle, match_v2_projections, inp)
 
     def test_parity_match_equal_same(self, match_bundle, match_v2_projections):
@@ -981,7 +985,7 @@ class TestParityVsSourcePath:
         inp = {
             "mode": "match",
             "pattern_focus": {"_type": "list", "head": {"var": "h"}, "tail": {"var": "t"}},
-            "value_focus": {"_type": "list", "head": 1, "tail": None},
+            "value_focus": {"_type": "list", "head": "one", "tail": None},
             "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
         }
         self._check_match_parity(match_bundle, match_v2_projections, inp)
@@ -1000,7 +1004,7 @@ class TestParityVsSourcePath:
             "mode": "match", "pattern_focus": None, "value_focus": None,
             "bindings": None,
             "stack": {
-                "head": {"type": "pair", "pattern_rest": 10, "value_rest": 20},
+                "head": {"type": "pair", "pattern_rest": "ten", "value_rest": "twenty"},
                 "tail": None,
             },
             "_match_ctx": _match_ctx(),
@@ -1008,7 +1012,7 @@ class TestParityVsSourcePath:
         self._check_match_parity(match_bundle, match_v2_projections, inp)
 
     def test_parity_match_done(self, match_bundle, match_v2_projections):
-        bindings = {"name": "x", "value": 42, "rest": None}
+        bindings = {"name": "x", "value": "forty_two", "rest": None}
         inp = {
             "mode": "match", "pattern_focus": None, "value_focus": None,
             "bindings": bindings, "stack": None, "_match_ctx": _match_ctx(),
@@ -1045,13 +1049,13 @@ class TestParityVsSourcePath:
 
     def test_parity_subst_wrap(self, subst_bundle, subst_v2_projections):
         inp = {
-            "subst": {"body": 42, "bindings": None},
+            "subst": {"body": "forty_two", "bindings": None},
             "_subst_ctx": _subst_ctx(),
         }
         self._check_subst_parity(subst_bundle, subst_v2_projections, inp)
 
     def test_parity_subst_var(self, subst_bundle, subst_v2_projections):
-        bindings = {"name": "x", "value": 42, "rest": None}
+        bindings = {"name": "x", "value": "forty_two", "rest": None}
         inp = {
             "mode": "subst", "phase": "traverse",
             "focus": {"var": "x"}, "bindings": bindings,
@@ -1060,21 +1064,21 @@ class TestParityVsSourcePath:
         self._check_subst_parity(subst_bundle, subst_v2_projections, inp)
 
     def test_parity_subst_lookup_found(self, subst_bundle, subst_v2_projections):
-        bindings = {"name": "x", "value": 42, "rest": None}
+        bindings = {"name": "x", "value": "forty_two", "rest": None}
         inp = {
             "mode": "subst", "phase": "lookup",
             "lookup_name": "x",
-            "lookup_bindings": {"name": "x", "value": 42, "rest": None},
+            "lookup_bindings": {"name": "x", "value": "forty_two", "rest": None},
             "bindings": bindings, "context": None, "_subst_ctx": _subst_ctx(),
         }
         self._check_subst_parity(subst_bundle, subst_v2_projections, inp)
 
     def test_parity_subst_lookup_next(self, subst_bundle, subst_v2_projections):
-        bindings = {"name": "y", "value": 99, "rest": None}
+        bindings = {"name": "y", "value": "ninety_nine", "rest": None}
         inp = {
             "mode": "subst", "phase": "lookup",
             "lookup_name": "x",
-            "lookup_bindings": {"name": "y", "value": 99, "rest": None},
+            "lookup_bindings": {"name": "y", "value": "ninety_nine", "rest": None},
             "bindings": bindings, "context": None, "_subst_ctx": _subst_ctx(),
         }
         self._check_subst_parity(subst_bundle, subst_v2_projections, inp)
@@ -1089,7 +1093,7 @@ class TestParityVsSourcePath:
 
     def test_parity_subst_primitive(self, subst_bundle, subst_v2_projections):
         inp = {
-            "mode": "subst", "phase": "traverse", "focus": 42,
+            "mode": "subst", "phase": "traverse", "focus": "forty_two",
             "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
         }
         self._check_subst_parity(subst_bundle, subst_v2_projections, inp)
@@ -1097,7 +1101,7 @@ class TestParityVsSourcePath:
     def test_parity_subst_descend(self, subst_bundle, subst_v2_projections):
         inp = {
             "mode": "subst", "phase": "traverse",
-            "focus": {"head": 1, "tail": 2},
+            "focus": {"head": "one", "tail": "two"},
             "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
         }
         self._check_subst_parity(subst_bundle, subst_v2_projections, inp)
@@ -1105,14 +1109,14 @@ class TestParityVsSourcePath:
     def test_parity_subst_typed_descend(self, subst_bundle, subst_v2_projections):
         inp = {
             "mode": "subst", "phase": "traverse",
-            "focus": {"_type": "list", "head": 1, "tail": None},
+            "focus": {"_type": "list", "head": "one", "tail": None},
             "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
         }
         self._check_subst_parity(subst_bundle, subst_v2_projections, inp)
 
     def test_parity_subst_done(self, subst_bundle, subst_v2_projections):
         inp = {
-            "mode": "subst", "phase": "result", "focus": 42,
+            "mode": "subst", "phase": "result", "focus": "forty_two",
             "bindings": None, "context": None, "_subst_ctx": _subst_ctx(),
         }
         self._check_subst_parity(subst_bundle, subst_v2_projections, inp)
@@ -1179,14 +1183,14 @@ class TestSourceMapAudit:
 
 class TestMetrics:
     def test_step_reports_metrics(self, match_bundle):
-        inp = {"match": {"pattern": 1, "value": 1}, "_match_ctx": _match_ctx()}
+        inp = {"match": {"pattern": ONE, "value": ONE}, "_match_ctx": _match_ctx()}
         r = stage0_vm_step(match_bundle, inp)
         m = r["metrics"]
         assert m["program_attempts"] >= 1
         assert m["op_steps"] >= 1
 
     def test_run_reports_total_metrics(self, match_bundle):
-        inp = {"match": {"pattern": 1, "value": 1}, "_match_ctx": _match_ctx()}
+        inp = {"match": {"pattern": ONE, "value": ONE}, "_match_ctx": _match_ctx()}
         r = stage0_vm_run(match_bundle, inp)
         m = r["metrics"]
         assert m["total_steps"] >= 3  # wrap + equal + done
@@ -1194,7 +1198,7 @@ class TestMetrics:
         assert m["total_ops"] >= 3
 
     def test_op_limit_enforced(self, match_bundle):
-        inp = {"match": {"pattern": 1, "value": 1}, "_match_ctx": _match_ctx()}
+        inp = {"match": {"pattern": ONE, "value": ONE}, "_match_ctx": _match_ctx()}
         with pytest.raises(Stage0VMError, match="Op limit"):
             stage0_vm_step(match_bundle, inp, max_ops=1)
 
@@ -1328,7 +1332,7 @@ class TestCrossSubstrateParity:
     # --- Match cross-substrate ---
 
     def test_xsub_match_wrap(self, match_bundle):
-        inp = {"match": {"pattern": 42, "value": 42}, "_match_ctx": _match_ctx()}
+        inp = {"match": {"pattern": ONE, "value": ONE}, "_match_ctx": _match_ctx()}
         self._check_parity(match_bundle, MATCH_BUNDLE_PATH, inp)
 
     def test_xsub_match_equal(self, match_bundle):
@@ -1341,14 +1345,14 @@ class TestCrossSubstrateParity:
     def test_xsub_match_var(self, match_bundle):
         inp = {
             "mode": "match", "pattern_focus": {"var": "a"},
-            "value_focus": 99, "bindings": None,
+            "value_focus": ONE, "bindings": None,
             "stack": None, "_match_ctx": _match_ctx(),
         }
         self._check_parity(match_bundle, MATCH_BUNDLE_PATH, inp)
 
     def test_xsub_match_fail(self, match_bundle):
         inp = {
-            "mode": "match", "pattern_focus": 1, "value_focus": 2,
+            "mode": "match", "pattern_focus": ONE, "value_focus": TWO,
             "bindings": None, "stack": None, "_match_ctx": _match_ctx(),
         }
         self._check_parity(match_bundle, MATCH_BUNDLE_PATH, inp)
@@ -1391,11 +1395,11 @@ class TestCrossSubstrateParity:
     # --- Multi-step cross-substrate ---
 
     def test_xsub_match_literal_run(self, match_bundle):
-        inp = {"match": {"pattern": 42, "value": 42}, "_match_ctx": _match_ctx()}
+        inp = {"match": {"pattern": ONE, "value": ONE}, "_match_ctx": _match_ctx()}
         self._check_run_parity(match_bundle, MATCH_BUNDLE_PATH, inp)
 
     def test_xsub_match_mismatch_run(self, match_bundle):
-        inp = {"match": {"pattern": 42, "value": 99}, "_match_ctx": _match_ctx()}
+        inp = {"match": {"pattern": ONE, "value": TWO}, "_match_ctx": _match_ctx()}
         self._check_run_parity(match_bundle, MATCH_BUNDLE_PATH, inp)
 
     def test_xsub_subst_var_run(self, subst_bundle):
@@ -1429,6 +1433,84 @@ def _make_bundle(ops, pid="p1"):
         "program_order": [pid],
         "programs": [{"id": pid, "ops": ops}],
     }
+
+
+class TestMatcherNumericCutoverNestedHostLeaves:
+    """Nested host numeric leaves fail closed on matcher-visible VM equality."""
+
+    def _matcher_cutover_bundle(self, ops, pid="p1"):
+        bundle = _make_bundle(ops, pid)
+        bundle["source_seed"] = "match.v2.json"
+        return bundle
+
+    def _write_bundle(self, tmp_path, bundle):
+        path = tmp_path / "matcher_cutover_bundle.json"
+        path.write_text(json.dumps(bundle), encoding="utf-8")
+        return str(path)
+
+    def _check_py_js_step(self, tmp_path, bundle, input_value):
+        py_result = stage0_vm_step(bundle, input_value)
+        js_result = _run_js_vm(
+            "step", self._write_bundle(tmp_path, bundle), input_value)
+        assert py_result["status"] == js_result["status"]
+        assert py_result["matched_program_id"] == js_result["matched_program_id"]
+        assert _mu_deep_equal(py_result["root"], js_result["root"])
+        return py_result, js_result
+
+    def test_check_equal_nested_host_int_fails_closed_in_python_and_js(self, tmp_path):
+        bundle = self._matcher_cutover_bundle([
+            {"op": "check_equal",
+             "path": ["focus", "root"],
+             "value": {"nested": 1}},
+            {"op": "write_path",
+             "template": {"kind": "literal", "value": {"matched": True}}},
+            {"op": "return_projection_success"},
+        ])
+
+        py_result, js_result = self._check_py_js_step(
+            tmp_path, bundle, {"nested": 1})
+
+        assert py_result["status"] == "stall"
+        assert js_result["status"] == "stall"
+
+    def test_allowed_values_nested_host_int_fails_closed_in_python_and_js(
+            self, tmp_path):
+        bundle = self._matcher_cutover_bundle([
+            {"op": "assert_key_profile",
+             "path": ["focus", "root"],
+             "required": ["mode"],
+             "optional": [
+                 {"key": "x", "allowed_values": [{"nested": 1}]},
+             ]},
+            {"op": "write_path",
+             "template": {"kind": "literal", "value": {"matched": True}}},
+            {"op": "return_projection_success"},
+        ])
+
+        py_result, js_result = self._check_py_js_step(
+            tmp_path, bundle, {"mode": "match", "x": {"nested": 1}})
+
+        assert py_result["status"] == "stall"
+        assert js_result["status"] == "stall"
+
+    def test_nested_structural_numeral_still_matches_in_python_and_js(
+            self, tmp_path):
+        bundle = self._matcher_cutover_bundle([
+            {"op": "check_equal",
+             "path": ["focus", "root"],
+             "value": {"nested": ONE}},
+            {"op": "write_path",
+             "template": {"kind": "literal", "value": {"matched": True}}},
+            {"op": "return_projection_success"},
+        ])
+
+        py_result, js_result = self._check_py_js_step(
+            tmp_path, bundle, {"nested": ONE})
+
+        assert py_result["status"] == "match"
+        assert js_result["status"] == "match"
+        assert py_result["root"] == {"matched": True}
+        assert js_result["root"] == {"matched": True}
 
 
 class TestCapturePathProvenance:
