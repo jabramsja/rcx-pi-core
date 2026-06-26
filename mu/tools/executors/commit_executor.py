@@ -11038,11 +11038,17 @@ def _refresh_post_merge_package_for_next_open_queue(
     ]
     next_candidates: list[dict[str, Any]] = []
     if not entry.get("hard_stop"):
+        entry_packet = entry.get("packet")
+        tracked_packet = (
+            entry_packet
+            if isinstance(entry_packet, str) and entry_packet.strip()
+            else None
+        )
         next_candidates.append(
             {
                 "candidate": entry["wave_id"],
                 "bounded": True,
-                "tracked_packet": entry["packet"],
+                "tracked_packet": tracked_packet,
                 "summary": _post_merge_summary_for_queue_entry(entry),
                 "request_for_claude": _post_merge_request_for_queue_entry(entry),
             }
