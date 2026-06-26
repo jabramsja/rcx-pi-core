@@ -49,7 +49,7 @@ Files and surfaces in scope:
 
 ## Validation gates
 
-- evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_claude_pager_receiver.py mu/tests/tools/test_pipeline_agent_pager.py`
+- evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_claude_pager_receiver.py`
 - evidence_command path authority: code-verified -- both test files exist at `mu/tests/tools/` (`test_pipeline_agent_pager.py`, `test_claude_pager_receiver.py`). The staged 2026-06-21 TASKS.md tracker note and the supervisor package both use these `mu/tests/tools/...` paths, so this packet's evidence_command and the TASKS.md-derived evidence_command agree and commit/L4 automation derives a valid command (no tracker correction pending).
 
 ## Acceptance criteria
@@ -92,11 +92,10 @@ FOUNDER_OVERRIDE:pager-claude-codex-parity-resume-monitor-2026-06-21
 ## Same-Wave Deferred Non-Blocking Authorization
 
 - Refresh wave: `pager-claude-codex-parity-resume-monitor-2026-06-21`
-- Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
-- Authorized deferred packet(s):
-  - `reports/deferred/non_blocking/pager-claude-codex-parity-resume-monitor-2026-06-21_bridge_nonblockers.md`
-- Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
-- Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
+- Purpose: no active same-wave deferred non-blocking bridge findings packet is authorized for this commit package.
+- Authorized deferred packet(s): none
+- Scope binding: no generated bridge packet for this wave is authorized in `reports/deferred/non_blocking/` unless it exists as a staged file and is listed in `deferred_items`.
+- Acceptance binding: generated bridge packet paths for this wave must remain absent from active deferred lanes unless the package carries an existing staged deferred packet.
 <!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
 
 <!-- L4_FIELDS_FROM_TRACKER:start -->
@@ -107,8 +106,8 @@ FOUNDER_OVERRIDE:pager-claude-codex-parity-resume-monitor-2026-06-21
 - `indicator_artifact_ref`: reports/l4_wave_indicators/pager-claude-codex-parity-resume-monitor-2026-06-21.json.
 - `indicator_collection_command`: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id pager-claude-codex-parity-resume-monitor-2026-06-21 --output reports/l4_wave_indicators/pager-claude-codex-parity-resume-monitor-2026-06-21.json.
 - `target_gate_id`: G8.
-- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_claude_pager_receiver.py mu/tests/tools/test_pipeline_agent_pager.py`.
-- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/pager-claude-codex-parity-resume-monitor-2026-06-21_2026-06-21.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_claude_pager_receiver.py`.
+- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/pager-claude-codex-parity-resume-monitor-2026-06-21_2026-06-21.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
 - `boot0_progress_state`: HOLD.
@@ -121,19 +120,16 @@ FOUNDER_OVERRIDE:pager-claude-codex-parity-resume-monitor-2026-06-21
 - Refresh wave: `pager-claude-codex-parity-resume-monitor-2026-06-21`
 - Active packet: `reports/control_plane/pager-claude-codex-parity-resume-monitor-2026-06-21_2026-06-21.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `b7dd8a86b9732bf27be0f1bb5aaeec05ec0842b6d27937a81f221bde80e7dedf`
+- Tracker note sha256: `db2c667f34e5c83650b55e2db8b29f8617cc28829031191118b70e58cef02c2a`
 - Indicator artifact: `reports/l4_wave_indicators/pager-claude-codex-parity-resume-monitor-2026-06-21.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_claude_pager_receiver.py mu/tests/tools/test_pipeline_agent_pager.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/pager-claude-codex-parity-resume-monitor-2026-06-21_2026-06-21.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_claude_pager_receiver.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/pager-claude-codex-parity-resume-monitor-2026-06-21_2026-06-21.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/pager-claude-codex-parity-resume-monitor-2026-06-21.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_claude_pager_receiver.py`
-  - `mu/tests/tools/test_pipeline_agent_pager.py`
-  - `mu/tools/observability/pipeline_agent_pager.py`
   - `mu/tools/session/claude_pager_receiver.py`
   - `reports/control_plane/pager-claude-codex-parity-resume-monitor-2026-06-21_2026-06-21.md`
-  - `reports/deferred/non_blocking/pager-claude-codex-parity-resume-monitor-2026-06-21_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/pager-claude-codex-parity-resume-monitor-2026-06-21.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

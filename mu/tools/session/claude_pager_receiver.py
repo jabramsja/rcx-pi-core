@@ -23,12 +23,12 @@ What it provides (the behaviors locked by
 3. Codex-parity delivery (resolved at delivery time by the pager's
    ``resolve_claude_page_delivery``). When a DEDICATED monitor session id is set,
    DISTINCT from the live orchestrator, and resumable, the page is delivered INTO
-   that persistent warm monitor: ``[claude_bin, "--resume", <monitor>, "-p",
-   prompt]`` -- the same warm monitor the autoping watcher keeps, mirroring how the
-   codex leg issues each turn into the shared autoping thread. Otherwise (monitor
-   unset/malformed, monitor == live orchestrator, or a resume FAILURE) the page is a
-   fresh, resume-less ``[claude_bin, "-p", prompt]`` -- the live orchestrator is
-   NEVER resumed, and a resume failure falls back to a fresh page so no page is lost.
+   that persistent warm monitor with ``--disallowedTools`` on the argv -- the same
+   warm monitor the autoping watcher keeps, mirroring how the codex leg issues each
+   turn into the shared autoping thread. Otherwise (monitor unset/malformed, monitor
+   == live orchestrator, or a resume FAILURE) the page is a fresh, resume-less
+   ``[claude_bin, "-p", prompt]`` -- the live orchestrator is NEVER resumed, and a
+   resume failure falls back to a fresh page so no page is lost.
 
 4. ~120s per-delivery timeout plus a process-group reaper. The child runs in its
    own session/process-group (``start_new_session=True``); on timeout the whole
@@ -92,6 +92,9 @@ DEFAULT_DELIVERY_TIMEOUT_S = 120.0
 DEFAULT_POLL_INTERVAL_S = 5.0
 CLAUDE_BIN_ENV = "RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN"
 PROCESS_GROUP_GRACE_S = 5.0
+# Mirrors claude_autoping_watch.py: resumed monitor pages are diagnostic/wakeup
+# deliveries, so tools must be mechanically absent from the model context.
+CLAUDE_RESUME_DISALLOWED_TOOLS = ("Bash", "Edit", "Write", "NotebookEdit")
 # This module's own path, used by ``ensure_draining`` to spawn a bounded drain
 # pass (``<python> claude_pager_receiver.py --once ...``). Resolved once at import.
 _RECEIVER_SCRIPT = str(Path(__file__).resolve())
@@ -328,15 +331,24 @@ class ClaudePagerReceiver:
         """Delivery argv.
 
         When ``resume_session_id`` is a non-empty id, the page is delivered INTO that
-        persistent session: ``claude --resume <id> -p <prompt>`` (codex-parity -- the
-        page becomes a turn in the warm dedicated monitor). Otherwise it is a fresh,
-        resume-less ``claude -p`` page. The resume target is resolved by the pager's
-        ``resolve_claude_page_delivery`` at delivery time (NEVER the live orchestrator);
-        this method only builds the argv from the resolved decision.
+        persistent session with tools mechanically denied:
+        ``claude --resume <id> -p <prompt> --disallowedTools ...`` (codex-parity --
+        the page becomes a turn in the warm dedicated monitor). Otherwise it is a
+        fresh, resume-less ``claude -p`` page. The resume target is resolved by the
+        pager's ``resolve_claude_page_delivery`` at delivery time (NEVER the live
+        orchestrator); this method only builds the argv from the resolved decision.
         """
         resume_id = str(resume_session_id or "").strip()
         if resume_id:
-            return [self.claude_bin, "--resume", resume_id, "-p", self._event_prompt(event)]
+            return [
+                self.claude_bin,
+                "--resume",
+                resume_id,
+                "-p",
+                self._event_prompt(event),
+                "--disallowedTools",
+                *CLAUDE_RESUME_DISALLOWED_TOOLS,
+            ]
         return [self.claude_bin, "-p", self._event_prompt(event)]
 
     # -- enqueue (the quick-ack) ---------------------------------------------

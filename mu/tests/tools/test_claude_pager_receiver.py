@@ -302,12 +302,17 @@ def test_delivery_command_resumes_monitor_when_resume_session_id_given(tmp_path,
     assert command[2] == "sess-monitor"
     assert command[3] == "-p"
     # The prompt is the shared page body (same as the fresh leg) -- the resume changes
-    # only the delivery TARGET, not the prompt.
-    assert "event_id: E1\n" in command[-1] + "\n"
+    # only the delivery TARGET and mechanically disables tools, not the prompt.
+    prompt_index = command.index("-p") + 1
+    assert "event_id: E1\n" in command[prompt_index] + "\n"
+    disallowed_index = command.index("--disallowedTools")
+    assert disallowed_index > prompt_index
+    assert command[disallowed_index + 1 :] == ["Bash", "Edit", "Write", "NotebookEdit"]
     # A blank/whitespace resume id degrades to a fresh page (never ``--resume ''``).
     blank = receiver.delivery_command({"event_id": "E1"}, resume_session_id="   ")
     assert blank[1] == "-p"
     assert "--resume" not in blank
+    assert "--disallowedTools" not in blank
 
 
 def test_dispatched_command_is_fresh_when_no_monitor_configured(tmp_path, monkeypatch):
@@ -748,6 +753,9 @@ def test_resume_delivery_into_monitor_when_set_distinct_resumable(tmp_path, monk
     command = recorder.commands[0]
     assert command[:3] == [receiver.claude_bin, "--resume", "sess-monitor"]
     assert command[3] == "-p"
+    disallowed_index = command.index("--disallowedTools")
+    assert disallowed_index > command.index("-p")
+    assert command[disallowed_index + 1 :] == ["Bash", "Edit", "Write", "NotebookEdit"]
     assert [r["status"] for r in result] == ["delivered"]
     assert "RESUMED" in receiver.delivered_event_ids()
     assert receiver.queued_event_ids() == []
@@ -810,7 +818,9 @@ def test_resume_failure_falls_back_to_fresh_page_same_delivery(tmp_path, monkeyp
 
     assert recorder.call_count == 2
     assert recorder.commands[0][:2] == [receiver.claude_bin, "--resume"]
+    assert "--disallowedTools" in recorder.commands[0]
     assert "--resume" not in recorder.commands[1]
+    assert "--disallowedTools" not in recorder.commands[1]
     # The fresh fallback uses the clobber-safe fresh env (RCX_CLAUDE_MONITOR cleared).
     assert "RCX_CLAUDE_MONITOR" not in recorder.envs[1]
     assert result["status"] == "delivered"
