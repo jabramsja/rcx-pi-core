@@ -594,17 +594,16 @@ class ClaudePagerReceiver:
     # -- delivery (single-flight) --------------------------------------------
 
     def deliver_once(self, *, skip_keys: "set[str] | None" = None) -> dict[str, Any]:
-        """Deliver the oldest queued event (single-flight), if any.
+        """Deliver the oldest eligible queued event (single-flight), if any.
 
         Returns a status dict. ``idle`` when the queue is empty. On exit-0 a
         receipt is written and the entry removed (``delivered``); on timeout or
         non-zero exit the entry is re-queued fail-open (``requeued``).
 
         ``skip_keys`` lets a single drain pass (``run_until_empty``) avoid
-        re-attempting an event it has already tried this pass: if the oldest
-        queued event's idempotency keys intersect ``skip_keys`` the call returns
-        ``exhausted`` WITHOUT spawning a delivery, so a persistently-failing
-        event is attempted at most once per drain.
+        re-attempting an event it has already tried this pass. Attempted events
+        at the head are skipped while later unattempted queue entries are still
+        eligible for delivery; only an all-skipped queue returns ``exhausted``.
         """
         with self._delivery_guard():
             with self._queue_guard():
@@ -612,23 +611,41 @@ class ClaudePagerReceiver:
                 if not queue_files:
                     self._clear_current_drainer_state()
                     return {"status": "idle"}
-                queue_path = queue_files[0]
-                event = self._read_queue_file(queue_path)
-                if event is None:
-                    queue_path.unlink(missing_ok=True)
-                    return {"status": "dropped_unreadable", "queue_path": str(queue_path)}
-                event_id = str(event.get("event_id") or "").strip()
-                if self._already_delivered(event):
-                    # Terminal idempotency: a duplicate is dropped, never re-delivered.
-                    queue_path.unlink(missing_ok=True)
-                    return {"status": "duplicate_delivered", "event_id": event_id}
-                if skip_keys and (event_keys(event) & skip_keys):
-                    # The oldest queued event was already attempted (and re-queued)
-                    # this drain pass -> only persistently-failing events remain.
-                    # Report ``exhausted`` so ``run_until_empty`` stops WITHOUT a
-                    # second delivery (honors "attempted at most once per call").
+                skipped_event_id: str | None = None
+                queue_path = None
+                event = None
+                event_id = ""
+                for candidate_path in queue_files:
+                    candidate = self._read_queue_file(candidate_path)
+                    if candidate is None:
+                        candidate_path.unlink(missing_ok=True)
+                        return {
+                            "status": "dropped_unreadable",
+                            "queue_path": str(candidate_path),
+                        }
+                    candidate_event_id = str(candidate.get("event_id") or "").strip()
+                    if self._already_delivered(candidate):
+                        # Terminal idempotency: a duplicate is dropped, never re-delivered.
+                        candidate_path.unlink(missing_ok=True)
+                        return {
+                            "status": "duplicate_delivered",
+                            "event_id": candidate_event_id,
+                        }
+                    if skip_keys and (event_keys(candidate) & skip_keys):
+                        if skipped_event_id is None:
+                            skipped_event_id = candidate_event_id
+                        continue
+                    queue_path = candidate_path
+                    event = candidate
+                    event_id = candidate_event_id
+                    break
+                if queue_path is None or event is None:
+                    # All queued entries were already attempted and re-queued this
+                    # drain pass. Report ``exhausted`` so ``run_until_empty`` stops
+                    # WITHOUT retrying a persistent failure, while later unattempted
+                    # pages enqueued behind that head would have been selected above.
                     self._clear_current_drainer_state()
-                    return {"status": "exhausted", "event_id": event_id}
+                    return {"status": "exhausted", "event_id": skipped_event_id or ""}
             # Dispatch OUTSIDE the queue lock (but still single-flight) so a slow
             # delivery never blocks concurrent enqueues' quick-ack.
             result = self._dispatch(event)
