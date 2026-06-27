@@ -62,6 +62,7 @@ try:
         normalize_wave_id,
         packet_status_is_completed,
         read_control_plane_packet_status,
+        read_control_plane_packet_wave_id,
         resolve_agent_bus_dir,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
@@ -86,6 +87,7 @@ except ImportError:
     normalize_wave_id = _mod.normalize_wave_id
     packet_status_is_completed = _mod.packet_status_is_completed
     read_control_plane_packet_status = _mod.read_control_plane_packet_status
+    read_control_plane_packet_wave_id = _mod.read_control_plane_packet_wave_id
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
@@ -10563,6 +10565,25 @@ _PROGRAM_QUEUE_HEADER_RE = re.compile(r"^##\s+PROGRAM QUEUE\b", re.IGNORECASE)
 _PROGRAM_QUEUE_NUMBERED_ENTRY_RE = re.compile(
     r"^\s*(?P<order>\d+)\.\s+\*\*(?P<label>[^*]+?)\*\*\s*(?P<tail>.*?)\s*$"
 )
+_WAVE_ID_DATE_SUFFIX_RE = re.compile(r"-\d{4}-\d{2}-\d{2}[a-z]?$")
+_SIMPLE_QUEUE_TERMINAL_MARKER_RE = re.compile(
+    r"\b(?:COMPLETED|LANDED|MERGED|CLOSED|CURRENT[-_\s]+DEV|POST[-_\s]+MERGE(?:D)?)\b",
+    re.IGNORECASE,
+)
+_SIMPLE_QUEUE_PRECOMMIT_MARKER_RE = re.compile(
+    r"\b(?:PRE[-_\s]*COMMIT|RECEIPT\s+PENDING|COMMIT[-_\s]*READY|"
+    r"LOCAL\s+EVIDENCE|PACKAGE[-_\s]*BOUND|PENDING)\b",
+    re.IGNORECASE,
+)
+_SIMPLE_QUEUE_STATE_TRAILER_RE = re.compile(
+    r"(?:\s+|\s*[-\u2013\u2014]+\s*)"
+    r"(?:NEXT|LAST(?:\s*\([^)]*\))?|"
+    r"LANDED(?:\s+in\s+PR\s+#?\d+(?:\s+\([^)]*\))?)?|"
+    r"MERGED(?:\s+in\s+PR\s+#?\d+(?:\s+\([^)]*\))?)?|"
+    r"COMPLETED|CLOSED|CURRENT[-_\s]+DEV)"
+    r"\.?\s*$",
+    re.IGNORECASE,
+)
 
 
 _MU_STRUCTURAL_PHASE_A_AUTHORIZATION_RE = re.compile(
@@ -10673,7 +10694,38 @@ def _program_queue_section_lines(repo_root: Path) -> list[str]:
 
 def _simple_program_queue_wave_id(label: str, queue_text: str) -> str:
     raw = " ".join(part.strip() for part in (label, queue_text) if part.strip())
+    previous = None
+    while raw and raw != previous:
+        previous = raw
+        raw = _SIMPLE_QUEUE_STATE_TRAILER_RE.sub("", raw).rstrip()
     return normalize_wave_id(raw)
+
+
+def _strip_wave_date_suffix(wave_id: str) -> str:
+    return _WAVE_ID_DATE_SUFFIX_RE.sub("", normalize_wave_id(wave_id))
+
+
+def _program_queue_identity_matches(*, candidate: str, derived_wave_id: str) -> bool:
+    candidate_norm = normalize_wave_id(candidate)
+    derived_norm = normalize_wave_id(derived_wave_id)
+    if not candidate_norm or not derived_norm:
+        return False
+    if candidate_norm == derived_norm:
+        return True
+    if candidate_norm.startswith(f"{derived_norm}-"):
+        return True
+
+    candidate_base = _strip_wave_date_suffix(candidate_norm)
+    derived_base = _strip_wave_date_suffix(derived_norm)
+    if not candidate_base or not derived_base:
+        return False
+    if candidate_base == derived_base:
+        return True
+    if min(len(candidate_base), len(derived_base)) < 12:
+        return False
+    return candidate_base.startswith(f"{derived_base}-") or derived_base.startswith(
+        f"{candidate_base}-"
+    )
 
 
 def _safe_config_tracked_packet(repo_root: Path, raw_packet: Any) -> str:
@@ -10694,23 +10746,29 @@ def _safe_config_tracked_packet(repo_root: Path, raw_packet: Any) -> str:
 
 
 def _wave_config_matches_program_queue_entry(
+    repo_root: Path,
     config_path: Path,
     config: dict[str, Any],
     *,
     derived_wave_id: str,
 ) -> bool:
+    packet = _safe_config_tracked_packet(repo_root, config.get("tracked_packet"))
+    packet_wave_id = (
+        read_control_plane_packet_wave_id(repo_root, packet) if packet else ""
+    )
     config_ids = [
         str(config.get("wave_id") or ""),
         config_path.name.removesuffix("_wave_config.json"),
         str(config.get("title") or ""),
+        packet_wave_id or "",
     ]
     for raw in config_ids:
         if not raw.strip():
             continue
-        candidate = normalize_wave_id(raw)
-        if candidate == derived_wave_id:
-            return True
-        if candidate.startswith(f"{derived_wave_id}-"):
+        if _program_queue_identity_matches(
+            candidate=raw,
+            derived_wave_id=derived_wave_id,
+        ):
             return True
     return False
 
@@ -10741,6 +10799,7 @@ def _matching_program_queue_wave_config(
             exact_matches.append((config_path.name, config))
             continue
         if _wave_config_matches_program_queue_entry(
+            repo_root,
             config_path,
             config,
             derived_wave_id=derived_wave_id,
@@ -10756,6 +10815,127 @@ def _program_queue_config_request(config: dict[str, Any]) -> str:
         if value:
             return value
     return ""
+
+
+def _program_queue_tracker_notes_for_wave_ids(
+    repo_root: Path,
+    *,
+    wave_ids: set[str],
+) -> list[str]:
+    if not wave_ids:
+        return []
+    tasks_path = repo_root / "TASKS.md"
+    try:
+        lines = tasks_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+    notes: list[str] = []
+    for line in lines:
+        if "Tracker sync note" not in line:
+            continue
+        note_wave_id = normalize_wave_id(_tracker_note_wave_id(line))
+        if note_wave_id in wave_ids:
+            notes.append(line.strip())
+    return notes
+
+
+def _simple_program_queue_text_has_post_merge_marker(text: Any) -> bool:
+    clean = str(text or "").strip()
+    if not clean:
+        return False
+    if _SIMPLE_QUEUE_PRECOMMIT_MARKER_RE.search(clean):
+        return False
+    return bool(_SIMPLE_QUEUE_TERMINAL_MARKER_RE.search(clean))
+
+
+def _git_merge_history_contains_wave_id(repo_root: Path, wave_id: str) -> bool:
+    normalized_wave_id = normalize_wave_id(wave_id)
+    if not normalized_wave_id or normalized_wave_id == "wave-unknown":
+        return False
+    try:
+        result = _run(
+            ["git", "log", "--merges", "--format=%s%n%b", "-n", "400"],
+            cwd=repo_root,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    normalized_log = result.stdout.lower()
+    return bool(
+        re.search(
+            rf"(?<![a-z0-9]){re.escape(normalized_wave_id)}(?![a-z0-9])",
+            normalized_log,
+        )
+    )
+
+
+def _program_queue_merge_log_wave_id_is_specific(wave_id: str) -> bool:
+    normalized_wave_id = normalize_wave_id(wave_id)
+    if not normalized_wave_id or normalized_wave_id == "wave-unknown":
+        return False
+    if _WAVE_ID_DATE_SUFFIX_RE.search(normalized_wave_id):
+        return True
+    parts = [part for part in normalized_wave_id.split("-") if part]
+    return len(parts) >= 3 and len(normalized_wave_id) >= 16
+
+
+def _simple_program_queue_merge_log_wave_ids(entry: dict[str, Any]) -> set[str]:
+    """Return explicit, specific IDs eligible for merge-history completion proof."""
+    derived_wave_id = normalize_wave_id(str(entry.get("derived_wave_id") or ""))
+    merge_log_ids = {
+        normalize_wave_id(str(raw or ""))
+        for raw in (
+            entry.get("config_wave_id"),
+            entry.get("packet_wave_id"),
+        )
+        if str(raw or "").strip()
+    }
+
+    entry_wave_id = normalize_wave_id(str(entry.get("wave_id") or ""))
+    if entry_wave_id and entry_wave_id != derived_wave_id:
+        merge_log_ids.add(entry_wave_id)
+
+    return {
+        wave_id
+        for wave_id in merge_log_ids
+        if _program_queue_merge_log_wave_id_is_specific(wave_id)
+    }
+
+
+def _simple_program_queue_entry_is_completed(
+    repo_root: Path,
+    entry: dict[str, Any],
+) -> bool:
+    wave_ids = {
+        normalize_wave_id(str(raw or ""))
+        for raw in (
+            entry.get("wave_id"),
+            entry.get("derived_wave_id"),
+            entry.get("config_wave_id"),
+            entry.get("packet_wave_id"),
+        )
+        if str(raw or "").strip()
+    }
+    completion_texts: list[Any] = [
+        entry.get("state"),
+        entry.get("status"),
+    ]
+    completion_texts.extend(
+        _program_queue_tracker_notes_for_wave_ids(repo_root, wave_ids=wave_ids)
+    )
+    if any(
+        _simple_program_queue_text_has_post_merge_marker(text)
+        for text in completion_texts
+    ):
+        return True
+    return any(
+        _git_merge_history_contains_wave_id(repo_root, wave_id)
+        for wave_id in _simple_program_queue_merge_log_wave_ids(entry)
+    )
 
 
 def _simple_program_queue_entries(
@@ -10789,11 +10969,17 @@ def _simple_program_queue_entries(
         if config_wave_id:
             wave_id = config_wave_id
         packet = _safe_config_tracked_packet(repo_root, config.get("tracked_packet"))
+        packet_wave_id = (
+            read_control_plane_packet_wave_id(repo_root, packet) if packet else None
+        )
         entries.append(
             {
                 "label": label,
                 "state": queue_text,
                 "wave_id": wave_id,
+                "derived_wave_id": _simple_program_queue_wave_id(label, tail),
+                "config_wave_id": config_wave_id,
+                "packet_wave_id": packet_wave_id,
                 "category": "PROGRAM QUEUE",
                 "packet": packet,
                 "source_packet": "",
@@ -10881,6 +11067,11 @@ def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
 def _next_open_founder_ordered_queue_entry(repo_root: Path) -> dict[str, Any] | None:
     open_entries: list[dict[str, Any]] = []
     for entry in _founder_ordered_queue_entries(repo_root):
+        if entry.get("simple_program_queue"):
+            if _simple_program_queue_entry_is_completed(repo_root, entry):
+                continue
+            open_entries.append(entry)
+            continue
         if packet_status_is_completed(entry.get("status")):
             continue
         if packet_status_is_completed(entry.get("state")):
