@@ -494,6 +494,16 @@ class TestRootFileConsistency:
         assert "name: green-gate" in content
         assert "scripts/green_gate.sh python-only" in content
 
+    def test_green_gate_ripgrep_install_ignores_third_party_apt_sources(self):
+        """The rg fallback must not fail before tests on hosted-runner apt drift."""
+        content = (REPO_ROOT / ".github" / "workflows" / "green_gate.yml").read_text()
+
+        assert "/etc/apt/sources.list.d/azure-cli.list" in content
+        assert "/etc/apt/sources.list.d/microsoft-prod.list" in content
+        assert "/etc/apt/sources.list.d/packages-microsoft-com-prod.list" in content
+        assert "apt-get update -o Acquire::Retries=3" in content
+        assert "apt-get install -y --no-install-recommends ripgrep" in content
+
     def test_critical_test_files_count_matches(self):
         """CRITICAL_TEST_FILES count must match between README and STATUS."""
         status_path = REPO_ROOT / "STATUS.md"

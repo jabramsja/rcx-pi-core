@@ -650,6 +650,30 @@ def test_run_until_empty_attempts_each_failing_event_once(tmp_path, monkeypatch)
     assert receiver.delivered_event_ids() == set()
 
 
+def test_deliver_once_skips_attempted_head_and_delivers_later_tail(tmp_path, monkeypatch):
+    # PR #1163 bot-review regression: if a live --once drainer has already
+    # failed and requeued the head event, a later page enqueued behind that head
+    # must still drain in the same pass instead of being hidden by skip_keys.
+    outcomes = iter([7, 0])
+    recorder = _install_popen(
+        monkeypatch,
+        lambda: FakeProc(exit_code=next(outcomes)),
+    )
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "POISON", "transition_key": "PTK"})
+
+    first = receiver.deliver_once(skip_keys=set())
+    attempted = set(first["keys"])
+    receiver.enqueue({"event_id": "TAIL", "transition_key": "TTK"})
+    second = receiver.deliver_once(skip_keys=attempted)
+
+    assert [first["status"], second["status"]] == ["requeued", "delivered"]
+    assert [first["event_id"], second["event_id"]] == ["POISON", "TAIL"]
+    assert recorder.call_count == 2
+    assert receiver.queued_event_ids() == ["POISON"]
+    assert receiver.delivered_event_ids() == {"TAIL"}
+
+
 def test_run_forever_backs_off_on_persistent_failure_no_tight_loop(tmp_path, monkeypatch):
     # Bridge round 2 regression: a persistently failing event must NOT spin the
     # poll loop. With a large poll interval the daemon attempts the poison once,

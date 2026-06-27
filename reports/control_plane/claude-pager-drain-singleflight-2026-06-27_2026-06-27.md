@@ -64,7 +64,7 @@ Files and surfaces in scope:
 
 ## Validation gates
 
-- evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_claude_pager_receiver.py`
+- evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_root_files.py mu/tests/tools/test_claude_pager_receiver.py`
 
 ## Acceptance criteria
 
@@ -126,6 +126,24 @@ FOUNDER_OVERRIDE:claude-pager-drain-singleflight-2026-06-27
 - Regression coverage: `test_ensure_draining_accepts_resolved_python_interpreter_identity` models the resolved-interpreter mismatch and proves a repeated ensure reuses the live drainer instead of spawning another `--once` receiver.
 <!-- LIVE_IDENTITY_REGRESSION_REFRESH:end -->
 
+<!-- PR1163_RECOVERY_REFRESH:start -->
+## PR #1163 Recovery Refresh
+
+- Refresh wave: `claude-pager-drain-singleflight-2026-06-27`
+- Trigger: commit executor Step 15 pushed bot-remediation commit `a42cd9cf`, then PR CI failed before project tests in green-gate's `Install system deps` step because hosted-runner Microsoft apt sources returned 403 during `apt-get update`.
+- Bot-review recovery: `deliver_once()` already scans past skipped attempted queue heads after `a42cd9cf`; this refresh adds focused regression coverage proving a later tail page drains while the failed head remains fail-open queued.
+- CI recovery: green-gate's ripgrep fallback now removes known hosted-runner Microsoft apt source files before the Ubuntu apt fallback and uses apt retries plus `--no-install-recommends`, so a missing preinstalled `rg` does not strand the workflow before tests.
+- Added validation coverage:
+  - `mu/tests/tools/test_claude_pager_receiver.py::test_deliver_once_skips_attempted_head_and_delivers_later_tail`
+  - `mu/tests/docs/test_root_files.py::TestRootFileConsistency::test_green_gate_ripgrep_install_ignores_third_party_apt_sources`
+- Authorized same-PR recovery files:
+  - `.github/workflows/green_gate.yml`
+  - `mu/tests/docs/test_root_files.py`
+  - `mu/tests/tools/test_claude_pager_receiver.py`
+  - `reports/control_plane/claude-pager-drain-singleflight-2026-06-27_2026-06-27.md`
+  - `reports/l4_wave_indicators/claude-pager-drain-singleflight-2026-06-27.json`
+<!-- PR1163_RECOVERY_REFRESH:end -->
+
 <!-- L4_FIELDS_FROM_TRACKER:start -->
 **L4 fields (auto-derived from the canonical TASKS.md tracker note -- single source of truth; do not hand-edit):**
 
@@ -134,8 +152,8 @@ FOUNDER_OVERRIDE:claude-pager-drain-singleflight-2026-06-27
 - `indicator_artifact_ref`: reports/l4_wave_indicators/claude-pager-drain-singleflight-2026-06-27.json.
 - `indicator_collection_command`: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id claude-pager-drain-singleflight-2026-06-27 --output reports/l4_wave_indicators/claude-pager-drain-singleflight-2026-06-27.json.
 - `target_gate_id`: G8.
-- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_claude_pager_receiver.py`.
-- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/claude-pager-drain-singleflight-2026-06-27_2026-06-27.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_root_files.py mu/tests/tools/test_claude_pager_receiver.py`.
+- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/claude-pager-drain-singleflight-2026-06-27_2026-06-27.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
 - `boot0_progress_state`: HOLD.
@@ -148,19 +166,17 @@ FOUNDER_OVERRIDE:claude-pager-drain-singleflight-2026-06-27
 - Refresh wave: `claude-pager-drain-singleflight-2026-06-27`
 - Active packet: `reports/control_plane/claude-pager-drain-singleflight-2026-06-27_2026-06-27.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `f5a6fbbc0e8a21b7f2d08b1af867c4f2c35f1c2c949358402f178b318aa151fb`
+- Tracker note sha256: `a498dea977eba0af97124f6b8a31df7078bd8cd53a6dc346ee7f85b4f79d671f`
 - Indicator artifact: `reports/l4_wave_indicators/claude-pager-drain-singleflight-2026-06-27.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_claude_pager_receiver.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/claude-pager-drain-singleflight-2026-06-27_2026-06-27.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_root_files.py mu/tests/tools/test_claude_pager_receiver.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/claude-pager-drain-singleflight-2026-06-27_2026-06-27.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/claude-pager-drain-singleflight-2026-06-27.json`
 - Current staged files:
+  - `.github/workflows/green_gate.yml`
   - `TASKS.md`
+  - `mu/tests/docs/test_root_files.py`
   - `mu/tests/tools/test_claude_pager_receiver.py`
-  - `mu/tools/session/claude_pager_receiver.py`
   - `reports/control_plane/claude-pager-drain-singleflight-2026-06-27_2026-06-27.md`
-  - `reports/control_plane/claude-pager-drain-singleflight-2026-06-27_wave_config.json`
-  - `reports/control_plane/coinduction-non-termination-as-structure-2026-06-27_wave_config.json`
-  - `reports/deferred/non_blocking/claude-pager-drain-singleflight-2026-06-27_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/claude-pager-drain-singleflight-2026-06-27.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
