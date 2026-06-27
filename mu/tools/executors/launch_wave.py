@@ -519,6 +519,215 @@ def check_packet_fences(content: str, config: WaveConfig) -> list[str]:
     return errors
 
 
+def _git_index_text(repo_root: Path, rel_path: str) -> str | None:
+    """Return the staged blob text for *rel_path*, or None when absent."""
+    try:
+        result = subprocess.run(
+            ["git", "show", f":{rel_path}"],
+            cwd=str(repo_root),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _packet_progress_score(content: str) -> int:
+    """Score packet progress beyond the launcher's initial Phase A render."""
+    score = 0
+    if "Phase-A-Lock: LOCKED" in content:
+        score += 1
+    if any(line.startswith("Status: Phase B") for line in content.splitlines()):
+        score += 2
+    if "PHASE_B_INDICATOR_SCOPE_REFRESH:start" in content:
+        score += 4
+    if "pre-supervisor" in content or "commit-ready" in content:
+        score += 1
+    return score
+
+
+def _preserve_advanced_packet_if_present(
+    repo_root: Path,
+    packet_path: Path,
+    config: WaveConfig,
+) -> bool:
+    """Preserve or restore a locked/Phase-B packet on SAME-config recovery reruns.
+
+    ``launch_wave`` owns initial setup. Once Phase A or Phase B has advanced the
+    packet, rerunning the original config is a recovery action and must not demote
+    packet truth back to the initial unlocked render. If an earlier bad rerun
+    already clobbered the worktree but the index still has the richer packet, restore
+    that staged authority before continuing.
+    """
+    try:
+        current_text = packet_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+
+    candidates: list[tuple[int, str, str]] = [
+        (_packet_progress_score(current_text), "worktree", current_text)
+    ]
+    try:
+        rel_path = packet_path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        rel_path = config.tracked_packet
+    indexed_text = _git_index_text(repo_root, rel_path)
+    if indexed_text is not None:
+        candidates.append((_packet_progress_score(indexed_text), "index", indexed_text))
+
+    best_score, best_source, best_text = max(candidates, key=lambda item: item[0])
+    if best_score <= 0:
+        return False
+
+    fence_errors = check_packet_fences(best_text, config)
+    if fence_errors:
+        raise LaunchWaveError(
+            f"refusing to preserve advanced packet from {best_source}; fence failure: "
+            + "; ".join(fence_errors)
+        )
+    if best_text != current_text:
+        packet_path.write_text(best_text, encoding="utf-8")
+    return True
+
+
+def _tracker_note_progress_score(note_line: str) -> int:
+    """Score tracker-note progress beyond the launcher's initial config note."""
+    score = 0
+    if "Phase B" in note_line:
+        score += 2
+    if "pre-commit supervisor" in note_line or "commit-ready" in note_line:
+        score += 2
+    if "scope_refs:" in note_line:
+        score += 3
+    if "reentry=true" in note_line:
+        score += 1
+    return score
+
+
+def _tracker_note_line_for_wave(content: str, wave_id: str) -> str | None:
+    matches = [
+        line
+        for line in content.splitlines()
+        if line.startswith("- Tracker sync note ") and f", {wave_id}):" in line
+    ]
+    if len(matches) > 1:
+        raise LaunchWaveError(
+            f"duplicate TASKS.md tracker notes for wave_id {wave_id!r}; refusing recovery rerun"
+        )
+    return matches[0] if matches else None
+
+
+def _replace_or_insert_tracker_note_line(content: str, wave_id: str, note_line: str) -> str:
+    lines = content.split("\n")
+    replaced = False
+    for idx, line in enumerate(lines):
+        if line.startswith("- Tracker sync note ") and f", {wave_id}):" in line:
+            if replaced:
+                raise LaunchWaveError(
+                    f"duplicate TASKS.md tracker notes for wave_id {wave_id!r}; "
+                    "refusing recovery rerun"
+                )
+            lines[idx] = note_line
+            replaced = True
+    if replaced:
+        return "\n".join(lines)
+
+    ra_start = None
+    ra_end = None
+    for idx, line in enumerate(lines):
+        if line.startswith("## Ra"):
+            ra_start = idx
+            continue
+        if ra_start is not None and idx > ra_start + 1 and line.strip() == "---":
+            ra_end = idx
+            break
+    if ra_start is None:
+        raise LaunchWaveError(
+            f"cannot restore advanced tracker note for missing Ra section and wave_id {wave_id!r}"
+        )
+
+    search_end = ra_end if ra_end is not None else len(lines)
+    last_note_idx = None
+    for idx in range(ra_start, search_end):
+        if lines[idx].startswith("- Tracker sync note "):
+            last_note_idx = idx
+    if last_note_idx is None:
+        raise LaunchWaveError(
+            f"cannot restore advanced tracker note for missing Ra tracker-note anchor "
+            f"and wave_id {wave_id!r}"
+        )
+
+    insert_at = last_note_idx + 1
+    while insert_at < search_end and lines[insert_at].strip() == "":
+        insert_at += 1
+    lines.insert(insert_at, "")
+    lines.insert(insert_at, note_line)
+    return "\n".join(lines)
+
+
+def _validate_preserved_tracker_note(note_line: str, config: WaveConfig) -> None:
+    required = [
+        f", {config.wave_id}):",
+        f"Packet: `{config.tracked_packet}`",
+        f"FOUNDER_OVERRIDE:{config.founder_override}",
+        "Class:",
+        "target_gate_id:",
+        "evidence_command:",
+        "evidence_delta:",
+    ]
+    missing = [token for token in required if token not in note_line]
+    if missing:
+        raise LaunchWaveError(
+            "refusing to preserve advanced TASKS.md tracker note with missing "
+            f"field(s): {missing!r}"
+        )
+
+
+def _preserve_advanced_tracker_note_if_present(
+    repo_root: Path,
+    config: WaveConfig,
+) -> bool:
+    """Preserve or restore an advanced same-wave TASKS note on recovery reruns."""
+    tasks_path = repo_root / "TASKS.md"
+    try:
+        current_text = tasks_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+
+    current_note = _tracker_note_line_for_wave(current_text, config.wave_id)
+    candidates: list[tuple[int, str, str]] = []
+    if current_note is not None:
+        candidates.append(
+            (_tracker_note_progress_score(current_note), "worktree", current_note)
+        )
+
+    indexed_text = _git_index_text(repo_root, "TASKS.md")
+    if indexed_text is not None:
+        indexed_note = _tracker_note_line_for_wave(indexed_text, config.wave_id)
+        if indexed_note is not None:
+            candidates.append(
+                (_tracker_note_progress_score(indexed_note), "index", indexed_note)
+            )
+
+    if not candidates:
+        return False
+    best_score, _best_source, best_note = max(candidates, key=lambda item: item[0])
+    if best_score <= 0:
+        return False
+
+    _validate_preserved_tracker_note(best_note, config)
+    if current_note != best_note:
+        tasks_path.write_text(
+            _replace_or_insert_tracker_note_line(current_text, config.wave_id, best_note),
+            encoding="utf-8",
+        )
+    return True
+
+
 # --------------------------------------------------------------------------- #
 # Setup steps (each reuses an existing builder; each is individually re-runnable)#
 # --------------------------------------------------------------------------- #
@@ -563,6 +772,9 @@ def setup_packet(repo_root: Path, config: WaveConfig) -> Path:
     }
     packet_path = _pa.create_plan_draft(repo_root, config.wave_id, scope)
 
+    if _preserve_advanced_packet_if_present(repo_root, packet_path, config):
+        return packet_path
+
     if packet_path.read_text(encoding="utf-8") != fenced:
         packet_path.write_text(fenced, encoding="utf-8")
     return packet_path
@@ -570,6 +782,8 @@ def setup_packet(repo_root: Path, config: WaveConfig) -> Path:
 
 def setup_tracker_note(repo_root: Path, config: WaveConfig) -> None:
     """Step 2: upsert the TASKS.md tracker-sync note (keyed by wave id)."""
+    if _preserve_advanced_tracker_note_if_present(repo_root, config):
+        return
     fields = build_tracker_fields(config)
     field_errors = _tsn.validate_fields(fields)
     if field_errors:

@@ -920,6 +920,152 @@ class TestStagePathSymlinkAliasRecovery:
             {"status": "failed", "executor": "commit_executor", "stdout": json.dumps(payload)}
         ) == FailureClass.FEATURE_BRANCH_MISMATCH
 
+    def test_phase_a_plan_name_date_suffixed_overflow_is_recoverable(self, tmp_path, monkeypatch):
+        plan_name = (
+            "fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-payoff_2026-06-27"
+        )
+        expected = (
+            "fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-pa_2026-06-27"
+        )
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "error": f"Unsafe plan_name: {plan_name!r}",
+        }
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda _repo_root, bus_dir=None: {
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": plan_name.removesuffix("_2026-06-27"),
+                "next_candidates": [{
+                    "candidate": plan_name,
+                    "bounded": True,
+                    "tracked_packet": f"reports/control_plane/{plan_name}.md",
+                }],
+            },
+        )
+
+        assert rg_mod.classify_failure(result) == FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION
+        recovery = rg_mod.fix_phase_a_plan_name_normalization(tmp_path, result=result)
+        assert recovery["fixed"] is True
+        assert recovery["action"] == "normalize_phase_a_plan_name"
+        retry_record = result["retry_record"]
+        assert retry_record["next_candidates"][0]["candidate"] == expected
+        assert retry_record["tracked_packet"] == f"reports/control_plane/{expected}.md"
+
+    def test_phase_a_plan_name_underscore_date_suffix_resolves_under_control_plane(self, tmp_path, monkeypatch):
+        plan_name = "safe-recovery-plan_2026-06-27"
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "error": f"Unsafe plan_name: {plan_name!r}",
+        }
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda _repo_root, bus_dir=None: {
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": "safe-recovery-plan",
+                "next_candidates": [{"bounded": True}],
+            },
+        )
+
+        recovery = rg_mod.fix_phase_a_plan_name_normalization(tmp_path, result=result)
+        assert recovery["fixed"] is True
+        assert recovery["action"] == "normalize_phase_a_plan_name"
+        retry_record = result["retry_record"]
+        assert retry_record["next_candidates"][0]["candidate"] == plan_name
+        assert retry_record["tracked_packet"] == (
+            "reports/control_plane/safe-recovery-plan_2026-06-27.md"
+        )
+
+    @pytest.mark.parametrize("plan_name", [
+        "../unsafe-plan_2026-06-27",
+        "/tmp/unsafe-plan_2026-06-27",
+        "unsafe/plan_2026-06-27",
+        "unsafe\\plan_2026-06-27",
+        "unsafe.plan_2026-06-27",
+        "unsafe plan_2026-06-27",
+        "unsafe-plan\n_2026-06-27",
+        "unsafe-plan\x00_2026-06-27",
+    ])
+    def test_phase_a_plan_name_unsafe_paths_are_not_normalized(self, plan_name):
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "error": f"Unsafe plan_name: {plan_name!r}",
+        }
+
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+
+        recovery = rg_mod.fix_phase_a_plan_name_normalization(Path.cwd(), result=result)
+        assert recovery["fixed"] is False
+        assert recovery["action"] == "unsafe_phase_a_plan_name_rejected"
+        assert rg_mod.classify_failure(result) != FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION
+
+    def test_phase_a_strict_l4_scope_guard_is_tier1_recoverable(self):
+        plan_path = "reports/control_plane/strict_l4_scope_gap.md"
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "plan_path": plan_path,
+            "error": (
+                "Phase A strict staged L4 guard failed before lock: "
+                "packet requires strict staged L4 --wave-id validation but Scope does "
+                "not include TASKS.md tracker-sync authority"
+            ),
+        }
+
+        fc = rg_mod.classify_failure({
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        })
+
+        assert fc == FailureClass.PHASE_A_STRICT_L4_SCOPE_AUTHORITY
+        assert rg_mod.tier_for(fc) == 1
+
+    def test_phase_a_packet_line_ref_guard_is_tier1_recoverable(self):
+        plan_path = "reports/control_plane/line_ref_gap.md"
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "plan_path": plan_path,
+            "error": (
+                "Plan-load pre-flight REJECTED: control packet cites code by line number\n"
+                f"{plan_path}:44: code line-number reference: "
+                "Preserve single packet authority: `TASKS.md:627`\n\n"
+                "1 code line-number reference(s) found. Cite code by function name "
+                "instead of file:line."
+            ),
+        }
+
+        fc = rg_mod.classify_failure({
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        })
+
+        assert fc == FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP
+        assert rg_mod.tier_for(fc) == 1
+
     def test_embedded_bridge_error_classified_as_agent_review_crash(self):
         stdout = json.dumps({
             "status": "error",
@@ -1063,6 +1209,9 @@ class TestTierMapping:
                          FailureClass.MISSING_PHASE_A_LOCK,
                          FailureClass.MISSING_PLAN_TASK_HEADER,
                          FailureClass.MISMATCHED_PLAN_TASK_HEADER,
+                         FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION,
+                         FailureClass.PHASE_A_STRICT_L4_SCOPE_AUTHORITY,
+                         FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP,
                          FailureClass.STAGE_PATH_SYMLINK_ALIAS}
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
@@ -2112,6 +2261,512 @@ class TestAttemptRecovery:
     def test_tier4_escalates(self, tmp_path):
         r = rg_mod.attempt_recovery(tmp_path, {"status": "question_for_founder", "step": "b"}, "w1")
         assert r["recovered"] is False and r["tier"] == 4 and r["action"] == "escalate"
+
+    def test_phase_a_plan_name_overflow_emits_safe_retry_record(self, tmp_path, monkeypatch):
+        plan_name = (
+            "fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-payoff_2026-06-27"
+        )
+        expected = (
+            "fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-pa_2026-06-27"
+        )
+        routing_record = {
+            "decision": "ROUTE_PHASE_A",
+            "wave_name": "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff",
+            "next_candidates": [{
+                "candidate": plan_name,
+                "bounded": True,
+                "tracked_packet": f"reports/control_plane/{plan_name}.md",
+            }],
+        }
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda _repo_root, bus_dir=None: routing_record,
+        )
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "error": f"Unsafe plan_name: {plan_name!r}",
+        }
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "fixpoint-meta-circular-evaluator-as-structure")
+
+        assert recovery["recovered"] is True
+        assert recovery["tier"] == 1
+        assert recovery["failure_class"] == FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION.value
+        assert recovery["action"] == "normalize_phase_a_plan_name"
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_A"
+        candidate = retry_record["next_candidates"][0]
+        assert candidate["wave_name"] == "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff"
+        assert candidate["candidate"] == expected
+        assert candidate["tracked_packet"] == f"reports/control_plane/{expected}.md"
+        assert candidate["recovery_authority"] == FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION.value
+        assert candidate["authority_tracked_packet"] == f"reports/control_plane/{plan_name}.md"
+        assert retry_record["authority_tracked_packet"] == f"reports/control_plane/{plan_name}.md"
+        assert len(expected) == 80
+        assert "/" not in expected and "\\" not in expected
+
+    def test_phase_a_strict_l4_scope_guard_inserts_tasks_scope_authority(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        wave_id = "strict-l4-scope-authority-2026-06-27"
+        plan_path = "reports/control_plane/strict_l4_scope_gap.md"
+        packet = tmp_path / plan_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "\n".join([
+                "# Strict L4 Scope Gap",
+                "",
+                "Date: 2026-06-27",
+                "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+                "Task: [NEXT-CODEX-POST-REDTEAM]",
+                f"Wave ID: {wave_id}",
+                "Phase-A-Lock: UNLOCKED",
+                "",
+                "## Scope",
+                "",
+                "- `mu/tools/executors/recovery_gate.py`",
+                "",
+                "## Acceptance Criteria",
+                "",
+                "- `python3 tools/checks/enforce_l4_execution_contract.py --staged "
+                f"--wave-id {wave_id} --wave-class L4_ENABLER` passes.",
+                "",
+                "## Grounding / Authorization",
+                "",
+                f"- `FOUNDER_OVERRIDE:{wave_id}`.",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda _repo_root, bus_dir=None: {
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": wave_id,
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "summary": "strict L4 scope authority retry",
+                "next_candidates": [{
+                    "candidate": Path(plan_path).stem,
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }],
+            },
+        )
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "plan_path": plan_path,
+            "error": (
+                "Phase A strict staged L4 guard failed before lock: "
+                "packet requires strict staged L4 --wave-id validation but Scope does "
+                "not include TASKS.md tracker-sync authority"
+            ),
+        }
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, wave_id)
+
+        assert recovery["recovered"] is True
+        assert recovery["tier"] == 1
+        assert recovery["failure_class"] == FailureClass.PHASE_A_STRICT_L4_SCOPE_AUTHORITY.value
+        assert recovery["action"] == "insert_phase_a_strict_l4_tasks_scope_authority"
+        content = packet.read_text(encoding="utf-8")
+        scope = content.split("## Scope", 1)[1].split("## Acceptance Criteria", 1)[0]
+        assert "`TASKS.md` - tracker-sync authority for strict staged L4 --wave-id validation" in scope
+        assert "Phase-A-Lock: UNLOCKED" in content
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_A"
+        assert retry_record["tracked_packet"] == plan_path
+        assert retry_record["next_candidates"][0]["tracked_packet"] == plan_path
+        assert retry_record["next_candidates"][0]["wave_name"] == wave_id
+
+    def test_phase_a_packet_line_ref_guard_removes_tasks_line_refs(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        wave_id = "phase-a-line-ref-cleanup-2026-06-27"
+        plan_path = "reports/control_plane/line_ref_gap.md"
+        packet = tmp_path / plan_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "\n".join([
+                "# Line Ref Gap",
+                "",
+                "Date: 2026-06-27",
+                "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+                "Task: [NEXT-CODEX-POST-REDTEAM]",
+                f"Wave ID: {wave_id}",
+                "Phase-A-Lock: UNLOCKED",
+                "",
+                "## Scope",
+                "",
+                "- `TASKS.md` - tracker-sync authority for strict staged L4 --wave-id validation.",
+                "- `mu/tools/executors/recovery_gate.py`",
+                "",
+                "## Acceptance Criteria",
+                "",
+                "- Preserve single packet authority: `TASKS.md:627` governs this plan.",
+                "- Stop if TASKS.md:627 cannot be reconciled with the packet.",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda _repo_root, bus_dir=None: {
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": wave_id,
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "summary": "Phase A line-ref cleanup retry",
+                "next_candidates": [{
+                    "candidate": Path(plan_path).stem,
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }],
+            },
+        )
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "plan_path": plan_path,
+            "error": (
+                "Plan-load pre-flight REJECTED: control packet cites code by line number\n"
+                f"{plan_path}:16: code line-number reference: "
+                "Preserve single packet authority: `TASKS.md:627`\n\n"
+                "1 code line-number reference(s) found. Cite code by function name "
+                "instead of file:line."
+            ),
+        }
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, wave_id)
+
+        assert recovery["recovered"] is True
+        assert recovery["tier"] == 1
+        assert recovery["failure_class"] == FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP.value
+        assert recovery["action"] == "remove_phase_a_packet_line_refs"
+        content = packet.read_text(encoding="utf-8")
+        assert "TASKS.md:627" not in content
+        assert "`TASKS.md` tracker entry" in content
+        assert "TASKS.md tracker entry" in content
+        assert "fixpoint meta-circular evaluator" not in content
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_A"
+        assert retry_record["tracked_packet"] == plan_path
+        assert retry_record["next_candidates"][0]["tracked_packet"] == plan_path
+        assert retry_record["next_candidates"][0]["wave_name"] == wave_id
+
+    def test_phase_a_packet_line_ref_guard_removes_generic_code_line_refs(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        wave_id = "phase-a-generic-line-ref-cleanup-2026-06-27"
+        plan_path = "reports/control_plane/generic_line_ref_gap.md"
+        packet = tmp_path / plan_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "\n".join([
+                "# Generic Line Ref Gap",
+                "",
+                "Date: 2026-06-27",
+                "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+                "Task: [NEXT-CODEX-POST-REDTEAM]",
+                f"Wave ID: {wave_id}",
+                "Phase-A-Lock: UNLOCKED",
+                "",
+                "## Scope",
+                "",
+                "- `TASKS.md` - tracker-sync authority for strict staged L4 --wave-id validation.",
+                "- `mu/tools/executors/recovery_gate.py`",
+                "",
+                "## Acceptance Criteria",
+                "",
+                "- Preserve the repair behavior around `mu/tools/executors/recovery_gate.py:1908`.",
+                "- Normalize range refs like `mu/tools/executors/phase_b_executor.py:433-434`.",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda _repo_root, bus_dir=None: {
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": wave_id,
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "summary": "Phase A generic line-ref cleanup retry",
+                "next_candidates": [{
+                    "candidate": Path(plan_path).stem,
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }],
+            },
+        )
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "plan_path": plan_path,
+            "error": (
+                "Plan-load pre-flight REJECTED: control packet cites code by line number\n"
+                f"{plan_path}:16: code line-number reference: "
+                "Preserve the repair behavior around "
+                "`mu/tools/executors/recovery_gate.py:1908`\n\n"
+                "1 code line-number reference(s) found. Cite code by function name "
+                "instead of file:line."
+            ),
+        }
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, wave_id)
+
+        assert recovery["recovered"] is True
+        assert recovery["tier"] == 1
+        assert recovery["failure_class"] == FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP.value
+        assert recovery["action"] == "remove_phase_a_packet_line_refs"
+        content = packet.read_text(encoding="utf-8")
+        assert "mu/tools/executors/recovery_gate.py:1908" not in content
+        assert "`mu/tools/executors/recovery_gate.py`" in content
+        assert "mu/tools/executors/phase_b_executor.py:433-434" not in content
+        assert "`mu/tools/executors/phase_b_executor.py`" in content
+        retry_record = result["retry_record"]
+        assert retry_record["decision"] == "ROUTE_PHASE_A"
+        assert retry_record["tracked_packet"] == plan_path
+        assert retry_record["next_candidates"][0]["tracked_packet"] == plan_path
+        assert retry_record["next_candidates"][0]["wave_name"] == wave_id
+
+    def test_phase_a_strict_l4_scope_guard_refuses_out_of_wave_packet(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        active_wave_id = "current-wave-2026-06-27"
+        packet_wave_id = "other-wave-2026-06-27"
+        plan_path = "reports/control_plane/strict_l4_scope_gap.md"
+        packet = tmp_path / plan_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        original = "\n".join([
+            "# Strict L4 Scope Gap",
+            "",
+            "Date: 2026-06-27",
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+            "Task: [NEXT-CODEX-POST-REDTEAM]",
+            f"Wave ID: {packet_wave_id}",
+            "Phase-A-Lock: UNLOCKED",
+            "",
+            "## Scope",
+            "",
+            "- `mu/tools/executors/recovery_gate.py`",
+            "",
+        ])
+        packet.write_text(original, encoding="utf-8")
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda _repo_root, bus_dir=None: {
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": active_wave_id,
+                "next_candidates": [{
+                    "candidate": Path(plan_path).stem,
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }],
+            },
+        )
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "plan_path": plan_path,
+            "error": (
+                "Phase A strict staged L4 guard failed before lock: "
+                "packet requires strict staged L4 --wave-id validation but Scope does "
+                "not include TASKS.md tracker-sync authority"
+            ),
+        }
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, active_wave_id)
+
+        assert recovery["recovered"] is False
+        assert recovery["action"] == "out_of_wave_packet"
+        assert "active wave_id current-wave-2026-06-27 != packet Wave ID other-wave-2026-06-27" in recovery["detail"]
+        assert packet.read_text(encoding="utf-8") == original
+        assert "retry_record" not in result
+
+    def test_phase_a_packet_line_ref_guard_refuses_out_of_wave_packet(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        active_wave_id = "current-wave-2026-06-27"
+        packet_wave_id = "other-wave-2026-06-27"
+        plan_path = "reports/control_plane/line_ref_gap.md"
+        packet = tmp_path / plan_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        original = "\n".join([
+            "# Line Ref Gap",
+            "",
+            "Date: 2026-06-27",
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+            "Task: [NEXT-CODEX-POST-REDTEAM]",
+            f"Wave ID: {packet_wave_id}",
+            "Phase-A-Lock: UNLOCKED",
+            "",
+            "## Scope",
+            "",
+            "- `TASKS.md` - tracker-sync authority for strict staged L4 --wave-id validation.",
+            "",
+            "## Acceptance Criteria",
+            "",
+            "- Preserve single packet authority: `TASKS.md:123` governs this plan.",
+            "",
+        ])
+        packet.write_text(original, encoding="utf-8")
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda _repo_root, bus_dir=None: {
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": active_wave_id,
+                "next_candidates": [{
+                    "candidate": Path(plan_path).stem,
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }],
+            },
+        )
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "plan_path": plan_path,
+            "error": (
+                "Plan-load pre-flight REJECTED: control packet cites code by line number\n"
+                f"{plan_path}:15: code line-number reference: "
+                "Preserve single packet authority: `TASKS.md:123`\n\n"
+                "1 code line-number reference(s) found. Cite code by function name "
+                "instead of file:line."
+            ),
+        }
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, active_wave_id)
+
+        assert recovery["recovered"] is False
+        assert recovery["action"] == "out_of_wave_packet"
+        assert "active wave_id current-wave-2026-06-27 != packet Wave ID other-wave-2026-06-27" in recovery["detail"]
+        assert packet.read_text(encoding="utf-8") == original
+        assert "TASKS.md:123" in packet.read_text(encoding="utf-8")
+        assert "retry_record" not in result
+
+    def test_phase_a_strict_l4_scope_guard_upgrades_generic_tasks_scope(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        wave_id = "strict-l4-generic-tasks-scope-2026-06-27"
+        plan_path = "reports/control_plane/strict_l4_generic_tasks_scope.md"
+        packet = tmp_path / plan_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "\n".join([
+                "# Strict L4 Generic TASKS Scope",
+                "",
+                "Date: 2026-06-27",
+                "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+                "Task: [NEXT-CODEX-POST-REDTEAM]",
+                f"Wave ID: {wave_id}",
+                "Phase-A-Lock: UNLOCKED",
+                "",
+                "## Scope",
+                "",
+                "- `TASKS.md`",
+                "- `mu/tools/executors/recovery_gate.py`",
+                "",
+                "## Acceptance Criteria",
+                "",
+                "- `python3 tools/checks/enforce_l4_execution_contract.py --staged "
+                f"--wave-id {wave_id} --wave-class L4_ENABLER` passes.",
+                "",
+                "## Grounding / Authorization",
+                "",
+                f"- `FOUNDER_OVERRIDE:{wave_id}`.",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda _repo_root, bus_dir=None: {
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": wave_id,
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "next_candidates": [{
+                    "candidate": Path(plan_path).stem,
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }],
+            },
+        )
+        payload = {
+            "status": "error",
+            "executor": "phase_a_executor",
+            "plan_path": plan_path,
+            "error": (
+                "Phase A strict staged L4 guard failed before lock: "
+                "packet requires strict staged L4 --wave-id validation but Scope does "
+                "not include TASKS.md tracker-sync authority"
+            ),
+        }
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps(payload),
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, wave_id)
+
+        assert recovery["recovered"] is True
+        assert recovery["action"] == "insert_phase_a_strict_l4_tasks_scope_authority"
+        content = packet.read_text(encoding="utf-8")
+        scope = content.split("## Scope", 1)[1].split("## Acceptance Criteria", 1)[0]
+        assert "`TASKS.md` - tracker-sync authority for strict staged L4 --wave-id validation" in scope
+        assert "- `TASKS.md`\n" not in scope
+        assert scope.count("`TASKS.md`") == 1
 
     def test_tier2_timeout_recovers_via_fix(self, tmp_path, monkeypatch):
         """PROCESS_TIMEOUT now has a Tier 2 fix — returns recovered=True."""
@@ -8548,6 +9203,21 @@ esac
         script.write_text((_OBSERVABILITY_DIR / name).read_text(encoding="utf-8"), encoding="utf-8")
         script.chmod(script.stat().st_mode | 0o111)
 
+    def _pane_oneshot_env(self, repo_root: Path, **overrides: str) -> dict[str, str]:
+        base_path = overrides.pop("PATH", os.environ["PATH"])
+        bin_dir = self._fake_git_dir(
+            repo_root,
+            show_toplevel=str(repo_root),
+            branch="test-pane-root",
+        )
+        return os.environ | {
+            "PATH": f"{bin_dir}:{base_path}",
+            "RCX_OBS_REPO_ROOT": str(repo_root),
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+            **overrides,
+        }
+
     def _write_monitor_identity_config(self, repo_root: Path, lanes: dict[str, dict[str, object]]) -> None:
         config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -10534,7 +11204,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -10605,7 +11275,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -10640,7 +11310,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -10676,7 +11346,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -10711,7 +11381,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -10742,7 +11412,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -10779,7 +11449,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -10816,7 +11486,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -10915,12 +11585,11 @@ esac
             "sleep 20\n",
         )
         pane_notify_marker = tmp_path / "pane-notify-marker.txt"
-        env = os.environ | {
-            "PATH": f"{bin_dir}:{os.environ['PATH']}",
-            "RCX_PANE_NOTIFY_MARKER": str(pane_notify_marker),
-            "RCX_PANE_ONESHOT": "1",
-            "TERM": "xterm",
-        }
+        env = self._pane_oneshot_env(
+            repo_root,
+            PATH=f"{bin_dir}:{os.environ['PATH']}",
+            RCX_PANE_NOTIFY_MARKER=str(pane_notify_marker),
+        )
 
         result = subprocess.run(
             ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
@@ -11075,7 +11744,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -11161,7 +11830,7 @@ esac
             cwd=repo_root,
             capture_output=True,
             text=True,
-            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            env=self._pane_oneshot_env(repo_root),
             timeout=10,
         )
 
@@ -12682,7 +13351,8 @@ class TestNeedsPhaseB_Tier3:
         )
         assert checkpoint["completed_step"] == "needs_phase_b_reentry"
         assert checkpoint["plan_path"] == "reports/control_plane/pager.md"
-        assert checkpoint["bridge_rounds"] == 3
+        assert checkpoint["bridge_rounds"] == 0
+        assert checkpoint["post_reentry_prior_bridge_rounds"] == 3
         assert checkpoint["changed_files"] == ["mu/tools/executors/phase_b_executor.py"]
         assert checkpoint["bridge_scope_fingerprint"] == "scope-fingerprint"
         assert checkpoint["deferred_packet_path"] == "reports/deferred/non_blocking/pager.md"
@@ -12711,7 +13381,8 @@ class TestNeedsPhaseB_Tier3:
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         assert checkpoint["completed_step"] == "needs_phase_b_reentry"
         assert checkpoint["plan_path"] == "reports/control_plane/pager.md"
-        assert checkpoint["bridge_rounds"] == 6
+        assert checkpoint["bridge_rounds"] == 0
+        assert checkpoint["post_reentry_prior_bridge_rounds"] == 6
         assert checkpoint["reentry_findings"] == "Bridge status drifted after reentry convergence."
         assert checkpoint["bridge_scope_fingerprint"] == rg_mod._bridge_scope_fingerprint_for_files(  # ANTICHEAT_OK: regression locks Phase B resume fingerprint parity
             tmp_path, []

@@ -1,0 +1,24 @@
+{
+  "wave_id": "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff",
+  "repeat_run_speedup_ratio": 1.177498,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.25242,
+  "repeat_run_raw_seconds": [
+    0.297224,
+    0.25242
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.297224
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.549644
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-27T17:18:44Z",
+  "collector_version": "2.2.0"
+}

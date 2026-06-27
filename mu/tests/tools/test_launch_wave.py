@@ -108,6 +108,57 @@ def make_config(**overrides):
     return lw.WaveConfig(**base)
 
 
+def _phase_b_packet_content(config):
+    content = lw.render_wave_packet(config)
+    content = content.replace(
+        "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+        "Status: Phase B (pre-supervisor pending, bridge-converged)",
+    )
+    content = content.replace("Phase-A-Lock: UNLOCKED", "Phase-A-Lock: LOCKED")
+    content += (
+        "\n<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+        "## Phase B Indicator Scope Reconciliation\n\n"
+        f"- Refresh wave: `{config.wave_id}`\n"
+        f"- Active packet: `{config.tracked_packet}`\n"
+        "- Purpose: Phase B mechanically collected and staged same-wave scope "
+        "before pre-commit supervisor review.\n"
+        "- Authorized staged files:\n"
+        "  - `TASKS.md`\n"
+        "  - `mu/tools/executors/phase_b_executor.py`\n"
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+    )
+    return content
+
+
+def _tracker_note_line(content, wave_id):
+    matches = [
+        line
+        for line in content.splitlines()
+        if line.startswith("- Tracker sync note ") and f", {wave_id}):" in line
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _phase_b_tracker_note_line(note_line):
+    note_line = note_line.replace(
+        "**Demo Launcher Wave 2026-06-19.**",
+        "**NEXT-CODEX-POST-REDTEAM - Phase B pre-commit supervisor package.**",
+    )
+    note_line = note_line.replace(
+        "evidence_delta: New builder mechanizes the setup.",
+        "evidence_delta: (1) Phase B converged on the locked plan. "
+        "(2) Final pytest gate covered wave-owned files. "
+        "scope_refs: `TASKS.md`, `mu/tools/executors/phase_b_executor.py`.",
+    )
+    note_line = note_line.replace(
+        "progress_proof_after: builder exists.",
+        "progress_proof_after: Phase B staged a canonical tracker note before "
+        "pre-commit supervisor validation; reentry=true.",
+    )
+    return note_line
+
+
 def _artifact_counts(repo, wave_id):
     """Return (packet count, tracker-note count, routing-candidate count)."""
     packets = list((repo / "reports" / "control_plane").glob(f"{wave_id}_*.md"))
@@ -479,6 +530,75 @@ def test_packet_content_is_byte_stable_across_reruns(wave_repo):
     first = lw.setup_packet(wave_repo, config).read_text(encoding="utf-8")
     second = lw.setup_packet(wave_repo, make_config()).read_text(encoding="utf-8")
     assert first == second
+
+
+def test_setup_packet_preserves_locked_phase_b_packet_on_rerun(wave_repo):
+    config = make_config()
+    packet_path = lw.setup_packet(wave_repo, config)
+    advanced = _phase_b_packet_content(config)
+    packet_path.write_text(advanced, encoding="utf-8")
+
+    rerun_path = lw.setup_packet(wave_repo, make_config())
+
+    assert rerun_path == packet_path
+    assert packet_path.read_text(encoding="utf-8") == advanced
+
+
+def test_setup_packet_restores_staged_phase_b_packet_after_worktree_clobber(wave_repo):
+    config = make_config()
+    packet_path = lw.setup_packet(wave_repo, config)
+    advanced = _phase_b_packet_content(config)
+    packet_path.write_text(advanced, encoding="utf-8")
+    _git(wave_repo, "add", config.tracked_packet)
+
+    packet_path.write_text(lw.render_wave_packet(config), encoding="utf-8")
+    assert "Phase-A-Lock: UNLOCKED" in packet_path.read_text(encoding="utf-8")
+
+    lw.setup_packet(wave_repo, make_config())
+
+    assert packet_path.read_text(encoding="utf-8") == advanced
+
+
+def test_setup_tracker_note_restores_staged_phase_b_note_after_worktree_clobber(wave_repo):
+    config = make_config()
+    lw.setup_tracker_note(wave_repo, config)
+    tasks_path = wave_repo / "TASKS.md"
+    initial = tasks_path.read_text(encoding="utf-8")
+    initial_note = _tracker_note_line(initial, config.wave_id)
+    advanced_note = _phase_b_tracker_note_line(initial_note)
+    advanced = initial.replace(initial_note, advanced_note)
+    tasks_path.write_text(advanced, encoding="utf-8")
+    _git(wave_repo, "add", "TASKS.md")
+
+    tasks_path.write_text(initial, encoding="utf-8")
+    assert "scope_refs:" not in tasks_path.read_text(encoding="utf-8")
+
+    lw.setup_tracker_note(wave_repo, make_config())
+
+    assert tasks_path.read_text(encoding="utf-8") == advanced
+
+
+def test_setup_tracker_note_restores_staged_phase_b_note_when_worktree_note_missing(wave_repo):
+    config = make_config(wave_id="demo-wave-2026-06-27")
+    lw.setup_tracker_note(wave_repo, config)
+    tasks_path = wave_repo / "TASKS.md"
+    initial = tasks_path.read_text(encoding="utf-8")
+    initial_note = _tracker_note_line(initial, config.wave_id)
+    advanced_note = _phase_b_tracker_note_line(initial_note)
+    advanced = initial.replace(initial_note, advanced_note)
+    tasks_path.write_text(advanced, encoding="utf-8")
+    _git(wave_repo, "add", "TASKS.md")
+
+    missing_note = initial.replace(initial_note + "\n", "")
+    tasks_path.write_text(missing_note, encoding="utf-8")
+    assert f", {config.wave_id}):" not in tasks_path.read_text(encoding="utf-8")
+
+    lw.setup_tracker_note(wave_repo, config)
+
+    restored = tasks_path.read_text(encoding="utf-8")
+    assert _tracker_note_line(restored, config.wave_id) == advanced_note
+    assert restored.count(f", {config.wave_id}):") == 1
+    assert "scope_refs:" in restored
 
 
 # --------------------------------------------------------------------------- #

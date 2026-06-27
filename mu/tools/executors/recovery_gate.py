@@ -7,10 +7,12 @@ The hybrid Tier 3 implementer path lazy-loads phase_b_implementer at runtime.
 """
 from __future__ import annotations
 
+import ast
 import atexit
 import fcntl
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -100,6 +102,9 @@ class FailureClass(Enum):
     MISSING_PHASE_A_LOCK = "missing_phase_a_lock"
     MISSING_PLAN_TASK_HEADER = "missing_plan_task_header"
     MISMATCHED_PLAN_TASK_HEADER = "mismatched_plan_task_header"
+    PHASE_A_PLAN_NAME_NORMALIZATION = "phase_a_plan_name_normalization"
+    PHASE_A_STRICT_L4_SCOPE_AUTHORITY = "phase_a_strict_l4_scope_authority"
+    PHASE_A_PACKET_LINE_REF_CLEANUP = "phase_a_packet_line_ref_cleanup"
     STAGE_PATH_SYMLINK_ALIAS = "stage_path_symlink_alias"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
@@ -150,6 +155,9 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.MISSING_PHASE_A_LOCK: 1,
     FailureClass.MISSING_PLAN_TASK_HEADER: 1,
     FailureClass.MISMATCHED_PLAN_TASK_HEADER: 1,
+    FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION: 1,
+    FailureClass.PHASE_A_STRICT_L4_SCOPE_AUTHORITY: 1,
+    FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP: 1,
     FailureClass.STAGE_PATH_SYMLINK_ALIAS: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.UPSTREAM_CONNECTIVITY: 2,
@@ -240,6 +248,37 @@ PHASE_B_RECOVERY_PLAN_WAVE_ENV = "RCX_RECOVERY_PHASE_B_PLAN_WAVE_ID"
 STALE_BRIDGE_LOCK_WAIT_TIMEOUT_S = 30.0
 STALE_BRIDGE_LOCK_WAIT_POLL_S = 0.5
 CONTROL_PLANE_PACKET_PREFIX = "reports/control_plane/"
+_PHASE_A_PLAN_NAME_MAX_LEN = 80
+_PHASE_A_PLAN_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
+_PHASE_A_PLAN_NAME_CHARS_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_PHASE_A_PLAN_DATE_SUFFIX_RE = re.compile(
+    r"^(?P<base>[a-z0-9][a-z0-9_-]*?)(?P<suffix>_\d{4}-\d{2}-\d{2})$"
+)
+_PHASE_A_PLAN_NAME_ERROR_RE = re.compile(
+    r"(?:Unsafe|Path traversal in) plan_name:\s*"
+    r"(?P<value>'(?:\\.|[^'])*'|\"(?:\\.|[^\"])*\"|\S+)"
+)
+_PHASE_A_STRICT_L4_SCOPE_GUARD_PREFIX = (
+    "Phase A strict staged L4 guard failed before lock:"
+)
+_PHASE_A_STRICT_L4_SCOPE_GUARD_FRAGMENT = (
+    "packet requires strict staged L4 --wave-id validation but Scope does "
+    "not include TASKS.md tracker-sync authority"
+)
+_PHASE_A_TASKS_SCOPE_AUTHORITY_LINE = (
+    "- `TASKS.md` - tracker-sync authority for strict staged L4 --wave-id validation."
+)
+_PHASE_A_TASKS_LINE_REF_RE = re.compile(r"`TASKS\.md:\d+`|\bTASKS\.md:\d+\b")
+_PHASE_A_CODE_LINE_REF_EXTENSIONS_FALLBACK = (
+    "py",
+    "js",
+    "md",
+    "sh",
+    "json",
+    "yaml",
+    "yml",
+    "txt",
+)
 _FEATURE_BRANCH_RE = re.compile(
     r"On branch (?P<current>[^,\n]+), expected (?P<base>\S+) or (?P<target>\S+)"
 )
@@ -494,6 +533,12 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.STAGE_PATH_SYMLINK_ALIAS
     if _looks_like_feature_branch_mismatch(result):
         return FailureClass.FEATURE_BRANCH_MISMATCH
+    if _looks_like_phase_a_plan_name_normalization(result):
+        return FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION
+    if _looks_like_phase_a_strict_l4_scope_authority(result):
+        return FailureClass.PHASE_A_STRICT_L4_SCOPE_AUTHORITY
+    if _looks_like_phase_a_packet_line_ref_cleanup(result):
+        return FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP
     if _looks_like_missing_phase_a_lock(result):
         return FailureClass.MISSING_PHASE_A_LOCK
     if _looks_like_missing_plan_task_header(result):
@@ -795,6 +840,270 @@ def _extract_validation_errors(result: dict[str, Any]) -> list[str]:
             if text:
                 errors.append(text)
     return errors
+
+
+def _decode_plan_name_repr(raw_value: str) -> str | None:
+    try:
+        parsed = ast.literal_eval(raw_value)
+    except (SyntaxError, ValueError):
+        parsed = raw_value.strip("'\"")
+    return parsed if isinstance(parsed, str) else None
+
+
+def _extract_phase_a_plan_name_error_value(result: dict[str, Any]) -> str | None:
+    for candidate in _extract_result_candidates(result):
+        for text in _iter_text_values(candidate):
+            for line in text.splitlines():
+                match = _PHASE_A_PLAN_NAME_ERROR_RE.search(line)
+                if not match:
+                    continue
+                decoded = _decode_plan_name_repr(match.group("value"))
+                if decoded:
+                    return decoded
+    return None
+
+
+def _result_mentions_phase_a_executor(result: dict[str, Any]) -> bool:
+    for candidate in _extract_result_candidates(result):
+        executor = str(candidate.get("executor") or "").strip()
+        step = str(candidate.get("step") or "").strip()
+        if executor == "phase_a_executor" or step == "phase_a_executor":
+            return True
+    return "phase_a_executor" in "\n".join(_iter_text_values(result)).lower()
+
+
+def _has_plan_name_control_char(text: str) -> bool:
+    return any(ord(ch) < 32 or ord(ch) == 127 for ch in text)
+
+
+def _phase_a_retry_plan_packet_path(plan_name: str) -> str | None:
+    """Return the safe control-plane packet path for a Phase A retry name."""
+    if not _PHASE_A_PLAN_NAME_RE.fullmatch(plan_name):
+        return None
+    packet_path = PurePosixPath(CONTROL_PLANE_PACKET_PREFIX) / f"{plan_name}.md"
+    control_prefix = PurePosixPath(CONTROL_PLANE_PACKET_PREFIX)
+    if packet_path.is_absolute() or ".." in packet_path.parts:
+        return None
+    try:
+        packet_path.relative_to(control_prefix)
+    except ValueError:
+        return None
+    if packet_path.name != f"{plan_name}.md":
+        return None
+    return packet_path.as_posix()
+
+
+def _normalize_phase_a_retry_plan_name(raw_plan_name: Any) -> str | None:
+    """Return a Phase A-safe plan_name, preserving a trailing date suffix.
+
+    This is deliberately narrower than a general slugifier. It only normalizes
+    internally generated ASCII plan slugs that are otherwise Phase A-compatible
+    but exceed the 80-character guard; path separators, dots, and control
+    characters remain invalid instead of being repaired.
+    """
+    if not isinstance(raw_plan_name, str):
+        return None
+    candidate = raw_plan_name.strip().lower()
+    if not candidate:
+        return None
+    if "/" in candidate or "\\" in candidate or _has_plan_name_control_char(candidate):
+        return None
+    if not _PHASE_A_PLAN_NAME_CHARS_RE.fullmatch(candidate):
+        return None
+    if len(candidate) <= _PHASE_A_PLAN_NAME_MAX_LEN:
+        return candidate if _phase_a_retry_plan_packet_path(candidate) else None
+
+    match = _PHASE_A_PLAN_DATE_SUFFIX_RE.fullmatch(candidate)
+    if not match:
+        return None
+    suffix = match.group("suffix")
+    base_budget = _PHASE_A_PLAN_NAME_MAX_LEN - len(suffix)
+    if base_budget < 1:
+        return None
+    base = match.group("base")[:base_budget].rstrip("-_")
+    if not base:
+        return None
+    normalized = f"{base}{suffix}"
+    return normalized if _phase_a_retry_plan_packet_path(normalized) else None
+
+
+def _looks_like_phase_a_plan_name_normalization(result: dict[str, Any]) -> bool:
+    if not _result_mentions_phase_a_executor(result):
+        return False
+    raw_plan_name = _extract_phase_a_plan_name_error_value(result)
+    if raw_plan_name is None:
+        return False
+    normalized = _normalize_phase_a_retry_plan_name(raw_plan_name)
+    return normalized is not None and normalized != raw_plan_name.strip().lower()
+
+
+def _extract_phase_a_strict_l4_scope_guard_message(result: dict[str, Any]) -> str:
+    for candidate in _extract_result_candidates(result):
+        for text in _iter_text_values(candidate):
+            if _PHASE_A_STRICT_L4_SCOPE_GUARD_PREFIX not in text:
+                continue
+            if _PHASE_A_STRICT_L4_SCOPE_GUARD_FRAGMENT not in text:
+                continue
+            for line in text.splitlines():
+                if (
+                    _PHASE_A_STRICT_L4_SCOPE_GUARD_PREFIX in line
+                    and _PHASE_A_STRICT_L4_SCOPE_GUARD_FRAGMENT in line
+                ):
+                    return line.strip()
+            return text.strip()
+    return ""
+
+
+def _looks_like_phase_a_strict_l4_scope_authority(result: dict[str, Any]) -> bool:
+    if not _result_mentions_phase_a_executor(result):
+        return False
+    return bool(_extract_phase_a_strict_l4_scope_guard_message(result))
+
+
+def _extract_phase_a_packet_line_ref_guard_message(result: dict[str, Any]) -> str:
+    for candidate in _extract_result_candidates(result):
+        for text in _iter_text_values(candidate):
+            lowered = text.lower()
+            if "cites code by line number" not in lowered:
+                continue
+            if "code line-number reference" not in lowered:
+                continue
+            if "plan-load pre-flight" not in lowered and "pre-flight rejected" not in lowered:
+                continue
+            for line in text.splitlines():
+                line_lower = line.lower()
+                if (
+                    "code line-number reference" in line_lower
+                    or "cites code by line number" in line_lower
+                ):
+                    return line.strip()
+            return text.strip()
+    return ""
+
+
+def _looks_like_phase_a_packet_line_ref_cleanup(result: dict[str, Any]) -> bool:
+    if not _result_mentions_phase_a_executor(result):
+        return False
+    return bool(_extract_phase_a_packet_line_ref_guard_message(result))
+
+
+def _phase_a_scope_mentions_tasks_content(content: str) -> bool:
+    """Return true only for explicit TASKS.md tracker-sync Scope authority."""
+    in_scope = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## ") and not stripped.startswith("### "):
+            in_scope = stripped.lstrip("#").strip().lower().rstrip(":") == "scope"
+            continue
+        lower = line.lower()
+        has_tracker_sync = "tracker-sync" in lower or "tracker sync" in lower
+        has_strict_l4 = "--wave-id" in line or "strict staged l4" in lower
+        if (
+            in_scope
+            and "TASKS.md" in line
+            and has_tracker_sync
+            and "authority" in lower
+            and has_strict_l4
+        ):
+            return True
+    return False
+
+
+def _phase_a_packet_is_unlocked(content: str) -> bool:
+    header = content.split("\n## ", 1)[0]
+    return bool(re.search(r"(?m)^Phase-A-Lock:\s*UNLOCKED[ \t]*$", header))
+
+
+def _extract_phase_a_packet_wave_id(content: str) -> str:
+    header = content.split("\n## ", 1)[0]
+    matches: list[str] = []
+    for line in header.splitlines():
+        stripped = line.strip()
+        for prefix in ("Wave ID:", "wave_id:"):
+            if stripped.startswith(prefix):
+                value = stripped[len(prefix):].strip()
+                if value:
+                    matches.append(value)
+                break
+    return matches[0] if len(matches) == 1 else ""
+
+
+def _phase_a_packet_wave_binding_error(
+    content: str,
+    *,
+    active_wave_id: str,
+    repair_name: str,
+) -> dict[str, Any] | None:
+    active_raw = str(active_wave_id or "").strip()
+    active = normalize_wave_id(active_raw) if active_raw else ""
+    if not active or active == "wave-unknown":
+        return _fix_result(
+            False,
+            "active_wave_missing",
+            f"{repair_name} requires active wave_id before mutating an unlocked packet",
+        )
+
+    packet_wave = _extract_phase_a_packet_wave_id(content)
+    if not packet_wave:
+        return _fix_result(
+            False,
+            "packet_wave_missing",
+            f"{repair_name} requires exactly one packet Wave ID before mutating an unlocked packet",
+        )
+
+    if normalize_wave_id(packet_wave) != active:
+        return _fix_result(
+            False,
+            "out_of_wave_packet",
+            f"{repair_name} refuses out-of-wave packet: active wave_id {active_raw} "
+            f"!= packet Wave ID {packet_wave}",
+        )
+    return None
+
+
+def _plain_phase_a_tasks_scope_line(line: str) -> bool:
+    stripped = line.strip()
+    stripped = re.sub(r"^(?:[-*]|\d+\.)\s*", "", stripped).strip()
+    stripped = stripped.rstrip(".,;").strip()
+    return stripped in {"TASKS.md", "`TASKS.md`"}
+
+
+def _insert_phase_a_tasks_scope_authority(content: str) -> tuple[str, bool, str]:
+    if _phase_a_scope_mentions_tasks_content(content):
+        return content, False, "scope_authority_already_present"
+    lines = content.splitlines(keepends=True)
+    scope_index: int | None = None
+    next_section_index = len(lines)
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("## ") and not stripped.startswith("### "):
+            title = stripped.lstrip("#").strip().lower().rstrip(":")
+            if scope_index is None:
+                if title == "scope":
+                    scope_index = index
+                continue
+            next_section_index = index
+            break
+    if scope_index is None:
+        return content, False, "scope_section_missing"
+
+    for line_index in range(scope_index + 1, next_section_index):
+        if "TASKS.md" not in lines[line_index]:
+            continue
+        if not _plain_phase_a_tasks_scope_line(lines[line_index]):
+            continue
+        line_ending = "\n" if lines[line_index].endswith("\n") else ""
+        lines[line_index] = _PHASE_A_TASKS_SCOPE_AUTHORITY_LINE + line_ending
+        return "".join(lines), True, "upgrade_tasks_scope_authority"
+
+    insert_at = scope_index + 1
+    while insert_at < next_section_index and not lines[insert_at].strip():
+        insert_at += 1
+    insertion = _PHASE_A_TASKS_SCOPE_AUTHORITY_LINE + "\n"
+    if insert_at == scope_index + 1:
+        insertion = "\n" + insertion
+    lines.insert(insert_at, insertion)
+    return "".join(lines), True, "insert_tasks_scope_authority"
 
 
 _STAGE_PATH_SYMLINK_ALIAS_RE = re.compile(
@@ -1369,6 +1678,427 @@ def _normalize_phase_a_lock_repair_packet_path(plan_path: str) -> str | None:
 
 def _fix_result(fixed: bool, action: str, detail: str) -> dict[str, Any]:
     return {"fixed": fixed, "action": action, "detail": detail}
+
+
+def _phase_a_retry_record_with_plan_name(
+    routing_record: dict[str, Any],
+    *,
+    plan_name: str,
+) -> dict[str, Any]:
+    retry_record = dict(routing_record)
+    retry_record["decision"] = "ROUTE_PHASE_A"
+    safe_packet = _phase_a_retry_plan_packet_path(plan_name)
+    if safe_packet is None:
+        raise ValueError(f"unsafe Phase A retry plan_name: {plan_name!r}")
+
+    raw_candidates = routing_record.get("next_candidates")
+    candidates = [
+        dict(candidate)
+        for candidate in raw_candidates
+        if isinstance(candidate, dict)
+    ] if isinstance(raw_candidates, list) else []
+    selected_indexes = [
+        idx for idx, candidate in enumerate(candidates)
+        if candidate.get("bounded") is True
+    ] or (list(range(len(candidates))) if candidates else [])
+    if not selected_indexes:
+        candidates = [{"bounded": True}]
+        selected_indexes = [0]
+
+    first = selected_indexes[0]
+    source_wave = str(
+        retry_record.get("wave_name")
+        or retry_record.get("wave_id")
+        or candidates[first].get("wave_name")
+        or candidates[first].get("wave_id")
+        or ""
+    ).strip()
+    original_tracked_packet = str(
+        candidates[first].get("tracked_packet")
+        or retry_record.get("tracked_packet")
+        or ""
+    ).strip()
+    candidates[first]["bounded"] = True
+    if source_wave:
+        candidates[first]["wave_name"] = source_wave
+    candidates[first]["candidate"] = plan_name
+    candidates[first]["tracked_packet"] = safe_packet
+    if original_tracked_packet and original_tracked_packet != safe_packet:
+        candidates[first]["recovery_authority"] = FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION.value
+        candidates[first]["authority_tracked_packet"] = original_tracked_packet
+    retry_record["next_candidates"] = candidates
+    retry_record["tracked_packet"] = safe_packet
+    if original_tracked_packet and original_tracked_packet != safe_packet:
+        retry_record["recovery_authority"] = FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION.value
+        retry_record["authority_tracked_packet"] = original_tracked_packet
+    return retry_record
+
+
+def fix_phase_a_plan_name_normalization(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Normalize an overlong generated Phase A plan_name and request retry."""
+    result = kw.get("result") if isinstance(kw.get("result"), dict) else {}
+    raw_plan_name = _extract_phase_a_plan_name_error_value(result)
+    normalized = _normalize_phase_a_retry_plan_name(raw_plan_name)
+    if not raw_plan_name or not normalized:
+        return _fix_result(
+            False,
+            "unsafe_phase_a_plan_name_rejected",
+            f"Phase A plan_name is not safe to normalize: {raw_plan_name!r}",
+        )
+
+    try:
+        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+    except Exception as exc:
+        return _fix_result(
+            False,
+            "routing_record_missing",
+            f"could not load routing record for Phase A plan_name retry: {exc}",
+        )
+    if not isinstance(routing_record, dict):
+        return _fix_result(False, "routing_record_invalid", "routing record was not a JSON object")
+
+    result["retry_record"] = _phase_a_retry_record_with_plan_name(
+        routing_record,
+        plan_name=normalized,
+    )
+    result["decision"] = "ROUTE_PHASE_A"
+    result["executor"] = "phase_a_executor"
+    return _fix_result(
+        True,
+        "normalize_phase_a_plan_name",
+        f"normalized Phase A plan_name {raw_plan_name!r} to {normalized!r} for retry",
+    )
+
+
+def _phase_a_retry_record_for_existing_packet(
+    repo_root: Path,
+    *,
+    plan_path: str,
+    wave_id: str,
+) -> dict[str, Any]:
+    try:
+        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+    except Exception:
+        routing_record = {}
+    if not isinstance(routing_record, dict):
+        routing_record = {}
+
+    retry_record = dict(routing_record)
+    retry_record["decision"] = "ROUTE_PHASE_A"
+    normalized_wave = normalize_wave_id(
+        str(
+            wave_id
+            or retry_record.get("wave_name")
+            or retry_record.get("wave_id")
+            or Path(plan_path).stem
+        )
+    )
+    if normalized_wave and normalized_wave != "wave-unknown":
+        retry_record["wave_name"] = normalized_wave
+    retry_record["tracked_packet"] = plan_path
+
+    raw_candidates = retry_record.get("next_candidates")
+    candidates = [
+        dict(candidate)
+        for candidate in raw_candidates
+        if isinstance(candidate, dict)
+    ] if isinstance(raw_candidates, list) else []
+    if not candidates:
+        candidates = [{"bounded": True}]
+    selected_index = 0
+    for index, candidate in enumerate(candidates):
+        if str(candidate.get("tracked_packet") or "").strip() == plan_path:
+            selected_index = index
+            break
+        if candidate.get("bounded") is True:
+            selected_index = index
+    selected = candidates[selected_index]
+    selected["bounded"] = True
+    selected["tracked_packet"] = plan_path
+    selected["candidate"] = Path(plan_path).stem
+    if normalized_wave and normalized_wave != "wave-unknown":
+        selected["wave_name"] = normalized_wave
+    retry_record["next_candidates"] = candidates
+    return retry_record
+
+
+def fix_phase_a_strict_l4_scope_authority(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Add explicit TASKS.md Scope authority after a strict staged L4 pre-lock stop."""
+    result = kw.get("result") if isinstance(kw.get("result"), dict) else {}
+    guard_message = _extract_phase_a_strict_l4_scope_guard_message(result)
+    if not guard_message:
+        return _fix_result(
+            False,
+            "strict_l4_scope_guard_missing",
+            "Phase A strict staged L4 Scope-authority repair requires the pre-lock guard error",
+        )
+
+    plan_path = _extract_plan_path(result)
+    if not plan_path:
+        return _fix_result(
+            False,
+            "plan_path_missing",
+            "strict staged L4 Scope-authority repair needs plan_path from the Phase A result",
+        )
+    normalized_plan_path = _normalize_phase_a_lock_repair_packet_path(plan_path)
+    if normalized_plan_path is None:
+        return _fix_result(
+            False,
+            "non_packet_plan_path",
+            "strict staged L4 Scope-authority repair only applies to "
+            f"{CONTROL_PLANE_PACKET_PREFIX}*.md packets: {plan_path}",
+        )
+    plan_path = normalized_plan_path
+
+    repo_root_resolved = repo_root.resolve()
+    try:
+        plan_file = (repo_root / plan_path).resolve()
+        plan_file.relative_to(repo_root_resolved)
+        plan_file.relative_to((repo_root / CONTROL_PLANE_PACKET_PREFIX).resolve())
+    except ValueError:
+        return _fix_result(False, "unsafe_plan_path", f"unsafe plan_path outside repo: {plan_path}")
+    if not plan_file.is_file():
+        return _fix_result(False, "plan_missing", f"plan packet not found: {plan_path}")
+
+    try:
+        content = plan_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(False, "plan_read_failed", f"could not read {plan_path}: {exc}")
+    if not _phase_a_packet_is_unlocked(content):
+        return _fix_result(
+            False,
+            "phase_a_lock_not_unlocked",
+            "strict staged L4 Scope-authority repair only applies before Phase-A-Lock is set",
+        )
+    wave_error = _phase_a_packet_wave_binding_error(
+        content,
+        active_wave_id=str(kw.get("wave_id") or ""),
+        repair_name="strict staged L4 Scope-authority repair",
+    )
+    if wave_error is not None:
+        return wave_error
+
+    repaired_content, changed, action = _insert_phase_a_tasks_scope_authority(content)
+    if not changed:
+        if action == "scope_authority_already_present":
+            result["retry_record"] = _phase_a_retry_record_for_existing_packet(
+                repo_root,
+                plan_path=plan_path,
+                wave_id=str(kw.get("wave_id") or ""),
+            )
+            return _fix_result(
+                True,
+                "strict_l4_scope_authority_already_present",
+                f"{plan_path} already includes TASKS.md Scope authority; retry Phase A",
+            )
+        return _fix_result(
+            False,
+            action,
+            f"could not insert TASKS.md Scope authority into {plan_path}: {action}",
+        )
+
+    try:
+        plan_file.write_text(repaired_content, encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(False, "plan_write_failed", f"could not write {plan_path}: {exc}")
+
+    result["retry_record"] = _phase_a_retry_record_for_existing_packet(
+        repo_root,
+        plan_path=plan_path,
+        wave_id=str(kw.get("wave_id") or ""),
+    )
+    result["decision"] = "ROUTE_PHASE_A"
+    result["executor"] = "phase_a_executor"
+    return _fix_result(
+        True,
+        "insert_phase_a_strict_l4_tasks_scope_authority",
+        f"inserted TASKS.md tracker-sync Scope authority in {plan_path}",
+    )
+
+
+def _control_packet_line_ref_checker_path(repo_root: Path) -> Path | None:
+    candidates = [
+        repo_root / "tools" / "checks" / "check_control_packet_line_refs.py",
+        repo_root / "mu" / "tools" / "checks" / "check_control_packet_line_refs.py",
+        SCRIPT_DIR.parent / "checks" / "check_control_packet_line_refs.py",
+        SCRIPT_DIR.parents[2] / "tools" / "checks" / "check_control_packet_line_refs.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _load_control_packet_line_ref_checker(repo_root: Path) -> Any | None:
+    checker_path = _control_packet_line_ref_checker_path(repo_root)
+    if checker_path is None:
+        return None
+    spec = importlib.util.spec_from_file_location(
+        "recovery_gate_control_packet_line_ref_checker",
+        str(checker_path),
+    )
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        return None
+    return module
+
+
+def _phase_a_code_line_ref_extensions(repo_root: Path) -> tuple[str, ...]:
+    checker = _load_control_packet_line_ref_checker(repo_root)
+    raw_extensions = getattr(checker, "CODE_EXTENSIONS", None) if checker is not None else None
+    if isinstance(raw_extensions, (list, tuple)):
+        extensions = tuple(
+            str(extension).strip().lstrip(".")
+            for extension in raw_extensions
+            if str(extension).strip().lstrip(".")
+        )
+        if extensions:
+            return extensions
+    return _PHASE_A_CODE_LINE_REF_EXTENSIONS_FALLBACK
+
+
+def _phase_a_code_line_ref_tail_re(repo_root: Path) -> re.Pattern[str]:
+    extensions = _phase_a_code_line_ref_extensions(repo_root)
+    ext_alternation = "|".join(sorted(map(re.escape, extensions), key=len, reverse=True))
+    return re.compile(r"(\.(?:" + ext_alternation + r")):\d+(?:[:,-]\d+)*")
+
+
+def _phase_a_packet_line_ref_offenses(
+    repo_root: Path,
+    content: str,
+) -> list[tuple[int, str]]:
+    checker = _load_control_packet_line_ref_checker(repo_root)
+    finder = getattr(checker, "find_offending_lines", None) if checker is not None else None
+    if callable(finder):
+        offenses = finder(content)
+        if isinstance(offenses, list):
+            return offenses
+
+    line_ref_re = _phase_a_code_line_ref_tail_re(repo_root)
+    return [
+        (lineno, line.strip())
+        for lineno, line in enumerate(content.splitlines(), start=1)
+        if line_ref_re.search(line)
+    ]
+
+
+def _replace_phase_a_packet_line_refs(
+    repo_root: Path,
+    content: str,
+) -> tuple[str, bool, list[tuple[int, str]]]:
+    def replace(match: re.Match[str]) -> str:
+        if match.group(0).startswith("`"):
+            return "`TASKS.md` tracker entry"
+        return "TASKS.md tracker entry"
+
+    repaired = _PHASE_A_TASKS_LINE_REF_RE.sub(replace, content)
+    repaired = _phase_a_code_line_ref_tail_re(repo_root).sub(r"\1", repaired)
+    return repaired, repaired != content, _phase_a_packet_line_ref_offenses(repo_root, repaired)
+
+
+def fix_phase_a_packet_line_ref_cleanup(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Remove stale TASKS.md:<line> references from an unlocked Phase A packet."""
+    result = kw.get("result") if isinstance(kw.get("result"), dict) else {}
+    guard_message = _extract_phase_a_packet_line_ref_guard_message(result)
+    if not guard_message:
+        return _fix_result(
+            False,
+            "phase_a_packet_line_ref_guard_missing",
+            "Phase A packet line-reference cleanup requires the plan-load pre-flight guard error",
+        )
+
+    plan_path = _extract_plan_path(result)
+    if not plan_path:
+        return _fix_result(
+            False,
+            "plan_path_missing",
+            "Phase A packet line-reference cleanup needs plan_path from the Phase A result",
+        )
+    normalized_plan_path = _normalize_phase_a_lock_repair_packet_path(plan_path)
+    if normalized_plan_path is None:
+        return _fix_result(
+            False,
+            "non_packet_plan_path",
+            "Phase A packet line-reference cleanup only applies to "
+            f"{CONTROL_PLANE_PACKET_PREFIX}*.md packets: {plan_path}",
+        )
+    plan_path = normalized_plan_path
+
+    repo_root_resolved = repo_root.resolve()
+    try:
+        plan_file = (repo_root / plan_path).resolve()
+        plan_file.relative_to(repo_root_resolved)
+        plan_file.relative_to((repo_root / CONTROL_PLANE_PACKET_PREFIX).resolve())
+    except ValueError:
+        return _fix_result(False, "unsafe_plan_path", f"unsafe plan_path outside repo: {plan_path}")
+    if not plan_file.is_file():
+        return _fix_result(False, "plan_missing", f"plan packet not found: {plan_path}")
+
+    try:
+        content = plan_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(False, "plan_read_failed", f"could not read {plan_path}: {exc}")
+    if not _phase_a_packet_is_unlocked(content):
+        return _fix_result(
+            False,
+            "phase_a_lock_not_unlocked",
+            "Phase A packet line-reference cleanup only applies before Phase-A-Lock is set",
+        )
+    wave_error = _phase_a_packet_wave_binding_error(
+        content,
+        active_wave_id=str(kw.get("wave_id") or ""),
+        repair_name="Phase A packet line-reference cleanup",
+    )
+    if wave_error is not None:
+        return wave_error
+
+    repaired_content, changed, remaining_offenses = _replace_phase_a_packet_line_refs(
+        repo_root,
+        content,
+    )
+    if remaining_offenses:
+        rendered = "; ".join(
+            f"line {lineno}: {line}" for lineno, line in remaining_offenses[:3]
+        )
+        return _fix_result(
+            False,
+            "phase_a_packet_line_refs_still_present",
+            f"{plan_path} still has code line-number citations after cleanup: {rendered}",
+        )
+    if not changed:
+        result["retry_record"] = _phase_a_retry_record_for_existing_packet(
+            repo_root,
+            plan_path=plan_path,
+            wave_id=str(kw.get("wave_id") or ""),
+        )
+        result["decision"] = "ROUTE_PHASE_A"
+        result["executor"] = "phase_a_executor"
+        return _fix_result(
+            True,
+            "phase_a_packet_line_refs_already_clean",
+            f"{plan_path} has no code line-number citations; retry Phase A",
+        )
+
+    try:
+        plan_file.write_text(repaired_content, encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(False, "plan_write_failed", f"could not write {plan_path}: {exc}")
+    result["retry_record"] = _phase_a_retry_record_for_existing_packet(
+        repo_root,
+        plan_path=plan_path,
+        wave_id=str(kw.get("wave_id") or ""),
+    )
+    result["decision"] = "ROUTE_PHASE_A"
+    result["executor"] = "phase_a_executor"
+    return _fix_result(
+        True,
+        "remove_phase_a_packet_line_refs",
+        f"removed stale code line-number citations from {plan_path}",
+    )
 
 
 def fix_stale_bridge_lock(repo_root: Path) -> dict[str, Any]:
@@ -2936,11 +3666,14 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
         or "Fix required"
     ).strip()
 
+    # A post-reentry supervisor veto starts a fresh bounded re-entry cycle; the
+    # exhausted prior bridge count is diagnostic evidence, not the resume cursor.
     resume_state: dict[str, Any] = {
         "plan_path": plan_path,
         "completed_step": "needs_phase_b_reentry",
         "wave_id": normalize_wave_id(wave_hint),
-        "bridge_rounds": bridge_rounds,
+        "bridge_rounds": 0,
+        "post_reentry_prior_bridge_rounds": bridge_rounds,
         "reentry_findings": findings,
     }
     scope_files = _post_reentry_scope_files(repo_root, result_payload, plan_path)
@@ -3540,6 +4273,9 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.MISSING_PHASE_A_LOCK: fix_missing_phase_a_lock,
     FailureClass.MISSING_PLAN_TASK_HEADER: fix_missing_plan_task_header,
     FailureClass.MISMATCHED_PLAN_TASK_HEADER: fix_mismatched_plan_task_header,
+    FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION: fix_phase_a_plan_name_normalization,
+    FailureClass.PHASE_A_STRICT_L4_SCOPE_AUTHORITY: fix_phase_a_strict_l4_scope_authority,
+    FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP: fix_phase_a_packet_line_ref_cleanup,
     FailureClass.STAGE_PATH_SYMLINK_ALIAS: fix_stage_path_symlink_alias,
 }
 
