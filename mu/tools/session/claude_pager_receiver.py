@@ -56,10 +56,11 @@ What it provides (the behaviors locked by
    collapse them and silently drop the second.
 
 8. ``ensure_draining`` -- the minimal idempotent start-if-not-running entry the
-   pager calls right after enqueue. It spawns ONE bounded, detached drain pass
-   (``--once`` -> ``run_until_empty``, then exit); no owner-loop / poll-forever /
-   session-rebuild / restart-supervision. The just-enqueued event (queued BEFORE
-   the spawn) is guaranteed to be observed by that pass.
+   pager calls right after enqueue. It keeps one live bounded, detached drain pass
+   per repo/bus (``--once`` -> ``run_until_empty``, then exit); no owner-loop /
+   poll-forever / session-rebuild / restart-supervision. The just-enqueued event
+   (queued BEFORE the ensure) is guaranteed to be observed by a live or freshly
+   started pass.
 
 This is additive, observability-only tooling. It touches no runtime/substrate
 surface (``rcx_pi/selfhost/`` or ``mu/host/``) and introduces no host semantics.
@@ -72,6 +73,7 @@ import fcntl
 import itertools
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -115,6 +117,138 @@ class ClaudePagerReceiverError(RuntimeError):
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _coerce_pid(pid: Any) -> int | None:
+    try:
+        value = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
+def _split_command_line(command_line: str) -> list[str]:
+    try:
+        return shlex.split(command_line)
+    except ValueError:
+        return command_line.split()
+
+
+def _read_proc_process_identity(pid: int) -> dict[str, Any] | None:
+    proc_dir = Path("/proc") / str(pid)
+    if not proc_dir.exists():
+        return None
+    try:
+        raw_cmdline = (proc_dir / "cmdline").read_bytes()
+        stat_text = (proc_dir / "stat").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    argv = [
+        part.decode("utf-8", errors="surrogateescape")
+        for part in raw_cmdline.split(b"\0")
+        if part
+    ]
+    if not argv:
+        return None
+    stat_end = stat_text.rfind(")")
+    if stat_end < 0:
+        return None
+    stat_fields = stat_text[stat_end + 2 :].split()
+    if len(stat_fields) < 20:
+        return None
+    if stat_fields[0].upper().startswith("Z"):
+        return None
+    return {
+        "pid": pid,
+        "source": "proc",
+        "start_token": f"proc:{stat_fields[19]}",
+        "argv": argv,
+        "command_line": " ".join(shlex.quote(arg) for arg in argv),
+    }
+
+
+def _ps_field(pid: int, field: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["ps", "-ww", "-p", str(pid), "-o", f"{field}="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+def _read_ps_process_identity(pid: int) -> dict[str, Any] | None:
+    stat = _ps_field(pid, "stat")
+    if stat and stat.lstrip().upper().startswith("Z"):
+        return None
+    started = _ps_field(pid, "lstart")
+    command_line = _ps_field(pid, "command") or _ps_field(pid, "args")
+    if not started or not command_line:
+        return None
+    argv = _split_command_line(command_line)
+    if not argv:
+        return None
+    return {
+        "pid": pid,
+        "source": "ps",
+        "start_token": f"ps:{started}",
+        "argv": argv,
+        "command_line": command_line,
+    }
+
+
+def read_process_identity(pid: Any) -> dict[str, Any] | None:
+    """Return live process identity strong enough to reject stale PID reuse."""
+    value = _coerce_pid(pid)
+    if value is None:
+        return None
+    proc_identity = _read_proc_process_identity(value)
+    if proc_identity is not None:
+        return proc_identity
+    return _read_ps_process_identity(value)
+
+
+def _identity_pid(identity: dict[str, Any]) -> int | None:
+    return _coerce_pid(identity.get("pid"))
+
+
+def _identity_start_token(identity: dict[str, Any]) -> str:
+    return str(identity.get("start_token") or "").strip()
+
+
+def _identity_argv(identity: dict[str, Any]) -> list[str]:
+    argv = identity.get("argv")
+    if isinstance(argv, list) and all(isinstance(part, str) for part in argv):
+        return list(argv)
+    command_line = str(identity.get("command_line") or "").strip()
+    if not command_line:
+        return []
+    return _split_command_line(command_line)
+
+
+def _identity_matches_drainer_command(
+    identity: dict[str, Any],
+    command: list[str],
+) -> bool:
+    argv = _identity_argv(identity)
+    if len(argv) != len(command):
+        return False
+    if not argv or not str(argv[0]).strip():
+        return False
+    # macOS may report the resolved Python.app executable even when Popen was
+    # invoked through sys.executable's Homebrew symlink. The stable drainer
+    # identity is the receiver script plus repo/bus/timeout/--once arguments;
+    # PID + start-token still provide the anti-PID-reuse proof.
+    return argv[1:] == command[1:]
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -292,10 +426,16 @@ class ClaudePagerReceiver:
         self._receipts_path = self._base / "delivered.jsonl"
         self._delivery_lock_path = self._base / "delivery.lock"
         self._queue_lock_path = self._base / "queue.lock"
+        self._drainer_lock_path = self._base / "drainer.lock"
+        self._drainer_state_path = self._base / "active_drainer.json"
         # Single-flight (long) vs queue-mutation (short) are DISTINCT locks so a
         # 120s in-flight delivery never blocks the atomic-enqueue quick-ack.
+        # Spawn decisions use a third lock: delivery.lock serializes actual Claude
+        # children, but it cannot prevent many detached --once drainers from piling
+        # up behind that delivery lock.
         self._delivery_thread_lock = threading.Lock()
         self._queue_thread_lock = threading.Lock()
+        self._drainer_thread_lock = threading.Lock()
         self._seq = itertools.count()
 
     # -- public read surface --------------------------------------------------
@@ -383,93 +523,129 @@ class ClaudePagerReceiver:
         right after it enqueues a page (PR #1137 P1): a durably-queued event always has
         a drain pass started after it, so there is NO never-drained-queue window.
 
-        Mechanism (deliberately minimal -- NO open-ended daemon lifecycle): spawn a
-        DETACHED child that runs a SINGLE bounded drain pass (``--once`` ->
-        ``run_until_empty``) and then EXITS. There is no owner-loop, no poll-forever, no
-        session-rebuild, and no restart-supervision; each ``claude`` page the child makes
-        reuses the existing per-delivery timeout + ``_terminate_process_group`` reaper.
-        The child is its own session/process-group (``start_new_session=True``) so it
-        outlives this short-lived pager invocation.
+        Mechanism (deliberately minimal -- NO open-ended daemon lifecycle): under a
+        per-repo/bus spawn lock, reuse a matching live DETACHED child or spawn one fresh.
+        That child runs a SINGLE bounded drain pass (``--once`` -> ``run_until_empty``)
+        and then EXITS. There is no owner-loop, no poll-forever, no session-rebuild, and
+        no restart-supervision; each ``claude`` page the child makes reuses the existing
+        per-delivery timeout + ``_terminate_process_group`` reaper. The child is its own
+        session/process-group (``start_new_session=True``) so it outlives this short-lived
+        pager invocation.
 
-        Idempotent and safe under concurrency WITHOUT suppressing spawns: ``deliver_once``
-        is single-flight (the delivery lock serializes ``claude`` children), so back-to-back
-        enqueues that each start a drainer never run two ``claude`` pages at once -- a
-        redundant drainer simply finds the queue already drained and exits. Because the
-        caller enqueues the event BEFORE calling this, the spawned pass is guaranteed to
-        OBSERVE that event (``run_until_empty`` globs the queue dir); spawning before
-        enqueue would risk the drainer globbing an empty queue and exiting first, so the
-        ordering (enqueue, then ensure_draining) is the contract that closes the window.
+        Idempotent and safe under concurrency WITH spawn suppression: ``delivery.lock``
+        still serializes actual ``claude`` children, while ``drainer.lock`` prevents
+        repeated enqueue attempts from spawning an unbounded herd of detached receivers
+        waiting behind that delivery lock. Missing, dead, malformed, or command-mismatched
+        drainer state is refreshable. A matching live state is accepted as already
+        draining. Because the caller enqueues the event BEFORE calling this, a fresh spawn
+        observes that event; a live drainer clears its state before reporting idle or
+        exhausted, so an enqueue racing with drainer exit starts the next pass instead of
+        being hidden behind stale live-pid state.
 
-        Returns ``{"started": True, "pid": ..., "mode": "detached_once"}`` on success.
+        Returns ``{"started": True, "pid": ..., "mode": "detached_once"}`` when a new
+        drainer starts, or ``{"started": False, "already_draining": True, ...}`` when a
+        matching live drainer is already responsible for the repo/bus queue.
         Raises ``ClaudePagerReceiverError`` if the drainer cannot be started, so the pager
         can FAIL-OPEN (leave the target pending rather than accept an undrainable queue).
         """
         self._base.mkdir(parents=True, exist_ok=True)
         spawn_log = self._base / "drain_spawn.log"
-        command = [
-            sys.executable,
-            _RECEIVER_SCRIPT,
-            "--repo-root", str(self.repo_root),
-            "--bus-dir", self.bus_dir,
-            "--timeout-s", str(self.timeout_s),
-            "--once",
-        ]
-        try:
-            with spawn_log.open("a", encoding="utf-8") as sink:
-                proc = subprocess.Popen(
-                    command,
-                    cwd=str(self.repo_root),
-                    stdin=subprocess.DEVNULL,
-                    stdout=sink,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    # Own session/process-group: outlives the pager invocation and lets
-                    # each delivery's timeout reaper kill the whole claude child group.
-                    start_new_session=True,
-                    env=os.environ.copy(),
-                )
-        except OSError as exc:
-            raise ClaudePagerReceiverError(
-                f"claude pager drain spawn failed: {exc}"
-            ) from exc
-        return {"started": True, "pid": proc.pid, "mode": "detached_once"}
+        command = self._drain_command()
+        with self._drainer_guard():
+            active = self._matching_live_drainer_state(command)
+            if active is not None:
+                return {
+                    "started": False,
+                    "already_draining": True,
+                    "accepted": True,
+                    "pid": active["pid"],
+                    "mode": "detached_once",
+                    "status": "already_draining",
+                    "state_path": str(self._drainer_state_path),
+                }
+            try:
+                with spawn_log.open("a", encoding="utf-8") as sink:
+                    proc = subprocess.Popen(
+                        command,
+                        cwd=str(self.repo_root),
+                        stdin=subprocess.DEVNULL,
+                        stdout=sink,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        # Own session/process-group: outlives the pager invocation and lets
+                        # each delivery's timeout reaper kill the whole claude child group.
+                        start_new_session=True,
+                        env=os.environ.copy(),
+                    )
+            except OSError as exc:
+                raise ClaudePagerReceiverError(
+                    f"claude pager drain spawn failed: {exc}"
+                ) from exc
+            self._write_drainer_state(command=command, pid=proc.pid)
+        return {
+            "started": True,
+            "accepted": True,
+            "pid": proc.pid,
+            "mode": "detached_once",
+            "status": "started",
+            "state_path": str(self._drainer_state_path),
+        }
 
     # -- delivery (single-flight) --------------------------------------------
 
     def deliver_once(self, *, skip_keys: "set[str] | None" = None) -> dict[str, Any]:
-        """Deliver the oldest queued event (single-flight), if any.
+        """Deliver the oldest eligible queued event (single-flight), if any.
 
         Returns a status dict. ``idle`` when the queue is empty. On exit-0 a
         receipt is written and the entry removed (``delivered``); on timeout or
         non-zero exit the entry is re-queued fail-open (``requeued``).
 
         ``skip_keys`` lets a single drain pass (``run_until_empty``) avoid
-        re-attempting an event it has already tried this pass: if the oldest
-        queued event's idempotency keys intersect ``skip_keys`` the call returns
-        ``exhausted`` WITHOUT spawning a delivery, so a persistently-failing
-        event is attempted at most once per drain.
+        re-attempting an event it has already tried this pass. Attempted events
+        at the head are skipped while later unattempted queue entries are still
+        eligible for delivery; only an all-skipped queue returns ``exhausted``.
         """
         with self._delivery_guard():
             with self._queue_guard():
                 queue_files = self._ordered_queue_files()
                 if not queue_files:
+                    self._clear_current_drainer_state()
                     return {"status": "idle"}
-                queue_path = queue_files[0]
-                event = self._read_queue_file(queue_path)
-                if event is None:
-                    queue_path.unlink(missing_ok=True)
-                    return {"status": "dropped_unreadable", "queue_path": str(queue_path)}
-                event_id = str(event.get("event_id") or "").strip()
-                if self._already_delivered(event):
-                    # Terminal idempotency: a duplicate is dropped, never re-delivered.
-                    queue_path.unlink(missing_ok=True)
-                    return {"status": "duplicate_delivered", "event_id": event_id}
-                if skip_keys and (event_keys(event) & skip_keys):
-                    # The oldest queued event was already attempted (and re-queued)
-                    # this drain pass -> only persistently-failing events remain.
-                    # Report ``exhausted`` so ``run_until_empty`` stops WITHOUT a
-                    # second delivery (honors "attempted at most once per call").
-                    return {"status": "exhausted", "event_id": event_id}
+                skipped_event_id: str | None = None
+                queue_path = None
+                event = None
+                event_id = ""
+                for candidate_path in queue_files:
+                    candidate = self._read_queue_file(candidate_path)
+                    if candidate is None:
+                        candidate_path.unlink(missing_ok=True)
+                        return {
+                            "status": "dropped_unreadable",
+                            "queue_path": str(candidate_path),
+                        }
+                    candidate_event_id = str(candidate.get("event_id") or "").strip()
+                    if self._already_delivered(candidate):
+                        # Terminal idempotency: a duplicate is dropped, never re-delivered.
+                        candidate_path.unlink(missing_ok=True)
+                        return {
+                            "status": "duplicate_delivered",
+                            "event_id": candidate_event_id,
+                        }
+                    if skip_keys and (event_keys(candidate) & skip_keys):
+                        if skipped_event_id is None:
+                            skipped_event_id = candidate_event_id
+                        continue
+                    queue_path = candidate_path
+                    event = candidate
+                    event_id = candidate_event_id
+                    break
+                if queue_path is None or event is None:
+                    # All queued entries were already attempted and re-queued this
+                    # drain pass. Report ``exhausted`` so ``run_until_empty`` stops
+                    # WITHOUT retrying a persistent failure, while later unattempted
+                    # pages enqueued behind that head would have been selected above.
+                    self._clear_current_drainer_state()
+                    return {"status": "exhausted", "event_id": skipped_event_id or ""}
             # Dispatch OUTSIDE the queue lock (but still single-flight) so a slow
             # delivery never blocks concurrent enqueues' quick-ack.
             result = self._dispatch(event)
@@ -582,6 +758,127 @@ class ClaudePagerReceiver:
 
     def _queue_guard(self) -> "Iterator[None]":
         return self._guarded(self._queue_thread_lock, self._queue_lock_path)
+
+    def _drainer_guard(self) -> "Iterator[None]":
+        return self._guarded(self._drainer_thread_lock, self._drainer_lock_path)
+
+    def _drain_command(self) -> list[str]:
+        return [
+            sys.executable,
+            _RECEIVER_SCRIPT,
+            "--repo-root", str(self.repo_root),
+            "--bus-dir", self.bus_dir,
+            "--timeout-s", str(self.timeout_s),
+            "--once",
+        ]
+
+    def _read_drainer_state(self) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(self._drainer_state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _pid_is_live(self, pid: Any) -> bool:
+        value = _coerce_pid(pid)
+        if value is None:
+            return False
+        try:
+            os.kill(value, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except (OSError, OverflowError):
+            return False
+        return True
+
+    def _drainer_process_identity_matches(
+        self,
+        *,
+        state: dict[str, Any],
+        pid: int,
+        command: list[str],
+    ) -> bool:
+        recorded = state.get("process_identity")
+        if not isinstance(recorded, dict):
+            return False
+        live = read_process_identity(pid)
+        if live is None:
+            return False
+        if _identity_pid(recorded) != pid or _identity_pid(live) != pid:
+            return False
+        if not _identity_start_token(recorded):
+            return False
+        if _identity_start_token(recorded) != _identity_start_token(live):
+            return False
+        if not _identity_matches_drainer_command(recorded, command):
+            return False
+        if not _identity_matches_drainer_command(live, command):
+            return False
+        return True
+
+    def _matching_live_drainer_state(self, command: list[str]) -> dict[str, Any] | None:
+        state = self._read_drainer_state()
+        if state is None:
+            return None
+        pid = state.get("pid")
+        if list(state.get("command") or []) != command:
+            return None
+        if str(state.get("repo_root") or "") != str(self.repo_root):
+            return None
+        if str(state.get("bus_dir") or "") != str(self.bus_dir):
+            return None
+        if str(state.get("mode") or "") != "detached_once":
+            return None
+        if not self._pid_is_live(pid):
+            return None
+        try:
+            live_pid = int(pid)
+        except (TypeError, ValueError):
+            return None
+        if not self._drainer_process_identity_matches(
+            state=state,
+            pid=live_pid,
+            command=command,
+        ):
+            return None
+        return {"pid": live_pid, "state": state}
+
+    def _write_drainer_state(self, *, command: list[str], pid: int) -> None:
+        state = {
+            "pid": int(pid),
+            "mode": "detached_once",
+            "command": list(command),
+            "repo_root": str(self.repo_root),
+            "bus_dir": str(self.bus_dir),
+            "timeout_s": self.timeout_s,
+            "started_at": _utcnow(),
+        }
+        process_identity = read_process_identity(pid)
+        if process_identity is not None:
+            state["process_identity"] = process_identity
+        _atomic_write_text(
+            self._drainer_state_path,
+            json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n",
+        )
+
+    def _clear_current_drainer_state(self) -> None:
+        command = self._drain_command()
+        pid = os.getpid()
+        with self._drainer_guard():
+            state = self._read_drainer_state()
+            if state is None:
+                return
+            try:
+                state_pid = int(state.get("pid", -1) or -1)
+            except (TypeError, ValueError):
+                return
+            if state_pid != pid:
+                return
+            if list(state.get("command") or []) != command:
+                return
+            self._drainer_state_path.unlink(missing_ok=True)
 
     def _ordered_queue_files(self) -> list[Path]:
         if not self._queue_dir.is_dir():
@@ -893,8 +1190,11 @@ def main(argv: list[str] | None = None) -> int:
         timeout_s=args.timeout_s,
     )
     if args.once:
-        for result in receiver.run_until_empty():
-            print(json.dumps(result, sort_keys=True))
+        try:
+            for result in receiver.run_until_empty():
+                print(json.dumps(result, sort_keys=True))
+        finally:
+            receiver._clear_current_drainer_state()
         return 0
     receiver.run_forever()
     return 0
