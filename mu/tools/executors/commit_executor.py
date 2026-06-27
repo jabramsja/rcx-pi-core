@@ -10851,7 +10851,7 @@ def _simple_program_queue_text_has_post_merge_marker(text: Any) -> bool:
 
 def _git_merge_history_contains_wave_id(repo_root: Path, wave_id: str) -> bool:
     normalized_wave_id = normalize_wave_id(wave_id)
-    if not normalized_wave_id:
+    if not normalized_wave_id or normalized_wave_id == "wave-unknown":
         return False
     try:
         result = _run(
@@ -10871,6 +10871,39 @@ def _git_merge_history_contains_wave_id(repo_root: Path, wave_id: str) -> bool:
             normalized_log,
         )
     )
+
+
+def _program_queue_merge_log_wave_id_is_specific(wave_id: str) -> bool:
+    normalized_wave_id = normalize_wave_id(wave_id)
+    if not normalized_wave_id or normalized_wave_id == "wave-unknown":
+        return False
+    if _WAVE_ID_DATE_SUFFIX_RE.search(normalized_wave_id):
+        return True
+    parts = [part for part in normalized_wave_id.split("-") if part]
+    return len(parts) >= 3 and len(normalized_wave_id) >= 16
+
+
+def _simple_program_queue_merge_log_wave_ids(entry: dict[str, Any]) -> set[str]:
+    """Return explicit, specific IDs eligible for merge-history completion proof."""
+    derived_wave_id = normalize_wave_id(str(entry.get("derived_wave_id") or ""))
+    merge_log_ids = {
+        normalize_wave_id(str(raw or ""))
+        for raw in (
+            entry.get("config_wave_id"),
+            entry.get("packet_wave_id"),
+        )
+        if str(raw or "").strip()
+    }
+
+    entry_wave_id = normalize_wave_id(str(entry.get("wave_id") or ""))
+    if entry_wave_id and entry_wave_id != derived_wave_id:
+        merge_log_ids.add(entry_wave_id)
+
+    return {
+        wave_id
+        for wave_id in merge_log_ids
+        if _program_queue_merge_log_wave_id_is_specific(wave_id)
+    }
 
 
 def _simple_program_queue_entry_is_completed(
@@ -10899,7 +10932,10 @@ def _simple_program_queue_entry_is_completed(
         for text in completion_texts
     ):
         return True
-    return any(_git_merge_history_contains_wave_id(repo_root, wave_id) for wave_id in wave_ids)
+    return any(
+        _git_merge_history_contains_wave_id(repo_root, wave_id)
+        for wave_id in _simple_program_queue_merge_log_wave_ids(entry)
+    )
 
 
 def _simple_program_queue_entries(
