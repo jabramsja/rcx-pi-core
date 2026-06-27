@@ -26,7 +26,6 @@ CONFIG_PATH = (
 )
 PACKET_REF = "reports/control_plane/recursive-ordinals-as-structure-2026-06-26_2026-06-26.md"
 PACKET_PATH = REPO_ROOT / PACKET_REF
-TASKS_PATH = REPO_ROOT / "TASKS.md"
 
 
 def _spec_text() -> str:
@@ -51,10 +50,13 @@ def test_recursive_ordinals_doc_is_discoverable_from_wave_authority():
     text = _spec_text()
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     packet_text = PACKET_PATH.read_text(encoding="utf-8")
-    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
 
     assert config["wave_id"] == WAVE_ID
+    assert config["date"] == "2026-06-26"
     assert config["wave_class"] == "L4_ENABLER"
+    assert config["task_id"] == "[NEXT-CODEX-POST-REDTEAM]"
+    assert config["target_gate_id"] == "G8"
+    assert config["tracked_packet"] == PACKET_REF
     assert "workload_target" not in config
     assert "host_semantics_delta_before" not in config
     assert "host_semantics_delta_after" not in config
@@ -62,16 +64,14 @@ def test_recursive_ordinals_doc_is_discoverable_from_wave_authority():
     assert TEST_PATH in config["structural_artifact_ref"]
     assert DOCS_TEST_PATH in config["structural_artifact_ref"]
     assert "--wave-class L4_ENABLER" in config["evidence_command"]
-    assert PACKET_REF in tasks_text
-    assert TEST_PATH in tasks_text
-    assert DOCS_TEST_PATH in tasks_text
+    assert f"Wave ID: {WAVE_ID}" in packet_text
+    assert "Phase-A-Lock: LOCKED" in packet_text
+    assert "Task: [NEXT-CODEX-POST-REDTEAM]" in packet_text
     assert "mu/docs/core/RecursiveOrdinals.v0.md" in packet_text
     assert TEST_PATH in packet_text
     assert DOCS_TEST_PATH in packet_text
-    assert WAVE_ID in tasks_text
-    assert "Class: L4_ENABLER" in tasks_text
-    assert "1. **Recursive ordinals** as structure." in tasks_text
-    assert "5. **Optimization**" in tasks_text
+    assert "RecursiveOrdinals.v0.md exists as a bounded design/spec" in packet_text
+    assert "Optimization remains out of scope and LAST in TASKS.md." in packet_text
     assert "First Foundation Gate Criteria" in text
 
 
