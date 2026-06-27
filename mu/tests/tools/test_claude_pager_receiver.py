@@ -22,8 +22,9 @@ subprocess boundary -- no real ``claude`` process is ever spawned:
 7. idempotency keyed by ``event_id`` ONLY (PR #1137 P2): distinct events that reuse
    a ``transition_key`` are each delivered, never collapsed;
 8. ``ensure_draining`` -- the minimal idempotent start-if-not-running entry the pager
-   calls after enqueue: spawns ONE bounded, detached ``--once`` drain pass (no
-   open-ended daemon lifecycle), and fails closed if the drainer cannot be started.
+   calls after enqueue: keeps ONE bounded, detached live ``--once`` drain pass per
+   repo/bus (no open-ended daemon lifecycle), refreshes stale/dead state, and fails
+   closed if the drainer cannot be started.
 
 The subprocess is mocked by patching ``receiver_mod.subprocess.Popen``; the
 receiver's public API is exercised directly, so no private-attr access is needed.
@@ -31,6 +32,8 @@ receiver's public API is exercised directly, so no private-attr access is needed
 
 from __future__ import annotations
 
+import json
+import os
 import signal
 import subprocess
 import threading
@@ -85,15 +88,25 @@ class PopenRecorder:
         self.envs = []
         self.cwds = []
         self.start_new_sessions = []
+        self.process_identities = {}
         self.lock = threading.Lock()
 
     def __call__(self, command, **kwargs):
+        proc = self._proc_factory()
         with self.lock:
-            self.commands.append(list(command))
+            command = list(command)
+            self.commands.append(command)
             self.envs.append(kwargs.get("env"))
             self.cwds.append(kwargs.get("cwd"))
             self.start_new_sessions.append(kwargs.get("start_new_session"))
-        return self._proc_factory()
+            self.process_identities[int(proc.pid)] = {
+                "pid": int(proc.pid),
+                "source": "test",
+                "start_token": f"test-start-{int(proc.pid)}",
+                "argv": command,
+                "command_line": " ".join(command),
+            }
+        return proc
 
     @property
     def call_count(self):
@@ -103,6 +116,11 @@ class PopenRecorder:
 def _install_popen(monkeypatch, proc_factory):
     recorder = PopenRecorder(proc_factory)
     monkeypatch.setattr(receiver_mod.subprocess, "Popen", recorder)
+    monkeypatch.setattr(
+        receiver_mod,
+        "read_process_identity",
+        lambda pid: recorder.process_identities.get(int(pid)),
+    )
     return recorder
 
 
@@ -110,6 +128,26 @@ def _receiver(tmp_path, **kwargs):
     kwargs.setdefault("bus_dir", ".agent_bus")
     kwargs.setdefault("timeout_s", 120.0)
     return receiver_mod.ClaudePagerReceiver(tmp_path, **kwargs)
+
+
+def _drainer_state_path(repo_root, *, bus_dir=".agent_bus"):
+    return (
+        repo_root
+        / bus_dir
+        / "observability"
+        / "claude_pager_receiver"
+        / "active_drainer.json"
+    )
+
+
+def _write_drainer_state(repo_root, payload, *, bus_dir=".agent_bus"):
+    path = _drainer_state_path(repo_root, bus_dir=bus_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _write_session_ids(tmp_path, *, monitor=None, live=None):
@@ -697,10 +735,9 @@ def test_ensure_draining_spawns_detached_bounded_once_drainer(tmp_path, monkeypa
 def test_ensure_draining_is_idempotent_and_repeatable(tmp_path, monkeypatch):
     """Calling ensure_draining repeatedly is safe (idempotent start-if-not-running).
 
-    Back-to-back enqueues each call ensure_draining; the delivery lock makes deliver_once
-    single-flight, so redundant drainers never run two claude pages at once -- a redundant
-    drainer simply finds the queue already drained and exits. The entry never raises on a
-    repeat call.
+    Back-to-back enqueues each call ensure_draining. While a matching detached drainer
+    remains live for this repo/bus, the second ensure is accepted as already draining and
+    MUST NOT spawn another ``--once`` receiver behind the delivery lock.
     """
     recorder = _install_popen(monkeypatch, FakeProc)
     receiver = _receiver(tmp_path)
@@ -708,8 +745,186 @@ def test_ensure_draining_is_idempotent_and_repeatable(tmp_path, monkeypatch):
     first = receiver.ensure_draining()
     second = receiver.ensure_draining()
 
-    assert first["started"] is True and second["started"] is True
-    assert recorder.call_count == 2  # each call starts a bounded pass; safe under the delivery lock
+    assert first["started"] is True
+    assert first["accepted"] is True
+    assert second["started"] is False
+    assert second["already_draining"] is True
+    assert second["accepted"] is True
+    assert second["pid"] == first["pid"]
+    assert recorder.call_count == 1
+
+
+def test_ensure_draining_duplicate_under_failure_keeps_event_queued(tmp_path, monkeypatch):
+    """Duplicate drain ensures do not hide or mark queued events delivered.
+
+    This is the stale-herd regression shape: a live drainer may be stuck behind a failing
+    delivery/credential state, but repeated enqueue attempts must reuse the active drainer
+    instead of spawning hundreds more. Skipping the duplicate spawn must not mutate the
+    durable queue or write a delivery receipt.
+    """
+    recorder = _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "PERSISTENT-FAIL"})
+
+    first = receiver.ensure_draining()
+    second = receiver.ensure_draining()
+    third = receiver.ensure_draining()
+
+    assert first["started"] is True
+    assert second["already_draining"] is True
+    assert third["already_draining"] is True
+    assert recorder.call_count == 1
+    assert receiver.queued_event_ids() == ["PERSISTENT-FAIL"]
+    assert receiver.delivered_event_ids() == set()
+
+
+def test_once_drainer_clears_live_state_when_idle_allows_future_spawn(tmp_path, monkeypatch):
+    """A one-shot drainer that reaches idle clears active state before future ensures.
+
+    Without this, an enqueue racing with a just-finished but not-yet-exited ``--once``
+    child could observe a live pid, skip the spawn, and leave the new event waiting for
+    a future unrelated enqueue.
+    """
+    recorder = _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path)
+
+    first = receiver.ensure_draining()
+    assert first["started"] is True
+    assert _drainer_state_path(tmp_path).exists()
+
+    assert receiver.run_until_empty() == []
+
+    assert not _drainer_state_path(tmp_path).exists()
+    second = receiver.ensure_draining()
+    assert second["started"] is True
+    assert recorder.call_count == 2
+
+
+def test_ensure_draining_refreshes_dead_drainer_state(tmp_path, monkeypatch):
+    """A recorded but dead drainer pid is refreshable and starts a fresh pass."""
+    dead_pid = 999_999_999
+    recorder = _install_popen(
+        monkeypatch,
+        lambda: FakeProc(pid=dead_pid),
+    )
+    receiver = _receiver(tmp_path)
+
+    first = receiver.ensure_draining()
+    second = receiver.ensure_draining()
+
+    assert first["started"] is True
+    assert second["started"] is True
+    assert recorder.call_count == 2
+
+
+def test_ensure_draining_refreshes_malformed_drainer_state(tmp_path, monkeypatch):
+    """Unreadable drainer state is stale and must not suppress a fresh spawn."""
+    recorder = _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path)
+    state_path = _drainer_state_path(tmp_path)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text("{not-json\n", encoding="utf-8")
+
+    result = receiver.ensure_draining()
+
+    assert result["started"] is True
+    assert recorder.call_count == 1
+
+
+def test_ensure_draining_refreshes_command_mismatched_live_state(tmp_path, monkeypatch):
+    """A live pid with the wrong command is not accepted as this repo/bus drainer."""
+    recorder = _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path)
+    _write_drainer_state(
+        tmp_path,
+        {
+            "pid": os.getpid(),
+            "mode": "detached_once",
+            "command": ["python3", "wrong_receiver.py", "--once"],
+            "repo_root": str(receiver.repo_root),
+            "bus_dir": receiver.bus_dir,
+        },
+    )
+
+    result = receiver.ensure_draining()
+
+    assert result["started"] is True
+    assert recorder.call_count == 1
+    state = json.loads(_drainer_state_path(tmp_path).read_text(encoding="utf-8"))
+    assert "--once" in state["command"]
+    assert "wrong_receiver.py" not in state["command"]
+
+
+def test_ensure_draining_accepts_resolved_python_interpreter_identity(tmp_path, monkeypatch):
+    """The drainer identity is the receiver argv tail, not the Python symlink spelling."""
+    recorder = _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path)
+
+    first = receiver.ensure_draining()
+    pid = int(first["pid"])
+    state_path = _drainer_state_path(tmp_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    resolved_argv = list(state["command"])
+    resolved_argv[0] = "/resolved/Python.app/Contents/MacOS/Python"
+    state["process_identity"]["argv"] = resolved_argv
+    state["process_identity"]["command_line"] = " ".join(resolved_argv)
+    recorder.process_identities[pid]["argv"] = list(resolved_argv)
+    recorder.process_identities[pid]["command_line"] = " ".join(resolved_argv)
+    _write_drainer_state(tmp_path, state)
+
+    second = receiver.ensure_draining()
+
+    assert second["started"] is False
+    assert second["already_draining"] is True
+    assert second["pid"] == first["pid"]
+    assert recorder.call_count == 1
+
+
+def test_ensure_draining_refreshes_live_pid_state_without_process_identity(tmp_path, monkeypatch):
+    """A live pid plus matching metadata is stale unless it proves the drainer identity."""
+    recorder = _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "LIVE-PID-NO-IDENTITY"})
+
+    first = receiver.ensure_draining()
+    state_path = _drainer_state_path(tmp_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["pid"] = os.getpid()
+    state.pop("process_identity", None)
+    _write_drainer_state(tmp_path, state)
+
+    second = receiver.ensure_draining()
+
+    assert first["started"] is True
+    assert second["started"] is True
+    assert recorder.call_count == 2
+    assert receiver.queued_event_ids() == ["LIVE-PID-NO-IDENTITY"]
+    assert receiver.delivered_event_ids() == set()
+
+
+def test_ensure_draining_refreshes_reused_live_pid_state(tmp_path, monkeypatch):
+    """PID reuse is stale when the live process start token or argv no longer matches."""
+    recorder = _install_popen(monkeypatch, FakeProc)
+    receiver = _receiver(tmp_path)
+    receiver.enqueue({"event_id": "PID-REUSE"})
+
+    first = receiver.ensure_draining()
+    reused_pid = int(first["pid"])
+    recorder.process_identities[reused_pid] = {
+        "pid": reused_pid,
+        "source": "test",
+        "start_token": f"test-reused-{reused_pid}",
+        "argv": ["python3", "not-the-drainer.py"],
+        "command_line": "python3 not-the-drainer.py",
+    }
+
+    second = receiver.ensure_draining()
+
+    assert first["started"] is True
+    assert second["started"] is True
+    assert recorder.call_count == 2
+    assert receiver.queued_event_ids() == ["PID-REUSE"]
+    assert receiver.delivered_event_ids() == set()
 
 
 def test_ensure_draining_fails_closed_when_spawn_raises(tmp_path, monkeypatch):

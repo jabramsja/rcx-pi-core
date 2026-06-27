@@ -1,0 +1,24 @@
+{
+  "wave_id": "claude-pager-drain-singleflight-2026-06-27",
+  "repeat_run_speedup_ratio": 0.959097,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.289244,
+  "repeat_run_raw_seconds": [
+    0.277413,
+    0.289244
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.277413
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.566657
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-27T03:51:17Z",
+  "collector_version": "2.2.0"
+}
