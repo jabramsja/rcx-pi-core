@@ -71,6 +71,63 @@ def _write_queue_packet(repo: Path, relpath: str, status: str) -> None:
     path.write_text(f"# Packet\n\nStatus: {status}\n", encoding="utf-8")
 
 
+def _write_program_queue_packet(
+    repo: Path,
+    relpath: str,
+    *,
+    wave_id: str,
+    status: str,
+) -> None:
+    path = repo / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"# Packet\n\nStatus: {status}\nWave ID: {wave_id}\n",
+        encoding="utf-8",
+    )
+
+
+def _write_program_queue_config(
+    repo: Path,
+    *,
+    wave_id: str,
+    title: str,
+    tracked_packet: str,
+) -> None:
+    config_path = repo / "reports" / "control_plane" / f"{wave_id}_wave_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "wave_id": wave_id,
+                "title": title,
+                "tracked_packet": tracked_packet,
+                "request_for_agent": f"Run the {title} launcher packet only.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _merge_wave_with_pr(repo: Path, *, wave_id: str, pr_number: int) -> None:
+    branch = f"jabramsja/{wave_id}"
+    _git(["checkout", "-b", branch], cwd=repo)
+    marker = repo / f"{wave_id}.txt"
+    marker.write_text(f"{wave_id}\n", encoding="utf-8")
+    _git(["add", marker.name], cwd=repo)
+    _git(["commit", "-m", f"feat: Phase B implementation for {wave_id}"], cwd=repo)
+    _git(["checkout", "dev"], cwd=repo)
+    _git(
+        [
+            "merge",
+            "--no-ff",
+            branch,
+            "-m",
+            f"Merge pull request #{pr_number} from jabramsja/{branch}",
+        ],
+        cwd=repo,
+    )
+
+
 def test_happy_path_removes_branch_worktree_and_matching_stashes(tmp_path):
     repo = _init_repo(tmp_path)
     wave_id = "test-wave-alpha-2026-04-17"
@@ -616,6 +673,128 @@ def test_post_merge_package_refresh_uses_matching_program_queue_config(tmp_path)
     assert candidate["tracked_packet"] == packet
     assert "Run the Surreals launcher packet only." in candidate["request_for_claude"]
     assert "launch_wave.py" in candidate["request_for_claude"]
+
+
+def test_post_merge_package_refresh_skips_completed_simple_program_queue_items_with_explicit_wave_id(tmp_path):
+    repo = _init_repo(tmp_path)
+    recursive_wave = "recursive-ordinals-as-structure-2026-06-26"
+    recursive_packet = (
+        f"reports/control_plane/{recursive_wave}_2026-06-26.md"
+    )
+    w_types_wave = "w-types-inductive-types-ast-as-inductive-structure-2026-06-26"
+    w_types_packet = f"reports/control_plane/{w_types_wave}_2026-06-26.md"
+    _write_program_queue_packet(
+        repo,
+        recursive_packet,
+        wave_id=recursive_wave,
+        status="IMPLEMENTED / LOCAL EVIDENCE",
+    )
+    _write_program_queue_packet(
+        repo,
+        w_types_packet,
+        wave_id=w_types_wave,
+        status="IMPLEMENTED / LOCAL EVIDENCE",
+    )
+    _write_program_queue_config(
+        repo,
+        wave_id=recursive_wave,
+        title="Recursive Ordinals As Structure 2026-06-26",
+        tracked_packet=recursive_packet,
+    )
+    _write_program_queue_config(
+        repo,
+        wave_id=w_types_wave,
+        title="W Types Inductive Types AST As Inductive Structure 2026-06-26",
+        tracked_packet=w_types_packet,
+    )
+    _merge_wave_with_pr(repo, wave_id=recursive_wave, pr_number=1160)
+    _merge_wave_with_pr(repo, wave_id=w_types_wave, pr_number=1161)
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            "1. **Recursive ordinals** as structure.\n"
+            "2. **W-types / inductive types** "
+            "(AST-as-inductive-structure; self-hosting building block).\n"
+            "3. **Coinduction** (non-termination as structure). NEXT.\n"
+            "4. **Fixpoint** -- meta-circular evaluator-as-structure.\n"
+            "5. **Optimization** -- LAST.\n\n"
+            "---\n\n"
+            "## Ra\n"
+            f"- Tracker sync note (2026-06-27, {recursive_wave}): "
+            "**NEXT-CODEX-POST-REDTEAM -- pre-commit supervisor package refresh.** "
+            f"Packet: `{recursive_packet}`. "
+            "Pre-commit supervisor receipt remains pending for the current staged package.\n"
+            f"- Tracker sync note (2026-06-27, {w_types_wave}): "
+            "**NEXT-CODEX-POST-REDTEAM -- pre-commit supervisor package refresh.** "
+            f"Packet: `{w_types_packet}`. "
+            "Pre-commit supervisor receipt remains pending for the current staged package.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "1161"},
+        merge_sha="6a6b4217",
+        log=_noop_log,
+    )
+
+    candidate = package["next_candidates"][0]
+    assert package["wave_name"] == "coinduction-non-termination-as-structure"
+    assert candidate["candidate"] == "coinduction-non-termination-as-structure"
+    assert candidate["tracked_packet"] is None
+    assert "Coinduction" in package["tracker_state_summary"]
+    assert "W-types" not in candidate["summary"]
+    assert recursive_packet not in package["deferred_items"]
+    assert w_types_packet not in package["deferred_items"]
+
+
+def test_post_merge_package_refresh_does_not_skip_simple_queue_item_from_precommit_tracker_note_only(tmp_path):
+    repo = _init_repo(tmp_path)
+    w_types_wave = "w-types-inductive-types-ast-as-inductive-structure-2026-06-26"
+    w_types_packet = f"reports/control_plane/{w_types_wave}_2026-06-26.md"
+    _write_program_queue_packet(
+        repo,
+        w_types_packet,
+        wave_id=w_types_wave,
+        status="IMPLEMENTED / LOCAL EVIDENCE",
+    )
+    _write_program_queue_config(
+        repo,
+        wave_id=w_types_wave,
+        title="W Types Inductive Types AST As Inductive Structure 2026-06-26",
+        tracked_packet=w_types_packet,
+    )
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            "1. **W-types / inductive types** "
+            "(AST-as-inductive-structure; self-hosting building block).\n"
+            "2. **Coinduction** (non-termination as structure).\n\n"
+            "---\n\n"
+            "## Ra\n"
+            f"- Tracker sync note (2026-06-27, {w_types_wave}): "
+            "**NEXT-CODEX-POST-REDTEAM -- pre-commit supervisor package refresh.** "
+            f"Packet: `{w_types_packet}`. "
+            "Pre-commit supervisor receipt remains pending for the current staged package.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "1161"},
+        merge_sha="not-landed",
+        log=_noop_log,
+    )
+
+    candidate = package["next_candidates"][0]
+    assert package["wave_name"] == w_types_wave
+    assert candidate["candidate"] == w_types_wave
+    assert candidate["tracked_packet"] == w_types_packet
+    assert "W-types / inductive types" in package["tracker_state_summary"]
 
 
 def test_skips_when_cleanup_root_not_on_base_branch(tmp_path):
