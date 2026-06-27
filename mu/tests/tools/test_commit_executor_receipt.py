@@ -5355,6 +5355,61 @@ class TestCommitExecutorPytestGate:
             "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
         ]
 
+    def test_pre_commit_doc_check_timeout_covers_docs_changed_hook_runtime(self, tmp_path):
+        from collections import namedtuple
+        import subprocess
+        import types
+
+        repo = _setup_repo(tmp_path)
+        hook = repo / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(json.dumps({
+            "decision": "COMMIT_GO",
+            "staged_sha": "fresh_sha",
+            "timestamp_utc": "2026-03-24T00:00:00+00:00",
+        }))
+
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        fake_result = SupervisorResult(
+            decision="COMMIT_GO",
+            summary="test",
+            receipt_path=sup_receipt_path,
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = lambda *a, **kw: fake_result
+        mock_client.MetaBridgeClientError = Exception
+
+        real_run = commit_mod._run  # ANTICHEAT_OK: test captures Step 8 hook subprocess budget
+        captured: dict[str, int | float | None] = {}
+
+        def intercept_run(args, cwd, check=True, timeout=120, env=None):
+            if list(args[:2]) == ["bash", str(hook)]:
+                captured["timeout"] = timeout
+                raise subprocess.CalledProcessError(
+                    1,
+                    args,
+                    output="",
+                    stderr="forced hook stop",
+                )
+            if list(args[:2]) == ["git", "commit"]:
+                raise AssertionError("git commit should not run after hook failure")
+            return real_run(args, cwd=cwd, check=check, timeout=timeout, env=env)
+
+        handoff = _make_new_schema_handoff()
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), \
+             patch.object(commit_mod, "_run", side_effect=intercept_run):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "run_pre_commit_script"
+        assert captured["timeout"] == commit_mod.PRE_COMMIT_DOC_CHECK_TIMEOUT_SECONDS
+        assert captured["timeout"] > 30
+
     def test_run_commit_pipeline_blocks_on_targeted_pytest_failure(self, tmp_path):
         from collections import namedtuple
         import types

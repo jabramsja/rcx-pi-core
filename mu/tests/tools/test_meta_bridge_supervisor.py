@@ -2852,6 +2852,44 @@ class TestWaveEvidenceGate:
         assert response.decision == "NEEDS_PHASE_B"
         assert "wave_evidence failed before commit" in response.summary
 
+    def test_failed_wave_evidence_preserves_failure_detail_after_long_header(self, wave_evidence_repo):
+        command = "python3 -m pytest long-suite"
+        package = _make_wave_evidence_package(
+            tracker_command=command,
+            package_command=command,
+        )
+        long_header = (
+            "============================= test session starts ==============================\n"
+            "platform darwin -- Python 3.13.13, pytest-9.0.2\n"
+            "collected 2250 items\n\n"
+            "mu/tests/docs/test_fixpoint_meta_circular_foundation_gate.py .F\n"
+            + ("header noise\n" * 500)
+        )
+        failure_detail = (
+            "=================================== FAILURES ===================================\n"
+            "FAILED mu/tests/docs/test_fixpoint_meta_circular_foundation_gate.py::"
+            "test_fixpoint_doc_is_discoverable_from_single_packet_authority\n"
+            "E       AssertionError: actionable assertion details survive\n"
+        )
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            if [str(part) for part in cmd] == ["bash", "-c", command]:
+                return 1, long_header + failure_detail
+            return 0, "passed"
+
+        results, all_passed = _run_validation_gates_for_wave_evidence(
+            package,
+            mock_run_validation,
+            repo_root=wave_evidence_repo,
+        )
+
+        gate = next(r for r in results if r.name == "wave_evidence")
+        assert not gate.passed
+        assert "FAILED mu/tests/docs/test_fixpoint_meta_circular_foundation_gate.py" in gate.error
+        assert "actionable assertion details survive" in gate.error
+        assert "test session starts" not in gate.error
+        assert not all_passed
+
     def test_declared_but_omitted_fails_closed_without_evidence_run(self, wave_evidence_repo):
         command = "echo should-not-run"
         package = _make_wave_evidence_package(

@@ -104,7 +104,11 @@ except ImportError:
     resolve_monitor_identity = _identity_mod.resolve_monitor_identity
 
 try:
-    from recovery_gate import attempt_recovery, clear_stale_recovery_status_on_success
+    from recovery_gate import (
+        attempt_recovery,
+        clear_stale_recovery_status_on_success,
+        _normalize_phase_a_retry_plan_name,
+    )
 except ImportError:
     import importlib.util as _ilu
     _recovery_path = SCRIPT_DIR / "recovery_gate.py"
@@ -115,6 +119,7 @@ except ImportError:
     _recovery_spec.loader.exec_module(_recovery_mod)
     attempt_recovery = _recovery_mod.attempt_recovery
     clear_stale_recovery_status_on_success = _recovery_mod.clear_stale_recovery_status_on_success
+    _normalize_phase_a_retry_plan_name = _recovery_mod._normalize_phase_a_retry_plan_name
 
 try:
     from meta_bridge_supervisor import compute_repo_state as _compute_repo_state
@@ -625,9 +630,31 @@ def _routing_candidate_wave_id(
     wave = str(
         candidate.get("wave_name")
         or candidate.get("wave_id")
+        or record.get("wave_name")
+        or record.get("wave_id")
         or candidate.get("candidate")
         or ""
     ).strip()
+    normalized = normalize_wave_id(wave) if wave else ""
+    return normalized if normalized != "wave-unknown" else ""
+
+
+def _routing_candidate_explicit_wave_id(candidate: dict[str, Any]) -> str:
+    wave = str(candidate.get("wave_name") or candidate.get("wave_id") or "").strip()
+    normalized = normalize_wave_id(wave) if wave else ""
+    return normalized if normalized != "wave-unknown" else ""
+
+
+def _routing_record_wave_id(record: dict[str, Any]) -> str:
+    wave = str(record.get("wave_name") or record.get("wave_id") or "").strip()
+    normalized = normalize_wave_id(wave) if wave else ""
+    return normalized if normalized != "wave-unknown" else ""
+
+
+def _routing_candidate_label_wave_id(candidate: dict[str, Any]) -> str:
+    if candidate.get("bounded") is not True:
+        return ""
+    wave = str(candidate.get("candidate") or "").strip()
     normalized = normalize_wave_id(wave) if wave else ""
     return normalized if normalized != "wave-unknown" else ""
 
@@ -646,6 +673,11 @@ def _tracked_packet_wave_conflict_result(
             continue
         routed_wave = _routing_candidate_wave_id(record, candidate)
         packet_wave = read_control_plane_packet_wave_id(repo_root, tracked_packet)
+        if decision == "ROUTE_PHASE_B":
+            explicit_candidate_wave = _routing_candidate_explicit_wave_id(candidate)
+            if not explicit_candidate_wave:
+                continue
+            routed_wave = explicit_candidate_wave
         if not routed_wave or not packet_wave or routed_wave == packet_wave:
             continue
         conflicts.append(
@@ -674,6 +706,45 @@ def _tracked_packet_wave_conflict_result(
     }
 
 
+def _phase_a_normalized_retry_packet_conflict_result(
+    repo_root: Path,
+    record: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    source_packet: str,
+    normalized_packet: str,
+    decision: str,
+    executor_name: str,
+) -> dict[str, Any] | None:
+    """Fail closed if a normalized Phase A alias already belongs to another wave."""
+    expected_wave = _routing_candidate_authority_wave_id(repo_root, record, candidate)
+    if not expected_wave:
+        source_wave = read_control_plane_packet_wave_id(repo_root, source_packet)
+        expected_wave = source_wave or ""
+    alias_wave = read_control_plane_packet_wave_id(repo_root, normalized_packet)
+    if not expected_wave or not alias_wave or expected_wave == alias_wave:
+        return None
+    return {
+        "status": "error",
+        "decision": decision,
+        "executor": executor_name,
+        "summary": "Routing stopped because the normalized Phase A retry packet has a conflicting Wave ID.",
+        "message": (
+            "Refusing to normalize Phase A tracked_packet "
+            f"{source_packet} to {normalized_packet}: existing normalized "
+            f"packet declares Wave ID {alias_wave}, routed/source wave is {expected_wave}."
+        ),
+        "request_for_agent": (
+            "Regenerate routing against the correct same-wave normalized packet, "
+            "or remove the stale alias through a bounded control-plane repair."
+        ),
+        "request_for_claude": (
+            "Regenerate routing against the correct same-wave normalized packet, "
+            "or remove the stale alias through a bounded control-plane repair."
+        ),
+    }
+
+
 def _same_wave_tasks_authority_exists(
     repo_root: Path,
     *,
@@ -692,22 +763,227 @@ def _same_wave_tasks_authority_exists(
     )
 
 
+def _phase_a_normalized_retry_has_source_authority(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    tracked_packet: str,
+    candidate: dict[str, Any],
+) -> bool:
+    """Allow a Phase A retry packet only when it is a safe normalization of an authorized packet."""
+    authority_packet = _phase_a_normalized_retry_authority_packet(
+        repo_root,
+        tracked_packet=tracked_packet,
+        candidate=candidate,
+    )
+    if not authority_packet:
+        return False
+    authority_wave = read_control_plane_packet_wave_id(repo_root, authority_packet)
+    if authority_wave and normalize_wave_id(authority_wave) != normalize_wave_id(wave_id):
+        return False
+    return _same_wave_tasks_authority_exists(
+        repo_root,
+        wave_id=wave_id,
+        tracked_packet=authority_packet,
+    )
+
+
+def _phase_a_normalized_retry_authority_packet(
+    repo_root: Path,
+    *,
+    tracked_packet: str,
+    candidate: dict[str, Any],
+) -> str:
+    if str(candidate.get("recovery_authority") or "") != "phase_a_plan_name_normalization":
+        return ""
+    packet = _phase_b_plan_routing_packet(repo_root, tracked_packet)
+    authority_packet = str(candidate.get("authority_tracked_packet") or "").strip()
+    authority_packet = _phase_b_plan_routing_packet(repo_root, authority_packet)
+    if not packet or not authority_packet or packet == authority_packet:
+        return ""
+    normalized_stem = _normalize_phase_a_retry_plan_name(Path(authority_packet).stem)
+    if not normalized_stem or Path(packet).stem != normalized_stem:
+        return ""
+    return authority_packet
+
+
+def _phase_a_normalized_retry_authority_wave_id(
+    repo_root: Path,
+    *,
+    tracked_packet: str,
+    candidate: dict[str, Any],
+) -> str:
+    authority_packet = _phase_a_normalized_retry_authority_packet(
+        repo_root,
+        tracked_packet=tracked_packet,
+        candidate=candidate,
+    )
+    if not authority_packet:
+        return ""
+    authority_wave = read_control_plane_packet_wave_id(repo_root, authority_packet)
+    normalized = normalize_wave_id(authority_wave) if authority_wave else ""
+    return normalized if normalized != "wave-unknown" else ""
+
+
 def _routing_candidate_authority_wave_id(
     repo_root: Path,
     record: dict[str, Any],
     candidate: dict[str, Any],
 ) -> str:
-    routed_wave = _routing_candidate_wave_id(record, candidate)
-    if routed_wave:
-        return routed_wave
     tracked_packet = str(candidate.get("tracked_packet") or "").strip()
+    candidate_wave = _routing_candidate_explicit_wave_id(candidate)
+    candidate_label_wave = _routing_candidate_label_wave_id(candidate)
+    record_wave = _routing_record_wave_id(record)
+    routed_wave = candidate_wave or record_wave or candidate_label_wave
+    if tracked_packet:
+        authority_wave = _phase_a_normalized_retry_authority_wave_id(
+            repo_root,
+            tracked_packet=tracked_packet,
+            candidate=candidate,
+        )
+        if authority_wave and (not routed_wave or routed_wave == authority_wave):
+            return authority_wave
+    if candidate_wave:
+        return candidate_wave
+    if candidate_label_wave:
+        return routed_wave
     if tracked_packet:
         packet_wave = read_control_plane_packet_wave_id(repo_root, tracked_packet)
         if packet_wave:
             return packet_wave
-    fallback = str(record.get("wave_name") or record.get("wave_id") or "").strip()
-    normalized = normalize_wave_id(fallback) if fallback else ""
-    return normalized if normalized != "wave-unknown" else ""
+    if routed_wave:
+        return routed_wave
+    return ""
+
+
+def _phase_b_routing_record_bound_to_plan_wave(
+    repo_root: Path,
+    record: dict[str, Any],
+    *,
+    plan_path: str,
+    wave_id: str,
+) -> dict[str, Any]:
+    """Return a Phase B routing record whose identity follows the locked packet."""
+    normalized_wave = normalize_wave_id(str(wave_id or ""))
+    if normalized_wave == "wave-unknown":
+        return record
+
+    plan_packet = _phase_b_plan_routing_packet(repo_root, plan_path)
+    rebound = dict(record)
+    rebound["wave_name"] = normalized_wave
+
+    candidates = record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return rebound
+
+    rebound_candidates: list[Any] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            rebound_candidates.append(candidate)
+            continue
+        updated = dict(candidate)
+        tracked_packet = _phase_b_plan_routing_packet(
+            repo_root,
+            str(updated.get("tracked_packet") or "").strip(),
+        )
+        if tracked_packet == plan_packet:
+            updated["candidate"] = normalized_wave
+            updated["wave_name"] = normalized_wave
+        rebound_candidates.append(updated)
+    rebound["next_candidates"] = rebound_candidates
+    return rebound
+
+
+def _phase_a_normalized_retry_chain_authority_packet(
+    repo_root: Path,
+    *,
+    plan_path: str,
+    record: dict[str, Any],
+    plan_wave_id: str,
+) -> str:
+    """Return the source packet that must govern Phase B for a normalized retry."""
+    plan_packet = _phase_b_plan_routing_packet(repo_root, plan_path)
+    if not plan_packet:
+        return ""
+    for candidate in _selected_routing_candidate_dicts(record):
+        tracked_packet = _phase_b_plan_routing_packet(
+            repo_root,
+            str(candidate.get("tracked_packet") or "").strip(),
+        )
+        if tracked_packet != plan_packet:
+            continue
+        authority_packet = _phase_a_normalized_retry_authority_packet(
+            repo_root,
+            tracked_packet=tracked_packet,
+            candidate=candidate,
+        )
+        if not authority_packet:
+            continue
+        authority_wave = read_control_plane_packet_wave_id(repo_root, authority_packet)
+        normalized_authority_wave = (
+            normalize_wave_id(authority_wave) if authority_wave else ""
+        )
+        if normalized_authority_wave == "wave-unknown":
+            normalized_authority_wave = ""
+        routed_wave = _routing_candidate_wave_id(record, candidate)
+        if (
+            routed_wave
+            and normalized_authority_wave
+            and routed_wave != normalized_authority_wave
+        ):
+            continue
+        if (
+            plan_wave_id
+            and normalized_authority_wave
+            and plan_wave_id != normalized_authority_wave
+        ):
+            continue
+        return authority_packet
+    return ""
+
+
+def _phase_a_normalized_retry_phase_b_candidates(
+    repo_root: Path,
+    record: dict[str, Any],
+    *,
+    plan_path: str,
+    authority_packet: str,
+    authority_wave_id: str,
+) -> list[Any]:
+    """Rewrite normalized retry candidates back to their source packet for Phase B."""
+    plan_packet = _phase_b_plan_routing_packet(repo_root, plan_path)
+    if not plan_packet or not authority_packet:
+        return list((record or {}).get("next_candidates", []))
+    rewritten_candidates: list[Any] = []
+    rewrote = False
+    for candidate in list((record or {}).get("next_candidates", [])):
+        if not isinstance(candidate, dict):
+            rewritten_candidates.append(candidate)
+            continue
+        rewritten = dict(candidate)
+        tracked_packet = _phase_b_plan_routing_packet(
+            repo_root,
+            str(rewritten.get("tracked_packet") or "").strip(),
+        )
+        if tracked_packet == plan_packet:
+            if authority_wave_id:
+                rewritten["candidate"] = authority_wave_id
+                rewritten["wave_name"] = authority_wave_id
+            rewritten["tracked_packet"] = authority_packet
+            rewritten.pop("recovery_authority", None)
+            rewritten.pop("authority_tracked_packet", None)
+            rewrote = True
+        rewritten_candidates.append(rewritten)
+    if not rewrote:
+        candidate_wave = authority_wave_id or normalize_wave_id(Path(authority_packet).stem)
+        return [
+            {
+                "candidate": candidate_wave,
+                "bounded": True,
+                "tracked_packet": authority_packet,
+            }
+        ]
+    return rewritten_candidates
 
 
 def _missing_next_codex_tracker_authority_result(
@@ -736,6 +1012,13 @@ def _missing_next_codex_tracker_authority_result(
             repo_root,
             wave_id=routed_wave,
             tracked_packet=tracked_packet,
+        ):
+            continue
+        if _phase_a_normalized_retry_has_source_authority(
+            repo_root,
+            wave_id=routed_wave,
+            tracked_packet=tracked_packet,
+            candidate=candidate,
         ):
             continue
         missing.append(f"{routed_wave} -> {tracked_packet}")
@@ -1060,7 +1343,13 @@ def _surface_record_for_chain(
                 parsed = None
             if isinstance(parsed, dict):
                 record.update(parsed)
-                record["decision"] = str(record.get("decision") or decision)
+                parsed_decision = str(parsed.get("decision") or "").strip()
+                if args.surface == "phase-b":
+                    if parsed_decision and parsed_decision != decision:
+                        record["source_routing_decision"] = parsed_decision
+                    record["decision"] = decision
+                else:
+                    record["decision"] = str(record.get("decision") or decision)
                 if canonical_task_id:
                     record["task_id"] = canonical_task_id
         if args.surface == "commit":
@@ -1501,6 +1790,7 @@ def run_recoverable_surface_command(
         wave_id = _surface_wave_id(args, repo_root)
     original_timeouts = None
     result: dict[str, Any] | None = None
+    surface_retry_record: dict[str, Any] | None = None
 
     # Auto-spawn the per-lane tmux monitor for a lane bus launch (no-op for the
     # MAIN/default bus).  The wave-end cleanup runs in the finally below so it
@@ -1530,7 +1820,11 @@ def run_recoverable_surface_command(
                     return 0
                 result = retried
             else:
-                surface_record = _surface_record_for_chain(args, repo_root)
+                if surface_retry_record is not None:
+                    surface_record = surface_retry_record
+                    surface_retry_record = None
+                else:
+                    surface_record = _surface_record_for_chain(args, repo_root)
                 decision = str(surface_record.get("decision") or decision)
                 wave_id = normalize_wave_id(
                     str(surface_record.get("wave_name") or surface_record.get("wave_id") or wave_id)
@@ -1622,6 +1916,13 @@ def run_recoverable_surface_command(
                 _clear_phase_b_state_for_retry(
                     repo_root, result, verbose=getattr(args, "verbose", False), bus_dir=bus_dir
                 )
+                retry_record = _recovered_retry_record(
+                    result,
+                    current_record=surface_record,
+                    allow_phase_b_to_phase_a=bool(getattr(args, "bootstrap_exception", False)),
+                )
+                if retry_record is not None:
+                    surface_retry_record = retry_record
                 continue
 
             if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
@@ -1646,6 +1947,13 @@ def run_recoverable_surface_command(
                 new_orig,
             )
             _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False), bus_dir=bus_dir)
+            retry_record = _recovered_retry_record(
+                result,
+                current_record=surface_record,
+                allow_phase_b_to_phase_a=bool(getattr(args, "bootstrap_exception", False)),
+            )
+            if retry_record is not None:
+                surface_retry_record = retry_record
 
         return 1
     finally:
@@ -2322,20 +2630,19 @@ def _continue_successful_executor_chain(
         plan_wave_id = _phase_b_plan_declared_wave_id(repo_root, plan_path)
         routed_wave_candidates: list[str] = []
         for candidate in _selected_routing_candidate_dicts(record or {}):
-            if candidate.get("wave_name") or candidate.get("wave_id"):
-                routed_wave_candidates.append(_routing_candidate_wave_id(record or {}, candidate))
+            if not (
+                candidate.get("wave_name")
+                or candidate.get("wave_id")
+                or candidate.get("tracked_packet")
+            ):
                 continue
-            if candidate.get("tracked_packet"):
-                candidate_wave = _routing_candidate_wave_id(record or {}, candidate)
-                if candidate_wave:
-                    routed_wave_candidates.append(candidate_wave)
-                    continue
-                packet_wave = read_control_plane_packet_wave_id(
-                    repo_root,
-                    str(candidate.get("tracked_packet") or ""),
-                )
-                if packet_wave:
-                    routed_wave_candidates.append(packet_wave)
+            candidate_wave = _routing_candidate_authority_wave_id(
+                repo_root,
+                record or {},
+                candidate,
+            )
+            if candidate_wave:
+                routed_wave_candidates.append(candidate_wave)
         routed_wave_candidates = [wave for wave in routed_wave_candidates if wave]
         expected_wave = (
             routed_wave_candidates[0]
@@ -2355,12 +2662,32 @@ def _continue_successful_executor_chain(
                 ),
                 "chained_from": "phase_a_executor",
             }
+        authority_plan_path = _phase_a_normalized_retry_chain_authority_packet(
+            repo_root,
+            plan_path=plan_path,
+            record=record or {},
+            plan_wave_id=plan_wave_id,
+        )
+        phase_b_plan_path = authority_plan_path or plan_path
+        if authority_plan_path:
+            authority_wave_id = _phase_b_plan_declared_wave_id(repo_root, authority_plan_path)
+            if authority_wave_id:
+                plan_wave_id = authority_wave_id
         if plan_wave_id:
             # The surface plan name can omit the dated wave suffix; commit
             # identity must follow the converged locked packet Phase B uses.
             phase_b_wave_name = plan_wave_id
-        phase_b_candidates = list((record or {}).get("next_candidates", []))
-        phase_b_tracked_packet = _phase_b_plan_routing_packet(repo_root, plan_path)
+        if authority_plan_path:
+            phase_b_candidates = _phase_a_normalized_retry_phase_b_candidates(
+                repo_root,
+                record or {},
+                plan_path=plan_path,
+                authority_packet=authority_plan_path,
+                authority_wave_id=plan_wave_id,
+            )
+        else:
+            phase_b_candidates = list((record or {}).get("next_candidates", []))
+        phase_b_tracked_packet = _phase_b_plan_routing_packet(repo_root, phase_b_plan_path)
         if plan_wave_id and not _routing_record_tracked_packet(
             {"next_candidates": phase_b_candidates}
         ):
@@ -2378,7 +2705,7 @@ def _continue_successful_executor_chain(
             )
         tracker_gate = _phase_b_tracker_gate_result(
             repo_root,
-            plan_path=plan_path,
+            plan_path=phase_b_plan_path,
             wave_id=phase_b_wave_name,
             tracked_packet=phase_b_tracked_packet,
         )
@@ -2403,7 +2730,7 @@ def _continue_successful_executor_chain(
         phase_b_args = [
             sys.executable,
             str(executor_script_dir / "phase_b_executor.py"),
-            "--plan", plan_path,
+            "--plan", phase_b_plan_path,
             "--routing-record", json.dumps(phase_b_routing),
             "--max-rounds",
             str(max_bridge_rounds or _configured_bridge_loop_limit(config, "phase_b")),
@@ -2991,7 +3318,56 @@ def _clear_phase_b_state_for_retry(
             print("[dispatch] Cleared stale Phase B state before retry")
 
 
-def _recovered_retry_record(result: dict[str, Any]) -> dict[str, Any] | None:
+_PHASE_B_RECOVERY_STEPS = frozenset({
+    "phase_b",
+    "phase_b_executor",
+    "post_reentry_supervisor",
+})
+
+
+def _phase_b_result_context(result: dict[str, Any]) -> bool:
+    """Return true when a recovered result genuinely belongs to Phase B."""
+    executor = str(result.get("executor") or "").strip().lower().replace("-", "_")
+    step = str(result.get("step") or "").strip().lower().replace("-", "_")
+    return executor == "phase_b_executor" or step in _PHASE_B_RECOVERY_STEPS
+
+
+def _retry_record_wave_matches_current(
+    retry_record: dict[str, Any],
+    current_record: dict[str, Any] | None,
+) -> bool:
+    """Keep recovered retry routing bound to the current wave when both are known."""
+    if not current_record:
+        return True
+    retry_wave = _routing_record_wave_id(retry_record)
+    current_wave = _routing_record_wave_id(current_record)
+    return not (retry_wave and current_wave and retry_wave != current_wave)
+
+
+def _retry_record_adds_routing_authority(
+    retry_record: dict[str, Any],
+    current_record: dict[str, Any] | None,
+) -> bool:
+    """Return true when a recovered record should override normal routing reload."""
+    if not current_record:
+        return True
+    retry_decision = str(retry_record.get("decision") or "").strip()
+    current_decision = str(current_record.get("decision") or "").strip()
+    if retry_decision and retry_decision != current_decision:
+        return True
+    if str(retry_record.get("plan_path") or retry_record.get("tracked_packet") or "").strip():
+        return True
+    if _routing_record_tracked_packet(retry_record):
+        return True
+    return False
+
+
+def _recovered_retry_record(
+    result: dict[str, Any],
+    *,
+    current_record: dict[str, Any] | None = None,
+    allow_phase_b_to_phase_a: bool = False,
+) -> dict[str, Any] | None:
     """Return a recovered executor's explicit retry record when it is valid."""
     retry_record = result.get("retry_record")
     if not isinstance(retry_record, dict):
@@ -2999,6 +3375,20 @@ def _recovered_retry_record(result: dict[str, Any]) -> dict[str, Any] | None:
     decision = str(retry_record.get("decision") or "").strip()
     if decision not in ROUTING_DISPATCH:
         return None
+    phase_b_context = _phase_b_result_context(result)
+    if decision == "ROUTE_PHASE_B":
+        if not phase_b_context:
+            return None
+        if not _retry_record_wave_matches_current(retry_record, current_record):
+            return None
+        if not _retry_record_adds_routing_authority(retry_record, current_record):
+            return None
+    if decision == "ROUTE_PHASE_A" and phase_b_context:
+        if not _retry_record_wave_matches_current(retry_record, current_record):
+            return None
+        bootstrap_exception = bool(result.get("bootstrap_exception"))
+        if not bootstrap_exception and not allow_phase_b_to_phase_a:
+            return None
     try:
         return json.loads(json.dumps(retry_record))
     except (TypeError, ValueError):
@@ -3707,7 +4097,35 @@ def dispatch(
                             "executor": executor_name,
                             "message": f"tracked_packet escapes repo root: {tp}",
                         }
-                    plan_name = Path(tp).stem
+                    source_plan_name = Path(tp).stem
+                    normalized_plan_name = _normalize_phase_a_retry_plan_name(
+                        source_plan_name,
+                    )
+                    if normalized_plan_name and normalized_plan_name != source_plan_name:
+                        normalized_packet = (
+                            f"reports/control_plane/{normalized_plan_name}.md"
+                        )
+                        normalized_conflict = _phase_a_normalized_retry_packet_conflict_result(
+                            repo,
+                            record,
+                            c,
+                            source_packet=tp,
+                            normalized_packet=normalized_packet,
+                            decision=decision,
+                            executor_name=executor_name,
+                        )
+                        if normalized_conflict is not None:
+                            return normalized_conflict
+                        c["candidate"] = normalized_plan_name
+                        c["tracked_packet"] = normalized_packet
+                        c["recovery_authority"] = "phase_a_plan_name_normalization"
+                        c["authority_tracked_packet"] = tp
+                        record["tracked_packet"] = normalized_packet
+                        record["recovery_authority"] = "phase_a_plan_name_normalization"
+                        record["authority_tracked_packet"] = tp
+                        plan_name = normalized_plan_name
+                    else:
+                        plan_name = source_plan_name
                     break
                 candidate_text = c.get("candidate", "")
                 if candidate_text:
@@ -3734,10 +4152,18 @@ def dispatch(
             if plan_error:
                 return plan_error
             if plan_path:
+                declared_plan_wave = _phase_b_plan_declared_wave_id(repo, plan_path)
                 phase_b_wave = (
-                    _phase_b_plan_wave_id(repo, plan_path)
+                    declared_plan_wave
                     or str(record.get("wave_name") or record.get("wave_id") or "")
                 )
+                if phase_b_wave:
+                    record = _phase_b_routing_record_bound_to_plan_wave(
+                        repo,
+                        record,
+                        plan_path=plan_path,
+                        wave_id=phase_b_wave,
+                    )
                 tracker_gate = _phase_b_tracker_gate_result(
                     repo,
                     plan_path=plan_path,
@@ -4573,7 +4999,7 @@ def main(argv: list[str] | None = None) -> int:
                             "before commit chain"
                         )
                     _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
-                    retry_record = _recovered_retry_record(result)
+                    retry_record = _recovered_retry_record(result, current_record=record)
                     if retry_record is not None:
                         record = retry_record
                     elif not _is_chained_commit_failure(result):
@@ -4640,7 +5066,7 @@ def main(argv: list[str] | None = None) -> int:
                         )
                         # Recovery succeeded — grant one extra attempt (don't increment counter)
                         _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
-                        retry_record = _recovered_retry_record(result)
+                        retry_record = _recovered_retry_record(result, current_record=record)
                         if retry_record is not None:
                             record = retry_record
                         elif not _is_chained_commit_failure(result):

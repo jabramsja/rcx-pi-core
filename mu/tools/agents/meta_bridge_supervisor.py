@@ -1594,7 +1594,7 @@ def _run_wave_evidence_with_restore_unlocked(repo_root: Path, evidence_command: 
             if restore_errors:
                 detail = "; ".join(restore_errors)
                 if output:
-                    detail = f"{output[:500]}\n[restore]\n{detail}"
+                    detail = f"{_validation_output_excerpt(output)}\n[restore]\n{detail}"
                 return 1, detail
 
             post_restore_state = compute_repo_state(repo_root)
@@ -1605,13 +1605,13 @@ def _run_wave_evidence_with_restore_unlocked(repo_root: Path, evidence_command: 
                     f"after={post_restore_state.state_sha[:12]})"
                 )
                 if output:
-                    detail = f"{output[:500]}\n[restore]\n{detail}"
+                    detail = f"{_validation_output_excerpt(output)}\n[restore]\n{detail}"
                 return 1, detail
             return exit_code, output
     except Exception as exc:
         detail = f"wave evidence failed before trusted receipt: {type(exc).__name__}: {exc}"
         if output:
-            detail = f"{output[:500]}\n[restore]\n{detail}"
+            detail = f"{_validation_output_excerpt(output)}\n[restore]\n{detail}"
         return 1, detail
 
 
@@ -1636,6 +1636,39 @@ def _failed_wave_evidence_result(validation_results: list[ValidationResult]) -> 
         if result.name == "wave_evidence" and not result.passed:
             return result
     return None
+
+
+def _validation_output_excerpt(output: str, *, limit: int = 4000) -> str:
+    """Keep actionable validation failure context instead of only the noisy header."""
+    text = str(output or "").strip()
+    if not text or len(text) <= limit:
+        return text
+
+    failure_markers = (
+        "=================================== FAILURES",
+        "==================================== ERRORS",
+        "FAILED ",
+        "ERROR ",
+        "Traceback (most recent call last):",
+    )
+    marker_positions = [
+        position
+        for marker in failure_markers
+        if (position := text.find(marker)) >= 0
+    ]
+    if marker_positions:
+        start = min(marker_positions)
+        prefix = "[truncated before validation failure]\n" if start > 0 else ""
+        return (prefix + text[start:start + limit])[:limit]
+
+    marker = "\n[...validation output truncated...]\n"
+    head_limit = min(1000, limit // 3)
+    tail_limit = max(0, limit - head_limit - len(marker))
+    return (
+        text[:head_limit].rstrip()
+        + marker
+        + text[-tail_limit:].lstrip()
+    )[-limit:]
 
 
 def run_validation_gates(
@@ -1818,7 +1851,7 @@ def run_validation_gates(
                 declared_evidence_command,
             )
             evidence_detail = (
-                evidence_output[:500]
+                _validation_output_excerpt(evidence_output)
                 if evidence_output
                 else ("passed" if evidence_exit == 0 else "failed")
             )

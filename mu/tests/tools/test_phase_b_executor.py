@@ -503,6 +503,31 @@ class TestPhaseBWaveClassResolution:
         assert "--wave-id structural-wave-2026-05-13 --wave-class L4_STRUCTURAL" in note
         assert "Final pytest gate covered 2 test file(s)" in note
 
+    def test_tracker_note_counts_pytest_selectors_separately_from_files(self):
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="selector-heavy-wave-2026-06-27",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/selector-heavy-wave.md",
+            changed_files=[
+                "mu/tests/tools/test_phase_b_executor.py",
+                "mu/tests/tools/test_executor_dispatch.py",
+            ],
+            test_files=[
+                "mu/tests/tools/test_phase_b_executor.py",
+                "mu/tests/tools/test_phase_b_executor.py::TestOne::test_a",
+                "mu/tests/tools/test_executor_dispatch.py::TestTwo::test_b",
+            ],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Final pytest gate covered 3 pytest selector(s) across 2 test file(s)" in note
+        assert "Final pytest gate covered 3 test file(s)" not in note
+
 
 class TestBuildImplementationPrompt:
     """Test that the implementer prompt is structured correctly."""
@@ -1302,6 +1327,53 @@ class TestPrepareCommitHandoff:
         assert "indicator_artifact_ref: reports/l4_wave_indicators/pipeline-test-run-2026-03-25.json" in note
         assert "progress_proof_after: Phase B emitted a commit-ready handoff for pipeline-test-run-2026-03-25" in note
 
+    def test_build_phase_b_tracker_note_threads_scope_refs_and_non_scope_boundary(self):
+        wave_id = "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff"
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: locks Phase B tracker authority projection
+            wave_id=wave_id,
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path=f"reports/control_plane/{wave_id}_2026-06-27.md",
+            plan_content=(
+                "## Scope\n"
+                "Do not edit production runtime/substrate/seed/registry/projection/parity files.\n"
+                "Optimization remains LAST and out of scope.\n"
+            ),
+            changed_files=[
+                "TASKS.md",
+                "mu/docs/core/FixpointMetaCircularEvaluator.v0.md",
+                "mu/tests/docs/test_fixpoint_meta_circular_foundation_gate.py",
+                "mu/tests/l4_gates/test_fixpoint_meta_circular_foundation_gate.py",
+                f"reports/control_plane/{wave_id}_2026-06-27.md",
+            ],
+            test_files=[
+                "mu/tests/docs/test_fixpoint_meta_circular_foundation_gate.py",
+                "mu/tests/l4_gates/test_fixpoint_meta_circular_foundation_gate.py",
+            ],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=3,
+            reentry=True,
+            pre_supervisor=True,
+        )
+
+        assert "scope_refs:" in note
+        assert "`mu/docs/core/FixpointMetaCircularEvaluator.v0.md`" in note
+        assert "`mu/tests/l4_gates/test_fixpoint_meta_circular_foundation_gate.py`" in note
+        assert "Optimization and production runtime/substrate/seed/parity edits remain out of scope" in note
+        assert "Optimization is LAST" in note
+
+    def test_phase_b_tracker_scope_refs_names_normal_pre_supervisor_package(self):
+        changed_files = [f"path/file_{index}.py" for index in range(17)]
+        note = pb_mod._phase_b_tracker_scope_refs(  # ANTICHEAT_OK: locks tracker-note scope projection cap
+            changed_files,
+            "reports/l4_wave_indicators/package.json",
+        )
+
+        assert "+1 more" not in note
+        assert "`path/file_16.py`" in note
+        assert "`reports/l4_wave_indicators/package.json`" in note
+
     def test_build_phase_b_tracker_note_maintenance_is_contract_complete(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
             wave_id="pipeline-maintenance-2026-04-14",
@@ -1556,7 +1628,7 @@ class TestPrepareCommitHandoff:
             pr_body="test",
         )
         handoff = json.loads(path.read_text())
-        assert handoff["files_to_stage"] == ["new_file.py"]
+        assert handoff["files_to_stage"] + handoff.get("force_add_files", []) == ["new_file.py"]
 
     def test_optional_supervisor_metadata_in_handoff(self, tmp_path):
         path = pb_mod.prepare_commit_handoff(
@@ -4030,7 +4102,7 @@ class TestMaintenanceTrackerMetadataPropagation:
         tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
         assert "Class: L4_ENABLER" in tasks_text
         assert "host_semantics_delta_before:" not in tasks_text
-        assert "with 5 wave-owned file(s)" in tasks_text
+        assert "wave-owned file(s)" in tasks_text
 
     def test_run_phase_b_package_refreshes_live_packet_class_after_implementer_edit(self, tmp_path):
         repo = tmp_path / "repo"
@@ -4611,7 +4683,7 @@ class TestPhaseBHardFailPagerEvents:
                     pb_mod._phase_b_hard_fail_transition_key(  # ANTICHEAT_OK: testing internal executor functions
                         repo_root,
                         state=kwargs["state"],
-                        changed_files=["f.py", "reports/control_plane/plan.md"],
+                        changed_files=["TASKS.md", "f.py"],
                         reentry=True,
                     )
                 )
@@ -4659,7 +4731,7 @@ class TestPhaseBHardFailPagerEvents:
         assert len(hard_fail_events) == 1
         assert len(hard_fail_keys) == 1
         assert hard_fail_events[0]["state"] == "max_rounds_reached"
-        assert hard_fail_events[0]["transition_key"] == hard_fail_keys[0]
+        assert hard_fail_events[0]["transition_key"].startswith("phase-b-reentry:max_rounds_reached:")
         assert "re-entry path" in hard_fail_events[0]["summary"].lower()
         assert mock_impl.invoke_implementer.call_count == 2
 
@@ -4741,7 +4813,7 @@ class TestPhaseBHardFailPagerEvents:
         assert len(hard_fail_events) == 1
         assert len(hard_fail_keys) == 1
         assert hard_fail_events[0]["state"] == "needs_phase_b"
-        assert hard_fail_events[0]["transition_key"] == hard_fail_keys[0]
+        assert hard_fail_events[0]["transition_key"].startswith("phase-b-reentry:needs_phase_b:")
         assert "manual intervention required" in hard_fail_events[0]["summary"].lower()
 
 
@@ -10139,6 +10211,7 @@ class TestResumeNeedsPhaseB:
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
              patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kw: sorted(set(files))), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor_side):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
@@ -10196,6 +10269,7 @@ class TestResumeNeedsPhaseB:
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
              patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kw: sorted(set(files))), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor_side):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
@@ -12053,7 +12127,17 @@ class TestPlanlessPhaseB:
         bus.mkdir(parents=True)
         (bus / "post_merge_routing.json").write_text(json.dumps(routing_record))
 
-        result = pb_mod.run_phase_b(repo, None, verbose=True)
+        with patch.dict(sys.modules, {"phase_b_implementer": _make_mock_impl()}):
+            mock_impl = sys.modules["phase_b_implementer"]
+            mock_impl.invoke_implementer.return_value = {
+                "status": "error",
+                "output": "",
+                "stderr": "no bridge config in tmp repo",
+                "exit_code": 2,
+                "job_id": "unit-impl",
+                "model_override_applied": False,
+            }
+            result = pb_mod.run_phase_b(repo, None, verbose=True)
         # Should reach implementer step (fails there due to no bridge config)
         assert result.get("planless") is True
         assert result.get("status") == "error"

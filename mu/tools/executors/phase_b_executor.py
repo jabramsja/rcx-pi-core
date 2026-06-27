@@ -4826,6 +4826,39 @@ def _phase_b_target_branch_for_current_worktree(
     return observed_branch
 
 
+def _phase_b_tracker_scope_refs(changed_files: list[str], indicator_path: str, *, limit: int = 32) -> str:
+    refs: list[str] = []
+    for raw_path in [*changed_files, indicator_path]:
+        path = str(raw_path or "").strip().replace("\\", "/")
+        while path.startswith("./"):
+            path = path[2:]
+        if not path or path in refs:
+            continue
+        refs.append(path)
+    if not refs:
+        return ""
+    visible = refs[:limit]
+    suffix = ""
+    if len(refs) > limit:
+        suffix = f", +{len(refs) - limit} more"
+    return "scope_refs: " + ", ".join(f"`{path}`" for path in visible) + suffix + "."
+
+
+def _phase_b_tracker_non_scope_note(plan_content: str, changed_files: list[str]) -> str:
+    """Project explicit packet non-scope constraints into the tracker note."""
+    if _phase_b_scope_has_runtime_substrate_file(changed_files):
+        return ""
+    normalized = " ".join(str(plan_content or "").split()).lower()
+    if "optimization" not in normalized or "runtime/substrate" not in normalized:
+        return ""
+    if "seed" not in normalized or "parity" not in normalized:
+        return ""
+    return (
+        "Optimization and production runtime/substrate/seed/parity edits remain out of scope. "
+        "Optimization is LAST."
+    )
+
+
 def _build_phase_b_tracker_note(
     *,
     wave_id: str,
@@ -4854,6 +4887,16 @@ def _build_phase_b_tracker_note(
 
     indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
 
+    def _pytest_coverage_label(selectors: list[str]) -> str:
+        test_paths: list[str] = []
+        for selector in selectors:
+            path = _pytest_selector_path(str(selector or "").strip())
+            if path and path not in test_paths:
+                test_paths.append(path)
+        if len(selectors) == len(test_paths):
+            return f"{len(test_paths)} test file(s)"
+        return f"{len(selectors)} pytest selector(s) across {len(test_paths)} test file(s)"
+
     def _append_l4_files_contract(command: str) -> str:
         if wave_class != "L4_STRUCTURAL":
             return command
@@ -4872,6 +4915,7 @@ def _build_phase_b_tracker_note(
     if not effective_test_files and wave_class == "L4_STRUCTURAL":
         effective_test_files = _select_pytest_gate_files(changed_files)
     if effective_test_files:
+        pytest_coverage_label = _pytest_coverage_label(effective_test_files)
         evidence_command = _append_l4_files_contract(
             "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
             + " ".join(effective_test_files)
@@ -4879,14 +4923,14 @@ def _build_phase_b_tracker_note(
         if pre_supervisor:
             evidence_delta = (
                 f"(1) Phase B converged on the locked plan at {plan_path}. "
-                f"(2) Final pytest gate covered {len(effective_test_files)} test file(s) from the wave-owned diff. "
+                f"(2) Final pytest gate covered {pytest_coverage_label} from the wave-owned diff. "
                 f"(3) Pre-commit supervisor package is staged at {receipt_path}; "
                 "commit handoff receipt remains pending the supervisor decision."
             )
         else:
             evidence_delta = (
                 f"(1) Phase B converged on the locked plan at {plan_path}. "
-                f"(2) Final pytest gate covered {len(effective_test_files)} test file(s) from the wave-owned diff. "
+                f"(2) Final pytest gate covered {pytest_coverage_label} from the wave-owned diff. "
                 f"(3) Commit handoff carries explicit receipt authority at {receipt_path}."
             )
     else:
@@ -4910,6 +4954,13 @@ def _build_phase_b_tracker_note(
                 "(3) No test files were present in the wave-owned diff, so indicator collection is the "
                 "mechanical evidence surface."
             )
+
+    scope_refs = _phase_b_tracker_scope_refs(changed_files, indicator_path)
+    non_scope_note = _phase_b_tracker_non_scope_note(plan_content, changed_files)
+    if scope_refs:
+        evidence_delta = f"{evidence_delta} {scope_refs}"
+    if non_scope_note:
+        evidence_delta = f"{evidence_delta} {non_scope_note}"
 
     if pre_supervisor:
         progress_before = (

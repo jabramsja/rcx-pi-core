@@ -1655,6 +1655,369 @@ class TestDispatcherFreshnessRefresh:
         assert "n3-orphan-packet-2026-05-19" in result["message"]
         assert packet_rel in result["message"]
 
+    def test_next_codex_phase_a_normalized_retry_inherits_source_packet_authority(
+        self,
+        tmp_path,
+    ):
+        source_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-payoff_2026-06-27.md"
+        )
+        retry_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-pa_2026-06-27.md"
+        )
+        source = tmp_path / source_packet
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "# Fixpoint Packet\n\n"
+            "Wave ID: fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Ra\n\n"
+                "- Tracker sync note (2026-06-27, "
+                "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff): "
+                "**Fixpoint sync.** Class: L4_ENABLER. target_gate_id: G8. "
+                f"Packet: `{source_packet}`. evidence_command: `pytest fixpoint`. "
+                "evidence_delta: source packet has authority. "
+                "progress_proof_before: source packet exists. "
+                "progress_proof_after: normalized retry can reuse source authority. "
+                "FOUNDER_OVERRIDE:fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff. "
+                "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/fixpoint.json. "
+                "indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py "
+                "--wave-id fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff "
+                "--output reports/l4_wave_indicators/fixpoint.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "normalized retry",
+            "wave_name": "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [{
+                "wave_name": "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff",
+                "candidate": Path(retry_packet).stem,
+                "bounded": True,
+                "tracked_packet": retry_packet,
+                "recovery_authority": "phase_a_plan_name_normalization",
+                "authority_tracked_packet": source_packet,
+            }],
+        }
+
+        assert dispatch_mod._missing_next_codex_tracker_authority_result(  # ANTICHEAT_OK: normalized retry authority regression
+            tmp_path,
+            record,
+            decision="ROUTE_PHASE_A",
+            executor_name="phase_a_executor",
+        ) is None
+
+    def test_next_codex_phase_a_normalized_retry_rejects_source_wave_mismatch(
+        self,
+        tmp_path,
+    ):
+        source_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-payoff_2026-06-27.md"
+        )
+        retry_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-pa_2026-06-27.md"
+        )
+        source = tmp_path / source_packet
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "# Fixpoint Packet\n\n"
+            "Wave ID: fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Ra\n\n"
+                "- Tracker sync note (2026-06-27, "
+                "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff): "
+                "**Fixpoint sync.** Class: L4_ENABLER. target_gate_id: G8. "
+                f"Packet: `{source_packet}`. evidence_command: `pytest fixpoint`. "
+                "evidence_delta: source packet has authority. "
+                "progress_proof_before: source packet exists. "
+                "progress_proof_after: forged routed wave cannot borrow source authority. "
+                "FOUNDER_OVERRIDE:fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff. "
+                "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/fixpoint.json. "
+                "indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py "
+                "--wave-id fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff "
+                "--output reports/l4_wave_indicators/fixpoint.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "forged routed wave",
+            "wave_name": "evil-wave-2026-06-27",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [{
+                "wave_name": "evil-wave-2026-06-27",
+                "candidate": "evil-wave-2026-06-27",
+                "bounded": True,
+                "tracked_packet": retry_packet,
+                "recovery_authority": "phase_a_plan_name_normalization",
+                "authority_tracked_packet": source_packet,
+            }],
+        }
+        candidate = record["next_candidates"][0]
+
+        assert dispatch_mod._routing_candidate_authority_wave_id(  # ANTICHEAT_OK: forged normalized retry regression
+            tmp_path,
+            record,
+            candidate,
+        ) == "evil-wave-2026-06-27"
+        result = dispatch_mod._missing_next_codex_tracker_authority_result(  # ANTICHEAT_OK: forged normalized retry regression
+            tmp_path,
+            record,
+            decision="ROUTE_PHASE_A",
+            executor_name="phase_a_executor",
+        )
+        assert result is not None
+        assert result["status"] == "held"
+        assert "evil-wave-2026-06-27" in result["message"]
+        assert retry_packet in result["message"]
+
+    def test_phase_a_dispatch_normalizes_overlong_tracked_packet_before_exec(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        source_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-payoff_2026-06-27.md"
+        )
+        expected = (
+            "fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-pa_2026-06-27"
+        )
+        source = tmp_path / source_packet
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "# Fixpoint Packet\n\n"
+            "Wave ID: fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Ra\n\n"
+                "- Tracker sync note (2026-06-27, "
+                "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff): "
+                "**Fixpoint sync.** Class: L4_ENABLER. target_gate_id: G8. "
+                f"Packet: `{source_packet}`. evidence_command: `pytest fixpoint`. "
+                "evidence_delta: source packet has authority. "
+                "progress_proof_before: source packet exists. "
+                "progress_proof_after: dispatcher normalizes overlong Phase A packet names before exec. "
+                "FOUNDER_OVERRIDE:fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff. "
+                "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/fixpoint.json. "
+                "indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py "
+                "--wave-id fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff "
+                "--output reports/l4_wave_indicators/fixpoint.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            ),
+            encoding="utf-8",
+        )
+        captured: dict[str, object] = {}
+
+        def fake_run_executor(args, *, cwd, timeout):
+            captured["args"] = list(args)
+            captured["cwd"] = cwd
+            captured["timeout"] = timeout
+            return subprocess.CompletedProcess(args, 2, stdout="", stderr="forced stop")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run_executor)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "ensure_not_agent_review_mode",
+            lambda *a, **k: None,
+        )
+
+        result = dispatch_mod.dispatch(
+            {
+                "decision": "ROUTE_PHASE_A",
+                "summary": "normalized retry",
+                "wave_name": "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff",
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "next_candidates": [{
+                    "wave_name": "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff",
+                    "candidate": "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff",
+                    "bounded": True,
+                    "tracked_packet": source_packet,
+                }],
+            },
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+
+        assert result["status"] == "failed"
+        args = captured["args"]
+        assert isinstance(args, list)
+        assert args[args.index("--plan-name") + 1] == expected
+        routing = json.loads(args[args.index("--routing-record") + 1])
+        candidate = routing["next_candidates"][0]
+        assert candidate["candidate"] == expected
+        assert candidate["tracked_packet"] == f"reports/control_plane/{expected}.md"
+        assert candidate["recovery_authority"] == "phase_a_plan_name_normalization"
+        assert candidate["authority_tracked_packet"] == source_packet
+
+    def test_phase_a_dispatch_rejects_normalized_retry_alias_claimed_by_other_wave(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        wave_id = "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff"
+        source_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-payoff_2026-06-27.md"
+        )
+        retry_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-pa_2026-06-27.md"
+        )
+        source = tmp_path / source_packet
+        retry = tmp_path / retry_packet
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "# Fixpoint Source Packet\n\n"
+            f"Wave ID: {wave_id}\n",
+            encoding="utf-8",
+        )
+        retry.write_text(
+            "# Stale Alias Packet\n\n"
+            "Wave ID: other-wave-2026-06-27\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Ra\n\n"
+                "- Tracker sync note (2026-06-27, "
+                f"{wave_id}): "
+                "**Fixpoint sync.** Class: L4_ENABLER. target_gate_id: G8. "
+                f"Packet: `{source_packet}`. evidence_command: `pytest fixpoint`. "
+                "evidence_delta: source packet has authority. "
+                "progress_proof_before: source packet exists. "
+                "progress_proof_after: normalized retry aliases cannot cross waves. "
+                f"FOUNDER_OVERRIDE:{wave_id}. "
+                "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/fixpoint.json. "
+                "indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py "
+                f"--wave-id {wave_id} --output reports/l4_wave_indicators/fixpoint.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            ),
+            encoding="utf-8",
+        )
+
+        def fail_if_phase_a_runs(*_args, **_kwargs):
+            pytest.fail("Phase A must not run against a wrong-wave normalized alias")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fail_if_phase_a_runs)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "ensure_not_agent_review_mode",
+            lambda *a, **k: None,
+        )
+
+        result = dispatch_mod.dispatch(
+            {
+                "decision": "ROUTE_PHASE_A",
+                "summary": "normalized retry",
+                "wave_name": wave_id,
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "next_candidates": [{
+                    "wave_name": wave_id,
+                    "candidate": wave_id,
+                    "bounded": True,
+                    "tracked_packet": source_packet,
+                }],
+            },
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+
+        assert result["status"] == "error"
+        assert result["executor"] == "phase_a_executor"
+        assert "normalized Phase A retry packet has a conflicting Wave ID" in result["summary"]
+        assert source_packet in result["message"]
+        assert retry_packet in result["message"]
+        assert "other-wave-2026-06-27" in result["message"]
+        assert wave_id in result["message"]
+
+    def test_next_codex_phase_a_normalized_retry_rejects_forged_source_authority(
+        self,
+        tmp_path,
+    ):
+        source_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-payoff_2026-06-27.md"
+        )
+        forged_retry_packet = "reports/control_plane/unrelated-safe-retry_2026-06-27.md"
+        source = tmp_path / source_packet
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "# Fixpoint Packet\n\n"
+            "Wave ID: fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Ra\n\n"
+                "- Tracker sync note (2026-06-27, "
+                "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff): "
+                "**Fixpoint sync.** Class: L4_ENABLER. target_gate_id: G8. "
+                f"Packet: `{source_packet}`. evidence_command: `pytest fixpoint`. "
+                "evidence_delta: source packet has authority. "
+                "progress_proof_before: source packet exists. "
+                "progress_proof_after: forged retry remains unauthorized. "
+                "FOUNDER_OVERRIDE:fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff. "
+                "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/fixpoint.json. "
+                "indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py "
+                "--wave-id fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff "
+                "--output reports/l4_wave_indicators/fixpoint.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "forged normalized retry",
+            "wave_name": "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [{
+                "wave_name": "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff",
+                "candidate": Path(forged_retry_packet).stem,
+                "bounded": True,
+                "tracked_packet": forged_retry_packet,
+                "recovery_authority": "phase_a_plan_name_normalization",
+                "authority_tracked_packet": source_packet,
+            }],
+        }
+
+        result = dispatch_mod._missing_next_codex_tracker_authority_result(  # ANTICHEAT_OK: forged normalized retry regression
+            tmp_path,
+            record,
+            decision="ROUTE_PHASE_A",
+            executor_name="phase_a_executor",
+        )
+        assert result is not None
+        assert result["status"] == "held"
+        assert "unrelated-safe-retry_2026-06-27" in result["message"]
+
 
 # ===========================================================================
 # Shared test helpers
@@ -2260,7 +2623,7 @@ class TestPhaseBCommitHandoff:
         assert path.exists()
         handoff = json.loads(path.read_text())
         assert handoff["caller"] == "phase_b"
-        assert handoff["files_to_stage"] == ["a.py"]
+        assert handoff["files_to_stage"] + handoff.get("force_add_files", []) == ["a.py"]
         assert handoff["wave_id"] == "test"
         assert handoff["pre_commit_receipt_path"] == ".agent_bus/meta/pre_commit_receipt.json"
 
@@ -2294,9 +2657,26 @@ class TestPhaseBRunPhaseB:
         plan = repo / "reports" / "control_plane" / "test_plan.md"
         plan.write_text("# Plan\n\nDate: 2026-03-22\nStatus: Phase B\nPhase-A-Lock: LOCKED\n")
 
-        result = phase_b_mod.run_phase_b(
-            repo, "reports/control_plane/test_plan.md", verbose=True
-        )
+        executors_dir = REPO_ROOT / "mu" / "tools" / "executors"
+        if str(executors_dir) not in sys.path:
+            sys.path.insert(0, str(executors_dir))
+        import phase_b_implementer as phase_b_impl_mod
+
+        with patch.object(
+            phase_b_impl_mod,
+            "invoke_implementer",
+            return_value={
+                "status": "error",
+                "output": "",
+                "stderr": "no bridge config in tmp repo",
+                "exit_code": 2,
+                "job_id": "unit-impl",
+                "model_override_applied": False,
+            },
+        ):
+            result = phase_b_mod.run_phase_b(
+                repo, "reports/control_plane/test_plan.md", verbose=True
+            )
         # Implementer fails closed (no bridge config in tmp repo) — this is correct.
         # The key assertion: the error is at the implementer step, NOT at load_plan.
         assert result.get("status") == "error"
@@ -7738,9 +8118,12 @@ class TestCommitContinuationAndBotFreshness:
                     }
                 }
                 return completed(cmd, stdout=json.dumps(payload))
+            if cmd == ["git", "status", "--porcelain"]:
+                return completed(cmd, stdout="??\n")
             raise AssertionError(f"unexpected command: {cmd}")
 
         monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod, "_bridge_adapters", None)
 
         post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: Step 15 must scope bot findings to the active review cycle
             repo_root=repo,
@@ -9554,6 +9937,83 @@ class TestModularSurfaceEntrypoints:
         assert mock_recovery.call_args[0][2] == "surface-wave"
         mock_clear.assert_called_once()
 
+    def test_phase_b_surface_recovery_retry_record_overrides_stale_phase_a_payload(self, tmp_path):
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-b",
+                "--routing-record-json",
+                json.dumps(
+                    {
+                        "wave_name": "surface-wave",
+                        "decision": "ROUTE_PHASE_A",
+                        "summary": "stale phase-a payload for a phase-b retry",
+                    }
+                ),
+            ]
+        )
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        failed = subprocess.CompletedProcess(["phase-b"], 1, stdout="", stderr="wrong route")
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+        retry_record = {
+            "wave_name": "surface-wave",
+            "decision": "ROUTE_PHASE_B",
+            "summary": "Resume Phase B recovery iteration",
+        }
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd, timeout):
+            calls.append(cmd)
+            if len(calls) == 1:
+                return failed
+            if len(calls) == 2:
+                _write_phase_b_handoff(
+                    handoff_dir / "phase_b_handoff.json",
+                    wave_id="surface-wave",
+                )
+                return phase_b_ok
+            return commit_ok
+
+        def fake_recovery(repo_root, result, wave_id, **kwargs):
+            result["retry_record"] = retry_record
+            return {
+                "recovered": True,
+                "exhausted": False,
+                "failure_class": "post_reentry_needs_phase_b",
+                "tier": 1,
+                "action": "resume_phase_b_reentry",
+                "detail": "seeded",
+            }
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run), \
+             patch.object(dispatch_mod, "attempt_recovery", side_effect=fake_recovery), \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        first_payload = json.loads(calls[0][calls[0].index("--routing-record") + 1])
+        retry_payload = json.loads(calls[1][calls[1].index("--routing-record") + 1])
+        assert first_payload["decision"] == "ROUTE_PHASE_B"
+        assert first_payload["source_routing_decision"] == "ROUTE_PHASE_A"
+        assert retry_payload["decision"] == "ROUTE_PHASE_B"
+        assert retry_payload["wave_name"] == "surface-wave"
+        assert "--bootstrap-exception" not in calls[1]
+        mock_clear.assert_called_once()
+
     def test_phase_surface_success_after_recovery_restores_overrides(self, tmp_path, monkeypatch):
         args = dispatch_mod.build_surface_parser().parse_args(
             ["phase-a", "--plan-name", "surface-wave", "--json"]
@@ -11049,7 +11509,7 @@ class TestPhaseBNewSchemaHandoff:
         handoff = json.loads(path.read_text())
         assert handoff["tracker_note_text"] == tracker_note_text
         assert handoff["fixes_implemented"] == ["fix1"]
-        assert handoff["force_add_files"] == []
+        assert handoff["files_to_stage"] + handoff.get("force_add_files", []) == ["a.py"]
         assert "wave_id" in handoff
         assert "branch_prefix" in handoff
         assert handoff["target_branch"] == "jabramsja/test-wave-restart-2026-04-21"
@@ -12146,6 +12606,64 @@ class TestPhaseAStrictStagedL4Guard:
         content = (tmp_path / packet_rel).read_text(encoding="utf-8")
         assert "Phase-A-Lock: UNLOCKED" in content
 
+    def test_recovery_gate_repairs_strict_staged_l4_scope_before_lock(self, tmp_path):
+        packet_wave_id = "packet-wave-2026-06-27"
+        strict_wave_id = "packet-wave-2026-06-27"
+        packet_rel = self._write_strict_packet(
+            tmp_path,
+            packet_wave_id=packet_wave_id,
+            strict_wave_id=strict_wave_id,
+            include_tasks_scope=False,
+        )
+        (tmp_path / "TASKS.md").write_text(
+            "## Ra\n\n" + self._tracker_note(strict_wave_id, packet=packet_rel),
+            encoding="utf-8",
+        )
+        routing_record = {
+            "decision": "ROUTE_PHASE_A",
+            "wave_name": packet_wave_id,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [{
+                "candidate": Path(packet_rel).stem,
+                "bounded": True,
+                "tracked_packet": packet_rel,
+            }],
+        }
+
+        with pytest.raises(phase_a_mod.PhaseAExecutorError) as exc:
+            phase_a_mod.lock_plan(
+                tmp_path,
+                packet_rel,
+                routing_record=routing_record,
+            )
+        guard_error = str(exc.value)
+        assert "strict staged L4 guard failed before lock" in guard_error
+        assert "Scope does not include TASKS.md" in guard_error
+
+        result = {
+            "status": "failed",
+            "step": "phase_a_executor",
+            "stdout": json.dumps({
+                "status": "error",
+                "executor": "phase_a_executor",
+                "plan_path": packet_rel,
+                "error": guard_error,
+            }),
+        }
+
+        recovery = recovery_mod.attempt_recovery(tmp_path, result, packet_wave_id)
+
+        assert recovery["recovered"] is True
+        assert recovery["failure_class"] == "phase_a_strict_l4_scope_authority"
+        phase_a_mod.lock_plan(
+            tmp_path,
+            packet_rel,
+            routing_record=routing_record,
+        )
+        content = (tmp_path / packet_rel).read_text(encoding="utf-8")
+        assert "`TASKS.md` - tracker-sync authority for strict staged L4 --wave-id validation" in content
+        assert "Phase-A-Lock: LOCKED" in content
+
     def test_lock_plan_accepts_grounded_strict_staged_l4_packet(self, tmp_path):
         packet_wave_id = "packet-wave-2026-05-22"
         strict_wave_id = "strict-wave-2026-05-22"
@@ -12402,7 +12920,7 @@ class TestCommitExecutorRoutingRecordAcceptance:
         assert not errors
         assert handoff is not None
         assert handoff["caller"] == "update_tracker_only"
-        assert "TASKS.md" in handoff["files_to_stage"]
+        assert "TASKS.md" in handoff["files_to_stage"] + handoff.get("force_add_files", [])
         assert handoff["wave_id"] == "tracker-update"
 
     def test_prepare_handoff_tracker_only_fallback_note_is_contract_complete(self, tmp_path):
@@ -13498,6 +14016,86 @@ class TestRecoveryGateWiring:
         mock_recovery.assert_not_called()
         mock_clear.assert_called_once()
         mock_refresh.assert_not_called()
+
+    def test_recovered_route_phase_b_retry_record_requires_phase_b_context_and_wave(self):
+        retry_record = {
+            "decision": "ROUTE_PHASE_B",
+            "wave_name": "surface-wave",
+            "summary": "resume Phase B",
+        }
+
+        not_phase_b = {
+            "status": "failed",
+            "decision": "ROUTE_PHASE_A",
+            "executor": "phase_a_executor",
+            "retry_record": retry_record,
+        }
+        assert dispatch_mod._recovered_retry_record(  # ANTICHEAT_OK: retry-record guard regression
+            not_phase_b,
+            current_record={"decision": "ROUTE_PHASE_A", "wave_name": "surface-wave"},
+        ) is None
+
+        wrong_wave = {
+            "status": "failed",
+            "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "retry_record": {
+                **retry_record,
+                "wave_name": "other-wave",
+            },
+        }
+        assert dispatch_mod._recovered_retry_record(  # ANTICHEAT_OK: retry-record wave binding regression
+            wrong_wave,
+            current_record={"decision": "ROUTE_PHASE_A", "wave_name": "surface-wave"},
+        ) is None
+
+        phase_b = {
+            "status": "failed",
+            "decision": "ROUTE_PHASE_A",
+            "executor": "phase_b_executor",
+            "step": "phase_b",
+            "retry_record": retry_record,
+        }
+        accepted = dispatch_mod._recovered_retry_record(  # ANTICHEAT_OK: retry-record guard regression
+            phase_b,
+            current_record={"decision": "ROUTE_PHASE_A", "wave_name": "surface-wave"},
+        )
+        assert accepted == retry_record
+
+    def test_recovered_phase_b_to_phase_a_retry_requires_bootstrap_exception(self):
+        retry_record = {
+            "decision": "ROUTE_PHASE_A",
+            "wave_name": "surface-wave",
+            "summary": "bootstrap reroute",
+        }
+        result = {
+            "status": "failed",
+            "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "retry_record": retry_record,
+        }
+
+        assert dispatch_mod._recovered_retry_record(  # ANTICHEAT_OK: bootstrap exception guard regression
+            result,
+            current_record={"decision": "ROUTE_PHASE_B", "wave_name": "surface-wave"},
+        ) is None
+        accepted = dispatch_mod._recovered_retry_record(  # ANTICHEAT_OK: bootstrap exception guard regression
+            result,
+            current_record={"decision": "ROUTE_PHASE_B", "wave_name": "surface-wave"},
+            allow_phase_b_to_phase_a=True,
+        )
+        assert accepted == retry_record
+        assert dispatch_mod._recovered_retry_record(  # ANTICHEAT_OK: bootstrap exception wave guard regression
+            {
+                **result,
+                "retry_record": {
+                    **retry_record,
+                    "wave_name": "other-wave",
+                },
+            },
+            current_record={"decision": "ROUTE_PHASE_B", "wave_name": "surface-wave"},
+            allow_phase_b_to_phase_a=True,
+        ) is None
 
     def test_post_reentry_recovery_resumes_phase_b_not_phase_a(self, tmp_path):
         # Regression: a recovered post_reentry_needs_phase_b must RESUME Phase B
@@ -14780,6 +15378,88 @@ class TestRecoveryGateWiring:
         assert "previous-wave-2026-05-09" in result["message"]
         assert "current-cleanup-wave-2026-05-09" in result["message"]
 
+    def test_chained_phase_a_accepts_normalized_retry_source_authority(
+        self, tmp_path, monkeypatch,
+    ):
+        source_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-payoff_2026-06-27.md"
+        )
+        retry_packet = (
+            "reports/control_plane/fixpoint-meta-circular-evaluator-as-structure-the-meta-"
+            "circularity-pa_2026-06-27.md"
+        )
+        wave_id = "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff"
+        source = tmp_path / source_packet
+        retry = tmp_path / retry_packet
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "# Fixpoint Source\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: UNLOCKED\n",
+            encoding="utf-8",
+        )
+        retry.write_text(
+            "# Fixpoint Retry\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"],
+            0,
+            stdout=json.dumps({"plan_path": retry_packet}),
+            stderr="",
+        )
+        captured: dict[str, object] = {}
+
+        def fake_phase_b(args, *, cwd, timeout):
+            captured["args"] = list(args)
+            captured["cwd"] = cwd
+            captured["timeout"] = timeout
+            return subprocess.CompletedProcess(args, 2, stdout="", stderr="forced stop")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_phase_b)
+
+        result = dispatch_mod._continue_successful_executor_chain(  # ANTICHEAT_OK: normalized retry authority regression
+            "phase_a_executor",
+            phase_a_ok,
+            repo_root=tmp_path,
+            config={
+                "timeouts": {"phase_b_executor": 10},
+                "bridge_loop_limits": {"phase_b": 1},
+            },
+            record={
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": wave_id,
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "next_candidates": [
+                    {
+                        "candidate": Path(retry_packet).stem,
+                        "bounded": True,
+                        "tracked_packet": retry_packet,
+                        "recovery_authority": "phase_a_plan_name_normalization",
+                        "authority_tracked_packet": source_packet,
+                    }
+                ],
+            },
+        )
+
+        assert result["status"] == "failed"
+        assert result["executor"] == "phase_b_executor"
+        assert "Wave ID conflicts" not in str(result)
+        args = captured["args"]
+        assert isinstance(args, list)
+        assert args[args.index("--plan") + 1] == source_packet
+        routing = json.loads(args[args.index("--routing-record") + 1])
+        assert routing["wave_name"] == wave_id
+        candidate = routing["next_candidates"][0]
+        assert candidate["candidate"] == wave_id
+        assert candidate["wave_name"] == wave_id
+        assert candidate["tracked_packet"] == source_packet
+        assert "recovery_authority" not in candidate
+        assert "authority_tracked_packet" not in candidate
+
     def test_phase_b_tracker_guard_requires_canonical_tracker_note(self, tmp_path):
         """Arbitrary TASKS prose must not satisfy a locked packet tracker gate."""
         packet_rel = "reports/control_plane/fake.md"
@@ -14917,6 +15597,14 @@ class TestRecoveryGateWiring:
         assert executor_calls
         assert "--plan" in executor_calls[0][0]
         assert packet_rel in executor_calls[0][0]
+        routing = json.loads(
+            executor_calls[0][0][executor_calls[0][0].index("--routing-record") + 1]
+        )
+        assert routing["wave_name"] == "fake-canonical-wave-2026-05-07"
+        candidate = routing["next_candidates"][0]
+        assert candidate["candidate"] == "fake-canonical-wave-2026-05-07"
+        assert candidate["wave_name"] == "fake-canonical-wave-2026-05-07"
+        assert candidate["tracked_packet"] == packet_rel
 
     def test_chained_commit_timeout_reports_commit_executor(self, tmp_path):
         """Chained commit timeout (from Phase B chain) reports commit_executor.

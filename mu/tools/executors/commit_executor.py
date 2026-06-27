@@ -134,6 +134,8 @@ PACKET_WAVE_CLASS_RE = re.compile(
     re.IGNORECASE,
 )
 
+PRE_COMMIT_DOC_CHECK_TIMEOUT_SECONDS = 120
+
 FORCE_ADD_DENYLIST = tuple(d.lower() for d in (".git/", ".env", ".agent_bus/"))
 
 REQUIRED_HANDOFF_FIELDS = {
@@ -13816,7 +13818,12 @@ def _run_commit_pipeline_impl(
         # must remain active on the commit path.
         step8_env = _commit_subprocess_env(skip_receipt_check=False)
         try:
-            _run(["bash", str(pre_commit_script)], cwd=repo_root, timeout=30, env=step8_env)
+            _run(
+                ["bash", str(pre_commit_script)],
+                cwd=repo_root,
+                timeout=PRE_COMMIT_DOC_CHECK_TIMEOUT_SECONDS,
+                env=step8_env,
+            )
         except subprocess.CalledProcessError as exc:
             failure_detail = _tail_failure_excerpt(exc.stderr or exc.stdout or "", limit=1000)
             error_text = "pre-commit-doc-check failed"
