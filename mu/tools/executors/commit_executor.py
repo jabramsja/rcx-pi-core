@@ -10559,6 +10559,12 @@ def _line_is_next_codex_post_redteam_queue_entry(line: str) -> bool:
     )
 
 
+_PROGRAM_QUEUE_HEADER_RE = re.compile(r"^##\s+PROGRAM QUEUE\b", re.IGNORECASE)
+_PROGRAM_QUEUE_NUMBERED_ENTRY_RE = re.compile(
+    r"^\s*(?P<order>\d+)\.\s+\*\*(?P<label>[^*]+?)\*\*\s*(?P<tail>.*?)\s*$"
+)
+
+
 _MU_STRUCTURAL_PHASE_A_AUTHORIZATION_RE = re.compile(
     r"(?i)\b(?:ROUTED\s*[-/]\s*)?PHASE\s+A\s+(?:REQUIRED|AUTHORIZED|LOCKED)\b"
 )
@@ -10645,6 +10651,166 @@ def _routed_tracker_queue_entries(
     return entries
 
 
+def _program_queue_section_lines(repo_root: Path) -> list[str]:
+    tasks_path = repo_root / "TASKS.md"
+    try:
+        lines = tasks_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+    section: list[str] = []
+    in_program_queue = False
+    for line in lines:
+        if _PROGRAM_QUEUE_HEADER_RE.match(line):
+            in_program_queue = True
+            continue
+        if in_program_queue and line.startswith("## "):
+            break
+        if in_program_queue:
+            section.append(line)
+    return section
+
+
+def _simple_program_queue_wave_id(label: str, queue_text: str) -> str:
+    raw = " ".join(part.strip() for part in (label, queue_text) if part.strip())
+    return normalize_wave_id(raw)
+
+
+def _safe_config_tracked_packet(repo_root: Path, raw_packet: Any) -> str:
+    packet = _normalize_repo_relpath(str(raw_packet or ""))
+    if not packet:
+        return ""
+    if _path_field_error("tracked_packet", packet):
+        return ""
+    if not packet.startswith("reports/control_plane/") or not packet.endswith(".md"):
+        return ""
+    packet_path = (repo_root / packet).resolve()
+    control_plane_dir = (repo_root / "reports" / "control_plane").resolve()
+    try:
+        packet_path.relative_to(control_plane_dir)
+    except ValueError:
+        return ""
+    return packet
+
+
+def _wave_config_matches_program_queue_entry(
+    config_path: Path,
+    config: dict[str, Any],
+    *,
+    derived_wave_id: str,
+) -> bool:
+    config_ids = [
+        str(config.get("wave_id") or ""),
+        config_path.name.removesuffix("_wave_config.json"),
+        str(config.get("title") or ""),
+    ]
+    for raw in config_ids:
+        if not raw.strip():
+            continue
+        candidate = normalize_wave_id(raw)
+        if candidate == derived_wave_id:
+            return True
+        if candidate.startswith(f"{derived_wave_id}-"):
+            return True
+    return False
+
+
+def _matching_program_queue_wave_config(
+    repo_root: Path,
+    *,
+    derived_wave_id: str,
+) -> dict[str, Any]:
+    control_plane_dir = repo_root / "reports" / "control_plane"
+    if not control_plane_dir.is_dir():
+        return {}
+
+    exact_matches: list[tuple[str, dict[str, Any]]] = []
+    prefix_matches: list[tuple[str, dict[str, Any]]] = []
+    for config_path in sorted(control_plane_dir.glob("*_wave_config.json")):
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(config, dict):
+            continue
+        raw_config_wave_id = str(config.get("wave_id") or "").strip()
+        config_wave_id = (
+            normalize_wave_id(raw_config_wave_id) if raw_config_wave_id else ""
+        )
+        if config_wave_id == derived_wave_id:
+            exact_matches.append((config_path.name, config))
+            continue
+        if _wave_config_matches_program_queue_entry(
+            config_path,
+            config,
+            derived_wave_id=derived_wave_id,
+        ):
+            prefix_matches.append((config_path.name, config))
+    matches = exact_matches or prefix_matches
+    return matches[0][1] if matches else {}
+
+
+def _program_queue_config_request(config: dict[str, Any]) -> str:
+    for key in ("request_for_agent", "request_for_claude", "routing_summary", "purpose"):
+        value = str(config.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _simple_program_queue_entries(
+    repo_root: Path,
+    *,
+    existing_wave_ids: set[str],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for line in _program_queue_section_lines(repo_root):
+        match = _PROGRAM_QUEUE_NUMBERED_ENTRY_RE.match(line)
+        if not match:
+            continue
+        if "Wave ID:" in line or "Packet:" in line:
+            continue
+        label = match.group("label").strip()
+        tail = match.group("tail").strip()
+        queue_text = " ".join(part for part in (label, tail) if part).strip()
+        if not queue_text:
+            continue
+        wave_id = _simple_program_queue_wave_id(label, tail)
+        if wave_id in existing_wave_ids:
+            continue
+        config = _matching_program_queue_wave_config(
+            repo_root,
+            derived_wave_id=wave_id,
+        )
+        raw_config_wave_id = str(config.get("wave_id") or "").strip()
+        config_wave_id = (
+            normalize_wave_id(raw_config_wave_id) if raw_config_wave_id else ""
+        )
+        if config_wave_id:
+            wave_id = config_wave_id
+        packet = _safe_config_tracked_packet(repo_root, config.get("tracked_packet"))
+        entries.append(
+            {
+                "label": label,
+                "state": queue_text,
+                "wave_id": wave_id,
+                "category": "PROGRAM QUEUE",
+                "packet": packet,
+                "source_packet": "",
+                "status": read_control_plane_packet_status(repo_root, packet)
+                if packet
+                else None,
+                "hard_stop": False,
+                "explicit_mu_structural_authorization": True,
+                "simple_program_queue": True,
+                "queue_text": queue_text,
+                "config_request": _program_queue_config_request(config),
+            }
+        )
+        existing_wave_ids.add(wave_id)
+    return entries
+
+
 def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
     tasks_path = repo_root / "TASKS.md"
     try:
@@ -10706,6 +10872,9 @@ def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
     entries.extend(
         _routed_tracker_queue_entries(repo_root, existing_wave_ids=seen_wave_ids)
     )
+    entries.extend(
+        _simple_program_queue_entries(repo_root, existing_wave_ids=seen_wave_ids)
+    )
     return entries
 
 
@@ -10738,6 +10907,21 @@ def _post_merge_request_for_queue_entry(entry: dict[str, Any]) -> str:
     packet = str(entry.get("packet") or "")
     source_packet = str(entry.get("source_packet") or "")
     category = str(entry.get("category") or "founder-ordered redteam")
+    if entry.get("simple_program_queue"):
+        queue_text = str(entry.get("queue_text") or entry.get("label") or "").strip()
+        config_request = str(entry.get("config_request") or "").strip()
+        packet_clause = f" Read {packet}." if packet else ""
+        request_source = f" {config_request}" if config_request else ""
+        return (
+            f"Use mu/tools/executors/launch_wave.py for the active PROGRAM QUEUE "
+            f"item '{queue_text}', then continue only through executor_dispatch.py, "
+            "Phase A, Phase B, and commit_executor.py."
+            f"{packet_clause}{request_source} "
+            "If no launcher config or tracked packet exists yet, prepare that "
+            "bounded queue item through launch_wave.py instead of reporting the "
+            "post-merge queue empty. Do not implement the structural item directly "
+            "from this post-merge package."
+        )
     is_authorized_mu_structural = (
         _queue_entry_category_is_mu_structural(category)
         and bool(entry.get("explicit_mu_structural_authorization"))
@@ -10761,6 +10945,37 @@ def _post_merge_request_for_queue_entry(entry: dict[str, Any]) -> str:
         f"Use the full dispatcher pipeline for this {category} remediation wave: "
         "post-merge supervisor -> Phase A -> Phase B -> commit executor. "
         f"Read {target_text}. Do not edit Claude-related files. {stop_clause}"
+    )
+
+
+def _post_merge_summary_for_queue_entry(entry: dict[str, Any]) -> str:
+    if entry.get("simple_program_queue"):
+        queue_text = str(entry.get("queue_text") or entry.get("label") or "").strip()
+        if entry.get("packet"):
+            return f"Launch the active PROGRAM QUEUE item: {queue_text}."
+        return (
+            "Prepare or launch the active PROGRAM QUEUE item through "
+            f"launch_wave.py: {queue_text}."
+        )
+    return f"Implement the queued {entry['category']} remediation packet only."
+
+
+def _post_merge_tracker_summary_for_queue_entry(entry: dict[str, Any]) -> str:
+    if not entry.get("simple_program_queue"):
+        return (
+            f"Next open queue packet is a hard stop: {entry['packet']}."
+            if entry.get("hard_stop")
+            else f"Next open queue packet: {entry['packet']}."
+        )
+    queue_text = str(entry.get("queue_text") or entry.get("label") or "").strip()
+    if entry.get("packet"):
+        return (
+            f"Next open PROGRAM QUEUE item: {queue_text}; tracked packet: "
+            f"{entry['packet']}."
+        )
+    return (
+        f"Next open PROGRAM QUEUE item: {queue_text}. No matching launcher config "
+        "or tracked packet exists yet."
     )
 
 
@@ -10823,14 +11038,18 @@ def _refresh_post_merge_package_for_next_open_queue(
     ]
     next_candidates: list[dict[str, Any]] = []
     if not entry.get("hard_stop"):
+        entry_packet = entry.get("packet")
+        tracked_packet = (
+            entry_packet
+            if isinstance(entry_packet, str) and entry_packet.strip()
+            else None
+        )
         next_candidates.append(
             {
                 "candidate": entry["wave_id"],
                 "bounded": True,
-                "tracked_packet": entry["packet"],
-                "summary": (
-                    f"Implement the queued {entry['category']} remediation packet only."
-                ),
+                "tracked_packet": tracked_packet,
+                "summary": _post_merge_summary_for_queue_entry(entry),
                 "request_for_claude": _post_merge_request_for_queue_entry(entry),
             }
         )
@@ -10845,11 +11064,7 @@ def _refresh_post_merge_package_for_next_open_queue(
         "deferred_items": deferred_items,
         "tracker_state_summary": (
             "Post-merge package refreshed mechanically after commit merge. "
-            + (
-                f"Next open queue packet is a hard stop: {entry['packet']}."
-                if entry.get("hard_stop")
-                else f"Next open queue packet: {entry['packet']}."
-            )
+            + _post_merge_tracker_summary_for_queue_entry(entry)
         ),
         "next_candidates": next_candidates,
         "blocker_report_paths": _post_merge_blocker_report_paths(repo_root),
