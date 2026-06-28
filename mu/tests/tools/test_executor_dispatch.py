@@ -6037,17 +6037,23 @@ class TestSupervisorPackage:
 
         assert result["status"] == "error"
         assert result["step"] == "build_and_run_supervisor"
+        # Pager defaults ON (factory default now matches prod), so run_commit_pipeline
+        # wraps the supervisor lifecycle with commit_started/commit_failed edges.
         assert [call["event_type"] for call in pager_calls] == [
+            "commit_started",
             "pre_commit_supervisor_started",
             "pre_commit_supervisor_completed",
+            "commit_failed",
         ]
         assert [call["phase"] for call in pager_calls] == [
+            "commit_executor",
             "pre_commit_supervisor",
             "pre_commit_supervisor",
+            "commit_executor",
         ]
-        assert pager_calls[0]["state"] == "started"
-        assert pager_calls[1]["state"] == "success"
-        assert pager_calls[1]["transition_key"].endswith(":success:NEEDS_PHASE_B")
+        assert pager_calls[1]["state"] == "started"
+        assert pager_calls[2]["state"] == "success"
+        assert pager_calls[2]["transition_key"].endswith(":success:NEEDS_PHASE_B")
         package = json.loads((repo / ".scratch" / "auto_supervisor_package.json").read_text())
         assert package["lane"] == "hooks/agents/bridge control-surface"
         assert package["deferred_items"] == ["reports/deferred/non_blocking/example.md"]

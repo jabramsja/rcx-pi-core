@@ -1,0 +1,24 @@
+{
+  "wave_id": "pager-default-enabled-on-2026-06-28",
+  "repeat_run_speedup_ratio": 1.323606,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.25955,
+  "repeat_run_raw_seconds": [
+    0.343542,
+    0.25955
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.343542
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.603092
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-28T14:33:11Z",
+  "collector_version": "2.2.0"
+}

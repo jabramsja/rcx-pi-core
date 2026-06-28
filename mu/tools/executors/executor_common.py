@@ -84,7 +84,7 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     },
     "hybrid_recovery_enabled": True,
     "pipeline_agent_pager": {
-        "enabled": False,
+        "enabled": True,
         "route": "notify-only",
     },
     "review_depths": {

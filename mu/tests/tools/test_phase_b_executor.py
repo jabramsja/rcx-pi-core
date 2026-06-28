@@ -2212,6 +2212,16 @@ class TestMaintenanceTrackerMetadataPropagation:
         repo = tmp_path / "repo"
         repo.mkdir()
         _init_git_repo(repo)
+        # Mirror prod: .agent_bus/ is gitignored, so the now-default-ON commit-outcome
+        # pager's runtime artifacts under .agent_bus/observability/ are never swept into
+        # files_to_stage by the real (unmocked) change collection. Commit it so it stays
+        # a tracked, clean file that cannot leak into the wave's changed-file scope.
+        (repo / ".gitignore").write_text(".agent_bus/\n.agent_bus-*/\n", encoding="utf-8")
+        subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "chore: gitignore .agent_bus"],
+            cwd=repo, check=True, capture_output=True,
+        )
         (repo / "reports" / "control_plane").mkdir(parents=True)
         (repo / ".agent_bus").mkdir()
         wave_id = "phase-b-final-status-receipt-refresh-2026-05-25"
