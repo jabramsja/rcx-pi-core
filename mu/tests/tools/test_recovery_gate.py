@@ -753,6 +753,129 @@ class TestStagePathSymlinkAliasRecovery:
             {"status": "error", "step": "agent_review",
              "stderr": "agent died"}) == FailureClass.AGENT_REVIEW_CRASH
 
+    def test_bridge_go_with_only_deferrable_findings_proceeds_not_agent_review_crash(self):
+        # A bridge round the supervisor decided GO, carrying ONLY a low-severity
+        # finding mislabeled disposition=blocking (e.g. 'no dedicated regression
+        # test for X'), is a defer-and-proceed-to-commit case -- NOT a reviewer
+        # crash. Without the guard the bare "reviewer" text hint + "bridge" step
+        # would misclassify it as AGENT_REVIEW_CRASH -> tier 3 -> tier3_exhausted
+        # strand (the recurring GO-with-deferrable-findings strand).
+        result = {
+            "status": "failed",
+            "step": "bridge_loop",
+            "decision": "GO",
+            "findings": [
+                {
+                    "title": "no dedicated regression test for X",
+                    "severity": "low",
+                    "disposition": "blocking",
+                    "class": "DOC_ACCURACY",
+                    "file": "reports/x.md",
+                }
+            ],
+            "stderr": "reviewer flagged 1 finding",
+        }
+        fc = rg_mod.classify_failure(result)
+        assert fc == FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
+        assert fc != FailureClass.AGENT_REVIEW_CRASH
+        # Tier 1 deterministic defer-and-proceed fix, NOT the tier 3 strand path.
+        assert rg_mod.tier_for(fc) == 1
+
+    def test_bridge_go_deferrable_findings_via_embedded_stdout_parsed_payload(self):
+        # decision + findings can arrive embedded in a stdout JSON 'parsed'
+        # payload (phase_b wraps the supervisor verdict under 'parsed').
+        result = {
+            "status": "failed",
+            "step": "phase_b",
+            "stdout": json.dumps(
+                {
+                    "step": "bridge_subprocess",
+                    "parsed": {
+                        "decision": "GO",
+                        "findings": [
+                            {
+                                "severity": "medium",
+                                "disposition": "blocking",
+                                "title": "doc nit",
+                                "class": "DOC_ACCURACY",
+                            }
+                        ],
+                    },
+                }
+            ),
+        }
+        assert (
+            rg_mod.classify_failure(result)
+            == FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
+        )
+
+    def test_bridge_go_with_high_severity_finding_still_strands(self):
+        # A GO carrying a HIGH-severity (true-blocking) finding must keep
+        # stranding -- the deferrable guard must NOT fire on it.
+        result = {
+            "status": "failed",
+            "step": "bridge_loop",
+            "decision": "GO",
+            "findings": [
+                {
+                    "title": "real defect",
+                    "severity": "high",
+                    "disposition": "blocking",
+                    "class": "DEFECT",
+                    "file": "mu/x.py",
+                }
+            ],
+            "stderr": "reviewer flagged 1 finding",
+        }
+        fc = rg_mod.classify_failure(result)
+        assert fc == FailureClass.AGENT_REVIEW_CRASH
+        assert fc != FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
+        assert rg_mod.tier_for(fc) == 3
+
+    def test_bridge_go_with_mixed_low_and_critical_findings_still_strands(self):
+        # ANY high/critical finding on a GO round blocks the deferrable guard;
+        # the round must keep stranding (one critical among low findings).
+        result = {
+            "status": "failed",
+            "step": "bridge_loop",
+            "decision": "GO",
+            "findings": [
+                {"severity": "low", "disposition": "blocking"},
+                {"severity": "critical", "disposition": "blocking"},
+            ],
+            "stderr": "reviewer",
+        }
+        fc = rg_mod.classify_failure(result)
+        assert fc == FailureClass.AGENT_REVIEW_CRASH
+        assert fc != FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
+
+    def test_genuine_no_go_still_strands(self):
+        # A genuine NO_GO must keep its existing strand classification even when
+        # its findings are all low-severity (decision, not severity, gates here).
+        result = {
+            "status": "failed",
+            "step": "bridge_loop",
+            "decision": "NO_GO",
+            "findings": [{"title": "x", "severity": "low", "class": "DOC_ACCURACY"}],
+            "stderr": "reviewer flagged",
+        }
+        fc = rg_mod.classify_failure(result)
+        assert fc == FailureClass.AGENT_REVIEW_CRASH
+        assert fc != FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
+        assert rg_mod.tier_for(fc) == 3
+
+    def test_real_reviewer_crash_without_go_decision_still_agent_review_crash(self):
+        # The guard must NOT broaden away from real reviewer/agent/bridge crashes:
+        # a status_failed result with a reviewer hint but NO GO decision / findings
+        # still classifies AGENT_REVIEW_CRASH (no decision=GO, no findings).
+        assert rg_mod.classify_failure(
+            {
+                "status": "error",
+                "step": "agent_review",
+                "stderr": "Bridge subprocess failed: reviewer produced no stdout",
+            }
+        ) == FailureClass.AGENT_REVIEW_CRASH
+
     def test_codex_session_or_auth_failures_are_terminal_not_retryable(self):
         result = {
             "status": "error",
@@ -1212,7 +1335,8 @@ class TestTierMapping:
                          FailureClass.PHASE_A_PLAN_NAME_NORMALIZATION,
                          FailureClass.PHASE_A_STRICT_L4_SCOPE_AUTHORITY,
                          FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP,
-                         FailureClass.STAGE_PATH_SYMLINK_ALIAS}
+                         FailureClass.STAGE_PATH_SYMLINK_ALIAS,
+                         FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS}
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
@@ -3031,6 +3155,75 @@ class TestAttemptRecovery:
         r = rg_mod.attempt_recovery(
             tmp_path, {"status": "error", "stderr": "bridge.lock held", "step": "bridge_loop"}, "w1")
         assert r["recovered"] is True and r["tier"] == 1
+
+    def test_tier1_bridge_go_deferrable_findings_defers_and_proceeds(self, tmp_path):
+        # End-to-end recovery for a GO-with-deferrable-findings round: it must
+        # PROCEED (recovered, tier 1, NOT exhausted), file the findings as
+        # deferred non-blockers under reports/deferred/non_blocking/, and seed the
+        # Phase B resume (ROUTE_PHASE_B + all_non_blocking) so the GO'd wave
+        # commits instead of stranding in tier3_exhausted.
+        (tmp_path / ".agent_bus").mkdir()
+        pkt = tmp_path / "reports" / "control_plane"
+        pkt.mkdir(parents=True)
+        (pkt / "wave_pkt.md").write_text("# plan\nTask: [X]\n", encoding="utf-8")
+        result = {
+            "status": "failed",
+            "step": "bridge_loop",
+            "decision": "GO",
+            "plan_path": "reports/control_plane/wave_pkt.md",
+            "findings": [
+                {
+                    "title": "no dedicated regression test for X",
+                    "severity": "low",
+                    "disposition": "blocking",
+                    "class": "DOC_ACCURACY",
+                    "file": "reports/x.md",
+                }
+            ],
+            "stderr": "reviewer flagged 1 finding",
+        }
+        rec = rg_mod.attempt_recovery(tmp_path, result, "demo-wave-2026-06-28")
+        assert rec["recovered"] is True
+        assert rec["exhausted"] is False
+        assert rec["tier"] == 1
+        assert (
+            rec["failure_class"]
+            == FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS.value
+        )
+        # Findings filed as deferred non-blockers in the canonical lane.
+        deferred = list(
+            (tmp_path / "reports" / "deferred" / "non_blocking").glob(
+                "*_bridge_nonblockers.md"
+            )
+        )
+        assert len(deferred) == 1
+        body = deferred[0].read_text(encoding="utf-8")
+        assert "DEFERRED_NON_BLOCKING" in body
+        # Carried forward as non_blocking (survives phase_b's convergence re-check).
+        assert [f.get("disposition") for f in result["all_non_blocking"]] == [
+            "non_blocking"
+        ]
+        # Phase B resume seeded so the wave proceeds rather than stranding.
+        assert result["retry_record"]["decision"] == "ROUTE_PHASE_B"
+
+    def test_tier1_bridge_go_high_severity_finding_does_not_defer(self, tmp_path):
+        # A GO carrying a HIGH-severity finding must NOT route to the deferrable
+        # Tier-1 fix: it stays AGENT_REVIEW_CRASH (tier 3), so no deferred packet
+        # is filed by this path.
+        (tmp_path / ".agent_bus").mkdir()
+        result = {
+            "status": "failed",
+            "step": "bridge_loop",
+            "decision": "GO",
+            "findings": [
+                {"title": "real defect", "severity": "high", "disposition": "blocking"}
+            ],
+            "stderr": "reviewer flagged 1 finding",
+        }
+        assert (
+            rg_mod.classify_failure(result) == FailureClass.AGENT_REVIEW_CRASH
+        )
+        assert not (tmp_path / "reports" / "deferred" / "non_blocking").exists()
 
     def test_tier1_bridge_lock_recovery_from_phase_b_heartbeat_plus_stdout_json(self, tmp_path):
         bus = tmp_path / ".agent_bus"; bus.mkdir()
