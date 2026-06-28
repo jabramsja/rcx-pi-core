@@ -4,6 +4,10 @@
 This command owns only the operator-facing orchestration surface:
 
 * bus-local ``orchestrator_mode.json`` used by the pager as the effective route;
+* committed ``pipeline_agent_pager.route`` narrowed to the single selected
+  orchestrator (the lowest-precedence fallback resolved below
+  ``orchestrator_mode.json``, so a checkout without the bus-local state file no
+  longer falls through to the ``"both"`` fan-out);
 * stale pending pager targets for the opposite orchestrator;
 * selected Codex/Claude autoping restart and opposite autoping stop;
 * tmux monitor rebuild for the selected root/bus/session.
@@ -258,12 +262,36 @@ def _set_pager_route(
     *,
     dry_run: bool,
 ) -> bool:
-    del mode, dry_run
+    """Narrow the committed ``pipeline_agent_pager.route`` to the single orchestrator.
+
+    The pager resolves its effective route (``pipeline_agent_pager._resolve_route``)
+    with precedence: explicit arg -> env override -> bus-local
+    ``orchestrator_mode.json`` -> committed ``executor_config.json`` route. The
+    orchestrator switch already writes ``orchestrator_mode.json`` (``mode=X``), which
+    narrows the LIVE bus to X. But a checkout or process WITHOUT that bus-local state
+    file falls through to the committed route, which ships as ``"both"`` and pages
+    BOTH orchestrators even when X is the sole selected one. Set the committed route to
+    the single selected orchestrator X so ``--mode X`` yields
+    ``_requested_targets(route) == [X]`` on every path, while the higher-precedence
+    ``orchestrator_mode.json`` resolution above is preserved unchanged (this only
+    rewrites the lowest-precedence committed fallback).
+
+    Returns whether the committed route would change. The write is skipped under
+    ``dry_run`` (parity with :func:`_write_orchestrator_state`), and an in-place edit
+    of only ``pager["route"]`` preserves the file's existing key order. ``mode`` is
+    pre-validated to ``MODE_CHOICES`` by :func:`apply_orchestrator_mode`, and both
+    members are valid single-provider pager routes.
+    """
     config = _load_raw_executor_config(repo_root)
     pager = config.setdefault("pipeline_agent_pager", {})
     if not isinstance(pager, dict):
         raise OrchestratorModeError("pipeline_agent_pager must be a JSON object")
-    return False
+    if pager.get("route") == mode:
+        return False
+    if not dry_run:
+        pager["route"] = mode
+        _atomic_write_text(_config_path(repo_root), json.dumps(config, indent=2) + "\n")
+    return True
 
 
 def _role_agent_visibility(repo_root: Path, bus_dir: str) -> dict[str, dict[str, str]]:

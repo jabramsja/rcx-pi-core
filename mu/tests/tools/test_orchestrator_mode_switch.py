@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from tests.repo_root import REPO_ROOT
 
 sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "session"))
@@ -21,6 +23,7 @@ import meta_bridge_supervisor as meta  # noqa: E402
 sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "observability"))
 import pipeline_dashboard as dash  # noqa: E402
 import pipeline_dashboard_web as web  # noqa: E402
+import pipeline_agent_pager as pager  # noqa: E402
 
 
 def _seed_repo(tmp_path: Path, *, route: str = "both") -> tuple[Path, Path]:
@@ -144,6 +147,22 @@ def _read_config(repo_root: Path) -> dict:
     )
 
 
+def _seed_orchestrator_mode_state(repo_root: Path, payload: dict) -> Path:
+    """Seed the bus-local orchestrator_mode.json fixture directly via stdlib.
+
+    Writes the same on-disk shape set_orchestrator_mode emits (indent=2,
+    sort_keys), so verify_state reads it identically -- but the test stands up its
+    own fixture here instead of reaching into the module-under-test's private JSON
+    writer to do it.
+    """
+    path = repo_root / ".agent_bus" / "observability" / "orchestrator_mode.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return path
+
+
 def _watcher_command(repo_root: Path, kind: str, label: str) -> str:
     if kind == "codex":
         return (
@@ -221,7 +240,9 @@ def test_dry_run_reports_exact_actions_without_writing_or_launching(tmp_path):
     )
 
     assert report.ok
-    assert report.config_changed is False
+    # Dry-run REPORTS the pending committed-route narrowing (both -> codex) without
+    # writing it; the cfg_path byte-equality assertion below proves nothing was written.
+    assert report.config_changed is True
     assert report.state_changed is True
     assert report.skipped_pager_targets == [
         {
@@ -269,7 +290,9 @@ def test_apply_writes_route_skips_stale_targets_restarts_surfaces_and_preserves_
 
     assert report.ok
     config = _read_config(repo_root)
-    assert config["pipeline_agent_pager"]["route"] == "both"
+    # --mode codex narrows the committed pager route to the single selected
+    # orchestrator (was a no-op "both"); roles are still untouched by this switch.
+    assert config["pipeline_agent_pager"]["route"] == "codex"
     assert config["role_agents"] == {"implementer": "claude", "reviewer": "claude"}
     assert config["backends"]["phase_b_executor"] == "claude"
     assert config["bridge_reviewers"] == {"phase_a": "claude", "phase_b": "claude"}
@@ -311,6 +334,83 @@ def test_apply_writes_route_skips_stale_targets_restarts_surfaces_and_preserves_
     assert (
         repo_root / ".agent_bus" / "observability" / "pipeline_agent_skip_receipts.jsonl"
     ).read_text(encoding="utf-8").splitlines() == receipts
+
+
+@pytest.mark.parametrize("mode", ["codex", "claude"])
+def test_apply_narrows_committed_pager_route_to_single_selected_orchestrator(
+    tmp_path, monkeypatch, mode
+):
+    """--mode X narrows the COMMITTED pager route to the single orchestrator [X].
+
+    Regression for the item-1 gap. The existing dry-run test only checks
+    "effective_pager_route=<mode>" in the rendered report, which render_report
+    hardcodes from report.mode -- it does NOT prove the committed route narrowed.
+    Assert the committed route narrows to exactly [mode] (never the "both" route
+    that fans out to ["codex", "claude"]), in both directions, and prove the
+    committed config ALONE resolves to that single orchestrator even on a
+    checkout/process WITHOUT the bus-local orchestrator_mode.json (the case that
+    previously fell through to the "both" fan-out and paged the opposite
+    orchestrator). Route RESOLUTION goes through set_orchestrator_mode's public
+    pager re-exports (switch.pager_resolve_route / switch.PAGER_ACTIVE_BUS_DIR).
+    The route->targets EXPANSION itself -- that a single-orchestrator route pages
+    exactly [route] and never the "both" fan-out -- is the pager's own pure
+    contract, owned and locked publicly by
+    test_pipeline_agent_pager.test_requested_targets_both_expands_to_codex_and_claude;
+    re-reaching into pager._requested_targets from here would only duplicate that
+    contract as white-box coupling, so this test asserts the narrowed route value
+    (the set_orchestrator_mode-side behavior) and leaves the expansion to its home.
+    """
+    # An env route override would shadow the committed route in _resolve_route;
+    # clear it so the committed-config resolution below is exact.
+    monkeypatch.delenv(pager.PAGER_ROUTE_OVERRIDE_ENV, raising=False)
+    repo_root, _cfg_path = _seed_repo(tmp_path, route="both")
+    runner = RecordingRunner()
+
+    report = switch.apply_orchestrator_mode(
+        mode=mode,
+        repo_root=repo_root,
+        bus_dir=".agent_bus",
+        tmux_session="rcx-test",
+        dry_run=False,
+        verify=False,
+        runner=runner,
+        pid_exists=lambda _pid: False,
+        killer=lambda _pid: None,
+        autoping_scanner=lambda _kind, **_kwargs: [],
+        codex_thread_id="thread-1",
+    )
+
+    assert report.ok
+    assert report.config_changed is True
+    config = _read_config(repo_root)
+    route = config["pipeline_agent_pager"]["route"]
+    # The narrowed value is itself the regression proof: the committed route ships
+    # as the single selected orchestrator [mode], never the "both" route the pager
+    # fans out to ["codex", "claude"]. That route->targets expansion is the pager's
+    # own pure contract, locked publicly by
+    # test_pipeline_agent_pager.test_requested_targets_both_expands_to_codex_and_claude;
+    # asserting the committed route value here (not a white-box pager._requested_targets
+    # call) is the set_orchestrator_mode-side half and keeps the expansion at its home.
+    assert route == mode, f"committed route did not narrow to {mode!r}: {route!r}"
+
+    # Committed route alone narrows even without the higher-precedence bus-local
+    # state file: remove orchestrator_mode.json and resolve from committed config.
+    (repo_root / ".agent_bus" / "observability" / "orchestrator_mode.json").unlink()
+    # Resolve through set_orchestrator_mode's own public re-exports of the pager
+    # surface (switch.PAGER_ACTIVE_BUS_DIR / switch.pager_resolve_route are the
+    # SAME objects production verify_state uses), not the pager underscore names.
+    token = switch.PAGER_ACTIVE_BUS_DIR.set(switch.normalize_agent_bus_dir(".agent_bus"))
+    try:
+        resolved = switch.pager_resolve_route(
+            repo_root, switch.load_executor_config(repo_root), None
+        )
+    finally:
+        switch.PAGER_ACTIVE_BUS_DIR.reset(token)
+    # Committed-config-only fallback resolves to the single orchestrator [mode];
+    # its route->targets expansion is the pager's own contract (see the home test
+    # named above), so the public resolved-route value is the assertion here, not a
+    # white-box pager._requested_targets call.
+    assert resolved == mode
 
 
 def test_terminal_skip_uses_pager_lock_and_receipt_helper(monkeypatch, tmp_path):
@@ -434,8 +534,8 @@ def test_verify_fails_for_stale_opposite_pending_target_and_wrong_autoping(tmp_p
     repo_root, _cfg_path = _seed_repo(tmp_path, route="codex")
     _write_pager_state(repo_root, pending_target="claude")
     _write_claude_autoping(repo_root, pid=4242)
-    switch._write_json(  # ANTICHEAT_OK: unit test seeds public tool state
-        repo_root / ".agent_bus" / "observability" / "orchestrator_mode.json",
+    _seed_orchestrator_mode_state(
+        repo_root,
         {
             "version": 1,
             "mode": "codex",
@@ -471,8 +571,8 @@ def test_verify_fails_for_wrong_autoping_process_without_state_file(monkeypatch,
     selected_pid = os.getpid()
     _write_codex_autoping(codex_home, repo_root, pid=selected_pid)
     live_wrong = _live_autoping(repo_root, "claude", "session-lost")
-    switch._write_json(  # ANTICHEAT_OK: unit test seeds public tool state
-        repo_root / ".agent_bus" / "observability" / "orchestrator_mode.json",
+    _seed_orchestrator_mode_state(
+        repo_root,
         {
             "version": 1,
             "mode": "codex",
@@ -510,8 +610,8 @@ def test_verify_requires_selected_autoping_watcher_not_active_ping(monkeypatch, 
     payload = json.loads(autoping_path.read_text(encoding="utf-8"))
     payload["active_pid"] = 2222
     autoping_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    switch._write_json(  # ANTICHEAT_OK: unit test seeds public tool state
-        repo_root / ".agent_bus" / "observability" / "orchestrator_mode.json",
+    _seed_orchestrator_mode_state(
+        repo_root,
         {
             "version": 1,
             "mode": "codex",
@@ -544,8 +644,8 @@ def test_verify_uses_live_worker_provider_not_role_defaults(monkeypatch, tmp_pat
     monkeypatch.setenv("RCX_CODEX_HOME", str(codex_home))
     selected_pid = os.getpid()
     _write_codex_autoping(codex_home, repo_root, pid=selected_pid)
-    switch._write_json(  # ANTICHEAT_OK: unit test seeds public tool state
-        repo_root / ".agent_bus" / "observability" / "orchestrator_mode.json",
+    _seed_orchestrator_mode_state(
+        repo_root,
         {
             "version": 1,
             "mode": "codex",
@@ -699,8 +799,8 @@ def test_verify_passes_selected_bus_to_live_worker_scanner(monkeypatch, tmp_path
     monkeypatch.setenv("RCX_CODEX_HOME", str(codex_home))
     selected_pid = os.getpid()
     _write_codex_autoping(codex_home, repo_root, pid=selected_pid)
-    switch._write_json(  # ANTICHEAT_OK: unit test seeds public tool state
-        repo_root / ".agent_bus" / "observability" / "orchestrator_mode.json",
+    _seed_orchestrator_mode_state(
+        repo_root,
         {
             "version": 1,
             "mode": "codex",
