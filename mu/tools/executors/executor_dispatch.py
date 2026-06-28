@@ -298,7 +298,21 @@ def _bind_phase_b_recovery_plan_wave(record: dict[str, Any], repo_root: Path) ->
 
 
 def load_config(config_path: Path | None = None) -> dict[str, Any]:
-    """Load executor config using the canonical shared defaults/merge rules."""
+    """Load executor config using the canonical shared defaults/merge rules.
+
+    Every path materializes the ``role_agents`` -> ``backends`` / ``bridge_reviewers``
+    derivation through the single canonical ``apply_role_agents`` rule, so a switched
+    role never leaves the dispatched backends pointing at the static default provider:
+    - the committed-config path delegates to ``executor_common.load_executor_config``,
+      which materializes WITH environment overrides;
+    - both ``--config`` fallback branches (a missing config, and a role-only loaded
+      config) route through ``merge_executor_config_overrides``, which materializes the
+      derived implementer/reviewer backends and ``bridge_reviewers`` from ``role_agents``
+      (config-only, no env). This is the "materialize fallback reviewer roles before
+      dispatch" fix: a missing or role-only ``--config`` can no longer leak the default
+      reviewer provider into the dispatched reviewer backends. ``commit_executor`` is not
+      a derived key, so it stays as configured (``None``) on every path.
+    """
     path = config_path or DEFAULT_CONFIG_PATH
     if path == DEFAULT_CONFIG_PATH:
         return _common_load_executor_config(REPO_ROOT)

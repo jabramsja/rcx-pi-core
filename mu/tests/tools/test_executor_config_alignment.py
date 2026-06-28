@@ -31,7 +31,9 @@ from executor_common import (  # noqa: E402  (path insert must precede import)
     REVIEW_OVERRIDE_BACKEND_KEYS,
     REVIEWER_BRIDGE_KEYS,
     apply_role_agents,
+    merge_executor_config_overrides,
 )
+import executor_dispatch as dispatch  # noqa: E402  (path insert must precede import)
 
 ROLE_AGENT_KEYS = {"implementer", "reviewer"}
 REQUIRED_BRIDGE_AGENT_DEFAULT_KEYS = {
@@ -399,3 +401,85 @@ class TestBridgeAgentDefaultConfigAlignment:
             for key in required_keys:
                 assert isinstance(provider_defaults[key], str)
                 assert provider_defaults[key]
+
+
+class TestFallbackMaterializesRolesNoDrift:
+    """BOTH the bare-defaults merge path AND the dispatch load_config --config
+    fallback must materialize backends/bridge_reviewers from role_agents via the
+    single apply_role_agents rule.
+
+    Regression guard for the role-switch drift the minimal PR #1166 stranded on:
+    a missing or role-only config must not leak the static DEFAULT_EXECUTOR_CONFIG
+    reviewer provider (codex) into the dispatched reviewer backends, and
+    commit_executor must stay None on every path. See work items 2/3/5 of
+    reports/control_plane/claude-roles-full-2026-06-27_2026-06-27.md.
+    """
+
+    @staticmethod
+    def _assert_role_fixed_point(config: dict) -> None:
+        """config's backends/bridge_reviewers are the apply_role_agents fixed-point
+        of its own role_agents (the canonical rule the runtime loader uses), and
+        commit_executor is not derived to a provider."""
+        role_agents = config["role_agents"]
+        implementer = role_agents["implementer"]
+        reviewer = role_agents["reviewer"]
+        materialized = apply_role_agents(copy.deepcopy(config), implementer, reviewer)
+        assert config["backends"] == materialized["backends"], (
+            "backends are not the materialization fixed-point of role_agents"
+        )
+        assert config["bridge_reviewers"] == materialized["bridge_reviewers"], (
+            "bridge_reviewers are not the fixed-point of role_agents"
+        )
+        for key in IMPLEMENTER_BACKEND_KEYS:
+            assert config["backends"][key] == implementer
+        for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+            assert config["backends"][key] == reviewer
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert config["bridge_reviewers"][key] == reviewer
+        assert config["backends"]["commit_executor"] is None
+
+    def test_bare_defaults_merge_materializes_roles(self):
+        # The bare-defaults path itself derives every materialized field from
+        # role_agents — no static codex literal leaks through unmaterialized.
+        self._assert_role_fixed_point(merge_executor_config_overrides({}))
+
+    def test_role_only_override_merge_has_no_codex_drift(self):
+        # A role-only override flipping the reviewer to claude must derive EVERY
+        # reviewer-side backend + bridge_reviewer to claude; the DEFAULT codex
+        # literals must not survive the merge.
+        config = merge_executor_config_overrides(
+            {"role_agents": {"implementer": "claude", "reviewer": "claude"}}
+        )
+        assert config["role_agents"] == {"implementer": "claude", "reviewer": "claude"}
+        self._assert_role_fixed_point(config)
+        for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+            assert config["backends"][key] == "claude"
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert config["bridge_reviewers"][key] == "claude"
+
+    def test_dispatch_load_config_missing_fallback_materializes_roles(self, tmp_path):
+        self._assert_role_fixed_point(dispatch.load_config(tmp_path / "nonexistent.json"))
+
+    def test_dispatch_load_config_role_only_fallback_has_no_codex_drift(
+        self, tmp_path, monkeypatch
+    ):
+        # The --config fallback materializes purely from the file's role_agents
+        # (config-only path, no env). Clear role env so the assertion is exact.
+        for name in (
+            "RCX_IMPLEMENTER_AGENT_OVERRIDE",
+            "RCX_REVIEWER_AGENT_OVERRIDE",
+            "RCX_BRIDGE_REVIEWER_OVERRIDE",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        config_path = tmp_path / "executor_config.json"
+        config_path.write_text(
+            json.dumps({"role_agents": {"implementer": "claude", "reviewer": "claude"}}),
+            encoding="utf-8",
+        )
+        config = dispatch.load_config(config_path)
+        assert config["role_agents"] == {"implementer": "claude", "reviewer": "claude"}
+        self._assert_role_fixed_point(config)
+        for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+            assert config["backends"][key] == "claude"
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert config["bridge_reviewers"][key] == "claude"

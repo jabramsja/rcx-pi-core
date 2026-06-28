@@ -426,10 +426,28 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def merge_executor_config_overrides(overrides: dict[str, Any]) -> dict[str, Any]:
-    """Apply config overrides on top of the canonical executor defaults."""
+    """Apply config overrides on top of the canonical executor defaults.
+
+    After the deep-merge, derive ``backends`` and ``bridge_reviewers`` from the
+    merged ``role_agents`` via the single canonical rule (:func:`apply_role_agents`,
+    invoked through :func:`_materialize_role_agents`). This makes the bare-defaults
+    fallback (``merge_executor_config_overrides({})``) and every caller that routes a
+    config fallback through this function — notably ``executor_dispatch.load_config``'s
+    missing-config and role-only ``--config`` branches — fully consistent: the static
+    ``DEFAULT_EXECUTOR_CONFIG`` ``reviewer`` / ``post_merge_supervisor`` /
+    ``dialectic_executor`` / ``bridge_reviewers`` literals can no longer drift from
+    ``role_agents``, and a role-only override config materializes its derived reviewer
+    backends here instead of leaking the default provider through.
+
+    Derivation here is CONFIG-ONLY (``use_env_overrides=False``); the runtime loader
+    (:func:`load_executor_config`) re-materializes WITH environment overrides on top,
+    so env-shadow precedence is unchanged. ``commit_executor`` is never derived (it is
+    not in the implementer/reviewer backend key sets), so it stays as configured.
+    """
     if not isinstance(overrides, dict):
         raise ExecutorCommonError("executor config overrides must be a JSON object")
-    return _deep_merge(DEFAULT_EXECUTOR_CONFIG, overrides)
+    merged = _deep_merge(DEFAULT_EXECUTOR_CONFIG, overrides)
+    return _materialize_role_agents(merged, raw_overrides=overrides, use_env_overrides=False)
 
 
 def _apply_int_env_override(
