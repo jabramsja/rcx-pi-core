@@ -106,6 +106,14 @@ class FailureClass(Enum):
     PHASE_A_STRICT_L4_SCOPE_AUTHORITY = "phase_a_strict_l4_scope_authority"
     PHASE_A_PACKET_LINE_REF_CLEANUP = "phase_a_packet_line_ref_cleanup"
     STAGE_PATH_SYMLINK_ALIAS = "stage_path_symlink_alias"
+    # A bridge round the supervisor decided GO, carrying ONLY low/medium
+    # (non-high/critical) findings, is a defer-and-proceed-to-commit case --
+    # NOT a reviewer/agent/bridge crash. Files those findings as deferred
+    # non-blockers and resumes Phase B so the GO'd wave commits instead of
+    # stranding in tier-3. Fires ONLY on decision=GO with zero high/critical
+    # (true-blocking) findings; a genuine NO_GO, or a GO carrying a
+    # high/critical finding, still routes to AGENT_REVIEW_CRASH (strand).
+    BRIDGE_GO_DEFERRABLE_FINDINGS = "bridge_go_deferrable_findings"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
     TRANSIENT_KILL = "transient_kill"
@@ -159,6 +167,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PHASE_A_STRICT_L4_SCOPE_AUTHORITY: 1,
     FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP: 1,
     FailureClass.STAGE_PATH_SYMLINK_ALIAS: 1,
+    FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.UPSTREAM_CONNECTIVITY: 2,
     FailureClass.TRANSIENT_RATE_LIMIT: 2,
@@ -318,6 +327,94 @@ def _json_field_equals(value: Any, field_names: frozenset[str], expected: str) -
     if isinstance(value, list):
         return any(_json_field_equals(item, field_names, expected) for item in value)
     return False
+
+
+# ---------------------------------------------------------------------------
+# Deferrable bridge GO detection -- pure dict inspection
+# ---------------------------------------------------------------------------
+
+# Bridge REVIEW decisions (phase_b / supervisor) recognized as a converged GO.
+# Scoped to the bridge-review "GO" token named by the recurring strand symptom;
+# the commit-receipt "COMMIT_GO"/"COMMIT_GO_HOLD_PUSH" family is a DIFFERENT
+# surface and is intentionally NOT folded in (folding it in could weaken a
+# genuine commit-side strand, which this change must not touch).
+_BRIDGE_GO_DECISIONS = frozenset({"GO"})
+
+# The fail-closed severity floor: a finding at HIGH or CRITICAL severity is
+# genuinely blocking ("true-blocking") even on a GO round and must keep
+# stranding. This mirrors phase_b_executor._disposition_for_finding, whose
+# critical/high floor overrides even an explicit non_blocking disposition.
+_TRUE_BLOCKING_SEVERITIES = frozenset({"high", "critical"})
+
+
+def _bridge_decision_and_findings(result: dict[str, Any]) -> tuple[str, list[Any]]:
+    """Extract the bridge decision token + findings list from a result dict.
+
+    Inspects the top-level result, an embedded stdout/stderr JSON object, and a
+    nested ``parsed`` payload (phase_b wraps the supervisor verdict under
+    ``parsed``). Returns the first decision string and the first findings list
+    found, or ("", []) when absent. Pure dict inspection -- no external calls.
+    """
+    if not isinstance(result, dict):
+        return "", []
+    bases: list[dict[str, Any]] = [result]
+    for stream_key in ("stdout", "stderr"):
+        embedded = _parse_json_object(result.get(stream_key, ""))
+        if embedded:
+            bases.append(embedded)
+    expanded: list[dict[str, Any]] = []
+    for base in bases:
+        if isinstance(base, dict):
+            expanded.append(base)
+            parsed = base.get("parsed")
+            if isinstance(parsed, dict):
+                expanded.append(parsed)
+    decision = ""
+    findings: list[Any] = []
+    for src in expanded:
+        if not decision:
+            candidate = src.get("decision")
+            if isinstance(candidate, str) and candidate.strip():
+                decision = candidate.strip()
+        if not findings:
+            candidate = src.get("findings")
+            if isinstance(candidate, list):
+                findings = candidate
+    return decision, findings
+
+
+def _finding_is_deferrable_on_go(finding: Any) -> bool:
+    """Return True when a finding is deferrable on a GO round.
+
+    On a GO round only a HIGH/CRITICAL-severity finding is genuinely blocking;
+    everything else (a low/medium nit, a doc-accuracy note, a reviewer-
+    acknowledged gap such as 'no dedicated regression test for X') is a
+    deferrable non-blocker -- even when it carries an explicit
+    ``disposition: blocking`` label, which is exactly the mislabel the recurring
+    strand produced. A non-dict / unreadable finding is conservatively treated
+    as NOT deferrable (fail-closed -- it keeps stranding).
+    """
+    if not isinstance(finding, dict):
+        return False
+    severity = str(finding.get("severity") or "").strip().lower()
+    return severity not in _TRUE_BLOCKING_SEVERITIES
+
+
+def _is_bridge_go_with_only_deferrable_findings(
+    decision: str, findings: list[Any]
+) -> bool:
+    """Return True for a bridge GO round whose findings are ALL deferrable.
+
+    The deferrable-GO guard fires ONLY when the supervisor decided GO AND there
+    is at least one finding AND every finding is deferrable (zero high/critical
+    true-blocking findings). A genuine NO_GO, or a GO carrying any high/critical
+    finding, returns False and keeps its existing strand classification.
+    """
+    if str(decision or "").strip().upper() not in _BRIDGE_GO_DECISIONS:
+        return False
+    if not findings:
+        return False
+    return all(_finding_is_deferrable_on_go(f) for f in findings)
 
 
 # ---------------------------------------------------------------------------
@@ -609,6 +706,22 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         for hint in fatal_codex_launch_hints
     ):
         return FailureClass.UNCLASSIFIED
+    # Deferrable bridge GO guard -- placed AHEAD of the broad review-crash
+    # branches below. A bridge round the supervisor decided GO, carrying ONLY
+    # low/medium (non-high/critical) findings -- even ones mislabeled
+    # disposition=blocking -- is a defer-and-proceed-to-commit case, NOT a
+    # reviewer/agent/bridge crash. Without this guard such a round matches the
+    # broad "reviewer" text hint (or an "agent"/"bridge" step) and misclassifies
+    # as AGENT_REVIEW_CRASH -> tier 3 -> tier3_exhausted strand (the recurring
+    # GO-with-deferrable-findings strand). Fires ONLY on decision=GO with zero
+    # high/critical true-blocking findings, so a genuine NO_GO, or a GO carrying
+    # a high/critical finding, still falls through to AGENT_REVIEW_CRASH and
+    # strands unchanged. The real codex-auth-crash terminal above still wins
+    # (a crashed reviewer cannot have produced a genuine GO verdict).
+    if status_failed:
+        _go_decision, _go_findings = _bridge_decision_and_findings(result)
+        if _is_bridge_go_with_only_deferrable_findings(_go_decision, _go_findings):
+            return FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
     review_crash_hints = (
         "bridge subprocess failed",
         "produced no stdout",
@@ -3761,6 +3874,128 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
     )
 
 
+def _write_recovery_deferred_non_blocking_packet(
+    repo_root: Path,
+    wave_id: str,
+    non_blocking_findings: list[dict[str, Any]],
+) -> Path:
+    """Write a deferred non-blocking findings packet (recovery-gate side).
+
+    Mirrors phase_b_executor._write_deferred_non_blocking_packet's canonical
+    location + format so the deferred GO findings land in the SAME lane the
+    normal Phase B deferral uses:
+    reports/deferred/non_blocking/<wave>_bridge_nonblockers.md.
+    """
+    deferred_dir = repo_root / "reports" / "deferred" / "non_blocking"
+    deferred_dir.mkdir(parents=True, exist_ok=True)
+    safe_wave = normalize_wave_id(wave_id) or "wave-unknown"
+    packet_path = deferred_dir / f"{safe_wave}_bridge_nonblockers.md"
+    lines = [
+        f"# Deferred Non-Blocking Findings: {wave_id}",
+        "",
+        f"Wave: {wave_id}",
+        "Status: DEFERRED_NON_BLOCKING",
+        (
+            "Filed by recovery_gate: bridge decision GO carried only low/medium "
+            "(non-high/critical) findings -- deferred so the GO'd wave proceeds "
+            "to commit instead of stranding in tier-3 recovery."
+        ),
+        f"{len(non_blocking_findings)} finding(s).",
+        "",
+    ]
+    for i, finding in enumerate(non_blocking_findings, 1):
+        if not isinstance(finding, dict):
+            continue
+        lines.append(f"## {i}. {finding.get('title', 'Untitled')}")
+        lines.append(f"- **Class:** {finding.get('class', 'unknown')}")
+        lines.append(f"- **Severity:** {finding.get('severity', 'unknown')}")
+        lines.append(f"- **File:** {finding.get('file', 'unknown')}")
+        lines.append("- **Disposition:** non_blocking")
+        lines.append("")
+    packet_path.write_text("\n".join(lines), encoding="utf-8")
+    return packet_path
+
+
+def fix_bridge_go_deferrable_findings(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Defer a GO round's low/medium findings and proceed to commit.
+
+    A bridge round the supervisor decided GO, carrying ONLY non-high/critical
+    findings (e.g. 'no dedicated regression test for X', a doc-accuracy nit),
+    must PROCEED to commit -- not strand in tier-3 recovery. This files those
+    findings as deferred non-blockers under reports/deferred/non_blocking/,
+    records them (rewritten to disposition=non_blocking) on the result's
+    all_non_blocking carry-forward, and reuses the proven Phase B resume channel
+    (fix_post_reentry_needs_phase_b) to seed phase_b_state.json + the
+    ROUTE_PHASE_B retry_record so the re-dispatched wave converges with the
+    findings already deferred. Returns fixed=True (recovered) so the wave leaves
+    the strand path.
+    """
+    result = kw.get("result", {})
+    if not isinstance(result, dict):
+        return _fix_result(False, "result_not_a_dict", "recovery result was not a dict")
+    wave_id = str(kw.get("wave_id") or "").strip()
+    decision, findings = _bridge_decision_and_findings(result)
+    # Fail-closed re-confirmation of the classification guard's contract: never
+    # defer unless this really is a GO round whose findings are ALL deferrable
+    # (zero high/critical). Protects against a stale/learned route landing a real
+    # blocker here.
+    if not _is_bridge_go_with_only_deferrable_findings(decision, findings):
+        return _fix_result(
+            False,
+            "not_a_deferrable_go_round",
+            "result is not a bridge GO with only deferrable findings",
+        )
+
+    deferrable = [
+        {**finding, "disposition": "non_blocking"}
+        for finding in findings
+        if isinstance(finding, dict)
+    ]
+    try:
+        packet_path = _write_recovery_deferred_non_blocking_packet(
+            repo_root, wave_id, deferrable
+        )
+        packet_rel = packet_path.relative_to(repo_root).as_posix()
+    except (OSError, ValueError) as exc:
+        return _fix_result(
+            False,
+            "deferred_packet_write_failed",
+            f"could not file deferred non-blockers: {exc}",
+        )
+
+    # Carry the deferred findings forward as non-blockers so the Phase B resume
+    # treats them as already-deferred. They survive phase_b's convergence
+    # re-check (_blocking_findings_in_deferred_convergence): low/medium severity
+    # + explicit non_blocking disposition stays non_blocking. _merge_result_candidates
+    # reads the top-level result, so the resume seed below copies this list into
+    # phase_b_state.json's all_non_blocking.
+    existing = result.get("all_non_blocking")
+    merged = list(existing) if isinstance(existing, list) else []
+    merged.extend(deferrable)
+    result["all_non_blocking"] = merged
+    result["deferred_packet_path"] = packet_rel
+
+    # Reuse the proven NEEDS_PHASE_B resume channel to seed phase_b_state.json +
+    # the ROUTE_PHASE_B retry_record (task_id / state_sha / scope fingerprint).
+    # It copies the result's all_non_blocking into the resume state, so the
+    # re-dispatched Phase B resumes with the GO findings already deferred.
+    resume = fix_post_reentry_needs_phase_b(repo_root, **kw)
+    if resume.get("fixed"):
+        detail = (
+            f"deferred {len(deferrable)} GO non-blocker(s) to {packet_rel}; "
+            "seeded Phase B resume so the GO'd wave proceeds to commit"
+        )
+    else:
+        # No resolvable plan_path to seed a resume -- the deferral is still filed
+        # and recorded, and the wave leaves the tier-3 strand path. The
+        # dispatcher re-dispatch carries the deferred packet + all_non_blocking.
+        detail = (
+            f"deferred {len(deferrable)} GO non-blocker(s) to {packet_rel}; "
+            f"no resume seed ({resume.get('action', 'unknown')})"
+        )
+    return _fix_result(True, "deferred_go_findings_and_proceed", detail)
+
+
 def _phase_b_plan_required_path(result: dict[str, Any]) -> str:
     plan_path = str(result.get("plan_path") or "").strip()
     if plan_path:
@@ -4277,6 +4512,7 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.PHASE_A_STRICT_L4_SCOPE_AUTHORITY: fix_phase_a_strict_l4_scope_authority,
     FailureClass.PHASE_A_PACKET_LINE_REF_CLEANUP: fix_phase_a_packet_line_ref_cleanup,
     FailureClass.STAGE_PATH_SYMLINK_ALIAS: fix_stage_path_symlink_alias,
+    FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS: fix_bridge_go_deferrable_findings,
 }
 
 
