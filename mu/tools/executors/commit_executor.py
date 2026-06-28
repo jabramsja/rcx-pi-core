@@ -3289,7 +3289,10 @@ def _emit_commit_ready_event(
         repo_root,
         bus_dir=_active_bus_dir(),
         event_type="commit_ready",
-        wave_id=str(handoff.get("wave_id") or "").strip(),
+        # normalize_wave_id keeps emission resilient if a handoff lacks a wave_id now
+        # that the pager defaults ON: normalize_wave_id("") -> "wave-unknown" instead of
+        # raising PipelineAgentPagerError. Consistent with recovery_gate._emit_recovery_event.
+        wave_id=normalize_wave_id(str(handoff.get("wave_id") or "").strip()),
         task_id=str(handoff.get("task_id") or "[COMMIT-EXECUTOR]").strip(),
         plan_path=_handoff_plan_path(handoff),
         phase="commit_executor",
@@ -3318,7 +3321,10 @@ def _emit_commit_lifecycle_event(
         repo_root,
         bus_dir=_active_bus_dir(),
         event_type=event_type,
-        wave_id=str(handoff.get("wave_id") or "").strip(),
+        # normalize_wave_id keeps emission resilient if a handoff lacks a wave_id now
+        # that the pager defaults ON: normalize_wave_id("") -> "wave-unknown" instead of
+        # raising PipelineAgentPagerError. Consistent with recovery_gate._emit_recovery_event.
+        wave_id=normalize_wave_id(str(handoff.get("wave_id") or "").strip()),
         task_id=str(handoff.get("task_id") or "[COMMIT-EXECUTOR]").strip(),
         plan_path=_handoff_plan_path(handoff),
         phase="commit_executor",

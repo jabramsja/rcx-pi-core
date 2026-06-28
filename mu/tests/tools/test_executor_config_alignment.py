@@ -168,6 +168,22 @@ class TestDefaultMatchesLiveConfig:
             "commit_ci_poll must cover the longest required workflow timeout"
         )
 
+    def test_pipeline_agent_pager_enabled_matches_live(self):
+        """DEFAULT pager-enabled must equal live (True) so the bare/missing-config
+        fallback emits commit_started/commit_failed exactly like prod -- no silent
+        fallback drift back to pager-OFF."""
+        default_enabled = _load_default_executor_config()["pipeline_agent_pager"]["enabled"]
+        live_enabled = json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))[
+            "pipeline_agent_pager"
+        ]["enabled"]
+        assert default_enabled is True, (
+            "DEFAULT_EXECUTOR_CONFIG['pipeline_agent_pager']['enabled'] must be True "
+            "so the bare-config fallback emits the commit-outcome pager like prod"
+        )
+        assert default_enabled == live_enabled, (
+            "DEFAULT pipeline_agent_pager.enabled drifted from live executor_config.json"
+        )
+
 
 class TestDispatchFallbacksReferenceDefault:
     """All dispatch .get("timeouts", ...) fallbacks must reference

@@ -10300,11 +10300,15 @@ def _emit_recovery_event(
     artifact_paths: dict[str, str] | None = None,
 ) -> None:
     task_id, plan_path = _recovery_event_context(repo_root, status=status)
+    # Normalize the wave_id so an empty/missing status wave_id cannot raise
+    # PipelineAgentPagerError("wave_id is required") once the pager is enabled
+    # (now the factory default). normalize_wave_id("") -> "wave-unknown", matching
+    # every other wave_id boundary in this module; keeps recovery emission resilient.
     emit_pipeline_agent_event(
         repo_root,
         bus_dir=_active_bus_dir(),
         event_type=event_type,
-        wave_id=str(status.get("wave_id") or "").strip(),
+        wave_id=normalize_wave_id(str(status.get("wave_id") or "").strip()),
         task_id=task_id,
         plan_path=plan_path,
         phase="recovery_gate",
