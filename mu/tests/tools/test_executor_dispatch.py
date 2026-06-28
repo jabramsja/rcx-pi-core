@@ -336,23 +336,30 @@ class TestDispatcherConfig:
         assert config["backends"]["bot_remediation"] == baseline_impl
 
     def test_implementer_override_retargets_only_implementers(self, monkeypatch):
-        # De-brittled: pick an implementer override that differs from the default reviewer
-        # and clear reviewer env so the reviewer side exercises the true default (CI parity).
-        default_rev = common_mod.DEFAULT_EXECUTOR_CONFIG["role_agents"]["reviewer"]
-        impl_value = "claude" if default_rev != "claude" else "codex"
+        # De-brittled: the baseline reviewer comes from the LIVE committed config (read
+        # with no reviewer override), and the implementer override is chosen to differ
+        # from it, so the "an implementer override retargets ONLY the implementer
+        # backends" property holds for any configured reviewer (claude or codex).
+        # load_config() reads the live committed executor_config.json, so deriving the
+        # baseline from DEFAULT_EXECUTOR_CONFIG would break whenever a set_roles switch
+        # makes the live reviewer differ from DEFAULT (e.g. the claude-across-the-board
+        # role switch). Clear all role env first so the baseline is the committed default.
+        monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+        baseline_rev = dispatch_mod.load_config()["role_agents"]["reviewer"]
+        impl_value = "claude" if baseline_rev != "claude" else "codex"
         monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", impl_value)
         config = dispatch_mod.load_config()
         assert config["role_agents"]["implementer"] == impl_value
-        assert config["role_agents"]["reviewer"] == default_rev
+        assert config["role_agents"]["reviewer"] == baseline_rev
         assert config["backends"]["phase_a_executor"] == impl_value
         assert config["backends"]["phase_b_executor"] == impl_value
         assert config["backends"]["bot_remediation"] == impl_value
-        assert config["backends"]["post_merge_supervisor"] == default_rev
-        assert config["backends"]["dialectic_executor"] == default_rev
-        assert config["bridge_reviewers"]["phase_a"] == default_rev
-        assert config["bridge_reviewers"]["phase_b"] == default_rev
+        assert config["backends"]["post_merge_supervisor"] == baseline_rev
+        assert config["backends"]["dialectic_executor"] == baseline_rev
+        assert config["bridge_reviewers"]["phase_a"] == baseline_rev
+        assert config["bridge_reviewers"]["phase_b"] == baseline_rev
 
     def test_load_missing_config_returns_defaults(self, tmp_path):
         config = dispatch_mod.load_config(tmp_path / "nonexistent.json")
