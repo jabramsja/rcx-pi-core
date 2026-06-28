@@ -49,7 +49,7 @@ REVIEWER_BRIDGE_KEYS = frozenset({"phase_a", "phase_b"})
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "role_agents": {
         "implementer": "claude",
-        "reviewer": "codex",
+        "reviewer": "claude",
     },
     "bridge_agent_defaults": {
         "claude": {

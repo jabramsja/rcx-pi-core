@@ -336,23 +336,26 @@ class TestDispatcherConfig:
         assert config["backends"]["bot_remediation"] == baseline_impl
 
     def test_implementer_override_retargets_only_implementers(self, monkeypatch):
-        # De-brittled: pick an implementer override that differs from the default reviewer
-        # and clear reviewer env so the reviewer side exercises the true default (CI parity).
-        default_rev = common_mod.DEFAULT_EXECUTOR_CONFIG["role_agents"]["reviewer"]
-        impl_value = "claude" if default_rev != "claude" else "codex"
+        # De-brittled: derive the baseline reviewer from the LIVE committed
+        # executor_config.json (the authoritative source of truth) with the reviewer env
+        # cleared, not from a pinned DEFAULT snapshot, so a `set_roles` switch to any
+        # provider keeps this green. Pick an implementer override that differs from that
+        # baseline reviewer so the "only implementers retarget" property is observable.
         monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+        baseline_reviewer = dispatch_mod.load_config()["role_agents"]["reviewer"]
+        impl_value = "claude" if baseline_reviewer != "claude" else "codex"
         monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", impl_value)
         config = dispatch_mod.load_config()
         assert config["role_agents"]["implementer"] == impl_value
-        assert config["role_agents"]["reviewer"] == default_rev
+        assert config["role_agents"]["reviewer"] == baseline_reviewer
         assert config["backends"]["phase_a_executor"] == impl_value
         assert config["backends"]["phase_b_executor"] == impl_value
         assert config["backends"]["bot_remediation"] == impl_value
-        assert config["backends"]["post_merge_supervisor"] == default_rev
-        assert config["backends"]["dialectic_executor"] == default_rev
-        assert config["bridge_reviewers"]["phase_a"] == default_rev
-        assert config["bridge_reviewers"]["phase_b"] == default_rev
+        assert config["backends"]["post_merge_supervisor"] == baseline_reviewer
+        assert config["backends"]["dialectic_executor"] == baseline_reviewer
+        assert config["bridge_reviewers"]["phase_a"] == baseline_reviewer
+        assert config["bridge_reviewers"]["phase_b"] == baseline_reviewer
 
     def test_load_missing_config_returns_defaults(self, tmp_path):
         config = dispatch_mod.load_config(tmp_path / "nonexistent.json")
