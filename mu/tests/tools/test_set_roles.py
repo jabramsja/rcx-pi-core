@@ -199,6 +199,59 @@ def test_write_is_atomic_failed_replace_preserves_original(tmp_path, monkeypatch
     assert leftovers == [], f"atomic write left temp residue: {leftovers}"
 
 
+def test_switch_keeps_committed_and_fallback_in_sync_both_directions(tmp_path, monkeypatch):
+    """set_roles is the single switch: after a flip the committed config AND the
+    bare/missing-config fallback resolve the SAME selection — no hardcoded DEFAULT
+    drift — in BOTH directions for any provider pair.
+
+    Regression for the manual DEFAULT_EXECUTOR_CONFIG.role_agents hand-edit this wave
+    eliminates: previously a set_roles switch updated only the committed file, so the
+    bare/missing-config fallback kept resolving the stale hardcoded literal. The
+    fallback now reads the committed file via executor_common._committed_executor_config_path;
+    point that seam at the file set_roles writes under --repo-root so no real tracked
+    file is touched.
+    """
+    _clear_role_env(monkeypatch)
+    cfg = _seed_config(tmp_path)  # claude/claude committed under tmp_path
+    monkeypatch.setattr(
+        executor_common, "_committed_executor_config_path", lambda: cfg
+    )
+    # A root with NO executor_config.json exercises load_executor_config's missing path.
+    configless_root = tmp_path / "configless"
+
+    for implementer, reviewer in (
+        ("codex", "codex"),
+        ("claude", "claude"),
+        ("codex", "claude"),
+        ("claude", "codex"),
+    ):
+        rc = set_roles.main(
+            [
+                "--implementer", implementer,
+                "--reviewer", reviewer,
+                "--repo-root", str(tmp_path),
+            ]
+        )
+        assert rc == 0
+        expected = {"implementer": implementer, "reviewer": reviewer}
+
+        # 1. The committed config reflects the switch.
+        committed = json.loads(cfg.read_text())
+        assert committed["role_agents"] == expected
+
+        # 2. The bare-defaults fallback resolves the SAME selection (no DEFAULT drift).
+        bare = executor_common.merge_executor_config_overrides({})
+        assert bare["role_agents"] == expected
+        assert bare["bridge_reviewers"]["phase_a"] == reviewer
+        assert bare["backends"]["phase_b_executor"] == implementer
+        assert bare["backends"]["commit_executor"] is None
+
+        # 3. The missing-config load path (no config at this root) also follows.
+        missing = executor_common.load_executor_config(configless_root)
+        assert missing["role_agents"] == expected
+        assert missing["backends"]["post_merge_supervisor"] == reviewer
+
+
 def test_role_labels_follow_live_roles_after_switch(tmp_path, monkeypatch):
     """tmux implementer/reviewer pane labels follow a set_roles switch (item 4).
 

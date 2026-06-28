@@ -443,10 +443,22 @@ def merge_executor_config_overrides(overrides: dict[str, Any]) -> dict[str, Any]
     (:func:`load_executor_config`) re-materializes WITH environment overrides on top,
     so env-shadow precedence is unchanged. ``commit_executor`` is never derived (it is
     not in the implementer/reviewer backend key sets), so it stays as configured.
+
+    When *overrides* does not pin ``role_agents`` (the bare/missing-config fallback —
+    ``merge_executor_config_overrides({})`` and ``load_executor_config``'s missing
+    branch), the role selection is sourced from the committed ``executor_config.json``
+    via :func:`_fallback_role_agents` rather than the static
+    ``DEFAULT_EXECUTOR_CONFIG['role_agents']`` literal. ``set_roles.py`` writes that
+    committed file, so the fallback can never drift from a switch and no manual DEFAULT
+    edit is ever required; the literal is used only when the committed file is truly
+    absent. An override that DOES carry ``role_agents`` is authoritative and is left
+    untouched (its explicit selection wins through :func:`_materialize_role_agents`).
     """
     if not isinstance(overrides, dict):
         raise ExecutorCommonError("executor config overrides must be a JSON object")
     merged = _deep_merge(DEFAULT_EXECUTOR_CONFIG, overrides)
+    if "role_agents" not in overrides:
+        merged["role_agents"] = _fallback_role_agents()
     return _materialize_role_agents(merged, raw_overrides=overrides, use_env_overrides=False)
 
 
@@ -618,6 +630,48 @@ def resolve_committed_role_agent(config: dict[str, Any], role: str) -> str:
         return legacy
     default_role_agents = DEFAULT_EXECUTOR_CONFIG.get("role_agents", {})
     return _nonempty_str(default_role_agents.get(role)) or "codex"
+
+
+def _committed_executor_config_path() -> Path:
+    """Path to the committed executor_config.json that set_roles.py maintains.
+
+    It sits next to this module (``mu/tools/executors/``), so every checkout and
+    linked worktree carries it, and it is exactly the file ``set_roles.py`` writes.
+    Factored out as the single seam the bare/missing-config ``role_agents`` fallback
+    reads (:func:`_fallback_role_agents`) so the resolution can be redirected in
+    tests without mutating the real tracked file.
+    """
+    return Path(__file__).resolve().parent / "executor_config.json"
+
+
+def _fallback_role_agents() -> dict[str, str]:
+    """Resolve ``role_agents`` for the bare/missing-config fallback from the committed file.
+
+    ``set_roles.py`` is the single role switch; it writes ``role_agents`` into the
+    committed ``executor_config.json`` next to this module. The bare/missing-config
+    fallback therefore reads THAT committed file so a switch can never leave the
+    fallback resolving a stale provider — no manual ``DEFAULT_EXECUTOR_CONFIG``
+    ``role_agents`` hand-edit is ever required after a switch. The static
+    ``DEFAULT_EXECUTOR_CONFIG['role_agents']`` literal is the last-resort source, used
+    only when that committed file is truly absent or unreadable.
+
+    Polymorphic: whatever implementer/reviewer the committed file names is returned
+    verbatim (via the same committed-config precedence as
+    :func:`resolve_committed_role_agent`: explicit ``role_agents`` -> legacy
+    ``backends`` / ``bridge_reviewers`` -> the literal). No provider is hardcoded in
+    this path.
+    """
+    committed: dict[str, Any] = {}
+    try:
+        loaded = json.loads(_committed_executor_config_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        loaded = None
+    if isinstance(loaded, dict):
+        committed = loaded
+    return {
+        role: resolve_committed_role_agent(committed, role)
+        for role in ("implementer", "reviewer")
+    }
 
 
 def apply_role_agents(
@@ -1128,8 +1182,14 @@ def load_executor_config(repo_root: Path) -> dict[str, Any]:
     """
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     if not config_path.exists():
+        # Missing-config fallback: route through the bare-defaults merge so the
+        # role selection comes from the committed executor_config.json (the file
+        # set_roles.py writes) via _fallback_role_agents, not the static
+        # DEFAULT_EXECUTOR_CONFIG['role_agents'] literal. Keeps the fallback in
+        # sync with a switch (no manual DEFAULT edit); the literal is used only
+        # when that committed file is truly absent too.
         raw_overrides: dict[str, Any] = {}
-        config = copy.deepcopy(DEFAULT_EXECUTOR_CONFIG)
+        config = merge_executor_config_overrides({})
     else:
         raw_overrides = json.loads(config_path.read_text(encoding="utf-8"))
         config = merge_executor_config_overrides(raw_overrides)

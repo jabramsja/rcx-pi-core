@@ -26,6 +26,7 @@ from tests.repo_root import REPO_ROOT
 # the observability panes do, so the LIVE-internal consistency check re-derives
 # through the canonical rule instead of duplicating the role->key mapping here.
 sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "executors"))
+import executor_common  # noqa: E402  (path insert must precede import)
 from executor_common import (  # noqa: E402  (path insert must precede import)
     IMPLEMENTER_BACKEND_KEYS,
     REVIEW_OVERRIDE_BACKEND_KEYS,
@@ -534,5 +535,118 @@ class TestFallbackMaterializesRolesNoDrift:
         self._assert_role_fixed_point(config)
         for key in REVIEW_OVERRIDE_BACKEND_KEYS:
             assert config["backends"][key] == "claude"
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert config["bridge_reviewers"][key] == "claude"
+
+
+class TestBareFallbackRoleAgentsFollowCommittedConfig:
+    """The bare/missing-config role_agents fallback derives from the committed
+    executor_config.json (the file set_roles.py writes), never a hardcoded DEFAULT
+    literal — so a set_roles switch can never strand the fallback on a stale provider.
+
+    Regression for the manual DEFAULT_EXECUTOR_CONFIG.role_agents hand-edit this wave
+    eliminates. Polymorphic: parametrized over provider pairs, with no provider asserted
+    as a baked-in default. The committed-config location is redirected through the
+    executor_common._committed_executor_config_path seam so the real tracked file is
+    never mutated. See reports/control_plane/
+    set-roles-syncs-default-no-drift-2026-06-28_2026-06-28.md.
+    """
+
+    @staticmethod
+    def _clear_role_env(monkeypatch):
+        for name in (
+            "RCX_IMPLEMENTER_AGENT_OVERRIDE",
+            "RCX_REVIEWER_AGENT_OVERRIDE",
+            "RCX_BRIDGE_REVIEWER_OVERRIDE",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+    @staticmethod
+    def _point_seam_at(monkeypatch, tmp_path, implementer, reviewer):
+        cfg = tmp_path / "executor_config.json"
+        cfg.write_text(
+            json.dumps(
+                {"role_agents": {"implementer": implementer, "reviewer": reviewer}}
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            executor_common, "_committed_executor_config_path", lambda: cfg
+        )
+        return cfg
+
+    @pytest.mark.parametrize(
+        "implementer,reviewer",
+        [
+            ("codex", "codex"),
+            ("claude", "claude"),
+            ("codex", "claude"),
+            ("claude", "codex"),
+        ],
+    )
+    def test_bare_fallback_resolves_committed_selection(
+        self, tmp_path, monkeypatch, implementer, reviewer
+    ):
+        # The bare/missing-config fallback resolves WHATEVER the committed file names,
+        # and every derived field follows it — no static DEFAULT provider leaks.
+        self._clear_role_env(monkeypatch)
+        self._point_seam_at(monkeypatch, tmp_path, implementer, reviewer)
+        config = merge_executor_config_overrides({})
+        assert config["role_agents"] == {
+            "implementer": implementer,
+            "reviewer": reviewer,
+        }
+        for key in IMPLEMENTER_BACKEND_KEYS:
+            assert config["backends"][key] == implementer
+        for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+            assert config["backends"][key] == reviewer
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert config["bridge_reviewers"][key] == reviewer
+        assert config["backends"]["commit_executor"] is None
+
+    def test_bare_fallback_follows_committed_not_static_default_literal(
+        self, tmp_path, monkeypatch
+    ):
+        # Point the committed file at a selection that DIFFERS from the static
+        # DEFAULT_EXECUTOR_CONFIG['role_agents'] literal in every role; the fallback
+        # must follow the FILE, proving it is not reading the hardcoded literal.
+        self._clear_role_env(monkeypatch)
+        default_ra = _load_default_executor_config_role_agents()
+        flipped = {
+            "implementer": "codex" if default_ra.get("implementer") != "codex" else "claude",
+            "reviewer": "codex" if default_ra.get("reviewer") != "codex" else "claude",
+        }
+        self._point_seam_at(
+            monkeypatch, tmp_path, flipped["implementer"], flipped["reviewer"]
+        )
+        config = merge_executor_config_overrides({})
+        assert config["role_agents"] == flipped
+        assert config["role_agents"] != default_ra  # not the static literal
+
+    def test_truly_absent_committed_config_uses_default_literal(
+        self, tmp_path, monkeypatch
+    ):
+        # Last resort: when the committed file is truly absent/unreadable, the
+        # hardcoded DEFAULT_EXECUTOR_CONFIG['role_agents'] literal is used.
+        self._clear_role_env(monkeypatch)
+        missing = tmp_path / "nonexistent.json"
+        monkeypatch.setattr(
+            executor_common, "_committed_executor_config_path", lambda: missing
+        )
+        config = merge_executor_config_overrides({})
+        assert config["role_agents"] == _load_default_executor_config_role_agents()
+
+    def test_explicit_role_agents_override_is_authoritative_over_fallback(
+        self, tmp_path, monkeypatch
+    ):
+        # An override that DOES pin role_agents wins over the committed-file fallback:
+        # the committed file names codex/codex but the explicit override (claude/claude)
+        # is what materializes, so the fallback never overrides an explicit selection.
+        self._clear_role_env(monkeypatch)
+        self._point_seam_at(monkeypatch, tmp_path, "codex", "codex")
+        config = merge_executor_config_overrides(
+            {"role_agents": {"implementer": "claude", "reviewer": "claude"}}
+        )
+        assert config["role_agents"] == {"implementer": "claude", "reviewer": "claude"}
         for key in REVIEWER_BRIDGE_KEYS:
             assert config["bridge_reviewers"][key] == "claude"
