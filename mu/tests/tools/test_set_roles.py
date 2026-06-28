@@ -15,6 +15,7 @@ import pytest
 from tests.repo_root import REPO_ROOT
 
 sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "executors"))
+import executor_common  # noqa: E402  (path insert must precede import)
 import set_roles  # noqa: E402  (path insert must precede import)
 
 
@@ -196,3 +197,45 @@ def test_write_is_atomic_failed_replace_preserves_original(tmp_path, monkeypatch
     # No truncated temp residue left alongside the authoritative config.
     leftovers = sorted(p.name for p in cfg.parent.iterdir() if p.name != cfg.name)
     assert leftovers == [], f"atomic write left temp residue: {leftovers}"
+
+
+def test_role_labels_follow_live_roles_after_switch(tmp_path, monkeypatch):
+    """tmux implementer/reviewer pane labels follow a set_roles switch (item 4).
+
+    The pane role labels (_pane_processes.sh / _pane_timeline.sh load_role_agent_labels)
+    and the dashboards source their implementer/reviewer display + status names from
+    executor_common.configured_role_agents, which reads the LIVE role_agents. A
+    set_roles switch must therefore move those labels with no separate label edit.
+    Prove the label SOURCE follows the switch in BOTH directions -- it is not a
+    one-way latch (the recurring stale-provider risk this wave generalizes).
+    """
+    _clear_role_env(monkeypatch)
+    _seed_config(tmp_path)  # starts claude/claude
+
+    claude_labels = executor_common.configured_role_agents(tmp_path)
+    assert claude_labels["implementer"]["agent"] == "claude"
+    assert claude_labels["reviewer"]["agent"] == "claude"
+
+    set_roles.main(
+        ["--implementer", "codex", "--reviewer", "codex", "--repo-root", str(tmp_path)]
+    )
+    codex_labels = executor_common.configured_role_agents(tmp_path)
+    assert codex_labels["implementer"]["agent"] == "codex"
+    assert codex_labels["reviewer"]["agent"] == "codex"
+    # The rendered label text (display + short status) moves with the switch.
+    for role in ("implementer", "reviewer"):
+        assert codex_labels[role]["display_name"] != claude_labels[role]["display_name"]
+        assert codex_labels[role]["status_name"] != claude_labels[role]["status_name"]
+
+    # Follows BACK to claude: the label source is live, not a one-way latch.
+    set_roles.main(
+        ["--implementer", "claude", "--reviewer", "claude", "--repo-root", str(tmp_path)]
+    )
+    back = executor_common.configured_role_agents(tmp_path)
+    assert back["implementer"]["agent"] == "claude"
+    assert back["reviewer"]["agent"] == "claude"
+    assert (
+        back["implementer"]["display_name"]
+        == claude_labels["implementer"]["display_name"]
+    )
+    assert back["reviewer"]["status_name"] == claude_labels["reviewer"]["status_name"]

@@ -457,6 +457,43 @@ class TestFallbackMaterializesRolesNoDrift:
         for key in REVIEWER_BRIDGE_KEYS:
             assert config["bridge_reviewers"][key] == "claude"
 
+    def test_codex_override_merge_materializes_roles_both_directions(self):
+        # The codex direction of the same fallback (the claude direction is covered
+        # above). A role-only override flipping BOTH roles to codex must derive EVERY
+        # implementer/reviewer backend + bridge_reviewer to codex -- no claude DEFAULT
+        # literal survives the merge -- with commit_executor still None. This is the
+        # "both directions" half item 2 adds so a future claude->codex switch can
+        # never leave a stale provider in the bare/missing-config fallback.
+        config = merge_executor_config_overrides(
+            {"role_agents": {"implementer": "codex", "reviewer": "codex"}}
+        )
+        assert config["role_agents"] == {"implementer": "codex", "reviewer": "codex"}
+        self._assert_role_fixed_point(config)
+        for key in IMPLEMENTER_BACKEND_KEYS:
+            assert config["backends"][key] == "codex"
+        for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+            assert config["backends"][key] == "codex"
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert config["bridge_reviewers"][key] == "codex"
+
+    def test_mixed_override_merge_materializes_split_roles(self):
+        # Implementer and reviewer derive INDEPENDENTLY in the fallback: an
+        # implementer=codex / reviewer=claude split lands codex on the
+        # implementer-backend keys and claude on every reviewer-side key (backends +
+        # bridge_reviewers), with commit_executor still None. Guards against a future
+        # single-provider shortcut that would collapse the split.
+        config = merge_executor_config_overrides(
+            {"role_agents": {"implementer": "codex", "reviewer": "claude"}}
+        )
+        assert config["role_agents"] == {"implementer": "codex", "reviewer": "claude"}
+        self._assert_role_fixed_point(config)
+        for key in IMPLEMENTER_BACKEND_KEYS:
+            assert config["backends"][key] == "codex"
+        for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+            assert config["backends"][key] == "claude"
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert config["bridge_reviewers"][key] == "claude"
+
     def test_dispatch_load_config_missing_fallback_materializes_roles(self, tmp_path):
         self._assert_role_fixed_point(dispatch.load_config(tmp_path / "nonexistent.json"))
 
