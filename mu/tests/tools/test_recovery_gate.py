@@ -7202,6 +7202,73 @@ class TestRecoveryPagerEvents:
         assert restored["current_iteration"] == 0
         assert restored["detail"] == ""
 
+    def test_emit_recovery_event_empty_wave_id_does_not_raise_with_pager_on(self, tmp_path):
+        """Regression: with the pager defaulting ON (factory default now matches prod),
+        ``_emit_recovery_event`` must tolerate a recovery status that carries an
+        empty/missing ``wave_id``. ``normalize_wave_id("") -> "wave-unknown"`` at the
+        emit site keeps recovery emission resilient; before that hardening this raised
+        ``PipelineAgentPagerError("wave_id is required for pager events")``.
+        """
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        # Pin the pager ON for this repo so the emit path runs the wave_id-required
+        # validation. (A configless repo would also default ON now, but pinning it keeps
+        # the no-raise assertion below non-vacuous even if the factory default changes.)
+        (cfg_dir / "executor_config.json").write_text(
+            json.dumps({"pipeline_agent_pager": {"enabled": True, "route": "notify-only"}})
+        )
+        (tmp_path / ".agent_bus" / "observability").mkdir(parents=True)
+
+        # Non-vacuous guard: with the pager ON, a RAW empty wave_id MUST raise. This proves
+        # (a) the pager is genuinely enabled here (no disabled short-circuit) and therefore
+        # (b) it is normalize_wave_id -- not a disabled pager -- that makes the recovery
+        # emit below safe.
+        with pytest.raises(RuntimeError, match="wave_id is required"):
+            rg_mod.emit_pipeline_agent_event(
+                tmp_path,
+                # bus_dir=None (the public default) resolves to the repo's default
+                # ``.agent_bus`` -- identical to what ``_emit_recovery_event`` resolves
+                # to below, where ``_active_bus_dir()`` reads an unset ContextVar (None)
+                # in this test. Using the public default keeps the guard faithful to the
+                # contract path without a test reaching into a private module helper.
+                bus_dir=None,
+                event_type="recovery_started",
+                wave_id="",
+                task_id="[PIPELINE-RECOVERY]",
+                plan_path="reports/control_plane/plan.md",
+                phase="recovery_gate",
+                state="started",
+                transition_key="recovery:raw-empty-wave:started",
+                summary="raw empty wave_id",
+                reason="raw empty wave_id",
+            )
+
+        # Contract: a recovery status with NO wave_id flows through the emit site, which
+        # normalizes to "wave-unknown" and therefore does NOT raise.
+        rg_mod._emit_recovery_event(  # ANTICHEAT_OK: empty-wave_id recovery emit no-raise edge
+            tmp_path,
+            status={
+                "task_id": "[PIPELINE-RECOVERY]",
+                "plan_path": "reports/control_plane/plan.md",
+            },
+            event_type="recovery_started",
+            state="started",
+            transition_key="recovery:empty-wave:started",
+            summary="recovery started without a wave_id",
+            reason="empty/missing wave_id must not break recovery emission",
+        )
+
+        # The contract emit (unlike the guard, which raises before any state write) must
+        # have run the full enabled dispatch path and persisted pager state -- proof the
+        # no-raise was the normalized happy path, not a disabled-pager no-op.
+        state_path = (
+            tmp_path / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
+        )
+        assert state_path.exists(), (
+            "pager-ON recovery emit must persist pager state (the empty-wave_id emit "
+            "ran the enabled dispatch, not a disabled short-circuit)"
+        )
+
     def test_update_recovery_status_noops_after_terminal_finish(self, tmp_path):
         initial = {
             "active": False,
