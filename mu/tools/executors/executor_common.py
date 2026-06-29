@@ -451,14 +451,25 @@ def merge_executor_config_overrides(overrides: dict[str, Any]) -> dict[str, Any]
     ``DEFAULT_EXECUTOR_CONFIG['role_agents']`` literal. ``set_roles.py`` writes that
     committed file, so the fallback can never drift from a switch and no manual DEFAULT
     edit is ever required; the literal is used only when the committed file is truly
-    absent. An override that DOES carry ``role_agents`` is authoritative and is left
-    untouched (its explicit selection wins through :func:`_materialize_role_agents`).
+    absent.
+
+    On that same bare/missing-config branch, :func:`_import_menu_only_agent_defaults`
+    additively copies the ``bridge_agent_defaults`` menu entry of any SELECTED agent that
+    is declared in the committed menu but ABSENT from ``DEFAULT_EXECUTOR_CONFIG`` (a
+    menu-only provider, e.g. a ``fable`` the founder added to the menu), so the
+    materialized config keeps that agent's model / effort / display_name / adapter
+    settings instead of routing backends/bridge_reviewers to an agent with no resolvable
+    defs. Agents already supplied by ``DEFAULT_EXECUTOR_CONFIG`` (claude/codex) are never
+    overwritten. An override that DOES carry ``role_agents`` is authoritative and is left
+    untouched (its explicit selection wins through :func:`_materialize_role_agents`, and
+    its committed menu already deep-merges in, so no import is needed there).
     """
     if not isinstance(overrides, dict):
         raise ExecutorCommonError("executor config overrides must be a JSON object")
     merged = _deep_merge(DEFAULT_EXECUTOR_CONFIG, overrides)
     if "role_agents" not in overrides:
         merged["role_agents"] = _fallback_role_agents()
+        _import_menu_only_agent_defaults(merged)
     return _materialize_role_agents(merged, raw_overrides=overrides, use_env_overrides=False)
 
 
@@ -672,6 +683,82 @@ def _fallback_role_agents() -> dict[str, str]:
         role: resolve_committed_role_agent(committed, role)
         for role in ("implementer", "reviewer")
     }
+
+
+def _committed_bridge_agent_defaults() -> dict[str, dict[str, Any]]:
+    """Return the committed ``executor_config.json``'s ``bridge_agent_defaults`` menu.
+
+    Reads the SAME committed-file seam (:func:`_committed_executor_config_path`) that
+    :func:`_fallback_role_agents` uses for the bare/missing-config role selection, so the
+    menu-def import on that fallback branch resolves the agent MENU from exactly the file
+    ``set_roles.py`` writes — no second file path is introduced. Returns ``{}`` when the
+    committed file is absent, unreadable, not a JSON object, or carries no
+    ``bridge_agent_defaults`` object; only ``str`` -> ``dict`` menu entries are retained.
+    """
+    try:
+        loaded = json.loads(_committed_executor_config_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    defaults = loaded.get("bridge_agent_defaults")
+    if not isinstance(defaults, dict):
+        return {}
+    return {
+        name: entry
+        for name, entry in defaults.items()
+        if isinstance(name, str) and isinstance(entry, dict)
+    }
+
+
+def _import_menu_only_agent_defaults(merged: dict[str, Any]) -> None:
+    """Import committed MENU-ONLY agents' ``bridge_agent_defaults`` into the bare fallback.
+
+    On the bare/missing-config fallback branch of :func:`merge_executor_config_overrides`
+    the role selection is imported from the committed ``executor_config.json`` (via
+    :func:`_fallback_role_agents`), but the static ``DEFAULT_EXECUTOR_CONFIG`` supplies only
+    the claude/codex ``bridge_agent_defaults`` menu. If the committed file SELECTS a
+    MENU-ONLY agent — one declared in the committed ``bridge_agent_defaults`` menu but
+    ABSENT from ``DEFAULT_EXECUTOR_CONFIG['bridge_agent_defaults']`` (e.g. a provider the
+    founder added to the menu) — its menu definition (model / effort / display_name /
+    adapter settings) would otherwise be lost, leaving the routed backends/bridge_reviewers
+    pointing at an agent with no resolvable defs.
+
+    For every agent NAMED by the resolved ``role_agents`` (the same names the derived
+    ``backends`` / ``bridge_reviewers`` carry) that is present in the committed menu but
+    ABSENT from ``DEFAULT_EXECUTOR_CONFIG``, copy its committed ``bridge_agent_defaults``
+    entry into the materialized config's menu. Additive only: an agent already supplied by
+    ``DEFAULT_EXECUTOR_CONFIG`` (claude/codex) is skipped and never overwritten, and an
+    entry already present in the materialized menu is left intact. Polymorphic — no provider
+    name is hardcoded; the copy keys off "in the committed menu, not in DEFAULT". Mutates
+    *merged* in place; role resolution and the derived backends are untouched (only the
+    ``bridge_agent_defaults`` menu grows).
+    """
+    role_agents = merged.get("role_agents")
+    if not isinstance(role_agents, dict):
+        return
+    referenced = {
+        name
+        for name in (_nonempty_str(value) for value in role_agents.values())
+        if name is not None
+    }
+    default_defaults = DEFAULT_EXECUTOR_CONFIG.get("bridge_agent_defaults", {})
+    default_names = set(default_defaults) if isinstance(default_defaults, dict) else set()
+    menu_only = {name for name in referenced if name not in default_names}
+    if not menu_only:
+        return
+    committed_defaults = _committed_bridge_agent_defaults()
+    if not committed_defaults:
+        return
+    materialized_defaults = merged.setdefault("bridge_agent_defaults", {})
+    if not isinstance(materialized_defaults, dict):
+        return
+    for name in menu_only:
+        if name in materialized_defaults:
+            continue
+        committed_entry = committed_defaults.get(name)
+        if isinstance(committed_entry, dict):
+            materialized_defaults[name] = copy.deepcopy(committed_entry)
 
 
 def apply_role_agents(
