@@ -127,7 +127,16 @@ def _observability_dir(repo_root: Path, bus_dir: str) -> Path:
 def _resume_env() -> dict[str, str]:
     # Preserve the live shell environment so the keepalive resume inherits the
     # same auth/session context and any repo-local RCX state overlay in use.
-    return os.environ.copy()
+    env = os.environ.copy()
+    # Force the dedicated-monitor marker so the resumed monitor session's
+    # session-start hook takes its monitor branch -- writing ONLY
+    # claude_monitor_session_id and NEVER clobbering orchestrator_session_id. A
+    # missing marker is the recurring self-collision that SELF-PAUSES the keepalive
+    # (the resumed session writes orchestrator_session_id == claude_monitor_session_id,
+    # tripping the equal-to-live guard). Additive: no inherited auth/session/overlay
+    # key is removed or rewritten.
+    env["RCX_CLAUDE_MONITOR"] = "1"
+    return env
 
 
 def _read_monitor_session_id(repo_root: Path, bus_dir: str) -> str | None:
