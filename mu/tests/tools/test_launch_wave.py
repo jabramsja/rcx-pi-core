@@ -1054,6 +1054,106 @@ def test_launch_max_turns_does_not_mutate_executor_config(wave_repo):
 
 
 # --------------------------------------------------------------------------- #
+# L4 indicator pre-stage (kills the agent_review_crash indicator-absent strand) #
+# --------------------------------------------------------------------------- #
+
+_PRESTAGE_WARNING = "L4 indicator pre-stage skipped"
+
+
+def _staged_paths(repo):
+    """Return the list of paths currently staged in the index (vs HEAD)."""
+    out = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=str(repo),
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    return out.split()
+
+
+def _write_indicator_generator(repo):
+    """Write a generator the wave_repo can actually run: it creates the artifact
+    at the output path passed as argv[1] (stands in for the canonical collector,
+    which is absent from the tmp repo)."""
+    gen = repo / "gen_indicator.py"
+    gen.write_text(
+        "import json, os, sys\n"
+        "out = sys.argv[1]\n"
+        "os.makedirs(os.path.dirname(out) or '.', exist_ok=True)\n"
+        "with open(out, 'w', encoding='utf-8') as fh:\n"
+        "    json.dump({'wave_id': 'demo', 'indicator': True}, fh)\n",
+        encoding="utf-8",
+    )
+    return gen
+
+
+def test_prestage_l4_indicator_collects_and_stages_artifact(wave_repo, capsys):
+    """(a) A config WITH an indicator command -> after setup the indicator artifact
+    exists on disk AND is staged in the index, so the L4 ``--staged`` contract
+    finds it PRESENT at Phase-B review (instead of stranding on indicator-absent).
+    """
+    _write_indicator_generator(wave_repo)
+    artifact_ref = "reports/l4_wave_indicators/demo.json"
+    config = make_config(
+        indicator_artifact_ref=artifact_ref,
+        indicator_collection_command=f"python3 gen_indicator.py {artifact_ref}",
+    )
+
+    lw.run_wave_setup(wave_repo, config)
+
+    # Exists on disk AND staged in the git index.
+    assert (wave_repo / artifact_ref).is_file()
+    assert artifact_ref in _staged_paths(wave_repo)
+    # Success path: no fail-open warning was emitted.
+    assert _PRESTAGE_WARNING not in capsys.readouterr().err
+
+
+def test_prestage_l4_indicator_fail_open_on_nonzero_command(wave_repo, capsys):
+    """(b) A config whose indicator command exits non-zero -> setup still SUCCEEDS
+    (fail-open): the whole launch completes, a warning is logged, and the launch is
+    NOT aborted. commit_executor Step 5 remains the commit-time authority.
+    """
+    artifact_ref = "reports/l4_wave_indicators/demo.json"
+    config = make_config(
+        indicator_artifact_ref=artifact_ref,
+        # A command that always fails -> exercises the fail-open path.
+        indicator_collection_command='python3 -c "import sys; sys.exit(3)"',
+    )
+
+    # MUST NOT raise: a failing pre-stage can never abort a wave launch.
+    result = lw.run_wave_setup(wave_repo, config)
+    assert result.precondition_ok is True
+    assert result.guards_ok is True
+    assert result.launch["launched"] is False
+
+    # Fail-open warning emitted, and nothing staged (the command failed).
+    assert _PRESTAGE_WARNING in capsys.readouterr().err
+    assert artifact_ref not in _staged_paths(wave_repo)
+
+
+def test_prestage_l4_indicator_noop_when_indicator_fields_empty(wave_repo, capsys):
+    """(c) A config with empty indicator fields -> a silent no-op: no command is
+    run, no warning is logged, and nothing is staged.
+
+    Tested against the helper directly because the full run_wave_setup chain
+    requires non-empty indicator fields at the tracker-note step; the no-op is a
+    property of the helper itself.
+    """
+    config = make_config(
+        indicator_artifact_ref="",
+        indicator_collection_command="",
+    )
+
+    lw._prestage_l4_indicator(wave_repo, config)  # ANTICHEAT_OK: unit-tests the launcher's own private helper's declared no-op contract (empty indicator fields), mirroring this module's existing direct-call precedent
+
+    # Silent no-op: no warning, nothing staged, no indicator dir created.
+    assert capsys.readouterr().err == ""
+    assert _staged_paths(wave_repo) == []
+    assert not (wave_repo / "reports" / "l4_wave_indicators").exists()
+
+
+# --------------------------------------------------------------------------- #
 # Optional dispatcher launch                                                  #
 # --------------------------------------------------------------------------- #
 

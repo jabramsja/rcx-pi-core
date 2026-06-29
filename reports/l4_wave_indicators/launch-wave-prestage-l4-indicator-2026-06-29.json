@@ -1,0 +1,24 @@
+{
+  "wave_id": "launch-wave-prestage-l4-indicator-2026-06-29",
+  "repeat_run_speedup_ratio": 1.398846,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.256367,
+  "repeat_run_raw_seconds": [
+    0.358618,
+    0.256367
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.358618
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.614985
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-06-29T04:58:12Z",
+  "collector_version": "2.2.0"
+}
