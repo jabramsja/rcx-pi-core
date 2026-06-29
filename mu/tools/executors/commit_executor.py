@@ -4676,10 +4676,76 @@ def _sync_primary_worktree_to_base(
                 timeout=30,
             )
             if ancestor_proc.returncode != 0:
-                return _skip(
+                skip_reason = (
                     f"primary worktree HEAD is not an ancestor of {remote_ref} "
                     "(divergent local commits; founder lands those via a PR)"
                 )
+                # never-behind-dev signal: GUARD-C means the founder's PRIMARY
+                # checkout carries divergent local commits that NO fast-forward
+                # can land. When it is ALSO genuinely behind origin/{base_branch}
+                # (origin holds commits HEAD lacks), this is the real
+                # invisible-drift path: the primary silently rots behind base
+                # until a PR lands those commits. Make it VISIBLE -- write an
+                # observability signal file and emit one loud, greppable WARNING
+                # -- then STILL skip. The divergent local commits and ALL WIP are
+                # left untouched (no merge, rebase, reset, checkout, or stash).
+                # Purely-ahead primaries (behind_count == 0) are not drift and
+                # stay silent. The signal write is best-effort/fail-open: a
+                # failure there must never raise into the post-merge pipeline.
+                behind_proc = _run(
+                    ["git", "rev-list", "--count", f"HEAD..{remote_ref}"],
+                    cwd=primary,
+                    check=False,
+                    timeout=30,
+                )
+                behind_count = 0
+                if behind_proc.returncode == 0:
+                    try:
+                        behind_count = int((behind_proc.stdout or "").strip() or "0")
+                    except ValueError:
+                        behind_count = 0
+                if behind_count > 0:
+                    try:
+                        signal_path = agent_bus_path(
+                            repo_root,
+                            _active_bus_dir(),
+                            "observability",
+                            "behind_dev.json",
+                        )
+                        signal_path.parent.mkdir(parents=True, exist_ok=True)
+                        signal_path.write_text(
+                            json.dumps(
+                                {
+                                    "primary_path": str(primary),
+                                    "base_branch": base_branch,
+                                    "primary_branch": primary_branch,
+                                    "behind_count": behind_count,
+                                    "skip_reason": skip_reason,
+                                    "timestamp": datetime.now(
+                                        timezone.utc
+                                    ).isoformat(),
+                                },
+                                indent=2,
+                            )
+                            + "\n",
+                            encoding="utf-8",
+                        )
+                    except Exception as signal_exc:  # noqa: BLE001 - fail-open
+                        try:
+                            log(
+                                "Step 15b: behind_dev signal write failed "
+                                f"(non-fatal): {signal_exc}"
+                            )
+                        except Exception:
+                            pass
+                    log(
+                        f"WARNING: behind_dev -- primary worktree {primary} on "
+                        f"'{primary_branch}' is {behind_count} commit(s) behind "
+                        f"{remote_ref} with divergent local commits; signalled "
+                        "and skipped (local commits and WIP preserved, not "
+                        "clobbered)"
+                    )
+                return _skip(skip_reason)
 
             if old_sha and new_sha and old_sha == new_sha:
                 outcome["primary"] = str(primary)

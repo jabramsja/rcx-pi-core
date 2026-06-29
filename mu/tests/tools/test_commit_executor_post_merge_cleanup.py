@@ -1492,6 +1492,74 @@ def test_sync_primary_skips_divergent_local_commit(tmp_path):
     assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == divergent_head
 
 
+def test_sync_primary_signals_behind_dev_only_on_divergent_drift(tmp_path):
+    """never-behind-dev (wave never-behind-dev-signal-2026-06-28): the GUARD-C
+    divergent-commits skip is the real INVISIBLE-drift path -- a ff cannot land
+    it, so the founder's PRIMARY checkout silently rots behind origin/dev. When
+    the primary is genuinely BEHIND (origin holds commits HEAD lacks) AND has
+    divergent local commits, the helper now writes a visible
+    `.agent_bus/observability/behind_dev.json` signal + emits one loud, greppable
+    `behind_dev` WARNING, then STILL skips (divergent commits + WIP never
+    clobbered). A clean fast-forward (behind + ANCESTOR) syncs and emits NO
+    signal. Both legs share one primary by stacking commits.
+    """
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-behind-signal"], cwd=primary, env=env)
+    signal_path = primary / ".agent_bus" / "observability" / "behind_dev.json"
+
+    # ── Negative leg: behind + ANCESTOR (a real fast-forward) → sync, NO signal.
+    # Primary sits at C0 (a pure ancestor); origin/dev advances to C1.
+    c1_sha = _advance_origin_dev(upstream, env)
+    ff_logs: list[str] = []
+    ff_outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=ff_logs.append,
+    )
+    assert ff_outcome["synced"] is True, ff_outcome
+    assert ff_outcome["skipped"] is False, ff_outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    assert not signal_path.exists(), "ff-sync must not write a behind_dev signal"
+    assert not any("behind_dev" in ln for ln in ff_logs), ff_logs
+
+    # ── Positive leg: behind + DIVERGENT local commit (GUARD-C) → skip + signal.
+    # Stack a local-only commit (never pushed) on the just-ff'd primary, then
+    # advance origin/dev again so the primary is divergent AND behind.
+    (primary / "local.txt").write_text("divergent local work\n")
+    _git(["add", "local.txt"], cwd=primary, env=env)
+    _git(["commit", "-m", "local-only"], cwd=primary, env=env)
+    divergent_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    c2_sha = _advance_origin_dev(upstream, env, content="seed-c2")
+    assert divergent_head != c2_sha
+
+    logs: list[str] = []
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=logs.append,
+    )
+
+    # (a) GUARD-C still SKIPS; divergent local commit preserved at HEAD (no
+    # clobber, no merge, no rebase, no reset).
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "ancestor" in (outcome["reason"] or ""), outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == divergent_head
+    # (b) behind_dev.json written into the observability dir with the expected
+    # fields and behind_count > 0.
+    assert signal_path.exists(), outcome
+    signal = json.loads(signal_path.read_text(encoding="utf-8"))
+    assert signal["behind_count"] >= 1, signal
+    assert Path(signal["primary_path"]).resolve() == primary.resolve(), signal
+    assert signal["base_branch"] == "dev", signal
+    assert signal["primary_branch"] == "jabramsja/feat-behind-signal", signal
+    assert signal["skip_reason"], signal
+    assert signal["timestamp"], signal
+    # (c) exactly one loud single-line WARNING carrying the token behind_dev,
+    # naming the primary path and the behind-count.
+    behind_lines = [ln for ln in logs if "behind_dev" in ln]
+    assert len(behind_lines) == 1, logs
+    assert "WARNING" in behind_lines[0], behind_lines
+    assert signal["primary_path"] in behind_lines[0], behind_lines
+    assert str(signal["behind_count"]) in behind_lines[0], behind_lines
+
+
 def test_sync_primary_skips_primary_on_base(tmp_path):
     """(d) A PRIMARY already ON base_branch is SKIPPED (GUARD-A) — the helper
     never touches a base-branch checkout."""
