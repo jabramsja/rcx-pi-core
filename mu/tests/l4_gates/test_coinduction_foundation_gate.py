@@ -10,6 +10,9 @@ obligations, and explicit about proof limits.
 from __future__ import annotations
 
 import json
+import re
+
+import pytest
 
 from tests.repo_root import REPO_ROOT
 
@@ -39,6 +42,47 @@ def _spec_text() -> str:
 
 def _normalized_spec_text() -> str:
     return " ".join(_spec_text().split())
+
+
+# Active structural-program list authority in TASKS.md. The program is a
+# numbered list of bolded entries ("N. **Item** ...") terminated by the
+# "**DROPPED (do not pursue):**" marker line. A bolded entry PERSISTS through
+# the queued -> in-flight -> landed transition (siblings already read
+# "**Recursive ordinals** ... LANDED" and "**W-types / inductive types** ...
+# LANDED"), so a membership check on the bolded entry is robust to queue-truth
+# rephrasing -- unlike the old narrative position sentence that pinned
+# Coinduction's exact queue slot, which any rephrase of that single TASKS.md
+# sentence would break, stranding waves.
+_PROGRAM_ENTRY_RE = re.compile(r"^[ \t]*\d+\.[ \t]+\*\*", re.MULTILINE)
+_DROPPED_MARKER = "**DROPPED (do not pursue):**"
+
+
+def _active_program_region(tasks_text: str) -> str:
+    """Return the active structural-program slice of TASKS.md.
+
+    The slice runs from the first numbered bolded program entry
+    (``N. **Item** ...``) up to, but excluding, the
+    ``**DROPPED (do not pursue):**`` terminator line.
+
+    Fails closed on purpose: if the program list or its terminator cannot be
+    located, this raises ``AssertionError`` instead of returning the whole file.
+    A whole-file fallback would let a historical/frozen tracker-note mention
+    (lowercase 'coinduction' at the bottom of TASKS.md) satisfy a membership
+    check even after Coinduction was dropped from the active program, making the
+    gate vacuous. The bounded region keeps the gate protective.
+    """
+    start = _PROGRAM_ENTRY_RE.search(tasks_text)
+    assert start is not None, (
+        "active structural-program list (N. **Item** ...) not found in TASKS.md"
+    )
+    end = tasks_text.find(_DROPPED_MARKER, start.start())
+    assert end != -1, (
+        "active-program terminator '**DROPPED (do not pursue):**' not found "
+        "after the program list in TASKS.md"
+    )
+    region = tasks_text[start.start():end]
+    assert region.strip(), "active structural-program region is empty"
+    return region
 
 
 def test_coinduction_doc_has_governed_header_and_grounding_gate():
@@ -74,15 +118,64 @@ def test_coinduction_doc_is_discoverable_from_wave_authority():
     assert DOCS_TEST_PATH in tasks_text
     assert WAVE_ID in tasks_text
     assert "Class: L4_ENABLER" in tasks_text
-    assert "Coinduction is the next active structural item" in tasks_text
-    assert "Fixpoint follows" in tasks_text
-    assert "Optimization is LAST" in tasks_text
+    # Verify Coinduction/Fixpoint/Optimization are durable bolded entries in the
+    # bounded active-program region, rather than pinning the brittle co-located
+    # queue-position sentence (which named Coinduction's exact slot, Fixpoint's
+    # order, and Optimization as last). The region bound keeps the check
+    # non-vacuous: a lowercase mention in a historical/frozen tracker note below
+    # the program list cannot satisfy it (see the negative-case test below).
+    program_region = _active_program_region(tasks_text)
+    assert "**Coinduction**" in program_region  # QUEUE_PHRASE_ROBUST
+    assert "**Fixpoint**" in program_region  # QUEUE_PHRASE_ROBUST
+    assert "**Optimization**" in program_region  # QUEUE_PHRASE_ROBUST
+    assert any(  # QUEUE_PHRASE_ROBUST
+        "**Optimization**" in entry
+        and ("LAST" in entry or "out of scope" in entry.lower())
+        for entry in program_region.splitlines()
+    ), "Optimization program entry must remain annotated LAST / out of scope"
     assert "mu/docs/core/Coinduction.v0.md" in packet_text
     assert TEST_PATH in packet_text
     assert DOCS_TEST_PATH in packet_text
     assert "Coinduction.v0.md exists as a bounded design/spec" in packet_text
     assert "Optimization remains out of scope and LAST in TASKS.md." in packet_text
     assert "First Foundation Gate Criteria" in text
+
+
+def test_coinduction_gate_fails_when_dropped_from_active_program():
+    """Non-vacuity + fail-closed lock for the QUEUE_PHRASE_ROBUST check.
+
+    Dropping the bolded ``**Coinduction**`` entry from the active-program region
+    must make the membership assert fail, even though lowercase 'coinduction'
+    mentions survive elsewhere in TASKS.md (the WAVE_ID, packet refs, narrative
+    sentences, and historical tracker notes). This proves the check is
+    region-bounded rather than a whole-file token scan, and that the region
+    helper fails closed when its boundaries cannot be located -- so the gate can
+    never silently degrade into a vacuous substring test.
+    """
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+
+    # Sanity: the live file has the durable bolded entry inside the region.
+    region = _active_program_region(tasks_text)
+    assert "**Coinduction**" in region  # QUEUE_PHRASE_ROBUST
+
+    # Drop the bolded entry from the active-program region ONLY. Lowercase
+    # 'coinduction' mentions elsewhere in TASKS.md are intentionally preserved.
+    mutated = tasks_text.replace(
+        region, region.replace("**Coinduction**", "**(dropped)**")
+    )
+    assert "coinduction" in mutated.lower()  # a bare token scan would still pass
+
+    mutated_region = _active_program_region(mutated)
+    with pytest.raises(AssertionError):  # QUEUE_PHRASE_ROBUST
+        assert "**Coinduction**" in mutated_region
+
+    # The region helper itself fails closed when the program list or the
+    # "**DROPPED (do not pursue):**" terminator cannot be located, so the check
+    # never falls back to scanning the whole file.
+    with pytest.raises(AssertionError):
+        _active_program_region(mutated.replace(_DROPPED_MARKER, "(no terminator)"))
+    with pytest.raises(AssertionError):
+        _active_program_region("no numbered bolded program entries present")
 
 
 def test_coinduction_spec_defines_structural_representation_boundary():
