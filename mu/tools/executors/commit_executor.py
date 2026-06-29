@@ -6115,6 +6115,65 @@ def _discard_worktree_path(
     )
 
 
+def _discard_failed_adapter_partial_changes(
+    repo_root: Path,
+    *,
+    log: Any,
+) -> list[str]:
+    """Discard partial index/worktree changes left by a failed remediation adapter.
+
+    The bot-remediation adapter can raise (e.g. a timeout) AFTER it has already
+    staged or modified files. The shared auto-defer helper
+    (:func:`_classify_and_auto_defer_unremediated_bot_findings`) runs
+    ``git commit --amend`` + force-push in its deferrable branch, which would
+    silently fold any such partial edits into the commit. The no-change path
+    reaches that helper only after ``git status`` proves the worktree clean; this
+    restores the SAME precondition on the adapter-error/timeout path.
+
+    The index is reset to HEAD so the helper's ``--amend`` folds in ONLY the
+    deferred report it stages itself, then non-transient worktree residue is
+    discarded (tracked files restored, untracked files removed). Transient bus
+    runtime paths are left on disk so the pipeline's runtime state survives.
+    Returns the discarded non-transient paths (for logging/tests).
+    """
+    # Unstage everything: a staged partial edit would otherwise be amended.
+    _run(["git", "reset", "-q", "HEAD"], cwd=repo_root, timeout=30, check=False)
+    status_out = _run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        timeout=30,
+        check=False,
+    ).stdout
+    discarded: list[str] = []
+    for raw_line in status_out.splitlines():
+        parsed = _parse_porcelain_status_line(raw_line)
+        if parsed is None:
+            continue
+        _status_code, file_path = parsed
+        if _is_transient_status_path(file_path):
+            continue
+        # Restore tracked files; remove untracked residue (incl. unstaged-new).
+        _run(
+            ["git", "checkout", "--", file_path],
+            cwd=repo_root,
+            timeout=10,
+            check=False,
+        )
+        _run(
+            ["git", "clean", "-fd", "--", file_path],
+            cwd=repo_root,
+            timeout=10,
+            check=False,
+        )
+        discarded.append(file_path)
+    if discarded:
+        log(
+            f"Step 15: discarded {len(discarded)} partial path(s) left by a "
+            f"failed remediation adapter before auto-defer: {discarded}"
+        )
+    return discarded
+
+
 def _decode_untrusted_path(path_str: str) -> str | None:
     """Decode percent escapes and normalize compatibility characters."""
     normalized = path_str.replace("\\", "/")
@@ -9053,6 +9112,15 @@ def _attempt_bot_finding_remediation(
             # bot_findings_pending UNCONDITIONALLY, stranding deferrable waves
             # (e.g. the slow bot_remediation=claude adapter hitting the 600s
             # timeout on an all-P2 finding set).
+            #
+            # The adapter may have raised AFTER staging or modifying files (a
+            # timeout mid-edit). The no-change path below only reaches the
+            # shared helper once `git status` proves the worktree clean; the
+            # helper's deferrable branch then runs `git commit --amend` +
+            # force-push. So FIRST discard the adapter's partial work, otherwise
+            # those unreviewed partial edits would be silently folded into the
+            # commit. This restores the helper's clean-worktree precondition.
+            _discard_failed_adapter_partial_changes(repo_root, log=log)
             return _classify_and_auto_defer_unremediated_bot_findings(
                 current_findings,
                 round_num=round_num,
