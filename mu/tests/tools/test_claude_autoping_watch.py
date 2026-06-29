@@ -448,6 +448,21 @@ def test_resume_env_preserves_live_environment(monkeypatch):
     assert env["KEEP_ME"] == "yes"
 
 
+def test_resume_env_sets_claude_monitor_marker(monkeypatch):
+    # Regression for the recurring CLAUDE autoping WATCHER self-collision pause
+    # (2026-06-21 / 2026-06-28): the keepalive resume MUST carry RCX_CLAUDE_MONITOR=1
+    # so the resumed monitor session's session-start hook writes ONLY
+    # claude_monitor_session_id and never clobbers orchestrator_session_id. Deleting
+    # the var first proves _resume_env() SETS it (not merely passes it through), so
+    # this fails against the bare os.environ.copy() it replaces.
+    monkeypatch.delenv("RCX_CLAUDE_MONITOR", raising=False)
+    monkeypatch.setenv("KEEP_ME", "yes")
+    env = watch_mod._resume_env()  # ANTICHEAT_OK: tool unit test
+    assert env["RCX_CLAUDE_MONITOR"] == "1"
+    # Additive: the marker does not displace any inherited environment key.
+    assert env["KEEP_ME"] == "yes"
+
+
 # --- bridge round-2 finding 1: equal-to-live guard before resume ---------------
 # The dedicated monitor id MUST be DISTINCT from the live orchestrator session
 # before the watcher builds a ``claude --resume`` argv -- mirror of the pager's
