@@ -78,11 +78,25 @@ echo ""
 echo "(d) LIVE STATE — read-only verification; nothing is applied or changed:"
 echo "    role_agents / derived backends / bridge_reviewers (set_roles.py --show):"
 if command -v python3 >/dev/null 2>&1; then
-    show_out="$(python3 mu/tools/executors/set_roles.py --show 2>&1)"
-    if [ -n "${show_out}" ]; then
-        printf '%s\n' "${show_out}" | sed 's/^/        /'
+    # Capture --show, but DO NOT let the command substitution swallow a non-zero
+    # exit. Testing the assignment in `if` propagates set_roles.py's status (a plain
+    # `var=$(...)` assignment, unlike `local var=$(...)`, preserves it). A failed
+    # --show — missing/invalid executor_config.json, or a stale CLAUDE_PROJECT_DIR
+    # that left us cd'd outside the repo so the relative script path is absent —
+    # means live state is UNVERIFIED: surface it and FAIL, never print the error
+    # indented as if it were the real live-state block and then exit 0.
+    if show_out="$(python3 mu/tools/executors/set_roles.py --show 2>&1)"; then
+        if [ -n "${show_out}" ]; then
+            printf '%s\n' "${show_out}" | sed 's/^/        /'
+        else
+            echo "        (set_roles.py --show produced no output; inspect mu/tools/executors/executor_config.json)"
+        fi
     else
-        echo "        (set_roles.py --show produced no output; inspect mu/tools/executors/executor_config.json)"
+        show_status=$?
+        echo "        ERROR: set_roles.py --show exited ${show_status}; live role/backend state is UNVERIFIED. Captured output:"
+        printf '%s\n' "${show_out}" | sed 's/^/        | /'
+        echo "ERROR: rcx_session_protocol.sh: live-state verification failed (set_roles.py --show exit ${show_status}); inspect CLAUDE_PROJECT_DIR and mu/tools/executors/executor_config.json." >&2
+        exit 3
     fi
 else
     echo "        (python3 unavailable; inspect mu/tools/executors/executor_config.json)"
