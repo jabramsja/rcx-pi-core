@@ -38,6 +38,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import unicodedata
 import uuid
@@ -4579,6 +4580,123 @@ def _sync_primary_worktree_to_base(
         log(f"Step 15b: primary worktree base-sync skipped: {reason}")
         return outcome
 
+    def _behind_dev_signal_path(primary_path: Path) -> Path:
+        # DURABLE founder-primary bus ONLY: the signal lives under the PRIMARY
+        # worktree's default ``.agent_bus``, NEVER the transient lane bus
+        # (``repo_root`` / the active namespaced bus). ``_run_post_commit_pipeline``
+        # passes the temporary lane as ``repo_root`` and Step 16 can REMOVE it,
+        # which would lose the alert; ``primary`` is the durable target the helper
+        # resolves at the top of this function.
+        return agent_bus_path(primary_path, None, "behind_dev.json")
+
+    def _commit_count(primary_path: Path, rev_range: str) -> int | None:
+        # Count commits in a range (e.g. ``HEAD..origin/dev`` for behind-count).
+        # Best-effort: returns None if git cannot answer; never raises.
+        try:
+            proc = _run(
+                ["git", "rev-list", "--count", rev_range],
+                cwd=primary_path,
+                check=False,
+                timeout=30,
+            )
+        except Exception:  # noqa: BLE001 - count is observability, never fatal
+            return None
+        if proc.returncode != 0:
+            return None
+        try:
+            return int((proc.stdout or "").strip())
+        except (ValueError, AttributeError):
+            return None
+
+    def _write_behind_dev_signal(primary_path: Path, payload: dict[str, Any]) -> None:
+        # Best-effort, fail-open: emitting the durable drift signal must NEVER
+        # change the skip DECISION or raise into the post-merge pipeline.
+        try:
+            signal_path = _behind_dev_signal_path(primary_path)
+            signal_path.parent.mkdir(parents=True, exist_ok=True)
+            serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+            # ATOMIC publish: write to a temp file in the SAME directory, flush
+            # + fsync to durable storage, then os.replace() (an atomic rename
+            # within a single filesystem). A crash mid-write can only leave a
+            # stray *.tmp file behind -- NEVER a torn/half-written
+            # behind_dev.json that a reader would parse as malformed. A plain
+            # write_text() truncates-then-writes in place, so a crash between
+            # those steps would publish a corrupt signal; this closes that gap.
+            tmp_fd, tmp_name = tempfile.mkstemp(
+                dir=str(signal_path.parent),
+                prefix=".behind_dev.",
+                suffix=".tmp",
+            )
+            try:
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_file:
+                    tmp_file.write(serialized)
+                    tmp_file.flush()
+                    os.fsync(tmp_file.fileno())
+                os.replace(tmp_name, signal_path)
+            except BaseException:
+                # Best-effort cleanup so a failed publish never leaves a *.tmp
+                # turd; re-raise into the fail-open handler below (the signal
+                # write must never regress the sync DECISION, but the existing
+                # behind_dev.json -- if any -- stays intact because os.replace
+                # never ran).
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+            log(
+                "Step 15b: WARNING behind_dev — primary worktree "
+                f"{primary_path} is behind {payload.get('base_ref')} by "
+                f"{payload.get('behind_count')} commit(s) with "
+                f"{payload.get('ahead_count')} divergent local commit(s) "
+                f"(reason={payload.get('reason')}); wrote durable behind_dev "
+                f"signal to {signal_path}"
+            )
+        except Exception as exc:  # noqa: BLE001 - signal write must not regress sync
+            try:
+                log(f"Step 15b: behind_dev signal write failed (non-fatal): {exc}")
+            except Exception:
+                pass
+
+    def _clear_behind_dev_signal(primary_path: Path) -> None:
+        # Best-effort clear-on-resync: once the primary is confirmed current with
+        # origin/{base}, remove any stale signal so it does not linger after the
+        # founder lands the divergent commits via a PR. Never raises; never
+        # touches WIP.
+        try:
+            _behind_dev_signal_path(primary_path).unlink(missing_ok=True)
+        except Exception as exc:  # noqa: BLE001 - clear must not regress sync
+            try:
+                log(f"Step 15b: behind_dev signal clear failed (non-fatal): {exc}")
+            except Exception:
+                pass
+
+    def _write_pending_ff_behind_dev_signal(
+        primary_path: Path, base_ref: str, reason: str,
+    ) -> None:
+        # The primary is behind origin/{base} by a REAL pending fast-forward
+        # that THIS run DECLINED -- WIP-isolation failed (overlap-compare or
+        # stash error) or the ff-only merge itself aborted (e.g.
+        # --no-overwrite-ignore protecting ignored founder WIP). Each of these
+        # paths used to SKIP with only a transient log line, silently leaving
+        # the primary behind dev -- the exact hole the never-behind-dev signal
+        # exists to close. HEAD is a PROVEN ancestor of base_ref at every call
+        # site (we passed the GUARD-C ancestor check), so ahead_count is 0 by
+        # construction; emit the SAME durable signal as the divergent-commits
+        # path so NO skip that leaves the primary behind origin/{base} is
+        # silent. Best-effort/fail-open: never changes the skip DECISION.
+        _write_behind_dev_signal(
+            primary_path,
+            {
+                "primary": str(primary_path),
+                "base_ref": base_ref,
+                "behind_count": _commit_count(primary_path, f"HEAD..{base_ref}"),
+                "ahead_count": _commit_count(primary_path, f"{base_ref}..HEAD"),
+                "reason": reason,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
     try:
         # Identify the PRIMARY worktree: the FIRST non-bare `git worktree list`
         # entry. git always lists the main worktree before any linked worktree.
@@ -4676,6 +4794,24 @@ def _sync_primary_worktree_to_base(
                 timeout=30,
             )
             if ancestor_proc.returncode != 0:
+                # GENUINE silent-drift path: the primary carries divergent LOCAL
+                # COMMITS not yet in origin/{base_branch}, so PULL-ONLY correctly
+                # refuses to force-sync -- the founder lands those via a PR. The
+                # skip DECISION below is UNCHANGED, but we ADDITIONALLY emit a
+                # DURABLE behind_dev signal (under the PRIMARY's own .agent_bus,
+                # never the transient lane) so the drift is VISIBLE instead of
+                # accumulating behind only a transient skip log line.
+                _write_behind_dev_signal(
+                    primary,
+                    {
+                        "primary": str(primary),
+                        "base_ref": remote_ref,
+                        "behind_count": _commit_count(primary, f"HEAD..{remote_ref}"),
+                        "ahead_count": _commit_count(primary, f"{remote_ref}..HEAD"),
+                        "reason": "divergent_local_commits",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
                 return _skip(
                     f"primary worktree HEAD is not an ancestor of {remote_ref} "
                     "(divergent local commits; founder lands those via a PR)"
@@ -4685,6 +4821,10 @@ def _sync_primary_worktree_to_base(
                 outcome["primary"] = str(primary)
                 outcome["old_sha"] = old_sha
                 outcome["new_sha"] = new_sha
+                # Clear-on-resync: the primary is already current with
+                # origin/{base_branch}; drop any stale behind_dev signal so it
+                # does not linger after the founder advances the primary to tip.
+                _clear_behind_dev_signal(primary)
                 return _skip(f"primary worktree already current at {new_sha[:8]}")
 
             tracked_wip_paths = sorted(_tracked_dirty_paths(primary))
@@ -4762,6 +4902,12 @@ def _sync_primary_worktree_to_base(
             outcome["primary"] = str(primary)
             outcome["old_sha"] = old_sha
             outcome["new_sha"] = synced_sha
+            # Clear-on-resync (single point): a successful ff confirms the primary
+            # is current with origin/{base_branch}. This covers BOTH the clean ff
+            # AND the tracked-dirty stash/ff/restore path (both reach here), so
+            # drop any stale behind_dev signal. This NEVER touches WIP -- the WIP
+            # restore logic below is unaffected.
+            _clear_behind_dev_signal(primary)
             if stash_record is not None:
                 if overlap_paths:
                     non_overlap_paths = sorted(

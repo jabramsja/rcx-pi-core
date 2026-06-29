@@ -1643,6 +1643,159 @@ def test_sync_primary_skips_when_ff_would_overwrite_ignored_founder_wip(tmp_path
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# never-behind-dev: durable, self-clearing `behind_dev` signal on the ONE
+# genuine silent-drift path (the GUARD-C divergent-local-commits skip). The
+# signal lands on the PRIMARY worktree's durable `.agent_bus` (never the
+# transient lane/`repo_root`) and is cleared whenever the primary is confirmed
+# current with origin/{base}. No sync/skip DECISION changes; WIP is never
+# clobbered. Every test name contains "behind_dev" so the wave evidence_command
+# (`grep -q behind_dev ...`) is satisfied by this module.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_sync_primary_writes_behind_dev_signal_on_divergent_skip(tmp_path):
+    """(a) WRITE: a PRIMARY that is BOTH behind origin/dev AND carrying divergent
+    LOCAL COMMITS hits GUARD-C — the helper still SKIPS (no ff; HEAD + WIP
+    untouched) but ADDITIONALLY writes a durable `behind_dev.json` under the
+    PRIMARY worktree's `.agent_bus` (NOT the transient lane/`repo_root`), with
+    the documented drift fields, and logs a WARNING carrying the literal
+    `behind_dev` token. This is the genuine drift path the founder hits."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-behind-div"], cwd=primary, env=env)
+    # A divergent LOCAL commit on the feature branch, never in origin/dev.
+    (primary / "local.txt").write_text("divergent local work\n")
+    _git(["add", "local.txt"], cwd=primary, env=env)
+    _git(["commit", "-m", "local-only"], cwd=primary, env=env)
+    divergent_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    # A DISTINCT linked worktree is the transient lane (repo_root) the pipeline
+    # passes; Step 16 can REMOVE it, so the durable signal must NOT land there.
+    linked = tmp_path / "linked_lane"
+    _git(["worktree", "add", "-b", "lane-y", str(linked), "HEAD"], cwd=primary)
+    # origin/dev advances by one non-overlapping commit → primary is now BEHIND
+    # as well as divergent.
+    c1_sha = _advance_origin_dev_add_file(upstream, env)
+    assert c1_sha != divergent_head
+
+    lines: list[str] = []
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=linked, base_branch="dev", log=lines.append,
+    )
+
+    # DECISION unchanged: GUARD-C still SKIPS; HEAD untouched (WIP-free here).
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "ancestor" in (outcome["reason"] or ""), outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == divergent_head
+
+    # Signal written under the PRIMARY's durable `.agent_bus`, NOT the lane.
+    primary_signal = primary / ".agent_bus" / "behind_dev.json"
+    lane_signal = linked / ".agent_bus" / "behind_dev.json"
+    assert primary_signal.exists(), outcome
+    assert not lane_signal.exists(), "signal must NOT land on the transient lane"
+
+    signal = json.loads(primary_signal.read_text())
+    assert Path(signal["primary"]).resolve() == primary.resolve(), signal
+    assert signal["base_ref"] == "origin/dev", signal
+    assert signal["behind_count"] == 1, signal
+    assert signal["ahead_count"] == 1, signal
+    assert signal["reason"] == "divergent_local_commits", signal
+    assert isinstance(signal["timestamp"], str) and signal["timestamp"], signal
+
+    # A loud WARNING carrying the literal `behind_dev` token was logged.
+    assert any("behind_dev" in line for line in lines), lines
+
+
+def test_sync_primary_clears_behind_dev_signal_on_clean_ff(tmp_path):
+    """(b) CLEAR-ON-FF: a PRIMARY behind origin/dev, clean, and a pure ANCESTOR
+    is fast-forward-synced AND any prior `behind_dev.json` is removed on the
+    resync, so no stale signal lingers after the founder lands the divergence."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-clearff"], cwd=primary, env=env)
+    # Pre-seed a STALE signal under the primary's durable `.agent_bus`.
+    stale = primary / ".agent_bus" / "behind_dev.json"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text('{"reason": "divergent_local_commits"}\n')
+    # origin/dev advances; primary (at C0, clean) is a pure ancestor → real ff.
+    c1_sha = _advance_origin_dev(upstream, env)
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    # Clear-on-resync: the stale signal is gone after the successful ff.
+    assert not stale.exists(), "stale behind_dev signal must be cleared on ff"
+
+
+def test_sync_primary_tracked_dirty_clears_signal_and_writes_none(tmp_path):
+    """(c) NO-REGRESSION (tracked-dirty): a PRIMARY behind + tracked dirt STILL
+    stashes/ff/restores (synced, WIP preserved). On that successful ff a prior
+    `behind_dev.json` is cleared, and NO signal is written on this path (it
+    ff-syncs — it is NOT drift). Directly guards the WITHDRAWN false premise that
+    behind+tracked-dirty silently skips."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-dirty-clear"], cwd=primary, env=env)
+    # Staged + unstaged tracked WIP on seed.txt (mirrors the existing
+    # non-overlapping restore test) plus untracked scratch.
+    (primary / "seed.txt").write_text("staged founder WIP\n")
+    _git(["add", "seed.txt"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("unstaged founder WIP\n")
+    (primary / "scratch.txt").write_text("untracked scratch\n")
+    # Pre-seed a STALE signal under the primary's durable `.agent_bus`.
+    stale = primary / ".agent_bus" / "behind_dev.json"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text('{"reason": "divergent_local_commits"}\n')
+    # origin/dev advances with a NON-overlapping file → real ff, WIP restored.
+    c1_sha = _advance_origin_dev_add_file(upstream, env)
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    # Tracked-dirty behavior UNCHANGED: stash/ff/restore, WIP preserved.
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert outcome["tracked_wip_paths"] == ["seed.txt"], outcome
+    assert outcome["tracked_wip_overlap_paths"] == [], outcome
+    assert outcome["tracked_wip_restored"] is True, outcome
+    assert outcome["tracked_wip_left_stashed"] is False, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    assert _git(["show", ":seed.txt"], cwd=primary).stdout == "staged founder WIP\n"
+    assert (primary / "seed.txt").read_text() == "unstaged founder WIP\n"
+    assert (primary / "scratch.txt").read_text() == "untracked scratch\n"
+    # Clear-on-resync fired AND no signal was (re)written on this non-drift path:
+    # the end state is NO behind_dev signal.
+    assert not stale.exists(), (
+        "tracked-dirty ff must clear any prior signal and write none"
+    )
+
+
+def test_sync_primary_clears_stale_signal_when_already_current(tmp_path):
+    """(d) CLEAR-ON-ALREADY-CURRENT: a PRIMARY already at origin/dev tip with a
+    STALE `behind_dev.json` present — the helper SKIPS (already current) AND
+    removes the stale signal."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    # Feature branch at C0 == origin/dev (origin NOT advanced) → already current.
+    _git(["checkout", "-b", "jabramsja/feat-current-clear"], cwd=primary, env=env)
+    stale = primary / ".agent_bus" / "behind_dev.json"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text('{"reason": "divergent_local_commits"}\n')
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "already current" in (outcome["reason"] or ""), outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
+    # Stale signal removed on the already-current resync confirmation.
+    assert not stale.exists(), "stale behind_dev signal must be cleared when current"
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Growth-cap auto-bump: FOUNDER_OVERRIDE-gated CAP_TEST_FILES bump that runs in
 # commit_executor before the Step 8 pre-commit-doc-check growth-cap gate. A
 # wave that adds a new test file would otherwise trip
