@@ -8813,6 +8813,126 @@ def _auto_defer_bot_findings(
         log(f"Step 15: failed to resolve comment threads (non-fatal): {exc}")
 
 
+def _classify_and_auto_defer_unremediated_bot_findings(
+    current_findings: list[dict[str, Any]],
+    *,
+    round_num: int,
+    repo_root: Path,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: str,
+    wave_id: str,
+    result: dict[str, Any],
+    log: Any,
+) -> dict[str, Any] | None:
+    """Classify unremediated bot findings and auto-defer the deferrable set.
+
+    Shared by both unremediated-findings exits of
+    ``_attempt_bot_finding_remediation``: the no-change path (the adapter ran
+    but produced no changes) AND the adapter-error/timeout path (the adapter
+    raised ``BridgeAdapterError``). In both the bot findings were NOT fixed, so
+    the disposition is identical:
+
+    * P0/P1 findings (the bot's P-level badge, read from ``body``/``severity``)
+      -> route to recovery (``bot_findings_pending``); never silently deferred.
+    * Critical-path findings (hooks, executors, checks, preflight) -> route to
+      recovery regardless of P-level; the badge measures code quality, not
+      pipeline impact.
+    * Otherwise (all P2+/non-critical) -> auto-defer + stage/amend/re-mint the
+      deferred report, then return ``None`` so the caller proceeds to merge.
+
+    Returns a ``bot_findings_pending`` response dict when any P0/P1 OR
+    critical-path finding remains; ``None`` (auto-deferred) otherwise. This is
+    the EXISTING no-change-path classifier verbatim -- the bot uses P-levels,
+    NOT the bridge severity rule.
+    """
+    # Check if any finding is P0 or P1 (blocking) — these with no
+    # adapter fix must still fail-close.  Only P2+ get auto-deferred.
+    blocking_findings = [
+        f for f in current_findings
+        if any(
+            sev in f.get("body", "") or sev in f.get("severity", "")
+            for sev in ("P0", "P1")
+        )
+    ]
+    if blocking_findings:
+        log(
+            f"Step 15: adapter produced no changes in round {round_num} — "
+            f"{len(blocking_findings)} P0/P1 finding(s) remain, routing to recovery agent"
+        )
+        return {
+            "status": "bot_findings_pending",
+            "bot_findings": current_findings,
+            "p1_unresolved": True,
+            "pr_number": pr_number,
+            "steps_completed": result["steps_completed"],
+            "remediation_rounds_attempted": round_num,
+        }
+    # Critical-path guard: findings on hooks, executors, checks, or
+    # preflight are ALWAYS blocking regardless of P-level — the bot's
+    # severity badge measures code quality, not pipeline impact.
+    _CRITICAL_PATH_PREFIXES = (
+        ".claude/hooks/", ".claude/skills/preflight/", "mu/tools/executors/",
+        "mu/tools/checks/", "tools/checks/", "mu/tools/hooks/",
+    )
+    critical_findings = [
+        f for f in current_findings
+        if any(f.get("path", "").startswith(pfx) for pfx in _CRITICAL_PATH_PREFIXES)
+    ]
+    if critical_findings:
+        log(
+            f"Step 15: adapter produced no changes in round {round_num} — "
+            f"{len(critical_findings)} finding(s) on critical-path files, routing to recovery"
+        )
+        return {
+            "status": "bot_findings_pending",
+            "bot_findings": current_findings,
+            "p1_unresolved": True,
+            "pr_number": pr_number,
+            "steps_completed": result["steps_completed"],
+            "remediation_rounds_attempted": round_num,
+        }
+    log(f"Step 15: adapter produced no changes in round {round_num} — auto-deferring {len(current_findings)} non-blocking finding(s)")
+    _auto_defer_bot_findings(
+        repo_root, current_findings, wave_id, pr_number,
+        repo_owner, repo_name, log,
+    )
+    # Stage + amend the deferred report into the commit so it's not
+    # lost on merge (PR #760 bot finding 5).
+    try:
+        deferred_dir = repo_root / "reports" / "deferred" / "non_blocking"
+        report_name = f"pr{pr_number}_bot_auto_deferred_{wave_id}.md"
+        report_path = deferred_dir / report_name
+        if report_path.exists():
+            _run(["git", "add", "-f", "--", str(report_path.relative_to(repo_root))],
+                 cwd=repo_root, timeout=30)
+            # Staging the deferred report changes the staged tree, which
+            # makes any prior receipt stale ("staged content changed since
+            # review"). Re-mint a fresh receipt for the now-staged report so
+            # the amend's pre-commit hook sees a matching staged_sha — the
+            # same mint-before-commit pattern the normal-remediation branch
+            # (and Step 9) use. Without this the amend's hook rejects the
+            # commit and the report is silently dropped (the failure below is
+            # caught non-fatally).
+            _mint_bot_remediation_receipt(
+                repo_root=repo_root,
+                findings_addressed=[
+                    {"path": f.get("path", ""), "body": f.get("body", "")[:200]}
+                    for f in current_findings
+                ],
+                scoped_files=[str(report_path.relative_to(repo_root))],
+                round_num=round_num,
+                wave_id=wave_id,
+            )
+            _run(["git", "commit", "--amend", "--no-edit"], cwd=repo_root,
+                 timeout=30, env=_commit_subprocess_env())
+            _run(["git", "push", "--force-with-lease"], cwd=repo_root, timeout=60)
+            log(f"Step 15: deferred report amended into commit and pushed")
+    except subprocess.CalledProcessError as exc:
+        log(f"Step 15: failed to amend deferred report (non-fatal): {exc}")
+    return None  # success — caller proceeds to merge
+
+
 def _attempt_bot_finding_remediation(
     bot_findings: list[dict[str, Any]],
     *,
@@ -8923,13 +9043,27 @@ def _attempt_bot_finding_remediation(
             )
         except _bridge_adapters.BridgeAdapterError as exc:
             log(f"Step 15: adapter error in round {round_num}: {exc}")
-            return {
-                "status": "bot_findings_pending",
-                "bot_findings": current_findings,
-                "pr_number": pr_number,
-                "steps_completed": result["steps_completed"],
-                "remediation_rounds_attempted": round_num,
-            }
+            # A remediation adapter TIMEOUT/error leaves the findings unfixed —
+            # the SAME state as the adapter running but producing no changes
+            # (the no-change path below). Route through the shared classifier so
+            # an all-deferrable (P2+/non-critical) finding set AUTO-DEFERS and
+            # the commit proceeds, while P0/P1 OR critical-path findings still
+            # strand to recovery exactly as this path and the no-change path
+            # already do for those classes. Previously this returned
+            # bot_findings_pending UNCONDITIONALLY, stranding deferrable waves
+            # (e.g. the slow bot_remediation=claude adapter hitting the 600s
+            # timeout on an all-P2 finding set).
+            return _classify_and_auto_defer_unremediated_bot_findings(
+                current_findings,
+                round_num=round_num,
+                repo_root=repo_root,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                pr_number=pr_number,
+                wave_id=wave_id,
+                result=result,
+                log=log,
+            )
 
         # Check if adapter produced changes
         status_out = _run(
@@ -8937,91 +9071,22 @@ def _attempt_bot_finding_remediation(
             cwd=repo_root, timeout=30,
         ).stdout
         if not status_out.strip():
-            # Check if any finding is P0 or P1 (blocking) — these with no
-            # adapter fix must still fail-close.  Only P2+ get auto-deferred.
-            blocking_findings = [
-                f for f in current_findings
-                if any(
-                    sev in f.get("body", "") or sev in f.get("severity", "")
-                    for sev in ("P0", "P1")
-                )
-            ]
-            if blocking_findings:
-                log(
-                    f"Step 15: adapter produced no changes in round {round_num} — "
-                    f"{len(blocking_findings)} P0/P1 finding(s) remain, routing to recovery agent"
-                )
-                return {
-                    "status": "bot_findings_pending",
-                    "bot_findings": current_findings,
-                    "p1_unresolved": True,
-                    "pr_number": pr_number,
-                    "steps_completed": result["steps_completed"],
-                    "remediation_rounds_attempted": round_num,
-                }
-            # Critical-path guard: findings on hooks, executors, checks, or
-            # preflight are ALWAYS blocking regardless of P-level — the bot's
-            # severity badge measures code quality, not pipeline impact.
-            _CRITICAL_PATH_PREFIXES = (
-                ".claude/hooks/", ".claude/skills/preflight/", "mu/tools/executors/",
-                "mu/tools/checks/", "tools/checks/", "mu/tools/hooks/",
+            # The adapter ran but produced no changes — the findings are
+            # unremediated. Classify + auto-defer via the shared helper (the
+            # SAME helper the adapter-error/timeout path uses): P0/P1 OR
+            # critical-path findings route to recovery; all-deferrable
+            # (P2+/non-critical) findings auto-defer and the commit proceeds.
+            return _classify_and_auto_defer_unremediated_bot_findings(
+                current_findings,
+                round_num=round_num,
+                repo_root=repo_root,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                pr_number=pr_number,
+                wave_id=wave_id,
+                result=result,
+                log=log,
             )
-            critical_findings = [
-                f for f in current_findings
-                if any(f.get("path", "").startswith(pfx) for pfx in _CRITICAL_PATH_PREFIXES)
-            ]
-            if critical_findings:
-                log(
-                    f"Step 15: adapter produced no changes in round {round_num} — "
-                    f"{len(critical_findings)} finding(s) on critical-path files, routing to recovery"
-                )
-                return {
-                    "status": "bot_findings_pending",
-                    "bot_findings": current_findings,
-                    "p1_unresolved": True,
-                    "pr_number": pr_number,
-                    "steps_completed": result["steps_completed"],
-                    "remediation_rounds_attempted": round_num,
-                }
-            log(f"Step 15: adapter produced no changes in round {round_num} — auto-deferring {len(current_findings)} non-blocking finding(s)")
-            _auto_defer_bot_findings(
-                repo_root, current_findings, wave_id, pr_number,
-                repo_owner, repo_name, log,
-            )
-            # Stage + amend the deferred report into the commit so it's not
-            # lost on merge (PR #760 bot finding 5).
-            try:
-                deferred_dir = repo_root / "reports" / "deferred" / "non_blocking"
-                report_name = f"pr{pr_number}_bot_auto_deferred_{wave_id}.md"
-                report_path = deferred_dir / report_name
-                if report_path.exists():
-                    _run(["git", "add", "-f", "--", str(report_path.relative_to(repo_root))],
-                         cwd=repo_root, timeout=30)
-                    # Staging the deferred report changes the staged tree, which
-                    # makes any prior receipt stale ("staged content changed since
-                    # review"). Re-mint a fresh receipt for the now-staged report so
-                    # the amend's pre-commit hook sees a matching staged_sha — the
-                    # same mint-before-commit pattern the normal-remediation branch
-                    # (and Step 9) use. Without this the amend's hook rejects the
-                    # commit and the report is silently dropped (the failure below is
-                    # caught non-fatally).
-                    _mint_bot_remediation_receipt(
-                        repo_root=repo_root,
-                        findings_addressed=[
-                            {"path": f.get("path", ""), "body": f.get("body", "")[:200]}
-                            for f in current_findings
-                        ],
-                        scoped_files=[str(report_path.relative_to(repo_root))],
-                        round_num=round_num,
-                        wave_id=wave_id,
-                    )
-                    _run(["git", "commit", "--amend", "--no-edit"], cwd=repo_root,
-                         timeout=30, env=_commit_subprocess_env())
-                    _run(["git", "push", "--force-with-lease"], cwd=repo_root, timeout=60)
-                    log(f"Step 15: deferred report amended into commit and pushed")
-            except subprocess.CalledProcessError as exc:
-                log(f"Step 15: failed to amend deferred report (non-fatal): {exc}")
-            return None  # success — caller proceeds to merge
 
         # Stage finding-scoped files + same-directory helpers, fail closed on rest.
         # The remediation prompt allows creating helper files in the same
