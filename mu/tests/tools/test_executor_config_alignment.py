@@ -650,3 +650,140 @@ class TestBareFallbackRoleAgentsFollowCommittedConfig:
         assert config["role_agents"] == {"implementer": "claude", "reviewer": "claude"}
         for key in REVIEWER_BRIDGE_KEYS:
             assert config["bridge_reviewers"][key] == "claude"
+
+
+class TestBareFallbackImportsMenuOnlyAgentDefs:
+    """The bare/missing-config fallback imports a SELECTED menu-only agent's
+    bridge_agent_defaults (its menu definition), not just its role_agents selection.
+
+    GAP closed (P2 deferred from the #14 set-roles single-switch wave): the bare/missing-
+    config fallback materialized role_agents from the committed executor_config.json but
+    kept only the static DEFAULT claude/codex bridge_agent_defaults menu. When set_roles
+    selects a MENU-ONLY agent — one declared in the committed menu but ABSENT from
+    DEFAULT_EXECUTOR_CONFIG (e.g. a 'fable' the founder added to the menu) — the routed
+    backends/bridge_reviewers pointed at an agent whose model / effort / display_name /
+    adapter settings were lost. The fallback now additively copies that agent's committed
+    menu entry, while leaving agents already in DEFAULT (claude/codex) untouched.
+
+    Polymorphic: the menu-only agent is constructed in-test with a synthetic name asserted
+    absent from DEFAULT, so no real provider is hardcoded. The committed-config location is
+    redirected through executor_common._committed_executor_config_path so the real tracked
+    file is never mutated. See reports/control_plane/
+    fallback-imports-agent-menu-defs-2026-06-29_2026-06-29.md.
+    """
+
+    @staticmethod
+    def _clear_role_env(monkeypatch):
+        for name in (
+            "RCX_IMPLEMENTER_AGENT_OVERRIDE",
+            "RCX_REVIEWER_AGENT_OVERRIDE",
+            "RCX_BRIDGE_REVIEWER_OVERRIDE",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+    @staticmethod
+    def _point_seam_at(monkeypatch, tmp_path, *, role_agents, bridge_agent_defaults):
+        cfg = tmp_path / "executor_config.json"
+        cfg.write_text(
+            json.dumps(
+                {
+                    "role_agents": role_agents,
+                    "bridge_agent_defaults": bridge_agent_defaults,
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            executor_common, "_committed_executor_config_path", lambda: cfg
+        )
+        return cfg
+
+    def test_bare_fallback_imports_menu_only_agent_menu_defs(self, tmp_path, monkeypatch):
+        # A committed menu-only agent selected by role_agents must keep its menu
+        # definition (model / effort / display_name / adapter command) through the
+        # bare/missing-config fallback — not just its role selection.
+        self._clear_role_env(monkeypatch)
+        default_menu = executor_common.DEFAULT_EXECUTOR_CONFIG["bridge_agent_defaults"]
+        # Synthetic MENU-ONLY agent: present in the committed menu, absent from DEFAULT.
+        # Constructed in-test; no real provider name is hardcoded.
+        menu_agent = "menuonlyfixture"
+        assert menu_agent not in default_menu, (
+            "fixture precondition: the menu-only agent must be absent from DEFAULT"
+        )
+        menu_def = {
+            "display_name": "Menu Only Provider X",
+            "model": "menu-only-model-x",
+            "effort": "high",
+            "adapter_cmd": ["menu-only-cli", "exec", "--flag"],
+        }
+        # The committed file SELECTS the menu-only agent for both roles and defines its menu.
+        self._point_seam_at(
+            monkeypatch,
+            tmp_path,
+            role_agents={"implementer": menu_agent, "reviewer": menu_agent},
+            bridge_agent_defaults={menu_agent: menu_def},
+        )
+
+        config = merge_executor_config_overrides({})
+
+        # The selected menu-only agent actually routes the backends/bridge_reviewers...
+        assert config["role_agents"] == {
+            "implementer": menu_agent,
+            "reviewer": menu_agent,
+        }
+        for key in IMPLEMENTER_BACKEND_KEYS:
+            assert config["backends"][key] == menu_agent
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert config["bridge_reviewers"][key] == menu_agent
+        # ...and its menu definition survives the fallback intact (the gap this closes).
+        assert menu_agent in config["bridge_agent_defaults"], (
+            "menu-only agent's bridge_agent_defaults entry was lost in the bare fallback"
+        )
+        imported = config["bridge_agent_defaults"][menu_agent]
+        assert imported == menu_def
+        assert imported["model"] == "menu-only-model-x"
+        assert imported["effort"] == "high"
+        assert imported["display_name"] == "Menu Only Provider X"
+        assert imported["adapter_cmd"] == ["menu-only-cli", "exec", "--flag"]
+        # Additive: the DEFAULT claude/codex entries are still present and unchanged.
+        for default_agent, default_entry in default_menu.items():
+            assert config["bridge_agent_defaults"][default_agent] == default_entry
+
+    def test_bare_fallback_leaves_default_agent_menu_def_unchanged(
+        self, tmp_path, monkeypatch
+    ):
+        # Sibling of test_bare_fallback_imports_menu_only_agent_menu_defs: an agent already
+        # in DEFAULT_EXECUTOR_CONFIG (claude/codex) is NOT touched by the import — its
+        # bridge_agent_defaults entry is neither dropped nor overwritten, even when the
+        # committed file carries a DIFFERENT entry for it. The additive copy must never
+        # clobber a DEFAULT-supplied menu def.
+        self._clear_role_env(monkeypatch)
+        default_menu = executor_common.DEFAULT_EXECUTOR_CONFIG["bridge_agent_defaults"]
+        # Pick a DEFAULT agent polymorphically; no hardcoded provider name.
+        default_agent = next(iter(default_menu))
+        default_entry = copy.deepcopy(default_menu[default_agent])
+        # The committed file selects that DEFAULT agent but carries a TAMPERED menu entry,
+        # proving the fallback does NOT pull the committed entry over the DEFAULT one.
+        tampered = {
+            "display_name": "TAMPERED DISPLAY",
+            "model": "tampered-model",
+            "effort": "tampered-effort",
+        }
+        assert tampered != default_entry
+        self._point_seam_at(
+            monkeypatch,
+            tmp_path,
+            role_agents={"implementer": default_agent, "reviewer": default_agent},
+            bridge_agent_defaults={default_agent: tampered},
+        )
+
+        config = merge_executor_config_overrides({})
+
+        assert config["role_agents"] == {
+            "implementer": default_agent,
+            "reviewer": default_agent,
+        }
+        # Neither dropped nor overwritten: the DEFAULT entry stands, not the committed tamper.
+        assert default_agent in config["bridge_agent_defaults"]
+        assert config["bridge_agent_defaults"][default_agent] == default_entry
+        assert config["bridge_agent_defaults"][default_agent] != tampered
