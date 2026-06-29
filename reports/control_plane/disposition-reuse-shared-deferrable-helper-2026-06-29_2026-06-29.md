@@ -1,0 +1,73 @@
+# phase_b _disposition_for_finding reuses recovery_gate's single deferrability definition (no divergence) so a GO with only deferrable findings defers
+
+Date: 2026-06-29
+Status: Phase B (locked, implementing)
+Task: [NEXT-CODEX-POST-REDTEAM]
+Wave ID: disposition-reuse-shared-deferrable-helper-2026-06-29
+Phase-A-Lock: LOCKED
+Purpose: STRUCTURAL FIX (re-scoped from the bridge's correct finding on the prior attempt) for the recurring agent_review_crash strand that forced a hand-finish on every claude wave this session. ROOT (verified): the post-GO consistency check uses `mu/tools/executors/phase_b_executor.py` `_disposition_for_finding` (~line 194-197), which returns 'blocking' for any finding carrying an explicit `disposition=blocking` REGARDLESS of severity -> the wave strands in phase_b. That DIVERGES from the already-correct single source of truth `mu/tools/executors/recovery_gate.py` `_finding_is_deferrable_on_go` (~line 386), which treats any NON-high/critical finding as DEFERRABLE on a GO round EVEN with an explicit `disposition=blocking` (and recovery_gate's classify_failure:723 already defers via `_is_bridge_go_with_only_deferrable_findings`). Because phase_b strands FIRST with a divergent definition, recovery_gate's deferrable-GO guard never gets to save the wave. The prior #19 attempt was correctly NO_GO'd by the bridge for ADDING A SECOND divergent deferrability definition in phase_b. FIX: make the two agree via ONE shared definition -- extract the deferrability predicate (non-high/critical severity is deferrable on a GO, even with disposition=blocking) into a SINGLE shared helper that BOTH `phase_b_executor._disposition_for_finding` AND `recovery_gate._finding_is_deferrable_on_go` call. Put the shared helper where both already import from to avoid a circular import (e.g. executor_common, or have recovery_gate keep the canonical `_finding_is_deferrable_on_go` and phase_b import it). Then `_disposition_for_finding`, on a GO-context finding that the shared helper says is deferrable, returns non_blocking (defer) INSTEAD of honoring the explicit disposition=blocking -- so a GO carrying only deferrable findings defers + commits rather than agent_review_crash-stranding. CRITICAL/HIGH stay blocking (both definitions already agree). Do NOT create a divergent/duplicate definition -- single source of truth is the whole point. Add regressions in the EXISTING `mu/tests/tools/test_phase_b_executor.py`: (1) medium finding + disposition=blocking -> non_blocking (matches recovery_gate); (2) high finding + disposition=blocking -> blocking; (3) a consistency assertion that phase_b's deferrability decision == recovery_gate._finding_is_deferrable_on_go for the same finding (no divergence). No host semantics. No new test file.
+
+## Scope
+
+STRUCTURAL FIX (re-scoped from the bridge's correct finding on the prior attempt) for the recurring agent_review_crash strand that forced a hand-finish on every claude wave this session. ROOT (verified): the post-GO consistency check uses `mu/tools/executors/phase_b_executor.py` `_disposition_for_finding` (~line 194-197), which returns 'blocking' for any finding carrying an explicit `disposition=blocking` REGARDLESS of severity -> the wave strands in phase_b. That DIVERGES from the already-correct single source of truth `mu/tools/executors/recovery_gate.py` `_finding_is_deferrable_on_go` (~line 386), which treats any NON-high/critical finding as DEFERRABLE on a GO round EVEN with an explicit `disposition=blocking` (and recovery_gate's classify_failure:723 already defers via `_is_bridge_go_with_only_deferrable_findings`). Because phase_b strands FIRST with a divergent definition, recovery_gate's deferrable-GO guard never gets to save the wave. The prior #19 attempt was correctly NO_GO'd by the bridge for ADDING A SECOND divergent deferrability definition in phase_b. FIX: make the two agree via ONE shared definition -- extract the deferrability predicate (non-high/critical severity is deferrable on a GO, even with disposition=blocking) into a SINGLE shared helper that BOTH `phase_b_executor._disposition_for_finding` AND `recovery_gate._finding_is_deferrable_on_go` call. Put the shared helper where both already import from to avoid a circular import (e.g. executor_common, or have recovery_gate keep the canonical `_finding_is_deferrable_on_go` and phase_b import it). Then `_disposition_for_finding`, on a GO-context finding that the shared helper says is deferrable, returns non_blocking (defer) INSTEAD of honoring the explicit disposition=blocking -- so a GO carrying only deferrable findings defers + commits rather than agent_review_crash-stranding. CRITICAL/HIGH stay blocking (both definitions already agree). Do NOT create a divergent/duplicate definition -- single source of truth is the whole point. Add regressions in the EXISTING `mu/tests/tools/test_phase_b_executor.py`: (1) medium finding + disposition=blocking -> non_blocking (matches recovery_gate); (2) high finding + disposition=blocking -> blocking; (3) a consistency assertion that phase_b's deferrability decision == recovery_gate._finding_is_deferrable_on_go for the same finding (no divergence). No host semantics. No new test file.
+
+Files and surfaces in scope:
+
+- `mu/tools/executors/phase_b_executor.py` -- `_disposition_for_finding` (the divergent surface). Its explicit-`disposition`-field branch currently returns `blocking` for ANY finding carrying `disposition=blocking` regardless of severity; this branch is repointed at the shared deferrability predicate so a GO-context non-high/critical finding defers (`non_blocking`). The critical/high fail-closed severity floor above that branch is left intact.
+- `mu/tools/executors/recovery_gate.py` -- `_finding_is_deferrable_on_go` (the already-correct single source of truth: non-high/critical severity is deferrable on a GO even with `disposition=blocking`) and the `_TRUE_BLOCKING_SEVERITIES = {high, critical}` floor it reads. Either remains the canonical home of the shared predicate (phase_b imports it) or delegates to a hoisted helper; `_is_bridge_go_with_only_deferrable_findings` / `classify_failure` behavior is unchanged.
+- `mu/tools/executors/executor_common.py` -- candidate shared-helper home. Both `phase_b_executor` and `recovery_gate` already import `executor_common` at module import time, and `recovery_gate`'s module-level import constraint (stdlib + `executor_common` only) makes this the circular-import-safe location. Edited only if the predicate is hoisted here (Option A in Work items).
+- `mu/tests/tools/test_phase_b_executor.py` -- EXISTING test file; the three regressions are added to the existing `TestFindingDisposition` class. NO new test file is created.
+- TASKS.md -- tracker-sync authority. The 2026-06-29 tracker sync note for wave `disposition-reuse-shared-deferrable-helper-2026-06-29` is the single source of truth for this packet's L4 fields; the packet derives from it.
+
+## Work items
+
+1. Establish ONE shared deferrability predicate (no divergent/duplicate definition). The predicate is exactly recovery_gate's existing rule: a finding is deferrable on a GO when its severity is NOT in `_TRUE_BLOCKING_SEVERITIES` (`{high, critical}`), even when it carries an explicit `disposition=blocking`; a non-dict finding is fail-closed (not deferrable). Pick one placement that keeps a single source of truth and avoids a circular import:
+   - Option A (constraint-clean, recommended): hoist the canonical predicate into `mu/tools/executors/executor_common.py` and have `recovery_gate._finding_is_deferrable_on_go` delegate to it. Both `phase_b_executor` and `recovery_gate` already import `executor_common` at module import time, and `recovery_gate`'s "stdlib + executor_common at module import time" constraint permits this.
+   - Option B: keep `recovery_gate._finding_is_deferrable_on_go` canonical and have `phase_b_executor` import it via the existing function-local `from recovery_gate import ...` pattern (recovery_gate must not be imported at phase_b module top if that would create a cycle).
+   Either option must make the literal `_finding_is_deferrable_on_go` appear in `phase_b_executor.py` (evidence_command target).
+2. Repoint `phase_b_executor._disposition_for_finding`'s explicit-`disposition` branch at the shared predicate: when the predicate marks a finding deferrable on a GO, return `non_blocking` (defer) instead of honoring the explicit `disposition=blocking`. Leave the existing critical/high fail-closed floor untouched -- it returns `blocking` BEFORE the explicit-disposition branch, so critical/high are unaffected and already agree with recovery_gate.
+3. Add three regressions to the EXISTING `TestFindingDisposition` class in `mu/tests/tools/test_phase_b_executor.py` (NO new test file):
+   - (a) medium-severity finding + `disposition=blocking` -> `_disposition_for_finding` returns `non_blocking` (matches recovery_gate).
+   - (b) high-severity finding + `disposition=blocking` -> `_disposition_for_finding` returns `blocking` (severity floor preserved).
+   - (c) `test_disposition_matches_recovery_gate_deferrability`: assert phase_b's deferrability decision equals `recovery_gate._finding_is_deferrable_on_go(finding)` for the same finding across severities (no divergence). This is the named test the evidence_command greps for.
+4. Confirm the change is pure control-plane: no host semantics, no edits under runtime dirs, no new file. Re-run the full `test_phase_b_executor.py` (not just the new cases) because `_disposition_for_finding` is also exercised by the bridge-converged resume guard and the REQUEST_CHANGES fix loop, so its contract has a blast radius beyond the three added tests.
+
+## Constraints
+
+- NO second/divergent/duplicate deferrability definition. Single source of truth is the whole point -- the prior #19 attempt was correctly NO_GO'd by the bridge for ADDING a second divergent definition in phase_b. Both call sites must resolve to the same predicate.
+- Do NOT change the critical/high fail-closed severity floor. Critical/high stay blocking in both `_disposition_for_finding` and `_finding_is_deferrable_on_go`; the two already agree there.
+- Do NOT change `recovery_gate.classify_failure` or `_is_bridge_go_with_only_deferrable_findings` behavior. They already defer correctly once phase_b stops stranding first; this wave only removes the earlier divergent strand.
+- Do NOT create a new test file. The three regressions go in the existing `mu/tests/tools/test_phase_b_executor.py`.
+- No host semantics and no runtime-dir edits. Class is L4_ENABLER: scope is limited to `mu/tools/executors/` control-plane code plus its tests; `mu/host/`, `rcx_pi/selfhost/`, seeds, and projection surfaces are OUT of scope.
+- Do NOT introduce a circular import. Respect recovery_gate's "stdlib + executor_common at module import time" constraint; if module-level reuse would create a cycle, use `executor_common` (Option A) or a function-local import (Option B).
+- Out of scope: any unrelated executor/dispatcher refactor, the agent_review_crash recovery path itself, and any change to `ALLOWED_FINDING_DISPOSITIONS` or the governance/doc-downgrade branch of `_disposition_for_finding`.
+
+## Stop conditions
+
+- STOP if a single shared predicate cannot be reused without a circular import that neither `executor_common` (Option A) nor a function-local import (Option B) resolves. Re-scope; do NOT force a module-level cycle and do NOT clone the definition.
+- STOP and treat as a TRUE blocker (not a fixture update) if making `_disposition_for_finding` defer a non-high/critical `disposition=blocking` finding causes any high/critical finding to leak to `non_blocking`, or breaks `TestHighSeverityCannotBeDowngradedByDisposition`.
+- STOP and escalate if the fix would require adding host semantics or editing any runtime dir -- that would violate the L4_ENABLER class for this wave.
+- STOP if the consistency assertion (item 3c) cannot pass without changing recovery_gate's canonical deferrability behavior; agreement must come from phase_b adopting the canonical rule, not from mutating the canonical rule (that would re-open the divergence the prior attempt was NO_GO'd for).
+- STOP if the full `test_phase_b_executor.py` / `test_recovery_gate.py` run regresses outside the three new cases in a way that signals a real semantic change to the resume guard or REQUEST_CHANGES fix loop (blast radius), rather than an expected disposition update.
+
+## Validation gates
+
+- evidence_command: `grep -q 'def test_disposition_matches_recovery_gate_deferrability' mu/tests/tools/test_phase_b_executor.py && grep -q '_finding_is_deferrable_on_go' mu/tools/executors/phase_b_executor.py`
+
+## Acceptance criteria
+
+- evidence_command passes (currently FAILS -- both targets absent): `grep -q 'def test_disposition_matches_recovery_gate_deferrability' mu/tests/tools/test_phase_b_executor.py && grep -q '_finding_is_deferrable_on_go' mu/tools/executors/phase_b_executor.py`.
+- `phase_b_executor._disposition_for_finding` and `recovery_gate._finding_is_deferrable_on_go` agree on every finding: a non-high/critical finding with `disposition=blocking` is deferrable/`non_blocking` in BOTH; a high/critical finding is blocking/not-deferrable in BOTH.
+- A bridge GO round carrying only deferrable (non-high/critical) findings defers + commits instead of agent_review_crash-stranding in phase_b; critical/high still block.
+- Exactly one shared deferrability definition exists (no divergent/duplicate); the literal `_finding_is_deferrable_on_go` resolves from phase_b to the same predicate recovery_gate uses.
+- The three regressions exist in the existing `TestFindingDisposition` class and pass: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py` is green (full files, to cover the resume-guard / fix-loop blast radius).
+- `python3 -m py_compile mu/tools/executors/phase_b_executor.py mu/tools/executors/recovery_gate.py mu/tools/executors/executor_common.py` is clean; `git diff --check` is clean.
+- No host semantics, no runtime-dir edits, no new test file (L4_ENABLER constraints upheld).
+
+## Grounding / Authorization
+
+- Task: [NEXT-CODEX-POST-REDTEAM]; wave id `disposition-reuse-shared-deferrable-helper-2026-06-29`.
+- Governing packet: this file, `reports/control_plane/disposition-reuse-shared-deferrable-helper-2026-06-29_2026-06-29.md`.
+- TASKS.md authority: the 2026-06-29 tracker sync note for wave `disposition-reuse-shared-deferrable-helper-2026-06-29` is canonical for this packet's L4 fields.
+
+FOUNDER_OVERRIDE:disposition-reuse-shared-deferrable-helper-2026-06-29

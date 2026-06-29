@@ -137,6 +137,18 @@ REVIEW_OVERRIDE_BACKEND_KEYS = frozenset(
 # Shared between bridge_reviewer_prompt.txt and phase_b_executor.py.
 # If you change these criteria, update BOTH the prompt template and the
 # executor's _disposition_for_finding fallback logic.
+#
+# Severity floor (authoritative): HIGH/CRITICAL severity is genuinely blocking
+# and is honored even against an explicit ``disposition: non_blocking``. BELOW
+# that floor (medium/low/absent severity) an explicit ``disposition: blocking``
+# is DEFERRED to non_blocking by phase_b_executor._disposition_for_finding via
+# the single shared rule recovery_gate._finding_is_deferrable_on_go (one rule,
+# no divergent local copy) — so a bridge GO carrying only sub-floor findings
+# defers and commits instead of stranding. To mark a GENUINE sub-floor blocker,
+# set severity=high (or critical); an explicit blocking disposition alone is NOT
+# sufficient below the floor. (bridge_reviewer_prompt.txt still states the
+# pre-floor "explicit disposition is honored" contract; syncing that template
+# note is a deferred follow-up — the executor behavior here is authoritative.)
 
 BLOCKING_CRITERIA = (
     "Causes runtime failure, crash, or data loss in the live pipeline",

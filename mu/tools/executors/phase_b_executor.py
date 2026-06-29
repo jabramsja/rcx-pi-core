@@ -158,6 +158,30 @@ PHASE_B_PRE_SUPERVISOR_PENDING_STATUS = (
 # Finding disposition helpers
 # ---------------------------------------------------------------------------
 
+
+def _shared_deferrable_on_go(finding: dict[str, Any]) -> bool:
+    """Return recovery_gate's deferrability verdict for *finding* on a GO round.
+
+    phase_b does NOT define its own deferrability predicate. It delegates to the
+    single shared rule ``recovery_gate._finding_is_deferrable_on_go`` so the two
+    executors can never diverge (the prior attempt was NO_GO'd for adding a
+    second, divergent definition). The import is function-local to match the
+    established executor idiom; recovery_gate imports phase_b_executor only inside
+    a function, so this stays cycle-safe. The shared rule fail-closes (returns
+    False / not deferrable) on a non-dict finding.
+    """
+    try:
+        from recovery_gate import _finding_is_deferrable_on_go
+    except ImportError:
+        _rg_path = SCRIPT_DIR / "recovery_gate.py"
+        _rg_spec = importlib.util.spec_from_file_location("recovery_gate", str(_rg_path))
+        _rg_mod = importlib.util.module_from_spec(_rg_spec)
+        assert _rg_spec.loader is not None
+        _rg_spec.loader.exec_module(_rg_mod)
+        _finding_is_deferrable_on_go = _rg_mod._finding_is_deferrable_on_go
+    return _finding_is_deferrable_on_go(finding)
+
+
 def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     """Derive effective disposition for a single finding.
 
@@ -165,7 +189,10 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
 
     Priority:
     1. Severity 'critical'/'high' — always blocking.
-    2. Explicit 'disposition' field — use only if valid.
+    2. Explicit 'disposition' field — used when valid, EXCEPT an explicit
+       'blocking' below the high/critical floor defers to 'non_blocking' via
+       recovery_gate._finding_is_deferrable_on_go (one shared rule, no divergent
+       local definition).
     3. Medium/low governance/doc-only findings — non-blocking by default.
     4. Medium/low severity — non-blocking UNLESS blocking keyword match.
     5. No severity — keyword match, then fail-closed blocking.
@@ -193,6 +220,29 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
 
     if disposition is not None:
         if disposition in ALLOWED_FINDING_DISPOSITIONS:
+            # Single deferrability source of truth: route the explicit-blocking
+            # case through recovery_gate._finding_is_deferrable_on_go (via
+            # _shared_deferrable_on_go) rather than a divergent local rule — the
+            # prior attempt was NO_GO'd for adding a second definition. The
+            # critical/high floor already returned "blocking" above, so an
+            # explicit disposition=blocking reaching here is BELOW that floor and
+            # the shared rule defers it (the recurring mislabel strand). We ASK
+            # the shared rule rather than hard-code the sub-floor conclusion so
+            # phase_b tracks any future change to the floor automatically and the
+            # two executors can never diverge.
+            #
+            # The fall-through (return disposition) honors the explicit label for
+            # every case the shared rule does NOT defer and is genuinely
+            # reachable: a non_blocking label always falls through, and a blocking
+            # label the rule declines to defer (a malformed/non-dict finding)
+            # falls through to stay blocking — so explicit blocking is still
+            # honored, never weakened to force a GO.
+            if disposition == "blocking" and _shared_deferrable_on_go(finding):
+                return "non_blocking", (
+                    "explicit disposition=blocking deferred — severity below "
+                    "high/critical floor "
+                    "(matches recovery_gate._finding_is_deferrable_on_go)"
+                )
             return disposition, "explicit disposition field"
         return "blocking", f"invalid disposition {disposition!r} (fail-closed)"
 
