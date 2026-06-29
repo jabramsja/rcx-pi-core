@@ -6202,6 +6202,136 @@ class TestBotRemediationValidation:
         assert captured["amend_env"] is not None
         assert captured["amend_env"].get("RCX_AGENT_BUS_DIR") == str(lane_bus)
 
+    def _fake_bridge_adapters_timeout(self, message="Adapter 'claude' timed out after 600s"):
+        """Fake bridge adapters whose ``run_adapter`` RAISES BridgeAdapterError.
+
+        Drives the production ``except _bridge_adapters.BridgeAdapterError``
+        branch of ``_attempt_bot_finding_remediation`` -- the bot-remediation
+        adapter TIMEOUT/error path (the slow ``bot_remediation=claude`` adapter
+        hitting the 600s adapter timeout). Mirrors ``_fake_bridge_adapters``
+        otherwise so the pre-loop adapter load/get path behaves identically.
+        """
+        from types import SimpleNamespace
+
+        class BridgeAdapterError(Exception):
+            pass
+
+        def run_adapter(_adapter=None, *, repo_root, **_kwargs):
+            raise BridgeAdapterError(message)
+
+        return SimpleNamespace(
+            AdapterSpec=lambda **kwargs: SimpleNamespace(**kwargs),
+            BridgeAdapterError=BridgeAdapterError,
+            load_bridge_config=lambda _path: {},
+            get_adapter=lambda _config, _name: SimpleNamespace(
+                name="fake",
+                cmd=["true"],
+                prompt_via_stdin=True,
+                env={},
+                mode="test",
+            ),
+            run_adapter=run_adapter,
+        )
+
+    def _run_timeout_remediation(self, repo, findings, *, wave_id):
+        """Drive ``_attempt_bot_finding_remediation`` so the remediation adapter
+        raises BridgeAdapterError (timeout). Returns ``(response, auto_defer)``.
+
+        ``_auto_defer_bot_findings`` is mocked so the auto-defer branch does NOT
+        write the deferred report; the stage/amend block then no-ops
+        (``report_path.exists()`` is False) and the shared helper returns
+        ``None`` with no git/network calls. The unit under test is the
+        TIMEOUT-path CLASSIFICATION (auto-defer vs route-to-recovery), not the
+        amend mechanics (covered by
+        ``test_auto_defer_amend_mints_fresh_receipt_for_staged_report``).
+        """
+        with patch.object(
+            commit_mod, "_bridge_adapters", self._fake_bridge_adapters_timeout(),
+        ), patch.object(
+            commit_mod, "_auto_defer_bot_findings",
+        ) as auto_defer:
+            response = commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: direct Step 15 timeout classification regression
+                findings,
+                repo_root=repo,
+                repo_owner="owner",
+                repo_name="repo",
+                pr_number="1036",
+                target_branch="bot-remediation-test",
+                head_sha="old-head",
+                wave_id=wave_id,
+                continuation_path=repo / ".agent_bus" / "meta" / "commit_continuation.json",
+                result=self._base_result(),
+                log=lambda _msg: None,
+            )
+        return response, auto_defer
+
+    def test_bot_remediation_timeout_autodefers_deferrable(self, tmp_path):
+        # Regression (wave bot-remediation-timeout-autodefers-2026-06-29): a bot
+        # remediation adapter TIMEOUT (BridgeAdapterError) on an all-deferrable
+        # (P2+/non-critical) finding set must AUTO-DEFER so the commit proceeds,
+        # exactly as the no-change path already does for the SAME findings.
+        # Before the shared-classifier refactor the `except BridgeAdapterError`
+        # branch returned bot_findings_pending UNCONDITIONALLY, stranding the
+        # wave (the slow bot_remediation=claude adapter routinely hits the 600s
+        # adapter timeout). The timeout/error path and the no-change path now
+        # share ONE classifier, so their disposition is identical.
+        repo = _setup_repo(tmp_path)
+        response, auto_defer = self._run_timeout_remediation(
+            repo,
+            [{
+                "path": "docs/nit.md",
+                "body": "P2 minor doc nit",
+                "author": commit_mod.BOT_REVIEW_LOGIN,
+                "line": 1,
+            }],
+            wave_id="bot-remediation-timeout-autodefer-test",
+        )
+        # None == auto-deferred (caller proceeds to merge), NOT bot_findings_pending.
+        assert response is None, response
+        assert auto_defer.called, "all-deferrable timeout must auto-defer"
+
+    def test_bot_remediation_timeout_p1_finding_routes_to_recovery(self, tmp_path):
+        # A bot remediation adapter TIMEOUT with a P0/P1 finding must STILL route
+        # to recovery (bot_findings_pending), never auto-defer -- the shared
+        # classifier reuses the EXISTING P0/P1 guard (the bot's P-level badge),
+        # so the blocking disposition is unchanged on the timeout path.
+        repo = _setup_repo(tmp_path)
+        response, auto_defer = self._run_timeout_remediation(
+            repo,
+            [{
+                "path": "docs/nit.md",
+                "body": "P1 blocking regression",
+                "author": commit_mod.BOT_REVIEW_LOGIN,
+                "line": 1,
+            }],
+            wave_id="bot-remediation-timeout-p1-test",
+        )
+        assert response is not None
+        assert response["status"] == "bot_findings_pending"
+        auto_defer.assert_not_called()
+
+    def test_bot_remediation_timeout_critical_path_finding_routes_to_recovery(self, tmp_path):
+        # A bot remediation adapter TIMEOUT with a finding on a critical-path
+        # file (here mu/tools/executors/) must route to recovery REGARDLESS of
+        # P-level -- the shared classifier reuses the EXISTING
+        # _CRITICAL_PATH_PREFIXES guard. The finding below is only P2, proving
+        # the critical-path guard (not the P0/P1 guard) is what fires on the
+        # timeout path.
+        repo = _setup_repo(tmp_path)
+        response, auto_defer = self._run_timeout_remediation(
+            repo,
+            [{
+                "path": "mu/tools/executors/commit_executor.py",
+                "body": "P2 nit on a critical-path file",
+                "author": commit_mod.BOT_REVIEW_LOGIN,
+                "line": 1,
+            }],
+            wave_id="bot-remediation-timeout-critical-test",
+        )
+        assert response is not None
+        assert response["status"] == "bot_findings_pending"
+        auto_defer.assert_not_called()
+
 
 class TestReviewFindingExtraction:
     def _base_pr_data(self, *, head_sha="abc123", latest_reviews=None, review_threads=None, comments=None):
