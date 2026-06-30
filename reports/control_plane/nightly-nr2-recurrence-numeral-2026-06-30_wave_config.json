@@ -1,0 +1,77 @@
+{
+  "wave_id": "nightly-nr2-recurrence-numeral-2026-06-30",
+  "title": "NR-2 Recurrence Numeral Routing 2026-06-30",
+  "task_id": "[NR-2]",
+  "purpose": "Repair the urgent nightly recurrence.v2 production regression by ensuring trace step and tau counters entering the meta-circular recurrence matcher are StructuralNumbers numerals, preserving host-facing decode behavior and keeping JS hash-trace parity aligned.",
+  "date": "2026-06-30",
+  "wave_class": "L4_STRUCTURAL",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/nightly-nr2-recurrence-numeral-2026-06-30.json",
+  "indicator_collection_command": "python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id nightly-nr2-recurrence-numeral-2026-06-30 --output reports/l4_wave_indicators/nightly-nr2-recurrence-numeral-2026-06-30.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_recurrence_production.py mu/tests/l4_gates/test_recurrence_v2_gate.py mu/tests/integration/test_paxos_end_to_end.py::TestPaxosEndToEnd::test_recurrence_v2_detects_paxos_closure --tb=short && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_js_parity_automated.py::TestEnginePipelineCrossSubstrateParity::test_hash_trace_simple_parity --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --files TASKS.md mu/host/python/rcx_pi/selfhost/engine_pipeline.py mu/host/js/engine/pipeline.js mu/tests/parity/test_recurrence_production.py mu/tests/l4_gates/test_recurrence_v2_gate.py mu/tests/integration/test_paxos_end_to_end.py mu/tests/parity/test_js_parity_automated.py reports/control_plane/nightly-nr2-recurrence-numeral-2026-06-30_2026-06-30.md reports/l4_wave_indicators/nightly-nr2-recurrence-numeral-2026-06-30.json --wave-id nightly-nr2-recurrence-numeral-2026-06-30 --wave-class L4_STRUCTURAL && git diff --check",
+  "evidence_delta": "(1) Clean origin/dev after NR-1 reproduces the NR-2 failure: mu/tests/parity/test_recurrence_production.py stalls on an unchanged _detect_closure payload when recurrence.v2 sees host-int trace step counters. (2) recurrence.v2 gate and the real Paxos trace pass when steps are already StructuralNumbers numerals, proving the semantic recurrence seed is intact and the failure is the counter representation at the production-style boundary. (3) This wave must keep recurrence trace/tau counters structural before matcher var sites and keep JS hash-trace parity aligned without adding host-only recurrence semantics.",
+  "progress_proof_before": "NR-1 is merged, but the urgent nightly suite still fails in recurrence.v2 production closure detection because a production-style trace builder feeds host-int step counters into the meta-circular recurrence matcher; direct repro: PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_recurrence_production.py --tb=short -x fails at test_paxos_livelock_closure_detected with result keys ['_detect_closure'].",
+  "progress_proof_after": "The recurrence production suite passes with StructuralNumbers trace steps/tau_step, the recurrence.v2 L4 gate remains green, the real Paxos hashed-trace recurrence path remains green, and JS hash_trace parity proves the mirrored trace hashing boundary still agrees across substrates.",
+  "structural_artifact_ref": "mu/tests/parity/test_recurrence_production.py; mu/tests/l4_gates/test_recurrence_v2_gate.py; mu/tests/integration/test_paxos_end_to_end.py; mu/tests/parity/test_js_parity_automated.py; mu/host/python/rcx_pi/selfhost/engine_pipeline.py; mu/host/js/engine/pipeline.js; reports/l4_wave_indicators/nightly-nr2-recurrence-numeral-2026-06-30.json",
+  "post_gate_contract_sweep": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_recurrence_production.py mu/tests/l4_gates/test_recurrence_v2_gate.py mu/tests/integration/test_paxos_end_to_end.py::TestPaxosEndToEnd::test_recurrence_v2_detects_paxos_closure --tb=short && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_js_parity_automated.py::TestEnginePipelineCrossSubstrateParity::test_hash_trace_simple_parity --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id nightly-nr2-recurrence-numeral-2026-06-30 --wave-class L4_STRUCTURAL && git diff --check",
+  "scope_summary": "Urgent nightly regression repair for recurrence.v2 only. Ensure production-style trace step and tau counters are StructuralNumbers numerals before they reach recurrence matcher var sites. Prefer correcting the trace-building/boundary representation over changing recurrence.v2 semantics. Keep hemisphere NR-1 landed behavior unchanged, leave JS mirror of broader recurrence work to NR-3 unless a narrow JS hash-trace parity update is required, and keep boot1/workload-contract reconciliation for NR-4.",
+  "scope_items": [
+    "reports/control_plane/nightly-nr2-recurrence-numeral-2026-06-30_wave_config.json (KEEP) -- launcher config for this urgent NR-2 wave.",
+    "mu/tests/parity/test_recurrence_production.py (MODIFY) -- production recurrence.v2 repro and regression coverage must use StructuralNumbers trace steps/tau counters and prove the current failing nightly shape is repaired.",
+    "mu/tests/l4_gates/test_recurrence_v2_gate.py (MODIFY IF NEEDED) -- keep recurrence.v2 structural contract explicit for numeral step/tau behavior.",
+    "mu/tests/integration/test_paxos_end_to_end.py (MODIFY IF NEEDED) -- keep the real run_mu_structural -> hash_trace_for_recurrence -> recurrence.v2 Paxos path green.",
+    "mu/tests/parity/test_js_parity_automated.py (MODIFY IF NEEDED) -- keep JS hash_trace parity aligned for StructuralNumbers trace steps.",
+    "mu/host/python/rcx_pi/selfhost/engine_pipeline.py (MODIFY ONLY IF BOUNDARY ROOT CAUSE REQUIRES) -- hash_trace_for_recurrence or recurrence boundary handling may be tightened, but do not add host-only recurrence semantics.",
+    "mu/host/js/engine/pipeline.js (MODIFY ONLY IF JS HASH-TRACE PARITY REQUIRES) -- mirror any narrow trace hashing boundary change.",
+    "TASKS.md (MODIFY THROUGH LAUNCHER TRACKER SYNC AFTER THIS SETUP ANCHOR) -- NR-2 NOW authorization and canonical tracker note.",
+    "reports/control_plane/nightly-nr2-recurrence-numeral-2026-06-30_2026-06-30.md (GENERATED BY LAUNCHER) -- governing packet.",
+    "reports/l4_wave_indicators/nightly-nr2-recurrence-numeral-2026-06-30.json (GENERATED BY WAVE) -- indicator artifact."
+  ],
+  "work_items": [
+    "Use launch_wave.py, executor_dispatch, Phase A, Phase B, bridge review, handoff receipts, pre-commit supervisor, and commit executor. Do not hand-author implementation receipts or manually commit the wave.",
+    "Reproduce the current NR-2 failure from clean origin/dev before implementation and preserve that repro in the wave packet/evidence.",
+    "Identify the narrowest boundary where trace step/tau counters must become StructuralNumbers numerals before recurrence.v2 matcher var sites see them.",
+    "Do not teach recurrence.v2, match.v2, or the kernel to accept raw host-int counters as semantic data.",
+    "If the fix is test-helper-only, document why the real production path already emits StructuralNumbers numerals and add a regression that prevents the host-int builder from reappearing.",
+    "If Python runtime boundary tightening is required, mirror only the necessary JS hash_trace behavior and keep NR-3 for broader JS recurrence mirror work.",
+    "Run the configured evidence command, collect the L4 indicator artifact, and leave commit/push/merge to the pipeline."
+  ],
+  "constraints": [
+    "Implementer, reviewer, and pager route are Codex; Codex 5.5 xhigh defaults come from executor_config.json and bridge-agent defaults.",
+    "Pipeline is primary; manual implementation, manual receipts, manual commits, and manual PR merges are out of scope unless needed only as a bounded recovery with a same-wave structural pipeline fix or explicit follow-up packet.",
+    "No Claude-owned files may be edited.",
+    "No new host arithmetic semantic primitive, host-only recurrence shortcut, matcher relaxation, or seed semantic change.",
+    "Do not change hemisphere routing from NR-1.",
+    "Do not advance NR-3, NR-4, NR-5, Coinduction, Fixpoint, or Optimization inside this wave.",
+    "Keep boot1 and workload_contract reconciliation out of scope unless Phase A proves recurrence cannot be fixed without splitting to NR-4."
+  ],
+  "stop_conditions": [
+    "Halt as DEFECT if the only passing fix requires recurrence.v2 or match/kernel projections to accept raw host integers directly.",
+    "Halt as NEEDS_RESCOPING if Python and JS require divergent trace/tau counter semantics.",
+    "Halt as POLICY_BOUND if the wave needs boot1 or workload_contract changes; split that to NR-4.",
+    "Halt if implementation would require editing Claude-specific files.",
+    "Do not commit without pipeline-produced handoff, review, pre-commit supervisor receipt, indicator artifact, and configured evidence."
+  ],
+  "acceptance_criteria": [
+    "The direct recurrence production repro passes: mu/tests/parity/test_recurrence_production.py returns closure_detected=True for Paxos and all scaling cases.",
+    "The recurrence.v2 structural gate remains green and continues to prove StructuralNumbers step/tau behavior.",
+    "The real Paxos run_mu_structural -> hash_trace_for_recurrence -> recurrence.v2 integration remains green.",
+    "JS hash_trace parity remains green for StructuralNumbers trace steps.",
+    "L4 execution contract passes for the staged NR-2 package.",
+    "No host-semantics or authority-inventory increase is introduced."
+  ],
+  "request_for_agent": "Launch NR-2 through the dispatcher pipeline with Codex implementer, Codex reviewer, and Codex pager route. Repair only the recurrence.v2 trace step/tau numeral regression: keep counters structural before recurrence matcher var sites, preserve recurrence.v2 seed semantics, keep JS hash_trace parity aligned if touched, and do not advance NR-3/NR-4/NR-5 or the program-structural queue from inside this wave.",
+  "request_for_claude": "Compatibility input only: this wave is pinned to Codex implementer, Codex reviewer, and Codex pager route. Do not route implementation, review, pager handling, commit handling, or receipts to Claude.",
+  "authorization_note": "Founder-directed urgent nightly queue from the 2026-06-29 handoff after NR-1 merged in PR #1181: do NR-2 recurrence-numeral next, keep pipeline primary, do handoff receipts, use Codex 5.5 xhigh implementer/reviewer defaults, and preserve JS parity where the recurrence trace hashing boundary is relevant.",
+  "slow_functions": [
+    "run_mu_structural"
+  ],
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "NR-2 urgent recurrence.v2 numeral repair: trace step/tau counters must be StructuralNumbers before matcher var sites; no hemisphere, boot1, workload_contract, NR-3, NR-4, NR-5, Coinduction, Fixpoint, or Optimization work.",
+  "tracked_packet": "reports/control_plane/nightly-nr2-recurrence-numeral-2026-06-30_2026-06-30.md"
+}

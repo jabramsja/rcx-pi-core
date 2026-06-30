@@ -1693,6 +1693,10 @@ class TestEngineHelpersParity:
         py_result = hash_trace_for_recurrence(trace)
         js_response = self._run_js_json_api({"action": "hash_trace", "trace": trace})
         assert js_response["success"], f"JS hash_trace failed: {js_response.get('error')}"
+        assert py_result["head"]["step"] == _sn(0)
+        assert py_result["tail"]["head"]["step"] == _sn(1)
+        assert js_response["result"]["head"]["step"] == _sn(0)
+        assert js_response["result"]["tail"]["head"]["step"] == _sn(1)
         assert _cross_substrate_equal(py_result, js_response["result"]), (
             f"hash_trace mismatch:\n  Python: {py_result}\n  JS: {js_response['result']}"
         )
@@ -1981,6 +1985,28 @@ class TestEnginePipelineCrossSubstrateParity:
             if line.startswith('JSON_API_RESPONSE:'):
                 return json.loads(line[len('JSON_API_RESPONSE:'):])
         raise RuntimeError(f"No JSON_API_RESPONSE: {result.stdout[:500]}")
+
+    def test_hash_trace_simple_parity(self):
+        """Locked NR-2 selector: hash_trace preserves StructuralNumbers steps."""
+        from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
+        trace = {
+            "head": {"step": _sn(0), "state": {"x": "one"}, "projection": "test"},
+            "tail": {
+                "head": {"step": _sn(1), "state": {"x": "one"}, "stall": True},
+                "tail": None
+            }
+        }
+        py_result = hash_trace_for_recurrence(trace)
+        js_response = self._run_js_json_api({"action": "hash_trace", "trace": trace})
+        assert js_response["success"], f"JS hash_trace failed: {js_response.get('error')}"
+        assert py_result["head"]["step"] == _sn(0)
+        assert py_result["tail"]["head"]["step"] == _sn(1)
+        assert js_response["result"]["head"]["step"] == _sn(0)
+        assert js_response["result"]["tail"]["head"]["step"] == _sn(1)
+        assert _cross_substrate_equal(py_result, js_response["result"]), (
+            f"hash_trace mismatch:\n  Python: {py_result}\n  JS: {js_response['result']}"
+        )
 
     def test_engine_pipeline_paxos_parity(self):
         """Engine pipeline produces identical closure detection on both substrates."""
