@@ -167,9 +167,6 @@ FOUNDER_OVERRIDE:nightly-nr5-full-green-verify-2026-06-30
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/nightly-nr5-full-green-verify-2026-06-30.json`
 - Current staged files:
-  - `TASKS.md`
   - `reports/control_plane/nightly-nr5-full-green-verify-2026-06-30_2026-06-30.md`
-  - `reports/control_plane/nightly-nr5-full-green-verify-2026-06-30_wave_config.json`
-  - `reports/deferred/non_blocking/nightly-nr5-full-green-verify-2026-06-30_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/nightly-nr5-full-green-verify-2026-06-30.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
