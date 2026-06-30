@@ -1,7 +1,7 @@
 # NR-5 Full Nightly Verification 2026-06-30
 
 Date: 2026-06-30
-Status: IMPLEMENTED / LOCAL EVIDENCE
+Status: DEFECT / STRUCTURAL FOLLOW-UP REQUIRED
 Task: [NR-5]
 Wave ID: nightly-nr5-full-verify-2026-06-30
 Phase-A-Lock: LOCKED
