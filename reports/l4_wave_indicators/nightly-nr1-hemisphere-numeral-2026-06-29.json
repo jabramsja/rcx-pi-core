@@ -1,24 +1,24 @@
 {
   "wave_id": "nightly-nr1-hemisphere-numeral-2026-06-29",
-  "repeat_run_speedup_ratio": 1.368475,
+  "repeat_run_speedup_ratio": 1.367135,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.269044,
+  "step_growth_slope": 0.24491,
   "repeat_run_raw_seconds": [
-    0.36818,
-    0.269044
+    0.334825,
+    0.24491
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.36818
+      "elapsed_seconds": 0.334825
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.637224
+      "elapsed_seconds": 0.579735
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-06-30T05:56:41Z",
+  "collection_timestamp_utc": "2026-06-30T06:56:21Z",
   "collector_version": "2.2.0"
 }

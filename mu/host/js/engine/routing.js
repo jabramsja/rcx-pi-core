@@ -134,7 +134,17 @@ function runHemisphereRouting(allProjections, hemisphereProjections, engineResul
       }
       if (itemIsStructuralNumber) {
         convertedItem = item;
-      } else if (typeof item === 'number' && Number.isInteger(item)) {
+      } else if (typeof item === 'number') {
+        // JSON erases the token-level distinction between 3 and 3.0 before
+        // this boundary sees the value. The enforceable JS contract is:
+        // safe integer numbers are host-int boundary payloads; fractional and
+        // unsafe numbers fail closed instead of being promoted.
+        if (!Number.isInteger(item)) {
+          throw new RcxError(
+            'input.invalid_type',
+            'engine_result numeric leaf must be an integer'
+          );
+        }
         if (!Number.isSafeInteger(item)) {
           throw new RcxError(
             'input.invalid_type',

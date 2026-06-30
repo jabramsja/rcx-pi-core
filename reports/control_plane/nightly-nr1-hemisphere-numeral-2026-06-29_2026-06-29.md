@@ -75,6 +75,24 @@ Focused repair evidence:
 - `PYTHONHASHSEED=0 python3 -m pytest -q tests/tools/test_pipeline_agent_pager.py::test_executor_config_default_pager_route_is_both tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py::TestJSOuterLoopBoundary::test_js_routing_continuation_drivers_use_bounded_return_meta --tb=short` passed `2` tests.
 - `bash tools/checks/linters/ast_police_js.sh mu/host/js` passed.
 
+## Bot-Remediation Numeric Boundary Repair
+
+PR bot review flagged that JS would promote integer-valued floats, while Python promotes only exact `int` leaves. The actionable boundary is narrower: after JSON parsing, JavaScript cannot distinguish token text `3` from `3.0`; both arrive as the same `number`. The final JS contract therefore keeps NR-1's required raw host-int JSON path while failing closed on fractional and unsafe numeric leaves:
+
+- safe integer `number` leaves convert to StructuralNumbers for hemisphere routing;
+- non-integer numeric leaves raise `input.invalid_type`;
+- unsafe integer numeric leaves raise `input.invalid_type`.
+
+The first automated remediation kept all JS numeric leaves raw and reproduced a pre-push regression: `tests/l4_gates/test_metabolize_cycle_gate.py::TestHemisphereNumeralRoutingGate::test_js_boundary_routes_host_int_value_and_tau_step_at_json_api` failed with `Got: ["route_hemisphere"]`. The same-wave repair restores safe-integer conversion and makes the fractional/unsafe-number fail-closed behavior explicit.
+
+Focused repair evidence:
+
+- `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_metabolize_cycle_gate.py::TestHemisphereNumeralRoutingGate --tb=short` passed `3` tests.
+- `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_js_parity_automated.py::TestEnginePipelineCrossSubstrateParity::test_hemisphere_routing_parity --tb=short` passed `1` test.
+- `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_js_parity_automated.py::TestHemisphereRoutingPropertyFuzzer::test_valid_engine_result_routing_parity --tb=short` passed `1` test.
+- `PYTHONHASHSEED=0 python3 -m pytest -q tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py::TestJSOuterLoopBoundary::test_js_routing_continuation_drivers_use_bounded_return_meta --tb=short` passed `1` test.
+- `bash tools/checks/linters/ast_police_js.sh mu/host/js` passed.
+
 ## Acceptance criteria
 
 - The direct Python host-int value and tau_step hemisphere repro returns a five-key hemisphere dict with exactly one populated expected target.

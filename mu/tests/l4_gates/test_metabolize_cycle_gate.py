@@ -158,6 +158,29 @@ class TestHemisphereNumeralRoutingGate:
         assert mu_equal(result["r_a"][0]["state"], sn(42))
         assert result["r_a"][0]["closure_flag"] is True
 
+    def test_js_boundary_rejects_fractional_numeric_leaf_at_json_api(self):
+        engine_result = {
+            "value": 3.5,
+            "closure_detected": True,
+            "tau_step": 3,
+            "exhaustion_detected": False,
+            "operator_frozen": False,
+            "frozen_set": None,
+            "action": None,
+            "stall": True,
+        }
+
+        # SPEED_OK: exact NR-1 JSON API numeric-boundary guard requires node.
+        resp = _js_request(
+            "run_hemisphere_routing",
+            engine_result=engine_result,
+            hemispheres=_empty_hemispheres(),
+        )
+
+        assert not resp["success"]
+        assert resp.get("error_code") == "input.invalid_type"
+        assert "numeric leaf must be an integer" in resp.get("error", "")
+
 
 @pytest.mark.slow
 @pytest.mark.l4_expensive
