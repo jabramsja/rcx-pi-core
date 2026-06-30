@@ -26,6 +26,7 @@ from tests.hemisphere_helpers import (
     empty_hemispheres as _empty_hemispheres,
     route as _route,
 )
+from tests.helpers.structural_numbers import sn
 
 
 # =============================================================================
@@ -52,26 +53,26 @@ ROUTING_VECTORS = [
     ("null_value", _make_engine_result(value=None), "r_null"),
     ("null_with_closure", _make_engine_result(value=None, closure_detected=True), "r_null"),
     # closure path
-    ("closure_int", _make_engine_result(value=42, closure_detected=True), "r_a"),
-    ("closure_zero", _make_engine_result(value=0, closure_detected=True), "r_a"),
+    ("closure_int", _make_engine_result(value=sn(42), closure_detected=True), "r_a"),
+    ("closure_zero", _make_engine_result(value=sn(0), closure_detected=True), "r_a"),
     # default path — each value type that could confuse type-weak matching
-    ("default_int", _make_engine_result(value=42), "lobes"),
-    ("default_zero", _make_engine_result(value=0), "lobes"),
+    ("default_int", _make_engine_result(value=sn(42)), "lobes"),
+    ("default_zero", _make_engine_result(value=sn(0)), "lobes"),
     ("default_string", _make_engine_result(value="hello"), "lobes"),
     ("default_empty_string", _make_engine_result(value=""), "lobes"),
     ("default_bool_false", _make_engine_result(value=False), "lobes"),
     ("default_bool_true_value", _make_engine_result(value=True), "lobes"),
-    ("default_dict", _make_engine_result(value={"x": [1, 2]}), "lobes"),
-    ("default_list_value", _make_engine_result(value=[1, 2, 3]), "lobes"),
+    ("default_dict", _make_engine_result(value={"x": [sn(1), sn(2)]}), "lobes"),
+    ("default_list_value", _make_engine_result(value=[sn(1), sn(2), sn(3)]), "lobes"),
     # pass-through fields must not affect routing
     # exhaustion_detected=True routes to sink (not lobes) per hemisphere.classify.exhaustion
     ("passthrough_exhaustion", _make_engine_result(
-        value=99, tau_step=10, exhaustion_detected=True,
+        value=sn(99), tau_step=sn(10), exhaustion_detected=True,
         operator_frozen="op", frozen_set=[], action="halt", stall=True,
     ), "sink"),
     # non-exhaustion/non-stall fields still pass through without affecting routing
     ("passthrough_fields_no_signal", _make_engine_result(
-        value=99, tau_step=10, operator_frozen="op", frozen_set=[], action="halt",
+        value=sn(99), tau_step=sn(10), operator_frozen="op", frozen_set=[], action="halt",
     ), "lobes"),
 ]
 
@@ -154,8 +155,8 @@ class TestHemisphereTypeConfusion:
     def test_string_true_vs_bool_true(self):
         """String "true" must NOT route to r_a (only bool true does)."""
         projs = _get_projs()
-        bool_result = _route(projs, _make_engine_result(value=42, closure_detected=True))
-        str_result = _route(projs, _make_engine_result(value=42, closure_detected="true"))
+        bool_result = _route(projs, _make_engine_result(value=sn(42), closure_detected=True))
+        str_result = _route(projs, _make_engine_result(value=sn(42), closure_detected="true"))
         assert bool_result["r_a"] is not None
         assert bool_result["lobes"] is None
         assert str_result["lobes"] is not None
@@ -172,19 +173,19 @@ class TestHemisphereTypeConfusion:
         assert str_result["r_null"] is None
 
     def test_integer_zero_vs_null(self):
-        """Integer 0 must route to lobes, not r_null."""
+        """Structural integer 0 must route to lobes, not r_null."""
         projs = _get_projs()
-        zero_result = _route(projs, _make_engine_result(value=0))
+        zero_result = _route(projs, _make_engine_result(value=sn(0)))
         null_result = _route(projs, _make_engine_result(value=None))
         assert zero_result["lobes"] is not None, "0 should route to lobes"
         assert zero_result["r_null"] is None, "0 should NOT route to r_null"
         assert null_result["r_null"] is not None, "null should route to r_null"
 
     def test_integer_one_vs_bool_true_closure(self):
-        """Integer 1 for closure_detected must NOT route to r_a (only bool true)."""
+        """Structural 1 for closure_detected must NOT route to r_a (only bool true)."""
         projs = _get_projs()
-        bool_result = _route(projs, _make_engine_result(value=42, closure_detected=True))
-        int_result = _route(projs, _make_engine_result(value=42, closure_detected=1))
+        bool_result = _route(projs, _make_engine_result(value=sn(42), closure_detected=True))
+        int_result = _route(projs, _make_engine_result(value=sn(42), closure_detected=sn(1)))
         assert bool_result["r_a"] is not None, "bool true -> r_a"
         assert int_result["lobes"] is not None, "int 1 -> lobes (not r_a)"
         assert int_result["r_a"] is None, "int 1 must NOT route to r_a"
@@ -210,16 +211,16 @@ class TestHemisphereBoundary:
         count = 15
         for i in range(count):
             reset_step_budget()
-            h = _route(projs, _make_engine_result(value=i), hemispheres=h)
+            h = _route(projs, _make_engine_result(value=sn(i)), hemispheres=h)
         assert len(h["lobes"]) == count, f"Expected {count} entries, got {len(h['lobes'])}"
         # Verify prepend order: most recent first
-        assert mu_equal(h["lobes"][0]["state"], count - 1)
-        assert mu_equal(h["lobes"][-1]["state"], 0)
+        assert mu_equal(h["lobes"][0]["state"], sn(count - 1))
+        assert mu_equal(h["lobes"][-1]["state"], sn(0))
 
     def test_deeply_nested_value_preserved(self):
         """Routing a deeply nested value preserves structure in entry."""
         projs = _get_projs()
-        nested = {"a": {"b": {"c": {"d": {"e": {"f": {"g": 42}}}}}}}
+        nested = {"a": {"b": {"c": {"d": {"e": {"f": {"g": sn(42)}}}}}}}
         result = _route(projs, _make_engine_result(value=nested))
         assert result["lobes"] is not None
         assert mu_equal(result["lobes"][0]["state"], nested)
@@ -330,10 +331,68 @@ class TestHemisphereAdversarialSmuggling:
         with pytest.raises(ValueError, match="engine_result must be a dict"):
             run_hemisphere_routing("not_a_dict", _empty_hemispheres())
 
+    def test_boundary_routes_host_int_value_and_tau_step(self):
+        """Production boundary encodes host ints and returns reentrant hemispheres."""
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing, run_metabolization_cycle
+
+        engine_result = _make_engine_result(
+            value=42,
+            closure_detected=True,
+            tau_step=3,
+            stall=True,
+        )
+        # SPEED_OK: production hemisphere boundary regression requires run_mu_structural.
+        result = run_hemisphere_routing(engine_result, _empty_hemispheres())
+        populated = [k for k in ("r_null", "r_inf", "r_a", "lobes", "sink") if result[k] is not None]
+        assert populated == ["r_a"]
+        assert mu_equal(result["r_a"][0]["state"], sn(42))
+        assert result["r_a"][0]["closure_flag"] is True
+        # SPEED_OK: returned hemisphere state must remain valid for the next structural boundary.
+        rerouted = run_hemisphere_routing(engine_result, result)
+        assert len(rerouted["r_a"]) == 2
+        # SPEED_OK: bridge regression locked metabolization compatibility for returned state.
+        metabolized = run_metabolization_cycle(result)
+        assert set(metabolized.keys()) == {"r_null", "r_inf", "r_a", "lobes", "sink"}
+
+    @pytest.mark.timeout(5)
+    def test_boundary_rejects_cyclic_engine_result_before_conversion(self):
+        """Cyclic engine_result fails closed before numeral conversion can loop."""
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
+        engine_result = _make_engine_result(
+            value=42,
+            closure_detected=True,
+            tau_step=3,
+            stall=True,
+        )
+        engine_result["value"] = engine_result
+        with pytest.raises(ValueError, match="maximum validation depth|cyclic structure"):
+            # SPEED_OK: direct production boundary regression for cyclic bridge finding.
+            run_hemisphere_routing(engine_result, _empty_hemispheres())
+
+    def test_boundary_rejects_container_subclasses_before_conversion(self):
+        """Host container subclasses must not be laundered into structural containers."""
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+
+        class HostDict(dict):
+            pass
+
+        class HostList(list):
+            pass
+
+        with pytest.raises(ValueError, match="engine_result must be a dict"):
+            # SPEED_OK: direct production boundary regression for host-object rejection.
+            run_hemisphere_routing(HostDict(_make_engine_result(value=42)), _empty_hemispheres())
+
+        engine_result = _make_engine_result(value=HostList([1, 2, 3]))
+        with pytest.raises(ValueError, match="non-Mu container"):
+            # SPEED_OK: direct production boundary regression for host-object rejection.
+            run_hemisphere_routing(engine_result, _empty_hemispheres())
+
     def test_hemisphere_key_names_in_value_safe(self):
         """Value containing hemisphere key names routes normally to lobes."""
         projs = _get_projs()
-        tricky_value = {"r_null": "attack", "r_a": True, "lobes": [1, 2, 3]}
+        tricky_value = {"r_null": "attack", "r_a": True, "lobes": [sn(1), sn(2), sn(3)]}
         result = _route(projs, _make_engine_result(value=tricky_value))
         assert result["lobes"] is not None, "Should route to lobes normally"
         assert mu_equal(result["lobes"][0]["state"], tricky_value), "Value preserved exactly"
