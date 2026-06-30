@@ -2015,27 +2015,208 @@ class TestEnginePipelineCrossSubstrateParity:
 
     def test_hemisphere_routing_parity(self):
         """Hemisphere routing produces identical bucket assignment on both substrates."""
-        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
+        from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing, run_metabolization_cycle
 
+        vectors = [
+            {
+                "value": {"x": "one"}, "closure_detected": True, "tau_step": _sn(2),
+                "exhaustion_detected": False, "operator_frozen": False,
+                "frozen_set": None, "action": None, "stall": True,
+            },
+            {
+                "value": 42, "closure_detected": True, "tau_step": 3,
+                "exhaustion_detected": False, "operator_frozen": False,
+                "frozen_set": None, "action": None, "stall": True,
+            },
+        ]
+        for engine_result in vectors:
+            hemispheres = {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
 
-        engine_result = {
-            "value": {"x": "one"}, "closure_detected": True, "tau_step": _sn(2),
+            py_result = run_hemisphere_routing(engine_result, dict(hemispheres))
+
+            # SPEED_OK: node JSON API parity locks the host-int hemisphere boundary.
+            js_response = self._run_js_json_api({
+                "action": "run_hemisphere_routing",
+                "engine_result": engine_result,
+                "hemispheres": dict(hemispheres),
+            })
+            assert js_response["success"], f"JS hemisphere routing failed: {js_response.get('error')}"
+            assert _cross_substrate_equal(py_result, js_response["result"]), (
+                f"Hemisphere routing mismatch:\n  Python: {py_result}\n  JS: {js_response['result']}"
+            )
+            populated = [k for k in ("r_null", "r_inf", "r_a", "lobes", "sink") if py_result[k] is not None]
+            assert populated == ["r_a"]
+            if engine_result["value"] == 42:
+                assert _cross_substrate_equal(py_result["r_a"][0]["state"], _sn(42))
+                py_second = run_hemisphere_routing(engine_result, py_result)
+                # SPEED_OK: node JSON API parity locks returned-hemisphere reentrancy.
+                js_second = self._run_js_json_api({
+                    "action": "run_hemisphere_routing",
+                    "engine_result": engine_result,
+                    "hemispheres": js_response["result"],
+                })
+                assert js_second["success"], (
+                    f"JS second hemisphere routing failed: {js_second.get('error')}"
+                )
+                assert _cross_substrate_equal(py_second, js_second["result"]), (
+                    f"Second routing mismatch:\n  Python: {py_second}\n  JS: {js_second['result']}"
+                )
+                py_metabolized = run_metabolization_cycle(py_result)
+                # SPEED_OK: node JSON API parity locks returned-state metabolization.
+                js_metabolized = self._run_js_json_api({
+                    "action": "run_metabolization_cycle",
+                    "hemispheres": js_response["result"],
+                })
+                assert js_metabolized["success"], (
+                    f"JS metabolization failed: {js_metabolized.get('error')}"
+                )
+                assert _cross_substrate_equal(py_metabolized, js_metabolized["result"]), (
+                    f"Metabolization mismatch:\n  Python: {py_metabolized}\n"
+                    f"  JS: {js_metabolized['result']}"
+                )
+        unsafe_engine_result = {
+            "value": 9007199254740993, "closure_detected": True, "tau_step": 3,
             "exhaustion_detected": False, "operator_frozen": False,
             "frozen_set": None, "action": None, "stall": True,
         }
-        hemispheres = {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
-
-        py_result = run_hemisphere_routing(engine_result, hemispheres)
-
-        js_response = self._run_js_json_api({
-            "action": "run_hemisphere_routing",
-            "engine_result": engine_result,
-            "hemispheres": hemispheres,
-        })
-        assert js_response["success"], f"JS hemisphere routing failed: {js_response.get('error')}"
-        assert _cross_substrate_equal(py_result, js_response["result"]), (
-            f"Hemisphere routing mismatch:\n  Python: {py_result}\n  JS: {js_response['result']}"
+        py_unsafe = run_hemisphere_routing(
+            unsafe_engine_result,
+            {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None},
         )
+        assert _cross_substrate_equal(py_unsafe["r_a"][0]["state"], _sn(9007199254740993))
+        # SPEED_OK: node JSON API must reject unsafe integer payloads instead of rounding.
+        js_unsafe = self._run_js_json_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": unsafe_engine_result,
+            "hemispheres": {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None},
+        })
+        assert js_unsafe["success"] is False
+        assert js_unsafe.get("error_code") == "input.invalid_type"
+        assert "safe integer range" in js_unsafe.get("error", "")
+        cyclic_probe = """
+        const fs = require('fs');
+        const path = require('path');
+        const { getSeedSubdir } = require('./mu/host/js/core/seed_loader');
+        const muContainers = require('./mu/host/js/core/container_factory');
+        const { runHemisphereRouting } = require('./mu/host/js/engine/routing');
+        const { defaultHemispheres } = require('./mu/host/js/core/terminal_classification');
+        function loadSeed(name) {
+          const seedPath = path.join(process.cwd(), 'mu', getSeedSubdir(name), name);
+          return JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+        }
+        const kernel = loadSeed('kernel.v1.json');
+        const matchSeed = loadSeed('match.v2.json');
+        const substSeed = loadSeed('subst.v2.json');
+        const hemisphereSeed = loadSeed('hemispheres.v1.json');
+        const allProjections = muContainers.list([
+          ...kernel.projections,
+          ...matchSeed.projections,
+          ...substSeed.projections,
+        ]);
+        const engineResult = {
+          value: 42,
+          closure_detected: true,
+          tau_step: 3,
+          exhaustion_detected: false,
+          operator_frozen: false,
+          frozen_set: null,
+          action: null,
+          stall: true,
+        };
+        engineResult.value = engineResult;
+        try {
+          runHemisphereRouting(
+            allProjections,
+            hemisphereSeed.projections,
+            engineResult,
+            defaultHemispheres()
+          );
+          process.stdout.write(JSON.stringify({ success: true }));
+        } catch (e) {
+          process.stdout.write(JSON.stringify({
+            success: false,
+            error_code: e.error_code || null,
+            error: String(e.message),
+          }));
+        }
+        """
+        # SPEED_OK: direct node regression for cyclic engine_result bridge finding.
+        cyclic_result = subprocess.run(
+            ["node", "-e", textwrap.dedent(cyclic_probe)],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=5,
+        )
+        assert cyclic_result.returncode == 0, cyclic_result.stderr
+        cyclic_response = json.loads(cyclic_result.stdout)
+        assert cyclic_response["success"] is False
+        assert (
+            "maximum validation depth" in cyclic_response["error"]
+            or "cyclic structure" in cyclic_response["error"]
+        ), cyclic_response
+        host_object_probe = """
+        const fs = require('fs');
+        const path = require('path');
+        const { getSeedSubdir } = require('./mu/host/js/core/seed_loader');
+        const muContainers = require('./mu/host/js/core/container_factory');
+        const { runHemisphereRouting } = require('./mu/host/js/engine/routing');
+        const { defaultHemispheres } = require('./mu/host/js/core/terminal_classification');
+        function loadSeed(name) {
+          const seedPath = path.join(process.cwd(), 'mu', getSeedSubdir(name), name);
+          return JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+        }
+        const kernel = loadSeed('kernel.v1.json');
+        const matchSeed = loadSeed('match.v2.json');
+        const substSeed = loadSeed('subst.v2.json');
+        const hemisphereSeed = loadSeed('hemispheres.v1.json');
+        const allProjections = muContainers.list([
+          ...kernel.projections,
+          ...matchSeed.projections,
+          ...substSeed.projections,
+        ]);
+        class HostValue {
+          constructor() { this.x = 1; }
+        }
+        const engineResult = {
+          value: new HostValue(),
+          closure_detected: true,
+          tau_step: 3,
+          exhaustion_detected: false,
+          operator_frozen: false,
+          frozen_set: null,
+          action: null,
+          stall: true,
+        };
+        try {
+          runHemisphereRouting(
+            allProjections,
+            hemisphereSeed.projections,
+            engineResult,
+            defaultHemispheres()
+          );
+          process.stdout.write(JSON.stringify({ success: true }));
+        } catch (e) {
+          process.stdout.write(JSON.stringify({
+            success: false,
+            error_code: e.error_code || null,
+            error: String(e.message),
+          }));
+        }
+        """
+        # SPEED_OK: direct node regression prevents host-object laundering at routing boundary.
+        host_object_result = subprocess.run(
+            ["node", "-e", textwrap.dedent(host_object_probe)],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            timeout=5,
+        )
+        assert host_object_result.returncode == 0, host_object_result.stderr
+        host_object_response = json.loads(host_object_result.stdout)
+        assert host_object_response["success"] is False
+        assert host_object_response.get("error_code") == "input.invalid_type"
+        assert "non-Mu container" in host_object_response.get("error", "")
 
     def test_full_pipeline_with_routing_parity(self):
         """Full engine->hemisphere pipeline produces identical results on both substrates."""
@@ -3612,10 +3793,16 @@ class TestReservedFieldValidationFuzzer:
 def _engine_result(draw):
     """Generate a valid 8-key engine_result dict for hemisphere routing."""
     closure_detected = draw(st.booleans())
-    scalar_value = st.one_of(st.none(), st.booleans(), st.text(max_size=10))
+    scalar_value = st.one_of(
+        st.none(),
+        st.booleans(),
+        st.integers(min_value=-5, max_value=20),
+        st.text(max_size=10),
+    )
     value = draw(st.one_of(
         st.none(),
         st.booleans(),
+        st.integers(min_value=-5, max_value=20),
         st.text(max_size=10),
         st.lists(scalar_value, max_size=2),
         st.dictionaries(_safe_keys, scalar_value, max_size=2),
@@ -3704,6 +3891,7 @@ class TestHemisphereRoutingPropertyFuzzer:
 
         py_result = run_hemisphere_routing(er, dict(hemispheres))
 
+        # SPEED_OK: node JSON API parity fuzzer exercises the production routing boundary.
         js_response = _module_run_js_json_api({
             "action": "run_hemisphere_routing",
             "engine_result": er,

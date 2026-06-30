@@ -1564,6 +1564,9 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
 # Hemisphere Routing & Metabolization (Boot2)
 # =============================================================================
 
+_ENGINE_RESULT_STRUCTURALIZE_FRAME_LIMIT = 300_000
+
+
 def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK: infra — hemisphere boundary validation
     """Route engine result to hemispheres with input shape validation.
 
@@ -1581,10 +1584,52 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
         ValueError: If engine_result is not a dict.
         RuntimeError: If hemisphere routing stalls.
     """
-    if not isinstance(engine_result, dict):
+    if type(engine_result) is not dict:
         raise ValueError("engine_result must be a dict")
+    if not is_mu(engine_result):
+        raise ValueError("engine_result contains non-Mu container or cyclic structure")
     projs = load_verified_seed(get_seed_path("hemispheres.v1.json"))["projections"]
-    wrapped = {"route_hemisphere": {"engine_result": engine_result, "hemispheres": hemispheres}}
+    routed_engine_result: dict = {}
+    pending = [(engine_result, routed_engine_result)]
+    frame_count = 0
+    while pending:
+        frame_count += 1
+        if frame_count > _ENGINE_RESULT_STRUCTURALIZE_FRAME_LIMIT:
+            raise ValueError("engine_result structural numeral conversion exceeded frame limit")
+        source, target = pending.pop()
+        source_type = type(source)
+        source_is_list = source_type is list
+        source_items = enumerate(source) if source_is_list else source.items()
+        for key, item in source_items:
+            item_type = type(item)
+            if item_type is dict and set(item.keys()) == {"_num"}:
+                converted_item = item
+            elif item_type is int:
+                if item == 0:
+                    converted_item = {"_num": None}
+                else:
+                    positive = item if item > 0 else -item
+                    bits = []
+                    while positive > 1:
+                        bits.append(positive & 1)
+                        positive >>= 1
+                    node: Mu = {"xH": None}
+                    while bits:
+                        node = {"xI": node} if bits.pop() else {"xO": node}
+                    converted_item = {"_num": node if item > 0 else {"neg": node}}
+            elif item_type is dict:
+                converted_item = {}
+                pending.append((item, converted_item))
+            elif item_type is list:
+                converted_item = []
+                pending.append((item, converted_item))
+            else:
+                converted_item = item
+            if source_is_list:
+                target.append(converted_item)
+            else:
+                target[key] = converted_item
+    wrapped = {"route_hemisphere": {"engine_result": routed_engine_result, "hemispheres": hemispheres}}
     validate_no_kernel_reserved_fields(wrapped, "run_hemisphere_routing input")
     structural_result = run_mu_structural(
         projs,

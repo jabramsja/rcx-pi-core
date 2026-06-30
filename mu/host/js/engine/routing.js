@@ -13,19 +13,168 @@ const { stepKernel } = require('./kernel');
 const { runEnginePipeline, runEnginePipelineRecursive, validateDomainBoundary } = require('./pipeline');
 
 const KERNEL_DRIVER_BOUNDARY_WATCHDOG = 1000;
+const ENGINE_RESULT_STRUCTURALIZE_FRAME_LIMIT = 300000;
 
 /**
  * Route engine result to hemispheres with input shape validation.
  * Parameterized: takes allProjections and hemisphereProjections.
- * Mirrors Python run_hemisphere_routing() (step_mu.py:1592-1621).
+ * Mirrors Python run_hemisphere_routing().
  */
 function runHemisphereRouting(allProjections, hemisphereProjections, engineResult, hemispheres, vmConfig) {
   if (engineResult === null || typeof engineResult !== 'object' || Array.isArray(engineResult)) {
     throw new RcxError('input.invalid_type', 'engine_result must be a dict');
   }
+  try {
+    const engineResultPrototype = Object.getPrototypeOf(engineResult);
+    const engineResultKeys = Object.keys(engineResult);
+    if (engineResultPrototype !== Object.prototype && engineResultPrototype !== null) {
+      throw new RcxError('input.invalid_type', 'engine_result must be a dict');
+    }
+    if (Object.getOwnPropertySymbols(engineResult).length > 0 ||
+        Object.getOwnPropertyNames(engineResult).length !== engineResultKeys.length) {
+      throw new RcxError('input.invalid_type', 'engine_result must be a dict');
+    }
+    for (let i = 0; i < engineResultKeys.length; i++) {
+      const descriptor = Object.getOwnPropertyDescriptor(engineResult, engineResultKeys[i]);
+      if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+        throw new RcxError('input.invalid_type', 'engine_result must be a dict');
+      }
+    }
+  } catch (e) {
+    if (e instanceof RcxError) throw e;
+    throw new RcxError('input.invalid_type', 'engine_result must be a dict');
+  }
+
+  const routedEngineResult = muContainers.record([]);
+  const pending = [{ source: engineResult, target: routedEngineResult, exiting: false }];
+  const activeContainers = [];
+  let frameCount = 0;
+  for (; pending.length > 0;) {
+    frameCount += 1;
+    if (frameCount > ENGINE_RESULT_STRUCTURALIZE_FRAME_LIMIT) {
+      throw new RcxError('input.invalid_type', 'engine_result structural numeral conversion exceeded frame limit');
+    }
+    const frame = pending.pop();
+    const source = frame.source;
+    const target = frame.target;
+    if (source === null || typeof source !== 'object') continue;
+    if (frame.exiting) {
+      if (activeContainers.length === 0 || activeContainers[activeContainers.length - 1] !== source) {
+        throw new RcxError('input.invalid_type', 'engine_result structural traversal stack mismatch');
+      }
+      activeContainers.pop();
+      continue;
+    }
+    if (activeContainers.includes(source)) {
+      throw new RcxError('input.invalid_type', 'engine_result contains cyclic structure');
+    }
+    activeContainers.push(source);
+    pending.push({ source, target, exiting: true });
+    const sourceIsArray = Array.isArray(source);
+    let sourceKeys = null;
+    let sourceLength = 0;
+    try {
+      if (sourceIsArray) {
+        if (Object.getPrototypeOf(source) !== Array.prototype) {
+          throw new RcxError('input.invalid_type', 'engine_result contains non-Mu container');
+        }
+        if (Object.getOwnPropertySymbols(source).length > 0 ||
+            Object.keys(source).length !== source.length ||
+            Object.getOwnPropertyNames(source).length !== source.length + 1) {
+          throw new RcxError('input.invalid_type', 'engine_result contains non-Mu container');
+        }
+        for (let i = 0; i < source.length; i++) {
+          const descriptor = Object.getOwnPropertyDescriptor(source, String(i));
+          if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+            throw new RcxError('input.invalid_type', 'engine_result contains non-Mu container');
+          }
+        }
+        sourceLength = source.length;
+      } else {
+        const sourcePrototype = Object.getPrototypeOf(source);
+        if (sourcePrototype !== Object.prototype && sourcePrototype !== null) {
+          throw new RcxError('input.invalid_type', 'engine_result contains non-Mu container');
+        }
+        sourceKeys = Object.keys(source);
+        if (Object.getOwnPropertySymbols(source).length > 0 ||
+            Object.getOwnPropertyNames(source).length !== sourceKeys.length) {
+          throw new RcxError('input.invalid_type', 'engine_result contains non-Mu container');
+        }
+        for (let i = 0; i < sourceKeys.length; i++) {
+          const descriptor = Object.getOwnPropertyDescriptor(source, sourceKeys[i]);
+          if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+            throw new RcxError('input.invalid_type', 'engine_result contains non-Mu container');
+          }
+        }
+        sourceLength = sourceKeys.length;
+      }
+    } catch (e) {
+      if (e instanceof RcxError) throw e;
+      throw new RcxError('input.invalid_type', 'engine_result contains non-Mu container');
+    }
+    for (let i = 0; i < sourceLength; i++) {
+      const key = sourceIsArray ? i : sourceKeys[i];
+      const item = sourceIsArray ? source[i] : source[key];
+      let convertedItem = item;
+      let itemIsStructuralNumber = false;
+      if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+        try {
+          const itemPrototype = Object.getPrototypeOf(item);
+          const itemKeys = Object.keys(item);
+          itemIsStructuralNumber = (
+            (itemPrototype === Object.prototype || itemPrototype === null) &&
+            itemKeys.length === 1 &&
+            Object.hasOwn(item, '_num') &&
+            Object.getOwnPropertySymbols(item).length === 0 &&
+            Object.getOwnPropertyNames(item).length === 1
+          );
+        } catch (_) {
+          itemIsStructuralNumber = false;
+        }
+      }
+      if (itemIsStructuralNumber) {
+        convertedItem = item;
+      } else if (typeof item === 'number' && Number.isInteger(item)) {
+        if (!Number.isSafeInteger(item)) {
+          throw new RcxError(
+            'input.invalid_type',
+            'engine_result integer exceeds JavaScript safe integer range'
+          );
+        }
+        if (item === 0) {
+          convertedItem = muContainers.record([['_num', null]]);
+        } else {
+          let positive = item > 0 ? item : -item;
+          const bits = [];
+          for (; positive > 1;) {
+            bits.push(positive % 2);
+            positive = Math.floor(positive / 2);
+          }
+          let node = muContainers.record([['xH', null]]);
+          for (; bits.length > 0;) {
+            node = muContainers.record([[bits.pop() === 1 ? 'xI' : 'xO', node]]);
+          }
+          convertedItem = muContainers.record([
+            ['_num', item > 0 ? node : muContainers.record([['neg', node]])],
+          ]);
+        }
+      } else if (Array.isArray(item)) {
+        convertedItem = muContainers.list([]);
+        pending.push({ source: item, target: convertedItem, exiting: false });
+      } else if (item !== null && typeof item === 'object') {
+        convertedItem = muContainers.record([]);
+        pending.push({ source: item, target: convertedItem, exiting: false });
+      }
+      if (sourceIsArray) {
+        target.push(convertedItem);
+      } else {
+        target[key] = convertedItem;
+      }
+    }
+  }
   const wrapped = muContainers.record([
     ['route_hemisphere', muContainers.record([
-      ['engine_result', engineResult],
+      ['engine_result', routedEngineResult],
       ['hemispheres', hemispheres],
     ])],
   ]);

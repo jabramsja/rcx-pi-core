@@ -19,7 +19,9 @@ import pytest
 
 from tests.repo_root import REPO_ROOT
 
+from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.engine_pipeline import (
+    run_hemisphere_routing,  # SPEED_OK: boundary wrapper tested via run_mu_structural
     run_metabolization_cycle,  # SPEED_OK: boundary wrapper tested via run_mu
     count_hemisphere_entries,
 )
@@ -28,6 +30,7 @@ from rcx_pi.selfhost.seed_integrity import (
     get_seed_path,
     EXPECTED_PROJECTION_IDS,
 )
+from tests.helpers.structural_numbers import sn
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +105,58 @@ class TestMetabolizeCycleJSParityGate:
         resp = _js_request("run_metabolization_cycle", hemispheres=h)
         assert not resp["success"]
         assert resp["error_code"] == "input.shape_mismatch"
+
+
+class TestHemisphereNumeralRoutingGate:
+    """Gate: host-int engine_result routing is structural before projection match."""
+
+    def test_python_boundary_routes_host_int_value_and_tau_step(self):
+        engine_result = {
+            "value": 42,
+            "closure_detected": True,
+            "tau_step": 3,
+            "exhaustion_detected": False,
+            "operator_frozen": False,
+            "frozen_set": None,
+            "action": None,
+            "stall": True,
+        }
+
+        # SPEED_OK: exact NR-1 production boundary regression requires run_mu_structural.
+        result = run_hemisphere_routing(engine_result, _empty_hemispheres())
+
+        assert set(result) == {"r_null", "r_inf", "r_a", "lobes", "sink"}
+        populated = [k for k in ("r_null", "r_inf", "r_a", "lobes", "sink") if result[k] is not None]
+        assert populated == ["r_a"]
+        assert mu_equal(result["r_a"][0]["state"], sn(42))
+        assert result["r_a"][0]["closure_flag"] is True
+
+    def test_js_boundary_routes_host_int_value_and_tau_step_at_json_api(self):
+        engine_result = {
+            "value": 42,
+            "closure_detected": True,
+            "tau_step": 3,
+            "exhaustion_detected": False,
+            "operator_frozen": False,
+            "frozen_set": None,
+            "action": None,
+            "stall": True,
+        }
+
+        # SPEED_OK: exact NR-1 JSON API parity vector requires node.
+        resp = _js_request(
+            "run_hemisphere_routing",
+            engine_result=engine_result,
+            hemispheres=_empty_hemispheres(),
+        )
+
+        assert resp["success"], resp.get("error")
+        result = resp["result"]
+        assert set(result) == {"r_null", "r_inf", "r_a", "lobes", "sink"}
+        populated = [k for k in ("r_null", "r_inf", "r_a", "lobes", "sink") if result[k] is not None]
+        assert populated == ["r_a"]
+        assert mu_equal(result["r_a"][0]["state"], sn(42))
+        assert result["r_a"][0]["closure_flag"] is True
 
 
 @pytest.mark.slow
