@@ -785,20 +785,22 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 ## NOW (normally empty; founder-directed exceptions may pin an active Codex queue)
 
-- **[NR-3] [NIGHTLY-JS-MIRROR-PRE-COMMIT-RETRY-2026-06-30] ACTIVE /
-  URGENT** (2026-06-30, founder-directed nightly production regression repair;
-  wave `nightly-nr3-js-mirror-2026-06-30`). Live L4_STRUCTURAL authorization
-  anchor for the current NR-3 package after Phase B bridge GO and before the
-  pre-commit receipt/commit handoff lands. Keep this anchor active until the
-  pre-commit supervisor produces COMMIT_GO/receipt authority and the commit
-  executor lands the package; do not advance NR-4/NR-5 inside this wave.
+- ~~**[NR-3] [NIGHTLY-JS-MIRROR-PRE-COMMIT-RETRY-2026-06-30] ACTIVE /
+  URGENT**~~ **RETIRED / RECEIPT-HANDOFF RECORDED** (2026-06-30,
+  founder-directed nightly production regression repair; wave
+  `nightly-nr3-js-mirror-2026-06-30`). NR-3 no longer owns the live NOW launch
+  anchor in this checkout: the same-wave Ra tracker note records the Phase B
+  commit-ready handoff and explicit pre-commit receipt authority at
+  `.agent_bus-lane1/meta/pre_commit_receipts/receipt_2026-06-30T12-42-58p00-00_12f297b4.json`.
+  Do not relaunch NR-3 from NOW; treat PR #1183 / this handoff landing as the
+  NR-3 queue-clearance evidence and advance the nightly queue to NR-4.
 
 - **[NR-4] [NIGHTLY-BOOT1-WORKLOAD-CONTRACT-RECONCILIATION-2026-06-30]
-  QUEUED / URGENT** (2026-06-30, founder-directed nightly follow-up after
-  NR-1, NR-2, and NR-3 JS mirror proof). Keep this queued for its own wave:
-  reconcile Boot1 plus workload_contract semantics only after the NR-3 JS
-  hemisphere/hash-trace proof package clears governance. Do not advance it
-  inside `nightly-nr3-js-mirror-2026-06-30`.
+  NEXT / URGENT** (2026-06-30, founder-directed nightly follow-up after NR-1,
+  NR-2, and NR-3 JS mirror proof). NR-4 is unblocked by the NR-3
+  receipt-handoff authority recorded in Ra; launch it only as its own wave to
+  reconcile Boot1 plus workload_contract semantics. Do not fold it into
+  `nightly-nr3-js-mirror-2026-06-30`.
 
 - **[NR-5] [NIGHTLY-FULL-VERIFY-2026-06-30] QUEUED / URGENT** (2026-06-30,
   founder-directed nightly follow-up after NR-4). Keep this queued for its own
