@@ -2054,6 +2054,11 @@ class TestEnginePipelineCrossSubstrateParity:
                 "exhaustion_detected": False, "operator_frozen": False,
                 "frozen_set": None, "action": None, "stall": True,
             },
+            {
+                "value": 3.0, "closure_detected": True, "tau_step": 0,
+                "exhaustion_detected": False, "operator_frozen": False,
+                "frozen_set": None, "action": None, "stall": True,
+            },
         ]
         for engine_result in vectors:
             hemispheres = {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}
@@ -2105,11 +2110,11 @@ class TestEnginePipelineCrossSubstrateParity:
             "exhaustion_detected": False, "operator_frozen": False,
             "frozen_set": None, "action": None, "stall": True,
         }
-        py_unsafe = run_hemisphere_routing(
-            unsafe_engine_result,
-            {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None},
-        )
-        assert _cross_substrate_equal(py_unsafe["r_a"][0]["state"], _sn(9007199254740993))
+        with pytest.raises(ValueError, match="safe integer range"):
+            run_hemisphere_routing(
+                unsafe_engine_result,
+                {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None},
+            )
         # SPEED_OK: node JSON API must reject unsafe integer payloads instead of rounding.
         js_unsafe = self._run_js_json_api({
             "action": "run_hemisphere_routing",

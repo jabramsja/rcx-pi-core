@@ -15,6 +15,7 @@ import pytest
 from rcx_pi.eval_seed import step, NO_MATCH
 from rcx_pi.step_mu import step_mu, run_mu
 from rcx_pi.mu_type import mu_equal
+from tests.helpers.structural_numbers import sn
 
 pytestmark = [pytest.mark.slow]
 
@@ -60,7 +61,7 @@ class TestTraceParity:
         projections = [
             {"pattern": {"inc": {"var": "n"}}, "body": {"result": {"var": "n"}}}
         ]
-        initial = {"inc": 5}
+        initial = {"inc": sn(5)}
 
         py_result, py_trace, py_stall = run_python(projections, initial)
         mu_result, mu_trace, mu_stall = run_mu(projections, initial)
@@ -177,12 +178,12 @@ class TestListAppend:
                 "body": {"first": {"var": "x"}, "rest": {"var": "xs"}}
             }
         ]
-        initial = {"cons": 1, "to": {"first": 2, "rest": None}}
+        initial = {"cons": sn(1), "to": {"first": sn(2), "rest": None}}
 
         py_result, py_trace, py_stall = run_python(projections, initial)
         mu_result, mu_trace, mu_stall = run_mu(projections, initial)
 
-        expected = {"first": 1, "rest": {"first": 2, "rest": None}}
+        expected = {"first": sn(1), "rest": {"first": sn(2), "rest": None}}
         assert mu_equal(py_result, expected)
         assert mu_equal(mu_result, expected)
 
@@ -203,18 +204,18 @@ class TestEvalSeedProjections:
         ]
 
         # Test wrap
-        wrap_input = {"wrap": 42}
+        wrap_input = {"wrap": sn(42)}
         py1, _, _ = run_python(projections, wrap_input)
         mu1, _, _ = run_mu(projections, wrap_input)
-        assert mu_equal(py1, {"wrapped": 42})
-        assert mu_equal(mu1, {"wrapped": 42})
+        assert mu_equal(py1, {"wrapped": sn(42)})
+        assert mu_equal(mu1, {"wrapped": sn(42)})
 
         # Test unwrap
-        unwrap_input = {"unwrap": {"wrapped": 42}}
+        unwrap_input = {"unwrap": {"wrapped": sn(42)}}
         py2, _, _ = run_python(projections, unwrap_input)
         mu2, _, _ = run_mu(projections, unwrap_input)
-        assert mu_equal(py2, 42)
-        assert mu_equal(mu2, 42)
+        assert mu_equal(py2, sn(42))
+        assert mu_equal(mu2, sn(42))
 
     def test_state_machine_projection(self):
         """State machine transition via projections."""
@@ -263,13 +264,13 @@ class TestSelfHostingCore:
         ]
 
         # Input: a projection (as data)
-        test_projection = {"pattern": 42, "body": "matched"}
+        test_projection = {"pattern": sn(42), "body": "matched"}
         initial = {"get_pattern": test_projection}
 
         py_result, py_trace, _ = run_python(projections, initial)
         mu_result, mu_trace, _ = run_mu(projections, initial)
 
-        expected = {"extracted_pattern": 42}
+        expected = {"extracted_pattern": sn(42)}
         assert mu_equal(py_result, expected)
         assert mu_equal(mu_result, expected)
 

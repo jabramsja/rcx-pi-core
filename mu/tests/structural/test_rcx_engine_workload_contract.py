@@ -27,7 +27,7 @@ from rcx_pi.selfhost.step_mu import RcxEngineError
 pytestmark = [pytest.mark.slow]
 
 VECTORS_PATH = Path(__file__).parents[1] / "fixtures" / "rcx_engine_workload_contract.json"
-ROOT = Path(__file__).parents[3]
+ROOT = Path(__file__).resolve().parents[3]
 _JS_API_TIMEOUT = 180
 
 
@@ -148,6 +148,64 @@ class TestRCXEngineWorkloadContract:
         assert js_result["r_a"] is not None
         assert mu_equal(js_result["r_a"][0]["state"], "legacy-zero")
         assert js_result["r_a"][0]["closure_flag"] is True
+
+    def test_safe_integer_float_routes_as_boundary_structural_integer_python_and_js(self):
+        """JSON integer-valued numeric leaves share the safe-integer boundary contract."""
+        engine_result = {
+            "value": 3.0,
+            "closure_detected": True,
+            "tau_step": 0,
+            "exhaustion_detected": False,
+            "operator_frozen": None,
+            "frozen_set": None,
+            "action": "continue",
+            "stall": False,
+        }
+        hemispheres = _empty_hemispheres()
+
+        py_result = run_hemisphere_routing(engine_result, hemispheres)
+        assert set(py_result) == {"r_null", "r_inf", "r_a", "lobes", "sink"}
+        assert py_result["r_a"] is not None
+        assert mu_equal(py_result["r_a"][0]["state"], _structural_num(3))
+        assert py_result["r_a"][0]["closure_flag"] is True
+
+        js_response = _js_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": engine_result,
+            "hemispheres": hemispheres,
+        })
+        assert js_response["success"], js_response.get("error")
+        js_result = js_response["result"]
+        assert set(js_result) == {"r_null", "r_inf", "r_a", "lobes", "sink"}
+        assert js_result["r_a"] is not None
+        assert mu_equal(js_result["r_a"][0]["state"], _structural_num(3))
+        assert js_result["r_a"][0]["closure_flag"] is True
+
+    def test_host_tau_step_unsafe_integer_rejected_python_and_js(self):
+        """Python and JS reject host integers outside the shared JSON boundary."""
+        engine_result = {
+            "value": "unsafe",
+            "closure_detected": True,
+            "tau_step": 2 ** 60,
+            "exhaustion_detected": False,
+            "operator_frozen": None,
+            "frozen_set": None,
+            "action": "continue",
+            "stall": False,
+        }
+        hemispheres = _empty_hemispheres()
+
+        with pytest.raises(ValueError, match="safe integer range"):
+            run_hemisphere_routing(engine_result, hemispheres)
+
+        js_response = _js_api({
+            "action": "run_hemisphere_routing",
+            "engine_result": engine_result,
+            "hemispheres": hemispheres,
+        })
+        assert not js_response["success"]
+        assert js_response["error_code"] == "input.invalid_type"
+        assert "safe integer range" in js_response["error"]
 
     def test_run_trace_over_cap_budget_rejects_before_structural_reduction(self, monkeypatch):
         """Boundary budget cap rejects over-cap StructuralNumbers before ADD/COMPARE."""
