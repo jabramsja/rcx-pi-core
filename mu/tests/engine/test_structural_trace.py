@@ -7,10 +7,11 @@ execution history as Mu linked-list format that projections can analyze.
 
 import pytest
 from rcx_pi.selfhost.step_mu import run_mu_structural, list_to_linked as list_to_linked
-from rcx_pi.selfhost.mu_type import mu_equal
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+from tests.helpers.structural_numbers import sn, SN_ZERO, SN_ONE
 
 pytestmark = [pytest.mark.slow]
+SN_42 = sn(42)
 
 
 class TestListToLinked:
@@ -66,7 +67,7 @@ class TestRunMuStructural:
 
     def test_returns_mu_compatible_structure(self, simple_projections):
         """Result structure has required fields."""
-        result = run_mu_structural(simple_projections, {"op": "double", "value": 42}, max_steps=10)
+        result = run_mu_structural(simple_projections, {"op": "double", "value": SN_42}, max_steps=10)
 
         assert "result" in result
         assert "trace" in result
@@ -75,7 +76,7 @@ class TestRunMuStructural:
 
     def test_trace_is_linked_list(self, simple_projections):
         """Trace is Mu linked-list format, not Python list."""
-        result = run_mu_structural(simple_projections, {"op": "double", "value": 42}, max_steps=10)
+        result = run_mu_structural(simple_projections, {"op": "double", "value": SN_42}, max_steps=10)
 
         trace = result["trace"]
         # Linked list has head/tail structure
@@ -83,7 +84,7 @@ class TestRunMuStructural:
 
     def test_trace_entries_have_required_fields(self, simple_projections):
         """Each trace entry has step, state, projection."""
-        result = run_mu_structural(simple_projections, {"op": "double", "value": 42}, max_steps=10)
+        result = run_mu_structural(simple_projections, {"op": "double", "value": SN_42}, max_steps=10)
 
         # Walk the linked list
         node = result["trace"]
@@ -97,14 +98,14 @@ class TestRunMuStructural:
     def test_stall_detected(self, simple_projections):
         """Stall is detected when no projection matches."""
         # Input that won't match the "double" projection
-        result = run_mu_structural(simple_projections, {"op": "unknown", "value": 42}, max_steps=10)
+        result = run_mu_structural(simple_projections, {"op": "unknown", "value": SN_42}, max_steps=10)
 
         assert result["stall"] is True
         assert result["steps"] == 1  # Immediate stall
 
     def test_match_recorded_in_trace(self, simple_projections):
         """Matched projection ID is recorded in trace."""
-        result = run_mu_structural(simple_projections, {"op": "double", "value": 42}, max_steps=10)
+        result = run_mu_structural(simple_projections, {"op": "double", "value": SN_42}, max_steps=10)
 
         # First entry should show the "double" projection matched
         first_entry = result["trace"]["head"]
@@ -112,7 +113,7 @@ class TestRunMuStructural:
 
     def test_stall_entry_has_null_projection(self, simple_projections):
         """Stall entries have projection=None."""
-        result = run_mu_structural(simple_projections, {"op": "unknown", "value": 42}, max_steps=10)
+        result = run_mu_structural(simple_projections, {"op": "unknown", "value": SN_42}, max_steps=10)
 
         # Walk to find the stall entry
         node = result["trace"]
@@ -138,26 +139,26 @@ class TestRunMuStructural:
 
         monkeypatch.setattr(step_mu_module, "step_mu", _should_not_be_called)
 
-        projs = [{"id": "inc", "pattern": 0, "body": 1}]
-        result = run_mu_structural(projs, 0, max_steps=2)
+        projs = [{"id": "inc", "pattern": SN_ZERO, "body": SN_ONE}]
+        result = run_mu_structural(projs, SN_ZERO, max_steps=2)
         assert result["trace"]["head"]["projection"] == "inc"
-        assert result["result"] == 1
+        assert result["result"] == SN_ONE
 
     def test_max_steps_without_stall(self, kernel_projections):
         """Max steps reached without stall returns stall=False."""
         # Create a projection that always transforms (never stalls)
         toggle = [
-            {"id": "toggle_0", "pattern": 0, "body": 1},
-            {"id": "toggle_1", "pattern": 1, "body": 0},
+            {"id": "toggle_0", "pattern": SN_ZERO, "body": SN_ONE},
+            {"id": "toggle_1", "pattern": SN_ONE, "body": SN_ZERO},
         ]
-        result = run_mu_structural(toggle, 0, max_steps=5)
+        result = run_mu_structural(toggle, SN_ZERO, max_steps=5)
 
         assert result["stall"] is False
         assert result["steps"] == 5
 
     def test_trace_length_matches_steps(self, simple_projections):
         """Trace has entry for each step plus final."""
-        result = run_mu_structural(simple_projections, {"op": "double", "value": 42}, max_steps=10)
+        result = run_mu_structural(simple_projections, {"op": "double", "value": SN_42}, max_steps=10)
 
         # Count linked list entries
         count = 0

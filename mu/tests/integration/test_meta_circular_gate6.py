@@ -27,11 +27,13 @@ from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.mu_type import mu_equal
 from tests.conftest import run_until_stable
+from tests.helpers.structural_numbers import sn, SN_ZERO, SN_ONE
 
 pytestmark = pytest.mark.slow
 
 # JSON null -> Python None alias for readability
 null = None
+SN_TWO = sn(2)
 
 
 # =============================================================================
@@ -146,9 +148,9 @@ class TestRecurrenceMetaCircular:
         input_data = {
             "_detect_closure": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "p1"},
+                    "head": {"step": SN_ZERO, "state": "A", "projection": "p1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "p2"},
+                        "head": {"step": SN_ONE, "state": "B", "projection": "p2"},
                         "tail": null
                     }
                 },
@@ -167,11 +169,11 @@ class TestRecurrenceMetaCircular:
         input_data = {
             "_detect_closure": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "p1"},
+                    "head": {"step": SN_ZERO, "state": "A", "projection": "p1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "p2"},
+                        "head": {"step": SN_ONE, "state": "B", "projection": "p2"},
                         "tail": {
-                            "head": {"step": 2, "state": "A", "projection": "p3"},
+                            "head": {"step": SN_TWO, "state": "A", "projection": "p3"},
                             "tail": null
                         }
                     }
@@ -183,7 +185,7 @@ class TestRecurrenceMetaCircular:
         result = run_until_stable_meta_circular(recurrence_projections, input_data)
 
         assert result.get("closure_detected") is True
-        assert result.get("tau_step") == 2  # Step where state A recurred
+        assert result.get("tau_step") == SN_TWO  # Step where state A recurred
         assert result.get("final_result") == "final"
 
     def test_recurrence_parity_no_closure(self, recurrence_projections):
@@ -191,9 +193,9 @@ class TestRecurrenceMetaCircular:
         input_data = {
             "_detect_closure": {
                 "trace": {
-                    "head": {"step": 0, "state": "X", "projection": "p1"},
+                    "head": {"step": SN_ZERO, "state": "X", "projection": "p1"},
                     "tail": {
-                        "head": {"step": 1, "state": "Y", "projection": "p2"},
+                        "head": {"step": SN_ONE, "state": "Y", "projection": "p2"},
                         "tail": null
                     }
                 },
@@ -215,11 +217,11 @@ class TestRecurrenceMetaCircular:
         input_data = {
             "_detect_closure": {
                 "trace": {
-                    "head": {"step": 0, "state": {"value": 1}, "projection": "p1"},
+                    "head": {"step": SN_ZERO, "state": {"value": SN_ONE}, "projection": "p1"},
                     "tail": {
-                        "head": {"step": 1, "state": {"value": 2}, "projection": "p2"},
+                        "head": {"step": SN_ONE, "state": {"value": SN_TWO}, "projection": "p2"},
                         "tail": {
-                            "head": {"step": 2, "state": {"value": 1}, "projection": "p3"},
+                            "head": {"step": SN_TWO, "state": {"value": SN_ONE}, "projection": "p3"},
                             "tail": null
                         }
                     }
@@ -276,14 +278,14 @@ class TestExhaustionMetaCircular:
         input_data = {
             "_detect_exhaustion": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "op1"},
+                    "head": {"step": SN_ZERO, "state": "A", "projection": "op1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "op1"},
+                        "head": {"step": SN_ONE, "state": "B", "projection": "op1"},
                         "tail": null
                     }
                 },
                 "frozen": null,
-                "tau_step": 0,
+                "tau_step": SN_ZERO,
                 "operator_ids": {"head": "op1", "tail": null}
             }
         }
@@ -299,14 +301,14 @@ class TestExhaustionMetaCircular:
         input_data = {
             "_detect_exhaustion": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "op1"},
+                    "head": {"step": SN_ZERO, "state": "A", "projection": "op1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "op2"},
+                        "head": {"step": SN_ONE, "state": "B", "projection": "op2"},
                         "tail": null
                     }
                 },
                 "frozen": null,
-                "tau_step": 0,
+                "tau_step": SN_ZERO,
                 "operator_ids": {
                     "head": "op1",
                     "tail": {"head": "op2", "tail": null}
@@ -344,14 +346,14 @@ class TestExhaustionMetaCircular:
         input_data = {
             "_detect_exhaustion": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "op1"},
+                    "head": {"step": SN_ZERO, "state": "A", "projection": "op1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "op1"},
+                        "head": {"step": SN_ONE, "state": "B", "projection": "op1"},
                         "tail": null
                     }
                 },
                 "frozen": null,
-                "tau_step": 0,
+                "tau_step": SN_ZERO,
                 "operator_ids": {"head": "op1", "tail": null}
             }
         }
@@ -436,15 +438,15 @@ class TestMetaCircularEdgeCases:
 
     def test_complex_state_equality(self, recurrence_projections):
         """Complex nested states should compare correctly (non-linear)."""
-        complex_state = {"nested": {"deep": [1, 2, 3]}}
+        complex_state = {"nested": {"deep": [SN_ONE, SN_TWO, sn(3)]}}
         input_data = {
             "_detect_closure": {
                 "trace": {
-                    "head": {"step": 0, "state": complex_state, "projection": "p1"},
+                    "head": {"step": SN_ZERO, "state": complex_state, "projection": "p1"},
                     "tail": {
-                        "head": {"step": 1, "state": {"other": "state"}, "projection": "p2"},
+                        "head": {"step": SN_ONE, "state": {"other": "state"}, "projection": "p2"},
                         "tail": {
-                            "head": {"step": 2, "state": complex_state, "projection": "p3"},
+                            "head": {"step": SN_TWO, "state": complex_state, "projection": "p3"},
                             "tail": null
                         }
                     }
@@ -456,21 +458,21 @@ class TestMetaCircularEdgeCases:
         result = run_until_stable_meta_circular(recurrence_projections, input_data)
 
         assert result.get("closure_detected") is True
-        assert result.get("tau_step") == 2
+        assert result.get("tau_step") == SN_TWO
 
     def test_already_frozen_operator(self, exhaustion_projections):
         """Already frozen operator should be skipped (meta-circular)."""
         input_data = {
             "_detect_exhaustion": {
                 "trace": {
-                    "head": {"step": 0, "state": "A", "projection": "op1"},
+                    "head": {"step": SN_ZERO, "state": "A", "projection": "op1"},
                     "tail": {
-                        "head": {"step": 1, "state": "B", "projection": "op1"},
+                        "head": {"step": SN_ONE, "state": "B", "projection": "op1"},
                         "tail": null
                     }
                 },
                 "frozen": {"head": "op1", "tail": null},  # Already frozen
-                "tau_step": 0,
+                "tau_step": SN_ZERO,
                 "operator_ids": {"head": "op1", "tail": null}
             }
         }

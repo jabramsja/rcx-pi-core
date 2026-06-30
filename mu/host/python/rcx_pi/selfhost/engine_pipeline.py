@@ -1566,6 +1566,7 @@ def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engin
 # =============================================================================
 
 _ENGINE_RESULT_STRUCTURALIZE_FRAME_LIMIT = 300_000
+_JS_SAFE_INTEGER_MAX = 9_007_199_254_740_991
 
 
 def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK: infra — hemisphere boundary validation
@@ -1605,7 +1606,13 @@ def run_hemisphere_routing(engine_result: Mu, hemispheres: Mu) -> Mu:  # AST_OK:
             item_type = type(item)
             if item_type is dict and set(item.keys()) == {"_num"}:
                 converted_item = item
-            elif item_type is int:
+            elif item_type is int or item_type is float:
+                if item_type is float:
+                    if not item.is_integer():
+                        raise ValueError("engine_result numeric leaf must be an integer")
+                    item = int(item)
+                if item < -_JS_SAFE_INTEGER_MAX or item > _JS_SAFE_INTEGER_MAX:
+                    raise ValueError("engine_result integer exceeds JavaScript safe integer range")
                 if item == 0:
                     converted_item = {"_num": None}
                 else:
