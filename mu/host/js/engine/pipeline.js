@@ -205,7 +205,7 @@ function hashTraceForRecurrence(trace, maxEntries) {
   const entries = [];
   const visited = new Set();
   let current = trace;
-  while (current !== null && typeof current === 'object' && 'head' in current) {
+  while (current !== null && typeof current === 'object' && Object.hasOwn(current, 'head')) {
     if (visited.has(current)) {
       throw new RcxError('trace.cycle_detected', 'hash_trace_for_recurrence: cyclic linked list detected');
     }
@@ -214,7 +214,7 @@ function hashTraceForRecurrence(trace, maxEntries) {
       throw new RcxError('trace.overcap', `hash_trace_for_recurrence: trace exceeds ${maxEntries} entries`);
     }
     let entry = current.head;
-    if (entry === null || typeof entry !== 'object' || !('state' in entry)) {
+    if (entry === null || typeof entry !== 'object' || !Object.hasOwn(entry, 'state')) {
       const entryType = entry === null ? 'null' : typeof entry;
       const detail = typeof entry === 'object' && entry !== null ? ' without \'state\'' : '';
       throw new RcxError('trace.malformed_entry',
@@ -228,7 +228,7 @@ function hashTraceForRecurrence(trace, maxEntries) {
     }
     entry.state_hash = muHashControl(state, 'hashTraceForRecurrence');
     entries.push(entry);
-    current = current.tail !== undefined ? current.tail : null;
+    current = Object.hasOwn(current, 'tail') ? current.tail : null;
   }
   let result = current;
   for (let i = entries.length - 1; i >= 0; i--) {
