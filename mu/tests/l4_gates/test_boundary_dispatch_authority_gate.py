@@ -1484,6 +1484,40 @@ class TestBehaviorPreservation:
         )
         assert "hashed" in ctx
 
+    def test_js_hash_trace_requires_own_trace_state_key(self):
+        """JS hash_trace must not accept inherited host-object state keys."""
+        js_code = """
+        const { hashTraceForRecurrence } = require('./mu/host/js/engine/pipeline');
+        const inheritedStateEntry = Object.create({state: {value: 'prototype'}});
+        const trace = {head: inheritedStateEntry, tail: null};
+        try {
+          hashTraceForRecurrence(trace);
+          console.log(JSON.stringify({ok: false, error_code: null}));
+        } catch (e) {
+          console.log(JSON.stringify({
+            ok: true,
+            error_code: e.error_code || null,
+            message: e.message
+          }));
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        payload = json.loads(result.stdout)
+        assert payload == {
+            "ok": True,
+            "error_code": "trace.malformed_entry",
+            "message": (
+                "hash_trace_for_recurrence: malformed trace entry "
+                "(expected dict with 'state' key, got object without 'state')"
+            ),
+        }
+
 
 # ===========================================================================
 # Test 5: Algorithm seed allowlist (F-22)
