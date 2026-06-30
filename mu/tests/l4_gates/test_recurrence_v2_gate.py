@@ -63,6 +63,29 @@ def _build_trace_with_hashes(entries: list[dict]) -> dict:
     return trace
 
 
+def _is_structural_number(value) -> bool:
+    if not isinstance(value, dict) or set(value.keys()) != {"_num"}:
+        return False
+    node = value["_num"]
+    seen = set()
+    while node is not None:
+        if not isinstance(node, dict) or len(node) != 1:
+            return False
+        node_id = id(node)
+        if node_id in seen:
+            return False
+        seen.add(node_id)
+        digit, rest = next(iter(node.items()))
+        if digit == "xH":
+            return rest is None
+        if digit not in {"xI", "xO"}:
+            return False
+        if rest is None:
+            return False
+        node = rest
+    return True
+
+
 class TestRecurrenceV2SeedStructure:
     """Seed loads correctly with expected projection count and IDs."""
 
@@ -120,6 +143,8 @@ class TestRecurrenceV2ClosureDetection:
         result = _run_recurrence(projs, input_val)
         assert isinstance(result, dict), f"Expected dict result, got {type(result)}"
         assert result.get("closure_detected") is True, f"Expected closure_detected=True, got {result}"
+        assert result.get("tau_step") == TWO
+        assert _is_structural_number(result.get("tau_step"))
 
     @pytest.mark.slow  # SPEED_OK: runs meta-circular kernel
     def test_non_recurring_trace_no_closure(self):
@@ -136,6 +161,7 @@ class TestRecurrenceV2ClosureDetection:
         result = _run_recurrence(projs, input_val)
         assert isinstance(result, dict), f"Expected dict result, got {type(result)}"
         assert result.get("closure_detected") is False, f"Expected closure_detected=False, got {result}"
+        assert result.get("tau_step") is None
 
 
 class TestRecurrenceV2ResultShape:
@@ -154,6 +180,7 @@ class TestRecurrenceV2ResultShape:
         result = _run_recurrence(projs, input_val)
         assert isinstance(result, dict)
         assert "closure_detected" in result, f"Terminal result missing closure_detected: {list(result.keys())}"
+        assert result.get("tau_step") is None
 
 
 class TestRecurrenceV2SeedCountRegistry:

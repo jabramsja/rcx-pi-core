@@ -220,12 +220,13 @@ function hashTraceForRecurrence(trace, maxEntries) {
       throw new RcxError('trace.malformed_entry',
         `hash_trace_for_recurrence: malformed trace entry (expected dict with 'state' key, got ${entryType}${detail})`);
     }
+    const state = entry.state;
     entry = muContainers.record(Object.entries(entry));
-    if (!isValidMu(entry.state)) {
+    if (!isValidMu(state)) {
       throw new RcxError('input.invalid_type',
-        `hash_trace_for_recurrence: trace entry state is not valid Mu, got ${typeof entry.state}`);
+        `hash_trace_for_recurrence: trace entry state is not valid Mu, got ${typeof state}`);
     }
-    entry.state_hash = muHashControl(entry.state, 'hashTraceForRecurrence');
+    entry.state_hash = muHashControl(state, 'hashTraceForRecurrence');
     entries.push(entry);
     current = current.tail !== undefined ? current.tail : null;
   }

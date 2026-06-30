@@ -1070,8 +1070,9 @@ def hash_trace_for_recurrence(trace: Mu, max_entries: int = 10000) -> Mu:  # AST
                 + (f" without 'state'" if isinstance(entry, dict) else "")
                 + ")"
             )
+        state = entry["state"]
         entry = dict(entry)
-        entry["state_hash"] = mu_hash_control(entry["state"], "hash_trace_for_recurrence")
+        entry["state_hash"] = mu_hash_control(state, "hash_trace_for_recurrence")
         entries.append(entry)
         current = current.get("tail")
     # Rebuild linked list from tail to head

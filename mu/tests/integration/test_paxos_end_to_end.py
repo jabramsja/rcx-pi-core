@@ -46,6 +46,46 @@ def _timeout_handler(signum, frame):
     raise _Timeout(f"Paxos e2e exceeded {TEST_TIMEOUT_SECONDS}s")
 
 
+def _sn_positive(n: int) -> dict:
+    if n <= 0:
+        raise ValueError("_sn_positive requires n >= 1")
+    if n == 1:
+        return {"xH": None}
+    quotient, remainder = divmod(n, 2)
+    return {"xI" if remainder else "xO": _sn_positive(quotient)}
+
+
+def _sn(n: int) -> dict:
+    if n < 0:
+        raise ValueError("_sn requires n >= 0")
+    if n == 0:
+        return {"_num": None}
+    return {"_num": _sn_positive(n)}
+
+
+def _is_structural_number(value) -> bool:
+    if not isinstance(value, dict) or set(value.keys()) != {"_num"}:
+        return False
+    node = value["_num"]
+    seen = set()
+    while node is not None:
+        if not isinstance(node, dict) or len(node) != 1:
+            return False
+        node_id = id(node)
+        if node_id in seen:
+            return False
+        seen.add(node_id)
+        digit, rest = next(iter(node.items()))
+        if digit == "xH":
+            return rest is None
+        if digit not in {"xI", "xO"}:
+            return False
+        if rest is None:
+            return False
+        node = rest
+    return True
+
+
 def run_recurrence_to_completion(recurrence_projs, recurrence_input, max_iterations=50):
     """Run recurrence algorithm repeatedly until terminal result or timeout."""
     current = recurrence_input
@@ -156,6 +196,9 @@ class TestPaxosEndToEnd:
                 )
                 assert isinstance(entry["state_hash"], str), "state_hash should be hex string"
                 assert len(entry["state_hash"]) == 64, "SHA-256 hex digest is 64 chars"
+                assert _is_structural_number(entry.get("step")), (
+                    f"Entry step must be StructuralNumbers, got {entry.get('step')!r}"
+                )
             count += 1
             current = current.get("tail")
 
@@ -186,6 +229,9 @@ class TestPaxosEndToEnd:
         assert result.get("_timeout") is not True, "Recurrence timed out"
         assert result.get("closure_detected") is True, (
             f"Expected closure_detected=True, got: {result}"
+        )
+        assert _is_structural_number(result.get("tau_step")), (
+            f"Expected structural tau_step, got: {result.get('tau_step')!r}"
         )
 
     # ------------------------------------------------------------------
@@ -289,7 +335,7 @@ class TestPaxosEndToEnd:
         engine_output = {
             "value": {"paxos_mode": "paxos_run", "status": "voting", "node_a": "idle", "node_b": "idle"},
             "closure_detected": True,
-            "tau_step": 3,
+            "tau_step": _sn(3),
             "exhaustion_detected": False,
             "operator_frozen": None,
             "frozen_set": None,
