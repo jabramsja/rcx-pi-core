@@ -1,0 +1,81 @@
+{
+  "wave_id": "nightly-nr4-boot1-workload-contract-reconciliation-2026-06-30",
+  "title": "NR-4 Boot1 Workload Contract Reconciliation 2026-06-30",
+  "task_id": "[NR-4]",
+  "purpose": "Finish the urgent nightly residual slice after NR-1, NR-2, and NR-3 by diagnosing Boot1 parity plus remaining l4_expensive failures and reconciling the rcx_engine workload contract with the StructuralNumbers engine-counter cutover.",
+  "date": "2026-06-30",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "workload_target": "rcx_engine_cycle",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_CROSS_SUBSTRATE_PARITY",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/nightly-nr4-boot1-workload-contract-reconciliation-2026-06-30.json",
+  "indicator_collection_command": "python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id nightly-nr4-boot1-workload-contract-reconciliation-2026-06-30 --output reports/l4_wave_indicators/nightly-nr4-boot1-workload-contract-reconciliation-2026-06-30.json",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_boot1_shadow_parity.py mu/tests/structural/test_rcx_engine_workload_contract.py mu/tests/parity/test_rcx_engine_workload_contract_parity.py --tb=short && PYTHONHASHSEED=0 python3 -m pytest -q -m l4_expensive mu/tests/l4_gates/test_boot1_default_pipeline_gate.py mu/tests/l4_gates/test_engine_transition_gate.py mu/tests/l4_gates/test_observer_type_guard_gate.py --tb=short && node mu/host/js/eval_step.js && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id nightly-nr4-boot1-workload-contract-reconciliation-2026-06-30 --wave-class L4_ENABLER && git diff --check",
+  "evidence_delta": "(1) NR-1, NR-2, and NR-3 are merged on current dev, so the remaining nightly failures must be diagnosed on the post-JS-mirror tree. (2) Boot1 parity and rcx_engine workload-contract expectations are the live residual focus; do not relaunch hemisphere, recurrence, or JS mirror work already covered by NR-1 through NR-3. (3) Phase B reproduced stale raw-host-integer test fixtures after the StructuralNumbers matcher-facing cutover; the package is L4_ENABLER because no runtime/substrate or L4 gate delta is authorized.",
+  "progress_proof_before": "The 2026-06-29 handoff identified test_boot1_shadow_parity, JS parity, and test_rcx_engine_workload_contract as remaining nightly families after the deterministic hemisphere and recurrence root cause. NR-3 has now merged the JS hash-trace mirror, leaving NR-4 to diagnose Boot1 plus workload-contract semantics on the current tree.",
+  "progress_proof_after": "NR-4 is complete when Boot1 shadow parity, workload-contract Python invariants, workload-contract Python/JS parity, selected Boot1 l4_expensive gates, and node eval_step are green or when Phase A proves a narrower residual and the tracker records any remaining deferred non-blocker without hiding a red nightly blocker.",
+  "structural_artifact_ref": "mu/host/python/rcx_pi/selfhost/engine_pipeline.py; mu/host/python/rcx_pi/selfhost/step_mu.py; mu/host/js/engine/pipeline.js; mu/host/js/eval_step.js; mu/tests/parity/test_boot1_shadow_parity.py; mu/tests/structural/test_rcx_engine_workload_contract.py; mu/tests/parity/test_rcx_engine_workload_contract_parity.py",
+  "post_gate_contract_sweep": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_boot1_shadow_parity.py mu/tests/structural/test_rcx_engine_workload_contract.py mu/tests/parity/test_rcx_engine_workload_contract_parity.py --tb=short && node mu/host/js/eval_step.js",
+  "founder_override": "nightly-nr4-boot1-workload-contract-reconciliation-2026-06-30",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "scope_summary": "Urgent Boot1 and workload-contract reconciliation after the engine-counter numeral waves. Diagnose current post-NR-3 dev first, then make only the narrow repair needed for Boot1 residual l4_expensive failures or the rcx_engine workload contract. Leave full-nightly verification to NR-5.",
+  "scope_items": [
+    "reports/control_plane/nightly-nr4-boot1-workload-contract-reconciliation-2026-06-30_wave_config.json (KEEP) -- launcher config for this urgent NR-4 wave.",
+    "mu/tests/parity/test_boot1_shadow_parity.py (MODIFY IF CONTRACT EXPECTATION IS STALE) -- Boot1 recursive/trampoline and cross-substrate parity evidence.",
+    "mu/tests/structural/test_rcx_engine_workload_contract.py (MODIFY IF CONTRACT EXPECTATION IS STALE) -- Python workload contract, including host tau_step zero semantics.",
+    "mu/tests/parity/test_rcx_engine_workload_contract_parity.py (MODIFY IF CONTRACT EXPECTATION IS STALE) -- Python/JS workload-contract parity evidence.",
+    "mu/host/python/rcx_pi/selfhost/engine_pipeline.py (MODIFY ONLY IF PHASE A PROVES A POST-NR-3 STRUCTURAL COUNTER GAP) -- Python engine boundary and routing contract.",
+    "mu/host/python/rcx_pi/selfhost/step_mu.py (MODIFY ONLY IF PHASE A PROVES BOOT1 TERMINAL CLASSIFICATION GAP) -- Boot1 terminal classification and validation contract.",
+    "mu/host/js/engine/pipeline.js (MODIFY ONLY IF PHASE A PROVES JS WORKLOAD PARITY GAP) -- JavaScript engine mirror.",
+    "mu/host/js/eval_step.js (MODIFY ONLY IF PHASE A PROVES JSON API MIRROR GAP) -- JavaScript JSON API boundary.",
+    ".github/workflows/slow_tests.yml (READ ONLY UNLESS PHASE A PROVES WORKFLOW SELECTOR DRIFT) -- nightly l4_expensive selector truth.",
+    "TASKS.md (MODIFY THROUGH LAUNCHER/TRACKER SYNC) -- retire NR-4 only after receipt-backed completion and keep NR-5 queued.",
+    "reports/control_plane/nightly-nr4-boot1-workload-contract-reconciliation-2026-06-30_2026-06-30.md (GENERATED BY LAUNCHER) -- governing packet.",
+    "reports/l4_wave_indicators/nightly-nr4-boot1-workload-contract-reconciliation-2026-06-30.json (GENERATED BY WAVE) -- indicator artifact."
+  ],
+  "work_items": [
+    "Launch through launch_wave.py, executor_dispatch, Phase A, Phase B, bridge review, handoff receipts, pre-commit supervisor, and commit executor.",
+    "Reproduce the current post-NR-3 state for Boot1 shadow parity and workload-contract Python/JS parity before editing.",
+    "Decide whether test_host_tau_step_zero_fails_closed_on_python_and_js still expresses the correct contract after the StructuralNumbers counter cutover, or whether its host-zero fail-closed expectation is stale.",
+    "If a runtime gap remains, repair the narrow structural counter/terminal boundary without accepting raw host integers at matcher-facing sites.",
+    "If only the workload contract is stale, update tests/fixtures with a tracker-backed rationale and no runtime churn.",
+    "Record any residual l4_expensive failure as blocking unless Phase A proves it is outside NR-4 and not part of the nightly production regression.",
+    "Do not run or claim full-nightly closure inside NR-4; leave that to NR-5."
+  ],
+  "constraints": [
+    "Implementer, reviewer, and pager route are Codex.",
+    "Pipeline is primary; no manual implementation receipts, manual commits, or manual PR merges.",
+    "No Claude-owned files may be edited.",
+    "No new host arithmetic semantic primitive, JS-only shortcut, matcher relaxation, or seed semantic change.",
+    "Do not relaunch NR-1, NR-2, or NR-3 work except as regression evidence.",
+    "Do not advance NR-5, Coinduction, Fixpoint, or Optimization inside this wave.",
+    "Do not update the full slow-tests workflow unless Phase A proves the workflow selector is the actual residual defect."
+  ],
+  "stop_conditions": [
+    "Halt as DEFECT if Boot1 or workload-contract parity requires accepting raw host integers inside matcher-facing runtime state.",
+    "Halt as NEEDS_RESCOPING if the current residual is a fresh non-Boot1, non-workload nightly family that belongs in a separate NR-4b or NR-5 wave.",
+    "Halt as POLICY_BOUND if the wave needs seed semantic changes or a new host-only numeric contract.",
+    "Halt if implementation would require editing Claude-specific files.",
+    "Do not commit without pipeline-produced handoff, bridge review, pre-commit supervisor receipt, indicator artifact, and configured evidence."
+  ],
+  "acceptance_criteria": [
+    "Boot1 shadow parity is green on current post-NR-3 dev or a narrower Phase A residual is explicitly recorded.",
+    "The rcx_engine workload contract and workload Python/JS parity are green with the post-cutover StructuralNumbers counter semantics.",
+    "Selected Boot1 l4_expensive gates remain green or are deferred only with non-blocking evidence.",
+    "node mu/host/js/eval_step.js remains healthy.",
+    "TASKS.md no longer leaves NR-4 pending after receipt-backed completion, and NR-5 remains queued for full-nightly verification.",
+    "L4 execution contract passes for the staged NR-4 package."
+  ],
+  "request_for_agent": "Launch NR-4 through the dispatcher pipeline with Codex implementer, Codex reviewer, and Codex pager route. Diagnose Boot1 plus workload-contract residual failures on current post-NR-3 dev, reconcile the host tau_step workload contract with the StructuralNumbers counter cutover, repair only the narrow proven residual, run the configured evidence, collect the indicator artifact, and leave full-nightly verification to NR-5.",
+  "request_for_claude": "Compatibility input only: this wave is pinned to Codex implementer, Codex reviewer, and Codex pager route. Do not route implementation, review, pager handling, commit handling, or receipts to Claude.",
+  "authorization_note": "Founder-directed urgent nightly queue from the 2026-06-29 handoff after NR-1, NR-2, and NR-3: do NR-4 Boot1 plus remaining workload_contract reconciliation next, keep pipeline primary, do handoff receipts, use Codex 5.5 xhigh implementer/reviewer defaults, and preserve StructuralNumbers counter parity.",
+  "slow_functions": [
+    "run_mu",
+    "node"
+  ],
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "NR-4 urgent Boot1 and workload-contract reconciliation after NR-1/NR-2/NR-3; no NR-5 full-nightly closure in this wave."
+}

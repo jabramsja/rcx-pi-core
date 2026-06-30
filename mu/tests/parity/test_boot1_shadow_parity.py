@@ -113,7 +113,7 @@ class TestBoot1PythonShadowParity:
         """Non-freeze input: both paths produce identical terminal result."""
         reset_step_budget()
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         trampoline_result = _run_trampoline(projs, initial, max_steps=10)
         reset_step_budget()
@@ -142,7 +142,7 @@ class TestBoot1PythonShadowParity:
         """use_boot1_recursive=True routes to recursive path and produces same result."""
         reset_step_budget()
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         trampoline_result = _run_trampoline(projs, initial, max_steps=10)
         reset_step_budget()
@@ -153,7 +153,7 @@ class TestBoot1PythonShadowParity:
         """Observer events are emitted by Boot1 recursive path."""
         reset_step_budget()
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         boot1_obs = []
         _run_boot1(projs, initial, max_steps=10, observer=boot1_obs)
@@ -166,7 +166,7 @@ class TestBoot1PythonShadowParity:
         """Both paths produce identical 8-key terminal shape (invariant S4)."""
         reset_step_budget()
         projs = [{"pattern": {"inc": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"inc": 5}
+        initial = {"inc": sn(5)}
 
         trampoline_result = _run_trampoline(projs, initial, max_steps=10)
         reset_step_budget()
@@ -181,9 +181,9 @@ class TestBoot1PythonShadowParity:
     def test_stall_parity(self):
         """Empty projections produce identical stall results on both paths."""
         reset_step_budget()
-        trampoline = _run_trampoline([], {"x": 1}, max_steps=10)
+        trampoline = _run_trampoline([], {"x": sn(1)}, max_steps=10)
         reset_step_budget()
-        recursive = _run_boot1([], {"x": 1}, max_steps=10)
+        recursive = _run_boot1([], {"x": sn(1)}, max_steps=10)
         assert trampoline == recursive
 
 
@@ -287,7 +287,7 @@ class TestBoot1CrossSubstrateParity:
     def test_js_boot1_simple_parity(self):
         """JS Boot1 recursive produces same result as JS trampoline."""
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         # JS trampoline
         trampoline_resp = _run_js_json_api({
@@ -318,7 +318,7 @@ class TestBoot1CrossSubstrateParity:
         """Python Boot1 recursive == JS Boot1 recursive."""
         reset_step_budget()
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         py_result = _run_boot1(
             projs, initial, max_steps=10, max_engine_iterations=20,
@@ -375,14 +375,14 @@ class TestBoot1CrossSubstrateParity:
         trampoline_resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [],
-            "input": {"x": 1},
+            "input": {"x": sn(1)},
             "maxSteps": 10,
         })
         # JS Boot1
         recursive_resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [],
-            "input": {"x": 1},
+            "input": {"x": sn(1)},
             "maxSteps": 10,
             "boot1LoopMode": True,
         })
@@ -530,14 +530,14 @@ class TestBoot1BudgetAdversarial:
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
         with pytest.raises(RuntimeError):
-            _run_boot1(projs, {"test": 42}, max_steps=10, max_engine_iterations=0)
+            _run_boot1(projs, {"test": sn(42)}, max_steps=10, max_engine_iterations=0)
 
     def test_budget_sufficient_for_simple(self):
         """max_engine_iterations=20 is enough for simple non-freeze input."""
         reset_step_budget()
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
         # Engine has multiple internal phases (~7-10 steps for simple input)
-        result = _run_boot1(projs, {"double": 42}, max_steps=10, max_engine_iterations=20)
+        result = _run_boot1(projs, {"double": sn(42)}, max_steps=10, max_engine_iterations=20)
         assert "value" in result
 
     def test_budget_one_insufficient_for_engine(self):
@@ -546,7 +546,7 @@ class TestBoot1BudgetAdversarial:
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
         # Engine state machine needs >1 iteration even for simple input
         with pytest.raises(RuntimeError, match="exhausted"):
-            _run_boot1(projs, {"double": 42}, max_steps=10, max_engine_iterations=1)
+            _run_boot1(projs, {"double": sn(42)}, max_steps=10, max_engine_iterations=1)
 
     def test_budget_not_reset_across_reentry(self):
         """Verify that child re-entry gets strictly LESS budget than parent.
@@ -649,7 +649,7 @@ class TestBoot1ParityProperty:
     def test_parity_multiple_max_steps_values(self):
         """Trampoline == recursive for various max_steps values."""
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
         for max_steps in [1, 5, 10, 50, 100]:
             tramp = _run_cached_engine_path(
                 projs, initial, boot1_mode="false", max_steps=max_steps
@@ -665,10 +665,10 @@ class TestBoot1ParityProperty:
             {"pattern": {"op": {"var": "x"}}, "body": {"var": "x"}},
         ]
         inputs = [
-            {"op": 42},
+            {"op": sn(42)},
             {"op": "hello"},
             {"op": None},
-            {"op": [1, 2, 3]},
+            {"op": [sn(1), sn(2), sn(3)]},
             {"op": {"nested": "dict"}},
             {"op": True},
         ]
@@ -680,7 +680,7 @@ class TestBoot1ParityProperty:
     def test_observer_event_count_parity(self):
         """Observer event counts must be close between trampoline and recursive."""
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         tramp_obs = []
         reset_step_budget()
@@ -699,8 +699,8 @@ class TestBoot1ParityProperty:
 
     def test_no_match_input_parity(self):
         """Input that doesn't match any projection: trampoline == recursive."""
-        projs = [{"pattern": {"specific": 42}, "body": "matched"}]
-        initial = {"different": 99}
+        projs = [{"pattern": {"specific": sn(42)}, "body": "matched"}]
+        initial = {"different": sn(99)}
 
         tramp = _run_cached_engine_path(projs, initial, boot1_mode="false", max_steps=10)
         boot1 = _run_cached_engine_path(projs, initial, boot1_mode="true", max_steps=10)
@@ -712,7 +712,7 @@ class TestBoot1ParityProperty:
             {"pattern": {"a": {"var": "x"}}, "body": {"result_a": {"var": "x"}}},
             {"pattern": {"b": {"var": "x"}}, "body": {"result_b": {"var": "x"}}},
         ]
-        for inp in [{"a": 1}, {"b": 2}]:
+        for inp in [{"a": sn(1)}, {"b": sn(2)}]:
             tramp = _run_cached_engine_path(projs, inp, boot1_mode="false", max_steps=10)
             boot1 = _run_cached_engine_path(projs, inp, boot1_mode="true", max_steps=10)
             assert tramp == boot1, f"First-match-wins parity failed for {inp}"
@@ -734,7 +734,7 @@ class TestBoot1FailClosed:
             {"pattern": {"cycle": {"var": "n"}}, "body": {"cycle": {"var": "n"}}},
         ]
         with pytest.raises(RuntimeError, match="exhausted|stalled"):
-            _run_boot1(projs, {"cycle": 1}, max_steps=10, max_engine_iterations=5)
+            _run_boot1(projs, {"cycle": sn(1)}, max_steps=10, max_engine_iterations=5)
 
     def test_reserved_field_in_boundary_inject_raises(self):
         """inject_key cannot be a kernel-reserved field (S3)."""
@@ -750,9 +750,9 @@ class TestBoot1FailClosed:
     def test_stall_parity_fail_closed(self):
         """Empty projection set: both paths stall identically (not silently succeed)."""
         reset_step_budget()
-        tramp = _run_trampoline([], {"x": 1}, max_steps=10)
+        tramp = _run_trampoline([], {"x": sn(1)}, max_steps=10)
         reset_step_budget()
-        boot1 = _run_boot1([], {"x": 1}, max_steps=10)
+        boot1 = _run_boot1([], {"x": sn(1)}, max_steps=10)
 
         # Both must indicate stall
         assert tramp.get("stall") == boot1.get("stall")
@@ -763,9 +763,9 @@ class TestBoot1FailClosed:
         reset_step_budget()
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
 
-        tramp = _run_trampoline(projs, {"test": 42}, max_steps=10)
+        tramp = _run_trampoline(projs, {"test": sn(42)}, max_steps=10)
         reset_step_budget()
-        boot1 = _run_boot1(projs, {"test": 42}, max_steps=10)
+        boot1 = _run_boot1(projs, {"test": sn(42)}, max_steps=10)
 
         for key in KERNEL_RESERVED_FIELDS:
             assert key not in tramp, f"Reserved field {key} leaked to trampoline result"
@@ -804,7 +804,7 @@ class TestBoot1CrossSubstrateAdversarial:
     def test_js_boot1_budget_parity(self):
         """JS Boot1 respects same budget constraints as Python Boot1."""
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         # Python Boot1 (engine needs ~10 iterations for simple input)
         reset_step_budget()
@@ -864,7 +864,7 @@ class TestBoot1CrossSubstrateAdversarial:
         js_resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": projs,
-            "input": {"test": 42},
+            "input": {"test": sn(42)},
             "maxSteps": 10,
             "boot1LoopMode": True,
         })
@@ -878,7 +878,7 @@ class TestBoot1CrossSubstrateAdversarial:
         """Python trampoline == JS Boot1 recursive (cross-path parity)."""
         reset_step_budget()
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         py_tramp = _run_trampoline(projs, initial, max_steps=10)
 
@@ -990,7 +990,7 @@ class TestBoot1FourWayParity:
     def test_simple_non_freeze_four_way(self):
         """Simple non-freeze input: all 4 paths agree."""
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        results = self._run_all_four(projs, {"double": 42})
+        results = self._run_all_four(projs, {"double": sn(42)})
         self._assert_four_way(results)
 
     def test_paxos_freeze_four_way(self):
@@ -1005,7 +1005,7 @@ class TestBoot1FourWayParity:
 
     def test_stall_four_way(self):
         """Stall (empty projections): all 4 paths agree."""
-        results = self._run_all_four([], {"x": 1})
+        results = self._run_all_four([], {"x": sn(1)})
         self._assert_four_way(results)
 
     def test_multi_projection_four_way(self):
@@ -1015,14 +1015,14 @@ class TestBoot1FourWayParity:
             {"pattern": {"b": {"var": "x"}}, "body": {"result_b": {"var": "x"}}},
             {"pattern": {"a": {"var": "x"}}, "body": {"shadow": {"var": "x"}}},
         ]
-        for inp in [{"a": 1}, {"b": 2}]:
+        for inp in [{"a": sn(1)}, {"b": sn(2)}]:
             results = self._run_all_four(projs, inp)
             self._assert_four_way(results)
 
     def test_terminal_shape_four_way(self):
         """Terminal shape has exactly 8 keys on all 4 paths."""
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
-        results = self._run_all_four(projs, {"test": 42})
+        results = self._run_all_four(projs, {"test": sn(42)})
         expected_keys = {"value", "closure_detected", "tau_step", "exhaustion_detected",
                         "operator_frozen", "frozen_set", "action", "stall"}
         for path_name in ["py_tramp", "py_boot1"]:
@@ -1081,17 +1081,17 @@ class TestBoot1Merge2GateAssertions:
         inputs = [
             (
                 [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}],
-                {"double": 42},
+                {"double": sn(42)},
                 {"max_steps": 10},
             ),
             (
                 [{"pattern": {"inc": {"var": "n"}}, "body": {"var": "n"}}],
-                {"inc": 5},
+                {"inc": sn(5)},
                 {"max_steps": 10},
             ),
             (
                 [],
-                {"x": 1},
+                {"x": sn(1)},
                 {"max_steps": 10},
             ),
         ]
@@ -1119,7 +1119,7 @@ class TestBoot1Merge2GateAssertions:
         projs = [{"pattern": {"test": {"var": "v"}}, "body": {"var": "v"}}]
 
         reset_step_budget()
-        boot1 = _run_boot1(projs, {"test": 42}, max_steps=10)
+        boot1 = _run_boot1(projs, {"test": sn(42)}, max_steps=10)
         assert set(boot1.keys()) == expected_keys, (
             f"G6 terminal shape violation: got {set(boot1.keys())}"
         )
@@ -1148,13 +1148,13 @@ class TestBoot1Merge2GateAssertions:
             {"pattern": {"x": {"var": "v"}}, "body": {"second": {"var": "v"}}},
         ]
         reset_step_budget()
-        tramp = _run_trampoline(projs, {"x": 42}, max_steps=10)
+        tramp = _run_trampoline(projs, {"x": sn(42)}, max_steps=10)
         reset_step_budget()
-        boot1 = _run_boot1(projs, {"x": 42}, max_steps=10)
+        boot1 = _run_boot1(projs, {"x": sn(42)}, max_steps=10)
 
         assert tramp == boot1
         # The value should reflect first projection, not second
-        assert tramp["value"] == {"first": 42} or tramp["value"] == 42
+        assert tramp["value"] == {"first": sn(42)} or tramp["value"] == sn(42)
 
 
 # ============================================================================
@@ -1229,7 +1229,7 @@ class TestBoot1Determinism:
     def test_determinism_simple(self):
         """Run same simple input twice, verify byte-identical results."""
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         reset_step_budget()
         result1 = _run_boot1(projs, initial, max_steps=10)
@@ -1268,7 +1268,7 @@ class TestBoot1Determinism:
     def test_determinism_observer_events(self):
         """Observer events are identical across repeated runs."""
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         obs1 = []
         reset_step_budget()
@@ -1295,7 +1295,7 @@ class TestBoot1Idempotence:
         """Running terminal result through engine again produces same result."""
         reset_step_budget()
         projs = [{"pattern": {"double": {"var": "n"}}, "body": {"var": "n"}}]
-        initial = {"double": 42}
+        initial = {"double": sn(42)}
 
         result1 = _run_boot1(projs, initial, max_steps=10)
 
@@ -1322,7 +1322,7 @@ class TestBoot1DepthCapEnforcement:
         js_resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
-            "input": {"x": 1},
+            "input": {"x": sn(1)},
             "maxSteps": 5,
             "boot1LoopMode": True,
         })
@@ -1570,7 +1570,7 @@ class TestBoot1TypeHardeningCrossSubstrate:
         resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
-            "input": {"x": 1},
+            "input": {"x": sn(1)},
             "maxSteps": 5,
             "boot1LoopMode": "true",
         })
@@ -1582,7 +1582,7 @@ class TestBoot1TypeHardeningCrossSubstrate:
         resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
-            "input": {"x": 1},
+            "input": {"x": sn(1)},
             "maxSteps": 5,
             "boot1LoopMode": 1,
         })
@@ -1594,7 +1594,7 @@ class TestBoot1TypeHardeningCrossSubstrate:
         resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
-            "input": {"x": 1},
+            "input": {"x": sn(1)},
             "maxSteps": 5,
             "boot1LoopMode": True,
         })
@@ -1605,7 +1605,7 @@ class TestBoot1TypeHardeningCrossSubstrate:
         resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
-            "input": {"x": 1},
+            "input": {"x": sn(1)},
             "maxSteps": 5,
             "boot1LoopMode": False,
         })
@@ -1616,7 +1616,7 @@ class TestBoot1TypeHardeningCrossSubstrate:
         resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
-            "input": {"x": 1},
+            "input": {"x": sn(1)},
             "maxSteps": 5,
             "boot1LoopMode": None,
         })
@@ -1627,7 +1627,7 @@ class TestBoot1TypeHardeningCrossSubstrate:
         resp = _run_js_json_api({
             "action": "run_engine_pipeline",
             "projections": [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}],
-            "input": {"x": 1},
+            "input": {"x": sn(1)},
             "maxSteps": 5,
         })
         assert resp["success"], f"JS should accept omitted boot1LoopMode: {resp.get('error')}"
@@ -1722,7 +1722,7 @@ class TestRunEngineWithRoutingBoot1:
         req_base = {
             "action": "run_engine_with_routing",
             "projections": projs,
-            "input": {"double": 42},
+            "input": {"double": sn(42)},
             "maxSteps": 10,
             "maxEngineIterations": 20,
             "maxAlgorithmIterations": 50,
