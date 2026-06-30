@@ -117,8 +117,8 @@ class TestRCXEngineWorkloadContract:
                 f"[{vector['id']}] Non-deterministic: two runs produced different results"
             )
 
-    def test_host_tau_step_zero_fails_closed_on_python_and_js(self):
-        """Legacy host zero must not become matcher-facing StructuralNumbers zero."""
+    def test_host_tau_step_zero_routes_as_boundary_structural_zero_python_and_js(self):
+        """Boundary host zero is structuralized before hemisphere matching."""
         engine_result = {
             "value": "legacy-zero",
             "closure_detected": True,
@@ -131,17 +131,23 @@ class TestRCXEngineWorkloadContract:
         }
         hemispheres = _empty_hemispheres()
 
-        with pytest.raises(RuntimeError) as py_error:
-            run_hemisphere_routing(engine_result, hemispheres)
-        assert getattr(py_error.value, "error_code", None) == "input.shape_mismatch"
+        py_result = run_hemisphere_routing(engine_result, hemispheres)
+        assert set(py_result) == {"r_null", "r_inf", "r_a", "lobes", "sink"}
+        assert py_result["r_a"] is not None
+        assert mu_equal(py_result["r_a"][0]["state"], "legacy-zero")
+        assert py_result["r_a"][0]["closure_flag"] is True
 
         js_response = _js_api({
             "action": "run_hemisphere_routing",
             "engine_result": engine_result,
             "hemispheres": hemispheres,
         })
-        assert not js_response["success"]
-        assert js_response.get("error_code") == "input.shape_mismatch"
+        assert js_response["success"], js_response.get("error")
+        js_result = js_response["result"]
+        assert set(js_result) == {"r_null", "r_inf", "r_a", "lobes", "sink"}
+        assert js_result["r_a"] is not None
+        assert mu_equal(js_result["r_a"][0]["state"], "legacy-zero")
+        assert js_result["r_a"][0]["closure_flag"] is True
 
     def test_run_trace_over_cap_budget_rejects_before_structural_reduction(self, monkeypatch):
         """Boundary budget cap rejects over-cap StructuralNumbers before ADD/COMPARE."""
