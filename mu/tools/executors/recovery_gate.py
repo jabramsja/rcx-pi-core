@@ -7275,6 +7275,173 @@ def _validate_ignored_pycache_bytecode_path(
     return snapshot["realpath"] == expected_realpath
 
 
+def _is_hybrid_support_state_content_path(rel_path: str) -> bool:
+    """True for repo-local support-state files whose content may change while
+    recovery delegates run.
+
+    These paths are not product edits. The hybrid audit should still fail closed
+    on creation/deletion/type/readlink drift through the inventory check, but a
+    Codex pager, bridge-config sync, or shared-learning hook can legitimately
+    rewrite the regular-file content while the delegate is validating.
+    """
+    return (
+        re.fullmatch(r"\.agent_bus(?:-[^/]+)?/bridge_config\.json", rel_path)
+        is not None
+        or re.fullmatch(
+            r"\.agent_bus(?:-[^/]+)?/recovery/learned_patterns\.json",
+            rel_path,
+        )
+        is not None
+    )
+
+
+def _is_hybrid_transient_observability_state_path(rel_path: str) -> bool:
+    """True for exact agent-bus observability files that live operators update.
+
+    These paths are runtime support state for pager/autoping visibility, not
+    product edits. They may be created, deleted, or rewritten while a recovery
+    delegate validates a patch. Symlinks and non-file/non-directory surprises
+    remain fail-closed through live path validation.
+    """
+    bus = r"\.agent_bus(?:-[^/]+)?"
+    receiver = bus + r"/observability/claude_pager_receiver"
+    return (
+        re.fullmatch(
+            receiver
+            + r"/(?:active_drainer\.json|delivered\.jsonl|delivery\.lock|"
+            r"drainer\.lock|queue\.lock|drain_spawn\.log)",
+            rel_path,
+        )
+        is not None
+        or re.fullmatch(receiver + r"/delivery_logs", rel_path) is not None
+        or re.fullmatch(receiver + r"/delivery_logs/[^/]+\.log", rel_path)
+        is not None
+        or re.fullmatch(
+            bus
+            + r"/observability/(?:pipeline_agent_delivery_receipts\.jsonl|"
+            r"pipeline_agent_events\.jsonl|pipeline_agent_pager_state\.json)",
+            rel_path,
+        )
+        is not None
+    )
+
+
+def _hybrid_support_state_expected_realpath(repo_root: Path, rel_path: str) -> str:
+    return str(repo_root.resolve() / PurePosixPath(rel_path))
+
+
+def _support_state_snapshot_allows_content_exemption(
+    repo_root: Path,
+    rel_path: str,
+    snapshot: dict[str, Any],
+) -> bool:
+    return (
+        snapshot.get("exists") is True
+        and snapshot.get("type") == "file"
+        and snapshot.get("readlink") is None
+        and snapshot.get("realpath") == _hybrid_support_state_expected_realpath(repo_root, rel_path)
+    )
+
+
+def _live_support_state_path_allows_content_exemption(
+    repo_root: Path,
+    rel_path: str,
+) -> bool:
+    snapshot = _absolute_path_snapshot(repo_root / rel_path)
+    return _support_state_snapshot_allows_content_exemption(
+        repo_root,
+        rel_path,
+        snapshot,
+    )
+
+
+def _validate_hybrid_support_state_content_path(
+    repo_root: Path,
+    rel_path: str,
+) -> tuple[bool, str]:
+    path = repo_root / rel_path
+    snapshot = _absolute_path_snapshot(path)
+    if not snapshot["exists"]:
+        return True, ""
+    if snapshot["realpath"] != _hybrid_support_state_expected_realpath(repo_root, rel_path):
+        return False, f"hybrid support-state content path escaped its stable realpath: {rel_path}"
+    if snapshot["type"] != "file":
+        return False, f"hybrid support-state content path must remain a regular file: {rel_path}"
+    return True, ""
+
+
+def _validate_hybrid_transient_observability_state_path(
+    repo_root: Path,
+    rel_path: str,
+) -> tuple[bool, str]:
+    path = repo_root / rel_path
+    snapshot = _absolute_path_snapshot(path)
+    if not snapshot["exists"]:
+        return True, ""
+    if snapshot["realpath"] != _hybrid_support_state_expected_realpath(repo_root, rel_path):
+        return False, f"hybrid transient observability path escaped its stable realpath: {rel_path}"
+    if rel_path.endswith("/delivery_logs"):
+        if snapshot["type"] != "directory":
+            return False, f"hybrid transient observability path must remain a directory: {rel_path}"
+    elif snapshot["type"] != "file":
+        return False, f"hybrid transient observability path must remain a regular file: {rel_path}"
+    return True, ""
+
+
+def _ensure_hybrid_support_state_content_paths_allowed(
+    repo_root: Path,
+    inventory: dict[str, dict[str, Any]],
+) -> tuple[bool, str]:
+    for rel_path in sorted(inventory):
+        if not _is_hybrid_support_state_content_path(rel_path):
+            continue
+        ok, detail = _validate_hybrid_support_state_content_path(repo_root, rel_path)
+        if not ok:
+            return False, detail
+    for rel_path in sorted(inventory):
+        if not _is_hybrid_transient_observability_state_path(rel_path):
+            continue
+        ok, detail = _validate_hybrid_transient_observability_state_path(repo_root, rel_path)
+        if not ok:
+            return False, detail
+    return True, ""
+
+
+def _support_state_fingerprint_change_is_exempt(
+    repo_root: Path,
+    rel_path: str,
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> bool:
+    return (
+        _is_hybrid_support_state_content_path(rel_path)
+        and _support_state_snapshot_allows_content_exemption(repo_root, rel_path, before)
+        and _support_state_snapshot_allows_content_exemption(repo_root, rel_path, after)
+        and _live_support_state_path_allows_content_exemption(repo_root, rel_path)
+    )
+
+
+def _transient_observability_manifest_change_is_exempt(
+    repo_root: Path,
+    rel_path: str,
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> bool:
+    if not _is_hybrid_transient_observability_state_path(rel_path):
+        return False
+    before_type = before.get("type")
+    after_exists = after.get("exists") is True
+    after_type = after.get("type")
+    if before_type == "directory" or after_type == "directory":
+        return rel_path.endswith("/delivery_logs")
+    if before_type != "file":
+        return False
+    if not after_exists:
+        return True
+    ok, _detail = _validate_hybrid_transient_observability_state_path(repo_root, rel_path)
+    return ok and after_type == "file" and after.get("readlink") is None
+
+
 def _validate_ignored_hybrid_scratch_cache_path(
     repo_root: Path,
     rel_path: str,
@@ -7443,6 +7610,7 @@ def _capture_hybrid_git_control_tuple(repo_root: Path) -> dict[str, Any]:
 
 
 def _diff_hybrid_manifest(
+    repo_root: Path,
     baseline: dict[str, dict[str, Any]],
     current: dict[str, dict[str, Any]],
 ) -> dict[str, str]:
@@ -7451,14 +7619,32 @@ def _diff_hybrid_manifest(
         if _is_ignored_hybrid_scratch_cache_path(rel_path):
             continue
         after = current.get(rel_path, {"exists": False, "type": "missing", "realpath": before["realpath"], "readlink": None, "fingerprint": None})
-        for field in ("exists", "type", "realpath", "readlink", "fingerprint"):
+        for field in ("exists", "type", "realpath", "readlink"):
             if before.get(field) != after.get(field):
-                reasons[rel_path] = f"manifest_{field}_changed"
+                if not _transient_observability_manifest_change_is_exempt(
+                    repo_root,
+                    rel_path,
+                    before,
+                    after,
+                ):
+                    reasons[rel_path] = f"manifest_{field}_changed"
                 break
+        else:
+            if before.get("fingerprint") != after.get("fingerprint") and not (
+                _support_state_fingerprint_change_is_exempt(repo_root, rel_path, before, after)
+                or _transient_observability_manifest_change_is_exempt(
+                    repo_root,
+                    rel_path,
+                    before,
+                    after,
+                )
+            ):
+                reasons[rel_path] = "manifest_fingerprint_changed"
     return reasons
 
 
 def _diff_hybrid_inventory(
+    repo_root: Path,
     baseline: dict[str, dict[str, Any]],
     current: dict[str, dict[str, Any]],
     *,
@@ -7470,6 +7656,20 @@ def _diff_hybrid_inventory(
             continue
         before = baseline.get(rel_path)
         after = current.get(rel_path)
+        if _is_hybrid_transient_observability_state_path(rel_path):
+            if after is not None:
+                ok, detail = _validate_hybrid_transient_observability_state_path(
+                    repo_root,
+                    rel_path,
+                )
+                if not ok:
+                    reasons[rel_path] = detail
+                    continue
+            if before is None or after is None:
+                continue
+            if before.get("type") != after.get("type") or before.get("readlink") != after.get("readlink"):
+                reasons[rel_path] = "inventory_transient_observability_shape_changed"
+            continue
         # Same-lineage recovery prompt siblings are tolerated only when they
         # were already present at checkpoint time. Newly created siblings must
         # still fail closed unless they are an exact admitted exception path.
@@ -7522,6 +7722,12 @@ def _capture_hybrid_checkpoint(
     )
     if not ok:
         return False, {"detail": detail}
+    ok, detail = _ensure_hybrid_support_state_content_paths_allowed(
+        repo_root,
+        inventory,
+    )
+    if not ok:
+        return False, {"detail": detail}
     try:
         git_control = _capture_hybrid_git_control_tuple(repo_root)
     except Exception as exc:
@@ -7555,8 +7761,9 @@ def _audit_hybrid_checkpoint(
         return False, current
     if current["git_control"] != baseline["git_control"]:
         return False, {"detail": "hybrid git-control tuple drifted from baseline"}
-    manifest_reasons = _diff_hybrid_manifest(baseline["manifest"], current["manifest"])
+    manifest_reasons = _diff_hybrid_manifest(repo_root, baseline["manifest"], current["manifest"])
     inventory_reasons = _diff_hybrid_inventory(
+        repo_root,
         baseline["inventory"],
         current["inventory"],
         exception_paths=exception_paths,

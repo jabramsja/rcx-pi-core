@@ -26,6 +26,10 @@ _RECOVERY_TIMEOUT_ENV_KEYS = (
     "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE",
     "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY",
     "RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE",
+    # Recovery-gate unit tests use temporary repos and often monkeypatch
+    # subprocess.run narrowly. They must not inherit a live operator pager route
+    # that would dispatch Codex/Node from recovery status emission.
+    "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE",
 )
 _RECOVERY_TIMEOUT_ENV_PREFIXES = (
     "RCX_RECOVERY_ORIGINAL_TIMEOUT_",
@@ -7931,6 +7935,228 @@ class TestHybridScopeAudit:
         assert ok is True
         assert audit["observed_drift"] == []
         assert rel_path not in audit["manifest_reasons"]
+
+    def test_agent_bus_support_state_content_churn_stays_out_of_manifest_drift(
+        self, tmp_path, monkeypatch
+    ):
+        # A live Codex/pager recovery attempt can rewrite repo-local support
+        # state while a hybrid delegate validates its fix. That content churn
+        # must not loop recovery as an out-of-scope product edit, but the
+        # exemption remains exact to support-state content only.
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        support_paths = [
+            ".agent_bus/bridge_config.json",
+            ".agent_bus/recovery/learned_patterns.json",
+            ".agent_bus-lane1/bridge_config.json",
+            ".agent_bus-lane1/recovery/learned_patterns.json",
+        ]
+        for rel_path in support_paths:
+            path = tmp_path / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("baseline\n", encoding="utf-8")
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: baseline support-state files
+            tmp_path,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        for rel_path in support_paths:
+            (tmp_path / rel_path).write_text("mutated by support process\n", encoding="utf-8")
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: support-state content churn is not product drift
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+
+        assert ok is True
+        assert audit["observed_drift"] == []
+        assert not set(support_paths) & set(audit["manifest_reasons"])
+
+    def test_agent_bus_support_state_symlink_escape_fails_closed_even_with_content(
+        self, tmp_path, monkeypatch
+    ):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        outside = tmp_path.parent / f"{tmp_path.name}_support_state_escape.json"
+        outside.write_text('{"support": "content"}\n', encoding="utf-8")
+        support_path = tmp_path / ".agent_bus" / "recovery" / "learned_patterns.json"
+        support_path.parent.mkdir(parents=True, exist_ok=True)
+        support_path.symlink_to(outside)
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: support-state symlink escape must fail closed
+            tmp_path,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+
+        assert ok is False
+        assert (
+            "hybrid support-state content path escaped its stable realpath"
+            in baseline["detail"]
+        )
+        assert ".agent_bus/recovery/learned_patterns.json" in baseline["detail"]
+
+    def test_agent_bus_support_state_exemption_checks_live_path_before_exempting(
+        self, tmp_path
+    ):
+        init_hybrid_delegate_tree(tmp_path)
+        rel_path = ".agent_bus/recovery/learned_patterns.json"
+        outside = tmp_path.parent / f"{tmp_path.name}_support_state_escape.json"
+        outside.write_text("after\n", encoding="utf-8")
+        support_path = tmp_path / rel_path
+        support_path.parent.mkdir(parents=True, exist_ok=True)
+        support_path.symlink_to(outside)
+
+        expected_realpath = str(tmp_path.resolve() / rel_path)
+        before = {
+            "exists": True,
+            "type": "file",
+            "realpath": expected_realpath,
+            "readlink": None,
+            "fingerprint": "before",
+        }
+        after = {
+            "exists": True,
+            "type": "file",
+            "realpath": expected_realpath,
+            "readlink": None,
+            "fingerprint": "after",
+        }
+
+        reasons = rg_mod._diff_hybrid_manifest(  # ANTICHEAT_OK: support-state exemption must validate live symlink state
+            tmp_path,
+            {rel_path: before},
+            {rel_path: after},
+        )
+
+        assert reasons == {rel_path: "manifest_fingerprint_changed"}
+
+    def test_agent_bus_pager_receiver_runtime_state_can_appear_and_disappear(
+        self, tmp_path, monkeypatch
+    ):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        rel_path = ".agent_bus-lane1/observability/claude_pager_receiver/active_drainer.json"
+        receiver_dir = tmp_path / ".agent_bus-lane1" / "observability" / "claude_pager_receiver"
+        receiver_dir.mkdir(parents=True, exist_ok=True)
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: baseline before live pager receiver state appears
+            tmp_path,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        active_drainer = receiver_dir / "active_drainer.json"
+        active_drainer.write_text('{"pid": 1}\n', encoding="utf-8")
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: live pager receiver create/delete is support-state churn
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert rel_path not in audit["observed_drift"]
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: baseline while pager receiver state exists
+            tmp_path,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        active_drainer.unlink()
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: live pager receiver disappearance is support-state churn
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert rel_path not in audit["observed_drift"]
+
+    def test_agent_bus_pager_receiver_runtime_state_symlink_fails_closed(
+        self, tmp_path, monkeypatch
+    ):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        rel_path = ".agent_bus-lane1/observability/claude_pager_receiver/active_drainer.json"
+        outside = tmp_path.parent / f"{tmp_path.name}_active_drainer.json"
+        outside.write_text('{"pid": 1}\n', encoding="utf-8")
+        active_drainer = tmp_path / rel_path
+        active_drainer.parent.mkdir(parents=True, exist_ok=True)
+        active_drainer.symlink_to(outside)
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: pager receiver symlink escape must fail closed
+            tmp_path,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+
+        assert ok is False
+        assert (
+            "hybrid transient observability path escaped its stable realpath"
+            in baseline["detail"]
+        )
+        assert rel_path in baseline["detail"]
+
+    def test_agent_bus_support_state_exemption_does_not_hide_deletion_or_source_drift(
+        self, tmp_path, monkeypatch
+    ):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        support_path = tmp_path / ".agent_bus" / "recovery" / "learned_patterns.json"
+        support_path.parent.mkdir(parents=True, exist_ok=True)
+        support_path.write_text("baseline\n", encoding="utf-8")
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: baseline support-state file
+            tmp_path,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        support_path.unlink()
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: deletion is still inventory drift
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is False
+        assert "hybrid observed drift escaped declared scope" in audit["detail"]
+        assert ".agent_bus/recovery/learned_patterns.json" in audit["detail"]
+        assert (
+            audit["inventory_reasons"][".agent_bus/recovery/learned_patterns.json"]
+            == "inventory_deleted"
+        )
+
+        support_path.write_text("baseline\n", encoding="utf-8")
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: fresh baseline for source-drift proof
+            tmp_path,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        (tmp_path / "mu" / "tools" / "executors" / "executor_common.py").write_text(
+            "real out-of-scope source drift\n",
+            encoding="utf-8",
+        )
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: real source drift still fails
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is False
+        assert "mu/tools/executors/executor_common.py" in audit["detail"]
 
     def test_regenerated_repo_pycache_bytecode_is_not_scope_escape_but_real_source_change_is(
         self, tmp_path, monkeypatch
