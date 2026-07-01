@@ -37,19 +37,21 @@ _RECOVERY_TIMEOUT_ENV_PREFIXES = (
 )
 
 
-def _clear_recovery_timeout_test_env() -> None:
+def _clear_recovery_timeout_test_env(*, pager_route: str | None = "notify-only") -> None:
     for env_key in list(os.environ):
         if env_key in _RECOVERY_TIMEOUT_ENV_KEYS or env_key.startswith(
             _RECOVERY_TIMEOUT_ENV_PREFIXES
         ):
             os.environ.pop(env_key, None)
+    if pager_route:
+        os.environ["RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"] = pager_route
 
 
 @pytest.fixture(autouse=True)
 def _isolate_recovery_timeout_env():
     _clear_recovery_timeout_test_env()
     yield
-    _clear_recovery_timeout_test_env()
+    _clear_recovery_timeout_test_env(pager_route=None)
 
 
 def _shell_quote(text: str) -> str:

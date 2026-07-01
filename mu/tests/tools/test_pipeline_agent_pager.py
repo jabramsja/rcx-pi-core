@@ -2770,22 +2770,18 @@ def test_requested_targets_both_expands_to_codex_and_claude():
     assert pager_mod._requested_targets("claude") == ["claude"]  # ANTICHEAT_OK: route fan-out contract test
 
 
-def test_executor_config_default_pager_route_is_both():
-    """Acceptance (e): the shipped default pager route is flipped to ``both``.
+def test_executor_config_default_pager_route_is_codex():
+    """The shipped pager fallback follows the committed Codex orchestrator.
 
-    Wave B activates the dedicated Claude monitor autoping
-    (ensure_claude_autoping.sh -> claude_autoping_watch.py) and flips the route to
-    ``both`` so commit-grade transitions page BOTH Codex and the dedicated Claude
-    monitor. The flip is NOT gated on the monitor being up: Wave A's monitor-absent
-    skip is RETRYABLE (a page emitted before the monitor is up is re-queued, never
-    dropped -- see the monitor-unset/equals-live retryable-skip tests above), so
-    route=both can never silently drop a Claude leg. Monitor health is observable
-    via the claude_autoping state file's ``status`` field.
+    Explicit ``route=both`` still fans out to Codex and the dedicated Claude monitor
+    in the route-contract tests above. The checked-in fallback stays narrowed to
+    Codex so a clean checkout or resumed process without bus-local
+    ``orchestrator_mode.json`` cannot page both orchestrators by accident.
     """
     repo_root = Path(__file__).resolve().parents[3]
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    assert config["pipeline_agent_pager"]["route"] == "both"
+    assert config["pipeline_agent_pager"]["route"] == "codex"
 
 
 def test_session_start_hook_writes_claude_monitor_session_id_when_flag_set(tmp_path):

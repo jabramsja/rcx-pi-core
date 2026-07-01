@@ -69,8 +69,10 @@ python3 mu/tools/executors/set_roles.py --implementer claude --reviewer codex
 
 `set_roles.py` writes `role_agents` plus derived `backends` and
 `bridge_reviewers`; it does not change orchestrator mode, effective pager route,
-tmux, or autoping state. `set_orchestrator_mode.py` does not write
-`role_agents`, `backends`, `bridge_reviewers`, or the tracked pager default.
+tmux, or autoping state. `set_orchestrator_mode.py` writes the bus-local
+orchestrator state and narrows the tracked pager fallback for the selected
+orchestrator; it does not write `role_agents`, `backends`, or
+`bridge_reviewers`.
 
 Provider display/model/effort metadata for Codex and Claude lives in one
 registry: `mu/tools/executors/executor_config.json` under
