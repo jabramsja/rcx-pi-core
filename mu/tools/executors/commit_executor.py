@@ -9791,6 +9791,9 @@ def prepare_handoff_from_routing_record(
     embedded_handoff = record.get("handoff")
     if isinstance(embedded_handoff, dict):
         embedded_copy = copy.deepcopy(embedded_handoff)
+        record_pager_route = str(record.get("pager_route") or "").strip()
+        if "pager_route" not in embedded_copy and record_pager_route:
+            embedded_copy["pager_route"] = record_pager_route
         valid, handoff_errors = validate_handoff(embedded_copy, repo_root=repo_root)
         if valid and not standalone:
             return embedded_copy, []
