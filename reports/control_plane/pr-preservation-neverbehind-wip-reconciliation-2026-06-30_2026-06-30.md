@@ -1,7 +1,7 @@
 # PR Preservation, Never-Behind, And WIP Reconciliation 2026-06-30
 
 Date: 2026-06-30
-Status: IMPLEMENTED / LOCAL EVIDENCE
+Status: IMPLEMENTED / LOCAL EVIDENCE - ROOT-LAYOUT REPAIR APPLIED
 Task: [WIP-PRESERVATION-DIRTY-WORKTREE-RECOVERY-2026-06-20]
 Wave ID: pr-preservation-neverbehind-wip-reconciliation-2026-06-30
 Phase-A-Lock: LOCKED
@@ -122,6 +122,7 @@ stash, sync, merge, or cleanup action:
 ## Validation gates
 
 - evidence_command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id pr-preservation-neverbehind-wip-reconciliation-2026-06-30 --output reports/l4_wave_indicators/pr-preservation-neverbehind-wip-reconciliation-2026-06-30.json`
+- root-layout repair evidence: `PYTHONHASHSEED=0 python3 -m pytest -q tests/structural/test_root_layout_guard.py::TestRootLayoutGuard::test_no_new_root_directories tests/structural/test_root_layout_guard.py::TestRootLayoutGuard::test_allowlisted_dirs_still_tracked --tb=short`
 
 ## Acceptance criteria
 
