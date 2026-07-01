@@ -1,0 +1,68 @@
+{
+  "wave_id": "pr1166-codex-role-default-preservation-2026-07-01",
+  "title": "PR 1166 Codex Role Default Preservation 2026-07-01",
+  "task_id": "[PR-1166-POLICY-BOUND-PRESERVATION-2026-06-30]",
+  "purpose": "Preserve the useful role-switch/default-fallback mechanics from unmerged PR #1166 without landing its Claude role selection. Keep Codex/Codex as the active implementer/reviewer default even on the truly absent committed-config fallback.",
+  "date": "2026-07-01",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/pr1166-codex-role-default-preservation-2026-07-01.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id pr1166-codex-role-default-preservation-2026-07-01 --output reports/l4_wave_indicators/pr1166-codex-role-default-preservation-2026-07-01.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_executor_config_alignment.py::TestBareFallbackFollowsCommittedRoles mu/tests/tools/test_executor_dispatch.py::TestDispatcherConfig mu/tests/tools/test_set_roles.py::test_switch_keeps_committed_and_fallback_in_sync_both_directions mu/tests/tools/test_set_roles.py::test_role_labels_follow_live_roles_after_switch --tb=short && python3 -m py_compile mu/tools/executors/executor_common.py mu/tools/executors/executor_dispatch.py mu/tools/executors/set_roles.py && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id pr1166-codex-role-default-preservation-2026-07-01 --wave-class L4_ENABLER && git diff --check",
+  "evidence_delta": "(1) PR #1166 is open/unmerged and policy-bound because it switches production roles to Claude, contrary to the current founder direction. (2) Current dev already preserves the useful single-switch/materialization mechanics: committed executor_config.json is Codex/Codex, role-only/missing config materializes backends and bridge reviewers from role_agents, and set_roles keeps committed and fallback paths in sync. (3) The remaining drift is the last-resort static DEFAULT_EXECUTOR_CONFIG literal: if the committed config is truly absent/unreadable, implementer/reviewer and phase backends still fall back to Claude. This wave changes only that last-resort literal to Codex/Codex and locks it with focused tests.",
+  "progress_proof_before": "On current dev, mu/tools/executors/executor_config.json selects Codex/Codex with Codex 5.5 xhigh metadata, but mu/tools/executors/executor_common.py DEFAULT_EXECUTOR_CONFIG still names Claude for role_agents and implementer backends on the truly absent committed-config fallback.",
+  "progress_proof_after": "The committed config and the last-resort DEFAULT_EXECUTOR_CONFIG both select Codex/Codex for implementer/reviewer, derived implementer backends, reviewer backends, and bridge reviewers; explicit overrides and set_roles polymorphism continue to work.",
+  "structural_artifact_ref": "mu/tools/executors/executor_common.py; mu/tests/tools/test_executor_config_alignment.py; mu/tests/tools/test_executor_dispatch.py; mu/tests/tools/test_set_roles.py",
+  "post_gate_contract_sweep": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_executor_dispatch.py::TestDispatcherConfig mu/tests/tools/test_set_roles.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id pr1166-codex-role-default-preservation-2026-07-01 --wave-class L4_ENABLER && git diff --check",
+  "scope_summary": "Control-plane role-default preservation only. Extract the useful consistency value from PR #1166 while keeping all active/default implementer and reviewer roles on Codex 5.5 xhigh.",
+  "scope_items": [
+    "mu/tools/executors/executor_common.py (MODIFY) -- change last-resort DEFAULT_EXECUTOR_CONFIG role_agents and derived implementer/reviewer defaults to Codex/Codex; keep commit_executor null.",
+    "mu/tests/tools/test_executor_config_alignment.py (MODIFY) -- assert the truly absent committed-config fallback is Codex/Codex and derived fields follow the default literal.",
+    "mu/tests/tools/test_executor_dispatch.py (MODIFY IF NEEDED) -- keep dispatcher config tests provider-polymorphic and green under Codex defaults.",
+    "mu/tests/tools/test_set_roles.py (MODIFY IF NEEDED) -- keep set_roles bidirectional switch and pane-label source tests green under Codex defaults.",
+    "TASKS.md (MODIFY) -- tracker sync for PR #1166 preservation, explicitly recording that direct Claude-role landing remains policy-bound.",
+    "reports/control_plane/pr1166-codex-role-default-preservation-2026-07-01_wave_config.json (KEEP) -- launcher config for this wave.",
+    "reports/l4_wave_indicators/pr1166-codex-role-default-preservation-2026-07-01.json (GENERATED BY WAVE) -- L4 indicator artifact."
+  ],
+  "work_items": [
+    "Reproduce current role truth from executor_config.json and DEFAULT_EXECUTOR_CONFIG before edits.",
+    "Do not merge PR #1166 as-is; treat its Claude role selection as policy-bound under current founder direction.",
+    "Update only the last-resort DEFAULT_EXECUTOR_CONFIG literal and the focused tests needed to prove Codex/Codex default behavior.",
+    "Preserve explicit role_agents override authority and the committed-config fallback path exactly as-is.",
+    "Run the focused executor config tests, staged L4 contract, and diff whitespace check."
+  ],
+  "constraints": [
+    "Pipeline is primary; use launch_wave and dispatcher surfaces.",
+    "Implementer, reviewer, pager route, tmux, and autoping target are Codex / Codex 5.5 xhigh.",
+    "Do not edit Claude-owned files, including CLAUDE.md, .claude/*, Claude memory, Claude rules, or Claude role defaults.",
+    "Do not touch runtime, substrate, seed, scheduler, projection, Python/JS semantic runtime, hemisphere production logic, or parity behavior.",
+    "Do not change committed executor_config.json away from Codex/Codex.",
+    "Do not weaken explicit override behavior: an explicit role_agents override may still select another provider for tests/custom configs.",
+    "Do not include PR #1173 refresh commits or direct PR #1166 Claude-role commits in this branch."
+  ],
+  "stop_conditions": [
+    "NEEDS_RESCOPING if the fix requires changing runtime/substrate/parity files.",
+    "DEFECT if any default, missing-config, or dispatcher path routes implementer/reviewer to Claude without an explicit test/custom override.",
+    "DEFECT if the change breaks set_roles as the single switch or removes provider polymorphism.",
+    "Halt if launch/commit/recovery routes implementation, review, pager, tmux, or autoping to Claude."
+  ],
+  "acceptance_criteria": [
+    "DEFAULT_EXECUTOR_CONFIG role_agents are Codex/Codex.",
+    "DEFAULT_EXECUTOR_CONFIG derived phase_a_executor, phase_b_executor, bot_remediation, post_merge_supervisor, dialectic_executor, and bridge_reviewers all point to Codex, while commit_executor remains null.",
+    "The truly absent committed-config fallback resolves Codex/Codex with derived Codex backends/reviewers.",
+    "Existing committed-config fallback and explicit role_agents override tests still pass.",
+    "The staged L4 contract and diff whitespace checks pass.",
+    "No Claude-owned files and no runtime/substrate/parity files are changed."
+  ],
+  "request_for_agent": "Run this PR #1166 preservation wave through the launcher and pipeline with Codex implementer, Codex reviewer, and Codex pager route only. Preserve #1166's useful role-materialization mechanics but keep active/default roles Codex/Codex.",
+  "request_for_claude": "Compatibility input only: do not implement, review, page, or route this wave through Claude. Claude-owned files and Claude role defaults are out of scope; the direct PR #1166 Claude-role change is policy-bound and must not be landed here.",
+  "authorization_note": "Founder-directed preservation of valuable unmerged PR #1166 work while enforcing current Codex 5.5 xhigh orchestrator/implementer/reviewer direction.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Pipeline-owned Codex-compatible preservation of PR #1166 role-default mechanics.",
+  "tracked_packet": "reports/control_plane/pr1166-codex-role-default-preservation-2026-07-01_2026-07-01.md"
+}
