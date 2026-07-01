@@ -2577,6 +2577,11 @@ def _phase_b_task_id(routing_record: dict[str, Any], plan: dict[str, Any]) -> st
     ).strip()
 
 
+def _phase_b_pager_route(routing_record: dict[str, Any]) -> str | None:
+    route = str(routing_record.get("pager_route") or "").strip()
+    return route or None
+
+
 def _emit_phase_b_event(
     repo_root: Path,
     *,
@@ -2623,6 +2628,7 @@ def _emit_phase_b_event(
         summary=summary,
         reason=summary,
         artifact_paths=artifact_paths,
+        route=_phase_b_pager_route(routing_record),
     )
 
 
@@ -4488,6 +4494,7 @@ def prepare_commit_handoff(
     bridge_status: dict[str, Any] | None = None,
     scope_items: list[str] | None = None,
     evidence_handles: dict[str, str] | None = None,
+    pager_route: str | None = None,
     bus_dir: str | Path | None = None,
 ) -> Path:
     """Prepare a commit executor handoff file (new schema).
@@ -4532,6 +4539,7 @@ def prepare_commit_handoff(
         scope_items=scope_items,
         evidence_handles=evidence_handles,
         pre_commit_receipt_path=pre_commit_receipt_path,
+        pager_route=pager_route,
         repo_root=repo_root,
     )
     if errors:
@@ -4818,6 +4826,7 @@ def prepare_dispatcher_commit_handoff_from_routing_record(
         bridge_status=bridge_status,
         scope_items=handoff_scope_items,
         evidence_handles={"indicator": f"reports/l4_wave_indicators/{wave_id}.json"},
+        pager_route=str(routing_record.get("pager_route") or "").strip() or None,
         bus_dir=bus_dir,
     )
     return handoff_path, []
@@ -9639,6 +9648,7 @@ def run_phase_b(
         bridge_status=handoff_bridge_status,
         scope_items=handoff_scope_items,
         evidence_handles={"indicator": f"reports/l4_wave_indicators/{wave_id}.json"},
+        pager_route=str(routing_record.get("pager_route") or "").strip() or None,
         bus_dir=_active_bus_dir(),
     )
     result["status"] = "commit_ready"

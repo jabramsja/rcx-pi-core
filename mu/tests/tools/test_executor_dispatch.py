@@ -54,6 +54,96 @@ recovery_mod = load_module(
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
 
 
+def test_local_validation_scripts_default_bounded_xdist_workers_with_env_override():
+    audit_fast = (REPO_ROOT / "mu" / "tools" / "audits" / "audit_fast.sh").read_text(
+        encoding="utf-8"
+    )
+    pre_push_fast = (REPO_ROOT / "mu" / "tools" / "hooks" / "pre-push-fast").read_text(
+        encoding="utf-8"
+    )
+
+    override_line = 'export PYTEST_XDIST_AUTO_NUM_WORKERS="${PYTEST_XDIST_AUTO_NUM_WORKERS:-4}"'
+    assert override_line in audit_fast
+    assert override_line in pre_push_fast
+    assert "auto workers=${PYTEST_XDIST_AUTO_NUM_WORKERS}" in audit_fast
+
+
+def test_recovery_events_inherit_active_bus_pager_route(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    bus = repo / ".agent_bus"
+    (bus / "meta").mkdir(parents=True)
+    (repo / "mu" / "tools" / "executors").mkdir(parents=True)
+    (repo / "mu" / "tools" / "executors" / "executor_config.json").write_text(
+        json.dumps({"pipeline_agent_pager": {"enabled": True, "route": "both"}}) + "\n",
+        encoding="utf-8",
+    )
+    (bus / "meta" / "post_merge_routing.json").write_text(
+        json.dumps({
+            "decision": "ROUTE_PHASE_B",
+            "summary": "route recovery wave",
+            "wave_name": "route-recovery-wave",
+            "task_id": "[ROUTE-RECOVERY]",
+            "tracked_packet": "reports/control_plane/route-recovery-wave.md",
+            "pager_route": "codex",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
+
+    emitted: list[dict] = []
+
+    def capture_event(repo_root, **kwargs):
+        emitted.append(kwargs)
+        return {"route": kwargs.get("route")}
+
+    monkeypatch.setattr(recovery_mod, "emit_pipeline_agent_event", capture_event)
+
+    result = recovery_mod.attempt_recovery(
+        repo,
+        {"status": "question_for_founder", "step": "commit"},
+        "route-recovery-wave",
+        bus_dir=".agent_bus",
+    )
+    status = json.loads(
+        (bus / "recovery" / "recovery_status.json").read_text(encoding="utf-8")
+    )
+
+    assert result["action"] == "escalate"
+    assert status["pager_route"] == "codex"
+    assert emitted
+    assert {event["route"] for event in emitted} == {"codex"}
+
+
+def test_phase_b_events_inherit_routing_record_pager_route(tmp_path, monkeypatch):
+    captured: list[dict] = []
+
+    def capture_event(repo_root, **kwargs):
+        captured.append(kwargs)
+        return {"route": kwargs.get("route")}
+
+    monkeypatch.setattr(phase_b_mod, "emit_pipeline_agent_event", capture_event)
+
+    result = phase_b_mod._emit_phase_b_event(  # ANTICHEAT_OK: locks Phase B pager route authority propagation
+        tmp_path,
+        routing_record={
+            "pager_route": "codex",
+            "wave_name": "phase-b-route-wave",
+            "task_id": "[PHASE-B-ROUTE]",
+        },
+        plan={},
+        plan_path="reports/control_plane/phase-b-route-wave.md",
+        event_type="phase_b_implementer_started",
+        state="implementer_started",
+        transition_key="phase-b-route:start",
+        summary="phase b started",
+    )
+
+    assert result["route"] == "codex"
+    assert captured
+    assert captured[0]["route"] == "codex"
+
+
 @pytest.fixture
 def mock_routing_record():
     """Patch load_routing_record to return a valid ROUTE_PHASE_B record."""
@@ -227,6 +317,7 @@ class TestDispatcherRouting:
             "task_id": "[PIPELINE-AGENT-PAGER]",
             "wave_name": "Pager Lifecycle Event Coverage",
             "decision": "ROUTE_PHASE_B",
+            "pager_route": "codex",
         }
 
         with patch.object(dispatch_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
@@ -244,6 +335,7 @@ class TestDispatcherRouting:
         assert call["task_id"] == "[PIPELINE-AGENT-PAGER]"
         assert call["phase"] == "executor_dispatch"
         assert call["state"] == "failed"
+        assert call["route"] == "codex"
         assert "phase_b_executor:failed:ROUTE_PHASE_B:test_failure:exhausted" in call["transition_key"]
 
 
@@ -450,10 +542,11 @@ class TestDispatcherFreshnessRefresh:
         repo, _ = _init_builder_repo(tmp_path)
         routing_file = repo / ".agent_bus" / "meta" / "post_merge_routing.json"
         record, errors = common_mod.build_and_write_routing_record(
-            **_valid_kwargs(repo, decision="ROUTE_PHASE_B"),
+            **_valid_kwargs(repo, decision="ROUTE_PHASE_B", pager_route="codex"),
             output_path=routing_file,
         )
         assert errors == []
+        assert record["pager_route"] == "codex"
 
         stale_record = dict(record)
         stale_record["state_sha"] = "stale-state"
@@ -489,6 +582,7 @@ class TestDispatcherFreshnessRefresh:
         fresh_ok, msg = dispatch_mod.validate_routing_record_freshness(persisted, repo)
         assert result["status"] == "success"
         assert persisted["state_sha"] != "stale-state"
+        assert persisted["pager_route"] == "codex"
         assert fresh_ok, msg
 
     def test_dispatch_stops_completed_bounded_candidate_before_phase_executor(
@@ -2465,6 +2559,16 @@ class TestCommitHandoffValidation:
             )
         )
         assert valid, errors
+
+    def test_optional_pager_route_passes_and_invalid_route_fails(self):
+        valid, errors = commit_mod.validate_handoff(_make_new_handoff(pager_route="codex"))
+        assert valid, errors
+
+        invalid, invalid_errors = commit_mod.validate_handoff(
+            _make_new_handoff(pager_route="pager-nowhere")
+        )
+        assert not invalid
+        assert any("pager_route" in error for error in invalid_errors)
 
     def test_empty_files_to_stage_fails(self):
         valid, errors = commit_mod.validate_handoff(_make_new_handoff(files_to_stage=[]))
@@ -11527,6 +11631,28 @@ class TestPhaseBNewSchemaHandoff:
         assert "branch_prefix" in handoff
         assert handoff["target_branch"] == "jabramsja/test-wave-restart-2026-04-21"
 
+    def test_handoff_includes_launch_owned_pager_route(self, tmp_path):
+        tracker_note_text = _make_new_handoff(
+            wave_id="test-wave",
+            target_gate_id="G8",
+        )["tracker_note_text"]
+        path = phase_b_mod.prepare_commit_handoff(
+            tmp_path,
+            wave_id="test-wave",
+            task_id="[TEST]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            tracker_note_text=tracker_note_text,
+            fixes_implemented=["fix1"],
+            files_to_stage=["a.py"],
+            commit_message="feat: test",
+            pr_title="feat: test",
+            pr_body="## Summary\ntest",
+            pager_route="codex",
+        )
+        handoff = json.loads(path.read_text())
+        assert handoff["pager_route"] == "codex"
+
 
 # ===========================================================================
 # Bridge R1 NO_GO Finding Fixes
@@ -12922,12 +13048,87 @@ class TestDispatcherCommitMechanicalBridge:
 class TestCommitExecutorRoutingRecordAcceptance:
     """commit_executor accepts --routing-record and prepares handoff internally."""
 
+    def test_routing_record_builder_persists_launch_owned_pager_route(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        packet = repo / "reports" / "control_plane" / "route-wave_2026-06-30.md"
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            "# Route Wave\n\nStatus: Phase B\nWave ID: route-wave\n",
+            encoding="utf-8",
+        )
+
+        def fake_symbol(name):
+            if name == "POST_MERGE_AUTHORIZED_DECISIONS":
+                return {"ROUTE_PHASE_A"}
+            if name == "compute_repo_state":
+                return lambda root: SimpleNamespace(
+                    head_sha="head-sha",
+                    state_sha="state-sha",
+                )
+            raise AssertionError(name)
+
+        with patch.object(common_mod, "_load_meta_bridge_symbol", side_effect=fake_symbol):  # ANTICHEAT_OK: unit-test shim for routing-record builder dependencies
+            record, errors = common_mod.build_and_write_routing_record(
+                wave_name="route-wave",
+                task_id="[ROUTE]",
+                tracked_packet="reports/control_plane/route-wave_2026-06-30.md",
+                request_for_claude="route",
+                summary="route",
+                repo_root=repo,
+                pager_route="codex",
+            )
+
+        assert not errors
+        assert record["pager_route"] == "codex"
+        on_disk = json.loads(
+            (repo / ".agent_bus" / "meta" / "post_merge_routing.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert on_disk["pager_route"] == "codex"
+
+    def test_routing_record_builder_rejects_invalid_pager_route(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        packet = repo / "reports" / "control_plane" / "route-wave_2026-06-30.md"
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            "# Route Wave\n\nStatus: Phase B\nWave ID: route-wave\n",
+            encoding="utf-8",
+        )
+
+        def fake_symbol(name):
+            if name == "POST_MERGE_AUTHORIZED_DECISIONS":
+                return {"ROUTE_PHASE_A"}
+            if name == "compute_repo_state":
+                return lambda root: SimpleNamespace(
+                    head_sha="head-sha",
+                    state_sha="state-sha",
+                )
+            raise AssertionError(name)
+
+        with patch.object(common_mod, "_load_meta_bridge_symbol", side_effect=fake_symbol):  # ANTICHEAT_OK: unit-test shim for routing-record builder dependencies
+            record, errors = common_mod.build_post_merge_routing_record(
+                wave_name="route-wave",
+                task_id="[ROUTE]",
+                tracked_packet="reports/control_plane/route-wave_2026-06-30.md",
+                request_for_claude="route",
+                summary="route",
+                repo_root=repo,
+                pager_route="pager-nowhere",
+            )
+
+        assert record == {}
+        assert any("pager_route" in error for error in errors)
+
     def test_prepare_handoff_from_valid_record(self, tmp_path):
         record = {
             "decision": "UPDATE_TRACKER_ONLY",
             "summary": "update the tracker",
             "wave_name": "tracker-update",
             "files_to_stage": ["TASKS.md"],
+            "pager_route": "codex",
         }
         handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
         assert not errors
@@ -12935,6 +13136,7 @@ class TestCommitExecutorRoutingRecordAcceptance:
         assert handoff["caller"] == "update_tracker_only"
         assert "TASKS.md" in handoff["files_to_stage"] + handoff.get("force_add_files", [])
         assert handoff["wave_id"] == "tracker-update"
+        assert handoff["pager_route"] == "codex"
 
     def test_prepare_handoff_tracker_only_fallback_note_is_contract_complete(self, tmp_path):
         record = {
@@ -16519,6 +16721,14 @@ class TestChainFounderOverrideCarryForward:
         assert dispatch_mod._carry_forward_founder_override(None) == {}  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
         assert dispatch_mod._carry_forward_founder_override({"founder_override": "   "}) == {}  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
 
+    def test_carries_launch_owned_pager_route_field(self):
+        assert dispatch_mod._carry_forward_pager_route(  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+            {"pager_route": " codex "}
+        ) == {"pager_route": "codex"}
+        assert dispatch_mod._carry_forward_pager_route({}) == {}  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+        assert dispatch_mod._carry_forward_pager_route(None) == {}  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+        assert dispatch_mod._carry_forward_pager_route({"pager_route": "   "}) == {}  # ANTICHEAT_OK: unit-tests the dispatch chain's internal carry-forward helper
+
     def test_rebuilt_phase_b_routing_feeds_commit_extractor(self):
         # The same spread the chain applies to phase_b_routing yields a dict
         # whose ``founder_override`` is exactly what the commit-flow extractor
@@ -16540,3 +16750,60 @@ class TestChainFounderOverrideCarryForward:
         }
         assert phase_b_routing["founder_override"] == "demo-chain-wave-2026-06-21"
         assert commit_mod._extract_founder_override_from_routing_record(phase_b_routing, REPO_ROOT) == "demo-chain-wave-2026-06-21"  # ANTICHEAT_OK: asserts the carried field is the exact one the commit extractor reads
+
+    def test_phase_a_chain_carries_pager_route_to_phase_b_routing(self, tmp_path, monkeypatch):
+        packet_rel = "reports/control_plane/route-wave_2026-06-30.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            "# Route Wave\n\nStatus: Phase B\nWave ID: route-wave\n",
+            encoding="utf-8",
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"],
+            0,
+            stdout=json.dumps({"plan_path": packet_rel}),
+            stderr="",
+        )
+        captured: dict[str, object] = {}
+
+        def fake_phase_b(args, *, cwd, timeout):
+            captured["args"] = list(args)
+            captured["cwd"] = cwd
+            captured["timeout"] = timeout
+            return subprocess.CompletedProcess(args, 2, stdout="", stderr="forced stop")
+
+        monkeypatch.setattr(dispatch_mod, "_phase_b_tracker_gate_result", lambda *a, **k: None)
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_phase_b)
+
+        result = dispatch_mod._continue_successful_executor_chain(  # ANTICHEAT_OK: direct dispatcher chain route-preservation regression
+            "phase_a_executor",
+            phase_a_ok,
+            repo_root=tmp_path,
+            config={
+                "timeouts": {"phase_b_executor": 10},
+                "bridge_loop_limits": {"phase_b": 1},
+            },
+            record={
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": "route-wave",
+                "task_id": "[ROUTE]",
+                "summary": "route",
+                "pager_route": "codex",
+                "founder_override": "route-wave",
+                "next_candidates": [
+                    {
+                        "candidate": "route-wave",
+                        "bounded": True,
+                        "tracked_packet": packet_rel,
+                    }
+                ],
+            },
+        )
+
+        assert result["status"] == "failed"
+        args = captured["args"]
+        assert isinstance(args, list)
+        phase_b_routing = json.loads(args[args.index("--routing-record") + 1])
+        assert phase_b_routing["pager_route"] == "codex"
+        assert phase_b_routing["founder_override"] == "route-wave"
