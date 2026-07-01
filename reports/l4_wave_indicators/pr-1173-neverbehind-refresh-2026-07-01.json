@@ -1,24 +1,24 @@
 {
   "wave_id": "pr-1173-neverbehind-refresh-2026-07-01",
-  "repeat_run_speedup_ratio": 1.131312,
+  "repeat_run_speedup_ratio": 1.086012,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.270013,
+  "step_growth_slope": 0.253138,
   "repeat_run_raw_seconds": [
-    0.305469,
-    0.270013
+    0.274911,
+    0.253138
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.305469
+      "elapsed_seconds": 0.274911
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.575482
+      "elapsed_seconds": 0.528049
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-07-01T02:14:24Z",
+  "collection_timestamp_utc": "2026-07-01T02:44:55Z",
   "collector_version": "2.2.0"
 }
