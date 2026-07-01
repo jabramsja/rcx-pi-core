@@ -153,7 +153,10 @@ OPTIONAL_HANDOFF_FIELDS = {
     "bridge_status",
     "scope_items",
     "evidence_handles",
+    "pager_route",
 }
+
+ALLOWED_HANDOFF_PAGER_ROUTES = frozenset({"codex", "claude", "both", "notify-only"})
 
 VALID_CALLERS = {"phase_b", "phase_a", "update_tracker_only", "standalone"}
 
@@ -3305,6 +3308,7 @@ def _emit_commit_ready_event(
             "supervisor_receipt": receipt_path_from_supervisor,
             "handoff_receipt": handoff_receipt_rel,
         },
+        route=_handoff_pager_route(handoff),
     )
 
 
@@ -3334,7 +3338,13 @@ def _emit_commit_lifecycle_event(
         summary=summary,
         reason=summary,
         artifact_paths=artifact_paths,
+        route=_handoff_pager_route(handoff),
     )
+
+
+def _handoff_pager_route(handoff: dict[str, Any]) -> str | None:
+    route = str(handoff.get("pager_route") or "").strip()
+    return route or None
 
 
 def _emit_pre_commit_supervisor_lifecycle_event(
@@ -3345,6 +3355,7 @@ def _emit_pre_commit_supervisor_lifecycle_event(
     state: str,
     decision: str = "pending",
     summary: str | None = None,
+    route: str | None = None,
 ) -> dict[str, Any]:
     """Emit the structured pre-commit supervisor lifecycle from package facts."""
     package: dict[str, Any] = {}
@@ -3385,6 +3396,7 @@ def _emit_pre_commit_supervisor_lifecycle_event(
         summary=event_summary,
         reason=event_summary,
         artifact_paths={"package": rel_package},
+        route=str(route or package.get("pager_route") or "").strip() or None,
     )
 
 
@@ -3396,6 +3408,7 @@ def _safe_emit_pre_commit_supervisor_lifecycle_event(
     state: str,
     decision: str = "pending",
     summary: str | None = None,
+    route: str | None = None,
 ) -> dict[str, Any]:
     try:
         return _emit_pre_commit_supervisor_lifecycle_event(
@@ -3405,6 +3418,7 @@ def _safe_emit_pre_commit_supervisor_lifecycle_event(
             state=state,
             decision=decision,
             summary=summary,
+            route=route,
         )
     except Exception as exc:
         return {"enabled": False, "error": str(exc)}
@@ -9822,6 +9836,9 @@ def prepare_handoff_from_routing_record(
     embedded_handoff = record.get("handoff")
     if isinstance(embedded_handoff, dict):
         embedded_copy = copy.deepcopy(embedded_handoff)
+        record_pager_route = str(record.get("pager_route") or "").strip()
+        if "pager_route" not in embedded_copy and record_pager_route:
+            embedded_copy["pager_route"] = record_pager_route
         valid, handoff_errors = validate_handoff(embedded_copy, repo_root=repo_root)
         if valid and not standalone:
             return embedded_copy, []
@@ -9995,6 +10012,11 @@ def prepare_handoff_from_routing_record(
             founder_override_token=founder_override_token,
             unblocks_wave_id=unblocks_wave_id,
             unblocks_runtime_blocker=unblocks_runtime_blocker,
+            pager_route=str(
+                (embedded_copy or {}).get("pager_route")
+                or record.get("pager_route")
+                or ""
+            ).strip() or None,
         )
         if build_errors:
             return None, build_errors
@@ -10047,6 +10069,7 @@ def prepare_handoff_from_routing_record(
         founder_override_token=founder_override_token or None,
         unblocks_wave_id=unblocks_wave_id,
         unblocks_runtime_blocker=unblocks_runtime_blocker,
+        pager_route=str(record.get("pager_route") or "").strip() or None,
     )
     if build_errors:
         return None, build_errors
@@ -10113,6 +10136,7 @@ def build_commit_handoff(
     unblocks_wave_id: str = "",
     unblocks_runtime_blocker: str = "",
     bus_dir: str | Path | None = None,
+    pager_route: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Build a validated commit handoff from essential fields.
 
@@ -10293,6 +10317,9 @@ def build_commit_handoff(
     }
 
     # Add optional fields if provided
+    normalized_pager_route = str(pager_route or "").strip()
+    if normalized_pager_route:
+        handoff["pager_route"] = normalized_pager_route
     if supervisor_lane:
         handoff["supervisor_lane"] = supervisor_lane
     if deferred_items is not None:
@@ -10485,6 +10512,16 @@ def validate_handoff(
                     errors.append("evidence_handles keys must be non-empty strings")
                 if not isinstance(value, str):
                     errors.append(f"evidence_handles['{key}'] must be a string")
+
+    pager_route = handoff.get("pager_route")
+    if pager_route is not None:
+        if not isinstance(pager_route, str) or not pager_route.strip():
+            errors.append("pager_route must be a non-empty string when provided")
+        elif pager_route.strip() not in ALLOWED_HANDOFF_PAGER_ROUTES:
+            errors.append(
+                "pager_route must be one of "
+                f"{sorted(ALLOWED_HANDOFF_PAGER_ROUTES)}, got: {pager_route}"
+            )
 
     tracked_packet = handoff.get("tracked_packet")
     if tracked_packet is not None:
@@ -13783,18 +13820,19 @@ def _run_commit_pipeline_impl(
             "tracker_note_text": supervisor_tracker_note_text,
             "evidence_command": supervisor_evidence_command,
         }
-
         scratch_dir = repo_root / ".scratch"
         scratch_dir.mkdir(exist_ok=True)
         pkg_path = scratch_dir / "auto_supervisor_package.json"
         pkg_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
 
         # Run supervisor via structured client
+        supervisor_pager_route = _handoff_pager_route(handoff)
         _safe_emit_pre_commit_supervisor_lifecycle_event(
             repo_root,
             pkg_path,
             event_type="pre_commit_supervisor_started",
             state="started",
+            route=supervisor_pager_route,
         )
         try:
             run_meta_bridge_package, MetaBridgeClientError = _load_repo_meta_bridge_client(repo_root)
@@ -13811,6 +13849,7 @@ def _run_commit_pipeline_impl(
                 state=str(getattr(sup_result, "status", "") or "success"),
                 decision=str(getattr(sup_result, "decision", "") or "unknown"),
                 summary=f"Pre-commit supervisor completed: {getattr(sup_result, 'decision', 'unknown')}",
+                route=supervisor_pager_route,
             )
             if sup_result.decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
                 return _commit_supervisor_rejection_result(
@@ -13872,6 +13911,7 @@ def _run_commit_pipeline_impl(
                 state="error",
                 decision="ERROR_INTERNAL",
                 summary=f"Pre-commit supervisor import failed: {exc}",
+                route=supervisor_pager_route,
             )
             return {"status": "error", "step": "build_and_run_supervisor",
                     "errors": [f"Cannot import meta_bridge_client: {exc}"],
@@ -13884,6 +13924,7 @@ def _run_commit_pipeline_impl(
                 state="error",
                 decision="ERROR_CODEX_TIMEOUT",
                 summary="Pre-commit supervisor timed out",
+                route=supervisor_pager_route,
             )
             return {"status": "error", "step": "build_and_run_supervisor",
                     "errors": ["Supervisor timed out"],
@@ -13896,6 +13937,7 @@ def _run_commit_pipeline_impl(
                 state="error",
                 decision="ERROR_INTERNAL",
                 summary=f"Pre-commit supervisor failed: {exc}",
+                route=supervisor_pager_route,
             )
             return {"status": "error", "step": "build_and_run_supervisor",
                     "errors": [f"Supervisor failed: {exc}"],

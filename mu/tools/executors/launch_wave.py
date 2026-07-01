@@ -816,6 +816,9 @@ def setup_routing_record(
         # growth-cap auto-bump reads it via _extract_founder_override_from_routing_record;
         # without this, a gate-authoring wave stranded 'no_founder_override' at Step 5e.
         founder_override=config.founder_override,
+        # Child env covers the initial dispatcher launch only. Persist the wave's
+        # route so direct commit_executor retries can keep the launch authority.
+        pager_route=config.pager_route,
     )
     if errors:
         raise LaunchWaveError(

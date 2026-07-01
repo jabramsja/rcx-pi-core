@@ -1,0 +1,68 @@
+{
+  "wave_id": "control-plane-prepush-blockers-2026-07-01",
+  "title": "Control Plane Pre-Push Blockers 2026-07-01",
+  "task_id": "[PIPELINE-EASY-SWITCH-PROPAGATION-2026-06-20]",
+  "purpose": "Reduce broad pre-push blockers that are control-plane only: recovery-gate pane timeline CWD filtering, hybrid support-state drift around pager/bridge_config runtime files, and pipeline monitor same-session wrong-bus owner replacement.",
+  "date": "2026-07-01",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/control-plane-prepush-blockers-2026-07-01.json",
+  "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id control-plane-prepush-blockers-2026-07-01 --output reports/l4_wave_indicators/control-plane-prepush-blockers-2026-07-01.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates mu/tests/tools/test_recovery_gate.py::TestHybridScopeAudit::test_pipeline_agent_pager_lock_runtime_state_can_appear_and_disappear mu/tests/tools/test_pipeline_monitor_autofollow.py::test_orchestrator_monitor_replaces_same_session_wrong_bus_owner --tb=short && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_pipeline_monitor_autofollow.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id control-plane-prepush-blockers-2026-07-01 --wave-class L4_ENABLER && git diff --check",
+  "evidence_delta": "(1) PR #1189 preservation refresh proved the #1173 work can reach COMMIT_GO, but broad pre-push still fails control-plane observability tests alongside unrelated JS/runtime failures. (2) A pipeline-generated recovery repair was preserved in stash `codex-recovery-gate-prepush-context-2026-07-01`; use it as evidence, not as authority, and reimplement the smallest valid control-plane fix through this wave. (3) This wave must fix the control-plane failures without touching runtime/substrate/parity/seed behavior.",
+  "progress_proof_before": "Pre-push on PR #1189 failed `tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates` and `tests/tools/test_pipeline_monitor_autofollow.py::test_orchestrator_monitor_replaces_same_session_wrong_bus_owner`; recovery also exhausted on exact `.agent_bus/bridge_config.json` support-state churn after a retry.",
+  "progress_proof_after": "The named recovery-gate and pipeline-monitor tests pass in the focused gate, and hybrid recovery no longer loops on exact pager/bridge_config runtime support files while source edits, symlinks, and git-control drift remain fail-closed.",
+  "structural_artifact_ref": "mu/tools/executors/recovery_gate.py; mu/tests/tools/test_recovery_gate.py; mu/tools/observability/pipeline_monitor.sh; mu/tools/observability/pipeline_monitor_identity.py; mu/tests/tools/test_pipeline_monitor_autofollow.py",
+  "post_gate_contract_sweep": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_pipeline_monitor_autofollow.py --tb=short && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id control-plane-prepush-blockers-2026-07-01 --wave-class L4_ENABLER && git diff --check",
+  "scope_summary": "Control-plane observability/recovery hardening only. Fix the exact pre-push control-plane failures and recovery-loop cause without changing JS, hemisphere runtime, seeds, structural-number routing, or production VM semantics.",
+  "scope_items": [
+    "mu/tools/executors/recovery_gate.py (MODIFY) -- classify wrapped pre-push pytest failures from embedded adapter JSON as test_failure and bound hybrid support-state exemptions to exact pager/bridge_config runtime files.",
+    "mu/tests/tools/test_recovery_gate.py (MODIFY) -- regress CWD candidate filtering, embedded pre-push context extraction, and exact pager/bridge_config support-state churn while preserving fail-closed source/symlink/git drift.",
+    "mu/tools/observability/pipeline_monitor.sh (MODIFY IF NEEDED) -- ensure same-session wrong-bus owner replacement follows orchestrator/bus truth.",
+    "mu/tools/observability/pipeline_monitor_identity.py (MODIFY IF NEEDED) -- keep owner identity resolution truthful across bus switches.",
+    "mu/tests/tools/test_pipeline_monitor_autofollow.py (MODIFY) -- keep the failing wrong-bus owner replacement test green with no stale-pane masking.",
+    "reports/control_plane/control-plane-prepush-blockers-2026-07-01_wave_config.json (KEEP) -- launcher config for this wave.",
+    "reports/l4_wave_indicators/control-plane-prepush-blockers-2026-07-01.json (GENERATED BY WAVE) -- L4 indicator artifact."
+  ],
+  "work_items": [
+    "Reproduce the two named control-plane pre-push failures from current dev before changing code.",
+    "Inspect the preserved stash `codex-recovery-gate-prepush-context-2026-07-01` only as implementation evidence; do not blindly apply it if current dev needs a narrower fix.",
+    "Fix recovery-gate classification/prompt context so pre-push pytest failures embedded inside adapter JSON are routed as test_failure instead of max_turns noise.",
+    "Fix hybrid recovery support-state auditing so exact pager lock/state and bridge_config runtime support churn does not exhaust recovery, while symlink escapes and source drift still fail closed.",
+    "Fix pipeline monitor autofollow so the same-session wrong-bus owner is replaced according to committed Codex orchestrator/bus truth.",
+    "Run the focused recovery-gate and pipeline-monitor tests plus the staged L4 contract and diff check.",
+    "Stop and defer if the remaining failures are JS/runtime/hemisphere parity; they belong to the separate runtime/parity wave."
+  ],
+  "constraints": [
+    "Pipeline is primary; use launch_wave and dispatcher surfaces.",
+    "Implementer, reviewer, pager route, tmux, and autoping target are Codex / Codex 5.5 xhigh.",
+    "Do not edit Claude-owned files, including CLAUDE.md, .claude/*, Claude memory, Claude rules, or Claude role defaults.",
+    "Do not touch runtime, substrate, seed, scheduler, projection, Python/JS semantic runtime, hemisphere production logic, or parity behavior.",
+    "Do not weaken hybrid recovery: only exact support-state runtime files may be exempted; source edits, git-control drift, symlink escapes, and shape drift must remain fail-closed.",
+    "Do not include PR #1173 refresh commits or PR #1166 policy-bound work in this branch."
+  ],
+  "stop_conditions": [
+    "NEEDS_RESCOPING if the fix requires JS/runtime/hemisphere/parity source changes.",
+    "DEFECT if monitor ownership can only be made green by hiding stale panes or suppressing wrong-bus evidence.",
+    "DEFECT if hybrid recovery exemptions allow arbitrary .agent_bus drift, symlink escapes, or source edits.",
+    "Halt if launch/commit/recovery routes implementation, review, pager, tmux, or autoping to Claude."
+  ],
+  "acceptance_criteria": [
+    "The named recovery-gate pane timeline test passes.",
+    "The named pipeline monitor wrong-bus owner replacement test passes.",
+    "A focused full run of mu/tests/tools/test_recovery_gate.py and mu/tests/tools/test_pipeline_monitor_autofollow.py passes.",
+    "The staged L4 contract and diff whitespace checks pass.",
+    "No runtime/substrate/parity/seed files are changed."
+  ],
+  "request_for_agent": "Run this control-plane blocker wave through the launcher and pipeline with Codex implementer, Codex reviewer, and Codex pager route only. Fix the recovery-gate and pipeline-monitor pre-push blockers without widening into JS/runtime/hemisphere parity.",
+  "request_for_claude": "Compatibility input only: do not implement, review, page, or route this wave through Claude. Claude-owned files and Claude role defaults are out of scope.",
+  "authorization_note": "Founder-directed autonomous pre-push blocker reduction after #1173 preservation draft PR #1189; narrow control-plane blockers must be separated from JS/hemisphere runtime parity.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Pipeline-owned control-plane blocker reduction for recovery-gate and pipeline monitor failures.",
+  "tracked_packet": "reports/control_plane/control-plane-prepush-blockers-2026-07-01_2026-07-01.md"
+}
