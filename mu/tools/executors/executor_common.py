@@ -115,6 +115,7 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "dialectic": 3,
     },
 }
+ALLOWED_PIPELINE_AGENT_PAGER_ROUTES = frozenset({"codex", "claude", "both", "notify-only"})
 
 DEFAULT_AGENT_DISPLAY_NAMES = {
     name: str(data.get("display_name")).strip()
@@ -1677,6 +1678,7 @@ def build_post_merge_routing_record(
     repo_root: Path | None = None,
     allow_completed_tracked_packet: bool = False,
     founder_override: str = "",
+    pager_route: str = "",
 ) -> tuple[dict[str, Any], list[str]]:
     """Build a validated post-merge routing record from kwargs.
 
@@ -1710,6 +1712,8 @@ def build_post_merge_routing_record(
         growth-cap auto-bump's _extract_founder_override_from_routing_record reads
         a non-empty token instead of stranding 'no_founder_override'. Default
         empty preserves the prior record shape exactly (no key emitted).
+      - pager_route: when non-empty, the record carries the launch-owned pager
+        route so commit/retry paths can use the wave route without ambient env.
     """
     errors: list[str] = []
 
@@ -1740,6 +1744,20 @@ def build_post_merge_routing_record(
         errors.append(
             f"decision must be one of {sorted(authorized_decisions)}; got: {decision!r}"
         )
+    normalized_pager_route = ""
+    if pager_route is not None:
+        if not isinstance(pager_route, str):
+            errors.append("pager_route must be a string when provided")
+        else:
+            normalized_pager_route = pager_route.strip()
+            if (
+                normalized_pager_route
+                and normalized_pager_route not in ALLOWED_PIPELINE_AGENT_PAGER_ROUTES
+            ):
+                errors.append(
+                    "pager_route must be one of "
+                    f"{sorted(ALLOWED_PIPELINE_AGENT_PAGER_ROUTES)}; got: {pager_route!r}"
+                )
 
     effective_repo_root = (
         repo_root if repo_root is not None else Path(__file__).resolve().parents[3]
@@ -1826,6 +1844,8 @@ def build_post_merge_routing_record(
         record["allow_completed_tracked_packet"] = True
     if isinstance(founder_override, str) and founder_override.strip():
         record["founder_override"] = founder_override.strip()
+    if normalized_pager_route:
+        record["pager_route"] = normalized_pager_route
     return record, []
 
 
@@ -1845,6 +1865,7 @@ def build_and_write_routing_record(
     bus_dir: str | Path | None = None,
     allow_completed_tracked_packet: bool = False,
     founder_override: str = "",
+    pager_route: str = "",
 ) -> tuple[dict[str, Any], list[str]]:
     """Build + persist a routing record. Returns (record, errors).
 
@@ -1871,6 +1892,7 @@ def build_and_write_routing_record(
         repo_root=effective_repo_root,
         allow_completed_tracked_packet=allow_completed_tracked_packet,
         founder_override=founder_override,
+        pager_route=pager_route,
     )
     if errors:
         return {}, errors

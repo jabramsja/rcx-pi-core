@@ -518,6 +518,75 @@ def test_explicit_pager_route_precedes_env_override(tmp_path, monkeypatch):
     assert pager_mod.NOTIFY_ONLY_TARGET in entry["delivered_targets"]
 
 
+def test_explicit_codex_route_narrows_committed_both_route(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="both")
+    monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
+    calls: list[str] = []
+
+    def ack_target(repo_root, target, event, state, config, *, timeout_s):
+        calls.append(target)
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-06-30T00:00:00+00:00",
+                "target": target,
+            },
+        }
+
+    monkeypatch.setattr(pager_mod, "_dispatch_target", ack_target)
+
+    result = pager_mod.emit_transition_event(
+        repo,
+        route="codex",
+        **_event_kwargs(),
+    )
+
+    assert result["route"] == "codex"
+    assert calls == ["codex"]
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    assert entry["requested_targets"] == ["codex"]
+
+
+def test_explicit_codex_route_replaces_prior_same_identity_both_route(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="both")
+    monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
+    deliveries: list[tuple[str, str]] = []
+
+    def ack_target(repo_root, target, event, state, config, *, timeout_s):
+        deliveries.append((event["route"], target))
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-07-01T00:00:00+00:00",
+                "target": target,
+            },
+        }
+
+    monkeypatch.setattr(pager_mod, "_dispatch_target", ack_target)
+
+    first = pager_mod.emit_transition_event(repo, **_event_kwargs())
+    second = pager_mod.emit_transition_event(repo, route="codex", **_event_kwargs())
+
+    assert first["route"] == "both"
+    assert second["route"] == "codex"
+    assert second["event_id"] == first["event_id"]
+    assert deliveries == [("both", "codex"), ("both", "claude")]
+    log_entries = _load_log(repo)
+    assert len(log_entries) == 2
+    assert [entry["route"] for entry in log_entries] == ["both", "codex"]
+    state = _load_state(repo)
+    entry = state["events"][first["event_id"]]
+    assert entry["route"] == "codex"
+    assert entry["requested_targets"] == ["codex"]
+    assert set(entry["delivered_targets"]) == {"codex"}
+    assert entry["pending_targets"] == []
+
+
 def test_invalid_pager_route_env_override_fails_closed(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -593,7 +662,7 @@ def test_both_route_persists_partial_success_and_retries_only_pending_target(tmp
     assert calls == ["codex", "claude", "claude"]
 
 
-def test_re_emitting_same_event_under_broader_route_adds_new_pending_target(tmp_path, monkeypatch):
+def test_re_emitting_same_event_under_new_route_replaces_requested_targets(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_config(repo, route="notify-only")
@@ -621,11 +690,12 @@ def test_re_emitting_same_event_under_broader_route_adds_new_pending_target(tmp_
     assert [entry["route"] for entry in log_entries] == [pager_mod.NOTIFY_ONLY_TARGET, "codex"]
     state = _load_state(repo)
     entry = state["events"][first["event_id"]]
-    assert entry["requested_targets"] == [pager_mod.NOTIFY_ONLY_TARGET, "codex"]
+    assert entry["route"] == "codex"
+    assert entry["requested_targets"] == ["codex"]
     assert entry["pending_targets"] == ["codex"]
 
 
-def test_broader_route_replay_rebuilds_pending_targets_from_append_only_log(tmp_path, monkeypatch):
+def test_route_replay_rebuilds_replaced_targets_from_append_only_log(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_config(repo, route="notify-only")
@@ -667,8 +737,9 @@ def test_broader_route_replay_rebuilds_pending_targets_from_append_only_log(tmp_
     assert dispatch_calls == ["codex"]
     state = _load_state(repo)
     entry = state["events"][first["event_id"]]
-    assert entry["requested_targets"] == [pager_mod.NOTIFY_ONLY_TARGET, "codex"]
-    assert set(entry["delivered_targets"]) == {pager_mod.NOTIFY_ONLY_TARGET, "codex"}
+    assert entry["route"] == "codex"
+    assert entry["requested_targets"] == ["codex"]
+    assert set(entry["delivered_targets"]) == {"codex"}
     assert entry["pending_targets"] == []
     assert len(_load_delivery_log(repo)) == 2
 

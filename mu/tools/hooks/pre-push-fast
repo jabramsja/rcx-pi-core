@@ -26,6 +26,11 @@ sanitize_local_git_env() {
 # worktree normally instead of inheriting hook-local state.
 sanitize_local_git_env
 
+# Bound local xdist fanout by default for the dev.sh/audit_fast path. Override
+# with PYTEST_XDIST_AUTO_NUM_WORKERS=<n> on machines that can sustain more JS
+# subprocess parity workers.
+export PYTEST_XDIST_AUTO_NUM_WORKERS="${PYTEST_XDIST_AUTO_NUM_WORKERS:-4}"
+
 # Enforce tracker sync for commits being pushed
 RANGE=""
 if git rev-parse --verify --quiet @{upstream} >/dev/null 2>&1; then
