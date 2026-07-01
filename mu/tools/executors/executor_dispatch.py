@@ -216,6 +216,7 @@ def _emit_executor_hard_fail_event(
     return emit_pipeline_agent_event(
         repo_root,
         bus_dir=bus_dir,
+        route=str(record.get("pager_route") or "").strip() or None,
         event_type="executor_hard_fail",
         wave_id=normalized_wave_id,
         task_id=str(
@@ -2608,6 +2609,14 @@ def _carry_forward_founder_override(record: dict[str, Any] | None) -> dict[str, 
     return carried
 
 
+def _carry_forward_pager_route(record: dict[str, Any] | None) -> dict[str, str]:
+    """Launch-owned pager route to carry across an A->B routing-record rebuild."""
+    value = (record or {}).get("pager_route")
+    if isinstance(value, str) and value.strip():
+        return {"pager_route": value.strip()}
+    return {}
+
+
 def _continue_successful_executor_chain(
     executor_name: str,
     completed: subprocess.CompletedProcess[str],
@@ -2740,6 +2749,10 @@ def _continue_successful_executor_chain(
             # dict dropped the launch-persisted override on the normal chained path
             # and a gate-authoring wave stranded 'no_founder_override'.
             **_carry_forward_founder_override(record),
+            # Preserve a launch-pinned pager route across the same rebuild. Without
+            # this, Phase B and commit retries fall back to the committed/default
+            # pager route instead of the orchestrator-selected route.
+            **_carry_forward_pager_route(record),
         }
         phase_b_args = [
             sys.executable,
@@ -3696,6 +3709,7 @@ def _refresh_canonical_routing_record_state(
         bus_dir=bus_dir,
         allow_completed_tracked_packet=bool(record.get("allow_completed_tracked_packet")),
         founder_override=founder_override_value,
+        pager_route=str(record.get("pager_route") or "").strip(),
     )
     if errors:
         if verbose:

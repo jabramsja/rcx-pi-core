@@ -10743,6 +10743,7 @@ def _emit_recovery_event(
     artifact_paths: dict[str, str] | None = None,
 ) -> None:
     task_id, plan_path = _recovery_event_context(repo_root, status=status)
+    route = _recovery_pager_route(repo_root, status=status)
     # Normalize the wave_id so an empty/missing status wave_id cannot raise
     # PipelineAgentPagerError("wave_id is required") once the pager is enabled
     # (now the factory default). normalize_wave_id("") -> "wave-unknown", matching
@@ -10760,7 +10761,20 @@ def _emit_recovery_event(
         summary=summary,
         reason=reason,
         artifact_paths=artifact_paths,
+        route=route,
     )
+
+
+def _recovery_pager_route(repo_root: Path, *, status: dict[str, Any]) -> str | None:
+    route = str(status.get("pager_route") or "").strip()
+    if route:
+        return route
+    try:
+        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+    except Exception:
+        routing_record = {}
+    route = str(routing_record.get("pager_route") or "").strip()
+    return route or None
 
 
 def _begin_recovery_status(
@@ -10807,6 +10821,9 @@ def _begin_recovery_status(
         "exhausted": False,
         "outcome": "",
     }
+    pager_route = _recovery_pager_route(repo_root, status={})
+    if pager_route:
+        status["pager_route"] = pager_route
     return _commit_recovery_status(
         repo_root,
         status,

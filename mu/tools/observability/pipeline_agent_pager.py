@@ -798,29 +798,41 @@ def _build_event_record(
 def _ensure_event_state(state: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
     events = state.setdefault("events", {})
     entry = events.get(event["event_id"])
+    event_route = str(event.get("route") or "").strip()
+    event_targets = _merge_requested_targets(event.get("requested_targets", []))
     if not isinstance(entry, dict):
         entry = {
             "event_id": event["event_id"],
-            "route": event["route"],
-            "requested_targets": list(event["requested_targets"]),
+            "route": event_route,
+            "requested_targets": list(event_targets),
             "delivered_targets": {},
             "skipped_targets": {},
             "attempts": {},
-            "pending_targets": list(event["requested_targets"]),
+            "pending_targets": list(event_targets),
             "created_at": _utcnow(),
             "updated_at": _utcnow(),
         }
         events[event["event_id"]] = entry
     else:
-        merged_targets = _merge_requested_targets(
-            entry.get("requested_targets", []),
-            event.get("requested_targets", []),
-        )
-        entry["route"] = event["route"]
-        entry["requested_targets"] = merged_targets
+        existing_route = str(entry.get("route") or "").strip()
+        if event_route and event_route != existing_route:
+            entry["route"] = event_route
+            entry["requested_targets"] = list(event_targets)
+            _prune_entry_to_requested_targets(entry, event_targets)
+        else:
+            merged_targets = _merge_requested_targets(
+                entry.get("requested_targets", []),
+                event_targets,
+            )
+            entry["route"] = event_route or existing_route
+            entry["requested_targets"] = merged_targets
         entry.setdefault("delivered_targets", {})
         entry.setdefault("skipped_targets", {})
         entry.setdefault("attempts", {})
+    _prune_entry_to_requested_targets(
+        entry,
+        _merge_requested_targets(entry.get("requested_targets", [])),
+    )
     _refresh_pending_targets(entry)
     return entry
 
@@ -852,6 +864,17 @@ def _merge_requested_targets(*sources: Any) -> list[str]:
     return merged_targets
 
 
+def _prune_entry_to_requested_targets(entry: dict[str, Any], requested_targets: list[str]) -> None:
+    requested = set(requested_targets)
+    for key in ("delivered_targets", "skipped_targets", "attempts"):
+        value = entry.get(key)
+        if not isinstance(value, dict):
+            continue
+        for target in list(value):
+            if target not in requested:
+                value.pop(target, None)
+
+
 def _coalesced_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ordered_event_ids: list[str] = []
     coalesced_by_id: dict[str, dict[str, Any]] = {}
@@ -860,18 +883,27 @@ def _coalesced_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not event_id:
             continue
         prior = coalesced_by_id.get(event_id)
+        event_route = str(event.get("route") or "").strip()
+        event_targets = _merge_requested_targets(event.get("requested_targets", []))
         if prior is None:
             merged = dict(event)
-            merged["requested_targets"] = _merge_requested_targets(event.get("requested_targets", []))
+            merged["route"] = event_route
+            merged["requested_targets"] = event_targets
             coalesced_by_id[event_id] = merged
             ordered_event_ids.append(event_id)
             continue
         merged = dict(prior)
         merged.update(event)
-        merged["requested_targets"] = _merge_requested_targets(
-            prior.get("requested_targets", []),
-            event.get("requested_targets", []),
-        )
+        prior_route = str(prior.get("route") or "").strip()
+        if event_route and event_route != prior_route:
+            merged["route"] = event_route
+            merged["requested_targets"] = event_targets
+        else:
+            merged["route"] = event_route or prior_route
+            merged["requested_targets"] = _merge_requested_targets(
+                prior.get("requested_targets", []),
+                event_targets,
+            )
         coalesced_by_id[event_id] = merged
     return [coalesced_by_id[event_id] for event_id in ordered_event_ids]
 
@@ -938,6 +970,9 @@ def _reconcile_delivery_state(
                 f"pager delivery receipt references unknown event_id: {event_id}"
             )
         entry = _ensure_event_state(state, event)
+        requested_targets = set(_merge_requested_targets(entry.get("requested_targets", [])))
+        if target not in requested_targets:
+            continue
         delivered = entry.setdefault("delivered_targets", {})
         delivered[target] = ack
         thread_id = str(receipt.get("codex_thread_id") or "").strip()
@@ -976,6 +1011,9 @@ def _reconcile_delivery_state(
             # hole; every other skip reason rebuilds terminally below, unchanged.
             continue
         entry = _ensure_event_state(state, event)
+        requested_targets = set(_merge_requested_targets(entry.get("requested_targets", [])))
+        if target not in requested_targets:
+            continue
         skipped = entry.setdefault("skipped_targets", {})
         skipped[target] = {
             "skip_reason": skip_reason,
@@ -1021,6 +1059,9 @@ def _reconcile_delivery_state(
             # per-pager-event authored.
             continue
         entry = _ensure_event_state(state, event)
+        requested_targets = set(_merge_requested_targets(entry.get("requested_targets", [])))
+        if "claude" not in requested_targets:
+            continue
         delivered = entry.setdefault("delivered_targets", {})
         delivered["claude"] = ack
         _refresh_pending_targets(entry)
@@ -2062,6 +2103,10 @@ def _target_timeout(config: dict[str, Any], target: str, remaining_s: float) -> 
 def _should_append_event_record(state: dict[str, Any], event: dict[str, Any]) -> bool:
     entry = state.get("events", {}).get(event["event_id"])
     if not isinstance(entry, dict):
+        return True
+    existing_route = str(entry.get("route") or "").strip()
+    event_route = str(event.get("route") or "").strip()
+    if event_route and event_route != existing_route:
         return True
     existing_targets = _merge_requested_targets(entry.get("requested_targets", []))
     next_targets = _merge_requested_targets(existing_targets, event.get("requested_targets", []))

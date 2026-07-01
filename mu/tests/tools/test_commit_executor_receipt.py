@@ -30,6 +30,10 @@ meta_bridge_mod = load_module(
     "meta_bridge_supervisor_for_commit_receipt_tests",
     REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
 )
+pager_mod = load_module(
+    "pipeline_agent_pager",
+    REPO_ROOT / "mu" / "tools" / "observability" / "pipeline_agent_pager.py",
+)
 
 
 def _canonical_handoff_sha_for_test(handoff: dict) -> str:
@@ -78,6 +82,98 @@ def _make_new_schema_handoff(**overrides):
 
 def _with_founder_override(note: str, token: str) -> str:
     return f"{note} FOUNDER_OVERRIDE:{token} (test authorization)"
+
+
+def _write_pager_config(repo_root: Path, *, route: str = "both") -> None:
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps({"pipeline_agent_pager": {"enabled": True, "route": route}}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _valid_supervisor_package() -> dict:
+    return {
+        "task_id": "[TEST]",
+        "wave_name": "test-wave",
+        "lane": "phase_b",
+        "changed_files": ["file.py"],
+        "fenced_files": [],
+        "scope_items": ["file.py"],
+        "fixes_implemented": ["test fix"],
+        "deferred_items": [],
+        "bridge_status": {},
+        "evidence_handles": {},
+        "blocker_report_paths": [],
+        "current_judgment": "COMMIT_GO",
+        "founder_override_token": "",
+        "wave_class": "L4_ENABLER",
+        "tracker_note_text": "",
+        "evidence_command": "",
+    }
+
+
+def test_no_env_commit_retry_handoff_route_drives_commit_and_supervisor_events(
+    tmp_path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_pager_config(repo, route="both")
+    monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
+
+    deliveries: list[str] = []
+
+    def ack_target(repo_root, target, event, state, config, *, timeout_s):
+        deliveries.append(target)
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-06-30T00:00:00+00:00",
+                "target": target,
+            },
+        }
+
+    monkeypatch.setattr(pager_mod, "_dispatch_target", ack_target)
+    handoff = _make_new_schema_handoff(pager_route="codex")
+
+    def emit_via_test_pager(repo_root, **kwargs):
+        return pager_mod.emit_transition_event(repo_root, **kwargs)
+
+    with patch.object(commit_mod, "emit_pipeline_agent_event", side_effect=emit_via_test_pager), \
+         patch.object(commit_mod, "_run_commit_pipeline_impl", return_value={
+             "status": "success",
+             "steps_completed": ["validate_inputs"],
+             "commit_sha": "abc123",
+         }):
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        package_path = repo / ".scratch" / "auto_supervisor_package.json"
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        supervisor_package = _valid_supervisor_package()
+        assert "pager_route" not in supervisor_package
+        schema_valid, schema_errors = meta_bridge_mod.validate_package_schema(supervisor_package)
+        assert schema_valid, schema_errors
+        package_path.write_text(json.dumps(supervisor_package) + "\n", encoding="utf-8")
+        commit_mod._emit_pre_commit_supervisor_lifecycle_event(  # ANTICHEAT_OK: locks explicit route propagation into pre-commit supervisor pager events
+            repo,
+            package_path,
+            event_type="pre_commit_supervisor_started",
+            state="started",
+            route="codex",
+        )
+
+    assert result["status"] == "success"
+    assert deliveries == ["codex", "codex", "codex"]
+    state = json.loads(
+        (repo / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    entries = list(state["events"].values())
+    assert {entry["route"] for entry in entries} == {"codex"}
+    assert all(entry["requested_targets"] == ["codex"] for entry in entries)
 
 
 def test_default_structural_tracker_note_l4_files_command_includes_indicator_artifact():

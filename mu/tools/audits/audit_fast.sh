@@ -17,6 +17,10 @@ sanitize_local_git_env
 # Ensure deterministic dict ordering for ALL subprocesses (including pytest-xdist workers)
 export PYTHONHASHSEED=0
 
+# Bound local xdist fanout by default. JS subprocess parity tests can false-red
+# under unbounded `-n auto`; larger machines may opt in explicitly.
+export PYTEST_XDIST_AUTO_NUM_WORKERS="${PYTEST_XDIST_AUTO_NUM_WORKERS:-4}"
+
 # Use fast Hypothesis profile for local iteration (50 examples vs 500 default)
 # CI sets its own profile via environment variable
 export HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci_fast}"
@@ -66,7 +70,7 @@ fi
 PARALLEL_FLAG=""
 if python3 -c "import xdist" 2>/dev/null; then
     PARALLEL_FLAG="-n auto --dist worksteal"
-    echo "Using parallel execution with worksteal (pytest-xdist detected)"
+    echo "Using parallel execution with worksteal (pytest-xdist detected; auto workers=${PYTEST_XDIST_AUTO_NUM_WORKERS})"
 else
     echo "Note: Install pytest-xdist for faster execution: pip install pytest-xdist"
 fi
