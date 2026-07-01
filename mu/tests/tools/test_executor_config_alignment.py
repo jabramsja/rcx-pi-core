@@ -539,7 +539,7 @@ class TestFallbackMaterializesRolesNoDrift:
             assert config["bridge_reviewers"][key] == "claude"
 
 
-class TestBareFallbackRoleAgentsFollowCommittedConfig:
+class TestBareFallbackFollowsCommittedRoles:
     """The bare/missing-config role_agents fallback derives from the committed
     executor_config.json (the file set_roles.py writes), never a hardcoded DEFAULT
     literal — so a set_roles switch can never strand the fallback on a stale provider.
@@ -627,14 +627,34 @@ class TestBareFallbackRoleAgentsFollowCommittedConfig:
         self, tmp_path, monkeypatch
     ):
         # Last resort: when the committed file is truly absent/unreadable, the
-        # hardcoded DEFAULT_EXECUTOR_CONFIG['role_agents'] literal is used.
+        # hardcoded DEFAULT_EXECUTOR_CONFIG['role_agents'] literal is used. Under
+        # current policy that literal must preserve Codex/Codex, and every derived
+        # backend/reviewer field must follow that literal while commit_executor
+        # remains intentionally unassigned.
         self._clear_role_env(monkeypatch)
         missing = tmp_path / "nonexistent.json"
         monkeypatch.setattr(
             executor_common, "_committed_executor_config_path", lambda: missing
         )
+        default_ra = _load_default_executor_config_role_agents()
+        assert default_ra == {"implementer": "codex", "reviewer": "codex"}
+
         config = merge_executor_config_overrides({})
-        assert config["role_agents"] == _load_default_executor_config_role_agents()
+        assert config["role_agents"] == default_ra
+        materialized = apply_role_agents(
+            copy.deepcopy(config),
+            default_ra["implementer"],
+            default_ra["reviewer"],
+        )
+        assert config["backends"] == materialized["backends"]
+        assert config["bridge_reviewers"] == materialized["bridge_reviewers"]
+        for key in IMPLEMENTER_BACKEND_KEYS:
+            assert config["backends"][key] == "codex"
+        for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+            assert config["backends"][key] == "codex"
+        for key in REVIEWER_BRIDGE_KEYS:
+            assert config["bridge_reviewers"][key] == "codex"
+        assert config["backends"]["commit_executor"] is None
 
     def test_explicit_role_agents_override_is_authoritative_over_fallback(
         self, tmp_path, monkeypatch

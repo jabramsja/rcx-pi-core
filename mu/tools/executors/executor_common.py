@@ -48,8 +48,8 @@ IMPLEMENTER_BACKEND_KEYS = frozenset(
 REVIEWER_BRIDGE_KEYS = frozenset({"phase_a", "phase_b"})
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "role_agents": {
-        "implementer": "claude",
-        "reviewer": "claude",
+        "implementer": "codex",
+        "reviewer": "codex",
     },
     "bridge_agent_defaults": {
         "claude": {
@@ -66,9 +66,9 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "backends": {
         "post_merge_supervisor": "codex",
         "dialectic_executor": "codex",
-        "phase_a_executor": "claude",
-        "phase_b_executor": "claude",
-        "bot_remediation": "claude",
+        "phase_a_executor": "codex",
+        "phase_b_executor": "codex",
+        "bot_remediation": "codex",
         "commit_executor": None,
     },
     "bridge_reviewers": {
