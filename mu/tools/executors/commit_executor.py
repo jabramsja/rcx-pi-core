@@ -252,6 +252,8 @@ query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       headRefOid
+      headRefName
+      isDraft
       reviewDecision
       latestReviews(first: 20) {
         nodes {
@@ -6571,6 +6573,145 @@ def _assert_expected_pr_head(pr_data: dict[str, Any], head_sha: str) -> None:
         )
 
 
+def _assert_current_pr_identity(
+    pr_data: dict[str, Any],
+    *,
+    head_sha: str,
+    target_branch: str,
+) -> None:
+    _assert_expected_pr_head(pr_data, head_sha)
+    head_ref_name = pr_data.get("headRefName", "")
+    if not isinstance(head_ref_name, str) or not head_ref_name:
+        raise ValueError("PR review query missing headRefName")
+    if head_ref_name != target_branch:
+        raise ValueError(
+            f"PR head branch moved from expected {target_branch!r} "
+            f"to {head_ref_name!r}"
+        )
+
+
+def _pr_is_draft(pr_data: dict[str, Any]) -> bool:
+    is_draft = pr_data.get("isDraft")
+    if not isinstance(is_draft, bool):
+        raise ValueError("PR review query missing boolean isDraft")
+    return is_draft
+
+
+def _draft_pr_ready_failure_response(
+    *,
+    pr_number: str,
+    result: dict[str, Any],
+    detail: str,
+) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "step": "ensure_review_clear_and_merge",
+        "failure_class": "draft_pr_ready_failed",
+        "errors": [f"Failed to mark draft PR #{pr_number} ready before merge_pr.sh: {detail}"],
+        "steps_completed": result["steps_completed"],
+        "pr_number": pr_number,
+    }
+
+
+def _ensure_current_draft_pr_ready_for_review(
+    repo_root: Path,
+    *,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: str,
+    head_sha: str,
+    target_branch: str,
+    result: dict[str, Any],
+    log: Any = None,
+) -> dict[str, Any] | None:
+    """Mark only the current executor-owned draft PR ready before final merge."""
+    try:
+        pr_data = _query_pr_review_state(
+            repo_root,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number,
+        )
+        _assert_current_pr_identity(
+            pr_data,
+            head_sha=head_sha,
+            target_branch=target_branch,
+        )
+        if not _pr_is_draft(pr_data):
+            return None
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        ValueError,
+    ) as exc:
+        return _draft_pr_ready_failure_response(
+            pr_number=pr_number,
+            result=result,
+            detail=f"post-CI draft state refresh failed: {exc}",
+        )
+
+    if log is not None:
+        log(
+            f"Step 15: PR #{pr_number} is draft; marking ready for review "
+            "before merge_pr.sh"
+        )
+
+    try:
+        _run(["gh", "pr", "ready", pr_number], cwd=repo_root, timeout=30)
+    except subprocess.CalledProcessError as exc:
+        detail = _tail_failure_excerpt(
+            exc.stderr or exc.stdout or "",
+            limit=1200,
+            max_lines=20,
+        ) or f"exit {exc.returncode}"
+        return _draft_pr_ready_failure_response(
+            pr_number=pr_number,
+            result=result,
+            detail=f"gh pr ready failed: {detail}",
+        )
+    except subprocess.TimeoutExpired:
+        return _draft_pr_ready_failure_response(
+            pr_number=pr_number,
+            result=result,
+            detail="gh pr ready timed out",
+        )
+
+    try:
+        refreshed_pr_data = _query_pr_review_state(
+            repo_root,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number,
+        )
+        _assert_current_pr_identity(
+            refreshed_pr_data,
+            head_sha=head_sha,
+            target_branch=target_branch,
+        )
+        if _pr_is_draft(refreshed_pr_data):
+            return _draft_pr_ready_failure_response(
+                pr_number=pr_number,
+                result=result,
+                detail="gh pr ready completed but GitHub still reports isDraft=true",
+            )
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        ValueError,
+    ) as exc:
+        return _draft_pr_ready_failure_response(
+            pr_number=pr_number,
+            result=result,
+            detail=f"ready transition verification failed: {exc}",
+        )
+
+    if log is not None:
+        log(f"Step 15: PR #{pr_number} marked ready for review")
+    return None
+
+
 def _has_fresh_connector_review(pr_data: dict[str, Any], head_sha: str) -> bool:
     if not _pr_head_matches_expected(pr_data, head_sha):
         return False
@@ -12001,6 +12142,19 @@ def _run_post_commit_pipeline(
     )
     if pre_merge_ci_response is not None:
         return pre_merge_ci_response
+
+    draft_ready_response = _ensure_current_draft_pr_ready_for_review(
+        repo_root,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        pr_number=pr_number,
+        head_sha=head_sha_before_merge,
+        target_branch=target_branch,
+        result=result,
+        log=log,
+    )
+    if draft_ready_response is not None:
+        return draft_ready_response
 
     merge_script = repo_root / "mu" / "tools" / "hooks" / "merge_pr.sh"
     if not merge_script.exists():

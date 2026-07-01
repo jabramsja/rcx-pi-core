@@ -34,6 +34,10 @@ pager_mod = load_module(
     "pipeline_agent_pager",
     REPO_ROOT / "mu" / "tools" / "observability" / "pipeline_agent_pager.py",
 )
+recovery_gate_mod = load_module(
+    "recovery_gate_for_commit_executor_receipt_tests",
+    REPO_ROOT / "mu" / "tools" / "executors" / "recovery_gate.py",
+)
 
 
 def _canonical_handoff_sha_for_test(handoff: dict) -> str:
@@ -6517,6 +6521,196 @@ class TestReviewFindingExtraction:
         )
 
         assert outcome == {"outcome": "clean"}
+
+
+class TestDraftPRReadyBeforeMerge:
+    def _run_step15_path(
+        self,
+        tmp_path,
+        *,
+        initial_is_draft: bool,
+        post_ci_is_draft: bool | None = None,
+        ready_fails: bool = False,
+        remains_draft_after_ready: bool = False,
+    ):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        target_branch = "jabramsja/draft-ready-test"
+        head_sha = "a" * 40
+        events: list[str] = []
+        commands: list[list[str]] = []
+        query_count = 0
+
+        def pr_payload(*, is_draft: bool) -> dict:
+            return {
+                "headRefOid": head_sha,
+                "headRefName": target_branch,
+                "isDraft": is_draft,
+                "reviewDecision": "APPROVED",
+                "latestReviews": {"nodes": [{
+                    "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                    "body": "",
+                    "state": "APPROVED",
+                    "submittedAt": "2026-07-01T00:00:00Z",
+                    "commit": {"oid": head_sha},
+                }]},
+                "reviewThreads": {"nodes": []},
+                "comments": {"nodes": []},
+            }
+
+        def fake_query(*args, **kwargs):
+            nonlocal query_count
+            query_count += 1
+            if query_count == 1:
+                return pr_payload(is_draft=initial_is_draft)
+            if "ready" not in events:
+                return pr_payload(
+                    is_draft=(
+                        initial_is_draft
+                        if post_ci_is_draft is None
+                        else post_ci_is_draft
+                    )
+                )
+            return pr_payload(is_draft=remains_draft_after_ready)
+
+        def fake_wait_for_ci(*args, **kwargs):
+            events.append("pre_merge_ci")
+            return None
+
+        def completed(cmd, *, stdout="", stderr="", returncode=0):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            command = list(cmd)
+            commands.append(command)
+            if command == ["git", "rev-parse", "HEAD"]:
+                return completed(command, stdout=head_sha + "\n")
+            if command == ["gh", "pr", "ready", "1189"]:
+                events.append("ready")
+                if ready_fails:
+                    raise subprocess.CalledProcessError(
+                        1,
+                        command,
+                        output="",
+                        stderr="ready transition rejected",
+                    )
+                return completed(command)
+            if command == ["bash", str(merge_script), "1189", "--sweep"]:
+                events.append("merge")
+                return completed(command)
+            if command[:2] == ["git", "fetch"]:
+                return completed(command)
+            if command[:2] == ["git", "status"]:
+                return completed(command)
+            if command[:2] == ["git", "merge"]:
+                return completed(command)
+            raise AssertionError(f"unexpected command: {command}")
+
+        result = {
+            "status": "success",
+            "steps_completed": [
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "pr_number": "1189",
+        }
+        with patch.object(commit_mod, "_parse_origin_owner_repo", return_value=("owner", "repo")), \
+             patch.object(commit_mod, "_query_pr_review_state", side_effect=fake_query), \
+             patch.object(commit_mod, "_wait_for_pr_ci", side_effect=fake_wait_for_ci), \
+             patch.object(
+                 commit_mod,
+                 "_try_auto_resolve_pr_conflict",
+                 return_value={"resolved": True, "action": "no_action"},
+             ), \
+             patch.object(commit_mod, "_resolve_post_merge_verify_root", return_value=repo), \
+             patch.object(commit_mod, "_sync_primary_worktree_to_base", return_value={"status": "skipped"}), \
+             patch.object(commit_mod, "_refresh_post_merge_package_for_next_open_queue"), \
+             patch.object(commit_mod, "_post_merge_cleanup", return_value={"status": "skipped"}), \
+             patch.object(commit_mod, "_clear_continuation_record"), \
+             patch.object(commit_mod, "_run", side_effect=fake_run):
+            outcome = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: Step 15 draft PR readiness regression
+                handoff={"wave_id": "draft-ready-test"},
+                repo_root=repo,
+                result=result,
+                target_branch=target_branch,
+                base_branch="dev",
+                continuation_path=repo / ".agent_bus" / "executors" / "commit_executor_draft-ready-test.json",
+                log=lambda _msg: None,
+            )
+
+        return outcome, events, commands, query_count
+
+    def test_draft_pr_is_marked_ready_after_ci_and_before_merge(self, tmp_path):
+        outcome, events, commands, query_count = self._run_step15_path(
+            tmp_path,
+            initial_is_draft=True,
+        )
+
+        assert outcome["status"] == "success", outcome
+        assert "ensure_review_clear_and_merge" in outcome["steps_completed"]
+        assert ["gh", "pr", "ready", "1189"] in commands
+        assert events.index("pre_merge_ci") < events.index("ready") < events.index("merge")
+        assert query_count == 3
+
+    def test_pr_that_becomes_draft_during_pre_merge_ci_is_readied_before_merge(self, tmp_path):
+        outcome, events, commands, query_count = self._run_step15_path(
+            tmp_path,
+            initial_is_draft=False,
+            post_ci_is_draft=True,
+        )
+
+        assert outcome["status"] == "success", outcome
+        assert ["gh", "pr", "ready", "1189"] in commands
+        assert events.index("pre_merge_ci") < events.index("ready") < events.index("merge")
+        assert query_count == 3
+
+    def test_non_draft_pr_merges_without_ready_transition(self, tmp_path):
+        outcome, events, commands, query_count = self._run_step15_path(
+            tmp_path,
+            initial_is_draft=False,
+        )
+
+        assert outcome["status"] == "success", outcome
+        assert ["gh", "pr", "ready", "1189"] not in commands
+        assert events == ["pre_merge_ci", "merge"]
+        assert query_count == 2
+
+    def test_ready_transition_failure_fails_before_merge_pr_script(self, tmp_path):
+        outcome, events, commands, query_count = self._run_step15_path(
+            tmp_path,
+            initial_is_draft=True,
+            ready_fails=True,
+            remains_draft_after_ready=True,
+        )
+
+        assert outcome["status"] == "error"
+        assert outcome["step"] == "ensure_review_clear_and_merge"
+        assert outcome["failure_class"] == "draft_pr_ready_failed"
+        assert "ready transition rejected" in outcome["errors"][0]
+        assert "merge" not in events
+        assert events == ["pre_merge_ci", "ready"]
+        assert query_count == 2
+
+    def test_ready_transition_failure_classifies_for_recovery(self):
+        failure_class = recovery_gate_mod.classify_failure({
+            "status": "error",
+            "step": "ensure_review_clear_and_merge",
+            "failure_class": "draft_pr_ready_failed",
+            "errors": [
+                "Failed to mark draft PR #1189 ready before merge_pr.sh: "
+                "ready transition rejected"
+            ],
+        })
+
+        assert failure_class.value == "draft_pr_ready_failed"
+        assert recovery_gate_mod.tier_for(failure_class) == 3
 
 
 class TestCIPollFallbackTimeout:
