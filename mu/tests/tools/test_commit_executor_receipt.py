@@ -6532,6 +6532,8 @@ class TestDraftPRReadyBeforeMerge:
         post_ci_is_draft: bool | None = None,
         ready_fails: bool = False,
         remains_draft_after_ready: bool = False,
+        omit_draft_state: bool = False,
+        omit_head_ref_name: bool = False,
     ):
         import subprocess
 
@@ -6547,7 +6549,7 @@ class TestDraftPRReadyBeforeMerge:
         query_count = 0
 
         def pr_payload(*, is_draft: bool) -> dict:
-            return {
+            payload = {
                 "headRefOid": head_sha,
                 "headRefName": target_branch,
                 "isDraft": is_draft,
@@ -6562,6 +6564,11 @@ class TestDraftPRReadyBeforeMerge:
                 "reviewThreads": {"nodes": []},
                 "comments": {"nodes": []},
             }
+            if omit_draft_state:
+                payload.pop("isDraft")
+            if omit_head_ref_name:
+                payload.pop("headRefName")
+            return payload
 
         def fake_query(*args, **kwargs):
             nonlocal query_count
@@ -6675,6 +6682,19 @@ class TestDraftPRReadyBeforeMerge:
         outcome, events, commands, query_count = self._run_step15_path(
             tmp_path,
             initial_is_draft=False,
+        )
+
+        assert outcome["status"] == "success", outcome
+        assert ["gh", "pr", "ready", "1189"] not in commands
+        assert events == ["pre_merge_ci", "merge"]
+        assert query_count == 2
+
+    def test_legacy_review_payload_without_draft_metadata_skips_ready_transition(self, tmp_path):
+        outcome, events, commands, query_count = self._run_step15_path(
+            tmp_path,
+            initial_is_draft=False,
+            omit_draft_state=True,
+            omit_head_ref_name=True,
         )
 
         assert outcome["status"] == "success", outcome

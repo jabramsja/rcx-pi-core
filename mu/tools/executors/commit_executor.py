@@ -6632,13 +6632,22 @@ def _ensure_current_draft_pr_ready_for_review(
             repo_name=repo_name,
             pr_number=pr_number,
         )
+        _assert_expected_pr_head(pr_data, head_sha)
+        draft_state = pr_data.get("isDraft")
+        if not isinstance(draft_state, bool):
+            if log is not None:
+                log(
+                    f"Step 15: PR #{pr_number} draft state absent from review "
+                    "payload; skipping draft-ready transition"
+                )
+            return None
+        if not draft_state:
+            return None
         _assert_current_pr_identity(
             pr_data,
             head_sha=head_sha,
             target_branch=target_branch,
         )
-        if not _pr_is_draft(pr_data):
-            return None
     except (
         subprocess.CalledProcessError,
         subprocess.TimeoutExpired,

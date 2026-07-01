@@ -132,9 +132,6 @@ FOUNDER_OVERRIDE:commit-executor-draft-pr-ready-2026-07-01
   - `TASKS.md`
   - `mu/tests/tools/test_commit_executor_receipt.py`
   - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/recovery_gate.py`
   - `reports/control_plane/commit-executor-draft-pr-ready-2026-07-01_2026-07-01.md`
-  - `reports/control_plane/commit-executor-draft-pr-ready-2026-07-01_wave_config.json`
-  - `reports/deferred/non_blocking/commit-executor-draft-pr-ready-2026-07-01_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/commit-executor-draft-pr-ready-2026-07-01.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
