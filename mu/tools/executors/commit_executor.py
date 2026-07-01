@@ -6590,6 +6590,42 @@ def _assert_current_pr_identity(
         )
 
 
+def _refresh_pr_head_after_executor_update(
+    repo_root: Path,
+    *,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: str,
+    previous_head_sha: str,
+    target_branch: str,
+    log: Any = None,
+) -> tuple[str, dict[str, Any]]:
+    refreshed_head_sha = _run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        timeout=10,
+    ).stdout.strip()
+    if not refreshed_head_sha:
+        raise ValueError("local HEAD refresh returned an empty SHA")
+    refreshed_pr_data = _query_pr_review_state(
+        repo_root,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        pr_number=pr_number,
+    )
+    _assert_current_pr_identity(
+        refreshed_pr_data,
+        head_sha=refreshed_head_sha,
+        target_branch=target_branch,
+    )
+    if log is not None and refreshed_head_sha != previous_head_sha:
+        log(
+            f"Step 15: refreshed PR head after bot remediation/auto-defer "
+            f"{previous_head_sha[:8]} -> {refreshed_head_sha[:8]}"
+        )
+    return refreshed_head_sha, refreshed_pr_data
+
+
 def _pr_is_draft(pr_data: dict[str, Any]) -> bool:
     is_draft = pr_data.get("isDraft")
     if not isinstance(is_draft, bool):
@@ -12139,6 +12175,28 @@ def _run_post_commit_pipeline(
         )
         if remediation_response is not None:
             return remediation_response
+        try:
+            head_sha_before_merge, pr_data = _refresh_pr_head_after_executor_update(
+                repo_root,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                pr_number=pr_number,
+                previous_head_sha=head_sha_before_merge,
+                target_branch=target_branch,
+                log=log,
+            )
+            result["commit_sha"] = head_sha_before_merge
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
+            return {"status": "error", "step": "ensure_review_clear_and_merge",
+                    "failure_class": "post_remediation_head_refresh_failed",
+                    "errors": [f"Post-remediation PR head refresh failed: {exc}"],
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number}
 
     pre_merge_ci_response = _wait_for_pr_ci(
         repo_root,
