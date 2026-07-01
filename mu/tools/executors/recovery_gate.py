@@ -145,6 +145,7 @@ class FailureClass(Enum):
     IMPLEMENTER_ERROR = "implementer_error"
     BRIDGE_ERROR = "bridge_error"
     L4_CONTRACT_VIOLATION = "l4_contract_violation"
+    DRAFT_PR_READY_FAILED = "draft_pr_ready_failed"
     PHASE_B_WAVE_CLASS_PACKAGE_GAP = "phase_b_wave_class_package_gap"
     COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP = "commit_supervisor_structural_override_package_gap"
     PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP = "phase_b_l4_structural_tracker_note_gap"
@@ -188,6 +189,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.IMPLEMENTER_ERROR: 3,
     FailureClass.BRIDGE_ERROR: 3,
     FailureClass.L4_CONTRACT_VIOLATION: 3,
+    FailureClass.DRAFT_PR_READY_FAILED: 3,
     FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP: 2,
     FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP: 2,
     FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP: 2,
@@ -493,6 +495,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     ).strip().lower()
     if status_failed and explicit_failure_class == FailureClass.TEST_FAILURE.value:
         return FailureClass.TEST_FAILURE
+    if status_failed and explicit_failure_class == FailureClass.DRAFT_PR_READY_FAILED.value:
+        return FailureClass.DRAFT_PR_READY_FAILED
     early_local_gate_signal = f"{reason_lower} {combined_lower}"
     if status_failed and _looks_like_local_gate_pytest_failure(
         step_lower,
