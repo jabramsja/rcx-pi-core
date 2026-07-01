@@ -1,0 +1,15 @@
+ STATUS.md                                          |   6 +-
+ TASKS.md                                           |  26 +++++
+ mu/tests/tools/test_codex_autoping_watch.py        | 115 ++++++++++++++++-----
+ mu/tests/tools/test_codex_startup_state.py         |  87 ++++++++++++++--
+ mu/tests/tools/test_pipeline_monitor_autofollow.py |  71 +++++++++++++
+ mu/tools/observability/_pane_processes.sh          |   9 +-
+ mu/tools/observability/_pane_timeline.sh           |  20 +++-
+ mu/tools/session/check_codex_startup_state.py      |  27 ++++-
+ mu/tools/session/codex_autoping_watch.py           |  29 +++++-
+ mu/tools/session/codex_autoping_window.sh          |  25 ++++-
+ mu/tools/session/ensure_codex_autoping.sh          |  18 +++-
+ mu/tools/session/render_codex_autoping_status.py   |  33 +++++-
+ ...ive-queue-stage4-postmerge-sync-2026-06-26.json |  24 +++++
+ ...ing-tmux-truthfulness-hardening-2026-06-26.json |  24 +++++
+ 14 files changed, 471 insertions(+), 43 deletions(-)

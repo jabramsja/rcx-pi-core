@@ -1,0 +1,124 @@
+WIP preservation snapshot: 20260620T171515Z
+Root parent: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal
+
+Git worktrees:
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX
+HEAD 43968729825b8ea3d4be314928bb31fee77f1fc5
+branch refs/heads/jabramsja/workspace-2026-06-04
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane1_castage0c_20260616
+HEAD f074021973cc4289e14bea329136ca4c3efb483b
+branch refs/heads/jabramsja/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane2_recoverygate58
+HEAD 85fe32ff777c80d66383cf9a07318740847c60c8
+branch refs/heads/jabramsja/primary-ffsync-tracked-wip-preserve-2026-06-20
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane3_observability_20260619
+HEAD e6ba365858b2ad6d086f08e8f7c31c2a4b608f17
+branch refs/heads/jabramsja/pipeline-observability-live-root-2026-06-19
+
+
+--- WorkingRCX ---
+worktree=/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX
+branch=jabramsja/workspace-2026-06-04
+head=43968729825b8ea3d4be314928bb31fee77f1fc5
+upstream=ahead_behind=
+status_short_branch:
+## jabramsja/workspace-2026-06-04
+ M .claude/rules/wave-protocol.md
+ M CLAUDE.md
+ M STATUS.md
+ M TASKS.md
+ M mu/tests/docs/test_docs_registry_agent_memory_exempt.py
+ M mu/tools/docs/docs_registry.json
+ M mu/tools/executors/executor_config.json
+ M mu/tools/observability/_pane_processes.sh
+ M mu/tools/observability/_pane_timeline.sh
+?? reports/deferred/non_blocking/flaky-audit-fast-parallel-load-2026-06-08.md
+?? reports/deferred/non_blocking/flaky-js-parity-no-json-api-response-2026-06-08.md
+?? reports/deferred/non_blocking/pager-claude-quickack-receiver-design-2026-06-17.md
+?? reports/deferred/non_blocking/preflight-step17b-pgrep-native-install-enumeration-2026-06-09.md
+
+stash_list:
+stash@{0}: On structural-numbers-gcd-2026-06-19: gcd-packet-repair-marker-2026-06-20
+stash@{1}: On queue-status-sync-2026-06-20: queue-status-rootenv-duplicate-and-packet-refresh-2026-06-20
+stash@{2}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-pipeline-scope-privateattr-tooling-2026-05-29
+stash@{3}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-js-kernel-continuation-proof-2026-05-29
+stash@{4}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-out-of-scope-p7w5-commit-2026-05-29
+stash@{5}: On n3-js-evidence-walker-runtime-authority-parity-2026-05-22: failed n3-js-evidence-walker-runtime-authority-parity pipeline artifacts before phase-a path repair
+stash@{6}: On dev: codex-startup-checker-local-fix-2026-05-17
+stash@{7}: On pipeline-agent-pager-transport-2026-04-22: phase-a-recovery-unblock-pager-2026-04-22
+
+unstaged_diff_bytes=25771
+staged_diff_bytes=0
+untracked_count=4
+
+--- workingrcx_lane1_castage0c_20260616 ---
+worktree=/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane1_castage0c_20260616
+branch=jabramsja/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16
+head=f074021973cc4289e14bea329136ca4c3efb483b
+upstream=origin/dev
+ahead_behind=74	0
+
+status_short_branch:
+## jabramsja/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16...origin/dev [behind 74]
+M  TASKS.md
+M  mu/host/js/core/bootstrap_core.js
+M  mu/host/python/rcx_pi/selfhost/eval_seed.py
+M  mu/tests/l4_gates/test_p7w4_structural_reduction_gate.py
+A  mu/tests/l4_gates/test_stage0_content_addressed_collapse_gate.py
+M  mu/tests/l4_gates/test_stage0_vm_cutover.py
+A  reports/control_plane/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16_2026-06-16.md
+A  reports/deferred/blocking/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16_phase_a_contradiction.md
+A  reports/deferred/non_blocking/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16_bridge_nonblockers.md
+A  reports/l4_wave_indicators/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16.json
+
+stash_list:
+stash@{0}: On structural-numbers-gcd-2026-06-19: gcd-packet-repair-marker-2026-06-20
+stash@{1}: On queue-status-sync-2026-06-20: queue-status-rootenv-duplicate-and-packet-refresh-2026-06-20
+stash@{2}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-pipeline-scope-privateattr-tooling-2026-05-29
+stash@{3}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-js-kernel-continuation-proof-2026-05-29
+stash@{4}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-out-of-scope-p7w5-commit-2026-05-29
+stash@{5}: On n3-js-evidence-walker-runtime-authority-parity-2026-05-22: failed n3-js-evidence-walker-runtime-authority-parity pipeline artifacts before phase-a path repair
+stash@{6}: On dev: codex-startup-checker-local-fix-2026-05-17
+stash@{7}: On pipeline-agent-pager-transport-2026-04-22: phase-a-recovery-unblock-pager-2026-04-22
+
+unstaged_diff_bytes=0
+staged_diff_bytes=72197
+untracked_count=0
+
+--- workingrcx_lane2_recoverygate58 ---
+worktree=/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane2_recoverygate58
+branch=jabramsja/primary-ffsync-tracked-wip-preserve-2026-06-20
+head=85fe32ff777c80d66383cf9a07318740847c60c8
+upstream=origin/jabramsja/primary-ffsync-tracked-wip-preserve-2026-06-20
+ahead_behind=0	1
+
+status_short_branch:
+## jabramsja/primary-ffsync-tracked-wip-preserve-2026-06-20...origin/jabramsja/primary-ffsync-tracked-wip-preserve-2026-06-20 [ahead 1]
+
+stash_list:
+stash@{0}: On structural-numbers-gcd-2026-06-19: gcd-packet-repair-marker-2026-06-20
+stash@{1}: On queue-status-sync-2026-06-20: queue-status-rootenv-duplicate-and-packet-refresh-2026-06-20
+stash@{2}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-pipeline-scope-privateattr-tooling-2026-05-29
+stash@{3}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-js-kernel-continuation-proof-2026-05-29
+stash@{4}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-out-of-scope-p7w5-commit-2026-05-29
+stash@{5}: On n3-js-evidence-walker-runtime-authority-parity-2026-05-22: failed n3-js-evidence-walker-runtime-authority-parity pipeline artifacts before phase-a path repair
+stash@{6}: On dev: codex-startup-checker-local-fix-2026-05-17
+stash@{7}: On pipeline-agent-pager-transport-2026-04-22: phase-a-recovery-unblock-pager-2026-04-22
+
+unstaged_diff_bytes=0
+staged_diff_bytes=0
+untracked_count=0
+
+Stash content preservation added: 2026-06-20T17:16:50Z
+stash_count=8
+stash_dir=/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/.rcx_wip_preservation/20260620T171515Z/git-stashes
+
+## workingrcx_lane3_observability_20260619 supplemental snapshot
+path: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane3_observability_20260619
+snapshot: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/.rcx_wip_preservation/20260620T171515Z/workingrcx_lane3_observability_20260619
+status:
+  ## jabramsja/pipeline-observability-live-root-2026-06-19...origin/dev [ahead 1, behind 34]
+  M  reports/control_plane/pipeline-observability-live-root-2026-06-19_2026-06-19.md

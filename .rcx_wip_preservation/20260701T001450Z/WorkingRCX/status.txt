@@ -1,0 +1,37 @@
+## jabramsja/workspace-2026-06-04
+ M .claude/hooks/artifact-edit-gate.sh
+ M .claude/settings.json
+ M .claude/skills/preflight/SKILL.md
+ M CLAUDE.md
+M  STATUS.md
+MM TASKS.md
+M  mu/tests/tools/test_codex_autoping_watch.py
+M  mu/tests/tools/test_codex_startup_state.py
+ M mu/tests/tools/test_orchestrator_mode_switch.py
+M  mu/tests/tools/test_pipeline_monitor_autofollow.py
+ M mu/tools/docs/docs_registry.json
+ M mu/tools/executors/executor_config.json
+M  mu/tools/observability/_pane_processes.sh
+MM mu/tools/observability/_pane_timeline.sh
+M  mu/tools/session/check_codex_startup_state.py
+M  mu/tools/session/codex_autoping_watch.py
+M  mu/tools/session/codex_autoping_window.sh
+M  mu/tools/session/ensure_codex_autoping.sh
+M  mu/tools/session/render_codex_autoping_status.py
+A  reports/l4_wave_indicators/active-queue-stage4-postmerge-sync-2026-06-26.json
+A  reports/l4_wave_indicators/pager-autoping-tmux-truthfulness-hardening-2026-06-26.json
+?? HANDOFF_FOR_NEXT_LLM_2026-06-20.md
+?? HANDOFF_FOR_NEXT_LLM_2026-06-21.md
+?? HANDOFF_FOR_NEXT_LLM_2026-06-22.md
+?? HANDOFF_FOR_NEXT_LLM_2026-06-24.md
+?? HANDOFF_FOR_NEXT_LLM_2026-06-29.md
+?? mu/tools/session/rcx_session_protocol.sh
+?? reports/control_plane/observability-pane-tail-trim-regression-2026-06-22_wave_config.json
+?? reports/deferred/non_blocking/bridge-lock-bounded-wait-8-scoping-2026-06-29.md
+?? reports/deferred/non_blocking/claude-control-plane-cleanup-test-updates-2026-06-27.md
+?? reports/deferred/non_blocking/flaky-audit-fast-parallel-load-2026-06-08.md
+?? reports/deferred/non_blocking/flaky-js-parity-no-json-api-response-2026-06-08.md
+?? reports/deferred/non_blocking/nightly-slow-tests-red-scale-flakiness-2026-06-29.md
+?? reports/deferred/non_blocking/pager-claude-quickack-receiver-design-2026-06-17.md
+?? reports/deferred/non_blocking/preflight-step17b-pgrep-native-install-enumeration-2026-06-09.md
+?? reports/deferred/non_blocking/wave-evidence-self-reference-15-scoping-2026-06-29.md
