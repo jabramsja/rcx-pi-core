@@ -4738,8 +4738,42 @@ def _sync_primary_worktree_to_base(
         if primary_branch is None:
             return _skip("primary worktree HEAD branch unresolved (detached?)")
 
-        # GUARD-A: never touch a base-branch checkout.
+        # GUARD-A: never sync a base-branch checkout.  When Step 15 used this
+        # same primary as the verify root, it may already have fast-forwarded
+        # the base branch; clear any stale primary-bus behind_dev signal only
+        # after proving the local base checkout is current with origin/base.
         if primary_branch in {base_branch, "main", "master"}:
+            remote_ref = f"origin/{base_branch}"
+            old_sha = ""
+            new_sha = ""
+            try:
+                old_sha = _run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=primary,
+                    check=False,
+                    timeout=30,
+                ).stdout.strip()
+                new_sha = _run(
+                    ["git", "rev-parse", remote_ref],
+                    cwd=primary,
+                    check=False,
+                    timeout=30,
+                ).stdout.strip()
+            except Exception:  # noqa: BLE001 - stale-signal clear is best-effort
+                old_sha = ""
+                new_sha = ""
+            if old_sha:
+                outcome["old_sha"] = old_sha
+            if new_sha:
+                outcome["new_sha"] = new_sha
+            if old_sha and new_sha and old_sha == new_sha:
+                outcome["primary"] = str(primary)
+                _clear_behind_dev_signal(primary)
+                return _skip(
+                    f"primary worktree on base branch '{primary_branch}' "
+                    f"already current at {new_sha[:8]}; "
+                    "PULL-ONLY helper never syncs a base-branch checkout"
+                )
             return _skip(
                 f"primary worktree on base branch '{primary_branch}'; "
                 "PULL-ONLY helper never syncs a base-branch checkout"
