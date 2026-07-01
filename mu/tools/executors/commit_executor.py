@@ -38,6 +38,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import unicodedata
 import uuid
@@ -4537,7 +4538,7 @@ def _sync_primary_worktree_to_base(
     *,
     log: Any,
 ) -> dict[str, Any]:
-    """Fast-forward the founder's PRIMARY working copy up to origin/base_branch.
+    """Fast-forward a clean founder PRIMARY working copy up to origin/base_branch.
 
     PULL-ONLY and fully fail-open. The existing post-merge verify-root ff
     (`_resolve_post_merge_verify_root` + `git merge --ff-only`) only ever
@@ -4556,12 +4557,10 @@ def _sync_primary_worktree_to_base(
 
     Guards (any miss -> SKIP):
       GUARD-A primary is on a FEATURE branch (not base_branch/main/master).
-      GUARD-B tracked founder WIP is isolated only after fetch, ancestry, and
-              already-current checks prove a real ff is pending. Non-overlapping
-              tracked WIP is restored after the ff; overlapping WIP is left in an
-              executor-owned stash and reported. The ff merge additionally runs
-              `--no-overwrite-ignore` to ABORT rather than silently overwrite
-              locally-ignored founder WIP.
+      GUARD-B visible dirty founder WIP writes durable behind_dev observability
+              to the primary-worktree bus and skips instead of fast-forwarding.
+              The ff merge additionally runs `--no-overwrite-ignore` to ABORT
+              rather than silently overwrite locally-ignored founder WIP.
       GUARD-C primary HEAD is an ANCESTOR of origin/{base_branch} (a real
               fast-forward; divergent local commits are landed via a PR).
       GUARD-D a NON-BLOCKING file lock under the common git dir is acquired
@@ -4576,6 +4575,12 @@ def _sync_primary_worktree_to_base(
         "primary": None,
         "old_sha": None,
         "new_sha": None,
+        "behind_count": None,
+        "ahead_count": None,
+        "dirty_paths": [],
+        "behind_dev_signal_path": None,
+        "behind_dev_signal_written": False,
+        "behind_dev_signal_cleared": False,
         "tracked_wip_paths": [],
         "tracked_wip_stash_marker": None,
         "tracked_wip_stash_ref": None,
@@ -4592,6 +4597,106 @@ def _sync_primary_worktree_to_base(
         outcome["reason"] = reason
         log(f"Step 15b: primary worktree base-sync skipped: {reason}")
         return outcome
+
+    def _behind_dev_signal_path(primary_path: Path) -> Path:
+        # Durable founder-primary bus only. The active lane's repo_root can be a
+        # temporary linked worktree removed by post-merge cleanup.
+        return agent_bus_path(primary_path, None, "behind_dev.json")
+
+    def _commit_count(primary_path: Path, rev_range: str) -> int | None:
+        try:
+            proc = _run(
+                ["git", "rev-list", "--count", rev_range],
+                cwd=primary_path,
+                check=False,
+                timeout=30,
+            )
+        except Exception:  # noqa: BLE001 - observability must not break sync
+            return None
+        if proc.returncode != 0:
+            return None
+        try:
+            return int((proc.stdout or "").strip())
+        except (TypeError, ValueError):
+            return None
+
+    def _clear_behind_dev_signal(primary_path: Path) -> None:
+        try:
+            signal_path = _behind_dev_signal_path(primary_path)
+            existed = signal_path.exists()
+            signal_path.unlink(missing_ok=True)
+            outcome["behind_dev_signal_path"] = str(signal_path)
+            if existed:
+                outcome["behind_dev_signal_cleared"] = True
+        except Exception as exc:  # noqa: BLE001 - clear must not regress sync
+            try:
+                log(f"Step 15b: behind_dev signal clear failed (non-fatal): {exc}")
+            except Exception:
+                pass
+
+    def _write_behind_dev_signal(
+        primary_path: Path,
+        *,
+        base_ref: str,
+        reason: str,
+        dirty_paths: list[str] | None = None,
+    ) -> None:
+        behind_count = _commit_count(primary_path, f"HEAD..{base_ref}")
+        ahead_count = _commit_count(primary_path, f"{base_ref}..HEAD")
+        outcome["behind_count"] = behind_count
+        outcome["ahead_count"] = ahead_count
+        if behind_count is None or behind_count <= 0:
+            _clear_behind_dev_signal(primary_path)
+            log(
+                "Step 15b: behind_dev signal not written because primary is "
+                f"not behind {base_ref} (behind_count={behind_count})"
+            )
+            return
+
+        signal_path = _behind_dev_signal_path(primary_path)
+        payload: dict[str, Any] = {
+            "primary": str(primary_path),
+            "base_ref": base_ref,
+            "behind_count": behind_count,
+            "ahead_count": ahead_count,
+            "reason": reason,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if dirty_paths is not None:
+            payload["dirty_paths"] = list(dirty_paths)
+        try:
+            signal_path.parent.mkdir(parents=True, exist_ok=True)
+            serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+            tmp_fd, tmp_name = tempfile.mkstemp(
+                dir=str(signal_path.parent),
+                prefix=".behind_dev.",
+                suffix=".tmp",
+            )
+            try:
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_file:
+                    tmp_file.write(serialized)
+                    tmp_file.flush()
+                    os.fsync(tmp_file.fileno())
+                os.replace(tmp_name, signal_path)
+            except BaseException:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+            outcome["behind_dev_signal_path"] = str(signal_path)
+            outcome["behind_dev_signal_written"] = True
+            log(
+                "Step 15b: WARNING behind_dev primary worktree "
+                f"{primary_path} is behind {base_ref} by {behind_count} "
+                f"commit(s), ahead by {ahead_count} commit(s), "
+                f"reason={reason}; wrote {signal_path}"
+            )
+        except Exception as exc:  # noqa: BLE001 - signal write must not regress sync
+            try:
+                log(f"Step 15b: behind_dev signal write failed (non-fatal): {exc}")
+            except Exception:
+                pass
 
     try:
         # Identify the PRIMARY worktree: the FIRST non-bare `git worktree list`
@@ -4633,8 +4738,42 @@ def _sync_primary_worktree_to_base(
         if primary_branch is None:
             return _skip("primary worktree HEAD branch unresolved (detached?)")
 
-        # GUARD-A: never touch a base-branch checkout.
+        # GUARD-A: never sync a base-branch checkout.  When Step 15 used this
+        # same primary as the verify root, it may already have fast-forwarded
+        # the base branch; clear any stale primary-bus behind_dev signal only
+        # after proving the local base checkout is current with origin/base.
         if primary_branch in {base_branch, "main", "master"}:
+            remote_ref = f"origin/{base_branch}"
+            old_sha = ""
+            new_sha = ""
+            try:
+                old_sha = _run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=primary,
+                    check=False,
+                    timeout=30,
+                ).stdout.strip()
+                new_sha = _run(
+                    ["git", "rev-parse", remote_ref],
+                    cwd=primary,
+                    check=False,
+                    timeout=30,
+                ).stdout.strip()
+            except Exception:  # noqa: BLE001 - stale-signal clear is best-effort
+                old_sha = ""
+                new_sha = ""
+            if old_sha:
+                outcome["old_sha"] = old_sha
+            if new_sha:
+                outcome["new_sha"] = new_sha
+            if old_sha and new_sha and old_sha == new_sha:
+                outcome["primary"] = str(primary)
+                _clear_behind_dev_signal(primary)
+                return _skip(
+                    f"primary worktree on base branch '{primary_branch}' "
+                    f"already current at {new_sha[:8]}; "
+                    "PULL-ONLY helper never syncs a base-branch checkout"
+                )
             return _skip(
                 f"primary worktree on base branch '{primary_branch}'; "
                 "PULL-ONLY helper never syncs a base-branch checkout"
@@ -4690,6 +4829,11 @@ def _sync_primary_worktree_to_base(
                 timeout=30,
             )
             if ancestor_proc.returncode != 0:
+                _write_behind_dev_signal(
+                    primary,
+                    base_ref=remote_ref,
+                    reason="divergent_local_commits",
+                )
                 return _skip(
                     f"primary worktree HEAD is not an ancestor of {remote_ref} "
                     "(divergent local commits; founder lands those via a PR)"
@@ -4699,45 +4843,34 @@ def _sync_primary_worktree_to_base(
                 outcome["primary"] = str(primary)
                 outcome["old_sha"] = old_sha
                 outcome["new_sha"] = new_sha
+                _clear_behind_dev_signal(primary)
                 return _skip(f"primary worktree already current at {new_sha[:8]}")
 
-            tracked_wip_paths = sorted(_tracked_dirty_paths(primary))
-            stash_record: dict[str, Any] | None = None
-            overlap_paths: list[str] = []
-            if tracked_wip_paths:
-                overlap_set, overlap_error = _primary_sync_changed_paths_in_range(
+            dirty_paths = sorted(_dirty_worktree_paths(primary))
+            if dirty_paths:
+                outcome["primary"] = str(primary)
+                outcome["old_sha"] = old_sha
+                outcome["new_sha"] = new_sha
+                outcome["dirty_paths"] = list(dirty_paths)
+                _write_behind_dev_signal(
                     primary,
-                    old_sha,
-                    new_sha,
-                    tracked_wip_paths,
+                    base_ref=remote_ref,
+                    reason="dirty_primary_worktree",
+                    dirty_paths=dirty_paths,
                 )
-                if overlap_error:
-                    return _skip(overlap_error)
-                overlap_paths = sorted(overlap_set)
-                stash_record, stash_error = _stash_primary_sync_tracked_wip(
-                    primary,
-                    tracked_wip_paths,
-                    log=log,
+                return _skip(
+                    "primary worktree is behind base with dirty WIP; wrote "
+                    "behind_dev signal instead of fast-forwarding"
                 )
-                if stash_error:
-                    return _skip(stash_error)
-                if stash_record is not None:
-                    outcome["tracked_wip_paths"] = list(tracked_wip_paths)
-                    outcome["tracked_wip_stash_marker"] = stash_record["marker"]
-                    outcome["tracked_wip_stash_ref"] = stash_record["stash_ref"]
-                    outcome["tracked_wip_stash_oid"] = stash_record["stash_oid"]
-                    outcome["tracked_wip_overlap_paths"] = list(overlap_paths)
 
             # PULL-ONLY ff: bring origin/{base_branch} DOWN into the primary's
             # CURRENT feature branch. --ff-only is the backstop that refuses any
             # non-fast-forward; we never push, checkout base, force, or reset.
-            # --no-overwrite-ignore closes the GUARD-B gap for IGNORED founder
-            # WIP: GUARD-B's _dirty_worktree_paths uses `ls-files --others
-            # --exclude-standard`, which excludes ignored files, so a clean-tree
-            # check cannot see them. git merge SILENTLY overwrites ignored files
-            # by default; --no-overwrite-ignore makes it ABORT (non-zero) instead
-            # when the ff would clobber a locally-ignored path, so the
-            # returncode-!=0 SKIP below preserves the founder's ignored WIP.
+            # --no-overwrite-ignore closes the remaining gap for IGNORED founder
+            # WIP: _dirty_worktree_paths uses `ls-files --others
+            # --exclude-standard`, which excludes ignored files. git merge can
+            # silently overwrite ignored files by default; --no-overwrite-ignore
+            # makes it abort instead, preserving that WIP.
             merge_proc = _run(
                 ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
                 cwd=primary,
@@ -4746,22 +4879,11 @@ def _sync_primary_worktree_to_base(
             )
             if merge_proc.returncode != 0:
                 detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
-                if stash_record is not None:
-                    restore_error = _restore_primary_sync_tracked_wip(
-                        primary,
-                        stash_record,
-                        log=log,
-                    )
-                    if restore_error:
-                        outcome["tracked_wip_left_stashed"] = True
-                        outcome["tracked_wip_restore_error"] = restore_error
-                        log(
-                            "Step 15b: tracked primary WIP remains in "
-                            f"{stash_record['stash_ref']} after ff failure; "
-                            f"restore failed: {restore_error}"
-                        )
-                    else:
-                        outcome["tracked_wip_restored"] = True
+                _write_behind_dev_signal(
+                    primary,
+                    base_ref=remote_ref,
+                    reason="ff_only_merge_failed",
+                )
                 return _skip(
                     f"ff-only merge of {remote_ref} into '{primary_branch}' "
                     f"failed: {detail[:200]}"
@@ -4776,50 +4898,7 @@ def _sync_primary_worktree_to_base(
             outcome["primary"] = str(primary)
             outcome["old_sha"] = old_sha
             outcome["new_sha"] = synced_sha
-            if stash_record is not None:
-                if overlap_paths:
-                    non_overlap_paths = sorted(
-                        set(tracked_wip_paths) - set(overlap_paths)
-                    )
-                    if non_overlap_paths:
-                        restore_error = _restore_primary_sync_tracked_wip_paths(
-                            primary,
-                            stash_record,
-                            non_overlap_paths,
-                            log=log,
-                        )
-                        if restore_error:
-                            outcome["tracked_wip_restore_error"] = restore_error
-                            log(
-                                "Step 15b: non-overlapping tracked primary WIP "
-                                f"remains in {stash_record['stash_ref']} after "
-                                f"successful ff; restore failed: {restore_error}"
-                            )
-                        else:
-                            outcome["tracked_wip_restored"] = True
-                    outcome["tracked_wip_left_stashed"] = True
-                    log(
-                        "Step 15b: left overlapping tracked primary WIP in "
-                        f"{stash_record['stash_ref']} ({stash_record['stash_oid']}); "
-                        f"path(s): {', '.join(tracked_wip_paths)}; "
-                        f"overlap(s): {', '.join(overlap_paths)}"
-                    )
-                else:
-                    restore_error = _restore_primary_sync_tracked_wip(
-                        primary,
-                        stash_record,
-                        log=log,
-                    )
-                    if restore_error:
-                        outcome["tracked_wip_left_stashed"] = True
-                        outcome["tracked_wip_restore_error"] = restore_error
-                        log(
-                            "Step 15b: tracked primary WIP remains in "
-                            f"{stash_record['stash_ref']} after successful ff; "
-                            f"restore failed: {restore_error}"
-                        )
-                    else:
-                        outcome["tracked_wip_restored"] = True
+            _clear_behind_dev_signal(primary)
             log(
                 f"Step 15b: synced primary worktree {primary} on "
                 f"'{primary_branch}' {(old_sha or '?')[:8]} -> "

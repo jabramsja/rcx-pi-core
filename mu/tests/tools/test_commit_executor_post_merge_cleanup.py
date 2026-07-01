@@ -1330,10 +1330,8 @@ def test_sync_primary_ffs_feature_branch_behind_base(tmp_path):
     assert linked_branch == "lane-x"
 
 
-def test_sync_primary_restores_non_overlapping_tracked_wip(tmp_path):
-    """Tracked founder WIP is stashed only when a real ff is pending, then
-    restored with staged and unstaged state when origin/dev did not touch those
-    paths."""
+def test_sync_primary_writes_behind_dev_for_tracked_dirty_without_ff(tmp_path):
+    """Behind plus tracked dirty WIP writes behind_dev and leaves WIP untouched."""
     upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "jabramsja/feat-b"], cwd=primary, env=env)
     # Staged + unstaged tracked WIP on seed.txt.
@@ -1345,36 +1343,49 @@ def test_sync_primary_restores_non_overlapping_tracked_wip(tmp_path):
     (primary / "scratch.txt").write_text("untracked scratch\n")
     c1_sha = _advance_origin_dev_add_file(upstream, env)
 
+    lines: list[str] = []
     outcome = commit_mod.sync_primary_worktree_to_base(
-        repo_root=primary, base_branch="dev", log=_noop_log,
+        repo_root=primary, base_branch="dev", log=lines.append,
     )
 
-    assert outcome["synced"] is True, outcome
-    assert outcome["skipped"] is False, outcome
-    assert outcome["tracked_wip_paths"] == ["seed.txt"], outcome
-    assert outcome["tracked_wip_stash_marker"], outcome
-    assert outcome["tracked_wip_stash_ref"], outcome
-    assert outcome["tracked_wip_stash_oid"], outcome
-    assert outcome["tracked_wip_overlap_paths"] == [], outcome
-    assert outcome["tracked_wip_restored"] is True, outcome
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "dirty WIP" in (outcome["reason"] or ""), outcome
+    assert outcome["dirty_paths"] == ["scratch.txt", "seed.txt"], outcome
+    assert outcome["behind_count"] == 1, outcome
+    assert outcome["ahead_count"] == 0, outcome
+    assert outcome["behind_dev_signal_written"] is True, outcome
+    assert outcome["tracked_wip_paths"] == [], outcome
+    assert outcome["tracked_wip_stash_marker"] is None, outcome
+    assert outcome["tracked_wip_stash_ref"] is None, outcome
     assert outcome["tracked_wip_left_stashed"] is False, outcome
     assert outcome["tracked_wip_restore_error"] is None, outcome
-    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
     assert _git(["show", ":seed.txt"], cwd=primary).stdout == "staged founder WIP\n"
     assert (primary / "seed.txt").read_text() == "unstaged founder WIP\n"
     assert (primary / "scratch.txt").read_text() == "untracked scratch\n"
     status_lines = set(_git(["status", "--short"], cwd=primary).stdout.splitlines())
     assert "MM seed.txt" in status_lines
     assert "?? scratch.txt" in status_lines
+    assert c1_sha != c0_sha
     assert "commit_executor:primary_ffsync_tracked_wip" not in _git(
         ["stash", "list"], cwd=primary
     ).stdout
 
+    signal_path = primary / ".agent_bus" / "behind_dev.json"
+    assert signal_path.exists(), outcome
+    signal = json.loads(signal_path.read_text(encoding="utf-8"))
+    assert Path(signal["primary"]).resolve() == primary.resolve()
+    assert signal["base_ref"] == "origin/dev"
+    assert signal["behind_count"] == 1
+    assert signal["ahead_count"] == 0
+    assert signal["reason"] == "dirty_primary_worktree"
+    assert signal["dirty_paths"] == ["scratch.txt", "seed.txt"]
+    assert any("behind_dev" in line for line in lines), lines
 
-def test_sync_primary_leaves_overlapping_tracked_wip_stashed(tmp_path):
-    """If origin/dev touches a tracked WIP path, the helper still ff-syncs but
-    leaves the WIP recoverable in an executor-owned stash with explicit
-    metadata instead of applying a conflicted stash into the primary worktree."""
+
+def test_sync_primary_dirty_overlap_does_not_stash_or_overwrite(tmp_path):
+    """Even when origin/dev touches the dirty path, behind+dirty skips safely."""
     upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "jabramsja/feat-overlap"], cwd=primary, env=env)
     (primary / "seed.txt").write_text("staged founder WIP\n")
@@ -1387,38 +1398,31 @@ def test_sync_primary_leaves_overlapping_tracked_wip_stashed(tmp_path):
         repo_root=primary, base_branch="dev", log=_noop_log,
     )
 
-    assert outcome["synced"] is True, outcome
-    assert outcome["skipped"] is False, outcome
-    assert outcome["tracked_wip_paths"] == ["seed.txt"], outcome
-    assert outcome["tracked_wip_overlap_paths"] == ["seed.txt"], outcome
-    assert outcome["tracked_wip_stash_marker"], outcome
-    assert outcome["tracked_wip_stash_ref"], outcome
-    assert outcome["tracked_wip_stash_oid"], outcome
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "dirty WIP" in (outcome["reason"] or ""), outcome
+    assert outcome["dirty_paths"] == ["scratch.txt", "seed.txt"], outcome
+    assert outcome["behind_count"] == 1, outcome
+    assert outcome["ahead_count"] == 0, outcome
+    assert outcome["behind_dev_signal_written"] is True, outcome
+    assert outcome["tracked_wip_paths"] == [], outcome
+    assert outcome["tracked_wip_overlap_paths"] == [], outcome
+    assert outcome["tracked_wip_stash_marker"] is None, outcome
+    assert outcome["tracked_wip_stash_ref"] is None, outcome
+    assert outcome["tracked_wip_stash_oid"] is None, outcome
     assert outcome["tracked_wip_restored"] is False, outcome
-    assert outcome["tracked_wip_left_stashed"] is True, outcome
+    assert outcome["tracked_wip_left_stashed"] is False, outcome
     assert outcome["tracked_wip_restore_error"] is None, outcome
-    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
-    assert (primary / "seed.txt").read_text() == "origin seed c1\n"
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
+    assert _git(["show", ":seed.txt"], cwd=primary).stdout == "staged founder WIP\n"
+    assert (primary / "seed.txt").read_text() == "unstaged founder WIP\n"
     assert (primary / "scratch.txt").read_text() == "untracked scratch\n"
     status_lines = set(_git(["status", "--short"], cwd=primary).stdout.splitlines())
+    assert "MM seed.txt" in status_lines
     assert "?? scratch.txt" in status_lines
-    assert all("seed.txt" not in line for line in status_lines)
-
-    stash_ref = outcome["tracked_wip_stash_ref"]
-    assert _git(["show", f"{stash_ref}:seed.txt"], cwd=primary).stdout == (
-        "unstaged founder WIP\n"
-    )
-    assert _git(["show", f"{stash_ref}^2:seed.txt"], cwd=primary).stdout == (
-        "staged founder WIP\n"
-    )
-    stash_paths = set(
-        _git(
-            ["stash", "show", "--name-only", stash_ref],
-            cwd=primary,
-        ).stdout.splitlines()
-    )
-    assert "seed.txt" in stash_paths
-    assert "scratch.txt" not in stash_paths
+    assert c1_sha != c0_sha
+    assert _git(["stash", "list"], cwd=primary).stdout.strip() == ""
+    assert (primary / ".agent_bus" / "behind_dev.json").exists()
 
 
 def test_sync_primary_skips_already_current_before_stashing_tracked_wip(tmp_path):
@@ -1441,14 +1445,8 @@ def test_sync_primary_skips_already_current_before_stashing_tracked_wip(tmp_path
     assert (primary / "seed.txt").read_text() == "founder work in progress\n"
 
 
-def test_sync_primary_ffs_with_untracked_files_present(tmp_path):
-    """(#55) A PRIMARY holding UNTRACKED files (deferred reports / handoffs / scratch)
-    is STILL ff'd. Untracked files are not founder WIP a ff can clobber (git aborts on a
-    path collision; ff-only never touches non-colliding untracked), so GUARD-B must block
-    ONLY on TRACKED dirt. Regression for the main-repo drift the old
-    _dirty_worktree_paths (tracked | untracked) check caused: the auto-sync skipped
-    whenever an untracked deferred report / handoff sat in the primary -- i.e. almost
-    always."""
+def test_sync_primary_writes_behind_dev_with_untracked_files_present(tmp_path):
+    """Behind plus untracked primary files writes behind_dev and leaves them alone."""
     upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "jabramsja/feat-untracked"], cwd=primary, env=env)
     # Untracked artifacts in the primary (the normal state: handoffs, deferred notes).
@@ -1460,13 +1458,24 @@ def test_sync_primary_ffs_with_untracked_files_present(tmp_path):
         repo_root=primary, base_branch="dev", log=_noop_log,
     )
 
-    assert outcome["synced"] is True, outcome
-    assert outcome["skipped"] is False, outcome
-    # ff applied to origin/dev tip despite the untracked files.
-    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha, outcome
-    # Untracked files preserved (ff-only never touches non-colliding untracked).
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "dirty WIP" in (outcome["reason"] or ""), outcome
+    assert outcome["dirty_paths"] == [
+        "HANDOFF_FOR_CODEX.md",
+        "scratch_deferred_note.md",
+    ], outcome
+    assert outcome["behind_count"] == 1, outcome
+    assert outcome["ahead_count"] == 0, outcome
+    assert outcome["behind_dev_signal_written"] is True, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha, outcome
+    assert c1_sha != c0_sha
     assert (primary / "HANDOFF_FOR_CODEX.md").read_text() == "handoff"
     assert (primary / "scratch_deferred_note.md").read_text() == "deferred finding"
+    signal = json.loads(
+        (primary / ".agent_bus" / "behind_dev.json").read_text(encoding="utf-8")
+    )
+    assert signal["reason"] == "dirty_primary_worktree"
 
 
 def test_sync_primary_skips_divergent_local_commit(tmp_path):
@@ -1490,6 +1499,115 @@ def test_sync_primary_skips_divergent_local_commit(tmp_path):
     assert "ancestor" in (outcome["reason"] or ""), outcome
     # HEAD unchanged — the divergent local commit is preserved.
     assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == divergent_head
+
+
+def test_sync_primary_writes_behind_dev_signal_on_divergent_behind_skip(tmp_path):
+    """Divergent and behind primary branches get a durable behind_dev signal."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-behind-div"], cwd=primary, env=env)
+    (primary / "local.txt").write_text("divergent local work\n")
+    _git(["add", "local.txt"], cwd=primary, env=env)
+    _git(["commit", "-m", "local-only"], cwd=primary, env=env)
+    divergent_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    linked = tmp_path / "linked_lane"
+    _git(["worktree", "add", "-b", "lane-y", str(linked), "HEAD"], cwd=primary)
+    c1_sha = _advance_origin_dev_add_file(upstream, env)
+
+    lines: list[str] = []
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=linked, base_branch="dev", log=lines.append,
+    )
+
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "ancestor" in (outcome["reason"] or ""), outcome
+    assert outcome["behind_count"] == 1, outcome
+    assert outcome["ahead_count"] == 1, outcome
+    assert outcome["behind_dev_signal_written"] is True, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == divergent_head
+    assert c1_sha != divergent_head
+
+    primary_signal = primary / ".agent_bus" / "behind_dev.json"
+    lane_signal = linked / ".agent_bus" / "behind_dev.json"
+    assert primary_signal.exists(), outcome
+    assert not lane_signal.exists(), "signal must not land on the transient lane"
+    signal = json.loads(primary_signal.read_text(encoding="utf-8"))
+    assert Path(signal["primary"]).resolve() == primary.resolve()
+    assert signal["base_ref"] == "origin/dev"
+    assert signal["behind_count"] == 1
+    assert signal["ahead_count"] == 1
+    assert signal["reason"] == "divergent_local_commits"
+    assert isinstance(signal["timestamp"], str) and signal["timestamp"]
+    assert any("behind_dev" in line for line in lines), lines
+
+
+def test_sync_primary_does_not_write_behind_dev_for_ahead_only_branch(tmp_path):
+    """Ahead-only feature work is not behind dev and clears stale behind_dev."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-ahead-only"], cwd=primary, env=env)
+    (primary / "local.txt").write_text("local work\n")
+    _git(["add", "local.txt"], cwd=primary, env=env)
+    _git(["commit", "-m", "local-only"], cwd=primary, env=env)
+    local_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    stale = primary / ".agent_bus" / "behind_dev.json"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text('{"reason": "stale"}\n', encoding="utf-8")
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "ancestor" in (outcome["reason"] or ""), outcome
+    assert outcome["behind_count"] == 0, outcome
+    assert outcome["ahead_count"] == 1, outcome
+    assert outcome["behind_dev_signal_written"] is False, outcome
+    assert outcome["behind_dev_signal_cleared"] is True, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == local_head
+    assert not stale.exists()
+    assert c0_sha != local_head
+
+
+def test_sync_primary_clears_behind_dev_signal_on_clean_ff(tmp_path):
+    """A later clean ancestor fast-forward clears stale behind_dev."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-clearff"], cwd=primary, env=env)
+    stale = primary / ".agent_bus" / "behind_dev.json"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text('{"reason": "dirty_primary_worktree"}\n', encoding="utf-8")
+    c1_sha = _advance_origin_dev(upstream, env)
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert outcome["behind_dev_signal_cleared"] is True, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    assert not stale.exists()
+    assert c1_sha != c0_sha
+
+
+def test_sync_primary_clears_stale_signal_when_already_current(tmp_path):
+    """Already-current primary branches clear stale behind_dev without stashing."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-current-clear"], cwd=primary, env=env)
+    stale = primary / ".agent_bus" / "behind_dev.json"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text('{"reason": "dirty_primary_worktree"}\n', encoding="utf-8")
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert "already current" in (outcome["reason"] or ""), outcome
+    assert outcome["behind_dev_signal_cleared"] is True, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
+    assert not stale.exists()
 
 
 def test_sync_primary_skips_primary_on_base(tmp_path):
