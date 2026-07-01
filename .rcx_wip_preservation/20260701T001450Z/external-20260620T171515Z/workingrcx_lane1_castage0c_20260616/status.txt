@@ -1,0 +1,28 @@
+worktree=/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane1_castage0c_20260616
+branch=jabramsja/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16
+head=f074021973cc4289e14bea329136ca4c3efb483b
+upstream=origin/dev
+ahead_behind=74	0
+
+status_short_branch:
+## jabramsja/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16...origin/dev [behind 74]
+M  TASKS.md
+M  mu/host/js/core/bootstrap_core.js
+M  mu/host/python/rcx_pi/selfhost/eval_seed.py
+M  mu/tests/l4_gates/test_p7w4_structural_reduction_gate.py
+A  mu/tests/l4_gates/test_stage0_content_addressed_collapse_gate.py
+M  mu/tests/l4_gates/test_stage0_vm_cutover.py
+A  reports/control_plane/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16_2026-06-16.md
+A  reports/deferred/blocking/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16_phase_a_contradiction.md
+A  reports/deferred/non_blocking/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16_bridge_nonblockers.md
+A  reports/l4_wave_indicators/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16.json
+
+stash_list:
+stash@{0}: On structural-numbers-gcd-2026-06-19: gcd-packet-repair-marker-2026-06-20
+stash@{1}: On queue-status-sync-2026-06-20: queue-status-rootenv-duplicate-and-packet-refresh-2026-06-20
+stash@{2}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-pipeline-scope-privateattr-tooling-2026-05-29
+stash@{3}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-js-kernel-continuation-proof-2026-05-29
+stash@{4}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-out-of-scope-p7w5-commit-2026-05-29
+stash@{5}: On n3-js-evidence-walker-runtime-authority-parity-2026-05-22: failed n3-js-evidence-walker-runtime-authority-parity pipeline artifacts before phase-a path repair
+stash@{6}: On dev: codex-startup-checker-local-fix-2026-05-17
+stash@{7}: On pipeline-agent-pager-transport-2026-04-22: phase-a-recovery-unblock-pager-2026-04-22

@@ -1,0 +1,10 @@
+ .claude/hooks/artifact-edit-gate.sh             | 128 +++++++++---------------
+ .claude/settings.json                           |   9 ++
+ .claude/skills/preflight/SKILL.md               |  52 ++++++++++
+ CLAUDE.md                                       |   2 +
+ TASKS.md                                        |  28 +++++-
+ mu/tests/tools/test_orchestrator_mode_switch.py |   2 +-
+ mu/tools/docs/docs_registry.json                |   4 +-
+ mu/tools/executors/executor_config.json         |  66 ++++++------
+ mu/tools/observability/_pane_timeline.sh        |  67 ++++++++++---
+ 9 files changed, 228 insertions(+), 130 deletions(-)

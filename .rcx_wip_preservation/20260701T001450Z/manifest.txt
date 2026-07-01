@@ -1,0 +1,11 @@
+snapshot_id: 20260701T001450Z
+created_for_wave: pr-preservation-neverbehind-wip-reconciliation-2026-06-30
+primary_worktree: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX
+phase_b_worktree: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_pr_preservation_20260630
+old_external_snapshot: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/.rcx_wip_preservation/20260620T171515Z
+lane1_stage0_historical_artifact: external-20260620T171515Z/workingrcx_lane1_castage0c_20260616
+lane1_current_disposition: lane1_stage0_worktree/current-path-disposition.txt
+lane3_current_artifact: lane3_observability_worktree
+lane3_historical_artifact: external-20260620T171515Z/workingrcx_lane3_observability_20260619
+shared_stash_artifact: git-stashes
+notes: inspection-only snapshot; no stash pop/drop/clear, no branch movement, no sync cleanup. Raw diff/patch evidence is gzip-compressed with stable gzip headers so the exact evidence remains preserved while git diff --check treats it as binary evidence.

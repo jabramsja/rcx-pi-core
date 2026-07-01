@@ -1,0 +1,5 @@
+current_status: missing live git worktree path
+historical_path: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane1_castage0c_20260616
+historical_snapshot: external-20260620T171515Z/workingrcx_lane1_castage0c_20260616
+current_git_worktree_list_checked: git worktree list --porcelain at 2026-07-01T00:31Z
+disposition: old lane1 Stage0 staged work is preserved from the 20260620 snapshot; no live path was available to refresh.

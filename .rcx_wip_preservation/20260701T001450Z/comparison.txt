@@ -1,0 +1,13 @@
+# WIP Snapshot Comparison
+
+- Current primary worktree: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX`
+- Current primary branch: `jabramsja/workspace-2026-06-04`
+- Current primary HEAD: `73483308b844d282995a0be842af166876c49926`
+- Current ahead/behind vs `origin/dev`: `0 102`
+- Current tracked/staged status entries: `36`
+- Current untracked inventory entries: `15`
+- Current live stash list entries: `1`; the live list was inspected only.
+- External 20260620 snapshot path exists and is readable: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/.rcx_wip_preservation/20260620T171515Z`
+- External snapshot stash-list entries: `8`; those are preserved snapshot artifacts, not assumed live stashes.
+- External snapshot includes `WorkingRCX/head.bundle` and `git-stashes/all-stashes.bundle`; current snapshot includes new equivalents under this directory.
+- Current Phase B worktree ahead/behind vs `origin/dev`: `0 0`; packet edits are separate from primary WIP.

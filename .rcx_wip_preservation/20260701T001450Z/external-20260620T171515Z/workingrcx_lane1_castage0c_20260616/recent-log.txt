@@ -1,0 +1,20 @@
+f0740219 (HEAD -> jabramsja/n3-stage0-content-addressed-mu-typedispatch-reduction-2026-06-16) Merge pull request #1102 from jabramsja/jabramsja/revert-implementer-fable-to-opus-access-lost-2026-06-16
+113dc554 revert: pipeline implementer fable->claude (opus-4-8) -- claude-fable-5 model access lost
+91a894d0 Merge pull request #1101 from jabramsja/jabramsja/renew-theater-allowlist-expired-entries-2026-06-16
+b79f5c6b chore: renew 9 expired founder-owned theater_allowlist entries (2026-06-15 -> 2026-07-15)
+abe66eca Merge pull request #1100 from jabramsja/jabramsja/n3-kernel-driver-watchdog-accepted-boundary-marker-truth-2026-06-11
+7893b783 feat: Phase B implementation for n3-kernel-driver-watchdog-accepted-boundary-marker-truth-2026-06-11
+b6a66843 Merge pull request #1099 from jabramsja/jabramsja/n3-kernel-driver-max-steps-structural-budget-decision-2026-06-11
+cc8a0e50 fix: address bot review findings (round 1)
+7a39af21 feat: Phase B implementation for n3-kernel-driver-max-steps-structural-budget-decision-2026-06-11
+460f0a4f Merge pull request #1098 from jabramsja/jabramsja/fable-claude-bridge-adapter-max-turns-100-2026-06-11
+a152f310 fix: sync --max-turns onto existing bridge adapters, not only newly-seeded ones (PR #1098 bot P1)
+d723748b fix: bump claude+fable bridge adapter --max-turns to 100 (match opus implementer budget)
+cd724e33 Merge pull request #1097 from jabramsja/jabramsja/add-fable5-to-agent-menu-2026-06-11
+eb8aa714 fix: seed newly-added menu adapters into pre-existing bridge configs (PR #1097 bot P1)
+f0f119cb feat: add Claude Fable 5 to the agent menu + activate implementer (codex reviewer)
+f34b703c Merge pull request #1096 from jabramsja/jabramsja/monitor-default-autofollow-bus-resolver-narrow-2026-06-10
+7bb56e40 feat: Phase B implementation for monitor-default-autofollow-bus-resolver-narrow-2026-06-10
+47037a2e (jabramsja/monitor-default-autofollow-active-lane-bus-2026-06-10) Merge pull request #1095 from jabramsja/jabramsja/post-reentry-resume-phase-b-not-route-phase-a-2026-06-10
+105afa2e feat: resume seeded Phase B re-entry for recovered post_reentry_needs_phase_b instead of full ROUTE_PHASE_A
+28db1a65 Merge pull request #1094 from jabramsja/jabramsja/recovery-scope-drift-exclude-pyc-bytecode-2026-06-09

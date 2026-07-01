@@ -1,0 +1,67 @@
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX
+HEAD 73483308b844d282995a0be842af166876c49926
+branch refs/heads/jabramsja/workspace-2026-06-04
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_claroles_20260627
+HEAD 5061f270355521ecb33db2aaf8c5f771d64d4b17
+branch refs/heads/jabramsja/claude-roles-claude-2026-06-27
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_clarolesfull_20260627
+HEAD 2da83d930e6b76ff6b80828b7eb5e3e3147d2f0d
+branch refs/heads/dev
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_cpbackend_20260628
+HEAD a3992292bc4f07a6999ef98f17298541a9d20846
+branch refs/heads/jabramsja/control-plane-commit-backend-2026-06-28
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_dashboard_autoping_20260622
+HEAD 73483308b844d282995a0be842af166876c49926
+branch refs/heads/jabramsja/dashboard-autoping-observability-2026-06-22
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_fix34_20260620
+HEAD 1d3134061674c0dd3c314debcf849bdbaf6cb4a2
+branch refs/heads/jabramsja/pipeline-fix-34-bot-remediation-durable-edit-2026-06-20
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane2_recoverygate58
+HEAD 2da83d930e6b76ff6b80828b7eb5e3e3147d2f0d
+branch refs/heads/jabramsja/claude-control-plane-cleanup-2026-06-27
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_lane3_observability_20260619
+HEAD e6ba365858b2ad6d086f08e8f7c31c2a4b608f17
+branch refs/heads/jabramsja/pipeline-observability-live-root-2026-06-19
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_neverbehind2_20260628
+HEAD 05b6dd5aa54d294e12c86eb543cf9c0a0b032f1a
+branch refs/heads/jabramsja/never-behind-dev-signal-2026-06-28
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_neverbehind3_20260628
+HEAD 1ad8c91c53d9718b5f86f059a26eeeda19e85b88
+branch refs/heads/jabramsja/never-behind-dev-durable-signal-2026-06-28
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_neverbehind_20260628
+HEAD c7b228955624a63ad5a84c70920a2db413e21e83
+branch refs/heads/jabramsja/never-behind-dev-auto-sync-2026-06-28
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_nightlydiag_20260629
+HEAD 51130976dca27833badca28313a683e1099b09cc
+detached
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_pagerparity_20260621
+HEAD 71124008e051a64b84fc727eb292c97912fe8513
+branch refs/heads/jabramsja/pager-claude-codex-parity-resume-monitor-2026-06-21
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_pr_preservation_20260630
+HEAD 844ee137166a2d483971406deab3a66b40d414aa
+branch refs/heads/jabramsja/pr-preservation-neverbehind-wip-reconciliation-2026-06-30
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_route_xdist_20260630
+HEAD 844ee137166a2d483971406deab3a66b40d414aa
+branch refs/heads/jabramsja/control-plane-route-xdist-hardening-2026-06-30
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_setrolesdefault_20260628
+HEAD 13849e8aeea5d501078811f8b2b504cd72ff4f8e
+branch refs/heads/jabramsja/set-roles-syncs-default-no-drift-2026-06-28
+
+worktree /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_stage4_loop_20260622
+HEAD efaf4bd497843b7be255fa61d191580b0e748d98
+branch refs/heads/jabramsja/stage4-loop-struct-2026-06-22

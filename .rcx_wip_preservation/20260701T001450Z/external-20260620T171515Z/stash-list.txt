@@ -1,0 +1,8 @@
+stash@{0}: On structural-numbers-gcd-2026-06-19: gcd-packet-repair-marker-2026-06-20
+stash@{1}: On queue-status-sync-2026-06-20: queue-status-rootenv-duplicate-and-packet-refresh-2026-06-20
+stash@{2}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-pipeline-scope-privateattr-tooling-2026-05-29
+stash@{3}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-js-kernel-continuation-proof-2026-05-29
+stash@{4}: On ci-green-gate-js-metabolization-continuation-reuse-2026-05-28: codex-preserve-out-of-scope-p7w5-commit-2026-05-29
+stash@{5}: On n3-js-evidence-walker-runtime-authority-parity-2026-05-22: failed n3-js-evidence-walker-runtime-authority-parity pipeline artifacts before phase-a path repair
+stash@{6}: On dev: codex-startup-checker-local-fix-2026-05-17
+stash@{7}: On pipeline-agent-pager-transport-2026-04-22: phase-a-recovery-unblock-pager-2026-04-22
