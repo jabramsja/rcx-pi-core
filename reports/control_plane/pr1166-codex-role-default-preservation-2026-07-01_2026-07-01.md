@@ -115,10 +115,6 @@ FOUNDER_OVERRIDE:pr1166-codex-role-default-preservation-2026-07-01
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/pr1166-codex-role-default-preservation-2026-07-01.json`
 - Current staged files:
-  - `TASKS.md`
-  - `mu/tests/tools/test_executor_config_alignment.py`
-  - `mu/tools/executors/executor_common.py`
   - `reports/control_plane/pr1166-codex-role-default-preservation-2026-07-01_2026-07-01.md`
-  - `reports/control_plane/pr1166-codex-role-default-preservation-2026-07-01_wave_config.json`
   - `reports/l4_wave_indicators/pr1166-codex-role-default-preservation-2026-07-01.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
