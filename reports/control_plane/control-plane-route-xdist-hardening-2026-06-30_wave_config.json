@@ -1,0 +1,72 @@
+{
+  "wave_id": "control-plane-route-xdist-hardening-2026-06-30",
+  "title": "Control-Plane Route Inheritance And Local Xdist Load Hardening 2026-06-30",
+  "task_id": "[CONTROL-PLANE-ROOT-FIX]",
+  "purpose": "Close the control-plane defects observed during the NR-5 verifier: launcher-pinned Codex pager route did not survive a manual commit_executor retry without ambient env, and pre-push-fast/audit_fast under unbounded xdist auto overloaded JS subprocess parity tests. Keep the fix in tooling/control-plane surfaces only.",
+  "date": "2026-06-30",
+  "wave_class": "L4_ENABLER",
+  "target_gate_id": "G8",
+  "primary_blocker_class": "INTEGRATION",
+  "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+  "indicator_artifact_ref": "reports/l4_wave_indicators/control-plane-route-xdist-hardening-2026-06-30.json",
+  "indicator_collection_command": "python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id control-plane-route-xdist-hardening-2026-06-30 --output reports/l4_wave_indicators/control-plane-route-xdist-hardening-2026-06-30.json",
+  "implementer_agent": "codex",
+  "reviewer_agent": "codex",
+  "pager_route": "codex",
+  "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_pipeline_agent_pager.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_orchestrator_mode_switch.py --tb=short && bash -n mu/tools/audits/audit_fast.sh && bash -n mu/tools/hooks/pre-push-fast && bash -n scripts/green_gate.sh && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id control-plane-route-xdist-hardening-2026-06-30 --wave-class L4_ENABLER && git diff --check",
+  "evidence_delta": "(1) Reproduce and lock the route leak found during NR-5: a launcher config with pager_route=codex emitted normal pipeline events as codex, but a direct commit_executor retry with only --handoff and --bus-dir fell back to committed pipeline_agent_pager.route=both. (2) Carry the wave-owned pager route through routing record, handoff, commit executor lifecycle/pre-commit-supervisor pager emissions, and retry/continuation paths without relying on an ambient RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE shell variable. (3) Add a durable local pre-push/audit_fast worker cap or equivalent grouping so JS subprocess parity tests cannot false-red from unbounded xdist auto fanout; keep an explicit env override for larger machines.",
+  "progress_proof_before": "PR #1187 completed NR-5 only after manually rerunning commit_executor with PYTEST_XDIST_AUTO_NUM_WORKERS=4. The retry event stream recorded requested_targets=[\"codex\",\"claude\"], route=\"both\" despite the wave config pinning pager_route=\"codex\". The first uncapped pre-push-fast failed on JS subprocess 60s timeouts, while focused serial/xdist tests passed and the capped rerun passed.",
+  "progress_proof_after": "A no-env commit_executor retry against a handoff from a codex-routed launch emits commit lifecycle and pre-commit-supervisor events with route=\"codex\" and requested_targets=[\"codex\"]. Local pre-push/audit_fast defaults to a bounded worker count for JS-heavy suites or otherwise proves a bounded xdist shape, while preserving documented override behavior.",
+  "post_gate_contract_sweep": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_pipeline_agent_pager.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_orchestrator_mode_switch.py --tb=short && bash -n mu/tools/audits/audit_fast.sh && bash -n mu/tools/hooks/pre-push-fast && bash -n scripts/green_gate.sh",
+  "scope_summary": "Tooling/control-plane hardening only. Fix route inheritance across launcher, dispatcher/handoff, commit executor, pager events, and local validation load shaping. Do not edit production runtime, substrate, seed, scheduler, registry, projection, Python/JS semantic runtime, or Claude-owned files.",
+  "scope_items": [
+    "reports/control_plane/control-plane-route-xdist-hardening-2026-06-30_wave_config.json (MODIFY THROUGH LAUNCHER/WAVE-CONFIG SYNC) -- launcher config for this control-plane hardening wave.",
+    "TASKS.md (MODIFY THROUGH LAUNCHER/TRACKER SYNC) -- record this root-fix wave and keep Coinduction next, Fixpoint after it, and Optimization last after control-plane blockers clear.",
+    "mu/tools/executors/launch_wave.py (MODIFY IF NARROWED) -- persist launch-owned pager_route authority into the routing/handoff path rather than only child env.",
+    "mu/tools/executors/executor_dispatch.py (MODIFY IF NARROWED) -- carry launch metadata into Phase B/commit handoff when needed.",
+    "mu/tools/executors/commit_executor.py (MODIFY IF NARROWED) -- commit lifecycle and pre-commit-supervisor pager events must resolve the handoff/wave pager route when ambient env is absent.",
+    "mu/tools/executors/recovery_gate.py (MODIFY IF NARROWED) -- recovery pager events must resolve the active bus/wave pager route instead of falling back to committed config.",
+    "mu/tools/executors/executor_common.py (MODIFY IF NARROWED) -- shared helper surface for route authority if Phase A chooses one.",
+    "mu/tools/observability/pipeline_agent_pager.py (MODIFY IF NARROWED) -- route resolution tests/helpers only; preserve route=both semantics when explicitly selected.",
+    "mu/tools/audits/audit_fast.sh and/or mu/tools/hooks/pre-push-fast (MODIFY IF NARROWED) -- cap or group local xdist load for JS subprocess parity paths while preserving env override.",
+    "mu/tests/tools/test_commit_executor_receipt.py, mu/tests/tools/test_pipeline_agent_pager.py, mu/tests/tools/test_executor_dispatch.py, mu/tests/tools/test_orchestrator_mode_switch.py (MODIFY/ADD focused regressions) -- prove route inheritance and worker-cap behavior.",
+    "reports/l4_wave_indicators/control-plane-route-xdist-hardening-2026-06-30.json (GENERATED BY WAVE) -- indicator artifact."
+  ],
+  "work_items": [
+    "Launch through launch_wave.py, executor_dispatch, Phase A, Phase B, bridge review, handoff receipts, pre-commit supervisor, and commit executor.",
+    "Reproduce the NR-5 route leak in a focused test: committed executor_config pager route is both, wave/launch route is codex, no RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE env is present, direct commit_executor-style lifecycle events still route only to codex.",
+    "Choose one durable route authority path in Phase A: either persist pager_route into the routing/handoff record and pass it as explicit pager route, or materialize a bus-local route state before any commit/retry event can fire. Avoid relying on an operator shell env var.",
+    "Ensure pre-commit-supervisor lifecycle, commit_started, commit_ready, commit_failed/success, recovery-triggered retry, and bot-remediation pager emissions all use the same route authority.",
+    "Add a local pre-push/audit_fast xdist worker cap or equivalent JS-heavy test grouping that defaults to a safe worker count and documents/locks env override behavior.",
+    "Keep tmux/pager/autoping labels tied to the same route source if Phase A finds the stale-pane label path in scope; do not rebuild unrelated tmux lifecycle code in this wave.",
+    "Run focused route/commit/pager tests, shell syntax checks, staged L4 contract, and diff check before commit handoff."
+  ],
+  "constraints": [
+    "Implementer, reviewer, and pager route are Codex; Codex 5.5 xhigh defaults come from executor_config.json and bridge-agent defaults.",
+    "Pipeline is primary; do not hand-author implementation receipts, handoffs, commits, PRs, or merges.",
+    "No Claude-owned files may be edited.",
+    "Do not edit production runtime, substrate, seed, scheduler, registry, projection, Python/JS semantic runtime, or parity implementation files.",
+    "Do not change the meaning of explicit pager route=both; only prevent accidental fallback to both when a wave pinned a single route.",
+    "Do not advance Coinduction, Fixpoint, or Optimization inside this control-plane hardening wave.",
+    "Keep any manual recovery from this wave paired with a same-wave mechanical fix or a precise next-wave packet."
+  ],
+  "stop_conditions": [
+    "Halt as NEEDS_RESCOPING if the route fix requires changing runtime/substrate/parity semantics.",
+    "Halt as POLICY_BOUND if the only available route fix requires editing Claude-owned files or making Claude the default target against founder direction.",
+    "Halt as DEFECT if focused tests prove current commit/retry cannot carry route authority without a broader dispatcher/handoff redesign; record the exact failing path.",
+    "Halt if implementation would require weakening route=both fanout semantics or suppressing real JS parity failures instead of reducing local fanout load."
+  ],
+  "acceptance_criteria": [
+    "A no-env commit_executor retry using a codex-routed handoff/bus emits route=\"codex\" and requested_targets=[\"codex\"] for commit lifecycle and pre-commit-supervisor events.",
+    "Launcher/dispatcher/handoff metadata preserves pager_route=\"codex\" through Phase B into commit execution.",
+    "Local pre-push/audit_fast defaults to a bounded worker count, or equivalent JS subprocess grouping, that prevents the reproduced NR-5 false-red class while preserving an explicit override.",
+    "Focused route/pager/commit tests pass, shell syntax checks pass, staged L4 contract passes, and git diff check passes.",
+    "No runtime/substrate/seed/parity implementation or Claude-owned files are touched."
+  ],
+  "request_for_agent": "Launch this control-plane hardening wave through the pipeline with Codex implementer, Codex reviewer, and Codex pager route. Fix the NR-5 route-inheritance leak so manual/retry commit executor paths do not fall back to route=both when the wave pinned codex, and fix the local pre-push/audit_fast xdist load shape so JS subprocess parity tests do not false-red under unbounded local fanout. Keep the change tooling-only, receipt-backed, and test-locked.",
+  "request_for_claude": "Compatibility input only: this wave is pinned to Codex implementer, Codex reviewer, and Codex pager route. Do not route implementation, review, pager handling, commit handling, or receipts to Claude.",
+  "authorization_note": "Founder-directed autonomous continuation after NR-5 PR #1187: pipeline primary, handoff receipts required, all implementers/reviewers Codex 5.5 xhigh, and structural root fixes must be queued for any manual bypass needed to move pipeline forward.",
+  "routing_decision": "ROUTE_PHASE_A",
+  "routing_summary": "Control-plane root fix for Codex pager route inheritance across commit/retry paths and local xdist load shaping for JS-heavy pre-push validation.",
+  "tracked_packet": "reports/control_plane/control-plane-route-xdist-hardening-2026-06-30_2026-06-30.md"
+}
