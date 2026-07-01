@@ -8081,6 +8081,49 @@ class TestHybridScopeAudit:
         assert ok is True
         assert rel_path not in audit["observed_drift"]
 
+    def test_pipeline_agent_pager_lock_runtime_state_can_appear_and_disappear(
+        self, tmp_path, monkeypatch
+    ):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        rel_path = ".agent_bus/observability/pipeline_agent_pager.lock"
+        lock_path = tmp_path / rel_path
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: baseline before pager event lock appears
+            tmp_path,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        lock_path.write_text("", encoding="utf-8")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: pager lock creation is observability churn
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert rel_path not in audit["observed_drift"]
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: baseline while pager event lock exists
+            tmp_path,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        lock_path.unlink()
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: pager lock deletion is observability churn
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tests/tools/test_recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert rel_path not in audit["observed_drift"]
+
     def test_agent_bus_pager_receiver_runtime_state_symlink_fails_closed(
         self, tmp_path, monkeypatch
     ):
@@ -14419,6 +14462,34 @@ class TestMaxTurnsClassification:
         assert fc == FailureClass.MAX_TURNS_REACHED
         assert rg_mod.tier_for(fc) == 3
 
+    def test_pre_push_pytest_failure_wrapped_in_adapter_max_turns_is_test_failure(self):
+        embedded_output = (
+            "pre-push-fast failed: FAILED "
+            "mu/tests/l4_gates/test_kernel_run_result_contract.py::"
+            "TestJsKernelRunResultContract::test_js_max_steps_stall_true\n"
+            "subprocess.TimeoutExpired: Command ['node', "
+            "'mu/host/js/eval_step.js'] timed out after 30 seconds\n"
+            "1 failed, 213 passed"
+        )
+        stdout = json.dumps(
+            {
+                "type": "result",
+                "subtype": "error_max_turns",
+                "item": {"aggregated_output": embedded_output},
+            }
+        )
+
+        fc = rg_mod.classify_failure(
+            {
+                "status": "failed",
+                "step": "run_pre_push_script",
+                "stdout": stdout,
+            }
+        )
+
+        assert fc == FailureClass.TEST_FAILURE
+        assert rg_mod.tier_for(fc) == 3
+
     def test_embedded_adapter_error_max_turns_is_tier3(self):
         stdout = json.dumps({
             "type": "result",
@@ -18933,6 +19004,43 @@ def test_diagnosis_prompt_includes_wait_ci_structured_failure_context(tmp_path):
     assert "test_js_trampoline_run_engine_negative_control" in prompt
     assert "runs/26288230263/job/77381193282" in prompt
     assert "timed out after 30 seconds" in prompt
+
+
+def test_diagnosis_prompt_extracts_embedded_pre_push_js_parity_context(tmp_path):
+    embedded_output = (
+        ("x" * 5000)
+        + "\npre-push-fast failed: FAILED "
+        "mu/tests/l4_gates/test_kernel_run_result_contract.py::"
+        "TestJsKernelRunResultContract::test_js_max_steps_stall_true"
+        "\nsubprocess.TimeoutExpired: Command ['node', "
+        "'mu/host/js/eval_step.js'] timed out after 30 seconds"
+        "\n"
+        + ("y" * 5000)
+    )
+    result = {
+        "status": "failed",
+        "step": "run_pre_push_script",
+        "failure_class": "test_failure",
+        "stdout": json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"aggregated_output": embedded_output},
+            }
+        ),
+        "stderr": "",
+    }
+
+    prompt = rg_mod._build_diagnosis_prompt(  # ANTICHEAT_OK: embedded pre-push context regression
+        result,
+        "pr-1173-neverbehind-refresh-2026-07-01",
+        0,
+        tmp_path,
+    )
+
+    assert "embedded_stdout_context:" in prompt
+    assert "test_js_max_steps_stall_true" in prompt
+    assert "mu/host/js/eval_step.js" in prompt
+    assert len(prompt) <= rg_mod._RECOVERY_AGENT_PROMPT_MAX_CHARS  # ANTICHEAT_OK
 
 
 _ANTI_THEATER_RATCHET_PYTEST_ID = (

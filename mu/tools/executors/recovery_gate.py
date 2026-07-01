@@ -450,8 +450,14 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         )
         if part
     )
+    embedded_stream_text = "\n".join(
+        _embedded_json_context_lines(stdout, line_limit=40)
+        + _embedded_json_context_lines(stderr, line_limit=40)
+    )
     combined_text = " ".join(
-        part for part in (stderr, stdout, embedded_reason) if isinstance(part, str) and part
+        part
+        for part in (stderr, stdout, embedded_reason, embedded_stream_text)
+        if isinstance(part, str) and part
     )
     combined_lower = combined_text.lower()
     reason_text = _summarize_result_reason(result)
@@ -478,12 +484,6 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     if _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result):
         return FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
 
-    if any(
-        _json_field_equals(candidate, frozenset({"error_subtype", "subtype"}), "error_max_turns")
-        for candidate in (result, embedded_stdout, embedded_stderr)
-    ):
-        return FailureClass.MAX_TURNS_REACHED
-
     status_key = str(status or embedded_status or "").strip().lower()
     explicit_failure_class = str(
         result.get("failure_class")
@@ -493,6 +493,17 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     ).strip().lower()
     if status_failed and explicit_failure_class == FailureClass.TEST_FAILURE.value:
         return FailureClass.TEST_FAILURE
+    early_local_gate_signal = f"{reason_lower} {combined_lower}"
+    if status_failed and _looks_like_local_gate_pytest_failure(
+        step_lower,
+        early_local_gate_signal,
+    ):
+        return FailureClass.TEST_FAILURE
+    if any(
+        _json_field_equals(candidate, frozenset({"error_subtype", "subtype"}), "error_max_turns")
+        for candidate in (result, embedded_stdout, embedded_stderr)
+    ):
+        return FailureClass.MAX_TURNS_REACHED
     private_attr_signal = " ".join(
         part
         for part in (reason_lower, combined_lower, step_lower)
@@ -6458,6 +6469,111 @@ def _is_dangerous_command(cmd: str) -> bool:
     return False
 
 
+_EMBEDDED_JSON_CONTEXT_KEYS = (
+    "aggregated_output",
+    "stdout",
+    "stderr",
+    "error",
+    "errors",
+    "message",
+    "detail",
+    "reason",
+    "output",
+    "text",
+    "content",
+)
+_EMBEDDED_JSON_METADATA_KEYS = frozenset({
+    "type",
+    "subtype",
+    "stop_reason",
+    "role",
+    "id",
+    "event_id",
+    "created_at",
+    "updated_at",
+})
+
+
+def _iter_embedded_json_objects(value: Any) -> list[dict[str, Any]]:
+    """Return JSON objects embedded in a stream or JSONL-ish text value."""
+    if not isinstance(value, str):
+        return []
+    objects: list[dict[str, Any]] = []
+    first = _parse_json_object(value)
+    if first:
+        objects.append(first)
+    for line in value.splitlines():
+        stripped = line.strip()
+        if "{" not in stripped:
+            continue
+        parsed = _parse_json_object(stripped)
+        if parsed:
+            objects.append(parsed)
+    return objects
+
+
+def _embedded_json_context_texts(value: Any, *, max_texts: int = 8) -> list[str]:
+    """Extract bounded actionable text from adapter JSON wrappers."""
+    texts: list[str] = []
+    seen: set[str] = set()
+
+    def add_text(raw: Any) -> None:
+        if len(texts) >= max_texts:
+            return
+        text = str(raw or "").strip()
+        if not text or text in _TRIVIAL_EXCERPTS or text in seen:
+            return
+        seen.add(text)
+        texts.append(text)
+
+    def visit(node: Any, *, actionable: bool = False) -> None:
+        if len(texts) >= max_texts:
+            return
+        if isinstance(node, dict):
+            for key in _EMBEDDED_JSON_CONTEXT_KEYS:
+                if key in node:
+                    visit(node[key], actionable=True)
+            for key, item in node.items():
+                if key in _EMBEDDED_JSON_CONTEXT_KEYS or key in _EMBEDDED_JSON_METADATA_KEYS:
+                    continue
+                visit(item, actionable=actionable)
+            return
+        if isinstance(node, list):
+            for item in node:
+                visit(item, actionable=actionable)
+            return
+        if not isinstance(node, str):
+            return
+        lowered = node.lower()
+        if actionable or any(
+            hint in lowered
+            for hint in (
+                "pre-push-fast failed",
+                "failed ",
+                "failure",
+                "error",
+                "timed out",
+                "timeout",
+                "pytest",
+                "traceback",
+            )
+        ):
+            add_text(node)
+
+    for embedded in _iter_embedded_json_objects(value):
+        visit(embedded)
+        if len(texts) >= max_texts:
+            break
+    return texts
+
+
+def _embedded_json_context_lines(value: Any, *, line_limit: int) -> list[str]:
+    lines: list[str] = []
+    for text in _embedded_json_context_texts(value):
+        lines.extend(_tail_recovery_prompt_lines(text, line_limit))
+    return lines[-line_limit:]
+
+
 def _structured_recovery_context_lines(result: dict[str, Any]) -> list[str]:
     """Render structured executor result fields that are not stdout/stderr."""
     lines: list[str] = []
@@ -6479,6 +6595,12 @@ def _structured_recovery_context_lines(result: dict[str, Any]) -> list[str]:
             rendered = str(value)
         lines.append(f"{key}:")
         lines.extend(_tail_recovery_prompt_lines(rendered, 40))
+    for key, label in (("stdout", "embedded_stdout_context"), ("stderr", "embedded_stderr_context")):
+        embedded_lines = _embedded_json_context_lines(result.get(key), line_limit=40)
+        if not embedded_lines:
+            continue
+        lines.append(f"{label}:")
+        lines.extend(embedded_lines)
     return lines or ["(none)"]
 
 
@@ -7319,7 +7441,8 @@ def _is_hybrid_transient_observability_state_path(rel_path: str) -> bool:
         or re.fullmatch(
             bus
             + r"/observability/(?:pipeline_agent_delivery_receipts\.jsonl|"
-            r"pipeline_agent_events\.jsonl|pipeline_agent_pager_state\.json)",
+            r"pipeline_agent_events\.jsonl|pipeline_agent_pager_state\.json|"
+            r"pipeline_agent_pager\.lock)",
             rel_path,
         )
         is not None
