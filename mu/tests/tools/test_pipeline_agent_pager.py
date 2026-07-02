@@ -2770,18 +2770,19 @@ def test_requested_targets_both_expands_to_codex_and_claude():
     assert pager_mod._requested_targets("claude") == ["claude"]  # ANTICHEAT_OK: route fan-out contract test
 
 
-def test_executor_config_default_pager_route_is_codex():
-    """The shipped pager fallback follows the committed Codex orchestrator.
+def test_executor_config_default_pager_route_is_claude():
+    """The shipped pager fallback follows the committed all-Claude roles.
 
     Explicit ``route=both`` still fans out to Codex and the dedicated Claude monitor
     in the route-contract tests above. The checked-in fallback stays narrowed to
-    Codex so a clean checkout or resumed process without bus-local
-    ``orchestrator_mode.json`` cannot page both orchestrators by accident.
+    Claude so a clean checkout or resumed process without bus-local
+    ``orchestrator_mode.json`` pages Claude by default, consistent with the
+    committed claude/claude roles -- no active Codex pager target remains.
     """
     repo_root = Path(__file__).resolve().parents[3]
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    assert config["pipeline_agent_pager"]["route"] == "codex"
+    assert config["pipeline_agent_pager"]["route"] == "claude"
 
 
 def test_session_start_hook_writes_claude_monitor_session_id_when_flag_set(tmp_path):
