@@ -28,7 +28,7 @@ def _seed_config(root: Path) -> Path:
             {
                 "role_agents": {"implementer": "claude", "reviewer": "claude"},
                 "bridge_agent_defaults": {"claude": {}, "codex": {}},
-                "pipeline_agent_pager": {"enabled": True, "route": "codex"},
+                "pipeline_agent_pager": {"enabled": True, "route": "claude"},
                 "backends": {
                     "post_merge_supervisor": "codex",
                     "dialectic_executor": "codex",
@@ -111,7 +111,7 @@ def test_role_switch_preserves_orchestrator_mode_surfaces(tmp_path):
     assert rc == 0
     data = json.loads(cfg.read_text())
     assert data["role_agents"] == {"implementer": "codex", "reviewer": "claude"}
-    assert data["pipeline_agent_pager"] == {"enabled": True, "route": "codex"}
+    assert data["pipeline_agent_pager"] == {"enabled": True, "route": "claude"}
     assert state_path.read_text(encoding="utf-8") == before_state
 
 
