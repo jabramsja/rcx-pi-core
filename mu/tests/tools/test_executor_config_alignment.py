@@ -627,17 +627,20 @@ class TestBareFallbackFollowsCommittedRoles:
         self, tmp_path, monkeypatch
     ):
         # Last resort: when the committed file is truly absent/unreadable, the
-        # hardcoded DEFAULT_EXECUTOR_CONFIG['role_agents'] literal is used. Under
-        # current policy that literal must preserve Codex/Codex, and every derived
-        # backend/reviewer field must follow that literal while commit_executor
-        # remains intentionally unassigned.
+        # hardcoded DEFAULT_EXECUTOR_CONFIG['role_agents'] literal is used, and every
+        # derived backend/reviewer field must follow THAT literal (the derivation
+        # invariant) while commit_executor remains intentionally unassigned.
+        # Provider-agnostic: expectations are derived from the DEFAULT literal itself,
+        # not a hardcoded provider name, so a set_roles switch of the committed roles
+        # and the matching DEFAULT (e.g. the claude-across-the-board flip) keeps this
+        # green without a test edit.
         self._clear_role_env(monkeypatch)
         missing = tmp_path / "nonexistent.json"
         monkeypatch.setattr(
             executor_common, "_committed_executor_config_path", lambda: missing
         )
         default_ra = _load_default_executor_config_role_agents()
-        assert default_ra == {"implementer": "codex", "reviewer": "codex"}
+        assert set(default_ra) == ROLE_AGENT_KEYS
 
         config = merge_executor_config_overrides({})
         assert config["role_agents"] == default_ra
@@ -649,11 +652,11 @@ class TestBareFallbackFollowsCommittedRoles:
         assert config["backends"] == materialized["backends"]
         assert config["bridge_reviewers"] == materialized["bridge_reviewers"]
         for key in IMPLEMENTER_BACKEND_KEYS:
-            assert config["backends"][key] == "codex"
+            assert config["backends"][key] == default_ra["implementer"]
         for key in REVIEW_OVERRIDE_BACKEND_KEYS:
-            assert config["backends"][key] == "codex"
+            assert config["backends"][key] == default_ra["reviewer"]
         for key in REVIEWER_BRIDGE_KEYS:
-            assert config["bridge_reviewers"][key] == "codex"
+            assert config["bridge_reviewers"][key] == default_ra["reviewer"]
         assert config["backends"]["commit_executor"] is None
 
     def test_explicit_role_agents_override_is_authoritative_over_fallback(
