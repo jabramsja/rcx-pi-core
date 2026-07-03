@@ -628,16 +628,17 @@ class TestBareFallbackFollowsCommittedRoles:
     ):
         # Last resort: when the committed file is truly absent/unreadable, the
         # hardcoded DEFAULT_EXECUTOR_CONFIG['role_agents'] literal is used. Under
-        # current policy that literal must preserve Codex/Codex, and every derived
-        # backend/reviewer field must follow that literal while commit_executor
-        # remains intentionally unassigned.
+        # the current all-Claude default that literal is Claude/Claude, and every
+        # derived backend/reviewer field must follow that literal while
+        # commit_executor remains intentionally unassigned. (codex stays a valid
+        # switch target; it is simply no longer the no-config DEFAULT.)
         self._clear_role_env(monkeypatch)
         missing = tmp_path / "nonexistent.json"
         monkeypatch.setattr(
             executor_common, "_committed_executor_config_path", lambda: missing
         )
         default_ra = _load_default_executor_config_role_agents()
-        assert default_ra == {"implementer": "codex", "reviewer": "codex"}
+        assert default_ra == {"implementer": "claude", "reviewer": "claude"}
 
         config = merge_executor_config_overrides({})
         assert config["role_agents"] == default_ra
@@ -649,11 +650,11 @@ class TestBareFallbackFollowsCommittedRoles:
         assert config["backends"] == materialized["backends"]
         assert config["bridge_reviewers"] == materialized["bridge_reviewers"]
         for key in IMPLEMENTER_BACKEND_KEYS:
-            assert config["backends"][key] == "codex"
+            assert config["backends"][key] == "claude"
         for key in REVIEW_OVERRIDE_BACKEND_KEYS:
-            assert config["backends"][key] == "codex"
+            assert config["backends"][key] == "claude"
         for key in REVIEWER_BRIDGE_KEYS:
-            assert config["bridge_reviewers"][key] == "codex"
+            assert config["bridge_reviewers"][key] == "claude"
         assert config["backends"]["commit_executor"] is None
 
     def test_explicit_role_agents_override_is_authoritative_over_fallback(

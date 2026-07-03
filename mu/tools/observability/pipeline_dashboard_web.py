@@ -68,7 +68,14 @@ def _fallback_configured_role_agents(
     config: dict | None = None,
     bus_dir: str | Path | None = None,
 ):
-    role_agents = {"implementer": "codex", "reviewer": "codex"}
+    # Last-resort default (used only if the executor_config.json read below also
+    # fails): the all-Claude no-config default, matching DEFAULT_EXECUTOR_CONFIG.
+    # codex stays fully supported — a readable config still overrides this to
+    # whatever role_agents it names. Kept as a literal rather than derived from
+    # executor_common: this fallback runs only because the executor_common import
+    # failed (see the configured_role_agents import guard below), so that canonical
+    # default is unavailable here.
+    role_agents = {"implementer": "claude", "reviewer": "claude"}
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     try:
         payload = json.loads(config_path.read_text(encoding="utf-8"))

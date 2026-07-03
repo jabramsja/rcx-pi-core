@@ -1116,7 +1116,14 @@ if mode in {"codex", "claude"}:
 PY
     return 0
   fi
-  printf '%s\n' "codex"
+  # No --orchestrator-mode env and no bus-local orchestrator_mode.json: fall back
+  # to the all-Claude default so a clean checkout launches the Claude monitor/
+  # autoping, consistent with the committed pager route. codex stays a fully
+  # supported mode (selected via --orchestrator-mode / orchestrator_mode.json);
+  # only this no-config default is claude. Kept as a literal rather than derived
+  # from a committed default: orchestrator mode is {codex,claude}, which does not
+  # map cleanly from the wider pager-route/role-agent domain.
+  printf '%s\n' "claude"
 }
 
 cmd_owner_tick() {
