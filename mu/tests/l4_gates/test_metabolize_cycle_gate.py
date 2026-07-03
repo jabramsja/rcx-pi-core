@@ -43,7 +43,13 @@ def _js_request(action, **kwargs):
     js_path = REPO_ROOT / "mu" / "host" / "js" / "eval_step.js"
     result = subprocess.run(
         ["node", str(js_path), "--json-api", json.dumps(request)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
+        # Load-tolerant headroom (wave parity-node-subprocess-load-2026-07-02).
+        # Same `node eval_step.js` spawn that test_hemisphere_parity.py found
+        # CPU-starved past a tight 60s budget under `-n auto` and raised to 180.
+        # The repo-root conftest flock now serializes node so this runs
+        # un-starved; 60->180 matches the sibling for defense-in-depth (never
+        # lowered). Stays < the l4_expensive lane's per-test --timeout=900.
+        capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=180,
     )
     for line in result.stdout.split("\n"):
         if line.startswith("JSON_API_RESPONSE:"):

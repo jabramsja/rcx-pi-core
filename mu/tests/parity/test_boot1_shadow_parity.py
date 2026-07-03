@@ -44,7 +44,12 @@ def _run_js_json_api(request_dict: dict) -> dict:
     """Run a JSON API request against the JS substrate."""
     result = subprocess.run(
         ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
-        capture_output=True, text=True, cwd=ROOT, timeout=120
+        # Load-tolerant headroom (wave parity-node-subprocess-load-2026-07-02).
+        # Paxos boot1 e2e runs ~13-60s serially; the repo-root conftest flock now
+        # serializes node so this executes un-starved, but 120s was only ~2x the
+        # serial worst case. Raised to 240 (a safety margin, still < the @slow
+        # lane's per-test --timeout=300 so this fires first on a genuine hang).
+        capture_output=True, text=True, cwd=ROOT, timeout=240
     )
     for line in result.stdout.split('\n'):
         if line.startswith('JSON_API_RESPONSE:'):
