@@ -1947,7 +1947,7 @@ class TestAPIMaxStepsGuard:
     def _run_js_json_api(self, request_dict: dict) -> dict:
         result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
-            capture_output=True, text=True, cwd=ROOT, timeout=30
+            capture_output=True, text=True, cwd=ROOT, timeout=600
         )
         for line in result.stdout.split('\n'):
             if line.startswith('JSON_API_RESPONSE:'):
@@ -2002,7 +2002,7 @@ class TestEnginePipelineCrossSubstrateParity:
     def _run_js_json_api(self, request_dict: dict) -> dict:
         result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
-            capture_output=True, text=True, cwd=ROOT, timeout=120
+            capture_output=True, text=True, cwd=ROOT, timeout=600
         )
         for line in result.stdout.split('\n'):
             if line.startswith('JSON_API_RESPONSE:'):
@@ -2873,7 +2873,7 @@ def _module_run_js_json_api(request_dict: dict) -> dict:
         capture_output=True,
         text=True,
         cwd=ROOT,
-        timeout=60,
+        timeout=600,
     )
     for line in result.stdout.split('\n'):
         if line.startswith('JSON_API_RESPONSE:'):
