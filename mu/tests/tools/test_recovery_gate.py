@@ -14528,6 +14528,173 @@ class TestNeedsPhaseB_Tier3:
         assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "wave-plan-required"
 
 
+class TestPostReentryDeferrableVetoNotLoop:
+    """#46/#62: an ALL-deferrable post-reentry NEEDS_PHASE_B veto must
+    defer-and-commit -- pre-defer via the EXISTING deferred-packet +
+    all_non_blocking carry-forward so the re-entered Phase B #19b-defers the
+    finding and commits -- instead of a plain resume that re-emits the same
+    non-blocker and loops (recovered=True each round, never converging). The
+    loop-guard is GATED ON DEFERRABILITY (the single shared
+    _finding_is_deferrable_on_go rule), NOT a bare prior-round count: a
+    high/critical / truly-blocking veto (even on a repeat cycle) stays on the
+    fail-closed resume path, and a reviewer/adapter crash still strands -- neither
+    is ever defer-and-committed.
+    """
+
+    _LOW_NON_BLOCKER = {
+        "title": "control-packet prose line-ref FIX-25 does not strip",
+        "severity": "low",
+        "disposition": "non_blocking",
+        "class": "DOC_ACCURACY",
+        "file": "reports/control_plane/pkt.md",
+    }
+
+    def _post_reentry_veto(self, **overrides):
+        # Canonical post-reentry NEEDS_PHASE_B veto payload (mirrors the fields
+        # phase_b_executor sets at the reentry NEEDS_PHASE_B emission).
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "wave-post-reentry-defer",
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B after reentry convergence."
+            ],
+        }
+        result.update(overrides)
+        return result
+
+    # (a) An all-non-blocking veto DEFERS-AND-COMMITS (no resume_phase_b_reentry).
+    def test_all_deferrable_veto_defers_and_commits_not_resume(self, tmp_path):
+        result = self._post_reentry_veto(
+            all_non_blocking=[dict(self._LOW_NON_BLOCKER)]
+        )
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is True, fix
+        # No longer the plain resume for the all-deferrable case (acceptance).
+        assert fix["action"] == "deferred_reentry_findings_and_proceed"
+        assert fix["action"] != "resume_phase_b_reentry"
+        # Finding filed as a deferred non-blocker in the canonical recovery lane
+        # (REUSED _write_recovery_deferred_non_blocking_packet, not duplicated).
+        deferred = list(
+            (tmp_path / "reports" / "deferred" / "non_blocking").glob(
+                "*_bridge_nonblockers.md"
+            )
+        )
+        assert len(deferred) == 1
+        assert "DEFERRED_NON_BLOCKING" in deferred[0].read_text(encoding="utf-8")
+        # Carried forward (disposition rewritten non_blocking) on BOTH the
+        # top-level result and the seeded phase_b_state.json so the re-entry
+        # treats it as already-deferred (#19b _disposition_for_finding).
+        assert [f["disposition"] for f in result["all_non_blocking"]] == [
+            "non_blocking"
+        ]
+        assert result["deferred_packet_path"].endswith("_bridge_nonblockers.md")
+        checkpoint = json.loads(
+            (tmp_path / ".agent_bus" / "executors" / "phase_b_state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert checkpoint["completed_step"] == "needs_phase_b_reentry"
+        assert [f["disposition"] for f in checkpoint["all_non_blocking"]] == [
+            "non_blocking"
+        ]
+        assert checkpoint["deferred_packet_path"] == result["deferred_packet_path"]
+        # Still ROUTE_PHASE_B: commit happens INSIDE Phase B after the GO -- this
+        # fix introduces NO new ROUTE_COMMIT decision.
+        assert result["retry_record"]["decision"] == "ROUTE_PHASE_B"
+
+    # (a') End-to-end through the real attempt_recovery: recovered tier-1 defer.
+    def test_attempt_recovery_all_deferrable_veto_defers_end_to_end(self, tmp_path):
+        pkt = tmp_path / "reports" / "control_plane"
+        pkt.mkdir(parents=True)
+        (pkt / "pager.md").write_text("# plan\nTask: [X]\n", encoding="utf-8")
+        result = self._post_reentry_veto(
+            all_non_blocking=[dict(self._LOW_NON_BLOCKER)]
+        )
+        recovery = rg_mod.attempt_recovery(
+            tmp_path, result, "wave-post-reentry-defer"
+        )
+
+        assert recovery["recovered"] is True
+        assert recovery["tier"] == 1
+        assert recovery["failure_class"] == "post_reentry_needs_phase_b"
+        assert recovery["action"] == "deferred_reentry_findings_and_proceed"
+        assert result["retry_record"]["decision"] == "ROUTE_PHASE_B"
+
+    # (b) Loop-guard DEFERS on a REPEAT post_reentry cycle when all-deferrable.
+    def test_loop_guard_defers_on_repeat_cycle_when_all_deferrable(self, tmp_path):
+        result = self._post_reentry_veto(
+            all_non_blocking=[dict(self._LOW_NON_BLOCKER)],
+            post_reentry_prior_bridge_rounds=3,  # a prior post_reentry cycle
+        )
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is True
+        assert fix["action"] == "deferred_reentry_findings_and_proceed"
+        # The bounded loop-guard signal is load-bearing in the framing.
+        assert "repeat post_reentry cycle" in fix["detail"]
+
+    # (c) A high/critical veto still RESUMES (fail-closed), never defers.
+    def test_high_severity_veto_still_resumes_not_defer(self, tmp_path):
+        result = self._post_reentry_veto(
+            all_non_blocking=[
+                {
+                    "title": "genuine high-severity blocker",
+                    "severity": "high",
+                    "disposition": "blocking",
+                    "file": "mu/tools/executors/phase_b_executor.py",
+                }
+            ],
+        )
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        assert fix["fixed"] is True
+        assert fix["action"] == "resume_phase_b_reentry"
+        # Fail-closed: NO deferred packet is filed for a blocking veto.
+        assert not (tmp_path / "reports" / "deferred" / "non_blocking").exists()
+
+    # (d) A reviewer/adapter crash still STRANDS (classified crash, not the
+    #     deferrable post_reentry class) -- the defer path is unreachable for it.
+    def test_reviewer_adapter_crash_still_strands_not_deferrable(self, tmp_path):
+        crash = {
+            "status": "failed",
+            "step": "bridge_subprocess",
+            "stderr": (
+                "Bridge subprocess failed in round 1 (exit=1). "
+                "adapter 'codex' produced no stdout"
+            ),
+        }
+        fc = rg_mod.classify_failure(crash)
+        assert fc == FailureClass.AGENT_REVIEW_CRASH
+        assert fc != FailureClass.POST_REENTRY_NEEDS_PHASE_B
+        assert rg_mod.tier_for(fc) == 3
+
+    # (e) INTERSECTION: a REPEAT post_reentry cycle carrying a high/critical
+    #     (non-deferrable) veto does NOT defer-and-commit -- it stays on the
+    #     fail-closed resume path, proving the loop-guard is gated on
+    #     deferrability, not a bare prior-round count (no fail-closed hole).
+    def test_repeat_cycle_high_severity_veto_does_not_defer(self, tmp_path):
+        result = self._post_reentry_veto(
+            post_reentry_prior_bridge_rounds=5,  # repeat cycle (would trip a bare count)
+            all_non_blocking=[
+                {
+                    "title": "genuine critical blocker on repeat cycle",
+                    "severity": "critical",
+                    "disposition": "blocking",
+                    "file": "mu/tools/executors/phase_b_executor.py",
+                }
+            ],
+        )
+        fix = rg_mod.fix_post_reentry_needs_phase_b(tmp_path, result=result)
+
+        # Repeat cycle + non-deferrable veto stays on the fail-closed resume path;
+        # the loop-guard NEVER defer-and-commits a blocking finding.
+        assert fix["action"] == "resume_phase_b_reentry"
+        assert not (tmp_path / "reports" / "deferred" / "non_blocking").exists()
+
+
 class TestMaxTurnsClassification:
     def test_top_level_error_max_turns_is_tier3(self):
         fc = rg_mod.classify_failure({
