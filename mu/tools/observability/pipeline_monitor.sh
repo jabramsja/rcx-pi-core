@@ -467,6 +467,10 @@ record_codex_autoping_thread() {
   printf '%s\n' "$CODEX_THREAD_ID" > "$AUTOPING_THREAD_FILE"
 }
 
+clear_codex_autoping_thread() {
+  rm -f "$AUTOPING_THREAD_FILE"
+}
+
 current_codex_autoping_thread() {
   local thread_id=""
   if [ -f "$AUTOPING_THREAD_FILE" ]; then
@@ -1116,7 +1120,14 @@ if mode in {"codex", "claude"}:
 PY
     return 0
   fi
-  printf '%s\n' "codex"
+  # No --orchestrator-mode env and no bus-local orchestrator_mode.json: fall back
+  # to the all-Claude default so a clean checkout launches the Claude monitor/
+  # autoping, consistent with the committed pager route. codex stays a fully
+  # supported mode (selected via --orchestrator-mode / orchestrator_mode.json);
+  # only this no-config default is claude. Kept as a literal rather than derived
+  # from a committed default: orchestrator mode is {codex,claude}, which does not
+  # map cleanly from the wider pager-route/role-agent domain.
+  printf '%s\n' "claude"
 }
 
 cmd_owner_tick() {
@@ -1165,11 +1176,23 @@ cmd_start() {
     esac
   done
 
-  record_codex_autoping_thread
+  local mode=""
+  mode="$(current_orchestrator_mode)"
+
+  # Persist/clear the Codex autoping thread state to match the resolved mode.
+  # In the no-config default (now claude) an ambient CODEX_THREAD_ID must NOT be
+  # written to $AUTOPING_THREAD_FILE: doing so would launch the Claude autoping
+  # path (below) while leaving stale Codex thread state on disk that a later
+  # codex tick could pick up. Codex mode keeps the existing record behavior.
+  case "$mode" in
+    claude) clear_codex_autoping_thread ;;
+    *) record_codex_autoping_thread ;;
+  esac
+
   ensure_owner_running
   ensure_tmux_session_under_owner_lock
 
-  case "$(current_orchestrator_mode)" in
+  case "$mode" in
     claude) ensure_claude_autoping_health force ;;
     *) ensure_codex_autoping_health force ;;
   esac

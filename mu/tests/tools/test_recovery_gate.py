@@ -10637,6 +10637,12 @@ esac
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
             "CODEX_THREAD_ID": "thread-123",
+            # Pin to codex mode: this exercises the codex-only autoping thread
+            # seeding path (--thread-id / codex_autoping.thread), which the claude
+            # path has no equivalent for. The no-config default is now claude, so
+            # the mode must be selected explicitly here (current_orchestrator_mode
+            # in pipeline_monitor.sh); the claude default is covered separately.
+            "RCX_ORCHESTRATOR_MODE": "codex",
             "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
             "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
         }
@@ -10688,6 +10694,10 @@ esac
         env.pop("CODEX_THREAD_ID", None)
         env.update({
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            # Pin to codex mode so the codex autoping thread-clear path runs
+            # regardless of the now-claude no-config default (this test asserts on
+            # codex_autoping.thread, a codex-only mechanism).
+            "RCX_ORCHESTRATOR_MODE": "codex",
             "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
             "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
         })
@@ -10755,6 +10765,9 @@ esac
         env = os.environ.copy()
         env.update({
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            # Pin to codex mode so the owner-tick codex autoping reseed path runs
+            # regardless of the now-claude no-config default.
+            "RCX_ORCHESTRATOR_MODE": "codex",
             "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
             "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "1",
         })
@@ -10803,6 +10816,69 @@ esac
             assert any("--force-restart" not in line and "--thread-id thread-123" in line for line in marker_lines)
         finally:
             self._stop_pipeline_monitor(repo_root, new_thread_env)
+
+    def test_pipeline_monitor_start_defaults_to_claude_autoping_without_mode_config(self, tmp_path):
+        # Regression guard for the all-Claude no-config default: with no
+        # RCX_ORCHESTRATOR_MODE env and no bus-local orchestrator_mode.json,
+        # cmd_start must resolve current_orchestrator_mode() to 'claude' and drive
+        # the claude autoping path (ensure_claude_autoping.sh), never the codex one.
+        # This is the symmetric assertion to the codex-pinned autoping tests above;
+        # a future accidental flip of the default back to codex fails here.
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        launcher_dir = repo_root / "tools" / "session"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        marker = tmp_path / "autoping.log"
+        launcher = launcher_dir / "ensure_claude_autoping.sh"
+        launcher.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            f"printf '%s\\n' \"$*\" >> {marker!s}\n",
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | 0o111)
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        env = os.environ.copy()
+        # Clean checkout: no orchestrator mode selected via env, and no
+        # orchestrator_mode.json is written below, so the fallback default applies.
+        env.pop("RCX_ORCHESTRATOR_MODE", None)
+        env.pop("CODEX_THREAD_ID", None)
+        env.update({
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        })
+
+        try:
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            assert result.returncode == 0
+            # cmd_start's synchronous force call drove the claude launcher before
+            # returning, so the marker is populated with the claude autoping args.
+            marker_text = marker.read_text(encoding="utf-8")
+            assert "--repo" in marker_text
+            assert str(repo_root) in marker_text
+            assert "--bus-dir .agent_bus" in marker_text
+            assert "--force-restart" in marker_text
+            # The claude autoping path carries none of the codex-only thread/pane
+            # args, confirming the default routed to claude rather than codex.
+            assert "--thread-id" not in marker_text
+            assert "--tmux-session" not in marker_text
+        finally:
+            self._stop_pipeline_monitor(repo_root, env)
 
     def test_pipeline_monitor_detached_start_is_idempotent_with_single_owner(self, tmp_path):
         repo_root = tmp_path / "repo"
