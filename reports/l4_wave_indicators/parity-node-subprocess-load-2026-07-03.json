@@ -1,0 +1,24 @@
+{
+  "wave_id": "parity-node-subprocess-load-2026-07-03",
+  "repeat_run_speedup_ratio": 1.491784,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.224635,
+  "repeat_run_raw_seconds": [
+    0.335107,
+    0.224635
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.335107
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.559742
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-07-03T09:27:16Z",
+  "collector_version": "2.2.0"
+}

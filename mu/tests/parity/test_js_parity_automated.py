@@ -10,6 +10,8 @@ These tests run the JavaScript implementation via subprocess and verify:
 This test provides actual verification that JS behavior matches Python.
 """
 
+import contextlib
+import fcntl
 import json
 import subprocess
 import textwrap
@@ -53,8 +55,29 @@ def _read_all_js_source() -> str:
     return "\n".join(parts)
 
 
+_NODE_SUBPROCESS_LOCK = ROOT / ".pytest_cache" / "node_subprocess.lock"
+
+
+@contextlib.contextmanager
+def _serialized_node_subprocess():
+    """Serialize test-only node subprocesses across xdist worksteal workers."""
+    _NODE_SUBPROCESS_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with _NODE_SUBPROCESS_LOCK.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _run_serialized_node(*args, **kwargs):
+    """Run a Node subprocess under the cross-worker test lock."""
+    with _serialized_node_subprocess():
+        return subprocess.run(*args, **kwargs)
+
+
 def _run_node_json(script: str):
-    result = subprocess.run(
+    result = _run_serialized_node(
         ["node", "-e", textwrap.dedent(script)],
         capture_output=True,
         text=True,
@@ -66,7 +89,7 @@ def _run_node_json(script: str):
 
 
 def _run_node_json_with_input(script: str, input_value):
-    result = subprocess.run(
+    result = _run_serialized_node(
         ["node", "-e", textwrap.dedent(script)],
         input=json.dumps(input_value),
         capture_output=True,
@@ -172,7 +195,7 @@ class TestJSTestSuitePasses:
 
     def test_js_eval_step_tests_pass(self):
         """Run node mu/host/js/eval_step.js and verify all tests pass."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -203,7 +226,7 @@ class TestJSTestSuitePasses:
 
     def test_js_core_tests_pass(self):
         """Verify core JS test cases pass."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -286,7 +309,7 @@ class TestCrossSubstrateParity:
 
         9-agent Round 3 fix: Machine-readable output for actual comparison.
         """
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True,
             text=True,
@@ -303,7 +326,7 @@ class TestCrossSubstrateParity:
 
     def test_parity_vector_count_matches(self, parity_vectors):
         """Verify Python and JS test the same number of parity vectors."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -433,7 +456,7 @@ class TestCrossSubstrateParity:
             "}\n"
             "console.log('PASS');\n"
         )
-        proc = subprocess.run(
+        proc = _run_serialized_node(
             ["node", "-e", js_script],
             capture_output=True, text=True,
             cwd=ROOT, timeout=10,
@@ -503,7 +526,7 @@ class TestCrossSubstrateParity:
 
             # JS normalization via JSON API
             request = json.dumps({"action": "normalize_roundtrip", "value": case})
-            result = subprocess.run(
+            result = _run_serialized_node(
                 ["node", "mu/host/js/eval_step.js", "--json-api", request],
                 capture_output=True,
                 text=True,
@@ -593,7 +616,7 @@ class TestCrossSubstrateParity:
 
             # JS: same operation via JSON API
             request = json.dumps({"action": "normalize_roundtrip", "value": case})
-            result = subprocess.run(
+            result = _run_serialized_node(
                 ["node", "mu/host/js/eval_step.js", "--json-api", request],
                 capture_output=True,
                 text=True,
@@ -652,7 +675,7 @@ def test_parity_canary():
 
     # JS path via JSON API
     request = {"action": "run_vector", "input": test_input, "projection": test_projection}
-    js_proc = subprocess.run(
+    js_proc = _run_serialized_node(
         ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request)],
         capture_output=True, text=True, cwd=ROOT, timeout=30
     )
@@ -687,7 +710,7 @@ class TestJSReservedFieldValidationParity:
     def _run_js_validation(self, value, action="validate_reserved_fields"):
         """Run JS validation and return (success, error_msg)."""
         request = json.dumps({"action": action, "value": value})
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", request],
             capture_output=True,
             text=True,
@@ -889,7 +912,7 @@ class TestJSSecurityParity:
 
     def test_js_rejects_nan(self):
         """JS should reject NaN values like Python."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -901,7 +924,7 @@ class TestJSSecurityParity:
 
     def test_js_rejects_infinity(self):
         """JS should reject Infinity values like Python."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -915,7 +938,7 @@ class TestJSSecurityParity:
         """JS depth guard should match Python's MAX_MU_DEPTH."""
         from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH
 
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -942,7 +965,7 @@ class TestJSSecurityParity:
         assert len(KERNEL_RESERVED_FIELDS) == 25, "Python reserved fields changed"
 
         # JS test output should confirm reserved fields are checked
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -984,7 +1007,7 @@ class TestJSSecurityParity:
 
             # JS validation via JSON API
             request = json.dumps({"action": "validate_mu", "value": value})
-            result = subprocess.run(
+            result = _run_serialized_node(
                 ["node", "mu/host/js/eval_step.js", "--json-api", request],
                 capture_output=True,
                 text=True,
@@ -1012,7 +1035,7 @@ class TestJSSecurityParity:
 
         # Verify constants match
         request = json.dumps({"action": "validate_mu", "value": None})
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", request],
             capture_output=True,
             text=True,
@@ -1356,7 +1379,7 @@ class TestJSRecurrenceParity:
 
     def test_js_recurrence_projections_loaded(self):
         """Verify JS loads Recurrence projections."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -1370,7 +1393,7 @@ class TestJSRecurrenceParity:
 
     def test_js_recurrence_closure_detection_works(self):
         """Verify JS closure detection matches Python behavior."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -1390,7 +1413,7 @@ class TestJSTraceFormatParity:
 
     def test_js_trace_stall_format(self):
         """JS stall trace should add new entry at step i+1 (not modify last)."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -1419,7 +1442,7 @@ class TestJSBridgeParity:
 
     def _run_js_json_api(self, request_dict: dict) -> dict:
         """Call JS with JSON API and parse response."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True,
             text=True,
@@ -1435,7 +1458,7 @@ class TestJSBridgeParity:
 
     def test_js_bridge_projections_loaded(self):
         """Verify JS loads bridge projections."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js"],
             capture_output=True,
             text=True,
@@ -1669,7 +1692,7 @@ class TestEngineHelpersParity:
     """Fast parity tests for engine-hemisphere helper functions."""
 
     def _run_js_json_api(self, request_dict: dict) -> dict:
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True, text=True, cwd=ROOT, timeout=60
         )
@@ -1922,7 +1945,7 @@ class TestAPIMaxStepsGuard:
     """Verify API_MAX_STEPS cap and type validation on all guarded endpoints."""
 
     def _run_js_json_api(self, request_dict: dict) -> dict:
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True, text=True, cwd=ROOT, timeout=30
         )
@@ -1977,7 +2000,7 @@ class TestEnginePipelineCrossSubstrateParity:
     """Cross-substrate verification for engine-hemisphere orchestration."""
 
     def _run_js_json_api(self, request_dict: dict) -> dict:
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True, text=True, cwd=ROOT, timeout=120
         )
@@ -2172,7 +2195,7 @@ class TestEnginePipelineCrossSubstrateParity:
         }
         """
         # SPEED_OK: direct node regression for cyclic engine_result bridge finding.
-        cyclic_result = subprocess.run(
+        cyclic_result = _run_serialized_node(
             ["node", "-e", textwrap.dedent(cyclic_probe)],
             capture_output=True,
             text=True,
@@ -2236,7 +2259,7 @@ class TestEnginePipelineCrossSubstrateParity:
         }
         """
         # SPEED_OK: direct node regression prevents host-object laundering at routing boundary.
-        host_object_result = subprocess.run(
+        host_object_result = _run_serialized_node(
             ["node", "-e", textwrap.dedent(host_object_probe)],
             capture_output=True,
             text=True,
@@ -2307,7 +2330,7 @@ class TestEngineFixPathParity:
     ]
 
     def _run_js_json_api(self, request_dict: dict) -> dict:
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True, text=True, cwd=ROOT, timeout=120
         )
@@ -2494,7 +2517,7 @@ class TestEngineLoopPathParity:
     ]
 
     def _run_js_json_api(self, request_dict: dict) -> dict:
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True, text=True, cwd=ROOT, timeout=120
         )
@@ -2707,7 +2730,7 @@ class TestFalsyDefaultParity:
     """Verify JS nullish coalescing (??) handles 0 correctly for numeric caps."""
 
     def _run_js_json_api(self, request_dict: dict) -> dict:
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
             capture_output=True,
             text=True,
@@ -2845,7 +2868,7 @@ def _load_manifest():
 
 def _module_run_js_json_api(request_dict: dict) -> dict:
     """Module-level JS JSON API caller (not bound to a class)."""
-    result = subprocess.run(
+    result = _run_serialized_node(
         ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
         capture_output=True,
         text=True,
@@ -3306,7 +3329,7 @@ class TestManifestEdgeCaseParity:
 def _js_api_observer(request_dict):
     """Send a JSON API request to JS and return the parsed response."""
     req = json.dumps(request_dict)
-    proc = subprocess.run(
+    proc = _run_serialized_node(
         ["node", "mu/host/js/eval_step.js", "--json-api", req],
         cwd=ROOT,
         capture_output=True,
@@ -3707,7 +3730,7 @@ class TestReservedFieldValidationFuzzer:
     def _run_js_validation(self, value):
         """Call JS validate_reserved_fields and return (valid, error_code)."""
         request = json.dumps({"action": "validate_reserved_fields", "value": value})
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "mu/host/js/eval_step.js", "--json-api", request],
             capture_output=True,
             text=True,
