@@ -41,7 +41,12 @@ Files and surfaces in scope:
 
 ## Validation gates
 
-- evidence_command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id l4-expensive-lane-parallelism-headroom-2026-07-03 --output reports/l4_wave_indicators/l4-expensive-lane-parallelism-headroom-2026-07-03.json`
+This wave is a CI-config selector edit (`-n auto` -> `-n 2` on the l4_expensive lane), so real evidence is the affected class/lane running under the new parallelism -- NOT the generic indicator collector. Two distinct commands bind this wave: the first is proof of the change; the second is mechanical L4 indicator provenance only.
+
+- evidence_command (binds the workflow change -- real proof): `PYTHONHASHSEED=0 python3 -m pytest mu/tests/l4_gates/test_structural_numbers_rationals.py::TestExactQuotientEngine -p no:xdist -q` -- confirms `TestExactQuotientEngine` (incl. `test_exact_quotient_results_are_canonical_n`, the exact-quotient class that was timing out) passes on its own, proving the nightly failure is parallel-CPU over-subscription -- exactly what the `-n auto` -> `-n 2` reduction targets -- not a test defect. End-to-end, the changed nightly lane is the gate: `python -m pytest -m l4_expensive -v -n 2 --dist worksteal --timeout=900` must complete within the 900s per-test timeout under the reduced parallelism.
+- indicator_collection_command (mechanical L4 indicator provenance -- NOT change evidence): `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id l4-expensive-lane-parallelism-headroom-2026-07-03 --output reports/l4_wave_indicators/l4-expensive-lane-parallelism-headroom-2026-07-03.json` -- emits the required indicator JSON (debt/ratchet/timing) via a cheap `TestLegacyAliasLock` probe. It does NOT run the l4_expensive lane or `TestExactQuotientEngine`, so it is provenance, not proof of the change.
+
+The auto-derived `evidence_command` in the "L4 fields" block below currently equals the indicator command: this CI-config wave stages no pytest module, so the commit-handoff builder's no-test-file branch (`mu/tools/executors/commit_executor.py`) defaults `evidence_command` to the indicator command. The change-exercising proof is the `evidence_command` bullet above. Durable structural follow-up: teach the handoff builder to bind a named affected test (here `mu/tests/l4_gates/test_structural_numbers_rationals.py::TestExactQuotientEngine`) as the tracker-note `evidence_command` for test-timeout CI-config waves, so the pre-commit supervisor runs the real proof rather than the mechanical collector.
 
 ## Acceptance criteria
 
