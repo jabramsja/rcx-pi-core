@@ -2881,6 +2881,18 @@ def _module_run_js_json_api(request_dict: dict) -> dict:
     raise RuntimeError(f"No JSON_API_RESPONSE found in JS output: {result.stdout[:500]}")
 
 
+# Hypothesis per-example deadline (ms) for property fuzzers whose examples make a
+# serialized Node subprocess call via _module_run_js_json_api (timeout=600s above).
+# It MUST track that subprocess ceiling: under xdist/CPU contention a single
+# example can wait behind the cross-worker lock and then run Node for many
+# seconds, and a lower deadline (formerly 30000) makes Hypothesis fail the example
+# with DeadlineExceeded before the 600s subprocess timeout — the headroom this
+# wave adds — can ever take effect. A genuine hang is still caught at 600s by the
+# subprocess timeout (raising TimeoutExpired), so raising the deadline only
+# removes the false-failure at 30s, it does not mask real regressions.
+_NODE_PARITY_FUZZER_DEADLINE_MS = 600000
+
+
 def classify_python_error(exc):
     """Classify a Python exception into a parity error_code (test layer only)."""
     if hasattr(exc, 'error_code'):
@@ -3934,7 +3946,7 @@ class TestHemisphereRoutingPropertyFuzzer:
 
     @pytest.mark.timeout(600)
     @given(er=_engine_result())
-    @settings(max_examples=25, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=25, deadline=_NODE_PARITY_FUZZER_DEADLINE_MS, suppress_health_check=[HealthCheck.too_slow])
     def test_valid_engine_result_routing_parity(self, er):
         """Valid engine_result routes identically on both substrates."""
         from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
@@ -3977,7 +3989,7 @@ class TestHemisphereRoutingPropertyFuzzer:
         )
 
     @given(data=_invalid_engine_result())
-    @settings(max_examples=100, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=100, deadline=_NODE_PARITY_FUZZER_DEADLINE_MS, suppress_health_check=[HealthCheck.too_slow])
     def test_invalid_engine_result_shape_rejection_parity(self, data):
         """Invalid engine_result shapes rejected by both substrates with typed error_code."""
         from rcx_pi.selfhost.engine_pipeline import run_hemisphere_routing
@@ -4089,7 +4101,7 @@ class TestTraceHashParityFuzzer:
         )
 
     @given(data=_linked_list_trace(min_length=1, max_length=50))
-    @settings(max_examples=120, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=120, deadline=_NODE_PARITY_FUZZER_DEADLINE_MS, suppress_health_check=[HealthCheck.too_slow])
     def test_valid_trace_hash_parity(self, data):
         """Valid linked-list trace hashes identically on both substrates."""
         from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
@@ -4112,7 +4124,7 @@ class TestTraceHashParityFuzzer:
         )
 
     @given(data=_linked_list_trace(min_length=4, max_length=30))
-    @settings(max_examples=80, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=80, deadline=_NODE_PARITY_FUZZER_DEADLINE_MS, suppress_health_check=[HealthCheck.too_slow])
     def test_trace_hash_overcap_parity(self, data):
         """Both substrates reject traces exceeding maxEntries with correct error_code."""
         from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
@@ -4148,7 +4160,7 @@ class TestTraceHashParityFuzzer:
         )
 
     @given(data=_linked_list_trace(min_length=1, max_length=20))
-    @settings(max_examples=50, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=50, deadline=_NODE_PARITY_FUZZER_DEADLINE_MS, suppress_health_check=[HealthCheck.too_slow])
     def test_trace_hash_hardcap_clamp_parity(self, data):
         """Oversized maxEntries is clamped — short traces not falsely rejected."""
         from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
@@ -4464,7 +4476,7 @@ class TestDifferentialReplayAuditR3:
 
     @pytest.mark.timeout(600)
     @given(er=_engine_result())
-    @settings(max_examples=25, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=25, deadline=_NODE_PARITY_FUZZER_DEADLINE_MS, suppress_health_check=[HealthCheck.too_slow])
     def test_generated_hemisphere_replay(self, er):
         """Generated hemisphere routing replay."""
         hemispheres = dict(_DEFAULT_HEMISPHERES)
@@ -4484,7 +4496,7 @@ class TestDifferentialReplayAuditR3:
     # --- Generated: trace hash (60 cases) ---
 
     @given(data=_linked_list_trace(min_length=1, max_length=20))
-    @settings(max_examples=60, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=60, deadline=_NODE_PARITY_FUZZER_DEADLINE_MS, suppress_health_check=[HealthCheck.too_slow])
     def test_generated_trace_hash_replay(self, data):
         """Generated trace hash replay."""
         trace, length = data
@@ -4503,7 +4515,7 @@ class TestDifferentialReplayAuditR3:
     # --- Generated: reserved-field validation (50 cases) ---
 
     @given(value=_clean_mu)
-    @settings(max_examples=50, deadline=30000, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=50, deadline=_NODE_PARITY_FUZZER_DEADLINE_MS, suppress_health_check=[HealthCheck.too_slow])
     def test_generated_validation_replay(self, value):
         """Generated reserved-field validation replay (clean values)."""
         js = _module_run_js_json_api({
