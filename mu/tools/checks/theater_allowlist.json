@@ -36,16 +36,6 @@
       "defer_reason": "Tests call validate_bundle() which raises on failure; classifier misses exception-as-assertion pattern",
       "expires_on": "2026-08-02",
       "file": "mu/tests/l4_gates/test_lower_stage0.py",
-      "method": "test_match_v2_compiles",
-      "owner": "founder",
-      "target_wave": "P7-b.2"
-    },
-    {
-      "class": "TestCompilationSmoke",
-      "classification": "heuristic_false_positive",
-      "defer_reason": "Tests call validate_bundle() which raises on failure; classifier misses exception-as-assertion pattern",
-      "expires_on": "2026-08-02",
-      "file": "mu/tests/l4_gates/test_lower_stage0.py",
       "method": "test_subst_v2_compiles",
       "owner": "founder",
       "target_wave": "P7-b.2"
@@ -853,5 +843,5 @@
   ],
   "generated_at": "2026-03-17T17:01:57.224039Z",
   "schema_version": 1,
-  "total_theater_risk": 85
+  "total_theater_risk": 84
 }
