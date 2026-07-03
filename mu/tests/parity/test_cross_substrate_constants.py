@@ -22,7 +22,10 @@ What this checker does NOT prove:
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -39,6 +42,25 @@ from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH, MAX_MU_WIDTH
 
 _REPO = Path(__file__).resolve().parents[3]
 _JS_DIR = _REPO / "mu" / "host" / "js"
+_NODE_SUBPROCESS_LOCK = _REPO / ".pytest_cache" / "node_subprocess.lock"
+
+
+@contextlib.contextmanager
+def _serialized_node_subprocess():
+    """Serialize test-only node subprocesses across xdist worksteal workers."""
+    _NODE_SUBPROCESS_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with _NODE_SUBPROCESS_LOCK.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _run_serialized_node(*args, **kwargs):
+    """Run a Node subprocess under the cross-worker test lock."""
+    with _serialized_node_subprocess():
+        return subprocess.run(*args, **kwargs)
 
 
 def _js_source() -> str:
@@ -135,8 +157,7 @@ class TestReservedFieldParity:
         which regex can't parse, so we evaluate via Node.js to get the runtime set.
         """
         import json
-        import subprocess
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "-e",
              "const c = require('./mu/host/js/core/constants.js');"
              "console.log(JSON.stringify(Array.from("

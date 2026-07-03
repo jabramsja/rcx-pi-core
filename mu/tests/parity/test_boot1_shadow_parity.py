@@ -11,6 +11,8 @@ Wave 5: 4-way path comparison, multi-projection parity, merge-2 gate assertions.
 
 See mu/docs/core/Boot1LoopContract.v0.md §5 for test plan.
 """
+import contextlib
+import fcntl
 import json
 import subprocess
 
@@ -40,9 +42,30 @@ ROOT = str(REPO_ROOT)
 # Helper
 # ============================================================================
 
+_NODE_SUBPROCESS_LOCK = REPO_ROOT / ".pytest_cache" / "node_subprocess.lock"
+
+
+@contextlib.contextmanager
+def _serialized_node_subprocess():
+    """Serialize test-only node subprocesses across xdist worksteal workers."""
+    _NODE_SUBPROCESS_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with _NODE_SUBPROCESS_LOCK.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _run_serialized_node(*args, **kwargs):
+    """Run a Node subprocess under the cross-worker test lock."""
+    with _serialized_node_subprocess():
+        return subprocess.run(*args, **kwargs)
+
+
 def _run_js_json_api(request_dict: dict) -> dict:
     """Run a JSON API request against the JS substrate."""
-    result = subprocess.run(
+    result = _run_serialized_node(
         ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
         capture_output=True, text=True, cwd=ROOT, timeout=120
     )
@@ -61,7 +84,8 @@ def _run_cached_js_json_api(request_dict: dict) -> dict:
     """Run deterministic JS JSON API evidence through the shared L4 cache."""
     request = dict(request_dict)
     action = request.pop("action")
-    return cached_js_request(action, **request)
+    with _serialized_node_subprocess():
+        return cached_js_request(action, **request)
 
 
 def _cross_substrate_equal(a, b):
@@ -1829,7 +1853,7 @@ class TestJsReentryPayloadValidation:
             "  console.log(JSON.stringify({ok: false, error_code: e.error_code || 'unknown', message: e.message}));\n"
             "}\n"
         )
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", "-e", script],
             capture_output=True, text=True, cwd=ROOT, timeout=10,
         )

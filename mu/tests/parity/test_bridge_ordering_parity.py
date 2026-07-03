@@ -19,6 +19,8 @@ What this checker does NOT prove:
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import re
 import subprocess
@@ -35,6 +37,25 @@ from rcx_pi.selfhost.step_mu import (
 _REPO = Path(__file__).resolve().parents[3]
 _JS_DIR = _REPO / "mu" / "host" / "js"
 _JS_PATH = _JS_DIR / "eval_step.js"  # CLI entrypoint (shim)
+_NODE_SUBPROCESS_LOCK = _REPO / ".pytest_cache" / "node_subprocess.lock"
+
+
+@contextlib.contextmanager
+def _serialized_node_subprocess():
+    """Serialize test-only node subprocesses across xdist worksteal workers."""
+    _NODE_SUBPROCESS_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with _NODE_SUBPROCESS_LOCK.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _run_serialized_node(*args, **kwargs):
+    """Run a Node subprocess under the cross-worker test lock."""
+    with _serialized_node_subprocess():
+        return subprocess.run(*args, **kwargs)
 
 
 def _js_source() -> str:
@@ -154,7 +175,7 @@ class TestCrossSubstrateBridgeValidation:
 
     def test_js_bridge_validation_inline_tests_pass(self):
         """Run JS and verify bridge validation tests pass."""
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", str(_JS_PATH)],
             capture_output=True,
             text=True,
@@ -188,7 +209,7 @@ class TestCrossSubstrateBridgeValidation:
         The self-tests in self_tests.js exercise validateCombinedBridgeOrdering
         with null and array entries. This test verifies those runtime checks pass.
         """
-        result = subprocess.run(
+        result = _run_serialized_node(
             ["node", str(_JS_PATH)],
             capture_output=True,
             text=True,
