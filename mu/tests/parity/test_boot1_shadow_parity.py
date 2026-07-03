@@ -67,7 +67,12 @@ def _run_js_json_api(request_dict: dict) -> dict:
     """Run a JSON API request against the JS substrate."""
     result = _run_serialized_node(
         ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request_dict)],
-        capture_output=True, text=True, cwd=ROOT, timeout=120
+        # 600s (raised from 120s) for serial-node CPU competition under `-n auto`:
+        # the serializer runs node one-at-a-time, but that single node still competes
+        # for CPU with the parallel xdist python workers, so the slowest paxos boot1
+        # node run (test_paxos_boot1_cross_substrate) needs headroom above the tight
+        # per-subprocess ceiling. Raise only; no scenario/substrate/assertion change.
+        capture_output=True, text=True, cwd=ROOT, timeout=600
     )
     for line in result.stdout.split('\n'):
         if line.startswith('JSON_API_RESPONSE:'):
@@ -85,7 +90,14 @@ def _run_cached_js_json_api(request_dict: dict) -> dict:
     request = dict(request_dict)
     action = request.pop("action")
     with _serialized_node_subprocess():
-        return cached_js_request(action, **request)
+        # timeout_s=600 (raised from the 180s _DEFAULT_CACHED_JS_TIMEOUT_S) for
+        # serial-node CPU competition under `-n auto`: the four-way paxos boot1
+        # node legs (test_paxos_freeze_four_way) reach node through this cached
+        # path, and the serialized node still competes for CPU with parallel xdist
+        # workers. timeout_s is keyword-only on cached_js_request and excluded from
+        # the cache key, so this governs ONLY the cache-miss subprocess timeout —
+        # it does not perturb caching, the substrate, or the scenario params.
+        return cached_js_request(action, timeout_s=600, **request)
 
 
 def _cross_substrate_equal(a, b):
@@ -364,6 +376,10 @@ class TestBoot1CrossSubstrateParity:
             f"  JS:     {js_resp['result']}"
         )
 
+    # 900s pytest-timeout for serial-node CPU competition under `-n auto`: exceeds
+    # the ~600s worst-case serialized node runtime and the nightly slow-lane default
+    # (--timeout=300). Overrides the lane CLI timeout for this one test only.
+    @pytest.mark.timeout(900)
     def test_paxos_boot1_cross_substrate(self):
         """Paxos freeze cycle: Python Boot1 == JS Boot1."""
         reset_step_budget()
@@ -1017,6 +1033,10 @@ class TestBoot1FourWayParity:
         results = self._run_all_four(projs, {"double": sn(42)})
         self._assert_four_way(results)
 
+    # 900s pytest-timeout for serial-node CPU competition under `-n auto`: exceeds
+    # the ~600s worst-case serialized node runtime and the nightly slow-lane default
+    # (--timeout=300). Overrides the lane CLI timeout for this one test only.
+    @pytest.mark.timeout(900)
     def test_paxos_freeze_four_way(self):
         """Paxos freeze input: all 4 paths agree after re-entry."""
         paxos_seed = load_verified_seed(get_seed_path("paxos_demo.v1.json"))
