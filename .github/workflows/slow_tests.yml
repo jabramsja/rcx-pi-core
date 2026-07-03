@@ -41,5 +41,5 @@ jobs:
         run: |
           set -euo pipefail
           python -m pytest -m "slow and not l4_expensive" -v -n auto --dist worksteal --timeout=300 2>&1
-          python -m pytest -m l4_expensive -v -n auto --dist worksteal --timeout=900 2>&1
+          python -m pytest -m l4_expensive -v -n 2 --dist worksteal --timeout=900 2>&1
           echo "✅ Slow tests passed"
