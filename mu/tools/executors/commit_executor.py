@@ -4553,6 +4553,147 @@ def _restore_primary_sync_tracked_wip_paths(
     return None
 
 
+def _primary_sync_collision_candidates(
+    repo_root: Path,
+    old_sha: str,
+    new_sha: str,
+) -> tuple[list[str], str | None]:
+    """Return worktree files an untracked/ignored ff collision would overwrite.
+
+    The primary rests on ``old_sha`` (a pure ANCESTOR of ``new_sha`` -- GUARD-C),
+    so any path ADDED across ``old_sha..new_sha`` is absent from the primary's
+    tree: if such a path ALSO exists on disk it is necessarily an untracked or
+    locally-ignored founder file that the fast-forward would overwrite. That
+    intersection is exactly the set ``git merge --ff-only --no-overwrite-ignore``
+    aborts on. Rename detection is disabled so a dev-side rename surfaces its
+    added destination as an ADD (not an ``R``) and is not missed.
+    """
+    proc = _run(
+        [
+            "git", "diff", "--name-only", "--diff-filter=A", "--no-renames",
+            old_sha, new_sha,
+        ],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        return [], (
+            "could not enumerate ff-range additions for collision candidates: "
+            f"{detail[:200] or proc.returncode}"
+        )
+    candidates: list[str] = []
+    for raw in proc.stdout.splitlines():
+        rel = raw.strip()
+        if rel and (repo_root / rel).exists():
+            candidates.append(rel)
+    return sorted(candidates), None
+
+
+def _relocate_worktree_file(src: Path, dst: Path) -> None:
+    """Move a single file from ``src`` to ``dst`` byte-preservingly.
+
+    Creates ``dst``'s parent, prefers an atomic same-filesystem rename, and
+    falls back to a byte copy + unlink for the rare cross-device case so founder
+    WIP content is preserved exactly.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(src, dst)
+        return
+    except OSError:
+        pass
+    data = src.read_bytes()
+    partial = dst.with_name(dst.name + ".rcx-partial")
+    partial.write_bytes(data)
+    os.replace(partial, dst)
+    src.unlink()
+
+
+def _move_primary_wip_path_aside(
+    repo_root: Path,
+    rel_path: str,
+    *,
+    backup_root: Path,
+    log: Any,
+) -> tuple[str | None, str | None, bool]:
+    """SINGLE shared, check-ignore-FENCED move-aside for one colliding path.
+
+    This is the ONLY surface that relocates a founder worktree file during the
+    primary ff-sync, and it is the wave's load-bearing never-clobber choke point.
+    BEFORE relocating ANY path it probes ``git check-ignore``: a locally-IGNORED
+    path is REFUSED (returned as fenced, never touched) so ignored founder WIP is
+    left byte-identical in place -- git's own overwrite-abort message lumps
+    ignored files under "untracked", so ONLY this explicit check-ignore fence
+    keeps them from being relocated. A NON-ignored untracked collision is moved
+    to ``backup_root`` (executor-owned) so the fast-forward can write dev's
+    now-tracked file at that path; the founder recovers the original from backup.
+
+    Returns ``(backup_path, error, fenced)``:
+      * ``fenced=True`` -> path is locally ignored; REFUSED, file untouched,
+        ``backup_path`` None. A clean never-clobber refusal, not a failure.
+      * ``error`` set, ``fenced=False`` -> a real relocation/probe failure; the
+        helper left the file in place.
+      * ``backup_path`` set, ``error`` None, ``fenced=False`` -> relocated.
+    """
+    src = repo_root / rel_path
+    # FENCE: never relocate a locally-ignored founder file. `--no-index` decides
+    # purely from ignore rules (independent of index state). rc==0 -> ignored
+    # (REFUSE); rc==1 -> not ignored (safe to relocate); any other rc -> the
+    # probe was inconclusive, so fail closed toward never-relocating.
+    probe = _run(
+        ["git", "check-ignore", "--no-index", "-q", "--", rel_path],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if probe.returncode == 0:
+        log(
+            "Step 15b: FENCED move-aside of locally-ignored founder WIP "
+            f"'{rel_path}' (git check-ignore) -- left byte-identical in place"
+        )
+        return None, f"path '{rel_path}' is locally ignored; move-aside refused", True
+    if probe.returncode != 1:
+        detail = (probe.stderr or probe.stdout or "").strip()
+        return None, (
+            f"git check-ignore probe for '{rel_path}' was inconclusive "
+            f"(rc={probe.returncode}); move-aside refused: {detail[:120]}"
+        ), False
+    dest = backup_root / rel_path
+    try:
+        if not src.exists():
+            return None, f"colliding path '{rel_path}' vanished before move-aside", False
+        _relocate_worktree_file(src, dest)
+    except OSError as exc:
+        return None, f"failed to move '{rel_path}' aside to backup: {exc}", False
+    log(
+        f"Step 15b: moved colliding untracked founder WIP '{rel_path}' aside to "
+        f"{dest} before fast-forward (dev now tracks this path)"
+    )
+    return str(dest), None, False
+
+
+def _restore_primary_sync_moved_aside_path(
+    repo_root: Path,
+    rel_path: str,
+    backup_path: str,
+    *,
+    log: Any,
+) -> str | None:
+    """Restore a moved-aside founder file from its executor backup, in place."""
+    src = Path(backup_path)
+    dst = repo_root / rel_path
+    try:
+        if not src.exists():
+            return f"moved-aside backup for '{rel_path}' missing at {backup_path}"
+        _relocate_worktree_file(src, dst)
+    except OSError as exc:
+        return f"failed to restore moved-aside '{rel_path}' from backup: {exc}"
+    log(f"Step 15b: restored moved-aside founder WIP '{rel_path}' from {backup_path}")
+    return None
+
+
 def _sync_primary_worktree_to_base(
     repo_root: Path,
     base_branch: str,
@@ -4616,6 +4757,13 @@ def _sync_primary_worktree_to_base(
         "tracked_wip_restored": False,
         "tracked_wip_left_stashed": False,
         "tracked_wip_restore_error": None,
+        "tracked_wip_stash_held": False,
+        "moved_aside_paths": [],
+        "moved_aside_backups": {},
+        "moved_aside_backup_dir": None,
+        "moved_aside_restored": False,
+        "moved_aside_restore_error": None,
+        "moved_aside_fenced_ignored_paths": [],
     }
 
     def _skip(reason: str) -> dict[str, Any]:
@@ -4939,17 +5087,156 @@ def _sync_primary_worktree_to_base(
                         timeout=60,
                     )
                     if merge_proc.returncode != 0:
-                        # Real untracked/ignored collision: git aborted rather
-                        # than overwrite founder WIP. Fall back to the existing
-                        # safe skip + behind_dev signal -- never clobber.
+                        # The untracked-only ff ABORTED: an untracked-or-ignored
+                        # founder file sits at a path the ff range now TRACKS (dev
+                        # added it -- e.g. local scratch that became tracked on
+                        # dev). Auto-advance via MOVE-ASIDE: relocate each colliding
+                        # NON-ignored untracked file to an executor-owned backup,
+                        # then re-run the ff to reach behind==0. IGNORED founder WIP
+                        # is FENCED at the single shared move-aside helper (git
+                        # check-ignore) and is NEVER relocated -- an ignored
+                        # collision stays a clean behind_dev skip with the file left
+                        # byte-identical in place.
                         detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
-                        return _behind_dev_dirty_skip(
-                            f"ff-only merge of {remote_ref} into '{primary_branch}' "
-                            "aborted on an untracked/ignored collision; wrote "
-                            "behind_dev signal instead of clobbering founder WIP: "
-                            f"{detail[:200]}",
-                            signal_reason="ff_only_merge_failed",
+                        candidates, candidate_error = _primary_sync_collision_candidates(
+                            primary, old_sha, new_sha,
                         )
+                        if candidate_error or not candidates:
+                            # Could not resolve the colliding path(s), or the ff
+                            # aborted for another reason: fall back to the existing
+                            # safe behind_dev skip -- never clobber.
+                            return _behind_dev_dirty_skip(
+                                f"ff-only merge of {remote_ref} into "
+                                f"'{primary_branch}' aborted on an untracked/"
+                                "ignored collision; wrote behind_dev instead of "
+                                "clobbering founder WIP"
+                                + (
+                                    f": {candidate_error}"
+                                    if candidate_error
+                                    else f": {detail[:200]}"
+                                ),
+                                signal_reason="ff_only_merge_failed",
+                            )
+
+                        backup_root = (
+                            common_dir
+                            / "rcx_primary_ffsync_moved_aside"
+                            / uuid.uuid4().hex
+                        )
+                        outcome["moved_aside_backup_dir"] = str(backup_root)
+                        moved: list[tuple[str, str]] = []
+
+                        def _restore_all_moved_aside() -> str | None:
+                            first_error: str | None = None
+                            for rel_path, backup_path in reversed(moved):
+                                err = _restore_primary_sync_moved_aside_path(
+                                    primary, rel_path, backup_path, log=log,
+                                )
+                                if err and first_error is None:
+                                    first_error = err
+                            return first_error
+
+                        def _record_restore(restore_err: str | None) -> None:
+                            outcome["moved_aside_paths"] = [p for p, _ in moved]
+                            if restore_err:
+                                outcome["moved_aside_restore_error"] = restore_err
+                            else:
+                                outcome["moved_aside_restored"] = bool(moved)
+
+                        # Route EVERY candidate through the single shared,
+                        # check-ignore-FENCED move-aside helper. A locally-ignored
+                        # candidate REFUSES the whole advance; a real move failure
+                        # aborts it. Either way we restore anything already moved so
+                        # the founder's tree ends byte-identical, then fall back to
+                        # the safe skip.
+                        fenced_ignored: str | None = None
+                        move_failure: str | None = None
+                        for rel_path in candidates:
+                            backup_path, move_error, fenced = (
+                                _move_primary_wip_path_aside(
+                                    primary,
+                                    rel_path,
+                                    backup_root=backup_root,
+                                    log=log,
+                                )
+                            )
+                            if fenced:
+                                fenced_ignored = rel_path
+                                break
+                            if move_error:
+                                move_failure = move_error
+                                break
+                            moved.append((rel_path, backup_path or ""))
+
+                        if fenced_ignored is not None:
+                            outcome["moved_aside_fenced_ignored_paths"] = [
+                                fenced_ignored
+                            ]
+                            _record_restore(_restore_all_moved_aside())
+                            return _behind_dev_dirty_skip(
+                                "primary worktree is behind base and the ff would "
+                                "overwrite locally-ignored founder WIP "
+                                f"('{fenced_ignored}'); FENCED the move-aside via "
+                                "git check-ignore and wrote behind_dev instead of "
+                                "relocating ignored WIP -- left byte-identical in "
+                                "place",
+                                signal_reason="ff_only_merge_failed",
+                            )
+                        if move_failure is not None:
+                            _record_restore(_restore_all_moved_aside())
+                            return _behind_dev_dirty_skip(
+                                "primary worktree is behind base with an untracked "
+                                "collision that could not be moved aside for a safe "
+                                f"fast-forward: {move_failure}",
+                                signal_reason="ff_only_merge_failed",
+                            )
+
+                        # All colliding NON-ignored untracked files moved aside ->
+                        # re-run the PULL-ONLY ff. --no-overwrite-ignore still
+                        # guards any ignored path (none is left to collide).
+                        merge_retry = _run(
+                            ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
+                            cwd=primary,
+                            check=False,
+                            timeout=60,
+                        )
+                        if merge_retry.returncode != 0:
+                            # ff still failed -> restore the moved files to their
+                            # original paths and fall back to the safe skip. WIP is
+                            # never stranded or clobbered.
+                            retry_detail = (
+                                merge_retry.stderr or merge_retry.stdout or ""
+                            ).strip()
+                            _record_restore(_restore_all_moved_aside())
+                            return _behind_dev_dirty_skip(
+                                f"ff-only merge of {remote_ref} into "
+                                f"'{primary_branch}' failed after moving "
+                                f"{len(moved)} untracked collision(s) aside: "
+                                f"{retry_detail[:200]}",
+                                signal_reason="ff_only_merge_failed",
+                            )
+
+                        # ff succeeded -> HOLD the moved-aside backups (do NOT
+                        # restore: dev now tracks those paths). Record the backup
+                        # locations so the founder reconciles the originals.
+                        synced_sha = _run(
+                            ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
+                        ).stdout.strip()
+                        outcome["moved_aside_paths"] = [p for p, _ in moved]
+                        outcome["moved_aside_backups"] = {p: b for p, b in moved}
+                        outcome["synced"] = True
+                        outcome["skipped"] = False
+                        outcome["reason"] = None
+                        outcome["new_sha"] = synced_sha
+                        _clear_behind_dev_signal(primary)
+                        log(
+                            f"Step 15b: synced primary worktree {primary} on "
+                            f"'{primary_branch}' {(old_sha or '?')[:8]} -> "
+                            f"{(synced_sha or '?')[:8]} (ff-only {remote_ref}; "
+                            f"moved {len(moved)} untracked collision(s) aside to "
+                            f"{backup_root}: {', '.join(p for p, _ in moved)})"
+                        )
+                        return outcome
 
                     synced_sha = _run(
                         ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
@@ -4984,11 +5271,76 @@ def _sync_primary_worktree_to_base(
                     )
                 if overlap_paths:
                     outcome["tracked_wip_overlap_paths"] = sorted(overlap_paths)
-                    return _behind_dev_dirty_skip(
-                        "primary worktree is behind base with tracked dirty WIP "
-                        "overlapping the fast-forward range; wrote behind_dev "
-                        "signal instead of risking a conflicting restore"
+                    # Auto-advance an overlapping-tracked-WIP primary via
+                    # STASH-FF-HOLD: the overlap makes an in-place `stash pop` a
+                    # conflicting 3-way merge (founder WIP vs origin content), so
+                    # instead of restoring we HOLD the stash for founder review.
+                    # Isolate the tracked WIP, fast-forward to behind==0, and LEAVE
+                    # the WIP in the executor-owned stash (never a conflicting
+                    # restore, never a clobber). On ff failure, restore the WIP so
+                    # it is never stranded.
+                    stash_record, stash_error = _stash_primary_sync_tracked_wip(
+                        primary, tracked_wip_paths, log=log,
                     )
+                    if stash_error or stash_record is None:
+                        return _behind_dev_dirty_skip(
+                            "primary worktree is behind base with tracked dirty WIP "
+                            "overlapping the fast-forward range that could not be "
+                            "isolated for a safe fast-forward"
+                            + (f": {stash_error}" if stash_error else "")
+                        )
+                    outcome["tracked_wip_stash_marker"] = stash_record.get("marker")
+                    outcome["tracked_wip_stash_ref"] = stash_record.get("stash_ref")
+                    outcome["tracked_wip_stash_oid"] = stash_record.get("stash_oid")
+
+                    merge_proc = _run(
+                        ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
+                        cwd=primary,
+                        check=False,
+                        timeout=60,
+                    )
+                    if merge_proc.returncode != 0:
+                        # ff failed after stashing -> restore WIP so it is never
+                        # left only in the stash on a skip path.
+                        detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
+                        restore_error = _restore_primary_sync_tracked_wip(
+                            primary, stash_record, log=log,
+                        )
+                        if restore_error:
+                            outcome["tracked_wip_left_stashed"] = True
+                            outcome["tracked_wip_restore_error"] = restore_error
+                        else:
+                            outcome["tracked_wip_restored"] = True
+                        return _behind_dev_dirty_skip(
+                            f"ff-only merge of {remote_ref} into '{primary_branch}' "
+                            "failed after isolating overlapping tracked dirty WIP: "
+                            f"{detail[:200]}",
+                            signal_reason="ff_only_merge_failed",
+                        )
+
+                    # ff succeeded -> HOLD the stash for founder review (do NOT
+                    # restore: an in-place restore would conflict with the origin
+                    # content the ff brought in). The founder reconciles the WIP
+                    # from the held executor-owned stash.
+                    synced_sha = _run(
+                        ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
+                    ).stdout.strip()
+                    outcome["tracked_wip_left_stashed"] = True
+                    outcome["tracked_wip_stash_held"] = True
+                    outcome["synced"] = True
+                    outcome["skipped"] = False
+                    outcome["reason"] = None
+                    outcome["new_sha"] = synced_sha
+                    _clear_behind_dev_signal(primary)
+                    log(
+                        f"Step 15b: synced primary worktree {primary} on "
+                        f"'{primary_branch}' {(old_sha or '?')[:8]} -> "
+                        f"{(synced_sha or '?')[:8]} (ff-only {remote_ref}; HELD "
+                        "overlapping tracked WIP in stash "
+                        f"{stash_record.get('stash_ref')} for founder review: "
+                        f"{', '.join(tracked_wip_paths)})"
+                    )
+                    return outcome
 
                 # Non-overlapping tracked WIP: isolate it, fast-forward, restore.
                 stash_record, stash_error = _stash_primary_sync_tracked_wip(
