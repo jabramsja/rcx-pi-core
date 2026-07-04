@@ -4854,16 +4854,141 @@ def _sync_primary_worktree_to_base(
                 outcome["old_sha"] = old_sha
                 outcome["new_sha"] = new_sha
                 outcome["dirty_paths"] = list(dirty_paths)
-                _write_behind_dev_signal(
-                    primary,
-                    base_ref=remote_ref,
-                    reason="dirty_primary_worktree",
-                    dirty_paths=dirty_paths,
+
+                def _behind_dev_dirty_skip(
+                    reason_text: str,
+                    *,
+                    signal_reason: str = "dirty_primary_worktree",
+                ) -> dict[str, Any]:
+                    _write_behind_dev_signal(
+                        primary,
+                        base_ref=remote_ref,
+                        reason=signal_reason,
+                        dirty_paths=dirty_paths,
+                    )
+                    return _skip(reason_text)
+
+                # Only TRACKED dirty WIP blocks a fast-forward: git refuses to ff
+                # over locally-modified tracked files. Untracked/ignored founder
+                # WIP is NEVER stashed -- `_dirty_worktree_paths` already excludes
+                # ignored (`ls-files --others --exclude-standard`), the ff runs
+                # `--no-overwrite-ignore` (aborts rather than clobber ignored WIP),
+                # and non-colliding untracked files ride through the ff untouched
+                # (a colliding one aborts the ff, handled below). Isolate ONLY the
+                # tracked-dirty subset.
+                tracked_wip_paths = sorted(
+                    set(_tracked_dirty_paths(primary)) & set(dirty_paths)
                 )
-                return _skip(
-                    "primary worktree is behind base with dirty WIP; wrote "
-                    "behind_dev signal instead of fast-forwarding"
+                outcome["tracked_wip_paths"] = list(tracked_wip_paths)
+
+                if not tracked_wip_paths:
+                    # Untracked-only dirty WIP: out of scope for this wave (ONLY
+                    # the clean-ancestor + tracked-dirty path changes behavior).
+                    # Preserve the existing behind_dev skip.
+                    return _behind_dev_dirty_skip(
+                        "primary worktree is behind base with dirty WIP; wrote "
+                        "behind_dev signal instead of fast-forwarding"
+                    )
+
+                # A fast-forward whose range TOUCHES a tracked-WIP path would turn
+                # the post-ff `stash pop --index` restore into a conflicting 3-way
+                # merge (founder WIP vs origin content). Detect that overlap BEFORE
+                # stashing or fast-forwarding and skip -- never risk corrupting
+                # founder WIP with conflict markers.
+                overlap_paths, overlap_error = _primary_sync_changed_paths_in_range(
+                    primary, old_sha, new_sha, tracked_wip_paths,
                 )
+                if overlap_error:
+                    return _behind_dev_dirty_skip(
+                        "primary worktree is behind base with tracked dirty WIP "
+                        f"but the ff range could not be compared safely: "
+                        f"{overlap_error}"
+                    )
+                if overlap_paths:
+                    outcome["tracked_wip_overlap_paths"] = sorted(overlap_paths)
+                    return _behind_dev_dirty_skip(
+                        "primary worktree is behind base with tracked dirty WIP "
+                        "overlapping the fast-forward range; wrote behind_dev "
+                        "signal instead of risking a conflicting restore"
+                    )
+
+                # Non-overlapping tracked WIP: isolate it, fast-forward, restore.
+                stash_record, stash_error = _stash_primary_sync_tracked_wip(
+                    primary, tracked_wip_paths, log=log,
+                )
+                if stash_error or stash_record is None:
+                    # Stash creation failed -> DO NOT fast-forward; keep the WIP in
+                    # place and fall back to the behind_dev skip.
+                    return _behind_dev_dirty_skip(
+                        "primary worktree is behind base with tracked dirty WIP "
+                        "that could not be isolated for a safe fast-forward"
+                        + (f": {stash_error}" if stash_error else "")
+                    )
+                outcome["tracked_wip_stash_marker"] = stash_record.get("marker")
+                outcome["tracked_wip_stash_ref"] = stash_record.get("stash_ref")
+                outcome["tracked_wip_stash_oid"] = stash_record.get("stash_oid")
+
+                # PULL-ONLY ff with the tracked WIP isolated. --ff-only refuses any
+                # non-fast-forward; --no-overwrite-ignore aborts rather than clobber
+                # locally-ignored founder WIP. We never push, checkout base, force,
+                # or reset.
+                merge_proc = _run(
+                    ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
+                    cwd=primary,
+                    check=False,
+                    timeout=60,
+                )
+                if merge_proc.returncode != 0:
+                    # ff failed after stashing -> restore WIP before returning so
+                    # founder WIP is never left only in the stash on a skip path.
+                    detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
+                    restore_error = _restore_primary_sync_tracked_wip(
+                        primary, stash_record, log=log,
+                    )
+                    if restore_error:
+                        outcome["tracked_wip_left_stashed"] = True
+                        outcome["tracked_wip_restore_error"] = restore_error
+                    else:
+                        outcome["tracked_wip_restored"] = True
+                    return _behind_dev_dirty_skip(
+                        f"ff-only merge of {remote_ref} into '{primary_branch}' "
+                        f"failed after isolating tracked dirty WIP: {detail[:200]}",
+                        signal_reason="ff_only_merge_failed",
+                    )
+
+                # ff succeeded -> restore the isolated tracked WIP in place.
+                restore_error = _restore_primary_sync_tracked_wip(
+                    primary, stash_record, log=log,
+                )
+                synced_sha = _run(
+                    ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
+                ).stdout.strip()
+                if restore_error:
+                    # HEAD advanced but the WIP restore drifted. The WIP is safe in
+                    # the executor-owned stash; surface the drift and skip so the
+                    # founder recovers it -- never silently drop or overwrite it.
+                    outcome["tracked_wip_left_stashed"] = True
+                    outcome["tracked_wip_restore_error"] = restore_error
+                    outcome["new_sha"] = synced_sha
+                    _clear_behind_dev_signal(primary)
+                    return _skip(
+                        "primary worktree fast-forwarded but tracked dirty WIP "
+                        f"restore drifted; WIP preserved in stash: {restore_error}"
+                    )
+
+                outcome["tracked_wip_restored"] = True
+                outcome["synced"] = True
+                outcome["skipped"] = False
+                outcome["reason"] = None
+                outcome["new_sha"] = synced_sha
+                _clear_behind_dev_signal(primary)
+                log(
+                    f"Step 15b: synced primary worktree {primary} on "
+                    f"'{primary_branch}' {(old_sha or '?')[:8]} -> "
+                    f"{(synced_sha or '?')[:8]} (ff-only {remote_ref}; preserved "
+                    f"tracked WIP: {', '.join(tracked_wip_paths)})"
+                )
+                return outcome
 
             # PULL-ONLY ff: bring origin/{base_branch} DOWN into the primary's
             # CURRENT feature branch. --ff-only is the backstop that refuses any
