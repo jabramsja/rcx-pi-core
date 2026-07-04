@@ -64,6 +64,10 @@ echo "      bootstrap; Codex edits the founder bootstrap and never the claude-ow
 echo "      files; each treats the other's files as read-only."
 echo "    - AUTONOMOUS: continue autonomously to the best structural outcome; do not"
 echo "      stall for confirmation the founder has already granted."
+echo "    - AUTOMATE THE GRUNT WORK: you orchestrate; the pipeline/recovery does"
+echo "      the grunt work. Land every recurring manual op into the AUTOMATIC"
+echo "      pipeline layer (recovery_gate / commit_executor / a deterministic"
+echo "      script) so BOTH orchestrators inherit it — never a hand-run one-off."
 echo ""
 
 # --- (c) key pipeline commands (founder-chosen placeholders, no hardcoded provider) ---
