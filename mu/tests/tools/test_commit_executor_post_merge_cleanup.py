@@ -1509,37 +1509,99 @@ def test_sync_primary_skips_already_current_before_stashing_tracked_wip(tmp_path
     assert (primary / "seed.txt").read_text() == "founder work in progress\n"
 
 
-def test_sync_primary_writes_behind_dev_with_untracked_files_present(tmp_path):
-    """Behind plus untracked primary files writes behind_dev and leaves them alone."""
+def test_sync_primary_ffs_over_noncolliding_untracked_files(tmp_path):
+    """FIX-NEVERBEHIND-FF-UNTRACKED (hermetic ff-SUCCESS): a clean-ancestor
+    primary that is behind origin/dev and holds ONLY non-colliding untracked
+    founder scratch (handoffs, deferred notes) is FAST-FORWARDED, not skipped.
+    `git merge --ff-only --no-overwrite-ignore` leaves non-colliding untracked
+    files untouched, so never-behind is achieved WITHOUT clobbering founder WIP.
+
+    This SUPERSEDES the old untracked-PRESENCE skip test
+    (`test_sync_primary_writes_behind_dev_with_untracked_files_present`), whose
+    non-colliding origin advance now fast-forwards under the changed behavior."""
     upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "jabramsja/feat-untracked"], cwd=primary, env=env)
-    # Untracked artifacts in the primary (the normal state: handoffs, deferred notes).
+    # The normal founder-primary state: untracked scratch (handoffs, deferred
+    # notes). origin/dev advances on seed.txt ONLY -> no collision with these.
     (primary / "HANDOFF_FOR_CODEX.md").write_text("handoff")
     (primary / "scratch_deferred_note.md").write_text("deferred finding")
     c1_sha = _advance_origin_dev(upstream, env)
+    assert c1_sha != c0_sha
 
     outcome = commit_mod.sync_primary_worktree_to_base(
         repo_root=primary, base_branch="dev", log=_noop_log,
     )
 
-    assert outcome["synced"] is False, outcome
-    assert outcome["skipped"] is True, outcome
-    assert "dirty WIP" in (outcome["reason"] or ""), outcome
+    # Fast-forwarded to origin/dev tip (never-behind), still on the feature branch.
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert outcome["reason"] is None, outcome
+    assert outcome["new_sha"] == c1_sha, outcome
+    # The untracked files WERE seen as dirty, but the ff proceeded anyway.
     assert outcome["dirty_paths"] == [
         "HANDOFF_FOR_CODEX.md",
         "scratch_deferred_note.md",
     ], outcome
-    assert outcome["behind_count"] == 1, outcome
-    assert outcome["ahead_count"] == 0, outcome
-    assert outcome["behind_dev_signal_written"] is True, outcome
-    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha, outcome
-    assert c1_sha != c0_sha
+    assert outcome["tracked_wip_paths"] == [], outcome
+    primary_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    assert primary_head == c1_sha, outcome
+    assert _git(
+        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=primary
+    ).stdout.strip() == "jabramsja/feat-untracked"
+    # Post-sync the primary is NOT behind origin/dev (behind_count == 0).
+    behind = _git(
+        ["rev-list", "--count", "HEAD..origin/dev"], cwd=primary
+    ).stdout.strip()
+    assert behind == "0", behind
+    # Non-colliding untracked founder scratch left BYTE-IDENTICAL and still untracked.
     assert (primary / "HANDOFF_FOR_CODEX.md").read_text() == "handoff"
     assert (primary / "scratch_deferred_note.md").read_text() == "deferred finding"
+    status = _git(["status", "--short"], cwd=primary).stdout
+    assert "?? HANDOFF_FOR_CODEX.md" in status, status
+    assert "?? scratch_deferred_note.md" in status, status
+    # never-behind achieved WITHOUT writing a behind_dev skip signal.
+    assert outcome["behind_dev_signal_written"] is False, outcome
+    assert not (primary / ".agent_bus" / "behind_dev.json").exists(), outcome
+
+
+def test_sync_primary_untracked_collision_skips_and_preserves_founder_wip(tmp_path):
+    """FIX-NEVERBEHIND-FF-UNTRACKED (never-clobber): when the ff range would
+    OVERWRITE an untracked founder file (origin/dev force-adds a TRACKED file at
+    the same path), `git merge --ff-only --no-overwrite-ignore` ABORTS. The new
+    untracked-only branch then falls back to the SAFE behind_dev skip -- HEAD is
+    left at C0 and the founder's untracked WIP is preserved byte-identical, never
+    clobbered by origin content. This exercises the untracked-only ff FAILURE
+    branch (the collision-abort fallback), complementing the ff-SUCCESS case."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-untracked-collide"], cwd=primary, env=env)
+    # Untracked founder WIP at a path origin/dev is about to ADD as a tracked file.
+    (primary / "collide.txt").write_text("local untracked WIP")
+    # A second, non-colliding untracked file must ALSO survive the safe skip.
+    (primary / "keep.txt").write_text("keep me")
+    # origin/dev advances by ADDING collide.txt as a TRACKED file -> real collision.
+    c1_sha = _advance_origin_dev_add_file(
+        upstream, env, path="collide.txt", content="origin tracked content\n"
+    )
+    assert c1_sha != c0_sha
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    # The ff ABORTED on the collision -> safe SKIP, never synced.
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    # HEAD unchanged at C0 -- no fast-forward applied.
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha, outcome
+    # Founder's untracked WIP is PRESERVED, not clobbered by origin's content.
+    assert (primary / "collide.txt").read_text() == "local untracked WIP", outcome
+    assert (primary / "keep.txt").read_text() == "keep me", outcome
+    # Fell back to the durable behind_dev skip signal (reason: the ff aborted).
+    assert outcome["behind_dev_signal_written"] is True, outcome
     signal = json.loads(
         (primary / ".agent_bus" / "behind_dev.json").read_text(encoding="utf-8")
     )
-    assert signal["reason"] == "dirty_primary_worktree"
+    assert signal["reason"] == "ff_only_merge_failed", signal
 
 
 def test_sync_primary_skips_divergent_local_commit(tmp_path):

@@ -4578,8 +4578,14 @@ def _sync_primary_worktree_to_base(
 
     Guards (any miss -> SKIP):
       GUARD-A primary is on a FEATURE branch (not base_branch/main/master).
-      GUARD-B visible dirty founder WIP writes durable behind_dev observability
-              to the primary-worktree bus and skips instead of fast-forwarding.
+      GUARD-B visible dirty founder WIP is preserved, never clobbered. TRACKED
+              dirty WIP is stash-isolated across the ff and restored in place;
+              UNTRACKED-only dirty WIP attempts the ff directly (non-colliding
+              founder scratch rides through byte-identical on disk). Either path
+              falls back to durable behind_dev observability on the
+              primary-worktree bus -- a clean SKIP instead of fast-forwarding --
+              when the ff cannot proceed safely (a tracked-WIP overlap with the
+              ff range, or a real untracked/ignored collision that git aborts on).
               The ff merge additionally runs `--no-overwrite-ignore` to ABORT
               rather than silently overwrite locally-ignored founder WIP.
       GUARD-C primary HEAD is an ANCESTOR of origin/{base_branch} (a real
@@ -4914,13 +4920,53 @@ def _sync_primary_worktree_to_base(
                 outcome["tracked_wip_paths"] = list(tracked_wip_paths)
 
                 if not tracked_wip_paths:
-                    # Untracked-only dirty WIP: out of scope for this wave (ONLY
-                    # the clean-ancestor + tracked-dirty path changes behavior).
-                    # Preserve the existing behind_dev skip.
-                    return _behind_dev_dirty_skip(
-                        "primary worktree is behind base with dirty WIP; wrote "
-                        "behind_dev signal instead of fast-forwarding"
+                    # FIX-NEVERBEHIND-FF-UNTRACKED: untracked-only dirty WIP no
+                    # longer forces a behind_dev skip. Skipping on the mere
+                    # PRESENCE of untracked founder scratch (reports/handoffs)
+                    # was TOO CONSERVATIVE: `git merge --ff-only
+                    # --no-overwrite-ignore` does NOT clobber untracked files --
+                    # git ABORTS the ff ONLY when an untracked/ignored path would
+                    # be OVERWRITTEN (a real collision). Non-colliding untracked
+                    # scratch rides through the ff byte-identical on disk. So
+                    # ATTEMPT the ff to stay never-behind while git's own
+                    # collision-abort (plus --no-overwrite-ignore) preserves
+                    # never-clobber. A real collision returns non-zero and falls
+                    # back to the existing safe behind_dev skip.
+                    merge_proc = _run(
+                        ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
+                        cwd=primary,
+                        check=False,
+                        timeout=60,
                     )
+                    if merge_proc.returncode != 0:
+                        # Real untracked/ignored collision: git aborted rather
+                        # than overwrite founder WIP. Fall back to the existing
+                        # safe skip + behind_dev signal -- never clobber.
+                        detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
+                        return _behind_dev_dirty_skip(
+                            f"ff-only merge of {remote_ref} into '{primary_branch}' "
+                            "aborted on an untracked/ignored collision; wrote "
+                            "behind_dev signal instead of clobbering founder WIP: "
+                            f"{detail[:200]}",
+                            signal_reason="ff_only_merge_failed",
+                        )
+
+                    synced_sha = _run(
+                        ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
+                    ).stdout.strip()
+                    outcome["synced"] = True
+                    outcome["skipped"] = False
+                    outcome["reason"] = None
+                    outcome["new_sha"] = synced_sha
+                    _clear_behind_dev_signal(primary)
+                    log(
+                        f"Step 15b: synced primary worktree {primary} on "
+                        f"'{primary_branch}' {(old_sha or '?')[:8]} -> "
+                        f"{(synced_sha or '?')[:8]} (ff-only {remote_ref}; left "
+                        f"{len(dirty_paths)} non-colliding untracked founder "
+                        "path(s) in place)"
+                    )
+                    return outcome
 
                 # A fast-forward whose range TOUCHES a tracked-WIP path would turn
                 # the post-ff `stash pop --index` restore into a conflicting 3-way
