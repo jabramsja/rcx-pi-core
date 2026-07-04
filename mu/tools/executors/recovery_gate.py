@@ -3794,6 +3794,82 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
         or "Fix required"
     ).strip()
 
+    # ------------------------------------------------------------------
+    # Deferrable-veto routing (#46/#62 post_reentry loop guard)
+    # ------------------------------------------------------------------
+    # A post-reentry NEEDS_PHASE_B veto carried over ONLY deferrable
+    # (non-high/critical) findings would, on a plain resume, re-emit the SAME
+    # non-blocker and re-trigger the supervisor veto -- an unbounded
+    # NEEDS_PHASE_B loop (recovered=True each round, never converging), forcing a
+    # per-wave hand-finish. Detect that case with the SINGLE shared deferrability
+    # rule (_finding_is_deferrable_on_go) applied to the all_non_blocking
+    # findings already carried on the veto payload -- NO divergent local rule. A
+    # non-dict / high / critical finding fails that rule (fail-closed), so a
+    # genuine blocking veto is NEVER classified all-deferrable.
+    non_blocking_carry = result_payload.get("all_non_blocking")
+    veto_findings = (
+        list(non_blocking_carry) if isinstance(non_blocking_carry, list) else []
+    )
+    veto_is_all_deferrable = bool(veto_findings) and all(
+        _finding_is_deferrable_on_go(finding) for finding in veto_findings
+    )
+
+    # Bounded loop-guard signal: recovery_gate is the SOLE writer of
+    # post_reentry_prior_bridge_rounds (seeded into phase_b_state.json below), so
+    # a non-zero value carried on the veto payload marks a REPEAT post_reentry
+    # cycle for this wave. The guard is GATED ON DEFERRABILITY
+    # (veto_is_all_deferrable), NEVER on this count alone: a high/critical /
+    # truly-blocking veto stays on the fail-closed resume path even on a repeat
+    # cycle, so the loop-guard can never auto-commit a blocking finding.
+    try:
+        prior_post_reentry_rounds = int(
+            result_payload.get("post_reentry_prior_bridge_rounds") or 0
+        )
+    except (TypeError, ValueError):
+        prior_post_reentry_rounds = 0
+    is_repeat_post_reentry_cycle = prior_post_reentry_rounds > 0
+
+    # Route an all-deferrable veto through the EXISTING deferred-non-blocking
+    # packet + all_non_blocking carry-forward so Phase B re-enters with the
+    # finding PRE-DEFERRED: phase_b_executor._disposition_for_finding defers it
+    # (#19b) -> GO -> commit, instead of a plain resume that loops. This REUSES
+    # _write_recovery_deferred_non_blocking_packet (the same lane the normal
+    # Phase B deferral and fix_bridge_go_deferrable_findings use) -- it does NOT
+    # duplicate the machinery and introduces NO ROUTE_COMMIT (commit still
+    # happens inside Phase B after the GO). On the first cycle this pre-empts the
+    # loop; on a repeat cycle it is the bounded loop-guard (do not resume again).
+    deferred_reentry_findings = False
+    deferred_packet_rel = ""
+    deferred_finding_count = 0
+    if veto_is_all_deferrable:
+        deferrable = [
+            {**finding, "disposition": "non_blocking"}
+            for finding in veto_findings
+            if isinstance(finding, dict)
+        ]
+        try:
+            packet_path = _write_recovery_deferred_non_blocking_packet(
+                repo_root, wave_hint, deferrable
+            )
+            deferred_packet_rel = packet_path.relative_to(repo_root).as_posix()
+        except (OSError, ValueError):
+            # Could not FILE the deferral -- fall through to the fail-closed plain
+            # resume (prior behavior). Never commit a finding we could not file.
+            deferred_packet_rel = ""
+        if deferred_packet_rel:
+            # Carry the deferred findings forward as non-blockers so the seeded
+            # resume_state below (and the re-entered Phase B convergence
+            # re-check) treats them as already-deferred. Mutate BOTH the merged
+            # payload (read into resume_state below) and the top-level result
+            # (the fix_bridge_go_deferrable_findings carry-forward contract).
+            result_payload["all_non_blocking"] = deferrable
+            result_payload["deferred_packet_path"] = deferred_packet_rel
+            if isinstance(result, dict):
+                result["all_non_blocking"] = deferrable
+                result["deferred_packet_path"] = deferred_packet_rel
+            deferred_reentry_findings = True
+            deferred_finding_count = len(deferrable)
+
     # A post-reentry supervisor veto starts a fresh bounded re-entry cycle; the
     # exhausted prior bridge count is diagnostic evidence, not the resume cursor.
     resume_state: dict[str, Any] = {
@@ -3881,6 +3957,37 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
     if resume_state_sha:
         retry_record["state_sha"] = resume_state_sha
     result["retry_record"] = retry_record
+
+    if deferred_reentry_findings:
+        # Deferrable-veto path: the finding is PRE-DEFERRED (deferred packet on
+        # disk + all_non_blocking carry-forward), so the re-entered Phase B
+        # defers it (#19b) -> GO -> commit instead of re-emitting it and looping.
+        # The DISTINCT last_action is load-bearing at the dispatcher boundary:
+        # executor_dispatch._clear_phase_b_state_for_retry PRESERVES the seeded
+        # checkpoint only for action=='resume_phase_b_reentry', so this non-resume
+        # action correctly lets the dispatcher CLEAR the checkpoint and re-dispatch
+        # a FRESH ROUTE_PHASE_B run whose bridge re-classifies the finding
+        # non_blocking (#19b) and commits -- exactly the proven path
+        # fix_bridge_go_deferrable_findings (also executor=phase_b_executor, also a
+        # non-resume 'deferred_*_and_proceed' action) already relies on. A genuine
+        # blocking veto keeps 'resume_phase_b_reentry' below so its checkpoint IS
+        # preserved and it resumes at the re-entry supervisor (fail-closed).
+        cycle_note = (
+            f" (repeat post_reentry cycle; prior_bridge_rounds="
+            f"{prior_post_reentry_rounds})"
+            if is_repeat_post_reentry_cycle
+            else ""
+        )
+        return _fix_result(
+            True,
+            "deferred_reentry_findings_and_proceed",
+            (
+                f"deferred {deferred_finding_count} all-non-blocking post-reentry "
+                f"finding(s) to {deferred_packet_rel} and seeded {state_path} so the "
+                f"re-entered Phase B defers them (#19b) -> GO -> commit for "
+                f"{plan_path}{cycle_note}"
+            ),
+        )
 
     return _fix_result(
         True,
