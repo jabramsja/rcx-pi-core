@@ -4284,10 +4284,24 @@ def _probe_feature_branch_existence(repo_root: Path, target_branch: str) -> tupl
     return local_check.returncode == 0, bool(remote_check.stdout.strip())
 
 
-def _tracked_dirty_paths(repo_root: Path, pathspecs: list[str] | None = None) -> set[str]:
-    """Return tracked paths that differ from HEAD."""
+def _tracked_dirty_paths(
+    repo_root: Path,
+    pathspecs: list[str] | None = None,
+    *,
+    no_renames: bool = False,
+) -> set[str]:
+    """Return tracked paths that differ from HEAD.
+
+    With ``no_renames=True`` git's DEFAULT rename detection is disabled, so a
+    tracked rename (``git mv a b``) is reported as BOTH its deleted source and
+    added destination instead of collapsed into the destination alone. Callers
+    that build a path-limited stash need both sides: otherwise the omitted
+    source-deletion survives the operation and corrupts the later restore.
+    """
     dirty: set[str] = set()
     cmd = ["git", "diff", "--name-only", "HEAD"]
+    if no_renames:
+        cmd.append("--no-renames")
     if pathspecs:
         cmd.extend(["--", *pathspecs])
     diff_proc = _run(cmd, cwd=repo_root, check=False)
@@ -4363,7 +4377,12 @@ def _stash_primary_sync_tracked_wip(
     """Isolate exact tracked dirty paths before primary ff-sync."""
     if not paths:
         return None, None
-    current_tracked = _tracked_dirty_paths(repo_root)
+    # `paths` may carry BOTH sides of a tracked rename (deleted source + added
+    # destination). Git's default rename detection collapses those into the
+    # destination alone, so a rename-detected `_tracked_dirty_paths` would
+    # report the source as "missing" and wrongly abort the stash. Disable
+    # rename detection here to match the caller's rename-complete path set.
+    current_tracked = _tracked_dirty_paths(repo_root, no_renames=True)
     missing_paths = sorted(set(paths) - current_tracked)
     if missing_paths:
         return None, (
@@ -4876,8 +4895,21 @@ def _sync_primary_worktree_to_base(
                 # and non-colliding untracked files ride through the ff untouched
                 # (a colliding one aborts the ff, handled below). Isolate ONLY the
                 # tracked-dirty subset.
+                # `dirty_paths` (via `_dirty_worktree_paths`) uses git's DEFAULT
+                # rename detection: a tracked rename (`git mv a b`) collapses
+                # into the destination `b` alone, hiding the deleted source `a`.
+                # A path-limited stash built from that set would leave the
+                # staged source-deletion behind, so it rides through the ff and
+                # breaks the post-ff `stash pop --index` restore -- and the
+                # source is invisible to the overlap check below. Recompute the
+                # tracked-WIP set with rename detection OFF so BOTH sides of
+                # every rename are isolated together; drop transient executor
+                # state to mirror `_dirty_worktree_paths`' filtering (the old
+                # `& dirty_paths` intersection did that double duty).
                 tracked_wip_paths = sorted(
-                    set(_tracked_dirty_paths(primary)) & set(dirty_paths)
+                    path
+                    for path in _tracked_dirty_paths(primary, no_renames=True)
+                    if not _is_transient_status_path(path)
                 )
                 outcome["tracked_wip_paths"] = list(tracked_wip_paths)
 
