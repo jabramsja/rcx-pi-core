@@ -36,6 +36,7 @@ import inspect
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -4553,6 +4554,315 @@ def _restore_primary_sync_tracked_wip_paths(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Step 15b stash-ff-HOLD-and-surface + move-aside-and-surface support.
+#
+# When the founder's primary is a clean ancestor of origin/base but its dirty
+# WIP would make a plain `git merge --ff-only` unsafe, the sync no longer just
+# skips (leaving the primary permanently behind). Two proven-safe reconciles are
+# automated here so the primary reaches behind==0 without losing or clobbering
+# founder WIP:
+#   * tracked-WIP that OVERLAPS the ff range is stash-isolated, the primary is
+#     fast-forwarded, and the WIP is HELD in the executor-owned stash (NOT
+#     restored over the freshly ff'd dev content -- that would be the conflicting
+#     3-way merge the overlap skip existed to avoid). A wip_held_for_review
+#     manifest names the stash ref/oid + held paths for founder recovery.
+#   * an untracked/ignored file that COLLIDES with the ff (git aborts rather than
+#     overwrite it) is moved ONLY-itself into an executor-owned backup dir, the
+#     ff is retried to behind==0, and the moved path(s) + backup location are
+#     recorded in the same manifest.
+# Every failure after isolation restores the stashed tracked WIP and moves the
+# relocated untracked file(s) back, then falls back to the safe behind_dev skip:
+# HEAD is never advanced with founder WIP stranded, and WIP is never dropped.
+# ---------------------------------------------------------------------------
+
+# git's ff-abort banner for a local file it would have to overwrite. BOTH an
+# untracked collision and an ignored collision (under `--no-overwrite-ignore`)
+# emit this exact "untracked working tree files" banner, tab-indenting each
+# offending path until the "Please move or remove" / "Aborting" terminator.
+_FF_UNTRACKED_COLLISION_BANNER = "untracked working tree files would be overwritten by merge"
+
+
+def _parse_untracked_ff_collision_paths(merge_output: str) -> list[str]:
+    """Return the repo-relative paths git named in an ff untracked-collision abort.
+
+    git prints the offending paths tab-indented between the
+    ``untracked working tree files would be overwritten by merge:`` banner and
+    the following non-indented terminator line. Parsing git's OWN list is exact
+    (it names precisely what it refused to overwrite) and covers untracked AND
+    ignored collisions uniformly; an empty result means we could not isolate a
+    collision and the caller fails closed to the safe behind_dev skip.
+    """
+    if not merge_output or _FF_UNTRACKED_COLLISION_BANNER not in merge_output:
+        return []
+    paths: list[str] = []
+    collecting = False
+    for raw_line in merge_output.splitlines():
+        if _FF_UNTRACKED_COLLISION_BANNER in raw_line:
+            collecting = True
+            continue
+        if not collecting:
+            continue
+        # git tab-indents each offending path; the first non-tab line ends the block.
+        if raw_line.startswith("\t"):
+            candidate = raw_line[1:].strip()
+            if candidate:
+                paths.append(candidate)
+            continue
+        break
+    # De-dup while preserving git's order.
+    return list(dict.fromkeys(paths))
+
+
+def _wip_held_for_review_manifest_path(primary_path: Path) -> Path:
+    """Durable founder-primary bus path for the wip_held_for_review manifest."""
+    return agent_bus_path(primary_path, None, "wip_held_for_review.json")
+
+
+def _wip_held_for_review_backup_dir(primary_path: Path, hold_id: str) -> Path:
+    """Executor-owned, per-sync backup dir for moved colliding untracked WIP.
+
+    Lives under `.agent_bus/` (a transient-excluded runtime prefix) so the moved
+    founder WIP is never re-detected as tracked/untracked dirty state and is
+    never dropped by the wave-scoped post-merge stash/branch cleanup.
+    """
+    return agent_bus_path(
+        primary_path, None, "wip_held_for_review_backups", hold_id,
+    )
+
+
+def _restore_moved_untracked_collisions(
+    repo_root: Path,
+    moved_records: list[dict[str, str]],
+    *,
+    log: Any,
+) -> str | None:
+    """Move relocated colliding untracked/ignored WIP back to its worktree path.
+
+    Used on every failure-after-isolation path so founder WIP is restored in
+    place (never left only in the backup dir on a skip). Returns the first error
+    string encountered (best-effort continues moving the rest) or None.
+    """
+    first_error: str | None = None
+    for record in moved_records:
+        rel = str(record.get("path") or "").strip()
+        backup = str(record.get("backup") or "")
+        if not rel or not backup:
+            continue
+        src = Path(backup)
+        dst = repo_root / rel
+        if not src.exists() and not src.is_symlink():
+            # Already moved back (or never moved); nothing to restore.
+            continue
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+        except (OSError, shutil.Error) as exc:
+            if first_error is None:
+                first_error = f"could not restore moved untracked WIP {rel}: {exc}"
+            continue
+    if moved_records and first_error is None:
+        try:
+            log(
+                "Step 15b: restored "
+                f"{len(moved_records)} moved-aside untracked/ignored founder "
+                f"path(s) in place: {', '.join(str(r.get('path')) for r in moved_records)}"
+            )
+        except Exception:
+            pass
+    return first_error
+
+
+def _move_untracked_collisions_aside(
+    repo_root: Path,
+    paths: list[str],
+    backup_dir: Path,
+    *,
+    log: Any,
+) -> tuple[list[dict[str, str]], str | None]:
+    """Move ONLY the git-named colliding untracked/ignored paths into a backup dir.
+
+    Never relocates a TRACKED path (git only names untracked/ignored files in
+    this abort, but we verify against the index and fail closed anyway). On ANY
+    failure every already-moved path is moved back so the worktree is left
+    exactly as found, and an error string is returned. On success returns the
+    moved records ({"path", "backup"}); the founder recovers them via the
+    wip_held_for_review manifest.
+    """
+    moved: list[dict[str, str]] = []
+    for raw in paths:
+        rel = str(raw or "").strip()
+        if not rel:
+            continue
+        # Fail closed: never move a path the index tracks -- moving a tracked
+        # file aside would surface as a spurious deletion / lose content.
+        tracked = _run(
+            ["git", "ls-files", "--error-unmatch", "--", rel],
+            cwd=repo_root, check=False, timeout=30,
+        )
+        if tracked.returncode == 0:
+            _restore_moved_untracked_collisions(repo_root, moved, log=log)
+            return [], f"refusing to move a tracked path aside as a collision: {rel}"
+        src = repo_root / rel
+        if not src.exists() and not src.is_symlink():
+            _restore_moved_untracked_collisions(repo_root, moved, log=log)
+            return [], f"colliding untracked/ignored path is missing on disk: {rel}"
+        dst = backup_dir / rel
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+        except (OSError, shutil.Error) as exc:
+            _restore_moved_untracked_collisions(repo_root, moved, log=log)
+            return [], f"could not move colliding untracked/ignored path {rel} aside: {exc}"
+        moved.append({"path": rel, "backup": str(dst)})
+    if moved:
+        try:
+            log(
+                "Step 15b: moved "
+                f"{len(moved)} colliding untracked/ignored founder path(s) aside "
+                f"to {backup_dir} for review: "
+                f"{', '.join(r['path'] for r in moved)}"
+            )
+        except Exception:
+            pass
+    return moved, None
+
+
+def _write_wip_held_for_review_manifest(
+    primary_path: Path,
+    *,
+    hold_id: str,
+    base_ref: str,
+    old_sha: str,
+    new_sha: str,
+    reason: str,
+    held_stash: dict[str, Any] | None,
+    moved_records: list[dict[str, str]],
+    backup_dir: Path | None,
+) -> str | None:
+    """Upsert (by hold_id) a durable wip_held_for_review manifest entry.
+
+    Records the executor-owned tracked-WIP stash (ref/oid/marker/paths) that a
+    HOLD leaves un-restored and/or the colliding untracked/ignored paths moved
+    into ``backup_dir`` so the founder can recover them. Atomic write, append by
+    hold_id so an un-recovered prior hold's pointer is never overwritten. Returns
+    None on success or an error string; the caller fails closed and never
+    advances HEAD when the manifest cannot be written.
+    """
+    path = _wip_held_for_review_manifest_path(primary_path)
+    entry: dict[str, Any] = {
+        "hold_id": hold_id,
+        "primary": str(primary_path),
+        "base_ref": base_ref,
+        "old_sha": old_sha,
+        "new_sha": new_sha,
+        "reason": reason,
+        "held_stash": None,
+        "moved_untracked": [dict(record) for record in moved_records],
+        "backup_dir": str(backup_dir) if backup_dir is not None else None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if held_stash is not None:
+        entry["held_stash"] = {
+            "stash_ref": held_stash.get("stash_ref"),
+            "stash_oid": held_stash.get("stash_oid"),
+            "marker": held_stash.get("marker"),
+            "paths": list(held_stash.get("paths") or []),
+        }
+    try:
+        existing: dict[str, Any] = {}
+        if path.exists():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                existing = {}
+        held = existing.get("held") if isinstance(existing, dict) else None
+        if not isinstance(held, list):
+            held = []
+        held = [
+            item
+            for item in held
+            if isinstance(item, dict) and item.get("hold_id") != hold_id
+        ]
+        held.append(entry)
+        payload = {
+            "schema": "wip_held_for_review/v1",
+            "primary": str(primary_path),
+            "updated": entry["timestamp"],
+            "held": held,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent),
+            prefix=".wip_held_for_review.",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_file:
+                tmp_file.write(serialized)
+                tmp_file.flush()
+                os.fsync(tmp_file.fileno())
+            os.replace(tmp_name, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
+        return None
+    except Exception as exc:  # noqa: BLE001 - caller fails closed on any write error
+        return f"wip_held_for_review manifest write failed: {exc}"
+
+
+def _clear_wip_held_for_review_manifest(primary_path: Path, hold_id: str) -> None:
+    """Drop a single hold entry (rollback); delete the file once it is empty.
+
+    Removes only this hold_id so an un-recovered prior hold's entry survives.
+    Best-effort: rollback cleanup must never raise into the sync.
+    """
+    try:
+        path = _wip_held_for_review_manifest_path(primary_path)
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        held = data.get("held") if isinstance(data, dict) else None
+        if not isinstance(held, list):
+            return
+        remaining = [
+            item
+            for item in held
+            if isinstance(item, dict) and item.get("hold_id") != hold_id
+        ]
+        if not remaining:
+            path.unlink(missing_ok=True)
+            return
+        data["held"] = remaining
+        serialized = json.dumps(data, indent=2, sort_keys=True) + "\n"
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent),
+            prefix=".wip_held_for_review.",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_file:
+                tmp_file.write(serialized)
+                tmp_file.flush()
+                os.fsync(tmp_file.fileno())
+            os.replace(tmp_name, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
+    except Exception:  # noqa: BLE001 - rollback cleanup must not raise into sync
+        pass
+
+
 def _sync_primary_worktree_to_base(
     repo_root: Path,
     base_branch: str,
@@ -4616,6 +4926,14 @@ def _sync_primary_worktree_to_base(
         "tracked_wip_restored": False,
         "tracked_wip_left_stashed": False,
         "tracked_wip_restore_error": None,
+        # stash-ff-HOLD-and-surface + move-aside-and-surface observability.
+        "wip_held_for_review": False,
+        "wip_held_manifest_path": None,
+        "wip_held_stash_ref": None,
+        "wip_held_stash_oid": None,
+        "wip_held_tracked_paths": [],
+        "wip_moved_untracked_paths": [],
+        "wip_moved_backup_dir": None,
     }
 
     def _skip(reason: str) -> dict[str, Any]:
@@ -4919,6 +5237,77 @@ def _sync_primary_worktree_to_base(
                 )
                 outcome["tracked_wip_paths"] = list(tracked_wip_paths)
 
+                def _resolve_ff_untracked_collision(
+                    merge_output: str,
+                    *,
+                    hold_id: str,
+                    backup_dir: Path,
+                    held_stash: dict[str, Any] | None,
+                    reason: str,
+                ) -> tuple[bool, list[dict[str, str]], str | None]:
+                    """Move ONLY the git-named colliding untracked/ignored path(s)
+                    aside, record them in the wip_held_for_review manifest, and
+                    retry the ff so the primary reaches behind==0.
+
+                    Returns (resolved, moved_records, detail). resolved True means
+                    HEAD advanced with the moved WIP held in ``backup_dir`` and
+                    surfaced in the manifest. resolved False means HEAD is
+                    UNCHANGED and every moved path has already been moved back in
+                    place -- the caller restores any held tracked-WIP stash and
+                    safe-skips; ``detail`` explains the fallback.
+                    """
+                    colliding = _parse_untracked_ff_collision_paths(merge_output)
+                    if not colliding:
+                        return False, [], (
+                            "no untracked/ignored collision could be isolated "
+                            "from the ff abort"
+                        )
+                    moved, move_err = _move_untracked_collisions_aside(
+                        primary, colliding, backup_dir, log=log,
+                    )
+                    if move_err:
+                        # The mover already moved anything it relocated back.
+                        return False, [], move_err
+                    manifest_err = _write_wip_held_for_review_manifest(
+                        primary,
+                        hold_id=hold_id,
+                        base_ref=remote_ref,
+                        old_sha=old_sha,
+                        new_sha=new_sha,
+                        reason=reason,
+                        held_stash=held_stash,
+                        moved_records=moved,
+                        backup_dir=backup_dir,
+                    )
+                    if manifest_err:
+                        # Never advance HEAD with the moved WIP unaccounted-for:
+                        # move it back and fall back to the safe skip.
+                        _restore_moved_untracked_collisions(primary, moved, log=log)
+                        return False, [], manifest_err
+                    retry = _run(
+                        ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
+                        cwd=primary,
+                        check=False,
+                        timeout=60,
+                    )
+                    if retry.returncode != 0:
+                        detail2 = (retry.stderr or retry.stdout or "").strip()
+                        _restore_moved_untracked_collisions(primary, moved, log=log)
+                        _clear_wip_held_for_review_manifest(primary, hold_id)
+                        return False, [], (
+                            "ff-only merge still failed after moving untracked "
+                            f"collision(s) aside: {detail2[:200]}"
+                        )
+                    outcome["wip_held_for_review"] = True
+                    outcome["wip_held_manifest_path"] = str(
+                        _wip_held_for_review_manifest_path(primary)
+                    )
+                    outcome["wip_moved_untracked_paths"] = [
+                        record["path"] for record in moved
+                    ]
+                    outcome["wip_moved_backup_dir"] = str(backup_dir)
+                    return True, moved, None
+
                 if not tracked_wip_paths:
                     # FIX-NEVERBEHIND-FF-UNTRACKED: untracked-only dirty WIP no
                     # longer forces a behind_dev skip. Skipping on the mere
@@ -4939,17 +5328,34 @@ def _sync_primary_worktree_to_base(
                         timeout=60,
                     )
                     if merge_proc.returncode != 0:
-                        # Real untracked/ignored collision: git aborted rather
-                        # than overwrite founder WIP. Fall back to the existing
-                        # safe skip + behind_dev signal -- never clobber.
+                        # Untracked/ignored collision: git aborted rather than
+                        # overwrite founder WIP. move-aside-and-surface -- relocate
+                        # ONLY the git-named colliding path(s) into an
+                        # executor-owned backup dir, surface them in the
+                        # wip_held_for_review manifest, and retry the ff to reach
+                        # behind==0. If it still cannot proceed safely, the helper
+                        # has already moved everything back and we fall back to the
+                        # existing safe behind_dev skip -- never clobber.
                         detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
-                        return _behind_dev_dirty_skip(
-                            f"ff-only merge of {remote_ref} into '{primary_branch}' "
-                            "aborted on an untracked/ignored collision; wrote "
-                            "behind_dev signal instead of clobbering founder WIP: "
-                            f"{detail[:200]}",
-                            signal_reason="ff_only_merge_failed",
+                        hold_id = uuid.uuid4().hex
+                        resolved, _moved, fallback = _resolve_ff_untracked_collision(
+                            detail,
+                            hold_id=hold_id,
+                            backup_dir=_wip_held_for_review_backup_dir(primary, hold_id),
+                            held_stash=None,
+                            reason="untracked_collision_moved",
                         )
+                        if not resolved:
+                            return _behind_dev_dirty_skip(
+                                f"ff-only merge of {remote_ref} into '{primary_branch}' "
+                                "aborted on an untracked/ignored collision and could "
+                                "not be safely reconciled; wrote behind_dev signal "
+                                "instead of clobbering founder WIP: "
+                                f"{fallback or detail[:200]}",
+                                signal_reason="ff_only_merge_failed",
+                            )
+                        # resolved -> the colliding path(s) are held aside and HEAD
+                        # advanced; fall through to the shared success block.
 
                     synced_sha = _run(
                         ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
@@ -4984,11 +5390,127 @@ def _sync_primary_worktree_to_base(
                     )
                 if overlap_paths:
                     outcome["tracked_wip_overlap_paths"] = sorted(overlap_paths)
-                    return _behind_dev_dirty_skip(
-                        "primary worktree is behind base with tracked dirty WIP "
-                        "overlapping the fast-forward range; wrote behind_dev "
-                        "signal instead of risking a conflicting restore"
+                    # stash-ff-HOLD-and-surface: restoring the overlapping tracked
+                    # WIP over the freshly ff'd dev content is the conflicting 3-way
+                    # merge this branch used to skip on. Instead, isolate ALL tracked
+                    # WIP, fast-forward to behind==0, and HOLD the WIP in the
+                    # executor-owned stash (do NOT restore) -- a wip_held_for_review
+                    # manifest names the stash ref/oid + held paths for recovery.
+                    hold_stash_record, hold_stash_error = _stash_primary_sync_tracked_wip(
+                        primary, tracked_wip_paths, log=log,
                     )
+                    if hold_stash_error or hold_stash_record is None:
+                        # Isolation failed -> keep the WIP in place, never ff.
+                        return _behind_dev_dirty_skip(
+                            "primary worktree is behind base with overlapping "
+                            "tracked dirty WIP that could not be isolated for a "
+                            "safe fast-forward"
+                            + (f": {hold_stash_error}" if hold_stash_error else "")
+                        )
+                    outcome["tracked_wip_stash_marker"] = hold_stash_record.get("marker")
+                    outcome["tracked_wip_stash_ref"] = hold_stash_record.get("stash_ref")
+                    outcome["tracked_wip_stash_oid"] = hold_stash_record.get("stash_oid")
+
+                    hold_id = uuid.uuid4().hex
+                    hold_backup_dir = _wip_held_for_review_backup_dir(primary, hold_id)
+                    # Prove the manifest is writable BEFORE advancing HEAD: the held
+                    # WIP is never restored, so we must never fast-forward with it
+                    # stranded outside a durable surface. HEAD is still at old_sha
+                    # here, so any rollback restores the stash cleanly in place.
+                    manifest_err = _write_wip_held_for_review_manifest(
+                        primary,
+                        hold_id=hold_id,
+                        base_ref=remote_ref,
+                        old_sha=old_sha,
+                        new_sha=new_sha,
+                        reason="tracked_wip_overlap_held",
+                        held_stash=hold_stash_record,
+                        moved_records=[],
+                        backup_dir=None,
+                    )
+                    if manifest_err:
+                        _restore_primary_sync_tracked_wip(
+                            primary, hold_stash_record, log=log,
+                        )
+                        return _behind_dev_dirty_skip(
+                            "primary worktree is behind base with overlapping "
+                            "tracked dirty WIP but the wip_held_for_review manifest "
+                            "could not be written; restored WIP in place and "
+                            f"skipped: {manifest_err}"
+                        )
+                    outcome["wip_held_for_review"] = True
+                    outcome["wip_held_manifest_path"] = str(
+                        _wip_held_for_review_manifest_path(primary)
+                    )
+                    outcome["wip_held_stash_ref"] = hold_stash_record.get("stash_ref")
+                    outcome["wip_held_stash_oid"] = hold_stash_record.get("stash_oid")
+                    outcome["wip_held_tracked_paths"] = list(tracked_wip_paths)
+
+                    # PULL-ONLY ff with the overlapping tracked WIP isolated. A real
+                    # untracked/ignored collision is moved aside + surfaced by the
+                    # shared helper; on any unresolved failure HEAD is left at
+                    # old_sha and the held stash is restored in place before skip.
+                    merge_proc = _run(
+                        ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
+                        cwd=primary,
+                        check=False,
+                        timeout=60,
+                    )
+                    if merge_proc.returncode != 0:
+                        detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
+                        resolved, _moved, fallback = _resolve_ff_untracked_collision(
+                            detail,
+                            hold_id=hold_id,
+                            backup_dir=hold_backup_dir,
+                            held_stash=hold_stash_record,
+                            reason="tracked_wip_overlap_held+untracked_collision_moved",
+                        )
+                        if not resolved:
+                            # HEAD still at old_sha; untracked already moved back.
+                            # Clear the manifest, restore the held stash in place,
+                            # then fall back to the safe behind_dev skip.
+                            _clear_wip_held_for_review_manifest(primary, hold_id)
+                            restore_error = _restore_primary_sync_tracked_wip(
+                                primary, hold_stash_record, log=log,
+                            )
+                            if restore_error:
+                                outcome["tracked_wip_left_stashed"] = True
+                                outcome["tracked_wip_restore_error"] = restore_error
+                            else:
+                                outcome["tracked_wip_restored"] = True
+                            outcome["wip_held_for_review"] = False
+                            outcome["wip_held_manifest_path"] = None
+                            outcome["wip_held_stash_ref"] = None
+                            outcome["wip_held_stash_oid"] = None
+                            outcome["wip_held_tracked_paths"] = []
+                            return _behind_dev_dirty_skip(
+                                f"ff-only merge of {remote_ref} into '{primary_branch}' "
+                                "failed after isolating overlapping tracked dirty WIP; "
+                                f"restored WIP in place and skipped: {fallback or detail[:200]}",
+                                signal_reason="ff_only_merge_failed",
+                            )
+
+                    # ff succeeded (HEAD advanced). HOLD: never restore the tracked
+                    # WIP over the freshly ff'd dev content -- it stays in the
+                    # executor-owned stash, surfaced by the manifest for recovery.
+                    synced_sha = _run(
+                        ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
+                    ).stdout.strip()
+                    outcome["tracked_wip_left_stashed"] = True
+                    outcome["synced"] = True
+                    outcome["skipped"] = False
+                    outcome["reason"] = None
+                    outcome["new_sha"] = synced_sha
+                    _clear_behind_dev_signal(primary)
+                    log(
+                        f"Step 15b: synced primary worktree {primary} on "
+                        f"'{primary_branch}' {(old_sha or '?')[:8]} -> "
+                        f"{(synced_sha or '?')[:8]} (ff-only {remote_ref}; HELD "
+                        f"{len(tracked_wip_paths)} overlapping tracked WIP path(s) "
+                        f"in stash {hold_stash_record.get('stash_ref')} for review: "
+                        f"{', '.join(tracked_wip_paths)})"
+                    )
+                    return outcome
 
                 # Non-overlapping tracked WIP: isolate it, fast-forward, restore.
                 stash_record, stash_error = _stash_primary_sync_tracked_wip(
@@ -5017,22 +5539,42 @@ def _sync_primary_worktree_to_base(
                     timeout=60,
                 )
                 if merge_proc.returncode != 0:
-                    # ff failed after stashing -> restore WIP before returning so
-                    # founder WIP is never left only in the stash on a skip path.
+                    # ff aborted after stashing the non-overlapping tracked WIP.
+                    # With the tracked WIP isolated, the only remaining cause is an
+                    # untracked/ignored collision -> move-aside-and-surface: relocate
+                    # ONLY the git-named colliding path(s), retry the ff, and (on
+                    # success) fall through to restore the non-overlapping tracked
+                    # WIP in place. If it still cannot proceed the colliding path(s)
+                    # are already moved back; restore the tracked WIP and safe-skip
+                    # so founder WIP is never left only in the stash/backup.
                     detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
-                    restore_error = _restore_primary_sync_tracked_wip(
-                        primary, stash_record, log=log,
+                    hold_id = uuid.uuid4().hex
+                    resolved, _moved, fallback = _resolve_ff_untracked_collision(
+                        detail,
+                        hold_id=hold_id,
+                        backup_dir=_wip_held_for_review_backup_dir(primary, hold_id),
+                        held_stash=None,
+                        reason="untracked_collision_moved",
                     )
-                    if restore_error:
-                        outcome["tracked_wip_left_stashed"] = True
-                        outcome["tracked_wip_restore_error"] = restore_error
-                    else:
-                        outcome["tracked_wip_restored"] = True
-                    return _behind_dev_dirty_skip(
-                        f"ff-only merge of {remote_ref} into '{primary_branch}' "
-                        f"failed after isolating tracked dirty WIP: {detail[:200]}",
-                        signal_reason="ff_only_merge_failed",
-                    )
+                    if not resolved:
+                        # ff still not possible -> restore WIP before returning so
+                        # founder WIP is never left only in the stash on a skip path.
+                        restore_error = _restore_primary_sync_tracked_wip(
+                            primary, stash_record, log=log,
+                        )
+                        if restore_error:
+                            outcome["tracked_wip_left_stashed"] = True
+                            outcome["tracked_wip_restore_error"] = restore_error
+                        else:
+                            outcome["tracked_wip_restored"] = True
+                        return _behind_dev_dirty_skip(
+                            f"ff-only merge of {remote_ref} into '{primary_branch}' "
+                            "failed after isolating tracked dirty WIP: "
+                            f"{fallback or detail[:200]}",
+                            signal_reason="ff_only_merge_failed",
+                        )
+                    # resolved -> colliding untracked path(s) held aside and HEAD
+                    # advanced; fall through to restore the tracked WIP in place.
 
                 # ff succeeded -> restore the isolated tracked WIP in place.
                 restore_error = _restore_primary_sync_tracked_wip(
