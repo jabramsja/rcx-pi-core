@@ -1448,45 +1448,65 @@ def test_sync_primary_stash_preserves_tracked_wip_and_clears_behind_dev(tmp_path
     assert c1_sha != c0_sha
 
 
-def test_sync_primary_dirty_overlap_does_not_stash_or_overwrite(tmp_path):
-    """Even when origin/dev touches the dirty path, behind+dirty skips safely."""
+def test_sync_primary_overlap_tracked_wip_stash_ff_holds_for_review(tmp_path):
+    """RECONCILED case (a) held-overlap (never-behind-checkignore-fence-2026-07-04)
+    -- supersedes the pre-fence SKIP regression
+    ``test_sync_primary_dirty_overlap_does_not_stash_or_overwrite``.
+
+    When origin/dev's fast-forward range OVERLAPS a tracked-WIP path, an in-place
+    ``stash pop`` restore would be a conflicting 3-way merge. Instead of the old
+    behind_dev SKIP, the primary now auto-advances via STASH-FF-HOLD: the tracked
+    WIP is stashed, the ff proceeds to behind==0, and the stash is HELD (never
+    restored) for founder review. Founder WIP is never clobbered -- it lives in
+    the executor-owned stash."""
     upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "jabramsja/feat-overlap"], cwd=primary, env=env)
     (primary / "seed.txt").write_text("staged founder WIP\n")
     _git(["add", "seed.txt"], cwd=primary, env=env)
     (primary / "seed.txt").write_text("unstaged founder WIP\n")
     (primary / "scratch.txt").write_text("untracked scratch\n")
+    # origin/dev touches seed.txt -> the ff range OVERLAPS the tracked WIP path.
     c1_sha = _advance_origin_dev(upstream, env, content="origin seed c1\n")
+    assert c1_sha != c0_sha
 
     outcome = commit_mod.sync_primary_worktree_to_base(
         repo_root=primary, base_branch="dev", log=_noop_log,
     )
 
-    assert outcome["synced"] is False, outcome
-    assert outcome["skipped"] is True, outcome
-    assert "dirty WIP" in (outcome["reason"] or ""), outcome
+    # Auto-advanced to origin/dev tip; the overlap was recorded, WIP HELD.
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert outcome["reason"] is None, outcome
+    assert outcome["old_sha"] == c0_sha, outcome
+    assert outcome["new_sha"] == c1_sha, outcome
     assert outcome["dirty_paths"] == ["scratch.txt", "seed.txt"], outcome
-    assert outcome["behind_count"] == 1, outcome
-    assert outcome["ahead_count"] == 0, outcome
-    assert outcome["behind_dev_signal_written"] is True, outcome
     assert outcome["tracked_wip_paths"] == ["seed.txt"], outcome
     assert outcome["tracked_wip_overlap_paths"] == ["seed.txt"], outcome
-    assert outcome["tracked_wip_stash_marker"] is None, outcome
-    assert outcome["tracked_wip_stash_ref"] is None, outcome
-    assert outcome["tracked_wip_stash_oid"] is None, outcome
+    # Stash HELD (not restored): the founder reviews it out-of-band.
+    assert outcome["tracked_wip_stash_held"] is True, outcome
+    assert outcome["tracked_wip_left_stashed"] is True, outcome
     assert outcome["tracked_wip_restored"] is False, outcome
-    assert outcome["tracked_wip_left_stashed"] is False, outcome
     assert outcome["tracked_wip_restore_error"] is None, outcome
-    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
-    assert _git(["show", ":seed.txt"], cwd=primary).stdout == "staged founder WIP\n"
-    assert (primary / "seed.txt").read_text() == "unstaged founder WIP\n"
+    assert outcome["tracked_wip_stash_ref"] is not None, outcome
+    # HEAD fast-forwarded; primary now at behind==0 on its feature branch.
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    assert _git(
+        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=primary
+    ).stdout.strip() == "jabramsja/feat-overlap"
+    behind = _git(
+        ["rev-list", "--count", "HEAD..origin/dev"], cwd=primary
+    ).stdout.strip()
+    assert behind == "0", behind
+    # seed.txt now holds ORIGIN's content (dev's version; the held stash was NOT
+    # restored over it). The founder WIP survives in the executor-owned stash.
+    assert (primary / "seed.txt").read_text() == "origin seed c1\n", outcome
+    stash_list = _git(["stash", "list"], cwd=primary).stdout
+    assert "commit_executor:primary_ffsync_tracked_wip" in stash_list, stash_list
+    # Non-colliding untracked founder scratch rode through byte-identical.
     assert (primary / "scratch.txt").read_text() == "untracked scratch\n"
-    status_lines = set(_git(["status", "--short"], cwd=primary).stdout.splitlines())
-    assert "MM seed.txt" in status_lines
-    assert "?? scratch.txt" in status_lines
-    assert c1_sha != c0_sha
-    assert _git(["stash", "list"], cwd=primary).stdout.strip() == ""
-    assert (primary / ".agent_bus" / "behind_dev.json").exists()
+    # never-behind achieved -> no behind_dev skip signal written / left behind.
+    assert outcome["behind_dev_signal_written"] is False, outcome
+    assert not (primary / ".agent_bus" / "behind_dev.json").exists(), outcome
 
 
 def test_sync_primary_skips_already_current_before_stashing_tracked_wip(tmp_path):
@@ -1564,19 +1584,23 @@ def test_sync_primary_ffs_over_noncolliding_untracked_files(tmp_path):
     assert not (primary / ".agent_bus" / "behind_dev.json").exists(), outcome
 
 
-def test_sync_primary_untracked_collision_skips_and_preserves_founder_wip(tmp_path):
-    """FIX-NEVERBEHIND-FF-UNTRACKED (never-clobber): when the ff range would
-    OVERWRITE an untracked founder file (origin/dev force-adds a TRACKED file at
-    the same path), `git merge --ff-only --no-overwrite-ignore` ABORTS. The new
-    untracked-only branch then falls back to the SAFE behind_dev skip -- HEAD is
-    left at C0 and the founder's untracked WIP is preserved byte-identical, never
-    clobbered by origin content. This exercises the untracked-only ff FAILURE
-    branch (the collision-abort fallback), complementing the ff-SUCCESS case."""
+def test_sync_primary_untracked_collision_moves_aside_and_ffs(tmp_path):
+    """RECONCILED case (b) untracked-collision-moved
+    (never-behind-checkignore-fence-2026-07-04) -- supersedes the pre-fence SKIP
+    regression ``test_sync_primary_untracked_collision_skips_and_preserves_founder_wip``.
+
+    When the ff range would OVERWRITE a NON-ignored untracked founder file
+    (origin/dev adds a TRACKED file at the same path -- the realistic case of a
+    local scratch file that becomes tracked on dev), the primary now auto-advances
+    via MOVE-ASIDE: the colliding file is relocated to an executor-owned backup,
+    the ff reaches behind==0, and the backup location is recorded so the founder
+    reconciles the original. Founder WIP is never clobbered -- it is preserved in
+    the backup, byte-identical."""
     upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "jabramsja/feat-untracked-collide"], cwd=primary, env=env)
     # Untracked founder WIP at a path origin/dev is about to ADD as a tracked file.
     (primary / "collide.txt").write_text("local untracked WIP")
-    # A second, non-colliding untracked file must ALSO survive the safe skip.
+    # A second, non-colliding untracked file must ride through the ff untouched.
     (primary / "keep.txt").write_text("keep me")
     # origin/dev advances by ADDING collide.txt as a TRACKED file -> real collision.
     c1_sha = _advance_origin_dev_add_file(
@@ -1588,15 +1612,147 @@ def test_sync_primary_untracked_collision_skips_and_preserves_founder_wip(tmp_pa
         repo_root=primary, base_branch="dev", log=_noop_log,
     )
 
-    # The ff ABORTED on the collision -> safe SKIP, never synced.
+    # Auto-advanced to origin/dev tip via move-aside (never skipped).
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert outcome["reason"] is None, outcome
+    assert outcome["new_sha"] == c1_sha, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha, outcome
+    assert _git(
+        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=primary
+    ).stdout.strip() == "jabramsja/feat-untracked-collide"
+    behind = _git(
+        ["rev-list", "--count", "HEAD..origin/dev"], cwd=primary
+    ).stdout.strip()
+    assert behind == "0", behind
+    # The colliding path was moved aside and its backup recorded; NOT fenced.
+    assert outcome["moved_aside_paths"] == ["collide.txt"], outcome
+    assert outcome["moved_aside_fenced_ignored_paths"] == [], outcome
+    backups = outcome["moved_aside_backups"]
+    assert list(backups) == ["collide.txt"], outcome
+    backup_path = Path(backups["collide.txt"])
+    # Founder's original is preserved byte-identical in the executor backup.
+    assert backup_path.exists(), outcome
+    assert backup_path.read_text() == "local untracked WIP", outcome
+    # dev's now-tracked file occupies the worktree path; the founder-only file rode through.
+    assert (primary / "collide.txt").read_text() == "origin tracked content\n", outcome
+    assert (primary / "keep.txt").read_text() == "keep me", outcome
+    # never-behind achieved WITHOUT a behind_dev skip signal.
+    assert outcome["behind_dev_signal_written"] is False, outcome
+    assert not (primary / ".agent_bus" / "behind_dev.json").exists(), outcome
+
+
+def test_sync_primary_ignored_collision_fenced_leaves_wip_byte_identical(tmp_path):
+    """Case (c) ignored-collision-fenced -- the wave's core never-clobber
+    invariant (never-behind-checkignore-fence-2026-07-04).
+
+    A locally-IGNORED founder file at a path dev now TRACKS must NEVER be
+    relocated by the move-aside. git's own overwrite-abort message lumps ignored
+    files under "untracked", so only an explicit ``git check-ignore`` fence at the
+    single shared move-aside helper stops the relocation. A non-ignored untracked
+    file is present so the flow enters the untracked-only ff (whose collision-abort
+    triggers the move-aside path); the move-aside then FENCES the ignored
+    candidate -> clean behind_dev skip, ignored WIP left BYTE-IDENTICAL in place,
+    never relocated."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-ign-collide"], cwd=primary, env=env)
+    # Locally IGNORE ign_collide.txt (local-only via .git/info/exclude, no commit
+    # -> the branch stays a pure ancestor of origin/dev) and drop founder WIP there.
+    (primary / ".git" / "info" / "exclude").write_text(
+        "ign_collide.txt\n", encoding="utf-8"
+    )
+    (primary / "ign_collide.txt").write_text("local ignored WIP", encoding="utf-8")
+    # A NON-ignored untracked file so `_dirty_worktree_paths` is non-empty and the
+    # flow reaches the untracked-only ff branch (ignored files are excluded there).
+    (primary / "notes.txt").write_text("founder notes", encoding="utf-8")
+    # origin/dev ADDS ign_collide.txt as a TRACKED file -> the ff would overwrite
+    # the founder's ignored WIP; --no-overwrite-ignore ABORTS -> move-aside path.
+    c1_sha = _advance_origin_dev_add_file(
+        upstream, env, path="ign_collide.txt", content="origin tracked content\n"
+    )
+    assert c1_sha != c0_sha
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    # FENCED -> clean SKIP, never synced. HEAD unchanged at C0.
     assert outcome["synced"] is False, outcome
     assert outcome["skipped"] is True, outcome
-    # HEAD unchanged at C0 -- no fast-forward applied.
     assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha, outcome
-    # Founder's untracked WIP is PRESERVED, not clobbered by origin's content.
-    assert (primary / "collide.txt").read_text() == "local untracked WIP", outcome
-    assert (primary / "keep.txt").read_text() == "keep me", outcome
+    # The check-ignore fence fired on the ignored path; NOTHING was moved aside.
+    assert outcome["moved_aside_fenced_ignored_paths"] == ["ign_collide.txt"], outcome
+    assert outcome["moved_aside_paths"] == [], outcome
+    assert outcome["moved_aside_backups"] == {}, outcome
+    # Ignored founder WIP is BYTE-IDENTICAL in place -- never relocated.
+    assert (primary / "ign_collide.txt").read_text() == "local ignored WIP", outcome
+    # The non-ignored untracked file is untouched too (the ff aborted wholesale).
+    assert (primary / "notes.txt").read_text() == "founder notes", outcome
+    # No backup directory retained the ignored file (it was never moved).
+    backup_dir = outcome["moved_aside_backup_dir"]
+    if backup_dir is not None:
+        assert not (Path(backup_dir) / "ign_collide.txt").exists(), outcome
     # Fell back to the durable behind_dev skip signal (reason: the ff aborted).
+    assert outcome["behind_dev_signal_written"] is True, outcome
+    signal = json.loads(
+        (primary / ".agent_bus" / "behind_dev.json").read_text(encoding="utf-8")
+    )
+    assert signal["reason"] == "ff_only_merge_failed", signal
+
+
+def test_sync_primary_move_aside_ff_failure_restores_founder_wip(tmp_path, monkeypatch):
+    """Case (d) failure-restore -- a forced ff failure AFTER the move-aside
+    restores the original working-tree state (never stranded or clobbered).
+
+    A real untracked collision drives the primary into the move-aside path; the
+    colliding file is relocated to the executor backup for real, then the retry
+    fast-forward is FORCED to fail. The helper must move the founder file back to
+    its original path (byte-identical) and fall back to the safe behind_dev
+    skip."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-move-fail"], cwd=primary, env=env)
+    (primary / "collide.txt").write_text("local untracked WIP")
+    c1_sha = _advance_origin_dev_add_file(
+        upstream, env, path="collide.txt", content="origin tracked content\n"
+    )
+    assert c1_sha != c0_sha
+
+    # Let the FIRST `git merge` run for real (it aborts on the real collision and
+    # enters the move-aside path); FORCE the retry ff (the 2nd merge, run after the
+    # file is moved aside) to fail so the restore path is exercised.
+    real_run = subprocess.run
+    merge_seen = {"n": 0}
+
+    def _fail_retry_merge(cmd, *args, **kwargs):
+        if isinstance(cmd, (list, tuple)) and list(cmd[:2]) == ["git", "merge"]:
+            merge_seen["n"] += 1
+            if merge_seen["n"] >= 2:
+                return subprocess.CompletedProcess(
+                    list(cmd), 1, stdout="", stderr="forced ff failure after move-aside\n"
+                )
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _fail_retry_merge)
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    # The forced retry-ff failure -> safe SKIP, never synced. HEAD unchanged at C0.
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert merge_seen["n"] >= 2, merge_seen  # both the real ff and the forced retry ran
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha, outcome
+    # The moved-aside file was RESTORED to its original path, byte-identical.
+    assert outcome["moved_aside_paths"] == ["collide.txt"], outcome
+    assert outcome["moved_aside_restored"] is True, outcome
+    assert outcome["moved_aside_restore_error"] is None, outcome
+    assert (primary / "collide.txt").read_text() == "local untracked WIP", outcome
+    # The backup no longer retains the file (it was moved back on restore).
+    backup_dir = outcome["moved_aside_backup_dir"]
+    assert backup_dir is not None, outcome
+    assert not (Path(backup_dir) / "collide.txt").exists(), outcome
+    # Fell back to the durable behind_dev skip signal.
     assert outcome["behind_dev_signal_written"] is True, outcome
     signal = json.loads(
         (primary / ".agent_bus" / "behind_dev.json").read_text(encoding="utf-8")
