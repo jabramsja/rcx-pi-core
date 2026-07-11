@@ -69,9 +69,9 @@ _DEFAULT_BRIDGE_AGENT_DEFAULTS = {
         "effort": "max",
     },
     "codex": {
-        "display_name": "Codex 5.5 xhigh",
-        "model": "gpt-5.5",
-        "reasoning_effort": "xhigh",
+        "display_name": "Codex 5.6-sol ultra",
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "ultra",
     },
 }
 
@@ -158,9 +158,9 @@ def test_sync_corrects_effort_and_display_name_both_shapes(tmp_path):
     claude, codex = data["agents"]["claude"], data["agents"]["codex"]
     assert claude["cmd"][claude["cmd"].index("--effort") + 1] == "max"
     assert claude["display_name"] == "Claude Opus 4.8 max"
-    assert 'model_reasoning_effort="xhigh"' in codex["cmd"]
+    assert 'model_reasoning_effort="ultra"' in codex["cmd"]
     assert 'model_reasoning_effort="medium"' not in codex["cmd"]
-    assert codex["display_name"] == "Codex 5.5 xhigh"
+    assert codex["display_name"] == "Codex 5.6-sol ultra"
 
 
 def test_sync_leaves_other_cmd_args_and_fields_untouched(tmp_path):
