@@ -7153,3 +7153,196 @@ class TestRequiredCIGreenGuard:
         assert response["failure_class"] == "unknown_error"
         assert response["ci_failures"] == []
         assert "test\tpending" in response["ci_checks_output"]
+
+
+class TestCommitValidationEnvSanitization:
+    """PIPELINE-FIX-36: commit-owned validation children must not inherit the
+    launch-role, pager-route, or one-shot recovery override keys the dispatcher
+    and recovery gate leak into ``os.environ``, while every other variable
+    (``RCX_AGENT_BUS_DIR`` plus unrelated vars) is preserved byte-for-byte.
+
+    Exercised through public seams (``commit_validation_env`` /
+    ``run_pytest_on_files`` / ``run_pre_push_fast_gate``) and the already-public
+    ``run_private_attr_test_gate`` -- no ``ANTICHEAT_OK`` private-attr bypass.
+    """
+
+    # The exact keys the fix strips. Hardcoded here (NOT imported from the module)
+    # so a drift in _COMMIT_VALIDATION_STRIPPED_ENV_KEYS is caught by these tests.
+    _LAUNCH_ROLE_PAGER_KEYS = (
+        "RCX_IMPLEMENTER_AGENT_OVERRIDE",
+        "RCX_REVIEWER_AGENT_OVERRIDE",
+        "RCX_BRIDGE_REVIEWER_OVERRIDE",
+        "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT",
+        "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE",
+    )
+    _RECOVERY_KEYS = (
+        "RCX_RECOVERY_TIMEOUT_OVERRIDE",
+        "RCX_RECOVERY_TIMEOUT_KEY",
+        "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE",
+        "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY",
+        "RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE",
+    )
+    _ALL_STRIPPED_KEYS = _LAUNCH_ROLE_PAGER_KEYS + _RECOVERY_KEYS
+
+    def _contaminate(self, monkeypatch, *, bus="/tmp/.agent_bus-lane7"):
+        """Set the exact stranded-FIX35 parent env: role/pager pins select
+        ``claude`` while Tier-2 recovery selects ``phase_b_executor`` timeout
+        27000. Returns the sentinels the sanitized child env MUST preserve.
+        """
+        for key in self._ALL_STRIPPED_KEYS:
+            monkeypatch.setenv(key, "contaminant")
+        monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", "claude")
+        monkeypatch.setenv("RCX_REVIEWER_AGENT_OVERRIDE", "claude")
+        monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "claude")
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", "27000")
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_KEY", "phase_b_executor")
+        monkeypatch.setenv("RCX_AGENT_BUS_DIR", bus)
+        # A non-listed recovery key + an arbitrary unrelated var must BOTH survive.
+        monkeypatch.setenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", "1")
+        monkeypatch.setenv("FIX36_UNRELATED_SENTINEL", "keep-me-exactly")
+        return {
+            "RCX_AGENT_BUS_DIR": bus,
+            "RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY": "1",
+            "FIX36_UNRELATED_SENTINEL": "keep-me-exactly",
+        }
+
+    def test_sanitized_env_strips_exactly_the_ten_override_keys(self, monkeypatch):
+        self._contaminate(monkeypatch)
+        env = commit_mod.commit_validation_env()
+        for key in self._ALL_STRIPPED_KEYS:
+            assert key not in env, f"leaked {key}"
+        # Surgical: the ONLY difference from a plain os.environ copy is those 10 keys.
+        parent = dict(os.environ)
+        assert set(parent) - set(env) == set(self._ALL_STRIPPED_KEYS)
+        assert set(env) - set(parent) == set()
+        # Every preserved key is byte-for-byte identical to the parent value.
+        for key, value in env.items():
+            assert parent[key] == value, key
+
+    def test_sanitized_env_preserves_bus_and_unrelated_variables(self, monkeypatch):
+        preserved = self._contaminate(monkeypatch)
+        env = commit_mod.commit_validation_env()
+        for key, value in preserved.items():
+            assert env.get(key) == value, key
+
+    def test_sanitized_env_does_not_mutate_os_environ(self, monkeypatch):
+        self._contaminate(monkeypatch)
+        before = dict(os.environ)
+        commit_mod.commit_validation_env({"PYTHONHASHSEED": "0"})
+        assert dict(os.environ) == before
+        # The stripped keys remain LIVE in the parent process (needed by the
+        # dispatcher/recovery/role/pager authority); only the child copy loses them.
+        for key in self._ALL_STRIPPED_KEYS:
+            assert key in os.environ
+
+    def test_sanitized_env_overrides_layer_without_readding_stripped_keys(self, monkeypatch):
+        self._contaminate(monkeypatch)
+        env = commit_mod.commit_validation_env(
+            {"PYTHONHASHSEED": "0", "RCX_CI": "1", "HYPOTHESIS_PROFILE": "ci_fast"}
+        )
+        assert env["PYTHONHASHSEED"] == "0"
+        assert env["RCX_CI"] == "1"
+        assert env["HYPOTHESIS_PROFILE"] == "ci_fast"
+        for key in self._ALL_STRIPPED_KEYS:
+            assert key not in env
+
+    def test_reproduces_fix35_role_and_recovery_contamination_is_isolated(self, monkeypatch):
+        # Reproduction: the parent carries the exact contradictory FIX35 authority
+        # (role/pager -> claude, recovery -> phase_b_executor/27000); the validation
+        # child must see NONE of it so it resolves committed/seeded authority instead.
+        self._contaminate(monkeypatch)
+        assert os.environ["RCX_IMPLEMENTER_AGENT_OVERRIDE"] == "claude"
+        assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "27000"
+        assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "phase_b_executor"
+        env = commit_mod.commit_validation_env()
+        assert "RCX_IMPLEMENTER_AGENT_OVERRIDE" not in env
+        assert "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE" not in env
+        assert "RCX_RECOVERY_TIMEOUT_OVERRIDE" not in env
+        assert "RCX_RECOVERY_TIMEOUT_KEY" not in env
+
+    def test_targeted_pytest_gate_passes_sanitized_env_with_fast_shard_pins(
+        self, tmp_path, monkeypatch
+    ):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        preserved = self._contaminate(monkeypatch)
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=fake_run):
+            commit_mod.run_pytest_on_files(repo, ["mu/tests/tools/test_sentinel.py"])
+
+        env = captured.get("env")
+        assert env is not None
+        for key in self._ALL_STRIPPED_KEYS:
+            assert key not in env, key
+        assert env.get("RCX_AGENT_BUS_DIR") == preserved["RCX_AGENT_BUS_DIR"]
+        assert env.get("FIX36_UNRELATED_SENTINEL") == "keep-me-exactly"
+        # Fast-shard pins are still layered on the sanitized copy.
+        assert env.get("PYTHONHASHSEED") == "0"
+        assert env.get("RCX_CI") == "1"
+        assert env.get("HYPOTHESIS_PROFILE") == "ci_fast"
+
+    def test_private_attr_test_gate_passes_sanitized_env(self, tmp_path, monkeypatch):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        linters = repo / "mu" / "tools" / "checks" / "linters"
+        linters.mkdir(parents=True, exist_ok=True)
+        for checker in ("check_private_attr_access.py", "check_underscore_imports.py"):
+            (linters / checker).write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+        preserved = self._contaminate(monkeypatch)
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=fake_run):
+            result = commit_mod.run_private_attr_test_gate(
+                repo, ["mu/tests/tools/test_sentinel.py"]
+            )
+
+        assert "env" in captured, result
+        env = captured["env"]
+        for key in self._ALL_STRIPPED_KEYS:
+            assert key not in env, key
+        assert env.get("RCX_AGENT_BUS_DIR") == preserved["RCX_AGENT_BUS_DIR"]
+        assert env.get("FIX36_UNRELATED_SENTINEL") == "keep-me-exactly"
+
+    def test_pre_push_fast_gate_child_runs_with_sanitized_env_end_to_end(
+        self, tmp_path, monkeypatch
+    ):
+        # End-to-end: the SHARED helper that both the normal Step 11 pre-push and
+        # the Step 15 bot-remediation guard call actually launches pre-push-fast;
+        # the real child dumps its inherited os.environ, proving the 10 keys never
+        # reach it while the bus + unrelated vars do.
+        import json as _json
+        import shlex
+
+        repo = _setup_repo(tmp_path)
+        dump_path = repo / "pre_push_env_dump.json"
+        hook = repo / "mu" / "tools" / "hooks" / "pre-push-fast"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        dump_py = 'import os, json, sys; json.dump(dict(os.environ), open(sys.argv[1], "w"))'
+        hook.write_text(
+            "#!/usr/bin/env bash\n"
+            f"python3 -c {shlex.quote(dump_py)} {shlex.quote(str(dump_path))}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        preserved = self._contaminate(monkeypatch, bus=str(repo / ".agent_bus-lane7"))
+
+        completed = commit_mod.run_pre_push_fast_gate(repo, hook)
+        assert completed.returncode == 0
+
+        child_env = _json.loads(dump_path.read_text(encoding="utf-8"))
+        for key in self._ALL_STRIPPED_KEYS:
+            assert key not in child_env, key
+        assert child_env.get("RCX_AGENT_BUS_DIR") == preserved["RCX_AGENT_BUS_DIR"]
+        assert child_env.get("FIX36_UNRELATED_SENTINEL") == "keep-me-exactly"
+        assert child_env.get("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY") == "1"
