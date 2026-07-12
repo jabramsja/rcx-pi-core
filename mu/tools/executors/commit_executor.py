@@ -3474,6 +3474,102 @@ def _commit_subprocess_env(*, skip_receipt_check: bool = False) -> dict[str, str
     return run_env
 
 
+# ---------------------------------------------------------------------------
+# Commit-owned validation subprocess environment sanitization (PIPELINE-FIX-36).
+#
+# The outer dispatcher (launch_wave.dispatcher_child_environment) and the Tier-2
+# recovery gate (recovery_gate.py, which writes recovery-timeout keys directly
+# into os.environ) leak launch-role, pager-route, and one-shot recovery override
+# keys into the commit executor's PROCESS environment. Those keys are REQUIRED
+# for live pipeline execution -- they pin agent-role/pager selection and recovery
+# timeouts that git/adapter/receipt/push/merge/pager/supervisor work depends on,
+# so _commit_subprocess_env() (above) deliberately keeps them. But a commit-owned
+# VALIDATION child -- targeted pytest, the test-integrity linters, or the
+# pre-push-fast hook -- that inherits them resolves the WRONG role/timeout: the
+# reproduced FIX35 leak had an implementer/pager role pin selecting `claude`
+# while a Tier-2 recovery override selected `phase_b_executor` with a 27000s
+# timeout, stranding an otherwise COMMIT_GO commit. Only validation children are
+# sanitized here; every other commit subprocess keeps its live authority.
+_COMMIT_VALIDATION_STRIPPED_ENV_KEYS: tuple[str, ...] = (
+    # Launch-role / pager-route pins (launch_wave.py + dispatcher child env).
+    "RCX_IMPLEMENTER_AGENT_OVERRIDE",
+    "RCX_REVIEWER_AGENT_OVERRIDE",
+    "RCX_BRIDGE_REVIEWER_OVERRIDE",
+    "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT",
+    "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE",
+    # One-shot Tier-2 recovery timeout overrides (recovery_gate.py -> os.environ).
+    # NOTE: RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY is intentionally NOT stripped
+    # -- it is not a role/timeout authority key and is out of this fix's scope.
+    "RCX_RECOVERY_TIMEOUT_OVERRIDE",
+    "RCX_RECOVERY_TIMEOUT_KEY",
+    "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE",
+    "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY",
+    "RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE",
+)
+
+
+def _commit_validation_env(
+    overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return the environment for a commit-owned validation child.
+
+    Copies the current process environment and removes exactly the launch-role,
+    pager-route, and one-shot recovery override keys in
+    :data:`_COMMIT_VALIDATION_STRIPPED_ENV_KEYS`. Everything else is preserved
+    byte-for-byte -- the active-bus authority ``RCX_AGENT_BUS_DIR``, ``PATH``,
+    credentials, pytest worker bounds, locale, and every unrelated variable. The
+    live ``os.environ`` is never mutated (a fresh dict is returned). Optional
+    ``overrides`` are layered on top of the sanitized copy (e.g. the pytest gate's
+    ``PYTHONHASHSEED``/``RCX_CI``/``HYPOTHESIS_PROFILE`` pins) so a caller adds its
+    own keys without re-introducing the stripped launch/recovery authority.
+
+    Targeted sibling of :func:`_commit_subprocess_env`: git, adapter, receipt,
+    push, merge, pager, and supervisor subprocesses still need the live
+    role/pager/recovery/bus authority and keep using their existing env -- only
+    validation children are sanitized here.
+    """
+    run_env = dict(os.environ)
+    for key in _COMMIT_VALIDATION_STRIPPED_ENV_KEYS:
+        run_env.pop(key, None)
+    if overrides:
+        run_env.update(overrides)
+    return run_env
+
+
+# Public seam over :func:`_commit_validation_env` so the suite can pin the exact
+# strip/preserve contract and each validation call site's env without reaching
+# past a leading underscore (the test-integrity policy forbids ``ANTICHEAT_OK``
+# private-attr bypasses in tests and requires a real public seam).
+commit_validation_env = _commit_validation_env
+
+
+def _run_pre_push_fast_gate(
+    repo_root: Path,
+    pre_push_script: Path,
+) -> subprocess.CompletedProcess:
+    """Run the tracked pre-push-fast hook for a commit-owned validation gate.
+
+    Both the normal Step 11 pre-push and the Step 15 bot-remediation pre-push
+    guard run the hook through this single seam so the pre-push validation child
+    inherits a sanitized environment (:func:`_commit_validation_env`): the
+    launch-role, pager-route, and one-shot recovery override keys leaked into the
+    pipeline parent never reach pre-push-fast, while ``RCX_AGENT_BUS_DIR`` and
+    every unrelated variable are preserved. Keeps the same
+    :data:`PRE_PUSH_FAST_TIMEOUT_S` budget and raises the same subprocess errors
+    as before, so each call site keeps its existing failure handling.
+    """
+    return _run(
+        ["bash", str(pre_push_script)],
+        cwd=repo_root,
+        timeout=PRE_PUSH_FAST_TIMEOUT_S,
+        env=_commit_validation_env(),
+    )
+
+
+# Public seam over :func:`_run_pre_push_fast_gate` for the sanitized-env suite.
+run_pre_push_fast_gate = _run_pre_push_fast_gate
+
+
 def _tail_failure_excerpt(text: str, *, limit: int = 1000, max_lines: int = 20) -> str:
     """Keep the actionable tail of noisy hook output."""
     cleaned = (text or "").strip()
@@ -3781,6 +3877,9 @@ def run_private_attr_test_gate(
                 text=True,
                 check=False,
                 timeout=timeout,
+                # Test-integrity child: strip leaked launch-role/pager/recovery
+                # override keys (FIX-36); preserve bus + all unrelated env.
+                env=_commit_validation_env(),
             )
             if completed.stdout:
                 stdout_parts.append(completed.stdout)
@@ -3868,12 +3967,15 @@ def _run_pytest_on_files(
             text=True,
             check=False,
             timeout=effective_timeout,
-            env={
-                **os.environ,
-                "PYTHONHASHSEED": "0",
-                "RCX_CI": "1",
-                "HYPOTHESIS_PROFILE": "ci_fast",
-            },
+            # Commit-owned validation child: strip leaked launch-role/pager/
+            # recovery override keys (FIX-36) while layering the fast-shard pins.
+            env=_commit_validation_env(
+                {
+                    "PYTHONHASHSEED": "0",
+                    "RCX_CI": "1",
+                    "HYPOTHESIS_PROFILE": "ci_fast",
+                }
+            ),
         )
         passed = result.returncode == 0 or _pytest_only_deselected_by_marker_filter(
             result.returncode,
@@ -3893,6 +3995,11 @@ def _run_pytest_on_files(
             "stderr": f"pytest timed out after {effective_timeout}s",
             "passed": False,
         }
+
+
+# Public seam over :func:`_run_pytest_on_files` so the suite can pin the targeted
+# pytest gate's sanitized child env without an ANTICHEAT_OK private-attr bypass.
+run_pytest_on_files = _run_pytest_on_files
 
 
 def _pytest_only_deselected_by_marker_filter(returncode: int, stdout: str, stderr: str) -> bool:
@@ -3979,11 +4086,7 @@ def _run_bot_remediation_pre_push_guard(
     if not pre_push_script.exists():
         return {"passed": True, "skipped": True, "errors": []}
     try:
-        _run(
-            ["bash", str(pre_push_script)],
-            cwd=repo_root,
-            timeout=PRE_PUSH_FAST_TIMEOUT_S,
-        )
+        _run_pre_push_fast_gate(repo_root, pre_push_script)
     except subprocess.CalledProcessError as exc:
         detail = _tail_failure_excerpt(
             exc.stderr or exc.stdout or "",
@@ -12037,7 +12140,7 @@ def _run_post_commit_pipeline(
                     )
                 else:
                     try:
-                        _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=PRE_PUSH_FAST_TIMEOUT_S)
+                        _run_pre_push_fast_gate(repo_root, pre_push_script)
                     except subprocess.CalledProcessError as exc:
                         detail = _tail_failure_excerpt(
                             exc.stderr or exc.stdout or "",
