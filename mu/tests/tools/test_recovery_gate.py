@@ -8739,6 +8739,137 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
+    def test_bootstrap_fault_ignores_incidental_config_path_in_pre_push_stdout(self):
+        # Regression matching the failed pipeline-fix-37b recovery context: Step 11
+        # pre-push-fast failed on a NON-adapter test (the pager receipt test) and
+        # its captured broad pytest stdout incidentally printed
+        # ".agent_bus/bridge_config.json" from unrelated bus-resolving tests. That
+        # lone stdout PATH mention must no longer classify the failure as a
+        # bootstrap/adapter fault, or an otherwise valid bounded recovery delegate
+        # is wrongly rejected (recovery then exhausted, stranding fix37b).
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: recovery diagnostic-channel isolation regression
+            {
+                "status": "error",
+                "step": "run_pre_push_script",
+                "stderr": "pre-push-fast failed: 1 failed",
+                "stdout": (
+                    "collected 8317 items\n"
+                    "mu/tests/tools/test_agent_bus_namespacing.py ....\n"
+                    "PASSED tests resolving .agent_bus/bridge_config.json for the bus\n"
+                    "1 failed, 8315 passed, 1 skipped\n"
+                ),
+                "executor": "commit_executor",
+            },
+            ["mu/tools/executors/commit_executor.py"],
+        )
+        assert blocked is False
+        assert detail == ""
+
+    def test_bootstrap_fault_blocks_real_config_path_in_error_channels(self):
+        # Negative control (actual bridge adapter failure): the SAME bare config
+        # path stays fail-closed when it surfaces in an ERROR channel -- stderr
+        # (BridgeAdapterError), the failed step name, or the executor id -- because
+        # that is where a real adapter/bootstrap fault reports it.
+        real_stderr = {
+            "status": "error",
+            "step": "phase_b_executor",
+            "stderr": "BridgeAdapterError: Bridge config not found at '/x/.agent_bus/bridge_config.json'.",
+            "stdout": "",
+        }
+        real_step = {"status": "error", "step": "load .agent_bus/bridge_config.json", "stderr": "", "stdout": ""}
+        real_executor = {"status": "error", "step": "boot", "stderr": "", "stdout": "", "executor": ".agent_bus/bridge_config.json loader"}
+        for result in (real_stderr, real_step, real_executor):
+            blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: real adapter fault fail-closed negative control
+                result, ["mu/tools/executors/commit_executor.py"]
+            )
+            assert blocked is True, result
+            assert "bootstrap/adapter fault" in detail
+
+    def test_bootstrap_fault_blocks_adapter_error_phrases_in_any_channel(self):
+        # Negative control (actual bridge adapter failure): adapter/bootstrap error
+        # PHRASES carry their own error semantics, so they stay fail-closed wherever
+        # they surface -- including captured stdout (unchanged from prior behavior).
+        phrases = (
+            "Bridge adapter config error: missing backend",
+            "cannot import bridge_adapters",
+            "adapter invocation/bootstrap failed",
+            "adapter selection produced no backend",
+        )
+        for phrase in phrases:
+            for channel in ("stderr", "stdout"):
+                result = {"status": "error", "step": "build_and_run_supervisor", "stderr": "", "stdout": ""}
+                result[channel] = phrase
+                blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: adapter error-phrase fail-closed negative control
+                    result, ["mu/tools/executors/recovery_gate.py"]
+                )
+                assert blocked is True, (phrase, channel)
+                assert "bootstrap/adapter fault" in detail
+
+    def test_bootstrap_fault_still_blocks_bootstrap_surface_in_scope(self):
+        # Negative control: targeting a bootstrap surface itself is still rejected
+        # by the first (files_in_scope) check, independent of the diagnostic text.
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: bootstrap-surface target fail-closed negative control
+            {"status": "error", "step": "run_pre_push_script", "stderr": "", "stdout": ""},
+            [".agent_bus/bridge_config.json"],
+        )
+        assert blocked is True
+        assert "may not target bootstrap surface" in detail
+
+    def test_bridge_config_support_state_symlink_or_type_drift_fails_closed(self, tmp_path):
+        # Negative control (support-state symlink/type drift): narrowing the
+        # incidental-stdout bootstrap DIAGNOSTIC must not weaken the guard that
+        # keeps the SAME .agent_bus/bridge_config.json a real regular file at its
+        # stable realpath. A regular file validates; a symlink (realpath escape)
+        # or a directory (type drift) fails closed.
+        rel = ".agent_bus/bridge_config.json"
+        cfg = tmp_path / rel
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("{}\n", encoding="utf-8")
+        ok, detail = rg_mod._validate_hybrid_support_state_content_path(tmp_path, rel)  # ANTICHEAT_OK: support-state type guard baseline
+        assert ok is True and detail == ""
+
+        # Symlink drift: realpath escapes the stable location -> fail closed.
+        cfg.unlink()
+        outside = tmp_path / "outside_bridge_config.json"
+        outside.write_text("{}\n", encoding="utf-8")
+        cfg.symlink_to(outside)
+        ok, detail = rg_mod._validate_hybrid_support_state_content_path(tmp_path, rel)  # ANTICHEAT_OK: symlink drift fail-closed
+        assert ok is False
+        assert rel in detail
+
+        # Type drift: a directory where a regular file is required -> fail closed.
+        rel2 = ".agent_bus-lane1/bridge_config.json"
+        cfg2 = tmp_path / rel2
+        cfg2.mkdir(parents=True, exist_ok=True)
+        ok, detail = rg_mod._validate_hybrid_support_state_content_path(tmp_path, rel2)  # ANTICHEAT_OK: type drift fail-closed
+        assert ok is False
+        assert "regular file" in detail
+
+    def test_undeclared_source_drift_during_bounded_delegate_fails_closed(self, tmp_path, monkeypatch):
+        # Negative control (undeclared source drift): a bounded delegate scoped to
+        # recovery_gate.py must still fail the checkpoint audit closed if it makes
+        # an undeclared edit to another source file (executor_common.py). The
+        # bootstrap-fault narrowing does not relax this fail-closed contract.
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        undeclared = tmp_path / "mu" / "tools" / "executors" / "executor_common.py"
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: capture bounded-delegate baseline
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        undeclared.write_text("# undeclared source edit outside declared scope\n", encoding="utf-8")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: undeclared source drift fail-closed
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: exact hybrid exception allowlist
+        )
+        assert ok is False
+        assert "escaped declared scope" in audit["detail"]
+
 
 class TestDangerousCommandDetection:
     @pytest.mark.parametrize("cmd", [

@@ -7950,20 +7950,42 @@ def _hybrid_bootstrap_fault_detected(
     for rel_path in files_in_scope:
         if rel_path in _HYBRID_BOOTSTRAP_SURFACES:
             return True, f"hybrid delegation may not target bootstrap surface: {rel_path}"
-    diagnostic_haystack = " ".join(
+    # Adapter/bootstrap error PHRASES carry error semantics on their own, so they
+    # count wherever they surface -- including captured stdout (a real supervisor
+    # or phase step can print a "Bridge adapter config error" to stdout).
+    full_haystack = " ".join(
         str(result.get(key, "") or "")
         for key in ("step", "stderr", "stdout", "executor")
     ).lower()
-    blocked_fragments = (
-        ".agent_bus/bridge_config.json",
+    error_phrase_fragments = (
         "bridge adapter config error",
         "cannot import bridge_adapters",
         "adapter invocation/bootstrap",
         "adapter selection",
     )
-    for fragment in blocked_fragments:
-        if fragment in diagnostic_haystack:
+    for fragment in error_phrase_fragments:
+        if fragment in full_haystack:
             return True, f"hybrid delegation blocked for bootstrap/adapter fault: {fragment}"
+    # A bare ".agent_bus/bridge_config.json" PATH mention is only a real bootstrap
+    # fault when it surfaces in an ERROR channel (the failed step name, its stderr,
+    # or the executor id). A broad validation child -- e.g. a run_pre_push_script
+    # pytest sweep -- routinely prints that path to stdout from unrelated
+    # bus-resolving tests; classifying that incidental stdout text as an adapter
+    # fault wrongly rejects an otherwise valid bounded recovery delegate (the
+    # pipeline-fix-37b recovery context that stranded after Step 11). Real
+    # adapter/bootstrap faults still surface the path in stderr/step
+    # (BridgeAdapterError "Bridge config not found at '...'"), which stays
+    # fail-closed here; only a stdout-only path mention is no longer sufficient.
+    error_channel_haystack = " ".join(
+        str(result.get(key, "") or "")
+        for key in ("step", "stderr", "executor")
+    ).lower()
+    config_path_fragment = ".agent_bus/bridge_config.json"
+    if config_path_fragment in error_channel_haystack:
+        return True, (
+            "hybrid delegation blocked for bootstrap/adapter fault: "
+            f"{config_path_fragment}"
+        )
     return False, ""
 
 

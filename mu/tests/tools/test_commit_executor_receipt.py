@@ -6433,6 +6433,315 @@ class TestBotRemediationValidation:
         auto_defer.assert_not_called()
 
 
+class TestCommitValidationChildBusIsolation:
+    """Commit-owned validation children must be hermetic against the live lane.
+
+    Reproduction (pipeline-fix-37b -> 37c): on a namespaced live lane the parent
+    env carries ``RCX_AGENT_BUS_DIR=.agent_bus-fix37`` PLUS the live dispatcher's
+    ``RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE`` and role overrides. Before this
+    fix the validation call sites passed ``env=None`` or ``{**os.environ, ...}``,
+    so the pre-push-fast / targeted-pytest child inherited the live lane bus AND
+    the live pager route. The repository's own bus-resolving tests then resolved
+    ``.agent_bus-fix37``, and
+    ``test_pager_persists_event_delivery_state_and_lock_in_namespaced_bus`` failed
+    because the leaked ``codex`` route suppressed delivery-receipt/state/lock
+    persistence -- the pipeline-fix-37b Step 11 failure that its bus-only strip did
+    NOT close. ``_commit_subprocess_env`` (commit/amend hooks) MUST keep the lane
+    bus; only validation children drop the bus AND the role/pager overrides.
+    """
+
+    _MALICIOUS_LANE = ".agent_bus-fix37"
+    _PAGER_ENV = "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"
+    _PAGER_TEST = (
+        "mu/tests/tools/test_agent_bus_namespacing.py::"
+        "test_pager_persists_event_delivery_state_and_lock_in_namespaced_bus"
+    )
+
+    def _seed_live_overrides(self, monkeypatch):
+        """Export a full live pipeline lane parent env: bus + pager + roles + guard."""
+        monkeypatch.setenv("RCX_AGENT_BUS_DIR", self._MALICIOUS_LANE)
+        monkeypatch.setenv(self._PAGER_ENV, "codex")
+        for env_names in commit_mod.ROLE_AGENT_ENV_VARS.values():
+            for name in env_names:
+                monkeypatch.setenv(name, "codex")
+        monkeypatch.setenv(commit_mod.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV, "/live/repo")
+
+    def test_commit_validation_env_strips_bus_pager_and_role_overrides(self, monkeypatch):
+        # A malicious/live parent env carries every protected override plus
+        # unrelated variables that MUST survive byte-for-byte.
+        self._seed_live_overrides(monkeypatch)
+        monkeypatch.setenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", "1")
+        monkeypatch.setenv("RCX_SKIP_RECEIPT_CHECK", "1")
+        monkeypatch.setenv("UNRELATED_VALIDATION_VAR", "keep-me")
+
+        hermetic = commit_mod._commit_validation_env()  # ANTICHEAT_OK: validation-child override isolation regression
+
+        # Every protected key is gone: live lane bus + pager route + ALL role
+        # overrides + the repo-root role-override guard.
+        protected = commit_mod._commit_validation_protected_env_keys()  # ANTICHEAT_OK: canonical protected-key set under test
+        assert "RCX_AGENT_BUS_DIR" in protected and self._PAGER_ENV in protected
+        for key in protected:
+            assert key not in hermetic, f"protected key leaked into validation child: {key}"
+        # Unrelated env preserved byte-for-byte; RCX_SKIP_* stripped for _run parity.
+        assert hermetic.get("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY") == "1"
+        assert hermetic.get("UNRELATED_VALIDATION_VAR") == "keep-me"
+        assert hermetic.get("PATH") == os.environ.get("PATH")
+        assert not any(k.startswith("RCX_SKIP_") for k in hermetic)
+        # It equals EXACTLY the parent env minus RCX_SKIP_* and every protected key.
+        expected = {k: v for k, v in os.environ.items() if not k.startswith("RCX_SKIP_")}
+        for key in protected:
+            expected.pop(key, None)
+        assert hermetic == expected
+        # Building the validation-child env never mutates the parent os.environ.
+        assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
+        assert os.environ.get(self._PAGER_ENV) == "codex"
+        assert os.environ.get("RCX_SKIP_RECEIPT_CHECK") == "1"
+
+    def test_commit_validation_env_pins_survive_but_overrides_cannot_reinject(self, monkeypatch):
+        self._seed_live_overrides(monkeypatch)
+        # The pytest determinism pins are applied BEFORE the protected-key removal,
+        # so they survive; they are not protected keys.
+        pinned = commit_mod._commit_validation_env(  # ANTICHEAT_OK: pins-survive regression
+            {"PYTHONHASHSEED": "0", "RCX_CI": "1", "HYPOTHESIS_PROFILE": "ci_fast"}
+        )
+        assert pinned.get("PYTHONHASHSEED") == "0"
+        assert pinned.get("RCX_CI") == "1"
+        assert pinned.get("HYPOTHESIS_PROFILE") == "ci_fast"
+        assert "RCX_AGENT_BUS_DIR" not in pinned and self._PAGER_ENV not in pinned
+        # A MALICIOUS caller override cannot restore any protected key or a skip key,
+        # because the protected-key removal runs after overrides are applied.
+        evil = commit_mod._commit_validation_env(  # ANTICHEAT_OK: malicious-override regression
+            {
+                "RCX_AGENT_BUS_DIR": ".agent_bus-evil",
+                self._PAGER_ENV: "claude",
+                "RCX_IMPLEMENTER_AGENT_OVERRIDE": "codex",
+                "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT": "/evil",
+                "RCX_SKIP_RECEIPT_CHECK": "1",
+                "BENIGN_OVERRIDE": "applied",
+            }
+        )
+        assert "RCX_AGENT_BUS_DIR" not in evil
+        assert self._PAGER_ENV not in evil
+        assert "RCX_IMPLEMENTER_AGENT_OVERRIDE" not in evil
+        assert "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT" not in evil
+        assert not any(k.startswith("RCX_SKIP_") for k in evil)
+        assert evil.get("BENIGN_OVERRIDE") == "applied"
+
+    def test_commit_validation_env_follows_canonical_role_truth(self, monkeypatch):
+        # Acceptance: sanitization follows canonical role override truth, so the
+        # later independent supervisor role can be added to ROLE_AGENT_ENV_VARS
+        # without reopening the leak -- no edit to this helper is required.
+        patched = dict(commit_mod.ROLE_AGENT_ENV_VARS)
+        patched["supervisor"] = ("RCX_SUPERVISOR_AGENT_OVERRIDE",)
+        monkeypatch.setattr(commit_mod, "ROLE_AGENT_ENV_VARS", patched)
+        monkeypatch.setenv("RCX_SUPERVISOR_AGENT_OVERRIDE", "codex")
+        assert (
+            "RCX_SUPERVISOR_AGENT_OVERRIDE"
+            in commit_mod._commit_validation_protected_env_keys()  # ANTICHEAT_OK: canonical-truth forward-compat
+        )
+        assert "RCX_SUPERVISOR_AGENT_OVERRIDE" not in commit_mod._commit_validation_env()  # ANTICHEAT_OK
+
+    def test_bot_remediation_pre_push_guard_env_omits_overrides(self, tmp_path, monkeypatch):
+        # Production call site #1: Step-15 bot-remediation pre-push guard.
+        repo = _setup_repo(tmp_path)
+        pre_push = repo / "mu" / "tools" / "hooks" / "pre-push-fast"
+        pre_push.parent.mkdir(parents=True, exist_ok=True)
+        pre_push.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        self._seed_live_overrides(monkeypatch)
+
+        captured: dict[str, object] = {}
+        real_run = commit_mod._run  # ANTICHEAT_OK: validation-child override isolation regression
+
+        def intercept_run(args, cwd, check=True, timeout=120, env=None, input_text=None):
+            if list(args) == ["bash", str(pre_push)]:
+                captured["env"] = env
+            return real_run(
+                args, cwd=cwd, check=check, timeout=timeout, env=env, input_text=input_text
+            )
+
+        with patch.object(commit_mod, "_run", side_effect=intercept_run):
+            guard = commit_mod._run_bot_remediation_pre_push_guard(  # ANTICHEAT_OK: direct guard regression
+                repo, log=lambda _msg: None
+            )
+
+        assert guard["passed"] is True
+        assert "env" in captured, "pre-push guard never invoked the pre-push-fast script"
+        env = captured["env"]
+        assert env is not None
+        assert "RCX_AGENT_BUS_DIR" not in env
+        assert self._PAGER_ENV not in env
+        assert env.get("PATH") == os.environ.get("PATH")
+        # Exactly the hermetic construction, and the parent env is not mutated.
+        assert env == commit_mod._commit_validation_env()  # ANTICHEAT_OK: validation-child override isolation regression
+        assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
+        assert os.environ.get(self._PAGER_ENV) == "codex"
+
+    def test_step11_post_commit_pre_push_env_omits_overrides(self, tmp_path, monkeypatch):
+        # Production call site #2: ordinary Step 11 (_run_post_commit_pipeline).
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        pre_push = repo / "mu" / "tools" / "hooks" / "pre-push-fast"
+        pre_push.parent.mkdir(parents=True, exist_ok=True)
+        pre_push.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        # Clean the worktree so Step 11 takes the direct pre-push path (no dirty
+        # isolation stash), then the intercept captures the pre-push env.
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True
+        )
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+        self._seed_live_overrides(monkeypatch)
+
+        captured: dict[str, object] = {}
+        real_run = commit_mod._run  # ANTICHEAT_OK: validation-child override isolation regression
+
+        def intercept_run(args, cwd, check=True, timeout=120, env=None, input_text=None):
+            if list(args) == ["bash", str(pre_push)]:
+                captured["env"] = env
+                # Short-circuit before push/CI now that the env is captured.
+                raise subprocess.CalledProcessError(1, list(args), output="", stderr="captured")
+            return real_run(
+                args, cwd=cwd, check=check, timeout=timeout, env=env, input_text=input_text
+            )
+
+        result = {
+            "commit_sha": head_sha,
+            "receipt_decision": "COMMIT_GO",
+            "handoff_sha": "handoff-sha",
+            "steps_completed": ["git_commit"],
+        }
+        with patch.object(commit_mod, "_run", side_effect=intercept_run):
+            pipeline_result = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: Step 11 regression
+                handoff={"wave_id": "validation-child-override-isolation-step11"},
+                repo_root=repo,
+                result=result,
+                target_branch="dev",
+                base_branch="dev",
+                continuation_path=repo / ".agent_bus" / "meta" / "commit_continuation.json",
+                log=lambda _msg: None,
+            )
+
+        assert "env" in captured, "Step 11 never invoked the pre-push-fast script"
+        env = captured["env"]
+        assert env is not None
+        assert "RCX_AGENT_BUS_DIR" not in env
+        assert self._PAGER_ENV not in env
+        assert env.get("PATH") == os.environ.get("PATH")
+        assert env == commit_mod._commit_validation_env()  # ANTICHEAT_OK: Step 11 regression
+        # The short-circuit surfaces as the pre-push step error (env was captured
+        # on the real production path), and the parent env is not mutated.
+        assert pipeline_result["step"] == "run_pre_push_script"
+        assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
+        assert os.environ.get(self._PAGER_ENV) == "codex"
+
+    def test_run_pytest_on_files_builds_hermetic_validation_env(self, tmp_path, monkeypatch):
+        # Production call sites #3/#4: the Step 8b pre-commit targeted pytest gate
+        # and the Step 15 bot-remediation targeted pytest gate both route through
+        # _run_pytest_on_files, which built its child env from a raw ``**os.environ``
+        # and therefore leaked a namespaced live lane AND the live pager/role
+        # overrides into the repository's own tests. Lock the hermetic child env.
+        import subprocess
+
+        self._seed_live_overrides(monkeypatch)
+        monkeypatch.setenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", "1")
+        monkeypatch.setenv("RCX_SKIP_RECEIPT_CHECK", "1")
+        monkeypatch.setenv("UNRELATED_VALIDATION_VAR", "keep-me")
+
+        captured: dict[str, object] = {}
+        real_run = subprocess.run
+
+        def intercept(args, **kwargs):
+            if any("pytest" in str(a) for a in args):
+                captured["env"] = kwargs.get("env")
+                # Do not actually spawn pytest; a clean pass is enough to reach
+                # the env-construction assertions.
+                return subprocess.CompletedProcess(list(args), 0, stdout="1 passed", stderr="")
+            return real_run(args, **kwargs)
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=intercept):
+            res = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: validation-child override isolation regression
+                tmp_path, ["mu/tests/tools/test_agent_bus_namespacing.py"]
+            )
+
+        assert res["passed"] is True
+        assert "env" in captured, "_run_pytest_on_files never invoked pytest"
+        env = captured["env"]
+        assert env is not None
+        # The reproduced leak is closed: no live lane bus and no live pager/role
+        # override reaches the child.
+        assert "RCX_AGENT_BUS_DIR" not in env
+        assert self._PAGER_ENV not in env
+        for key in commit_mod._commit_validation_protected_env_keys():  # ANTICHEAT_OK
+            assert key not in env
+        # The pytest determinism pins survive (applied BEFORE the protected-key removal).
+        assert env.get("PYTHONHASHSEED") == "0"
+        assert env.get("RCX_CI") == "1"
+        assert env.get("HYPOTHESIS_PROFILE") == "ci_fast"
+        # Unrelated parent env preserved byte-for-byte; RCX_SKIP_* sanitized.
+        assert env.get("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY") == "1"
+        assert env.get("UNRELATED_VALIDATION_VAR") == "keep-me"
+        assert env.get("PATH") == os.environ.get("PATH")
+        assert not any(k.startswith("RCX_SKIP_") for k in env)
+        # It IS exactly the commit-owned validation construction carrying the pins.
+        assert env == commit_mod._commit_validation_env(  # ANTICHEAT_OK: validation-child override isolation regression
+            {"PYTHONHASHSEED": "0", "RCX_CI": "1", "HYPOTHESIS_PROFILE": "ci_fast"}
+        )
+        # Building the child env never mutates the parent os.environ.
+        assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
+        assert os.environ.get(self._PAGER_ENV) == "codex"
+        assert os.environ.get("RCX_SKIP_RECEIPT_CHECK") == "1"
+
+    def test_pager_receipt_test_passes_through_validation_child_under_live_pager_override(
+        self, monkeypatch
+    ):
+        # THE acceptance regression: run the exact pager receipt test through the
+        # real commit-owned validation path (_run_pytest_on_files) while the parent
+        # exports a live namespaced lane AND RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE.
+        # Loud failure (never a silent skip) if the reproduced target ever moves.
+        assert (
+            REPO_ROOT / "mu" / "tests" / "tools" / "test_agent_bus_namespacing.py"
+        ).exists(), "reproduced bus-namespacing test file is missing"
+
+        self._seed_live_overrides(monkeypatch)
+
+        # Counter-proof that the leak is real RIGHT NOW: the SAME test run with the
+        # UNsanitized parent env (the pre-fix construction) fails because the leaked
+        # ``codex`` route suppresses delivery-receipt/state/lock persistence.
+        import subprocess
+
+        leaky = subprocess.run(
+            [
+                sys.executable, "-m", "pytest", "-x", "--tb=short",
+                "--import-mode=importlib", "-p", "no:cacheprovider", self._PAGER_TEST,
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONHASHSEED": "0", "RCX_CI": "1", "HYPOTHESIS_PROFILE": "ci_fast"},
+        )
+        assert leaky.returncode != 0, (
+            "pre-fix reproduction is vacuous: the pager test did not fail under a "
+            "leaked RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE=codex\n"
+            + (leaky.stdout or "")[-2000:]
+        )
+
+        # The fix: the commit-owned validation child strips the override and the
+        # exact pager receipt test resolves its temporary .agent_bus / config route.
+        res = commit_mod._run_pytest_on_files(REPO_ROOT, [self._PAGER_TEST])  # ANTICHEAT_OK: real e2e validation-child isolation
+        combined = (res.get("stdout") or "") + (res.get("stderr") or "")
+        assert res["passed"] is True, combined[-2000:]
+        assert res["exit_code"] == 0, combined[-2000:]
+        assert self._MALICIOUS_LANE not in combined
+        # The hermetic child never mutates the parent overrides.
+        assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
+        assert os.environ.get(self._PAGER_ENV) == "codex"
+
+
 class TestReviewFindingExtraction:
     def _base_pr_data(self, *, head_sha="abc123", latest_reviews=None, review_threads=None, comments=None):
         return {

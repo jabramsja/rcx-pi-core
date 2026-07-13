@@ -54,6 +54,8 @@ try:
         DEFAULT_EXECUTOR_CONFIG,
         MAX_WAVE_ID_LEN,
         WAVE_ID_RE,
+        ROLE_AGENT_ENV_VARS,
+        ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV,
         agent_bus_path,
         agent_bus_relpath,
         bridge_config_path,
@@ -79,6 +81,8 @@ except ImportError:
     DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
     MAX_WAVE_ID_LEN = _mod.MAX_WAVE_ID_LEN
     WAVE_ID_RE = _mod.WAVE_ID_RE
+    ROLE_AGENT_ENV_VARS = _mod.ROLE_AGENT_ENV_VARS
+    ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV = _mod.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV
     agent_bus_path = _mod.agent_bus_path
     agent_bus_relpath = _mod.agent_bus_relpath
     bridge_config_path = _mod.bridge_config_path
@@ -3474,6 +3478,87 @@ def _commit_subprocess_env(*, skip_receipt_check: bool = False) -> dict[str, str
     return run_env
 
 
+# Canonical env var that overrides the pipeline agent pager route. Defined here as
+# a literal for parity with the dispatcher launcher
+# (launch_wave._PAGER_ROUTE_OVERRIDE_ENV); the canonical source is
+# pipeline_agent_pager.PAGER_ROUTE_OVERRIDE_ENV. Kept a literal so commit_executor
+# does not import the observability layer just to name one key.
+_PAGER_ROUTE_OVERRIDE_ENV = "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"
+
+
+def _commit_validation_protected_env_keys() -> frozenset[str]:
+    """Env keys a commit-owned validation child must never inherit or be handed.
+
+    These are the live pipeline lane bus plus every invocation-owned role/pager
+    routing override the dispatcher resolves from the environment. Validation
+    children run the repository's OWN test suite, which mints its own temporary
+    ``.agent_bus`` and asserts DEFAULT role/pager routing; inheriting any live
+    override makes those hermetic tests resolve the live lane or the live route
+    instead of their fixtures (reproduced by
+    ``test_pager_persists_event_delivery_state_and_lock_in_namespaced_bus``, which
+    fails when ``RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE=codex`` leaks in).
+
+    The role keys are read from the SAME canonical role configuration the
+    dispatcher launcher uses (``ROLE_AGENT_ENV_VARS`` + the repo-root guard
+    ``ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV``), read at call time so a later
+    independent role (e.g. a supervisor) added to that config is sanitized here
+    automatically -- the leak cannot silently reopen. ``RCX_SKIP_*`` is handled by
+    prefix in ``_commit_validation_env`` rather than enumerated here.
+    """
+    keys = {
+        "RCX_AGENT_BUS_DIR",
+        ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV,
+        _PAGER_ROUTE_OVERRIDE_ENV,
+    }
+    for env_names in ROLE_AGENT_ENV_VARS.values():
+        keys.update(env_names)
+    return frozenset(keys)
+
+
+def _commit_validation_env(
+    overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build the environment for commit-owned validation children (pre-push-fast).
+
+    Validation children run the repository's OWN test suite, and those tests
+    create their own temporary ``.agent_bus`` authority and assert default role
+    and pager routing. They MUST NOT inherit -- or be handed -- the live pipeline
+    lane (``RCX_AGENT_BUS_DIR``) or any invocation-owned role/pager override: a
+    namespaced live lane (e.g. ``.agent_bus-fix37``) would override the temporary
+    repository bus, and a live ``RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE`` would
+    override the temporary repository's pager config
+    (``test_pager_persists_event_delivery_state_and_lock_in_namespaced_bus`` --
+    the pipeline-fix-37b Step 11 failure that pipeline-fix-37b's bus-only strip
+    did not close).
+
+    Every other parent variable (PATH, credentials, locale, pytest pins,
+    ``RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY``, and any unrelated var) is
+    preserved byte-for-byte. ``RCX_SKIP_*`` is stripped for parity with the
+    ``_run`` default env, and ``os.environ`` is never mutated.
+
+    Caller ``overrides`` (e.g. the pytest determinism pins) are applied BEFORE the
+    protected keys are removed, so that neither a malicious parent env nor a
+    caller override can route a commit-owned validation child at the live lane bus
+    or a live role/pager override.
+
+    This is deliberately distinct from ``_commit_subprocess_env`` (commit / amend
+    hooks), which MUST retain the active lane ``RCX_AGENT_BUS_DIR`` so the
+    pre-commit hook resolves the same lane bus the receipt was minted to. Live
+    commit, hook, adapter, pager, supervisor, push, merge, and recovery children
+    keep their invocation authority; only validation children are sanitized.
+    """
+    run_env = {k: v for k, v in os.environ.items() if not k.startswith("RCX_SKIP_")}
+    if overrides:
+        run_env.update(overrides)
+    # Remove protected keys AFTER overrides so a caller cannot re-inject them.
+    for key in _commit_validation_protected_env_keys():
+        run_env.pop(key, None)
+    # Final RCX_SKIP_* sweep: a caller override could otherwise re-add a skip key.
+    for key in [k for k in run_env if k.startswith("RCX_SKIP_")]:
+        run_env.pop(key, None)
+    return run_env
+
+
 def _tail_failure_excerpt(text: str, *, limit: int = 1000, max_lines: int = 20) -> str:
     """Keep the actionable tail of noisy hook output."""
     cleaned = (text or "").strip()
@@ -3868,12 +3953,22 @@ def _run_pytest_on_files(
             text=True,
             check=False,
             timeout=effective_timeout,
-            env={
-                **os.environ,
-                "PYTHONHASHSEED": "0",
-                "RCX_CI": "1",
-                "HYPOTHESIS_PROFILE": "ci_fast",
-            },
+            # Validation child: build the env through the commit-owned validation
+            # constructor so the live pipeline lane bus and every invocation-owned
+            # role/pager override are dropped (AFTER the pytest determinism pins
+            # are applied) and the repository's own tests resolve their temporary
+            # .agent_bus and default routing instead of the live pipeline lane.
+            # This helper backs the Step 8b pre-commit targeted pytest gate and
+            # the Step 15 bot-remediation targeted pytest gate -- both commit-owned
+            # validation children reproduced leaking a namespaced live lane and a
+            # live pager route override.
+            env=_commit_validation_env(
+                {
+                    "PYTHONHASHSEED": "0",
+                    "RCX_CI": "1",
+                    "HYPOTHESIS_PROFILE": "ci_fast",
+                }
+            ),
         )
         passed = result.returncode == 0 or _pytest_only_deselected_by_marker_filter(
             result.returncode,
@@ -3979,10 +4074,15 @@ def _run_bot_remediation_pre_push_guard(
     if not pre_push_script.exists():
         return {"passed": True, "skipped": True, "errors": []}
     try:
+        # Validation child: strip the live pipeline lane bus and every
+        # invocation-owned role/pager override so the repository's own tests
+        # resolve their temporary .agent_bus and default routing instead of the
+        # live lane.
         _run(
             ["bash", str(pre_push_script)],
             cwd=repo_root,
             timeout=PRE_PUSH_FAST_TIMEOUT_S,
+            env=_commit_validation_env(),
         )
     except subprocess.CalledProcessError as exc:
         detail = _tail_failure_excerpt(
@@ -12037,7 +12137,16 @@ def _run_post_commit_pipeline(
                     )
                 else:
                     try:
-                        _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=PRE_PUSH_FAST_TIMEOUT_S)
+                        # Validation child: strip the live pipeline lane bus and
+                        # every invocation-owned role/pager override so the
+                        # repository's own tests resolve their temporary .agent_bus
+                        # and default routing instead of the live pipeline lane.
+                        _run(
+                            ["bash", str(pre_push_script)],
+                            cwd=repo_root,
+                            timeout=PRE_PUSH_FAST_TIMEOUT_S,
+                            env=_commit_validation_env(),
+                        )
                     except subprocess.CalledProcessError as exc:
                         detail = _tail_failure_excerpt(
                             exc.stderr or exc.stdout or "",
