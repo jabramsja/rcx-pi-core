@@ -7953,6 +7953,18 @@ def _hybrid_bootstrap_fault_detected(
     # Adapter/bootstrap error PHRASES carry error semantics on their own, so they
     # count wherever they surface -- including captured stdout (a real supervisor
     # or phase step can print a "Bridge adapter config error" to stdout).
+    #
+    # The load_bridge_config BridgeAdapterError load-fault messages ("Bridge config
+    # not found at '...'", "Bridge config is not valid JSON", "Bridge config must be
+    # a JSON object") are the same class: they only ever appear on a genuine
+    # bootstrap load fault, so they must be caught wherever they surface too. A real
+    # adapter bootstrap failure run through the dispatcher with verbose output can be
+    # captured in *stdout* (not stderr/step) as such a load error naming
+    # .agent_bus/bridge_config.json; because that message matches none of the other
+    # fragments, the bare-path check below -- which deliberately ignores stdout to
+    # avoid incidental bus-path leaks -- would otherwise let it fail OPEN. Matching
+    # the load-error phrase here keeps it fail-closed without reviving the incidental
+    # bare-path false positive (a bare path carries no error phrase).
     full_haystack = " ".join(
         str(result.get(key, "") or "")
         for key in ("step", "stderr", "stdout", "executor")
@@ -7962,20 +7974,26 @@ def _hybrid_bootstrap_fault_detected(
         "cannot import bridge_adapters",
         "adapter invocation/bootstrap",
         "adapter selection",
+        "bridge config not found",
+        "bridge config is not valid json",
+        "bridge config must be a json object",
     )
     for fragment in error_phrase_fragments:
         if fragment in full_haystack:
             return True, f"hybrid delegation blocked for bootstrap/adapter fault: {fragment}"
-    # A bare ".agent_bus/bridge_config.json" PATH mention is only a real bootstrap
-    # fault when it surfaces in an ERROR channel (the failed step name, its stderr,
-    # or the executor id). A broad validation child -- e.g. a run_pre_push_script
-    # pytest sweep -- routinely prints that path to stdout from unrelated
-    # bus-resolving tests; classifying that incidental stdout text as an adapter
-    # fault wrongly rejects an otherwise valid bounded recovery delegate (the
-    # pipeline-fix-37b recovery context that stranded after Step 11). Real
-    # adapter/bootstrap faults still surface the path in stderr/step
-    # (BridgeAdapterError "Bridge config not found at '...'"), which stays
-    # fail-closed here; only a stdout-only path mention is no longer sufficient.
+    # A bare ".agent_bus/bridge_config.json" PATH mention -- one that carries no
+    # load-error phrase caught above -- is only a real bootstrap fault when it
+    # surfaces in an ERROR channel (the failed step name, its stderr, or the
+    # executor id). A broad validation child -- e.g. a run_pre_push_script pytest
+    # sweep -- routinely prints that path to stdout from unrelated bus-resolving
+    # tests; classifying that incidental stdout text as an adapter fault wrongly
+    # rejects an otherwise valid bounded recovery delegate (the pipeline-fix-37b
+    # recovery context that stranded after Step 11). A real load fault that names
+    # the path always carries a load-error phrase (BridgeAdapterError "Bridge config
+    # not found at '...'", etc.), which is now caught above wherever it surfaces
+    # (stdout included, e.g. a verbose dispatcher run of commit_executor); this
+    # residual check only fail-closes on a phrase-less path mention in an error
+    # channel, so an incidental stdout-only path stays safe.
     error_channel_haystack = " ".join(
         str(result.get(key, "") or "")
         for key in ("step", "stderr", "executor")
