@@ -511,3 +511,113 @@ class TestHelperAndValidatorBroadening:
         """))
         classes = scan_file(f)
         assert classes["TestObservationalProbe"]["test_workload_timing"] == "theater_risk"
+
+
+# ---------------------------------------------------------------------------
+# TestRaisesOnFailureRegistry
+# ---------------------------------------------------------------------------
+
+class TestRaisesOnFailureRegistry:
+    """Detector 2 registry coverage, in BOTH directions.
+
+    A registered validator call with no surrounding assert must classify
+    meaningful, AND an assertion-free test that calls nothing registered must
+    still classify theater_risk. The second direction is the guard against the
+    registry (or Detector 2's matching rule) becoming over-broad: if it ever
+    starts rescuing arbitrary assertion-free tests, that control fails.
+    """
+
+    _REGISTERED = ("_verify_bundle_provenance", "_validate_match_bridge_ordering")
+
+    def test_registry_holds_exactly_the_five_expected_names(self):
+        """The registry is small and explicit — exactly five exact names."""
+        assert _mod.RAISES_ON_FAILURE_VALIDATORS == frozenset({
+            "validate_bundle", "validateBundle", "_validate_template",
+            "_verify_bundle_provenance", "_validate_match_bridge_ordering",
+        })
+
+    @pytest.mark.parametrize("validator", _REGISTERED)
+    def test_registered_validator_call_without_assert_is_meaningful(
+        self, validator, tmp_path
+    ):
+        """Direction (a): registered validator call, NO assert → meaningful.
+
+        Mirrors the live shapes: ``_verify_bundle_provenance(bundle)`` in
+        test_stage0_vm_cutover.py::TestBundleProvenance and
+        ``_validate_match_bridge_ordering(order)`` in
+        test_match_vm_staged_dispatch_gate.py. Both are no-exception-is-pass, so
+        the call IS the assertion.
+        """
+        f = tmp_path / f"test_registered_{validator}.py"
+        f.write_text(textwrap.dedent(f"""\
+            class TestValidatorProof:
+                def test_validator_does_not_raise(self):
+                    {validator}(build_subject())
+        """))
+        classes = scan_file(f)
+        assert classes["TestValidatorProof"]["test_validator_does_not_raise"] == "behavioral"
+
+    def test_unregistered_assertion_free_test_still_theater_risk(self):
+        """Direction (b) CONTROL: assertion-free test calling nothing registered
+        stays theater_risk.
+
+        Same shape as direction (a) — a single bare call with no assert — so the
+        ONLY difference is registry membership. If Detector 2 ever broadens to
+        wildcard/prefix/substring matching (e.g. any ``_validate_*`` or
+        ``_verify_*`` name), this control goes green-to-red and the registry
+        change is wrong.
+        """
+        src = """\
+        def test_calls_unregistered_helper(self):
+            _validate_something_unregistered(build_subject())
+            _verify_some_other_thing(build_subject())
+        """
+        tree = ast.parse(textwrap.dedent(src))
+        assert classify_method(tree.body[0]) == "theater_risk"
+
+    def test_near_miss_names_are_not_matched(self, tmp_path):
+        """Exact-match only: prefix/suffix/substring variants of the two newly
+        registered names must NOT be rescued."""
+        f = tmp_path / "test_near_miss.py"
+        f.write_text(textwrap.dedent("""\
+            class TestNearMiss:
+                def test_prefix_variant(self):
+                    _verify_bundle_provenance_extra(bundle)
+
+                def test_suffix_variant(self):
+                    outer_validate_match_bridge_ordering(order)
+
+                def test_partial_name(self):
+                    _verify_bundle(bundle)
+        """))
+        classes = scan_file(f)
+        assert classes["TestNearMiss"] == {
+            "test_prefix_variant": "theater_risk",
+            "test_suffix_variant": "theater_risk",
+            "test_partial_name": "theater_risk",
+        }
+
+    def test_live_gate_tests_reclassified_off_theater_risk(self):
+        """End-to-end: the five live gate tests that motivated the registry
+        change no longer classify theater_risk.
+
+        This is the coupling between the registry and the ratchet delta — it
+        fails if the registry change is reverted while the allowlist stays
+        pruned.
+        """
+        cutover = REPO_ROOT / "mu" / "tests" / "l4_gates" / "test_stage0_vm_cutover.py"
+        dispatch = REPO_ROOT / "mu" / "tests" / "l4_gates" / "test_match_vm_staged_dispatch_gate.py"
+        if not cutover.is_file() or not dispatch.is_file():
+            pytest.skip("l4_gates test files not found")
+
+        provenance = scan_file(cutover)["TestBundleProvenance"]
+        for method in (
+            "test_match_bundle_provenance_passes",
+            "test_subst_bundle_provenance_passes",
+            "test_missing_digest_accepted",
+            "test_unknown_seed_accepted",
+        ):
+            assert provenance[method] != "theater_risk", method
+
+        ordering = scan_file(dispatch)["TestMatchVMStagedDispatchGate"]
+        assert ordering["test_validate_bridge_ordering_accepts_correct_order"] != "theater_risk"

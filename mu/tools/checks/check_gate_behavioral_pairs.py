@@ -62,8 +62,17 @@ THEATER_PATTERNS = {"assert True", "assert 1"}
 # (no-exception-is-pass). A bare-name (or self/cls method) call to one of these
 # is a meaningful runtime check, even with no surrounding assert. Seeded from the
 # names in the founder-allowlist defer_reasons; keep this list small and explicit.
+#
+# Registry membership requires the callee to return ``None`` and raise on every
+# violation, so "did not raise" is the whole verdict:
+#   * ``_verify_bundle_provenance``      (step_mu.py) raises ValueError on a
+#     source_digest/SEED_CHECKSUMS mismatch — N15 fail-closed provenance.
+#   * ``_validate_match_bridge_ordering`` (match_mu.py) raises ValueError when
+#     bridge.var.check_existing does not precede match.var.
+# Names are matched exactly (no wildcard, prefix, or substring matching).
 RAISES_ON_FAILURE_VALIDATORS = frozenset({
     "validate_bundle", "validateBundle", "_validate_template",
+    "_verify_bundle_provenance", "_validate_match_bridge_ordering",
 })
 
 # Detector 1 — bound on how far same-module helper calls are followed when
