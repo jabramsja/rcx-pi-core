@@ -1,24 +1,24 @@
 {
   "wave_id": "both-gates-unblock-2026-07-26",
-  "repeat_run_speedup_ratio": 1.017618,
+  "repeat_run_speedup_ratio": 1.91845,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.271711,
+  "step_growth_slope": 0.265702,
   "repeat_run_raw_seconds": [
-    0.276498,
-    0.271711
+    0.509736,
+    0.265702
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.276498
+      "elapsed_seconds": 0.509736
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.548209
+      "elapsed_seconds": 0.775438
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-07-26T19:03:29Z",
+  "collection_timestamp_utc": "2026-07-26T22:15:52Z",
   "collector_version": "2.2.0"
 }
