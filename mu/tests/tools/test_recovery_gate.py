@@ -13097,7 +13097,7 @@ repo_has_bridge_role implement >/dev/null || true
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
