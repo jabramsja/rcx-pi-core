@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -483,30 +484,72 @@ def _load_delivery_receipts(repo_root: Path) -> list[dict[str, Any]]:
 
 
 def _load_claude_pager_receiver_cls() -> Any:
-    """Resolve ``claude_pager_receiver.ClaudePagerReceiver`` (READ-ONLY reuse).
-
-    Mirror of the receiver's own ``_load_claude_dispatch_env`` import discipline:
-    try a normal import, then fall back to a by-path load of the sibling session
-    module. The wave-1 receiver is consumed via its public surface only
-    (``enqueue`` / ``ensure_draining`` / ``receipts_path``); the pager never mutates
-    its internals.
-    """
-    try:
-        from claude_pager_receiver import ClaudePagerReceiver  # type: ignore
-        return ClaudePagerReceiver
-    except Exception:
-        pass
+    """Load the selected pager receiver from its one canonical sibling path."""
     import importlib.util as _ilu
 
-    receiver_path = SCRIPT_DIR.parent / "session" / "claude_pager_receiver.py"
-    spec = _ilu.spec_from_file_location("claude_pager_receiver", str(receiver_path))
+    tools_dir = SCRIPT_DIR.parent
+    session_dir = tools_dir / "session"
+    receiver_path = session_dir / "claude_pager_receiver.py"
+    if session_dir.is_symlink():
+        raise PipelineAgentPagerError(
+            f"canonical claude_pager_receiver directory must not be a symlink: "
+            f"{session_dir}"
+        )
+    try:
+        receiver_mode = receiver_path.lstat().st_mode
+    except OSError as exc:
+        raise PipelineAgentPagerError(
+            f"canonical claude_pager_receiver is missing or unreadable: "
+            f"{receiver_path}: {exc}"
+        ) from exc
+    if stat.S_ISLNK(receiver_mode):
+        raise PipelineAgentPagerError(
+            f"canonical claude_pager_receiver must not be a symlink: {receiver_path}"
+        )
+    if not stat.S_ISREG(receiver_mode):
+        raise PipelineAgentPagerError(
+            f"canonical claude_pager_receiver is not a regular file: {receiver_path}"
+        )
+    try:
+        canonical_tools = tools_dir.resolve(strict=True)
+        canonical_receiver = receiver_path.resolve(strict=True)
+        canonical_receiver.relative_to(canonical_tools)
+    except (OSError, ValueError) as exc:
+        raise PipelineAgentPagerError(
+            f"canonical claude_pager_receiver resolves outside selected tools root: "
+            f"{receiver_path}: {exc}"
+        ) from exc
+    try:
+        with canonical_receiver.open("rb"):
+            pass
+    except OSError as exc:
+        raise PipelineAgentPagerError(
+            f"canonical claude_pager_receiver is unreadable: "
+            f"{canonical_receiver}: {exc}"
+        ) from exc
+
+    module_name = "claude_pager_receiver"
+    sys.modules.pop(module_name, None)
+    spec = _ilu.spec_from_file_location(module_name, str(canonical_receiver))
     if spec is None or spec.loader is None:
         raise PipelineAgentPagerError(
-            f"cannot load claude_pager_receiver from {receiver_path}"
+            f"cannot load claude_pager_receiver from {canonical_receiver}"
         )
     module = _ilu.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.ClaudePagerReceiver
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+        receiver_cls = getattr(module, "ClaudePagerReceiver", None)
+        if not callable(receiver_cls):
+            raise PipelineAgentPagerError(
+                f"canonical claude_pager_receiver has no callable "
+                f"ClaudePagerReceiver: {canonical_receiver}"
+            )
+    except BaseException:
+        if sys.modules.get(module_name) is module:
+            sys.modules.pop(module_name, None)
+        raise
+    return receiver_cls
 
 
 def _claude_pager_receiver(repo_root: Path) -> Any:
