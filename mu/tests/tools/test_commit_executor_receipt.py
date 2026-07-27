@@ -6448,6 +6448,24 @@ class TestCommitValidationChildBusIsolation:
     persistence -- the pipeline-fix-37b Step 11 failure that its bus-only strip did
     NOT close. ``_commit_subprocess_env`` (commit/amend hooks) MUST keep the lane
     bus; only validation children drop the bus AND the role/pager overrides.
+
+    WI-1 finding (counterproof-repoint-r2, 2026-07-26) -- why the counter-proof
+    below went vacuous, established by direct experiment, not conjecture: the
+    leaked route override DOES still reach the delivery path
+    (``_resolve_route`` honours it ahead of the repository's configured route),
+    and delivery-receipt/state/lock persistence IS still route-sensitive. What
+    moved is AMBIENT MACHINE STATE. Under ``route=codex`` the receipt is written
+    only when ``_dispatch_codex`` acknowledges, and that requires a live codex
+    app-server websocket listener on ``ws://127.0.0.1:8765``. With the founder's
+    codex app-server up (observed listening, PID-owned by ``codex``) the leaked
+    route ACKNOWLEDGED, the receipt was written, the reproduced target passed --
+    and the test minted a REAL codex thread as a side effect. With that listener
+    unreachable the same run failed on the missing
+    ``pipeline_agent_delivery_receipts.jsonl``, exactly as in pipeline-fix-37b.
+    So the counter-proof's pass/fail was a function of whether a process outside
+    this repository happened to be running. The reproduction is therefore PINNED
+    (see ``_pin_codex_transport_unconfigured``) into a deterministic negative
+    control instead of being re-pointed at another ambient-state-dependent target.
     """
 
     _MALICIOUS_LANE = ".agent_bus-fix37"
@@ -6456,6 +6474,17 @@ class TestCommitValidationChildBusIsolation:
         "mu/tests/tools/test_agent_bus_namespacing.py::"
         "test_pager_persists_event_delivery_state_and_lock_in_namespaced_bus"
     )
+    # Deterministic codex-transport pin (WI-2). A non-``ws://`` URL is rejected
+    # IN-PROCESS by ``pipeline_agent_pager._codex_app_server_url`` before any
+    # socket or subprocess, and ``_is_codex_transport_unavailable`` is False for
+    # that rejection, so the ``codex exec resume`` fallback -- the one path that
+    # would spawn the real ``codex`` binary -- can never fire. An empty
+    # ``CODEX_THREAD_ID`` removes the fallback's other trigger. Neither key is a
+    # protected key, so BOTH legs of the counter-proof inherit the pin and the
+    # ONLY variable that differs between them is the route override itself.
+    _CODEX_URL_ENV = "RCX_CODEX_APP_SERVER_URL"
+    _CODEX_THREAD_ENV = "CODEX_THREAD_ID"
+    _CODEX_TRANSPORT_UNCONFIGURED = "http://127.0.0.1:8765"
 
     def _seed_live_overrides(self, monkeypatch):
         """Export a full live pipeline lane parent env: bus + pager + roles + guard."""
@@ -6465,6 +6494,48 @@ class TestCommitValidationChildBusIsolation:
             for name in env_names:
                 monkeypatch.setenv(name, "codex")
         monkeypatch.setenv(commit_mod.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV, "/live/repo")
+
+    def _pin_codex_transport_unconfigured(self, monkeypatch):
+        """Remove ambient codex reachability from the leaked-route reproduction.
+
+        Pins the codex delivery leg to a transport it can never acknowledge on any
+        machine, so the reproduction no longer depends on whether a live codex
+        app-server happens to be listening -- and never pages a real codex thread
+        from inside the test suite. Applied to the PARENT env so it is inherited by
+        the leaky child AND by the hermetic validation child alike.
+        """
+        monkeypatch.setenv(self._CODEX_URL_ENV, self._CODEX_TRANSPORT_UNCONFIGURED)
+        monkeypatch.setenv(self._CODEX_THREAD_ENV, "")
+
+    def _write_pager_repo(self, base, name):
+        """Mirror the reproduced target's fixture: pager ENABLED on the DEFAULT
+        ``notify-only`` route, so the resolved route can only change via an env
+        override."""
+        repo = base / name
+        (repo / "mu" / "tools" / "executors").mkdir(parents=True, exist_ok=True)
+        (repo / "mu" / "tools" / "executors" / "executor_config.json").write_text(
+            json.dumps({"pipeline_agent_pager": {"enabled": True, "route": "notify-only"}})
+            + "\n",
+            encoding="utf-8",
+        )
+        return repo
+
+    def _emit_pager_event(self, repo):
+        """Emit the reproduced target's exact transition event into ``repo``."""
+        return pager_mod.emit_transition_event(
+            repo,
+            bus_dir=".agent_bus-test",
+            event_type="commit_ready",
+            wave_id="wave-bus",
+            task_id="[BUS]",
+            plan_path="reports/control_plane/bus.md",
+            phase="phase_b",
+            state="commit_ready",
+            transition_key="bus-ready",
+            summary="ready",
+            reason="receipt available",
+            artifact_paths={"receipt": ".agent_bus-test/meta/pre_commit_receipts/r.json"},
+        )
 
     def test_commit_validation_env_strips_bus_pager_and_role_overrides(self, monkeypatch):
         # A malicious/live parent env carries every protected override plus
@@ -6708,10 +6779,33 @@ class TestCommitValidationChildBusIsolation:
         ).exists(), "reproduced bus-namespacing test file is missing"
 
         self._seed_live_overrides(monkeypatch)
+        # Make the leaked-route reproduction a DETERMINISTIC negative control: pin
+        # the codex transport unconfigured so the reproduction's outcome no longer
+        # depends on whether a live codex app-server happens to be listening on this
+        # machine (the WI-1 finding recorded in the class docstring).
+        self._pin_codex_transport_unconfigured(monkeypatch)
+        # The pin MUST be unprotected, so the leaky child below and the hermetic
+        # validation child both inherit it and the ONLY variable that differs is the
+        # leaked route override. If either pin key ever becomes a protected key this
+        # pairing stops being a controlled experiment -- fail loudly, do not drift.
+        protected = commit_mod._commit_validation_protected_env_keys()  # ANTICHEAT_OK: counter-proof control-variable symmetry
+        assert self._CODEX_URL_ENV not in protected, (
+            f"{self._CODEX_URL_ENV} became a protected validation-child key: the "
+            "counter-proof's two legs no longer share the codex-transport pin, so "
+            "the leaked route is no longer the only differing variable"
+        )
+        assert self._CODEX_THREAD_ENV not in protected, (
+            f"{self._CODEX_THREAD_ENV} became a protected validation-child key: the "
+            "counter-proof's two legs no longer share the codex-transport pin"
+        )
+        assert commit_mod._commit_validation_env().get(self._CODEX_URL_ENV) == (  # ANTICHEAT_OK: counter-proof control-variable symmetry
+            self._CODEX_TRANSPORT_UNCONFIGURED
+        ), "the validation child did not inherit the codex-transport pin"
 
         # Counter-proof that the leak is real RIGHT NOW: the SAME test run with the
         # UNsanitized parent env (the pre-fix construction) fails because the leaked
-        # ``codex`` route suppresses delivery-receipt/state/lock persistence.
+        # ``codex`` route sends the page down the codex delivery leg, which cannot
+        # acknowledge under the pin, so delivery-receipt persistence never happens.
         import subprocess
 
         leaky = subprocess.run(
@@ -6724,10 +6818,25 @@ class TestCommitValidationChildBusIsolation:
             text=True,
             env={**os.environ, "PYTHONHASHSEED": "0", "RCX_CI": "1", "HYPOTHESIS_PROFILE": "ci_fast"},
         )
+        leaky_output = (leaky.stdout or "") + (leaky.stderr or "")
         assert leaky.returncode != 0, (
             "pre-fix reproduction is vacuous: the pager test did not fail under a "
             "leaked RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE=codex\n"
-            + (leaky.stdout or "")[-2000:]
+            + leaky_output[-2000:]
+        )
+        # ...and it failed for THE reproduced reason. Without this, an unrelated
+        # collection/import error would satisfy the counter-proof vacuously in the
+        # opposite direction. The premises behind these two strings are pinned by
+        # ``test_pager_route_override_counter_proof_premises_stay_pinned``.
+        assert f"FAILED {self._PAGER_TEST}" in leaky_output, (
+            "the leaked-route reproduction did not fail on the reproduced target "
+            "itself (an unrelated error would satisfy the counter-proof vacuously)\n"
+            + leaky_output[-2000:]
+        )
+        assert "pipeline_agent_delivery_receipts.jsonl" in leaky_output, (
+            "the leaked-route reproduction failed for the WRONG reason: the expected "
+            "failure is the missing delivery receipt under the codex route\n"
+            + leaky_output[-2000:]
         )
 
         # The fix: the commit-owned validation child strips the override and the
@@ -6740,6 +6849,94 @@ class TestCommitValidationChildBusIsolation:
         # The hermetic child never mutates the parent overrides.
         assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
         assert os.environ.get(self._PAGER_ENV) == "codex"
+
+    def test_pager_route_override_counter_proof_premises_stay_pinned(
+        self, tmp_path, monkeypatch
+    ):
+        """Pin every premise the counter-proof above stands on.
+
+        The counter-proof in
+        ``test_pager_receipt_test_passes_through_validation_child_under_live_pager_override``
+        is only a real gate while four premises hold. Each one previously drifted
+        (or could drift) SILENTLY, turning ``assert leaky.returncode != 0`` into a
+        vacuous assertion that no longer proved the leak. This test asserts each
+        premise directly and hermetically -- no pytest subprocess, no network, no
+        live codex -- so a future drift fails loudly and names its own cause instead
+        of quietly hollowing out the counter-proof.
+        """
+        # PREMISE 1 -- the leak vector still exists: the pager resolves the env route
+        # override AHEAD of the repository's own configured route, and commit_executor
+        # names the SAME canonical key it sanitizes.
+        assert commit_mod._PAGER_ROUTE_OVERRIDE_ENV == pager_mod.PAGER_ROUTE_OVERRIDE_ENV, (  # ANTICHEAT_OK: canonical route-override key parity
+            "commit_executor's pager route-override literal drifted from the pager's "
+            "canonical key: the counter-proof would seed a key nothing reads"
+        )
+        repo = self._write_pager_repo(tmp_path, "resolve")
+        config = {"pipeline_agent_pager": {"enabled": True, "route": "notify-only"}}
+        monkeypatch.delenv(self._PAGER_ENV, raising=False)
+        assert pager_mod._resolve_route(repo, config, None) == "notify-only"  # ANTICHEAT_OK: route resolution is the leak vector under test
+        monkeypatch.setenv(self._PAGER_ENV, "codex")
+        assert pager_mod._resolve_route(repo, config, None) == "codex", (  # ANTICHEAT_OK: route resolution is the leak vector under test
+            "the pager no longer honours the env route override ahead of the "
+            "configured route: the leak the counter-proof reproduces is gone, so the "
+            "counter-proof must be removed rather than left unsatisfiable"
+        )
+
+        # PREMISE 2 -- the negative control is HERMETIC: the codex-transport pin is
+        # rejected in-process, and that rejection is not classified as a transport
+        # outage, so the ``codex exec resume`` fallback (which would spawn the real
+        # ``codex`` binary and reintroduce ambient machine state) can never fire.
+        self._pin_codex_transport_unconfigured(monkeypatch)
+        with pytest.raises(pager_mod.PipelineAgentPagerError) as excinfo:
+            pager_mod._codex_app_server_url()  # ANTICHEAT_OK: transport-pin rejection is the hermeticity premise
+        assert not pager_mod._is_codex_transport_unavailable(str(excinfo.value)), (  # ANTICHEAT_OK: fallback-unreachability premise
+            "the codex-transport pin is now classified as a transport outage, so the "
+            "exec-resume fallback can spawn a real codex binary: the counter-proof's "
+            "negative control is no longer hermetic"
+        )
+
+        # PREMISE 3 -- delivery-receipt persistence is still ROUTE-SENSITIVE, which is
+        # the whole discriminator. Under the leaked route the codex leg cannot ack, so
+        # events/state/lock persist but the delivery receipt does NOT; with the override
+        # stripped the configured notify-only route acks and the receipt IS written.
+        leaked_repo = self._write_pager_repo(tmp_path, "leaked")
+        leaked = self._emit_pager_event(leaked_repo)
+        leaked_obs = leaked_repo / ".agent_bus-test" / "observability"
+        assert leaked["route"] == "codex"
+        assert [a["target"] for a in leaked["attempted"]] == ["codex"]
+        assert leaked["attempted"][0]["acknowledged"] is False
+        assert (leaked_obs / "pipeline_agent_events.jsonl").exists()
+        assert (leaked_obs / "pipeline_agent_pager_state.json").exists()
+        assert (leaked_obs / "pipeline_agent_pager.lock").exists()
+        assert not (leaked_obs / "pipeline_agent_delivery_receipts.jsonl").exists(), (
+            "the leaked codex route now persists a delivery receipt anyway: the "
+            "reproduced target can no longer fail under the leak, so the "
+            "counter-proof is vacuous and must be re-pointed or removed"
+        )
+
+        monkeypatch.delenv(self._PAGER_ENV, raising=False)
+        clean_repo = self._write_pager_repo(tmp_path, "clean")
+        clean = self._emit_pager_event(clean_repo)
+        clean_obs = clean_repo / ".agent_bus-test" / "observability"
+        assert clean["route"] == "notify-only"
+        assert [a["target"] for a in clean["attempted"]] == ["notify-only"]
+        assert clean["attempted"][0]["acknowledged"] is True
+        assert (clean_obs / "pipeline_agent_delivery_receipts.jsonl").exists(), (
+            "the configured notify-only route no longer persists a delivery receipt: "
+            "the counter-proof's PASSING leg would fail for a reason unrelated to "
+            "override stripping"
+        )
+
+        # PREMISE 4 -- the pin keys stay unprotected, so both counter-proof legs
+        # inherit the SAME codex transport and the leaked route override remains the
+        # only differing variable between them.
+        protected = commit_mod._commit_validation_protected_env_keys()  # ANTICHEAT_OK: counter-proof control-variable symmetry
+        assert self._CODEX_URL_ENV not in protected
+        assert self._CODEX_THREAD_ENV not in protected
+        assert self._PAGER_ENV in protected, (
+            "the route override is no longer sanitized from validation children: the "
+            "counter-proof's passing leg proves nothing"
+        )
 
 
 class TestReviewFindingExtraction:

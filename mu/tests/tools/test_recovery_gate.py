@@ -11570,7 +11570,7 @@ esac
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=10,
+                timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
             )
 
             assert unrelated_result.returncode == 0
@@ -11601,7 +11601,7 @@ esac
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=10,
+                timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
             )
 
             assert result.returncode == 0
@@ -11684,7 +11684,7 @@ esac
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=10,
+                timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
             )
 
             assert result.returncode == 0
@@ -11917,7 +11917,7 @@ esac
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0, result.stderr
@@ -11943,7 +11943,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12014,7 +12014,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12049,7 +12049,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12085,7 +12085,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12120,7 +12120,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12151,7 +12151,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12188,7 +12188,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12225,7 +12225,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12285,7 +12285,7 @@ esac
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12335,7 +12335,7 @@ esac
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12396,7 +12396,7 @@ esac
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12483,7 +12483,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12569,7 +12569,7 @@ esac
             capture_output=True,
             text=True,
             env=self._pane_oneshot_env(repo_root),
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12677,7 +12677,7 @@ printf 'n{repo_root}\\n'
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12797,7 +12797,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12896,7 +12896,7 @@ repo_has_bridge_role implement >/dev/null || true
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -12999,7 +12999,7 @@ repo_has_bridge_role implement >/dev/null || true
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -13097,7 +13097,7 @@ repo_has_bridge_role implement >/dev/null || true
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -13192,7 +13192,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -13293,7 +13293,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -13394,7 +13394,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0

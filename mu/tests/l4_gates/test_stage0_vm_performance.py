@@ -7,12 +7,19 @@ Two-tier profiling for VM cutover GO/NO-GO evidence:
 Performance data is observational — recorded in test output for the indicator
 artifact. No wall-clock CI gating assertions.
 
+Tier 2 asserts EVIDENCE INTEGRITY, not performance: the emitted record must
+describe the sampling that actually happened (sample count and profile mode as
+derived by ``_stage0_profile_counts``, every duration a finite non-negative
+number). Those checks are env-independent by construction. No latency,
+throughput, or ratio threshold is asserted anywhere in this suite.
+
 L4_ENABLER evidence: G8 (Irreducible Primitive Consensus).
 """
 # SPEED_OK: Performance profiling suite intentionally runs repeated timing trials.
 # Tier 1 diagnostics are fast (<10s) but Tier 2 integration workloads take ~60s.
 
 import json
+import math
 import os
 import time
 import pytest
@@ -135,6 +142,14 @@ def _stats(times):
 
 _FULL_PROFILING_ENV = "RCX_STAGE0_VM_FULL_PROFILING"
 
+# Closed vocabulary of profile modes emitted by _stage0_profile_counts. Tier 2
+# locks the mode field of its evidence record to this set. Env-INDEPENDENT: the
+# concrete mode varies by environment ("default" locally, "ci_bounded" under
+# RCX_CI=1, "full" under the opt-in), so a test must never assert one literal
+# mode — only membership here, plus equality against a derivation that used the
+# same arguments as the timing helper.
+_PROFILE_MODES = frozenset({"full", "ci_bounded", "default"})
+
 
 def _stage0_profile_counts(default_runs, default_warmup):
     """Bound CI sampling while preserving full profiling behind an explicit opt-in."""
@@ -143,6 +158,20 @@ def _stage0_profile_counts(default_runs, default_warmup):
     if os.environ.get("RCX_CI") == "1":
         return min(default_runs, 3), min(default_warmup, 1), "ci_bounded"
     return default_runs, default_warmup, "default"
+
+
+def _assert_durations_valid(times):
+    """Every recorded duration is a finite, non-negative real number.
+
+    A validity floor, NOT a time budget: there is no upper bound, so no
+    wall-clock/latency/throughput threshold is introduced. Callers also keep an
+    inline ``assert`` of their own so each test carries its own check.
+    """
+    assert times, "timing helper recorded no samples"
+    for t in times:
+        assert isinstance(t, float), f"duration is not a float: {t!r}"
+        assert math.isfinite(t), f"duration is not finite: {t!r}"
+        assert t >= 0.0, f"duration is negative: {t!r}"
 
 
 class TestTier1MatchDiagnostics:
@@ -263,9 +292,18 @@ class TestTier2IntegrationWorkloads:
         ]
         inp = {"state": "A"}
 
+        # Derived, never hardcoded: _time_kernel_mu bounds its own sampling via
+        # _stage0_profile_counts(n_runs, 5), so the same call here yields the
+        # count/mode this run must report (30 by default, 3 under RCX_CI=1).
+        expected_runs, _warmup, profile_mode = _stage0_profile_counts(30, 5)
         times = _time_kernel_mu(projs, inp, n_runs=30)
         stats = _stats(times)
-        _n_runs, _warmup, profile_mode = _stage0_profile_counts(30, 5)
+
+        # Evidence integrity — shape/count/validity only, no wall-clock budget.
+        assert len(times) == expected_runs
+        assert stats["n"] == expected_runs
+        assert profile_mode in _PROFILE_MODES
+        _assert_durations_valid(times)
 
         print(json.dumps({
             "tier": 2,
@@ -273,7 +311,7 @@ class TestTier2IntegrationWorkloads:
             "profile_mode": profile_mode,
             "stats": stats,
         }))
-        # Observational — data feeds GO/NO-GO memo
+        # Timing values themselves remain observational — data feeds GO/NO-GO memo
 
     def test_workload_b_bridge_mode(self):
         """Workload B: Bridge mode with variable binding."""
@@ -282,9 +320,16 @@ class TestTier2IntegrationWorkloads:
         ]
         inp = {"x": "hello"}
 
+        # Same argument pair the helper uses internally: (n_runs=30, warmup=5).
+        expected_runs, _warmup, profile_mode = _stage0_profile_counts(30, 5)
         times = _time_kernel_mu(projs, inp, n_runs=30, kernel_mode="bridge")
         stats = _stats(times)
-        _n_runs, _warmup, profile_mode = _stage0_profile_counts(30, 5)
+
+        # Evidence integrity — shape/count/validity only, no wall-clock budget.
+        assert len(times) == expected_runs
+        assert stats["n"] == expected_runs
+        assert profile_mode in _PROFILE_MODES
+        _assert_durations_valid(times)
 
         print(json.dumps({
             "tier": 2,
@@ -301,8 +346,20 @@ class TestTier2IntegrationWorkloads:
         ]
         inp = {"state": "A"}
 
+        # Same argument pair the helper uses internally: (n_runs=10, warmup=3).
+        expected_runs, _warmup, expected_mode = _stage0_profile_counts(10, 3)
         times, profile_mode = _time_engine_pipeline(projs, inp, n_runs=10, warmup=3)
         stats = _stats(times)
+
+        # Evidence integrity — shape/count/validity only, no wall-clock budget.
+        # profile_mode is returned BY the helper, so equality against an
+        # independent derivation is a real cross-check, not a tautology.
+        assert len(times) == expected_runs
+        assert stats["n"] == expected_runs
+        assert profile_mode == expected_mode
+        assert profile_mode in _PROFILE_MODES
+        _assert_durations_valid(times)
+
         print(json.dumps({
             "tier": 2,
             "workload": "engine_pipeline_cycling_shadow",
@@ -322,9 +379,16 @@ class TestTier2IntegrationWorkloads:
         ]
         inp = {"state": "A"}
 
+        # Same argument pair the helper uses internally: (n_runs=30, warmup=5).
+        expected_runs, _warmup, profile_mode = _stage0_profile_counts(30, 5)
         times = _time_kernel_mu(projs, inp, n_runs=30)
         stats = _stats(times)
-        _n_runs, _warmup, profile_mode = _stage0_profile_counts(30, 5)
+
+        # Evidence integrity — shape/count/validity only, no wall-clock budget.
+        assert len(times) == expected_runs
+        assert stats["n"] == expected_runs
+        assert profile_mode in _PROFILE_MODES
+        _assert_durations_valid(times)
 
         print(json.dumps({
             "tier": 2,
@@ -345,8 +409,18 @@ class TestTier2IntegrationWorkloads:
         ]
         inp = {"state": "A"}
 
+        # Same argument pair the helper uses internally: (n_runs=10, warmup=3).
+        expected_runs, _warmup, expected_mode = _stage0_profile_counts(10, 3)
         times, profile_mode = _time_engine_pipeline(projs, inp, n_runs=10, warmup=3)
         stats = _stats(times)
+
+        # Evidence integrity — shape/count/validity only, no wall-clock budget.
+        assert len(times) == expected_runs
+        assert stats["n"] == expected_runs
+        assert profile_mode == expected_mode
+        assert profile_mode in _PROFILE_MODES
+        _assert_durations_valid(times)
+
         print(json.dumps({
             "tier": 2,
             "workload": "engine_pipeline_cycling_cutover",
