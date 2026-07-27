@@ -17,6 +17,7 @@ pager_mod = load_module(
     "pipeline_agent_pager",
     _TOOLS_DIR / "observability" / "pipeline_agent_pager.py",
 )
+_REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS = pager_mod._load_claude_pager_receiver_cls  # ANTICHEAT_OK: exact-loader regression seam
 # The wave-1 receiver MUST load after the pager: its module-level
 # ``_load_claude_dispatch_env`` resolves ``from pipeline_agent_pager import ...``
 # against the pager already registered in sys.modules above. The Wave-2 claude leg
@@ -53,6 +54,240 @@ def _stub_receiver_drain_spawn(monkeypatch):
         "ensure_draining",
         lambda self: {"started": True, "pid": 0, "mode": "stubbed"},
     )
+    monkeypatch.setattr(
+        pager_mod,
+        "_load_claude_pager_receiver_cls",
+        lambda: receiver_mod.ClaudePagerReceiver,
+    )
+
+
+def _write_receiver_authority_fixture(tmp_path: Path, source: str) -> tuple[Path, Path]:
+    tools_dir = tmp_path / "mu" / "tools"
+    observability_dir = tools_dir / "observability"
+    session_dir = tools_dir / "session"
+    observability_dir.mkdir(parents=True)
+    session_dir.mkdir()
+    receiver_path = session_dir / "claude_pager_receiver.py"
+    receiver_path.write_text(source, encoding="utf-8")
+    return observability_dir, receiver_path
+
+
+@pytest.mark.parametrize(
+    "shadow_root_name",
+    ["executors", "observability", "agents", "checks", "retained-site"],
+)
+def test_receiver_loader_uses_exact_session_file_before_import_shadows(
+    tmp_path,
+    monkeypatch,
+    shadow_root_name,
+):
+    import sys
+
+    observability_dir, receiver_path = _write_receiver_authority_fixture(
+        tmp_path,
+        "class ClaudePagerReceiver:\n"
+        "    AUTHORITY_SENTINEL = 'CANONICAL_SESSION_BYTES'\n",
+    )
+    tools_dir = observability_dir.parent
+    shadow_dir = (
+        tmp_path / "retained-site"
+        if shadow_root_name == "retained-site"
+        else tools_dir / shadow_root_name
+    )
+    shadow_dir.mkdir(parents=True, exist_ok=True)
+    (shadow_dir / "claude_pager_receiver.py").write_text(
+        "class ClaudePagerReceiver:\n"
+        f"    AUTHORITY_SENTINEL = 'SHADOW_{shadow_root_name.upper()}'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pager_mod, "SCRIPT_DIR", observability_dir)
+    monkeypatch.setattr(pager_mod.sys, "path", [str(shadow_dir), *sys.path])
+    monkeypatch.delitem(sys.modules, "claude_pager_receiver", raising=False)
+
+    receiver_cls = _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
+
+    assert receiver_cls.AUTHORITY_SENTINEL == "CANONICAL_SESSION_BYTES"
+    loaded = sys.modules["claude_pager_receiver"]
+    assert Path(loaded.__file__).resolve() == receiver_path.resolve()
+
+
+def test_receiver_loader_replaces_wrong_cached_module_with_exact_session_file(
+    tmp_path,
+    monkeypatch,
+):
+    import sys
+    import types
+
+    observability_dir, receiver_path = _write_receiver_authority_fixture(
+        tmp_path,
+        "class ClaudePagerReceiver:\n"
+        "    AUTHORITY_SENTINEL = 'CANONICAL_SESSION_BYTES'\n",
+    )
+    poison = types.ModuleType("claude_pager_receiver")
+    poison.__file__ = str(tmp_path / "wrong-root" / "claude_pager_receiver.py")
+    poison.ClaudePagerReceiver = type(
+        "ClaudePagerReceiver",
+        (),
+        {"AUTHORITY_SENTINEL": "WRONG_CACHED_BYTES"},
+    )
+    monkeypatch.setattr(pager_mod, "SCRIPT_DIR", observability_dir)
+    monkeypatch.setitem(sys.modules, "claude_pager_receiver", poison)
+
+    receiver_cls = _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
+
+    assert receiver_cls.AUTHORITY_SENTINEL == "CANONICAL_SESSION_BYTES"
+    loaded = sys.modules["claude_pager_receiver"]
+    assert loaded is not poison
+    assert Path(loaded.__file__).resolve() == receiver_path.resolve()
+
+
+def test_receiver_loader_loads_repo_receiver_with_circular_pager_link(
+    monkeypatch,
+):
+    import sys
+
+    if sys.platform == "win32":
+        pytest.skip("claude_pager_receiver uses the POSIX fcntl queue lock")
+    canonical_receiver = _TOOLS_DIR / "session" / "claude_pager_receiver.py"
+    monkeypatch.setattr(pager_mod, "SCRIPT_DIR", _TOOLS_DIR / "observability")
+    monkeypatch.delitem(sys.modules, "claude_pager_receiver", raising=False)
+
+    receiver_cls = _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
+
+    loaded = sys.modules["claude_pager_receiver"]
+    assert receiver_cls is loaded.ClaudePagerReceiver
+    assert Path(loaded.__file__).resolve() == canonical_receiver.resolve()
+    assert sys.modules["pipeline_agent_pager"] is pager_mod
+
+
+def test_receiver_loader_cleans_partial_module_before_retry(
+    tmp_path,
+    monkeypatch,
+):
+    import importlib
+    import sys
+    import types
+
+    observability_dir, receiver_path = _write_receiver_authority_fixture(
+        tmp_path,
+        "PARTIAL_SENTINEL = 'PARTIAL_BYTES'\n"
+        "raise RuntimeError('RECEIVER_LOAD_BOOM')\n",
+    )
+    poison = types.ModuleType("claude_pager_receiver")
+    poison.__file__ = str(tmp_path / "wrong-root" / "claude_pager_receiver.py")
+    monkeypatch.setattr(pager_mod, "SCRIPT_DIR", observability_dir)
+    monkeypatch.setitem(sys.modules, "claude_pager_receiver", poison)
+
+    with pytest.raises(RuntimeError, match="RECEIVER_LOAD_BOOM"):
+        _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
+
+    assert "claude_pager_receiver" not in sys.modules
+    receiver_path.write_text(
+        "class ClaudePagerReceiver:\n"
+        "    AUTHORITY_SENTINEL = 'FRESH_CANONICAL_BYTES_AFTER_RETRY'\n",
+        encoding="utf-8",
+    )
+    importlib.invalidate_caches()
+
+    receiver_cls = _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
+
+    assert receiver_cls.AUTHORITY_SENTINEL == "FRESH_CANONICAL_BYTES_AFTER_RETRY"
+    assert not hasattr(sys.modules["claude_pager_receiver"], "PARTIAL_SENTINEL")
+
+
+@pytest.mark.parametrize(
+    "invalid_shape",
+    ["missing", "file-symlink", "directory", "session-symlink", "unreadable"],
+)
+def test_receiver_loader_rejects_invalid_canonical_path_shape(
+    tmp_path,
+    monkeypatch,
+    request,
+    invalid_shape,
+):
+    tools_dir = tmp_path / "mu" / "tools"
+    observability_dir = tools_dir / "observability"
+    observability_dir.mkdir(parents=True)
+    session_dir = tools_dir / "session"
+    receiver_path = session_dir / "claude_pager_receiver.py"
+    if invalid_shape == "session-symlink":
+        outside_session = tmp_path / "outside-session"
+        outside_session.mkdir()
+        (outside_session / receiver_path.name).write_text(
+            "class ClaudePagerReceiver:\n"
+            "    pass\n",
+            encoding="utf-8",
+        )
+        try:
+            session_dir.symlink_to(outside_session, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlinks unavailable: {exc}")
+    else:
+        session_dir.mkdir()
+        if invalid_shape == "file-symlink":
+            outside_receiver = tmp_path / "outside-receiver.py"
+            outside_receiver.write_text(
+                "class ClaudePagerReceiver:\n"
+                "    pass\n",
+                encoding="utf-8",
+            )
+            try:
+                receiver_path.symlink_to(outside_receiver)
+            except OSError as exc:
+                pytest.skip(f"file symlinks unavailable: {exc}")
+        elif invalid_shape == "directory":
+            receiver_path.mkdir()
+        elif invalid_shape == "unreadable":
+            import os
+            import sys
+
+            if sys.platform == "win32":
+                pytest.skip("POSIX unreadable-file permissions required")
+            receiver_path.write_text(
+                "class ClaudePagerReceiver:\n"
+                "    pass\n",
+                encoding="utf-8",
+            )
+            receiver_path.chmod(0)
+
+            def _restore_receiver_permissions() -> None:
+                if receiver_path.exists() and not receiver_path.is_symlink():
+                    receiver_path.chmod(0o600)
+
+            request.addfinalizer(_restore_receiver_permissions)
+            if os.access(receiver_path, os.R_OK):
+                pytest.skip("unreadable receiver cannot be represented")
+    monkeypatch.setattr(pager_mod, "SCRIPT_DIR", observability_dir)
+
+    with pytest.raises(pager_mod.PipelineAgentPagerError):
+        _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
+
+
+@pytest.mark.parametrize(
+    "receiver_source",
+    [
+        "AUTHORITY_SENTINEL = 'NO_RECEIVER_CLASS'\n",
+        "ClaudePagerReceiver = None\n",
+    ],
+)
+def test_receiver_loader_rejects_missing_or_noncallable_receiver_class(
+    tmp_path,
+    monkeypatch,
+    receiver_source,
+):
+    import sys
+
+    observability_dir, _receiver_path = _write_receiver_authority_fixture(
+        tmp_path,
+        receiver_source,
+    )
+    monkeypatch.setattr(pager_mod, "SCRIPT_DIR", observability_dir)
+    monkeypatch.delitem(sys.modules, "claude_pager_receiver", raising=False)
+
+    with pytest.raises(pager_mod.PipelineAgentPagerError, match="no callable"):
+        _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
+
+    assert "claude_pager_receiver" not in sys.modules
 
 
 class _RecordingReceiver:
