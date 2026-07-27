@@ -195,6 +195,145 @@ def test_receiver_loader_cleans_partial_module_before_retry(
     assert not hasattr(sys.modules["claude_pager_receiver"], "PARTIAL_SENTINEL")
 
 
+def test_receiver_loader_retry_ignores_same_size_same_mtime_stale_bytecode(
+    tmp_path,
+    monkeypatch,
+):
+    import importlib
+    import os
+    import sys
+
+    failing_source = (
+        "if True :\n"
+        "    raise RuntimeError('OLD_BYTECODE')\n"
+        "class ClaudePagerReceiver:\n"
+        "    AUTHORITY_SENTINEL = 'OLD_BYTECODE'\n"
+    )
+    repaired_source = (
+        "if False:\n"
+        "    raise RuntimeError('NEW_BYTECODE')\n"
+        "class ClaudePagerReceiver:\n"
+        "    AUTHORITY_SENTINEL = 'NEW_BYTECODE'\n"
+    )
+    assert len(failing_source.encode("utf-8")) == len(
+        repaired_source.encode("utf-8")
+    )
+    observability_dir, receiver_path = _write_receiver_authority_fixture(
+        tmp_path,
+        failing_source,
+    )
+    monkeypatch.setattr(pager_mod, "SCRIPT_DIR", observability_dir)
+    monkeypatch.delitem(sys.modules, "claude_pager_receiver", raising=False)
+    original_stat = receiver_path.stat()
+    stale_seed_spec = importlib.util.spec_from_file_location(
+        "stale_receiver_seed",
+        str(receiver_path),
+    )
+    assert stale_seed_spec is not None and stale_seed_spec.loader is not None
+    stale_module = importlib.util.module_from_spec(stale_seed_spec)
+    sys.modules["stale_receiver_seed"] = stale_module
+    try:
+        monkeypatch.setattr(sys, "dont_write_bytecode", False)
+        with pytest.raises(RuntimeError, match="OLD_BYTECODE"):
+            stale_seed_spec.loader.exec_module(stale_module)
+    finally:
+        sys.modules.pop("stale_receiver_seed", None)
+    stale_pyc = Path(importlib.util.cache_from_source(str(receiver_path)))
+    assert stale_pyc.is_file()
+    pyc_header = stale_pyc.read_bytes()[:16]
+    assert int.from_bytes(pyc_header[4:8], "little") == 0
+    assert int.from_bytes(pyc_header[8:12], "little") == int(
+        original_stat.st_mtime
+    )
+    assert int.from_bytes(pyc_header[12:16], "little") == original_stat.st_size
+
+    receiver_path.write_text(repaired_source, encoding="utf-8")
+    os.utime(
+        receiver_path,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+    )
+    repaired_stat = receiver_path.stat()
+    assert repaired_stat.st_size == original_stat.st_size
+    assert repaired_stat.st_mtime_ns == original_stat.st_mtime_ns
+
+    replay_spec = importlib.util.spec_from_file_location(
+        "stale_receiver_replay",
+        str(receiver_path),
+    )
+    assert replay_spec is not None and replay_spec.loader is not None
+    replay_module = importlib.util.module_from_spec(replay_spec)
+    sys.modules["stale_receiver_replay"] = replay_module
+    try:
+        with pytest.raises(RuntimeError, match="OLD_BYTECODE"):
+            replay_spec.loader.exec_module(replay_module)
+    finally:
+        sys.modules.pop("stale_receiver_replay", None)
+
+    receiver_cls = _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
+
+    assert receiver_cls.AUTHORITY_SENTINEL == "NEW_BYTECODE"
+    assert (
+        sys.modules["claude_pager_receiver"].ClaudePagerReceiver
+        is receiver_cls
+    )
+
+
+def test_receiver_loader_executes_opened_bytes_when_source_path_is_swapped(
+    tmp_path,
+    monkeypatch,
+):
+    import builtins
+    import sys
+
+    authorized_source = (
+        "class ClaudePagerReceiver:\n"
+        "    AUTHORITY_SENTINEL = 'OPENED_AUTHORIZED_BYTES'\n"
+    )
+    swapped_source = (
+        "class ClaudePagerReceiver:\n"
+        "    AUTHORITY_SENTINEL = 'LATE_PATH_SWAP_BYTES'\n"
+    )
+    observability_dir, receiver_path = _write_receiver_authority_fixture(
+        tmp_path,
+        authorized_source,
+    )
+    monkeypatch.setattr(pager_mod, "SCRIPT_DIR", observability_dir)
+    monkeypatch.delitem(sys.modules, "claude_pager_receiver", raising=False)
+    real_compile = builtins.compile
+    swapped = False
+
+    def _swap_path_then_compile(
+        source,
+        filename,
+        mode,
+        flags=0,
+        dont_inherit=False,
+        optimize=-1,
+        **kwargs,
+    ):
+        nonlocal swapped
+        if not swapped and Path(filename).resolve() == receiver_path.resolve():
+            swapped = True
+            receiver_path.write_text(swapped_source, encoding="utf-8")
+        return real_compile(
+            source,
+            filename,
+            mode,
+            flags=flags,
+            dont_inherit=dont_inherit,
+            optimize=optimize,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(builtins, "compile", _swap_path_then_compile)
+
+    receiver_cls = _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
+
+    assert swapped is True
+    assert receiver_cls.AUTHORITY_SENTINEL == "OPENED_AUTHORIZED_BYTES"
+    assert "LATE_PATH_SWAP_BYTES" in receiver_path.read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     "invalid_shape",
     ["missing", "file-symlink", "directory", "session-symlink", "unreadable"],

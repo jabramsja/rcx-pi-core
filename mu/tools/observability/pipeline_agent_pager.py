@@ -496,12 +496,13 @@ def _load_claude_pager_receiver_cls() -> Any:
             f"{session_dir}"
         )
     try:
-        receiver_mode = receiver_path.lstat().st_mode
+        receiver_stat = receiver_path.lstat()
     except OSError as exc:
         raise PipelineAgentPagerError(
             f"canonical claude_pager_receiver is missing or unreadable: "
             f"{receiver_path}: {exc}"
         ) from exc
+    receiver_mode = receiver_stat.st_mode
     if stat.S_ISLNK(receiver_mode):
         raise PipelineAgentPagerError(
             f"canonical claude_pager_receiver must not be a symlink: {receiver_path}"
@@ -519,14 +520,42 @@ def _load_claude_pager_receiver_cls() -> Any:
             f"canonical claude_pager_receiver resolves outside selected tools root: "
             f"{receiver_path}: {exc}"
         ) from exc
+    receiver_fd = -1
     try:
-        with canonical_receiver.open("rb"):
-            pass
+        open_flags = os.O_RDONLY
+        open_flags |= getattr(os, "O_CLOEXEC", 0)
+        open_flags |= getattr(os, "O_NOFOLLOW", 0)
+        receiver_fd = os.open(canonical_receiver, open_flags)
+        with os.fdopen(receiver_fd, "rb") as receiver_file:
+            receiver_fd = -1
+            opened_stat = os.fstat(receiver_file.fileno())
+            if not stat.S_ISREG(opened_stat.st_mode):
+                raise PipelineAgentPagerError(
+                    "opened canonical claude_pager_receiver is not a regular "
+                    f"file: {canonical_receiver}"
+                )
+            if (
+                opened_stat.st_dev,
+                opened_stat.st_ino,
+            ) != (
+                receiver_stat.st_dev,
+                receiver_stat.st_ino,
+            ):
+                raise PipelineAgentPagerError(
+                    "opened canonical claude_pager_receiver identity changed "
+                    f"before read: {canonical_receiver}"
+                )
+            receiver_source = receiver_file.read()
+    except PipelineAgentPagerError:
+        raise
     except OSError as exc:
         raise PipelineAgentPagerError(
             f"canonical claude_pager_receiver is unreadable: "
             f"{canonical_receiver}: {exc}"
         ) from exc
+    finally:
+        if receiver_fd >= 0:
+            os.close(receiver_fd)
 
     module_name = "claude_pager_receiver"
     sys.modules.pop(module_name, None)
@@ -536,9 +565,19 @@ def _load_claude_pager_receiver_cls() -> Any:
             f"cannot load claude_pager_receiver from {canonical_receiver}"
         )
     module = _ilu.module_from_spec(spec)
+    # Compile and execute the exact bytes read from the authorized file
+    # descriptor. SourceFileLoader.exec_module() may accept a timestamp/size
+    # matching .pyc created by a prior partial import, which can replay stale
+    # receiver code after a same-size, same-mtime source repair.
+    receiver_code = compile(
+        receiver_source,
+        str(canonical_receiver),
+        "exec",
+        dont_inherit=True,
+    )
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        exec(receiver_code, module.__dict__)
         receiver_cls = getattr(module, "ClaudePagerReceiver", None)
         if not callable(receiver_cls):
             raise PipelineAgentPagerError(
