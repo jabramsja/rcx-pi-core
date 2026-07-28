@@ -47,6 +47,97 @@ def mock_routing_record():
         yield
 
 
+@pytest.fixture(autouse=True)
+def isolate_phase_b_pager_transport():
+    """Prevent the focused module from reaching a live pager or app server."""
+    with patch.object(
+        pb_mod,
+        "emit_pipeline_agent_event",
+        return_value={
+            "enabled": False,
+            "event_id": "",
+            "attempted": [],
+            "budget_exhausted": False,
+        },
+    ):
+        yield
+
+
+@pytest.fixture
+def real_pre_review_package():
+    """Opt a focused integration test into the real pre-review package helper."""
+    yield
+
+
+@pytest.fixture(autouse=True)
+def isolate_legacy_run_phase_b_pre_review_boundaries(request):
+    """Keep legacy orchestration tests focused on their original boundary.
+
+    Focused tests that request ``real_pre_review_package`` exercise the new
+    tracker/collector/packet-refresh authority. Other pre-existing run_phase_b
+    tests retain their historical stage-only boundary so they do not need to
+    synthesize launcher-owned TASKS and indicator artifacts unrelated to the
+    behavior under test.
+    """
+    if "real_pre_review_package" in request.fixturenames:
+        yield
+        return
+
+    def stage_only_pre_review(
+        repo_root,
+        *,
+        candidate_files,
+        exact_stage_scope_files,
+        plan_path,
+        wave_id,
+        wave_class,
+        step_prefix,
+        context,
+    ):
+        del wave_id, wave_class
+        prepared = list(dict.fromkeys(candidate_files))
+        if plan_path and not plan_path.startswith("<") and plan_path not in prepared:
+            prepared.append(plan_path)
+        if exact_stage_scope_files:
+            ok, detail = getattr(pb_mod, "_unstage_out_of_exact_scope")(
+                repo_root,
+                exact_stage_scope_files,
+            )
+            if not ok:
+                return prepared, {
+                    "status": "error",
+                    "step": f"{step_prefix}_scope_reconcile",
+                    "stderr": detail,
+                    "errors": [
+                        f"Failed to reconcile exact staged scope before {context}",
+                        detail,
+                    ],
+                }
+        if prepared:
+            ok, detail = getattr(pb_mod, "_stage_files_for_pipeline")(
+                repo_root,
+                prepared,
+            )
+            if not ok:
+                return prepared, {
+                    "status": "error",
+                    "step": f"{step_prefix}_staging",
+                    "stderr": detail,
+                    "errors": [
+                        f"Failed to stage current Phase B candidate before {context}",
+                        detail,
+                    ],
+                }
+        return prepared, None
+
+    with patch.object(
+        pb_mod,
+        "_prepare_phase_b_pre_review_package",
+        side_effect=stage_only_pre_review,
+    ):
+        yield
+
+
 def _make_mock_impl():
     """Return a shared successful implementer mock for bridge-loop tests."""
     impl_success = {
@@ -68,6 +159,17 @@ def _init_git_repo(repo: Path) -> None:
     subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+
+
+def _write_canonical_tasks(repo: Path, wave_id: str) -> None:
+    (repo / "TASKS.md").write_text(
+        "## Ra\n\n"
+        f"- Tracker sync note (2026-07-28, {wave_id}): "
+        "**Phase B pre-review package.**. Class: L4_ENABLER. "
+        "target_gate_id: G8.\n\n"
+        "---\n",
+        encoding="utf-8",
+    )
 
 
 def _run_phase_b_public_target_gate_path(
@@ -3526,6 +3628,11 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert "does not authorize creation of a new report, indicator" not in packet_text
         assert "ratchet-baseline, indicator, or successor packet" not in packet_text
         assert "authorized only for mechanical commit packaging" in packet_text
+        assert (
+            pb_mod.PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER
+            in packet_text
+        )
+        assert pb_mod.parse_exact_stage_scope_files(packet_text) == []
         staged = subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
             cwd=repo,
@@ -3534,6 +3641,203 @@ class TestMaintenanceTrackerMetadataPropagation:
             text=True,
         ).stdout.splitlines()
         assert packet_path in staged
+
+    def test_phase_b_indicator_scope_refresh_preserves_legacy_exact_parse(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "phase-b-legacy-exact-refresh-2026-07-28"
+        packet_path = f"reports/control_plane/{wave_id}.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        packet = repo / packet_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Plan\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n\n"
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+            "## Phase B Indicator Scope Reconciliation\n\n"
+            "- Authorized staged files:\n"
+            f"  - `{packet_path}`\n"
+            "  - `TASKS.md`\n"
+            f"  - `{indicator_path}`\n"
+            "  - `mu/tools/executors/phase_b_executor.py`\n"
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n",
+            encoding="utf-8",
+        )
+        original_exact = pb_mod.parse_exact_stage_scope_files(
+            packet.read_text(encoding="utf-8")
+        )
+
+        changed, error = pb_mod._refresh_phase_b_indicator_packet_scope(  # ANTICHEAT_OK: legacy exact refresh compatibility
+            repo,
+            plan_path=packet_path,
+            wave_id=wave_id,
+            indicator_path=indicator_path,
+            changed_files=[
+                "TASKS.md",
+                packet_path,
+                indicator_path,
+                "mu/tools/executors/phase_b_executor.py",
+                "mu/tests/tools/test_phase_b_executor.py",
+            ],
+        )
+
+        assert error is None
+        assert changed is True
+        refreshed_text = packet.read_text(encoding="utf-8")
+        assert (
+            pb_mod.PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER
+            not in refreshed_text
+        )
+        assert pb_mod.parse_exact_stage_scope_files(refreshed_text) == original_exact
+
+    def test_phase_b_indicator_scope_refresh_replace_failure_is_atomic(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "phase-b-atomic-refresh-failure-2026-07-28"
+        packet_path = f"reports/control_plane/{wave_id}.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        packet = repo / packet_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Plan\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n",
+            encoding="utf-8",
+        )
+        original_bytes = packet.read_bytes()
+
+        with patch.object(
+            pb_mod.os,
+            "replace",
+            side_effect=OSError("simulated atomic replacement interruption"),
+        ), patch.object(pb_mod, "_stage_files_for_pipeline") as mock_stage:
+            changed, error = pb_mod._refresh_phase_b_indicator_packet_scope(  # ANTICHEAT_OK: atomic packet refresh failure
+                repo,
+                plan_path=packet_path,
+                wave_id=wave_id,
+                indicator_path=indicator_path,
+                changed_files=["TASKS.md", packet_path, indicator_path],
+            )
+
+        assert changed is False
+        assert error is not None
+        assert "atomic Phase B indicator packet scope refresh failed" in error
+        assert packet.read_bytes() == original_bytes
+        assert list(packet.parent.glob(f".{packet.name}.*.tmp")) == []
+        mock_stage.assert_not_called()
+
+    def test_phase_b_indicator_scope_refresh_preserves_packet_mode(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "phase-b-atomic-refresh-mode-2026-07-28"
+        packet_path = f"reports/control_plane/{wave_id}.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        packet = repo / packet_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Plan\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n",
+            encoding="utf-8",
+        )
+        packet.chmod(0o640)
+
+        changed, error = pb_mod._refresh_phase_b_indicator_packet_scope(  # ANTICHEAT_OK: atomic packet mode preservation
+            repo,
+            plan_path=packet_path,
+            wave_id=wave_id,
+            indicator_path=indicator_path,
+            changed_files=["TASKS.md", packet_path, indicator_path],
+        )
+
+        assert error is None
+        assert changed is True
+        assert packet.stat().st_mode & 0o777 == 0o640
+
+    def test_crash_orphaned_packet_refresh_temp_is_excluded_on_broad_restart(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / "README.md").write_text("init\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+
+        packet_path = "reports/control_plane/broad-crash-wave.md"
+        orphan_path = (
+            "reports/control_plane/.broad-crash-wave.md.deadbeef.tmp"
+        )
+        candidate_paths = [
+            "TASKS.md",
+            "mu/tools/executors/fix.py",
+            packet_path,
+        ]
+        for rel_path in [*candidate_paths, orphan_path]:
+            full_path = repo / rel_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(f"{rel_path}\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "--", *candidate_paths, orphan_path],
+            cwd=repo,
+            check=True,
+        )
+
+        baseline = pb_mod._collect_baseline_wave_files(  # ANTICHEAT_OK: crash orphan must not enter broad baseline
+            repo,
+            packet_path,
+        )
+        cached_candidate = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: cached baseline must not re-admit crash orphan
+            repo,
+            packet_path,
+            [],
+            set(),
+            set(),
+            {*candidate_paths, orphan_path},
+        )
+        prepared, error = pb_mod._prepare_phase_b_pre_review_package(  # ANTICHEAT_OK: pre-review staging must exclude crash orphan
+            repo,
+            candidate_files=[orphan_path, *candidate_paths],
+            exact_stage_scope_files=set(),
+            plan_path=packet_path,
+            wave_id="broad-crash-wave",
+            wave_class="DOCS",
+            step_prefix="bridge_pre_review",
+            context="broad restart review",
+        )
+
+        assert orphan_path not in baseline
+        assert orphan_path not in cached_candidate
+        assert error is None
+        assert orphan_path not in prepared
+        assert (repo / orphan_path).exists()
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        assert orphan_path not in staged
+        assert set(staged) == set(candidate_paths)
+        assert not pb_mod._is_phase_b_indicator_scope_refresh_temp_path(  # ANTICHEAT_OK: sibling packet temp must not be broadly classified
+            "reports/control_plane/.other-packet.md.deadbeef.tmp",
+            packet_path,
+        )
 
     def test_phase_b_indicator_scope_refresh_accepts_routed_retained_candidate_identity(self, tmp_path):
         repo = tmp_path / "repo"
@@ -4073,6 +4377,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              patch.object(pb_mod, "load_routing_record", return_value=routing), \
              patch.object(pb_mod, "_collect_changed_files", return_value=wave_owned), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_owned), \
+             patch.object(pb_mod, "_emit_phase_b_event", return_value={}), \
              patch.object(
                  pb_mod,
                  "_run_pytest_on_files",
@@ -5941,6 +6246,128 @@ class TestBridgeLoopReinvokesImplementer:
         assert mock_stage.call_args_list[0].args[1] == ["TASKS.md", "f.py", "reports/control_plane/plan.md"]
         assert mock_stage.call_args_list[1].args[1] == ["TASKS.md", "f.py", "reports/control_plane/plan.md"]
 
+    def test_bridge_rounds_prepare_same_wave_indicator_before_each_review(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        wave_id = "phase-b-pre-review-order-2026-07-28"
+        plan_path = "reports/control_plane/plan.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Class: L4_ENABLER\n\n"
+            "## Scope\n\n"
+            "This lock package may stage exactly these same-wave files:\n\n"
+            "- `TASKS.md`\n"
+            "- `f.py`\n"
+            f"- `{plan_path}`\n"
+            f"- `{indicator_path}`\n",
+            encoding="utf-8",
+        )
+        _write_canonical_tasks(repo, wave_id)
+        mock_impl = _make_mock_impl()
+        events: list[str] = []
+        bridge_calls = 0
+        real_tracker_predicate = getattr(
+            pb_mod,
+            "_tasks_has_canonical_wave_tracker_note",
+        )
+
+        def reconcile_side(_repo_root, _allowed):
+            events.append("reconcile")
+            return True, ""
+
+        def stage_side(_repo_root, _files):
+            events.append("stage_candidate")
+            return True, ""
+
+        def authority_side(*args, **kwargs):
+            events.append("tracker_authority")
+            return real_tracker_predicate(*args, **kwargs)
+
+        def collect_side(_repo_root, *, wave_id):
+            events.append("collect_and_stage_indicator")
+            return f"reports/l4_wave_indicators/{wave_id}.json", None
+
+        def refresh_side(*args, **kwargs):
+            events.append("refresh_and_stage_packet")
+            return True, None
+
+        def bridge_side(*args, **kwargs):
+            nonlocal bridge_calls
+            bridge_calls += 1
+            events.append("review")
+            if bridge_calls == 1:
+                return {
+                    "exit_code": 0,
+                    "stdout": "REQUEST_CHANGES\n",
+                    "stderr": "",
+                    "decision": "REQUEST_CHANGES",
+                    "job_id": "j1",
+                }
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": "j2",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md", "f.py", plan_path, indicator_path]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md", "f.py", plan_path, indicator_path]), \
+             patch.object(pb_mod, "_unstage_out_of_exact_scope", side_effect=reconcile_side), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", side_effect=stage_side), \
+             patch.object(pb_mod, "_tasks_has_canonical_wave_tracker_note", side_effect=authority_side), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", side_effect=collect_side) as mock_collect, \
+             patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope", side_effect=refresh_side), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
+             patch.object(pb_mod, "_emit_phase_b_event", return_value={}), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="findings here"), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {
+                     "decision": "COMMIT_GO",
+                     "summary": "",
+                     "status": "success",
+                     "findings": [],
+                 },
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ):
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready", result
+        assert mock_collect.call_count == 2
+        review_indexes = [
+            index for index, event in enumerate(events) if event == "review"
+        ]
+        assert len(review_indexes) == 2
+        expected_pre_review = [
+            "reconcile",
+            "stage_candidate",
+            "tracker_authority",
+            "collect_and_stage_indicator",
+            "refresh_and_stage_packet",
+        ]
+        for review_index in review_indexes:
+            assert events[review_index - len(expected_pre_review):review_index] == (
+                expected_pre_review
+            )
+
     def test_bridge_round_staging_failure_stops_pipeline(self, tmp_path):
         """If restaging fails before bridge review, fail closed instead of reviewing stale index state."""
         repo = tmp_path / "repo"
@@ -5959,8 +6386,188 @@ class TestBridgeLoopReinvokesImplementer:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "error"
-        assert result["step"] == "bridge_staging"
+        assert result["step"] == "bridge_pre_review_staging"
         mock_bridge.assert_not_called()
+
+    def test_missing_same_wave_tracker_authority_blocks_collector_and_reviewer(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        wave_id = "phase-b-missing-tracker-authority-2026-07-28"
+        plan_path = "reports/control_plane/plan.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Class: L4_ENABLER\n\n"
+            "## Scope\n\n"
+            "This lock package may stage exactly these same-wave files:\n\n"
+            "- `TASKS.md`\n"
+            f"- `{plan_path}`\n"
+            f"- `{indicator_path}`\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text(
+            "## Ra\n\n"
+            "- Tracker sync note (2026-07-28, unrelated-wave): "
+            "**Unrelated.**. Class: L4_ENABLER.\n\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        mock_impl = _make_mock_impl()
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md", plan_path]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md", plan_path]), \
+             patch.object(pb_mod, "_unstage_out_of_exact_scope", return_value=(True, "")), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_emit_phase_b_event", return_value={}), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact") as mock_collector, \
+             patch.object(pb_mod, "run_bridge_review") as mock_bridge:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "bridge_pre_review_tracker_authority"
+        assert "Canonical same-wave TASKS authority is required" in result["errors"][0]
+        mock_collector.assert_not_called()
+        mock_bridge.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "duplicate_is_canonical",
+        [True, False],
+        ids=["canonical_duplicate", "malformed_duplicate"],
+    )
+    def test_duplicate_tracker_authority_blocks_collector_and_reviewer(
+        self,
+        tmp_path,
+        real_pre_review_package,
+        duplicate_is_canonical,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        wave_id = "phase-b-duplicate-tracker-authority-2026-07-28"
+        plan_path = "reports/control_plane/plan.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Class: L4_ENABLER\n\n"
+            "## Scope\n\n"
+            "This lock package may stage exactly these same-wave files:\n\n"
+            "- `TASKS.md`\n"
+            f"- `{plan_path}`\n"
+            f"- `{indicator_path}`\n",
+            encoding="utf-8",
+        )
+        canonical_note = (
+            f"- Tracker sync note (2026-07-28, {wave_id}): "
+            "**Phase B pre-review package.**. Class: L4_ENABLER. "
+            "target_gate_id: G8.\n"
+        )
+        duplicate_note = (
+            canonical_note
+            if duplicate_is_canonical
+            else (
+                f"- Tracker sync note (2026-07-28, {wave_id}): "
+                "malformed same-wave duplicate\n"
+            )
+        )
+        (repo / "TASKS.md").write_text(
+            f"## Ra\n\n{canonical_note}{duplicate_note}\n---\n",
+            encoding="utf-8",
+        )
+        mock_impl = _make_mock_impl()
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md", plan_path]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md", plan_path]), \
+             patch.object(pb_mod, "_unstage_out_of_exact_scope", return_value=(True, "")), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_emit_phase_b_event", return_value={}), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact") as mock_collector, \
+             patch.object(pb_mod, "run_bridge_review") as mock_bridge:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "bridge_pre_review_tracker_authority"
+        assert "Canonical same-wave TASKS authority is required" in result["errors"][0]
+        mock_collector.assert_not_called()
+        mock_bridge.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("failure", "expected_step"),
+        [
+            ("indicator", "bridge_pre_review_l4_indicator"),
+            ("packet", "bridge_pre_review_indicator_scope"),
+        ],
+    )
+    def test_pre_review_mechanical_failure_blocks_reviewer(
+        self,
+        tmp_path,
+        real_pre_review_package,
+        failure,
+        expected_step,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        wave_id = f"phase-b-pre-review-{failure}-failure-2026-07-28"
+        plan_path = "reports/control_plane/plan.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Class: L4_ENABLER\n\n"
+            "## Scope\n\n"
+            "This lock package may stage exactly these same-wave files:\n\n"
+            "- `TASKS.md`\n"
+            f"- `{plan_path}`\n"
+            f"- `{indicator_path}`\n",
+            encoding="utf-8",
+        )
+        _write_canonical_tasks(repo, wave_id)
+        mock_impl = _make_mock_impl()
+        collector_result = (
+            (None, "git add -f failed for canonical indicator")
+            if failure == "indicator"
+            else (indicator_path, None)
+        )
+        packet_result = (
+            (False, "simulated atomic packet refresh failure")
+            if failure == "packet"
+            else (True, None)
+        )
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md", plan_path]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md", plan_path]), \
+             patch.object(pb_mod, "_unstage_out_of_exact_scope", return_value=(True, "")), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_emit_phase_b_event", return_value={}), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", return_value=collector_result), \
+             patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope", return_value=packet_result) as mock_refresh, \
+             patch.object(pb_mod, "run_bridge_review") as mock_bridge:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == expected_step
+        mock_bridge.assert_not_called()
+        if failure == "indicator":
+            mock_refresh.assert_not_called()
 
     def test_question_fails_closed(self, tmp_path):
         """QUESTION requires founder input — pipeline fails closed."""
@@ -8614,6 +9221,84 @@ class TestSdkReviewScopeSelection:
             "mu/tools/runners/run_review.py",
         ]
 
+    def test_launcher_exact_final_set_uses_only_files_and_surfaces_scope(self):
+        wave_id = "phase-b-launcher-exact-scope-2026-07-28"
+        packet_path = f"reports/control_plane/{wave_id}_2026-07-28.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        plan = (
+            "# Phase B Launcher Packet\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n\n"
+            "## Scope\n\n"
+            "Exactly one repair plus an optional standard reviewer nonblocker report.\n\n"
+            "Files and surfaces in scope:\n\n"
+            "- mu/tools/executors/phase_b_executor.py (MODIFY) -- implementation\n"
+            "- mu/tests/tools/test_phase_b_executor.py (MODIFY) -- tests\n"
+            "- TASKS.md (GENERATED UPDATE) -- tracker\n"
+            f"- {packet_path} (GENERATED) -- packet\n"
+            f"- {indicator_path} (GENERATED) -- indicator\n"
+            "- TASKS.md -- canonical tracker authority\n\n"
+            "Read-only grounding:\n\n"
+            "- mu/tools/executors/commit_executor.py\n\n"
+            "## Work items\n\n"
+            "1. A launcher-rendered packet may say the final staged set contains exactly "
+            "the authorized package in explanatory prose.\n"
+            "2. Validate mu/tools/executors/executor_dispatch.py without editing it.\n\n"
+            "## Validation gates\n\n"
+            "- python3 tools/checks/enforce_l4_execution_contract.py --files "
+            "mu/tools/executors/recovery_gate.py\n\n"
+            "## Acceptance criteria\n\n"
+            "- The final staged set contains exactly the authorized package, plus only "
+            "the standard generated reviewer nonblocker report if one is required.\n"
+        )
+
+        assert pb_mod.parse_exact_stage_scope_files(plan) == [
+            "mu/tools/executors/phase_b_executor.py",
+            "mu/tests/tools/test_phase_b_executor.py",
+            "TASKS.md",
+            packet_path,
+            indicator_path,
+            f"reports/deferred/non_blocking/{wave_id}_bridge_nonblockers.md",
+        ]
+
+    def test_launcher_exact_final_set_does_not_authorize_negated_reviewer_nonblocker(self):
+        wave_id = "phase-b-negated-reviewer-nonblocker-2026-07-28"
+        plan = (
+            "# Phase B Launcher Packet\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n\n"
+            "## Scope\n\n"
+            "No reviewer nonblocker report is authorized for this wave.\n\n"
+            "Files and surfaces in scope:\n\n"
+            "- mu/tools/executors/phase_b_executor.py (MODIFY)\n"
+            "- mu/tests/tools/test_phase_b_executor.py (MODIFY)\n"
+            "- TASKS.md (GENERATED UPDATE)\n\n"
+            "## Acceptance criteria\n\n"
+            "- The final staged set contains exactly the authorized package.\n"
+        )
+
+        assert pb_mod.parse_exact_stage_scope_files(plan) == [
+            "mu/tools/executors/phase_b_executor.py",
+            "mu/tests/tools/test_phase_b_executor.py",
+            "TASKS.md",
+        ]
+
+    def test_launcher_files_scope_is_not_exact_without_acceptance_authority(self):
+        plan = (
+            "# Phase B Launcher Packet\n\n"
+            "Wave ID: phase-b-launcher-nonexact-2026-07-28\n\n"
+            "## Scope\n\n"
+            "Files and surfaces in scope:\n\n"
+            "- mu/tools/executors/phase_b_executor.py (MODIFY)\n"
+            "- TASKS.md (GENERATED UPDATE)\n\n"
+            "## Work items\n\n"
+            "1. The final staged set contains exactly the authorized package.\n\n"
+            "## Acceptance criteria\n\n"
+            "- The implementation remains mechanically complete.\n"
+        )
+
+        assert pb_mod.parse_exact_stage_scope_files(plan) == []
+
     def test_exact_stage_scope_ignores_read_only_and_refresh_blocks(self):
         plan = (
             "## Scope\n\n"
@@ -8678,6 +9363,79 @@ class TestSdkReviewScopeSelection:
             "reports/l4_wave_indicators/p7w5-metabolization-source-lock-repair-2026-05-28.json",
         ]
 
+    def test_historical_unversioned_refresh_scope_parse_is_unchanged(self):
+        repo_root = _EXECUTORS_DIR.parents[2]
+        normalize_declared_path = getattr(
+            pb_mod,
+            "_normalize_declared_path_token",
+        )
+
+        def legacy_parse(plan_content: str) -> list[str]:
+            lines = plan_content.splitlines()
+            marker_index: int | None = None
+            for index, line in enumerate(lines):
+                stripped = line.strip()
+                lower = stripped.lower()
+                bullet_body = lower[2:].strip() if lower.startswith("- ") else lower
+                if (
+                    "`" not in stripped
+                    and (
+                        lower == "allowed write scope:"
+                        or (
+                            "may stage exactly" in lower
+                            and "file" in lower
+                            and lower.endswith(":")
+                        )
+                        or bullet_body
+                        in {"authorized staged files:", "current staged files:"}
+                    )
+                ):
+                    marker_index = index
+                    break
+            if marker_index is None:
+                return []
+
+            seen: set[str] = set()
+            parsed: list[str] = []
+            started = False
+            for line in lines[marker_index + 1:]:
+                stripped = line.strip()
+                if not stripped:
+                    if started:
+                        break
+                    continue
+                if stripped.startswith("#"):
+                    break
+                if not stripped.startswith("- "):
+                    if started:
+                        break
+                    continue
+                normalized = normalize_declared_path(
+                    stripped[2:].strip().split()[0]
+                )
+                if normalized and normalized not in seen:
+                    seen.add(normalized)
+                    parsed.append(normalized)
+                    started = True
+            return parsed
+
+        checked = 0
+        for packet in sorted((repo_root / "reports" / "control_plane").glob("*.md")):
+            packet_text = packet.read_text(encoding="utf-8")
+            if "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->" not in packet_text:
+                continue
+            if (
+                pb_mod.PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER
+                in packet_text
+            ):
+                continue
+            assert pb_mod.parse_exact_stage_scope_files(packet_text) == legacy_parse(
+                packet_text
+            ), packet.relative_to(repo_root).as_posix()
+            checked += 1
+
+        assert checked >= 232
+
     def test_exact_stage_scope_ignores_prose_mentions_of_legacy_headers(self):
         plan = (
             "## Direct Evidence\n\n"
@@ -8725,6 +9483,48 @@ class TestSdkReviewScopeSelection:
 
         assert "- Authorized staged files:" in block
         assert "- Current staged files:" not in block
+
+    def test_broad_scope_refresh_snapshot_is_explicitly_non_authoritative(self):
+        block = pb_mod._render_phase_b_indicator_scope_refresh_block(  # ANTICHEAT_OK: locks broad refresh restart authority
+            wave_id="packet-broad-scope-test",
+            plan_path="reports/control_plane/packet.md",
+            indicator_path="reports/l4_wave_indicators/packet.json",
+            changed_files=["TASKS.md"],
+            broad_package_snapshot=True,
+        )
+
+        assert (
+            pb_mod.PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER
+            in block
+        )
+        assert pb_mod.parse_exact_stage_scope_files(block) == []
+
+    def test_broad_scope_refresh_snapshot_is_not_generic_restart_authority(self, tmp_path):
+        stale_path = "mu/tools/executors/stale_previous_candidate.py"
+        plan_path = "reports/control_plane/packet.md"
+        block = pb_mod._render_phase_b_indicator_scope_refresh_block(  # ANTICHEAT_OK: locks broad refresh generic parser exclusion
+            wave_id="packet-broad-restart-test",
+            plan_path=plan_path,
+            indicator_path="reports/l4_wave_indicators/packet.json",
+            changed_files=[stale_path],
+            broad_package_snapshot=True,
+        )
+
+        generic_scope = pb_mod._parse_plan_declared_files(block)  # ANTICHEAT_OK: broad refresh must not grant generic authority
+        assert pb_mod.parse_exact_stage_scope_files(block) == []
+        assert stale_path not in generic_scope
+
+        with patch.object(pb_mod, "_collect_changed_files", return_value=[stale_path]):
+            restart_scope = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: restart scope must reject stale broad snapshot
+                tmp_path,
+                plan_path,
+                generic_scope,
+                set(),
+                set(),
+                set(),
+            )
+
+        assert restart_scope == []
 
     def test_exact_stage_scope_expands_tests_symlink_to_git_path(self, tmp_path):
         repo = tmp_path / "repo"
@@ -8907,21 +9707,37 @@ class TestSdkReviewScopeSelection:
 
         assert commit_bound == ["TASKS.md", "reports/control_plane/plan.md"]
 
-    def test_exact_stage_scope_reconciles_before_private_attr_bridge_review(self, tmp_path):
+    def test_exact_stage_scope_reconciles_before_private_attr_bridge_review(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
+        wave_id = "phase-b-private-attr-pre-review-2026-07-28"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
         (repo / "reports" / "control_plane" / "plan.md").write_text(
             "# Plan\n\n"
-            "Phase-A-Lock: LOCKED\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Class: L4_ENABLER\n\n"
             "## Scope\n\n"
             "This lock package may stage exactly these same-wave files:\n\n"
+            "- `TASKS.md`\n"
             "- `reports/control_plane/plan.md`\n"
-            "- `mu/tests/tools/test_foo.py`\n",
+            "- `mu/tests/tools/test_foo.py`\n"
+            f"- `{indicator_path}`\n",
             encoding="utf-8",
         )
+        _write_canonical_tasks(repo, wave_id)
 
-        changed_files = ["mu/tests/tools/test_foo.py"]
+        changed_files = [
+            "TASKS.md",
+            "mu/tests/tools/test_foo.py",
+            indicator_path,
+        ]
         mock_impl = _make_mock_impl()
         events: list[tuple[str, object]] = []
         gate_fail = {
@@ -8959,10 +9775,16 @@ class TestSdkReviewScopeSelection:
                 "job_id": kwargs.get("job_id", "j"),
             }
 
+        def collect_side(_repo_root, *, wave_id):
+            events.append(("collect_indicator", wave_id))
+            return f"reports/l4_wave_indicators/{wave_id}.json", None
+
+        def refresh_side(*args, **kwargs):
+            events.append(("refresh_packet", kwargs["plan_path"]))
+            return True, None
+
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
-             patch.object(pb_mod, "emit_pipeline_agent_event", return_value={
-                 "enabled": True, "event_id": "evt", "attempted": [], "budget_exhausted": False,
-             }), \
+             patch.object(pb_mod, "_emit_phase_b_event", return_value={}), \
              patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
@@ -8973,6 +9795,9 @@ class TestSdkReviewScopeSelection:
              }), \
              patch.object(pb_mod, "_unstage_out_of_exact_scope", side_effect=unstage_side), \
              patch.object(pb_mod, "_stage_files", side_effect=stage_side), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", side_effect=collect_side), \
+             patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope", side_effect=refresh_side), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
              patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0,
@@ -8987,26 +9812,44 @@ class TestSdkReviewScopeSelection:
             index for index, event in enumerate(events)
             if event[0] == "bridge" and "private-attr remediation review" in str(event[1])
         )
-        assert events[private_bridge_index - 2][0] == "unstage"
-        assert events[private_bridge_index - 1][0] == "stage"
+        assert [event[0] for event in events[private_bridge_index - 4:private_bridge_index]] == [
+            "unstage",
+            "stage",
+            "collect_indicator",
+            "refresh_packet",
+        ]
 
-    def test_exact_stage_scope_reconciles_before_needs_phase_b_reentry_bridge_review(self, tmp_path):
+    def test_exact_stage_scope_reconciles_before_needs_phase_b_reentry_bridge_review(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
+        wave_id = "phase-b-reentry-pre-review-2026-07-28"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
         (repo / "reports" / "control_plane" / "plan.md").write_text(
             "# Plan\n\n"
-            "Phase-A-Lock: LOCKED\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Class: L4_ENABLER\n\n"
             "## Scope\n\n"
             "This lock package may stage exactly these same-wave files:\n\n"
+            "- `TASKS.md`\n"
             "- `reports/control_plane/plan.md`\n"
-            "- `mu/tools/executors/foo.py`\n",
+            "- `mu/tools/executors/foo.py`\n"
+            f"- `{indicator_path}`\n",
             encoding="utf-8",
         )
+        _write_canonical_tasks(repo, wave_id)
 
         changed_files = [
+            "TASKS.md",
             "mu/tools/executors/foo.py",
             "mu/tools/executors/stale_scope.py",
+            indicator_path,
         ]
         mock_impl = _make_mock_impl()
         events: list[tuple[str, object]] = []
@@ -9028,6 +9871,14 @@ class TestSdkReviewScopeSelection:
                 "decision": "GO",
                 "job_id": kwargs.get("job_id", "j"),
             }
+
+        def collect_side(_repo_root, *, wave_id):
+            events.append(("collect_indicator", wave_id))
+            return f"reports/l4_wave_indicators/{wave_id}.json", None
+
+        def refresh_side(*args, **kwargs):
+            events.append(("refresh_packet", kwargs["plan_path"]))
+            return True, None
 
         supervisor_results = iter([
             {
@@ -9053,9 +9904,7 @@ class TestSdkReviewScopeSelection:
         ])
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
-             patch.object(pb_mod, "emit_pipeline_agent_event", return_value={
-                 "enabled": True, "event_id": "evt", "attempted": [], "budget_exhausted": False,
-             }), \
+             patch.object(pb_mod, "_emit_phase_b_event", return_value={}), \
              patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
@@ -9073,6 +9922,9 @@ class TestSdkReviewScopeSelection:
              }), \
              patch.object(pb_mod, "_unstage_out_of_exact_scope", side_effect=unstage_side), \
              patch.object(pb_mod, "_stage_files", side_effect=stage_side), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", side_effect=collect_side), \
+             patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope", side_effect=refresh_side), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
              patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()), \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=lambda *args, **kwargs: next(supervisor_results)), \
              patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
@@ -9083,11 +9935,11 @@ class TestSdkReviewScopeSelection:
             index for index, event in enumerate(events)
             if event[0] == "bridge" and "Phase B re-entry R" in str(event[1])
         )
-        assert events[reentry_bridge_index - 2][0] == "unstage"
-        assert events[reentry_bridge_index - 1][0] == "stage"
-        assert events[reentry_bridge_index - 1][1] == [
-            "mu/tools/executors/foo.py",
-            "reports/control_plane/plan.md",
+        assert [event[0] for event in events[reentry_bridge_index - 4:reentry_bridge_index]] == [
+            "unstage",
+            "stage",
+            "collect_indicator",
+            "refresh_packet",
         ]
 
     def test_report_only_changed_files_skip_sdk_gate(self, tmp_path):
@@ -12250,7 +13102,11 @@ class TestPlanlessPhaseB:
         assert result.get("status") == "error"
         assert result.get("step") == "implementer"
 
-    def test_planless_commit_ready_omits_tracked_packet_from_handoff(self, tmp_path):
+    def test_planless_commit_ready_omits_tracked_packet_from_handoff(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
         """Planless handoffs must not bind the synthetic plan marker as a tracked packet."""
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -12270,6 +13126,7 @@ class TestPlanlessPhaseB:
              patch.object(pb_mod, "_emit_phase_b_event", return_value={}), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tools/executors/phase_b_executor.py"]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tools/executors/phase_b_executor.py"]), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact") as mock_collector, \
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0,
                  "passed": True,
@@ -12303,6 +13160,7 @@ class TestPlanlessPhaseB:
             )
 
         assert result["status"] == "commit_ready"
+        mock_collector.assert_not_called()
         assert mock_handoff.call_args.kwargs["tracked_packet"] is None
         assert mock_handoff.call_args.kwargs["scope_items"] == [
             "<planless:planless-regression-2026-04-28>"

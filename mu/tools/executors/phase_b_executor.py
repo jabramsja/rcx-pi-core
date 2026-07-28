@@ -33,8 +33,10 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from contextvars import ContextVar
@@ -151,6 +153,11 @@ _CONTROL_PLANE_TOOLING_PREFIXES = (
 _SUPERVISOR_OVERRIDE_WAVE_CLASSES = {"L4_ENABLER", "MAINTENANCE"}
 PHASE_B_PRE_SUPERVISOR_PENDING_STATUS = (
     "Phase B (pre-supervisor pending, bridge-converged)"
+)
+PHASE_B_INDICATOR_SCOPE_REFRESH_START = "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->"
+PHASE_B_INDICATOR_SCOPE_REFRESH_END = "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->"
+PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER = (
+    "<!-- PHASE_B_INDICATOR_SCOPE_AUTHORITY:BROAD_PACKAGE_SNAPSHOT -->"
 )
 
 
@@ -3965,6 +3972,8 @@ def _normalize_declared_path_token(token: str) -> str | None:
 
 def _parse_plan_declared_files(plan_content: str) -> list[str]:
     """Extract repo-relative file paths from a locked plan packet."""
+    lines = plan_content.splitlines()
+    broad_refresh_lines = _phase_b_broad_refresh_line_indices(lines)
     seen: set[str] = set()
     parsed: list[str] = []
 
@@ -3974,7 +3983,9 @@ def _parse_plan_declared_files(plan_content: str) -> list[str]:
             seen.add(normalized)
             parsed.append(normalized)
 
-    for line in plan_content.splitlines():
+    for index, line in enumerate(lines):
+        if index in broad_refresh_lines:
+            continue
         for token in re.findall(r"`([^`\n]+)`", line):
             _add(token)
         stripped = line.strip()
@@ -3988,24 +3999,82 @@ def _parse_plan_declared_files(plan_content: str) -> list[str]:
     return parsed
 
 
+def _phase_b_broad_refresh_line_indices(lines: list[str]) -> set[int]:
+    """Return line indices belonging to explicitly non-authoritative refresh blocks."""
+    broad_refresh_lines: set[int] = set()
+    refresh_start: int | None = None
+    for index, line in enumerate(lines):
+        if PHASE_B_INDICATOR_SCOPE_REFRESH_START in line:
+            refresh_start = index
+        if (
+            refresh_start is not None
+            and PHASE_B_INDICATOR_SCOPE_REFRESH_END in line
+        ):
+            block_lines = lines[refresh_start:index + 1]
+            if any(
+                PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER in block_line
+                for block_line in block_lines
+            ):
+                broad_refresh_lines.update(range(refresh_start, index + 1))
+            refresh_start = None
+    if refresh_start is not None and any(
+        PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER in block_line
+        for block_line in lines[refresh_start:]
+    ):
+        broad_refresh_lines.update(range(refresh_start, len(lines)))
+    return broad_refresh_lines
+
+
 def _parse_exact_stage_scope_files(plan_content: str) -> list[str]:
     """Extract a packet section that explicitly declares the exact staged scope."""
     lines = plan_content.splitlines()
+    broad_refresh_lines = _phase_b_broad_refresh_line_indices(lines)
+
+    def _section_text(header: str) -> str:
+        section_start: int | None = None
+        for index, line in enumerate(lines):
+            if line.strip().lower() == header:
+                section_start = index + 1
+                break
+        if section_start is None:
+            return ""
+        section_end = len(lines)
+        for index in range(section_start, len(lines)):
+            if lines[index].strip().startswith("## "):
+                section_end = index
+                break
+        return "\n".join(lines[section_start:section_end])
+
+    acceptance_text = " ".join(
+        _section_text("## acceptance criteria").lower().split()
+    )
+    launcher_exact_final_set = (
+        "final staged set contains exactly" in acceptance_text
+    )
     marker_index: int | None = None
+    launcher_scope = False
     for index, line in enumerate(lines):
+        if index in broad_refresh_lines:
+            continue
         stripped = line.strip()
         lower = stripped.lower()
         bullet_body = lower[2:].strip() if lower.startswith("- ") else lower
+        is_launcher_scope_header = (
+            launcher_exact_final_set
+            and lower == "files and surfaces in scope:"
+        )
         is_exact_stage_header = (
             "`" not in stripped
             and (
                 lower == "allowed write scope:"
                 or ("may stage exactly" in lower and "file" in lower and lower.endswith(":"))
                 or bullet_body in {"authorized staged files:", "current staged files:"}
+                or is_launcher_scope_header
             )
         )
         if is_exact_stage_header:
             marker_index = index
+            launcher_scope = is_launcher_scope_header
             break
     if marker_index is None:
         return []
@@ -4030,6 +4099,21 @@ def _parse_exact_stage_scope_files(plan_content: str) -> list[str]:
             seen.add(normalized)
             parsed.append(normalized)
             started = True
+    if launcher_scope:
+        optional_reviewer_nonblocker = bool(
+            "final staged set contains exactly" in acceptance_text
+            and re.search(
+                r"\bplus only the standard generated reviewer[ -]nonblocker "
+                r"report if one is required\b",
+                acceptance_text,
+            )
+        )
+        if optional_reviewer_nonblocker:
+            _tasks, waves = _extract_authoritative_plan_header_metadata(plan_content)
+            if len(waves) == 1:
+                deferred_path = _canonical_deferred_packet_relpath(waves[0])
+                if deferred_path not in seen:
+                    parsed.append(deferred_path)
     return parsed
 
 
@@ -4130,6 +4214,31 @@ def _normalize_plan_target_gate_id(value: Any) -> str:
     return match.group("gate").upper() if match else gate
 
 
+def _is_phase_b_indicator_scope_refresh_temp_path(
+    candidate_path: str,
+    plan_path: str,
+) -> bool:
+    """Identify only same-packet temporary files created by atomic scope refresh."""
+    normalized_plan = str(plan_path or "").strip().replace("\\", "/")
+    normalized_candidate = str(candidate_path or "").strip().replace("\\", "/")
+    if (
+        not normalized_plan
+        or normalized_plan.startswith("<")
+        or not normalized_candidate
+    ):
+        return False
+    packet = Path(normalized_plan)
+    candidate = Path(normalized_candidate)
+    if candidate.parent != packet.parent:
+        return False
+    prefix = f".{packet.name}."
+    suffix = ".tmp"
+    if not candidate.name.startswith(prefix) or not candidate.name.endswith(suffix):
+        return False
+    nonce = candidate.name[len(prefix):-len(suffix)]
+    return bool(nonce)
+
+
 def _collect_baseline_wave_files(repo_root: Path, plan_path: str) -> list[str]:
     """Capture the preserved dirty-wave baseline before implementer deltas are applied.
 
@@ -4141,6 +4250,8 @@ def _collect_baseline_wave_files(repo_root: Path, plan_path: str) -> list[str]:
     plan_prefix = plan_path.rsplit("/", 1)[0] + "/" if "/" in plan_path else ""
     baseline: list[str] = []
     for f in all_changed:
+        if _is_phase_b_indicator_scope_refresh_temp_path(f, plan_path):
+            continue
         if any(f.startswith(p) or f == p for p in _WAVE_OWNED_PREFIXES):
             baseline.append(f)
         elif plan_prefix and f.startswith(plan_prefix):
@@ -4212,7 +4323,10 @@ def _collect_wave_owned_files(
     An empty list/set means "tracking is active but nothing matched" — which
     still allows plan-prefix files through.
     """
-    all_changed = _collect_changed_files(repo_root)
+    all_changed = [
+        path for path in _collect_changed_files(repo_root)
+        if not _is_phase_b_indicator_scope_refresh_temp_path(path, plan_path)
+    ]
     plan_prefix = plan_path.rsplit("/", 1)[0] + "/" if "/" in plan_path else ""
 
     # If we have explicit tracking, use it strictly — no prefix glob
@@ -5286,10 +5400,6 @@ def _collect_and_stage_l4_indicator_artifact(
     return indicator_path, None
 
 
-PHASE_B_INDICATOR_SCOPE_REFRESH_START = "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->"
-PHASE_B_INDICATOR_SCOPE_REFRESH_END = "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->"
-
-
 def _dedupe_phase_b_repo_paths(paths: list[str]) -> list[str]:
     deduped: list[str] = []
     seen: set[str] = set()
@@ -5310,21 +5420,34 @@ def _render_phase_b_indicator_scope_refresh_block(
     plan_path: str,
     indicator_path: str,
     changed_files: list[str],
+    broad_package_snapshot: bool = False,
 ) -> str:
-    staged_paths = sorted(_dedupe_phase_b_repo_paths([*changed_files, indicator_path, plan_path]))
+    if broad_package_snapshot:
+        staged_paths = sorted(
+            _dedupe_phase_b_repo_paths([*changed_files, indicator_path, plan_path])
+        )
+    else:
+        staged_paths = _dedupe_phase_b_repo_paths(changed_files)
     lines = [
         PHASE_B_INDICATOR_SCOPE_REFRESH_START,
         "## Phase B Indicator Scope Reconciliation",
         "",
+    ]
+    if broad_package_snapshot:
+        lines.extend([
+            PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER,
+            "",
+        ])
+    lines.extend([
         f"- Refresh wave: `{wave_id}`",
         f"- Active packet: `{plan_path}`",
         f"- Indicator artifact: `{indicator_path}`",
         "- Purpose: Phase B mechanically collected and staged this same-wave L4 indicator "
-        "before pre-commit supervisor review so the tracker note, Gate 8 package, and "
+        "before review so the tracker note, Gate 8 package, and "
         "governing packet describe one staged scope.",
         "- Scope binding: no indicator file other than the artifact above is in scope for this wave.",
         "- Authorized staged files:",
-    ]
+    ])
     for path in staged_paths:
         lines.append(f"  - `{path}`")
     lines.append(PHASE_B_INDICATOR_SCOPE_REFRESH_END)
@@ -5430,7 +5553,15 @@ def _refresh_phase_b_indicator_packet_scope(
     if not packet_full.exists():
         return False, f"active packet not found for Phase B indicator scope refresh: {packet_rel}"
 
-    packet_text = packet_full.read_text(encoding="utf-8")
+    try:
+        packet_text = packet_full.read_text(encoding="utf-8")
+        packet_mode = stat.S_IMODE(os.stat(packet_full).st_mode)
+    except OSError as exc:
+        return False, (
+            "cannot read active packet for Phase B indicator scope refresh: "
+            f"{packet_rel}: {exc}"
+        )
+    original_exact_scope = _parse_exact_stage_scope_files(packet_text)
     _tasks, waves = _extract_authoritative_plan_header_metadata(packet_text)
     routed_candidates = _extract_authoritative_routed_retained_candidates(packet_text)
     identity_matches_wave = waves == [normalized_wave]
@@ -5453,7 +5584,8 @@ def _refresh_phase_b_indicator_packet_scope(
         wave_id=normalized_wave,
         plan_path=packet_rel,
         indicator_path=indicator_rel,
-        changed_files=changed_files,
+        changed_files=original_exact_scope or changed_files,
+        broad_package_snapshot=not bool(original_exact_scope),
     )
     try:
         refreshed = _replace_phase_b_indicator_scope_refresh_block(refreshed, block)
@@ -5462,7 +5594,32 @@ def _refresh_phase_b_indicator_packet_scope(
     if refreshed == packet_text:
         return False, None
 
-    packet_full.write_text(refreshed, encoding="utf-8")
+    tmp_path: Path | None = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(packet_full.parent),
+            prefix=f".{packet_full.name}.",
+            suffix=".tmp",
+        )
+        tmp_path = Path(tmp_name)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(refreshed)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_path, packet_mode)
+        os.replace(tmp_path, packet_full)
+    except BaseException as exc:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        return False, (
+            "atomic Phase B indicator packet scope refresh failed for "
+            f"{packet_rel}: {exc}"
+        )
     ok, detail = _stage_files_for_pipeline(repo_root, [packet_rel])
     if not ok:
         return False, f"git add failed for refreshed packet {packet_rel}: {detail}"
@@ -5487,9 +5644,17 @@ def _tasks_has_canonical_wave_tracker_note(repo_root: Path, *, wave_id: str) -> 
         start_idx=ra_idx,
         end_idx=ra_end_idx,
     )
-    return any(
-        commit_mod._is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
+    canonical_tracker_indices = [
+        idx
         for idx in matching_tracker_indices
+        if commit_mod._is_canonical_tracker_note_line(
+            lines[idx].rstrip("\n"),
+            wave_id,
+        )
+    ]
+    return (
+        len(matching_tracker_indices) == 1
+        and len(canonical_tracker_indices) == 1
     )
 
 
@@ -5517,6 +5682,180 @@ def _should_collect_l4_indicator_artifact(
 
 def _phase_b_same_wave_indicator_path(wave_id: str) -> str:
     return f"reports/l4_wave_indicators/{wave_id}.json"
+
+
+def _prepare_phase_b_pre_review_package(
+    repo_root: Path,
+    *,
+    candidate_files: list[str],
+    exact_stage_scope_files: set[str],
+    plan_path: str,
+    wave_id: str,
+    wave_class: str,
+    step_prefix: str,
+    context: str,
+) -> tuple[list[str], dict[str, Any] | None]:
+    """Prepare one complete, staged Phase B package before bridge review."""
+    prepared_files = [
+        path for path in _dedupe_phase_b_repo_paths(candidate_files)
+        if not _is_phase_b_indicator_scope_refresh_temp_path(path, plan_path)
+    ]
+    if plan_path and not plan_path.startswith("<") and plan_path not in prepared_files:
+        prepared_files.append(plan_path)
+
+    def _failure(
+        suffix: str,
+        message: str,
+        *,
+        detail: str = "",
+    ) -> tuple[list[str], dict[str, Any]]:
+        errors = [message]
+        if detail and detail != message:
+            errors.append(detail)
+        error: dict[str, Any] = {
+            "status": "error",
+            "step": f"{step_prefix}_{suffix}",
+            "errors": errors,
+        }
+        if detail:
+            error["stderr"] = detail
+        return prepared_files, error
+
+    staged_files = set(_collect_staged_files(repo_root))
+    staged_refresh_temps = {
+        path
+        for path in staged_files
+        if _is_phase_b_indicator_scope_refresh_temp_path(path, plan_path)
+    }
+    if staged_refresh_temps:
+        reconciled_ok, reconciled_detail = _unstage_out_of_exact_scope(
+            repo_root,
+            staged_files - staged_refresh_temps,
+        )
+        if not reconciled_ok:
+            return _failure(
+                "scope_reconcile",
+                f"Failed to exclude stale packet-refresh temporary files before {context}",
+                detail=reconciled_detail,
+            )
+
+    exact_scope = set(exact_stage_scope_files)
+    if exact_scope:
+        reconciled_ok, reconciled_detail = _unstage_out_of_exact_scope(
+            repo_root,
+            exact_scope,
+        )
+        if not reconciled_ok:
+            return _failure(
+                "scope_reconcile",
+                f"Failed to reconcile exact staged scope before {context}",
+                detail=reconciled_detail,
+            )
+        out_of_scope = sorted(path for path in prepared_files if path not in exact_scope)
+        if out_of_scope:
+            return _failure(
+                "scope_reconcile",
+                f"Current Phase B candidate exceeds exact staged scope before {context}",
+                detail=", ".join(out_of_scope),
+            )
+
+    if prepared_files:
+        staged_ok, stage_detail = _stage_files_for_pipeline(
+            repo_root,
+            prepared_files,
+        )
+        if not staged_ok:
+            return _failure(
+                "staging",
+                f"Failed to stage current Phase B candidate before {context}",
+                detail=stage_detail,
+            )
+
+    if plan_path.startswith("<planless:"):
+        return prepared_files, None
+
+    if wave_class not in {"L4_STRUCTURAL", "L4_ENABLER", "MAINTENANCE"}:
+        return prepared_files, None
+
+    normalized_wave = normalize_wave_id(str(wave_id or ""))
+    if not normalized_wave:
+        return _failure(
+            "tracker_authority",
+            f"Canonical same-wave TASKS authority is unavailable before {context}: "
+            "wave_id is missing or invalid",
+        )
+    try:
+        tracker_authorized = _tasks_has_canonical_wave_tracker_note(
+            repo_root,
+            wave_id=normalized_wave,
+        )
+    except Exception as exc:
+        return _failure(
+            "tracker_authority",
+            f"Canonical same-wave TASKS authority check failed before {context}",
+            detail=str(exc),
+        )
+    if not tracker_authorized:
+        return _failure(
+            "tracker_authority",
+            f"Canonical same-wave TASKS authority is required before {context}: "
+            f"{normalized_wave}",
+        )
+
+    indicator_path = _phase_b_same_wave_indicator_path(normalized_wave)
+    if exact_scope and indicator_path not in exact_scope:
+        return _failure(
+            "scope_reconcile",
+            f"Canonical same-wave indicator is outside exact staged scope before {context}",
+            detail=indicator_path,
+        )
+    try:
+        collected_path, indicator_error = _collect_and_stage_l4_indicator_artifact(
+            repo_root,
+            wave_id=normalized_wave,
+        )
+    except Exception as exc:
+        return _failure(
+            "l4_indicator",
+            f"Canonical same-wave indicator collection failed before {context}",
+            detail=str(exc),
+        )
+    if indicator_error is not None:
+        return _failure(
+            "l4_indicator",
+            f"Canonical same-wave indicator preparation failed before {context}",
+            detail=indicator_error,
+        )
+    if collected_path != indicator_path:
+        return _failure(
+            "l4_indicator",
+            f"Canonical collector returned the wrong same-wave indicator before {context}",
+            detail=f"expected {indicator_path}, got {collected_path or '(none)'}",
+        )
+    if indicator_path not in prepared_files:
+        prepared_files.append(indicator_path)
+
+    try:
+        _packet_modified, packet_error = _refresh_phase_b_indicator_packet_scope(
+            repo_root,
+            plan_path=plan_path,
+            wave_id=normalized_wave,
+            indicator_path=indicator_path,
+            changed_files=prepared_files,
+        )
+    except Exception as exc:
+        return _failure(
+            "indicator_scope",
+            f"Governing packet scope refresh failed before {context}",
+            detail=str(exc),
+        )
+    if packet_error is not None:
+        return _failure(
+            "indicator_scope",
+            f"Governing packet scope refresh failed before {context}",
+            detail=packet_error,
+        )
+    return prepared_files, None
 
 
 def _phase_b_pre_supervisor_note_scope(changed_files: list[str]) -> list[str]:
@@ -6475,29 +6814,6 @@ def run_phase_b(
         })
         return scoped_files
 
-    def _reconcile_exact_stage_scope_for_review(
-        *,
-        step: str,
-        context: str,
-    ) -> dict[str, Any] | None:
-        if not exact_stage_scope_files:
-            return None
-        reconciled_ok, reconciled_detail = _unstage_out_of_exact_scope(
-            repo_root,
-            exact_stage_scope_files,
-        )
-        if reconciled_ok:
-            return None
-        return {
-            "status": "error",
-            "step": step,
-            "stderr": reconciled_detail,
-            "errors": [
-                f"Failed to reconcile exact staged scope before {context}",
-                reconciled_detail,
-            ],
-        }
-
     def _run_private_attr_gate_with_remediation(
         candidate_files: list[str],
         *,
@@ -6627,29 +6943,27 @@ def run_phase_b(
                     "proceed to commit without fresh review."
                 ],
             }
-        if current_files:
-            log(
-                ("Re-entry " if reentry else "")
-                + "private-attr remediation: staging "
-                f"{len(current_files)} wave-owned files before fresh bridge review..."
-            )
-            reconcile_error = _reconcile_exact_stage_scope_for_review(
-                step=f"{step_name}_scope_reconcile",
-                context="private-attr remediation bridge review",
-            )
-            if reconcile_error is not None:
-                return current_files, reconcile_error
-            staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, current_files)
-            if not staged_ok:
-                return current_files, {
-                    "status": "error",
-                    "step": step_name,
-                    "stderr": stage_detail,
-                    "errors": [
-                        "Failed to stage files before private-attr remediation bridge review",
-                        stage_detail,
-                    ],
-                }
+        log(
+            ("Re-entry " if reentry else "")
+            + "private-attr remediation: preparing "
+            f"{len(current_files)} wave-owned files before fresh bridge review..."
+        )
+        current_files, preparation_error = _prepare_phase_b_pre_review_package(
+            repo_root,
+            candidate_files=current_files,
+            exact_stage_scope_files=exact_stage_scope_files,
+            plan_path=plan_path,
+            wave_id=wave_id,
+            wave_class=wave_class,
+            step_prefix=step_name,
+            context="private-attr remediation bridge review",
+        )
+        if preparation_error is not None:
+            return current_files, preparation_error
+        indicator_path = _phase_b_same_wave_indicator_path(wave_id)
+        if indicator_path in current_files:
+            executor_created.add(indicator_path)
+        changed_files = current_files
 
         bridge_job_id = (
             f"phase-b-reentry-private-attr-r{next_round}-{uuid.uuid4().hex[:8]}"
@@ -7324,34 +7638,25 @@ def run_phase_b(
             baseline_wave_files or None,
         )
         changed_files = _bridge_review_scope_files(changed_files)
-        if changed_files:
-            if exact_stage_scope_files:
-                reconciled_ok, reconciled_detail = _unstage_out_of_exact_scope(
-                    repo_root,
-                    exact_stage_scope_files,
-                )
-                if not reconciled_ok:
-                    result["status"] = "error"
-                    result["step"] = "bridge_staging_scope_reconcile"
-                    result["stderr"] = reconciled_detail
-                    result["errors"] = [
-                        "Failed to reconcile exact staged scope before bridge review",
-                        reconciled_detail,
-                    ]
-                    _clear_state(repo_root)
-                    return result
-            log(f"Staging {len(changed_files)} wave-owned files before bridge review...")
-            staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
-            if not staged_ok:
-                result["status"] = "error"
-                result["step"] = "bridge_staging"
-                result["stderr"] = stage_detail
-                result["errors"] = [
-                    "Failed to stage files before bridge review",
-                    stage_detail,
-                ]
-                _clear_state(repo_root)
-                return result
+        log(
+            f"Preparing {len(changed_files)} wave-owned files before bridge review..."
+        )
+        changed_files, preparation_error = _prepare_phase_b_pre_review_package(
+            repo_root,
+            candidate_files=changed_files,
+            exact_stage_scope_files=exact_stage_scope_files,
+            plan_path=plan_path,
+            wave_id=wave_id,
+            wave_class=wave_class,
+            step_prefix="bridge_pre_review",
+            context=f"bridge review round {round_num}",
+        )
+        if preparation_error is not None:
+            _clear_state(repo_root)
+            return preparation_error
+        indicator_path = _phase_b_same_wave_indicator_path(wave_id)
+        if indicator_path in changed_files:
+            executor_created.add(indicator_path)
 
         # Build task summary — include deferred packet path if we have one
         task_summary = f"Phase B implementation review R{round_num} for {plan_path}"
@@ -8398,28 +8703,27 @@ def run_phase_b(
                 if reentry_fix_error is not None:
                     return reentry_fix_error
 
-            if changed_files:
-                changed_files = _bridge_review_scope_files(changed_files)
-                log(f"Re-entry: staging {len(changed_files)} wave-owned files before bridge review...")
-                reconcile_error = _reconcile_exact_stage_scope_for_review(
-                    step="reentry_bridge_staging_scope_reconcile",
-                    context="re-entry bridge review",
-                )
-                if reconcile_error is not None:
-                    _clear_state(repo_root)
-                    return reconcile_error
-                staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
-                if not staged_ok:
-                    _clear_state(repo_root)
-                    return {
-                        "status": "error",
-                        "step": "reentry_bridge_staging",
-                        "stderr": stage_detail,
-                        "errors": [
-                            "Failed to stage files before bridge review during re-entry",
-                            stage_detail,
-                        ],
-                    }
+            changed_files = _bridge_review_scope_files(changed_files)
+            log(
+                "Re-entry: preparing "
+                f"{len(changed_files)} wave-owned files before bridge review..."
+            )
+            changed_files, preparation_error = _prepare_phase_b_pre_review_package(
+                repo_root,
+                candidate_files=changed_files,
+                exact_stage_scope_files=exact_stage_scope_files,
+                plan_path=plan_path,
+                wave_id=wave_id,
+                wave_class=wave_class,
+                step_prefix="reentry_bridge_pre_review",
+                context="re-entry bridge review",
+            )
+            if preparation_error is not None:
+                _clear_state(repo_root)
+                return preparation_error
+            indicator_path = _phase_b_same_wave_indicator_path(wave_id)
+            if indicator_path in changed_files:
+                executor_created.add(indicator_path)
 
             # Bridge reviews the fix (bound to exact job_id)
             bridge_job_id = f"phase-b-reentry-r{reentry_round}-{uuid.uuid4().hex[:8]}"
