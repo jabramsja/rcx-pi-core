@@ -58,9 +58,9 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
             "effort": "max",
         },
         "codex": {
-            "display_name": "Codex 5.5 xhigh",
-            "model": "gpt-5.5",
-            "reasoning_effort": "xhigh",
+            "display_name": "Codex 5.6-sol ultra",
+            "model": "gpt-5.6-sol",
+            "reasoning_effort": "ultra",
         },
     },
     "backends": {

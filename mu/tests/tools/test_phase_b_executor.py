@@ -13,6 +13,7 @@ Covers:
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
@@ -1135,6 +1136,26 @@ class TestLoadExecutorConfig:
 
 class TestPrepareCommitHandoff:
     """Test updated handoff schema."""
+
+    def test_phase_b_commit_message_has_version_neutral_provenance(self):
+        message = pb_mod._phase_b_implementation_commit_message(  # ANTICHEAT_OK: regression covers the shared provenance helper
+            "test-wave"
+        )
+        assert message == (
+            "feat: Phase B implementation for test-wave\n\n"
+            "Co-Authored-By: Codex <noreply@openai.com>"
+        )
+
+        helper_call = "_phase_b_implementation_commit_message(wave_id)"
+        for production_call_site in (
+            pb_mod.prepare_dispatcher_commit_handoff_from_routing_record,
+            pb_mod.run_phase_b,
+        ):
+            source = inspect.getsource(production_call_site)
+            assert source.count(helper_call) == 1
+            assert "GPT-5.5" not in source
+            assert "gpt-5.5" not in source
+            assert "xhigh" not in source
 
     def test_new_schema_fields_present(self, tmp_path):
         path = pb_mod.prepare_commit_handoff(

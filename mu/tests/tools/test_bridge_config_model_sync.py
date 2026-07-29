@@ -26,6 +26,8 @@ import executor_common  # noqa: E402  (path insert must precede import)
 from executor_common import (  # noqa: E402  (path insert must precede import)
     sync_bridge_config_agents_from_defaults,
 )
+sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "agents"))
+import bridge_adapters  # noqa: E402  (path insert must precede import)
 
 
 def _claude_cmd(model: str = "claude-opus-4-7", effort: str = "low") -> list[str]:
@@ -69,9 +71,9 @@ _DEFAULT_BRIDGE_AGENT_DEFAULTS = {
         "effort": "max",
     },
     "codex": {
-        "display_name": "Codex 5.5 xhigh",
-        "model": "gpt-5.5",
-        "reasoning_effort": "xhigh",
+        "display_name": "Codex 5.6-sol ultra",
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "ultra",
     },
 }
 
@@ -95,8 +97,12 @@ def _seed_executor_config(root: Path, defaults: dict | None = None) -> Path:
     return cfg
 
 
-def _seed_bridge_config(root: Path, agents: dict) -> Path:
-    bus = root / ".agent_bus"
+def _seed_bridge_config(
+    root: Path,
+    agents: dict,
+    bus_dir: str | Path = ".agent_bus",
+) -> Path:
+    bus = root / bus_dir
     bus.mkdir(parents=True, exist_ok=True)
     path = bus / "bridge_config.json"
     path.write_text(json.dumps({"agents": agents}, indent=2) + "\n")
@@ -158,9 +164,63 @@ def test_sync_corrects_effort_and_display_name_both_shapes(tmp_path):
     claude, codex = data["agents"]["claude"], data["agents"]["codex"]
     assert claude["cmd"][claude["cmd"].index("--effort") + 1] == "max"
     assert claude["display_name"] == "Claude Opus 4.8 max"
-    assert 'model_reasoning_effort="xhigh"' in codex["cmd"]
+    assert codex["cmd"][codex["cmd"].index("-m") + 1] == "gpt-5.6-sol"
+    assert 'model_reasoning_effort="ultra"' in codex["cmd"]
     assert 'model_reasoning_effort="medium"' not in codex["cmd"]
-    assert codex["display_name"] == "Codex 5.5 xhigh"
+    assert codex["display_name"] == "Codex 5.6-sol ultra"
+
+
+def test_committed_codex_defaults_reach_fresh_namespaced_adapter_reload(tmp_path):
+    """A fresh namespaced bus and adapter reload use exact committed Codex metadata."""
+    committed = json.loads(
+        (
+            REPO_ROOT
+            / "mu"
+            / "tools"
+            / "executors"
+            / "executor_config.json"
+        ).read_text(encoding="utf-8")
+    )
+    codex_defaults = committed["bridge_agent_defaults"]["codex"]
+    expected = {
+        "display_name": "Codex 5.6-sol ultra",
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "ultra",
+    }
+    assert codex_defaults == expected
+    _seed_executor_config(tmp_path, defaults={"codex": codex_defaults})
+
+    _seed_bridge_config(
+        tmp_path,
+        {
+            "codex": {
+                "mode": "live",
+                "display_name": "Codex stale",
+                "cmd": _codex_cmd(model="gpt-stale", effort="medium"),
+                "prompt_via_stdin": True,
+                "timeout_s": 1200,
+                "env": {},
+            }
+        },
+    )
+    bus_dir = ".agent_bus-x7"
+    namespaced = executor_common.bridge_config_path(tmp_path, bus_dir)
+    assert not namespaced.exists()
+
+    assert executor_common.ensure_bridge_config_path(tmp_path, bus_dir) == namespaced
+    assert namespaced.exists()
+    assert sync_bridge_config_agents_from_defaults(tmp_path, bus_dir) == namespaced
+
+    raw_codex = json.loads(namespaced.read_text(encoding="utf-8"))["agents"]["codex"]
+    raw_cmd = raw_codex["cmd"]
+    assert raw_cmd[raw_cmd.index("-m") + 1] == expected["model"]
+    assert f'model_reasoning_effort="{expected["reasoning_effort"]}"' in raw_cmd
+    assert raw_codex["display_name"] == expected["display_name"]
+
+    reloaded = bridge_adapters.load_bridge_config(namespaced)
+    adapter = bridge_adapters.get_adapter(reloaded, "codex")
+    assert adapter.cmd[adapter.cmd.index("-m") + 1] == expected["model"]
+    assert f'model_reasoning_effort="{expected["reasoning_effort"]}"' in adapter.cmd
 
 
 def test_sync_leaves_other_cmd_args_and_fields_untouched(tmp_path):
