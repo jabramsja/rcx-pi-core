@@ -4584,6 +4584,14 @@ def run_pre_commit_supervisor(
         }
 
 
+def _phase_b_implementation_commit_message(wave_id: str) -> str:
+    """Build the Phase B commit message with version-neutral Codex provenance."""
+    return (
+        f"feat: Phase B implementation for {wave_id}\n\n"
+        "Co-Authored-By: Codex <noreply@openai.com>"
+    )
+
+
 def prepare_commit_handoff(
     repo_root: Path,
     *,
@@ -4927,7 +4935,7 @@ def prepare_dispatcher_commit_handoff_from_routing_record(
         fixes_implemented=["Phase B handoff rebuilt by dispatcher recovery via Phase B builder"],
         files_to_stage=handoff_files_to_stage,
         pre_commit_receipt_path=receipt_rel,
-        commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Codex GPT-5.5 xhigh <noreply@openai.com>",
+        commit_message=_phase_b_implementation_commit_message(wave_id),
         pr_title=f"feat: Phase B - {wave_id}",
         pr_body=f"## Summary\nPhase B implementation per locked plan at {resolved_plan_path}",
         tracked_packet=resolved_plan_path,
@@ -9943,7 +9951,7 @@ def run_phase_b(
         fixes_implemented=["Phase B implementation per locked plan"],
         files_to_stage=handoff_files_to_stage,
         pre_commit_receipt_path=receipt_path,
-        commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Codex GPT-5.5 xhigh <noreply@openai.com>",
+        commit_message=_phase_b_implementation_commit_message(wave_id),
         pr_title=f"feat: Phase B - {wave_id}",
         pr_body=f"## Summary\nPhase B implementation per locked plan at {plan_path}",
         tracked_packet=plan_path if not plan_path.startswith("<") else None,

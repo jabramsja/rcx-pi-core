@@ -1,0 +1,24 @@
+{
+  "wave_id": "roles-all-codex-current-dev-2026-07-29",
+  "repeat_run_speedup_ratio": 0.954574,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.260293,
+  "repeat_run_raw_seconds": [
+    0.248469,
+    0.260293
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.248469
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.508762
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-07-29T20:35:01Z",
+  "collector_version": "2.2.0"
+}
