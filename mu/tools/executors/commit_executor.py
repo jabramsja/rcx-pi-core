@@ -750,6 +750,25 @@ def _git_index_text_for_repo_path(repo_root: Path, relpath: str) -> str | None:
     return result.stdout
 
 
+def _git_head_text_for_repo_path(repo_root: Path, relpath: str) -> str | None:
+    """Read relpath from HEAD without trusting the mutable working tree."""
+    normalized = _normalize_repo_relpath(str(relpath or ""))
+    if not normalized or _is_absolute_untrusted_path(normalized) or _has_path_traversal(normalized):
+        return None
+    try:
+        result = _run(
+            ["git", "show", f"HEAD:{normalized}"],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
 def _tracked_packet_paths_from_record(record: dict[str, Any]) -> list[str]:
     paths: list[str] = []
 
@@ -2325,6 +2344,9 @@ def _append_tracker_scope_refs(note: str, paths: list[str]) -> str:
 def _validate_commit_generated_governance_paths(
     repo_root: Path,
     paths: list[str],
+    *,
+    provenance: str,
+    wave_id: str,
 ) -> tuple[list[str], str | None]:
     if not isinstance(paths, list):
         return [], "commit-generated governance paths must be a list"
@@ -2346,19 +2368,108 @@ def _validate_commit_generated_governance_paths(
             )
         normalized_paths.append(normalized)
     settled_paths = _dedupe_repo_paths(normalized_paths)
-    staged = set(_current_staged_diff_paths(repo_root))
     for path in settled_paths:
-        if path not in staged:
-            return [], (
-                "commit-generated governance path is not staged before supervisor: "
-                f"{path}"
-            )
         full_path = (repo_root / path).resolve(strict=False)
         try:
             full_path.relative_to(repo_root.resolve())
         except ValueError:
             return [], f"commit-generated governance path escapes repo root: {path}"
-    return settled_paths, None
+    if provenance == "bumped":
+        staged = set(_current_staged_diff_paths(repo_root))
+        for path in settled_paths:
+            if path not in staged:
+                return [], (
+                    "commit-generated governance path is not staged before supervisor: "
+                    f"{path}"
+                )
+        return settled_paths, None
+    if provenance == "already_recorded":
+        for path in settled_paths:
+            error = _validate_clean_already_recorded_commit_generated_governance_path(
+                repo_root,
+                path=path,
+                wave_id=wave_id,
+            )
+            if error:
+                return [], error
+        return settled_paths, None
+    return [], (
+        "unsupported commit-generated governance provenance before supervisor: "
+        f"{provenance}"
+    )
+
+
+def _validate_clean_already_recorded_commit_generated_governance_path(
+    repo_root: Path,
+    *,
+    path: str,
+    wave_id: str,
+) -> str | None:
+    """Validate same-wave already_recorded growth-cap reuse from HEAD/index truth."""
+    if path != COMMIT_GENERATED_GOVERNANCE_GROWTH_CAP_PATH:
+        return (
+            "unsupported already_recorded commit-generated governance path before "
+            f"supervisor: {path}"
+        )
+    if not wave_id:
+        return "commit-generated governance already_recorded reuse requires wave_id"
+    head_text = _git_head_text_for_repo_path(repo_root, path)
+    if head_text is None:
+        return (
+            "commit-generated governance already_recorded path is missing from "
+            f"HEAD before supervisor: {path}"
+        )
+    index_text = _git_index_text_for_repo_path(repo_root, path)
+    if index_text is None:
+        return (
+            "commit-generated governance already_recorded path is missing from "
+            f"the index before supervisor: {path}"
+        )
+    if head_text != index_text:
+        return (
+            "commit-generated governance already_recorded path has index/HEAD "
+            f"mismatch before supervisor: {path}"
+        )
+    if not _extract_same_wave_founder_override_token(head_text, wave_id):
+        return (
+            "commit-generated governance already_recorded path lacks same-wave "
+            f"HEAD/index provenance before supervisor: {path}"
+        )
+
+    staged_delta = _run(
+        ["git", "diff", "--cached", "--quiet", "--", path],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if staged_delta.returncode not in (0, 1):
+        return (
+            "commit-generated governance already_recorded path staged-delta "
+            f"state is ambiguous before supervisor: {path}"
+        )
+    if staged_delta.returncode == 1:
+        return (
+            "commit-generated governance already_recorded path has staged delta "
+            f"before supervisor: {path}"
+        )
+
+    unstaged_delta = _run(
+        ["git", "diff", "--quiet", "--", path],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if unstaged_delta.returncode not in (0, 1):
+        return (
+            "commit-generated governance already_recorded path unstaged-delta "
+            f"state is ambiguous before supervisor: {path}"
+        )
+    if unstaged_delta.returncode == 1:
+        return (
+            "commit-generated governance already_recorded path has unstaged "
+            f"delta before supervisor: {path}"
+        )
+    return None
 
 
 def _validate_commit_generated_governance_provenance(
@@ -2387,21 +2498,23 @@ def _render_commit_generated_governance_authorization_block(
         "",
         f"- Refresh wave: `{wave_id}`",
         f"- Step-5e provenance: `{provenance}`",
-        "- Purpose: commit automation may stage the exact same-wave growth-cap "
-        "governance file after Phase B review; this block authorizes only that "
-        "commit-time generated governance path.",
+        "- Purpose: commit automation may bind the exact same-wave growth-cap "
+        "governance file after Phase B review; first bumps require staged-index "
+        "proof, while already-recorded reuse requires clean HEAD/index proof.",
         "- Authorized generated governance path(s):",
     ]
     for path in paths:
         lines.append(f"  - `{path}`")
     lines.extend([
         "- Scope binding: the path above is in scope only as the Step-5e "
-        "same-wave growth-cap governance mutation with staged-index proof.",
+        "same-wave growth-cap governance mutation or exact clean same-wave "
+        "continuation evidence.",
         "- Pre-review boundary: this block does not add the path to the locked "
         "Phase B/pre-review candidate allowlist and cannot authorize arbitrary "
         "implementation files.",
-        "- Acceptance binding: unsupported, unstaged, malformed, outside-repo, "
-        "or provenance-free generated governance paths fail before supervisor.",
+        "- Acceptance binding: unsupported, malformed, outside-repo, dirty, "
+        "wrong-wave, worktree-only, index/HEAD-mismatched, or provenance-free "
+        "generated governance paths fail before supervisor.",
         COMMIT_GENERATED_GOVERNANCE_AUTH_END,
     ])
     return "\n".join(lines) + "\n"
@@ -3322,14 +3435,9 @@ def refresh_commit_path_packet_truth(
     commit_generated_governance_provenance: str = "",
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """Refresh the wave packet from current commit-path facts before supervisor review."""
-    settled_generated_paths, generated_path_error = _validate_commit_generated_governance_paths(
-        repo_root,
-        commit_generated_governance_paths or [],
-    )
-    if generated_path_error:
-        return handoff, [], generated_path_error
+    wave_id = str(handoff.get("wave_id") or "")
     settled_generated_provenance = ""
-    if settled_generated_paths:
+    if commit_generated_governance_paths:
         settled_generated_provenance, generated_provenance_error = (
             _validate_commit_generated_governance_provenance(
                 commit_generated_governance_provenance
@@ -3337,6 +3445,14 @@ def refresh_commit_path_packet_truth(
         )
         if generated_provenance_error:
             return handoff, [], generated_provenance_error
+    settled_generated_paths, generated_path_error = _validate_commit_generated_governance_paths(
+        repo_root,
+        commit_generated_governance_paths or [],
+        provenance=settled_generated_provenance,
+        wave_id=wave_id,
+    )
+    if generated_path_error:
+        return handoff, [], generated_path_error
     active_packet_path, packet_error = _commit_refresh_packet_path(handoff)
     if packet_error:
         return handoff, [], packet_error
@@ -3372,7 +3488,6 @@ def refresh_commit_path_packet_truth(
         return handoff, [], f"active packet not found for commit packet truth refresh: {active_packet_path}"
     packet_text = packet_full.read_text(encoding="utf-8")
     original_packet_text = packet_text
-    wave_id = str(handoff.get("wave_id") or "")
     if not _packet_declares_same_wave_id(packet_text, normalize_wave_id(wave_id)):
         return handoff, [], (
             "active packet missing matching Wave ID for commit packet truth refresh: "

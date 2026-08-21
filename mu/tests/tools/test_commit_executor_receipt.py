@@ -1258,6 +1258,64 @@ def _write_governance_packet_for_test(repo: Path, wave_id: str, packet_path: str
     return pre_review_block
 
 
+def _write_same_wave_growth_cap_for_test(
+    repo: Path,
+    wave_id: str,
+    *,
+    baseline_test_files: int = 1,
+    cap_test_files: int = 1,
+    baseline_tool_scripts: int = 0,
+    cap_tool_scripts: int = 0,
+) -> None:
+    cap_path = repo / commit_mod.GROWTH_CAP_TEST_RELPATH
+    cap_path.parent.mkdir(parents=True, exist_ok=True)
+    cap_path.write_text(
+        f"BASELINE_TEST_FILES = {baseline_test_files}\n"
+        f"CAP_TEST_FILES = {cap_test_files}  # +1 for prior.py ({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})\n"
+        f"BASELINE_TOOL_SCRIPTS = {baseline_tool_scripts}\n"
+        f"CAP_TOOL_SCRIPTS = {cap_tool_scripts}\n",
+        encoding="utf-8",
+    )
+
+
+def _commit_same_wave_growth_cap_for_test(
+    repo: Path,
+    wave_id: str,
+    *,
+    baseline_test_files: int = 1,
+    cap_test_files: int = 1,
+    baseline_tool_scripts: int = 0,
+    cap_tool_scripts: int = 0,
+) -> None:
+    _write_same_wave_growth_cap_for_test(
+        repo,
+        wave_id,
+        baseline_test_files=baseline_test_files,
+        cap_test_files=cap_test_files,
+        baseline_tool_scripts=baseline_tool_scripts,
+        cap_tool_scripts=cap_tool_scripts,
+    )
+    _commit_all_for_test(repo, "same-wave growth cap already recorded")
+
+
+def _stage_commit_refresh_inputs_for_test(
+    repo: Path,
+    wave_id: str,
+    *,
+    file_text: str = "# changed code\n",
+) -> str:
+    import subprocess
+
+    indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+    indicator_file = repo / indicator_path
+    indicator_file.parent.mkdir(parents=True, exist_ok=True)
+    indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+    (repo / "file.py").write_text(file_text, encoding="utf-8")
+    subprocess.run(["git", "add", "--", "file.py"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+    return indicator_path
+
+
 class TestSkipSupervisorBypassClosure:
     def test_run_commit_pipeline_rejects_skip_supervisor_without_synthesized_receipt(
         self,
@@ -1993,7 +2051,6 @@ class TestReceiptChainEndToEnd:
 
     def test_commit_generated_growth_cap_same_wave_retry_reconstructs_scope(self, tmp_path):
         from collections import namedtuple
-        import subprocess
         import types
 
         repo = _setup_repo(tmp_path)
@@ -2003,18 +2060,11 @@ class TestReceiptChainEndToEnd:
         _write_governance_packet_for_test(repo, wave_id, packet_path)
         growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
         cap_file = repo / growth_path
-        cap_file.write_text(
-            "BASELINE_TEST_FILES = 1\n"
-            f"CAP_TEST_FILES = 1  # +1 for prior.py ({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})\n"
-            "BASELINE_TOOL_SCRIPTS = 0\n"
-            "CAP_TOOL_SCRIPTS = 0\n",
-            encoding="utf-8",
-        )
+        _commit_same_wave_growth_cap_for_test(repo, wave_id)
         new_test_path = "mu/tests/generated/test_growth_cap_retry_case.py"
         (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
         (repo / new_test_path).parent.mkdir(parents=True, exist_ok=True)
         (repo / new_test_path).write_text("def test_retry_case():\n    assert True\n", encoding="utf-8")
-        subprocess.run(["git", "add", "--", growth_path], cwd=repo, check=True)
 
         sup_receipt_path = ".scratch/step6_receipt.json"
         (repo / ".scratch").mkdir(parents=True, exist_ok=True)
@@ -2062,9 +2112,20 @@ class TestReceiptChainEndToEnd:
         assert result["growth_cap_autobump_outcome"]["reason"] == "already_recorded"
         assert result["commit_generated_governance_paths"] == [growth_path]
         assert captured_package["scope_items"].count(growth_path) == 1
-        assert captured_package["changed_files"].count(growth_path) == 1
+        assert growth_path not in captured_package["changed_files"]
         assert (
             captured_package["evidence_handles"][commit_mod.COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY]
+            == growth_path
+        )
+        durable_handoff = json.loads(
+            (repo / ".agent_bus" / "executors" / "phase_b_handoff.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert growth_path not in durable_handoff["files_to_stage"]
+        assert durable_handoff["scope_items"].count(growth_path) == 1
+        assert (
+            durable_handoff["evidence_handles"][commit_mod.COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY]
             == growth_path
         )
         packet_text = (repo / packet_path).read_text(encoding="utf-8")
@@ -2074,7 +2135,6 @@ class TestReceiptChainEndToEnd:
 
     def test_commit_generated_growth_cap_mixed_retry_preserves_scope(self, tmp_path):
         from collections import namedtuple
-        import subprocess
         import types
 
         repo = _setup_repo(tmp_path)
@@ -2084,12 +2144,11 @@ class TestReceiptChainEndToEnd:
         _write_governance_packet_for_test(repo, wave_id, packet_path)
         growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
         cap_file = repo / growth_path
-        cap_file.write_text(
-            "BASELINE_TEST_FILES = 1\n"
-            f"CAP_TEST_FILES = 1  # +1 for prior.py ({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})\n"
-            "BASELINE_TOOL_SCRIPTS = 1\n"
-            "CAP_TOOL_SCRIPTS = 1\n",
-            encoding="utf-8",
+        _commit_same_wave_growth_cap_for_test(
+            repo,
+            wave_id,
+            baseline_tool_scripts=1,
+            cap_tool_scripts=1,
         )
         new_test_path = "mu/tests/generated/test_growth_cap_mixed_retry_case.py"
         new_tool_path = "mu/tools/generated_mixed_retry_probe.sh"
@@ -2101,7 +2160,6 @@ class TestReceiptChainEndToEnd:
         )
         (repo / new_tool_path).parent.mkdir(parents=True, exist_ok=True)
         (repo / new_tool_path).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        subprocess.run(["git", "add", "--", growth_path], cwd=repo, check=True)
 
         sup_receipt_path = ".scratch/step6_receipt.json"
         (repo / ".scratch").mkdir(parents=True, exist_ok=True)
@@ -2152,11 +2210,19 @@ class TestReceiptChainEndToEnd:
         assert outcome["commit_generated_governance_paths"] == [growth_path]
         assert result["commit_generated_governance_paths"] == [growth_path]
         assert captured_package["scope_items"].count(growth_path) == 1
-        assert captured_package["changed_files"].count(growth_path) == 1
+        assert growth_path not in captured_package["changed_files"]
         assert (
             captured_package["evidence_handles"][commit_mod.COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY]
             == growth_path
         )
+        durable_handoff = json.loads(
+            (repo / ".agent_bus" / "executors" / "phase_b_handoff.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert growth_path not in durable_handoff["files_to_stage"]
+        assert durable_handoff["scope_items"].count(growth_path) == 1
+        assert cap_file.read_text(encoding="utf-8").count(f"FOUNDER_OVERRIDE:{wave_id}") == 1
 
     def test_commit_generated_governance_refresh_rejects_unsupported_path(self, tmp_path):
         import subprocess
@@ -2238,6 +2304,184 @@ class TestReceiptChainEndToEnd:
         packet_text_after = (repo / packet_path).read_text(encoding="utf-8")
         assert packet_text_after == packet_text_before
         assert "Step-5e provenance: `unspecified`" not in packet_text_after
+
+    def test_commit_generated_governance_refresh_accepts_clean_already_recorded_reuse(self, tmp_path):
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "commit-generated-clean-reuse-wave"
+        packet_path = "reports/control_plane/commit_generated_clean_reuse_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        _commit_same_wave_growth_cap_for_test(repo, wave_id)
+        indicator_path = _stage_commit_refresh_inputs_for_test(repo, wave_id)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+        refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+            commit_generated_governance_paths=[growth_path],
+            commit_generated_governance_provenance="already_recorded",
+        )
+
+        assert error is None
+        assert growth_path not in staged
+        assert growth_path not in refreshed["files_to_stage"]
+        assert refreshed["scope_items"].count(growth_path) == 1
+        assert (
+            refreshed["evidence_handles"][commit_mod.COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY]
+            == growth_path
+        )
+        packet_text = (repo / packet_path).read_text(encoding="utf-8")
+        assert "Step-5e provenance: `already_recorded`" in packet_text
+        assert packet_text.count("## Commit-Time Generated Governance Authorization") == 1
+
+    def test_commit_generated_governance_refresh_rejects_already_recorded_worktree_only_provenance(
+        self,
+        tmp_path,
+    ):
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "commit-generated-worktree-only-reuse-wave"
+        packet_path = "reports/control_plane/commit_generated_worktree_only_reuse_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        _write_same_wave_growth_cap_for_test(repo, wave_id)
+        indicator_path = _stage_commit_refresh_inputs_for_test(repo, wave_id)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+        _refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+            commit_generated_governance_paths=[growth_path],
+            commit_generated_governance_provenance="already_recorded",
+        )
+
+        assert staged == []
+        assert error == (
+            "commit-generated governance already_recorded path lacks same-wave "
+            f"HEAD/index provenance before supervisor: {growth_path}"
+        )
+
+    def test_commit_generated_governance_refresh_rejects_already_recorded_index_head_mismatch(
+        self,
+        tmp_path,
+    ):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "commit-generated-index-head-mismatch-wave"
+        packet_path = "reports/control_plane/commit_generated_index_head_mismatch_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        _write_same_wave_growth_cap_for_test(repo, wave_id)
+        subprocess.run(["git", "add", "--", growth_path], cwd=repo, check=True)
+        indicator_path = _stage_commit_refresh_inputs_for_test(repo, wave_id)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+        _refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+            commit_generated_governance_paths=[growth_path],
+            commit_generated_governance_provenance="already_recorded",
+        )
+
+        assert staged == []
+        assert error == (
+            "commit-generated governance already_recorded path has index/HEAD "
+            f"mismatch before supervisor: {growth_path}"
+        )
+
+    def test_commit_generated_governance_refresh_rejects_already_recorded_unstaged_drift(
+        self,
+        tmp_path,
+    ):
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "commit-generated-unstaged-drift-wave"
+        packet_path = "reports/control_plane/commit_generated_unstaged_drift_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        cap_file = repo / growth_path
+        _commit_same_wave_growth_cap_for_test(repo, wave_id)
+        cap_file.write_text(cap_file.read_text(encoding="utf-8") + "# unstaged drift\n", encoding="utf-8")
+        indicator_path = _stage_commit_refresh_inputs_for_test(repo, wave_id)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+        _refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+            commit_generated_governance_paths=[growth_path],
+            commit_generated_governance_provenance="already_recorded",
+        )
+
+        assert staged == []
+        assert error == (
+            "commit-generated governance already_recorded path has unstaged "
+            f"delta before supervisor: {growth_path}"
+        )
+
+    def test_commit_generated_governance_refresh_rejects_already_recorded_wrong_wave_provenance(
+        self,
+        tmp_path,
+    ):
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "commit-generated-wrong-wave-reuse-wave"
+        packet_path = "reports/control_plane/commit_generated_wrong_wave_reuse_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        _commit_same_wave_growth_cap_for_test(repo, "different-commit-generated-wave")
+        indicator_path = _stage_commit_refresh_inputs_for_test(repo, wave_id)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+        _refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+            commit_generated_governance_paths=[growth_path],
+            commit_generated_governance_provenance="already_recorded",
+        )
+
+        assert staged == []
+        assert error == (
+            "commit-generated governance already_recorded path lacks same-wave "
+            f"HEAD/index provenance before supervisor: {growth_path}"
+        )
 
     def test_commit_generated_governance_fails_before_supervisor_when_not_staged(self, tmp_path):
         import types
