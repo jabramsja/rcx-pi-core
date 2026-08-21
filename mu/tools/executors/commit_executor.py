@@ -358,6 +358,13 @@ COMMIT_PATH_REFRESH_START = "<!-- COMMIT_PATH_TRUTH_REFRESH:start -->"
 COMMIT_PATH_REFRESH_END = "<!-- COMMIT_PATH_TRUTH_REFRESH:end -->"
 DEFERRED_AUTH_REFRESH_START = "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->"
 DEFERRED_AUTH_REFRESH_END = "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->"
+COMMIT_GENERATED_GOVERNANCE_AUTH_START = "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:start -->"
+COMMIT_GENERATED_GOVERNANCE_AUTH_END = "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:end -->"
+COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY = "commit_time_generated_governance"
+COMMIT_GENERATED_GOVERNANCE_GROWTH_CAP_PATH = "mu/tests/docs/test_growth_caps.py"
+COMMIT_GENERATED_GOVERNANCE_STEP5E_PROVENANCES = frozenset(
+    ("bumped", "already_recorded")
+)
 
 BOT_REMEDIATION_MAX_ROUNDS = 2
 _COMMIT_EXECUTOR_BACKENDS = _COMMIT_EXECUTOR_CONFIG.get("backends", {})
@@ -2251,6 +2258,177 @@ def _refresh_tracker_note_test_evidence(note: str, staged_paths: list[str]) -> s
     return refreshed
 
 
+def _tracker_field_span(note: str, marker: str) -> tuple[int, int] | None:
+    match = re.search(rf"\b{re.escape(marker)}:\s*", note)
+    if match is None:
+        return None
+    start = match.end()
+    end = len(note)
+    for candidate in _BUILDER_TRACKER_MARKER_NAMES:
+        if candidate == marker:
+            continue
+        candidate_match = re.search(rf"\b{re.escape(candidate)}:", note[start:])
+        if candidate_match is not None:
+            end = min(end, start + candidate_match.start())
+    return start, end
+
+
+def _append_tracker_scope_refs(note: str, paths: list[str]) -> str:
+    scoped_paths = _dedupe_repo_paths(paths)
+    if not scoped_paths:
+        return note
+    span = _tracker_field_span(note, "evidence_delta")
+    if span is None:
+        return note
+    start, end = span
+    raw_value = note[start:end]
+    stripped_value = raw_value.rstrip()
+    suffix = raw_value[len(stripped_value):]
+    missing = [path for path in scoped_paths if f"`{path}`" not in stripped_value]
+    if not missing:
+        return note
+    refs = ", ".join(f"`{path}`" for path in missing)
+    base = stripped_value.rstrip(".")
+    if "scope_refs:" in base:
+        refreshed_value = f"{base}, {refs}."
+    elif base:
+        refreshed_value = f"{base}. scope_refs: {refs}."
+    else:
+        refreshed_value = f"scope_refs: {refs}."
+    return note[:start] + refreshed_value + suffix + note[end:]
+
+
+def _validate_commit_generated_governance_paths(
+    repo_root: Path,
+    paths: list[str],
+) -> tuple[list[str], str | None]:
+    if not isinstance(paths, list):
+        return [], "commit-generated governance paths must be a list"
+    if not paths:
+        return [], None
+    normalized_paths: list[str] = []
+    for raw_path in paths:
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return [], "commit-generated governance paths must be non-empty strings"
+        if _is_absolute_untrusted_path(raw_path):
+            return [], f"commit-generated governance path is absolute or malformed: {raw_path}"
+        if _has_path_traversal(raw_path):
+            return [], f"commit-generated governance path contains traversal: {raw_path}"
+        normalized = _normalize_repo_relpath(raw_path)
+        if normalized != COMMIT_GENERATED_GOVERNANCE_GROWTH_CAP_PATH:
+            return [], (
+                "unsupported commit-generated governance path before supervisor: "
+                f"{normalized}"
+            )
+        normalized_paths.append(normalized)
+    settled_paths = _dedupe_repo_paths(normalized_paths)
+    staged = set(_current_staged_diff_paths(repo_root))
+    for path in settled_paths:
+        if path not in staged:
+            return [], (
+                "commit-generated governance path is not staged before supervisor: "
+                f"{path}"
+            )
+        full_path = (repo_root / path).resolve(strict=False)
+        try:
+            full_path.relative_to(repo_root.resolve())
+        except ValueError:
+            return [], f"commit-generated governance path escapes repo root: {path}"
+    return settled_paths, None
+
+
+def _validate_commit_generated_governance_provenance(
+    provenance: Any,
+) -> tuple[str, str | None]:
+    normalized = str(provenance or "").strip()
+    if not normalized:
+        return "", "commit-generated governance provenance is required before supervisor"
+    if normalized not in COMMIT_GENERATED_GOVERNANCE_STEP5E_PROVENANCES:
+        return "", (
+            "unsupported commit-generated governance provenance before supervisor: "
+            f"{normalized}"
+        )
+    return normalized, None
+
+
+def _render_commit_generated_governance_authorization_block(
+    *,
+    wave_id: str,
+    paths: list[str],
+    provenance: str,
+) -> str:
+    lines = [
+        COMMIT_GENERATED_GOVERNANCE_AUTH_START,
+        "## Commit-Time Generated Governance Authorization",
+        "",
+        f"- Refresh wave: `{wave_id}`",
+        f"- Step-5e provenance: `{provenance}`",
+        "- Purpose: commit automation may stage the exact same-wave growth-cap "
+        "governance file after Phase B review; this block authorizes only that "
+        "commit-time generated governance path.",
+        "- Authorized generated governance path(s):",
+    ]
+    for path in paths:
+        lines.append(f"  - `{path}`")
+    lines.extend([
+        "- Scope binding: the path above is in scope only as the Step-5e "
+        "same-wave growth-cap governance mutation with staged-index proof.",
+        "- Pre-review boundary: this block does not add the path to the locked "
+        "Phase B/pre-review candidate allowlist and cannot authorize arbitrary "
+        "implementation files.",
+        "- Acceptance binding: unsupported, unstaged, malformed, outside-repo, "
+        "or provenance-free generated governance paths fail before supervisor.",
+        COMMIT_GENERATED_GOVERNANCE_AUTH_END,
+    ])
+    return "\n".join(lines) + "\n"
+
+
+def _replace_commit_generated_governance_authorization_block(
+    packet_text: str,
+    block: str,
+) -> str:
+    start = packet_text.find(COMMIT_GENERATED_GOVERNANCE_AUTH_START)
+    end = packet_text.find(COMMIT_GENERATED_GOVERNANCE_AUTH_END)
+    if start != -1 and end != -1 and end > start:
+        end += len(COMMIT_GENERATED_GOVERNANCE_AUTH_END)
+        trailing_newline = "\n" if end < len(packet_text) and packet_text[end:end + 1] != "\n" else ""
+        return packet_text[:start].rstrip() + "\n\n" + block.rstrip() + trailing_newline + packet_text[end:]
+    if start != -1 or end != -1:
+        raise ValueError("existing Commit-Time Generated Governance Authorization markers are unbalanced")
+    for marker in (
+        DEFERRED_AUTH_REFRESH_START,
+        COMMIT_PATH_REFRESH_START,
+        L4_FIELDS_FROM_TRACKER_START,
+    ):
+        insert_at = packet_text.find(marker)
+        if insert_at != -1:
+            return (
+                packet_text[:insert_at].rstrip()
+                + "\n\n"
+                + block.rstrip()
+                + "\n\n"
+                + packet_text[insert_at:]
+            )
+    return packet_text.rstrip() + "\n\n" + block
+
+
+def _refresh_commit_generated_governance_authorization(
+    packet_text: str,
+    *,
+    wave_id: str,
+    paths: list[str],
+    provenance: str,
+) -> str:
+    if not paths:
+        return packet_text
+    block = _render_commit_generated_governance_authorization_block(
+        wave_id=wave_id,
+        paths=paths,
+        provenance=provenance,
+    )
+    return _replace_commit_generated_governance_authorization_block(packet_text, block)
+
+
 def _render_commit_path_truth_refresh_block(
     *,
     wave_id: str,
@@ -2261,6 +2439,7 @@ def _render_commit_path_truth_refresh_block(
     commit_status: str,
     evidence_handles: dict[str, str],
     pre_commit_receipt_path: str,
+    commit_generated_governance_paths: list[str] | None = None,
 ) -> str:
     tracker_note_sha = hashlib.sha256(tracker_note_text.encode("utf-8")).hexdigest()
     evidence_command = _tracker_marker_value(tracker_note_text, "evidence_command")
@@ -2281,6 +2460,10 @@ def _render_commit_path_truth_refresh_block(
         lines.append(f"- Evidence command: {evidence_command}")
     if evidence_delta:
         lines.append(f"- Evidence delta: {evidence_delta}")
+    if commit_generated_governance_paths:
+        lines.append("- Commit-generated governance paths:")
+        for path in commit_generated_governance_paths:
+            lines.append(f"  - `{path}`")
     lines.append("- Evidence handles:")
     if evidence_handles:
         for key in sorted(evidence_handles):
@@ -2591,11 +2774,14 @@ def _rebuild_handoff_after_packet_truth_refresh(
     active_packet_path: str,
     staged_paths: list[str],
     evidence_handles: dict[str, str],
+    commit_generated_governance_paths: list[str] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     scope_items = handoff.get("scope_items")
+    generated_scope_paths = commit_generated_governance_paths or []
     rebuilt_scope_items = _dedupe_repo_paths([
         *(scope_items if isinstance(scope_items, list) else []),
         active_packet_path,
+        *generated_scope_paths,
     ])
     bridge_status = _effective_commit_bridge_status(
         repo_root=repo_root,
@@ -3108,15 +3294,42 @@ def refresh_commit_path_packet_truth(
     handoff: dict[str, Any],
     indicator_path: str,
     commit_status: str,
+    commit_generated_governance_paths: list[str] | None = None,
+    commit_generated_governance_provenance: str = "",
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """Refresh the wave packet from current commit-path facts before supervisor review."""
+    settled_generated_paths, generated_path_error = _validate_commit_generated_governance_paths(
+        repo_root,
+        commit_generated_governance_paths or [],
+    )
+    if generated_path_error:
+        return handoff, [], generated_path_error
+    settled_generated_provenance = ""
+    if settled_generated_paths:
+        settled_generated_provenance, generated_provenance_error = (
+            _validate_commit_generated_governance_provenance(
+                commit_generated_governance_provenance
+            )
+        )
+        if generated_provenance_error:
+            return handoff, [], generated_provenance_error
     active_packet_path, packet_error = _commit_refresh_packet_path(handoff)
     if packet_error:
         return handoff, [], packet_error
     if not active_packet_path:
+        if settled_generated_paths:
+            return handoff, [], (
+                "commit-generated governance settlement requires an active "
+                "tracked_packet before supervisor"
+            )
         return handoff, _current_staged_diff_paths(repo_root), None
 
     if str(handoff.get("wave_class") or "").strip() != "L4_ENABLER":
+        if settled_generated_paths:
+            return handoff, [], (
+                "commit-generated governance settlement requires an L4_ENABLER "
+                "handoff before supervisor"
+            )
         return handoff, _current_staged_diff_paths(repo_root), None
 
     tracker_note_text = str(handoff.get("tracker_note_text") or "")
@@ -3192,6 +3405,10 @@ def refresh_commit_path_packet_truth(
         tracker_note_after_staging,
         staged_paths_for_block,
     )
+    tracker_note_after_staging = _append_tracker_scope_refs(
+        tracker_note_after_staging,
+        settled_generated_paths,
+    )
     if pending_pre_commit_supervisor:
         tracker_note_after_staging = _mark_tracker_note_pre_commit_receipt_pending(
             tracker_note_after_staging
@@ -3215,6 +3432,10 @@ def refresh_commit_path_packet_truth(
         indicator_path=indicator_path,
         include_pre_commit_receipt=not pending_pre_commit_supervisor,
     )
+    if settled_generated_paths:
+        evidence_handles[COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY] = ", ".join(
+            settled_generated_paths
+        )
     block = _render_commit_path_truth_refresh_block(
         wave_id=wave_id,
         active_packet_path=active_packet_path,
@@ -3228,6 +3449,7 @@ def refresh_commit_path_packet_truth(
             if pending_pre_commit_supervisor
             else str(handoff.get("pre_commit_receipt_path") or "")
         ),
+        commit_generated_governance_paths=settled_generated_paths,
     )
     try:
         raw_deferred_path_candidates = [
@@ -3250,6 +3472,12 @@ def refresh_commit_path_packet_truth(
             packet_text,
             wave_id=wave_id,
             deferred_paths=deferred_path_candidates,
+        )
+        packet_text = _refresh_commit_generated_governance_authorization(
+            packet_text,
+            wave_id=wave_id,
+            paths=settled_generated_paths,
+            provenance=settled_generated_provenance,
         )
         # Single-source the packet's L4-field block from the canonical tracker
         # note (the #52 supervisor + bot read the note as truth). The settled
@@ -3281,6 +3509,7 @@ def refresh_commit_path_packet_truth(
         active_packet_path=active_packet_path,
         staged_paths=final_staged_paths,
         evidence_handles=evidence_handles,
+        commit_generated_governance_paths=settled_generated_paths,
     )
     if errors:
         return handoff, [], "rebuilt commit handoff invalid after packet truth refresh: " + "; ".join(errors)
@@ -13119,7 +13348,7 @@ def land_stranded_pr(
 # new-file count, never the count of untracked/generated strays, and never when
 # the cap already covers the count.
 
-GROWTH_CAP_TEST_RELPATH = "mu/tests/docs/test_growth_caps.py"
+GROWTH_CAP_TEST_RELPATH = COMMIT_GENERATED_GOVERNANCE_GROWTH_CAP_PATH
 _GROWTH_CAP_TEST_BASELINE_RE = re.compile(
     r"^BASELINE_TEST_FILES\s*=\s*(\d+)", re.MULTILINE
 )
@@ -13327,6 +13556,7 @@ def _maybe_autobump_growth_cap_for_founder_override(
         "previous_cap": None,
         "new_cap": None,
         "cap_bumps": {},
+        "commit_generated_governance_paths": [],
         "reason": "",
     }
     cap_file = repo_root / "mu" / "tests" / "docs" / "test_growth_caps.py"
@@ -13460,6 +13690,8 @@ def _maybe_autobump_growth_cap_for_founder_override(
         )
 
     if not bump_edits:
+        if "already_recorded" in target_reasons:
+            outcome["commit_generated_governance_paths"] = [GROWTH_CAP_TEST_RELPATH]
         if target_reasons and all(reason == "already_recorded" for reason in target_reasons):
             outcome["reason"] = "already_recorded"
         elif "zero_shortfall" in target_reasons:
@@ -13533,6 +13765,7 @@ def _maybe_autobump_growth_cap_for_founder_override(
         )
         return outcome
     outcome["reason"] = "bumped"
+    outcome["commit_generated_governance_paths"] = [GROWTH_CAP_TEST_RELPATH]
     for edit in bump_edits:
         log(
             f"Step 5e: auto-bumped {edit['cap_name']} +{edit['shortfall']} "
@@ -13563,6 +13796,60 @@ def maybe_autobump_growth_cap_for_founder_override(
         founder_override_token=founder_override_token,
         log=log,
     )
+
+
+def _step5e_generated_governance_provenance(outcome: dict[str, Any]) -> str:
+    reason = str(outcome.get("reason") or "").strip()
+    if outcome.get("bumped") is True:
+        return reason or "bumped"
+    if reason == "already_recorded":
+        return reason
+    cap_bumps = outcome.get("cap_bumps")
+    if isinstance(cap_bumps, dict):
+        for target_outcome in cap_bumps.values():
+            if (
+                isinstance(target_outcome, dict)
+                and str(target_outcome.get("reason") or "").strip() == "already_recorded"
+            ):
+                return "already_recorded"
+    return ""
+
+
+def _commit_generated_governance_paths_from_step5e_outcome(
+    outcome: dict[str, Any] | None,
+) -> tuple[list[str], str, str | None]:
+    """Extract the bounded commit-time governance path set from Step 5e output."""
+    if not isinstance(outcome, dict):
+        return [], "", None
+    reason = str(outcome.get("reason") or "").strip()
+    provenance = _step5e_generated_governance_provenance(outcome)
+    has_supported_provenance = bool(provenance)
+    if (
+        not has_supported_provenance
+        and isinstance(outcome.get("commit_generated_governance_paths"), list)
+        and outcome.get("commit_generated_governance_paths")
+    ):
+        return [], reason, (
+            "Step 5e reported commit-generated governance paths without "
+            "bumped or same-wave already_recorded provenance"
+        )
+    if not has_supported_provenance:
+        return [], reason, None
+    if "commit_generated_governance_paths" not in outcome:
+        raw_paths: Any = [GROWTH_CAP_TEST_RELPATH]
+    else:
+        raw_paths = outcome.get("commit_generated_governance_paths")
+    if not isinstance(raw_paths, list) or not raw_paths:
+        return [], reason, (
+            "Step 5e reported commit-generated governance provenance without "
+            "a non-empty path list"
+        )
+    paths: list[str] = []
+    for raw_path in raw_paths:
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return [], reason, "Step 5e reported a malformed commit-generated governance path"
+        paths.append(raw_path)
+    return _dedupe_repo_paths(paths), provenance, None
 
 
 def commit_pipeline_impl_source() -> str:
@@ -14110,6 +14397,14 @@ def _run_commit_pipeline_impl(
 
     result["steps_completed"].append("stage_files")
     log(f"Step 4: staged {len(staged_output.splitlines())} files")
+    pre_step5e_authorized_paths = set(
+        _dedupe_repo_paths(
+            [
+                *list(handoff.get("files_to_stage") or []),
+                *list(handoff.get("scope_items") or []),
+            ]
+        )
+    )
 
     # ── Step 5: collect_and_stage_indicator ───────────────────────────
     indicator_script = repo_root / "mu" / "tools" / "metrics" / "collect_l4_wave_indicators.py"
@@ -14299,16 +14594,123 @@ def _run_commit_pipeline_impl(
     # (the Step 8 gate runs regardless). No FOUNDER_OVERRIDE -> no bump (the gate
     # strands the commit exactly as today). An auto-bump error never regresses
     # the commit path: it falls through to the unmodified Step 8 gate.
+    growth_cap_outcome: dict[str, Any] = {}
     try:
-        _maybe_autobump_growth_cap_for_founder_override(
+        growth_cap_outcome = _maybe_autobump_growth_cap_for_founder_override(
             repo_root,
             wave_id=wave_id,
             base_branch=base_branch,
             founder_override_token=founder_override_token,
             log=log,
         )
+        result["growth_cap_autobump_outcome"] = growth_cap_outcome
     except Exception as exc:
+        growth_cap_outcome = {
+            "bumped": False,
+            "shortfall": 0,
+            "bump_amount": 0,
+            "new_test_files": [],
+            "new_tool_scripts": [],
+            "previous_cap": None,
+            "new_cap": None,
+            "cap_bumps": {},
+            "commit_generated_governance_paths": [],
+            "reason": f"error: {exc}",
+        }
+        result["growth_cap_autobump_outcome"] = growth_cap_outcome
         log(f"Step 5e: growth-cap auto-bump skipped (non-fatal error: {exc})")
+
+    generated_paths, generated_provenance, generated_path_error = (
+        _commit_generated_governance_paths_from_step5e_outcome(growth_cap_outcome)
+    )
+    if generated_path_error:
+        return {
+            "status": "error",
+            "step": "settle_commit_generated_governance",
+            "errors": [generated_path_error],
+            "steps_completed": result["steps_completed"],
+        }
+    staged_after_step5e = set(_current_staged_diff_paths(repo_root))
+    if (
+        GROWTH_CAP_TEST_RELPATH in staged_after_step5e
+        and GROWTH_CAP_TEST_RELPATH not in generated_paths
+        and GROWTH_CAP_TEST_RELPATH not in pre_step5e_authorized_paths
+    ):
+        return {
+            "status": "error",
+            "step": "settle_commit_generated_governance",
+            "errors": [
+                "mu/tests/docs/test_growth_caps.py is staged without Step-5e "
+                "bumped or same-wave already_recorded provenance"
+            ],
+            "steps_completed": result["steps_completed"],
+        }
+    if generated_paths:
+        generated_handoff, generated_staged_paths, generated_refresh_error = (
+            refresh_commit_path_packet_truth(
+                repo_root=repo_root,
+                handoff=handoff,
+                indicator_path=indicator_path,
+                commit_status="pre_commit_supervisor_pending",
+                commit_generated_governance_paths=generated_paths,
+                commit_generated_governance_provenance=generated_provenance,
+            )
+        )
+        if generated_refresh_error:
+            return {
+                "status": "error",
+                "step": "settle_commit_generated_governance",
+                "errors": [generated_refresh_error],
+                "steps_completed": result["steps_completed"],
+            }
+        handoff = generated_handoff
+        generated_handoff_sha = _handoff_sha(handoff)
+        result["commit_generated_governance_paths"] = generated_paths
+        result["commit_generated_governance_handoff_sha"] = generated_handoff_sha
+        if _can_rekey_continuation_to_refreshed_handoff(handoff):
+            handoff_sha = generated_handoff_sha
+            result["handoff_sha"] = handoff_sha
+        try:
+            generated_files, generated_force = _stage_handoff_paths(
+                repo_root,
+                files_to_stage=list(handoff["files_to_stage"]),
+                force_files=list(handoff.get("force_add_files", [])),
+                scope_files=list(handoff.get("scope_items", [])),
+            )
+            handoff = {
+                **handoff,
+                "files_to_stage": generated_files,
+                "force_add_files": generated_force,
+            }
+            generated_staged_paths = _current_staged_diff_paths(repo_root)
+            persist_error = _persist_phase_b_handoff_for_commit_path(repo_root, handoff)
+            if persist_error:
+                return {
+                    "status": "error",
+                    "step": "settle_commit_generated_governance",
+                    "errors": [persist_error],
+                    "steps_completed": result["steps_completed"],
+                }
+        except subprocess.CalledProcessError as exc:
+            return {
+                "status": "error",
+                "step": "settle_commit_generated_governance",
+                "errors": [
+                    "git add failed after commit-generated governance settlement: "
+                    f"{exc.stderr.strip()}"
+                ],
+                "steps_completed": result["steps_completed"],
+            }
+        result["steps_completed"].append("settle_commit_generated_governance")
+        log(
+            "Step 5e: settled commit-generated governance authority for "
+            f"{', '.join(generated_paths)}"
+        )
+        if generated_staged_paths:
+            log(
+                "Step 5e: rebound post-bump handoff scope to "
+                f"{len(generated_staged_paths)} file(s)"
+            )
 
     # ── Steps 6-7: supervisor review + receipt validation ───────────
     if not skip_supervisor:
