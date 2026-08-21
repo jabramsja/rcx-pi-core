@@ -5,11 +5,11 @@ If a task is not listed here, it is NOT to be implemented.
 
 ---
 
-## PROGRAM QUEUE (priority order -- refreshed 2026-08-21 PR1219 P0IC2 precursor)
+## PROGRAM QUEUE (priority order -- refreshed 2026-08-21 PR1219 P0IA refresh)
 
-Live repository truth at this refresh: `origin/dev == 2ba6847a2f4e20cc35dc96f988a4ddbc3ecea91b` (PR #1221, P0IC1). The predecessor chain now contains P0IC0 at PR #1220 (`4d69a3a4`, theater allowlist expiry renewal) and P0IC1 at PR #1221 (`2ba6847a`, linked-worktree repo identity). P0IC2 is now the first launchable row, starting from the exact P0IC1 merge. The older remote history also contains PR #1215 (`0f0a1d2d`, three interlocked repository gates repaired), PR #1216 (`b4ae5845`, pager receiver exact-source authority), PR #1217 (`b5039dce`, pager bytecode retry authority), and PR #1218 (`019bf084`, Phase B L4 indicator pre-review authority). The PR1219 role/operator candidate is not complete: old P0 and fresh P0R each reached terminal Phase B round 1 `QUESTION`, and P0L passed 569 focused tests before round-2 blockers increased. Direct evidence still proves that no current autonomous surface can build candidate-bound indicator/inventory authority before the first reviewer; the pre-P0IA bootstrap chain therefore continues through P0IC2 and P0IA under the same bounded review-authority waiver. The strict launch order from here is P0IC2 → P0IA → P0IM → P0IB → P0T1 → P0T2 → P0T3 → P0T4 → P0R2 → P1 → P2 → P3 → P4 → P5. P0L round-2 findings 15-17 and P0R findings 11-25 remain deferred/nonblocking and must never hold a landing. The old theater structural priority insertion is historical because its repair landed in PR #1215; P0IC0 was the distinct data-only expiry renewal needed to reopen pre-push and CI and does not close or rewrite `[THEATER-RATCHET-EXPIRY-POLICY] POLICY_BOUND`.
+Live repository truth at this refresh: `origin/dev == 0b000e7bb14a09be8570e2a4e1a22fd56ee1d705` (PR #1222, P0IC2). The predecessor chain now contains P0IC0 at PR #1220 (`4d69a3a4`, theater allowlist expiry renewal), P0IC1 at PR #1221 (`2ba6847a`, linked-worktree repo identity), and P0IC2 at PR #1222 (`0b000e7bb14a09be8570e2a4e1a22fd56ee1d705`, commit-generated governance authority). P0IA is now the first launchable row, starting from the exact P0IC2 merge. The older remote history also contains PR #1215 (`0f0a1d2d`, three interlocked repository gates repaired), PR #1216 (`b4ae5845`, pager receiver exact-source authority), PR #1217 (`b5039dce`, pager bytecode retry authority), and PR #1218 (`019bf084`, Phase B L4 indicator pre-review authority). The PR1219 role/operator candidate is not complete: old P0 and fresh P0R each reached terminal Phase B round 1 `QUESTION`, and P0L passed 569 focused tests before round-2 blockers increased. Direct evidence still proves that no current autonomous surface can build candidate-bound indicator/inventory authority before the first reviewer; P0IA is the bounded bootstrap packet that lands that authority under the explicit one-time review-authority waiver. The strict launch order from here is P0IA → P0IM → P0IB → P0T1 → P0T2 → P0T3 → P0T4 → P0R2 → P1 → P2 → P3 → P4 → P5. P0L round-2 findings 15-17 and P0R findings 11-25 remain deferred/nonblocking and must never hold a landing. The old theater structural priority insertion is historical because its repair landed in PR #1215; P0IC0 was the distinct data-only expiry renewal needed to reopen pre-push and CI and does not close or rewrite `[THEATER-RATCHET-EXPIRY-POLICY] POLICY_BOUND`.
 
-P0IA reached Phase B `GO`, 541 focused tests, and repeated pre-commit meta-review, but two deterministic commit-path defects prevented landing: canonical-root supervisor source was rejected against a sibling linked worktree despite identical Git common-dir identity, and Step 5e's mechanically generated growth-cap file entered the staged package without being registered in tracker/packet commit-time scope. Same-wave recovery then tried to rewrite the locked pre-review allowlist and was stopped as divergent. P0IC0 and P0IC1 have now landed; P0IC2 remains the final bounded precursor before P0IA refresh. P0IA remains checksummed and preserved for refresh after P0IC2 merges. No deferred finding or edge case may enter any precursor or hold a landing.
+P0IA reached Phase B `GO`, 541 focused tests, and repeated pre-commit meta-review, but two deterministic commit-path defects prevented landing: canonical-root supervisor source was rejected against a sibling linked worktree despite identical Git common-dir identity, and Step 5e's mechanically generated growth-cap file entered the staged package without being registered in tracker/packet commit-time scope. Same-wave recovery then tried to rewrite the locked pre-review allowlist and was stopped as divergent. P0IC0, P0IC1, and P0IC2 have now landed; the refreshed P0IA lane starts from exact P0IC2 merge commit `0b000e7bb14a09be8570e2a4e1a22fd56ee1d705`. No deferred finding or edge case may enter P0IA or hold a landing.
 
 Execution constraint: follow `FOUNDER_SESSION_BOOTSTRAP.md`; launch waves through the pipeline only, never manually. Use parallel pipeline lanes when safe. Structural conversion belongs in Mu/projections, with no new host-authority sites. If a pipeline failure needs a manual unblock, the same wave must also run or queue a root structural pipeline fix in the appropriate builder, dispatcher, recovery, commit, or pre-commit surface so the failure mode is permanently handled.
 
@@ -23,15 +23,15 @@ Execution constraint: follow `FOUNDER_SESSION_BOOTSTRAP.md`; launch waves throug
 
    Landed only the canonical-root/sibling-worktree repository-identity defect reproduced by P0IA commit. Wave: `roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21`. The fix replaced the duplicated meta-supervisor lexical source-containment checks with a fail-closed resolved `git rev-parse --git-common-dir` identity predicate: ordinary and same-repository linked worktrees pass, unrelated repositories and probe failures remain `WRONG_GIT_REPO`.
 
-2. **[ROLES-ALL-CODEX-PR1219-P0IC2-COMMIT-GENERATED-GOVERNANCE-AUTHORITY]** NEXT -- first launchable row
+2. **[ROLES-ALL-CODEX-PR1219-P0IC2-COMMIT-GENERATED-GOVERNANCE-AUTHORITY] LANDED (PR #1222, `0b000e7bb14a09be8570e2a4e1a22fd56ee1d705`)**
 
-   After P0IC1, land only the Step-5e scope-registration defect reproduced by P0IA meta-review. Wave: `roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21`. When Step 5e creates or idempotently reuses a same-wave growth-cap bump, mechanically register that exact commit-generated governance path in the durable handoff, TASKS tracker scope refs, packet commit-time authority block, and supervisor package without pretending it belonged to the locked pre-review candidate allowlist. Modify only `mu/tools/executors/commit_executor.py`, its existing focused receipt test file, TASKS, and generated same-wave governance. Add no test/tool files, role/model work, lifecycle work, or nonblockers. P0IA cannot resume before this merge.
+   Landed only the Step-5e scope-registration defect reproduced by P0IA meta-review. Wave: `roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21`. PR #1222 merge evidence: `0b000e7bb14a09be8570e2a4e1a22fd56ee1d705`; exact TASKS.md merge blob `810755dc1d95df7bd468800b7ec9a8ab49f7391f`; TASKS.md SHA-256 `20b07420778307bd112383b852d0843f083789462e6d7d6a172a33578b13c95c`. The landed change mechanically registers same-wave commit-generated governance without pretending it belonged to the locked pre-review candidate allowlist.
 
-3. **[ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY]** NEXT
+3. **[ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY]** NEXT -- first launchable row
 
-   Land the one narrow infrastructure prerequisite that can build exact candidate authority before every successor reviewer. Wave: `roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20`. Start and compare at clean `origin/dev` commit `019bf08444390dcf875a6941f72fdb68f1e5fad3`; do not use the broader `28081acd` salvage commit as this lane's base. Add a shared candidate-authority builder, structured literal-base/allowlist config, atomic bus-local receipt, exact staging, same-wave indicator collection, exact-base inventory, and staged L4 enforcement before initial, bridge-fix, private-attribute, and re-entry review. Add an explicit `launch_wave.py --prepare-review` recovery entry point and fail closed when authority is stale or missing. Because the old root cannot load P0IA before these prerequisite commits, P0IC1, P0IC2, and P0IA share the founder-authorized pre-P0IA review-authority waiver; there is no supported pause or concurrent same-config rerun. All roles remain Codex through the predecessor gpt-5.5/xhigh catalog, commit stays providerless, and no other review/test/scope/indicator/L4/CI/merge gate is waived. Deterministic source-candidate partitioning and hunk-ledger generation remain in their separate packet after P5.
+   Land the one narrow infrastructure prerequisite that can build exact candidate authority before every successor reviewer. Wave: `roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20`. Start and compare at clean P0IC2 merge commit `0b000e7bb14a09be8570e2a4e1a22fd56ee1d705`; do not use the broader `28081acd` salvage commit as this lane's base. Add a shared candidate-authority builder, structured literal-base/allowlist config, atomic bus-local receipt, exact staging, same-wave indicator collection, exact-base inventory, and staged L4 enforcement before initial, bridge-fix, private-attribute, and re-entry review. Add an explicit `launch_wave.py --prepare-review` recovery entry point and fail closed when authority is stale or missing. P0IA alone carries the founder-authorized bootstrap review-authority waiver because the predecessor root cannot load P0IA before this repair lands; there is no supported pause or concurrent same-config rerun. All roles remain Codex through the predecessor gpt-5.5/xhigh catalog, commit stays providerless, and no other review/test/scope/indicator/L4/CI/merge gate is waived. Deterministic source-candidate partitioning and hunk-ledger generation remain in their separate packet after P5.
 
-   Current landing state: the reviewed 11-file staged candidate is frozen in `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-20260820`; the latest terminal recovery evidence is preserved at `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-preservation/p0ia-growthcap-needs-phaseb-terminal-20260821`. Do not relaunch or widen P0IA before P0IC1 and P0IC2 merge; then refresh it onto the exact merge predecessor, rerun review/commit authority, CI, and merge.
+   Current landing state: the prior reviewed 11-file staged candidate is frozen in `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-20260820`; the latest terminal recovery evidence is preserved at `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-preservation/p0ia-growthcap-needs-phaseb-terminal-20260821`. This refreshed lane is `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-refresh-20260821` on branch `jabramsja/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-refresh-2026-08-21`; prior 20260820 evidence is read-only and must not be resumed, rewritten, removed, staged, or committed.
 
 4. **[ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP]** NEXT
 
@@ -85,163 +85,167 @@ Execution constraint: follow `FOUNDER_SESSION_BOOTSTRAP.md`; launch waves throug
 
    After P5, implement recurrence prevention from `reports/control_plane/launch-wave-deterministic-candidate-carry-forward-builder-2026-08-20_wave_config.json`. Wave: `launch-wave-deterministic-candidate-carry-forward-builder-2026-08-20`. It must generate deterministic content-addressed narrow-packet inputs and a complete hunk ledger without applying, staging, committing, launching, or hiding candidate bytes. It may reuse the landed P0IA/P0IB authority primitive, but it must not widen either prerequisite packet.
 
-17. **[PIPELINE-FIX-61]** NEXT
+17. **[PHASE-A-POST-REMEDIATION-LINE-REF-PREBRIDGE-GUARD]** NEXT
+
+   Runnable only after P5 and row 16 land; nonblocking for the active P0IA/P0IM/P0IB/P0T/P0R2/P1-P5 landing chain. Add a Phase A post-remediation line-reference guard immediately before bridge review so stale or fabricated line references fail closed before reviewer entry. This must not launch before deterministic candidate carry-forward exists and must not widen P0IA.
+
+18. **[PIPELINE-FIX-61]** NEXT
 
    Replace the blind Phase A total-wall kill with bounded activity-aware supervision. A progressing design must not die only because total wall time elapsed; a genuinely silent child must terminate with exact evidence. Do not replace one constant with another.
 
-18. **[PIPELINE-FIX-54A3]** NEXT
+19. **[PIPELINE-FIX-54A3]** NEXT
 
    Continue durable Phase A checkpoint/resume with ordered file-plus-directory durability, gap-free launch ownership, quiescence proof, exact packet/base/role identity, cumulative attempt logs, and fail-closed stale checkpoints.
 
-19. **[PIPELINE-FIX-60B]** NEXT
+20. **[PIPELINE-FIX-60B]** NEXT
 
    Implement opt-in managed adapter containment/cancellation without changing shared `run_adapter()` consumers. Exclude terminal-state schema and replay identity.
 
-20. **[PIPELINE-FIX-60C]** NEXT
+21. **[PIPELINE-FIX-60C]** NEXT
 
     Reconcile interrupted bridge terminal states with monotonic state-version CAS and deterministic SQLite race proof. Exclude adapter launch and replay fingerprint work.
 
-21. **[PIPELINE-FIX-60D]** NEXT
+22. **[PIPELINE-FIX-60D]** NEXT
 
     Add immutable bridge replay identity, serialized compare-or-create, terminal-result reuse, and legacy-NULL fail-closed behavior. Exclude process lifecycle and timeout work.
 
-22. **[CANONICAL-DOCS-TRUTH-INTEGRATION]** NEXT
+23. **[CANONICAL-DOCS-TRUTH-INTEGRATION]** NEXT
 
     Route STATUS/TASKS/handoff/report truth through one narrow docs pipeline. Classify every currently unregistered root or learning-archive Markdown file without deleting evidence; the July 27 source already added another file beyond the earlier eight-file count. Historical tracker logs remain evidence, not a second scheduler. Source: `HANDOFF_FOR_NEXT_LLM_2026-07-27.md`.
 
-23. **[PBNOGO-INTEGRATION]** NEXT
+24. **[PBNOGO-INTEGRATION]** NEXT
 
     Preserve blocking `NO_GO`/`REQUEST_CHANGES`; defer only findings from a `GO` path; preserve terminal founder `QUESTION`; do not loop. This is the canonical alias for `phase-b-no-go-deferral-hardening-2026-06-30` and must not be duplicated.
 
-24. **[PREPUSH-RECOVERY-CONTEXT-AUTHORITY]** NEXT
+25. **[PREPUSH-RECOVERY-CONTEXT-AUTHORITY]** NEXT
 
     Replace fabricated Step-11 recovery context with the actual pytest short summary, captured stdout/stderr, status, and Git state. Source: `HANDOFF_FOR_NEXT_LLM_2026-07-27.md`, DEBT-1. Keep this separate from validation-selector work.
 
-25. **[PIPELINE-FIX-56]** NEXT
+26. **[PIPELINE-FIX-56]** NEXT
 
     Narrow `agent_review_crash` classification before later recovery/commit work.
 
-26. **[PIPELINE-FIX-52]** NEXT
+27. **[PIPELINE-FIX-52]** NEXT
 
     After FIX56, implement COMMENTED-review intake, remediation, and durable resolution evidence.
 
-27. **[PIPELINE-FIX-55]** NEXT
+28. **[PIPELINE-FIX-55]** NEXT
 
     After FIX52, classify supervisor/meta five-hour 429 envelopes as transient hold/resume rather than terminal policy. This is the canonical alias for July 27 DEBT-2.
 
-28. **[PIPELINE-FIX-53]** NEXT
+29. **[PIPELINE-FIX-53]** NEXT
 
     After FIX55, implement persistent open-PR lifecycle authority.
 
-29. **[OBSERVER-DURABILITY]** NEXT
+30. **[OBSERVER-DURABILITY]** NEXT
 
     Reconcile FIX51/FIX58 and the prepared OBSERVER-O2 packet serially: lane admission, authenticated bus/thread ownership, receipts/redrive, exact tmux identity, truthful labels/dashboard, independent liveness, and duplicate AUTO-PING prevention. Sources: `reports/control_plane/observer-o2-singleflight-owner-ready-2026-07-22_2026-07-22.md` and `reports/deferred/blocking/observer-autoping-singleflight-live-duplicates-2026-07-25.md`.
 
-30. **[PIPELINE-FIX-50]** NEXT
+31. **[PIPELINE-FIX-50]** NEXT
 
     After pbnogo and checkpoint foundations, establish role-scoped implementer-turn authority.
 
-31. **[PIPELINE-FIX-57]** NEXT
+32. **[PIPELINE-FIX-57]** NEXT
 
     After FIX50, add exact-stage `.js`/`.mjs`/`.cjs` parsing. This is the canonical alias for `[PHASEB-EXACT-STAGE-JS-PARSER-FIX-2026-06-30]` in NOW.
 
-32. **[PAGER-ORCHESTRATOR-LABEL-TRUTH]** NEXT
+33. **[PAGER-ORCHESTRATOR-LABEL-TRUTH]** NEXT
 
     Make orchestrator route selection, pager labels, tmux panes, and autoping identity follow one committed/effective source without wrong-bus drift.
 
-33. **[L4-GROWTH-CAP-PREBUMP-BUILDER]** NEXT
+34. **[L4-GROWTH-CAP-PREBUMP-BUILDER]** NEXT
 
     Mechanically add the required L4 structural growth-cap pre-bump at launch/package time or fail before commit handoff.
 
-34. **[BRIDGE-REVIEW-PRESERVATION-ARTIFACT-BOUNDS]** NEXT
+35. **[BRIDGE-REVIEW-PRESERVATION-ARTIFACT-BOUNDS]** NEXT
 
     Bound reviewer preservation input to manifests/stat/status artifacts while retaining complete evidence and stale-state safety.
 
-35. **[BOT-REMEDIATION-PREPUSH-SELECTOR-BOUNDS]** NEXT
+36. **[BOT-REMEDIATION-PREPUSH-SELECTOR-BOUNDS]** NEXT
 
     Select bounded same-wave bot-remediation validations from changed files/finding class while still requiring full CI before merge.
 
-36. **[PIPELINE-NR5-DEFECT-HANDOFF-TRUTH]** NEXT
+37. **[PIPELINE-NR5-DEFECT-HANDOFF-TRUTH]** NEXT
 
     Prevent a verifier wave that halts as DEFECT from regenerating indicator-only green commit metadata. Canonical alias: `[PIPELINE-NR5-DEFECT-HANDOFF-TRUTH-2026-06-30]` in NOW.
 
-37. **[ORCHESTRATOR-SWITCH-DRIFT-FIX]** NEXT
+38. **[ORCHESTRATOR-SWITCH-DRIFT-FIX]** NEXT
 
     Keep ordinary orchestrator selection bus-local/effective unless explicit config-edit authority is requested. Canonical alias: `[ORCHESTRATOR-SWITCH-DRIFT-FIX-2026-06-30]` in NOW.
 
-38. **[PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX]** NEXT
+39. **[PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX]** NEXT
 
     Retain a live L4 authorization anchor until the pre-commit receipt and commit path complete. Canonical alias: `[PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX-2026-06-30]` in NOW.
 
-39. **[GENERIC-NEXT-ROUTE-RECONCILIATION]** NEXT
+40. **[GENERIC-NEXT-ROUTE-RECONCILIATION]** NEXT
 
     Reconcile or retire stale generic NEXT routing/package records so no old observer, red-team, or autonomous-queue record can override the selected candidate.
 
-40. **[RECEIPT-COMMIT-ROBUSTNESS-BOUNDED-SUCCESSORS]** NEXT
+41. **[RECEIPT-COMMIT-ROBUSTNESS-BOUNDED-SUCCESSORS]** NEXT
 
     Create one bounded successor per coupled surface, never one monolith. Detached-child/monitor cleanup is owned by P0T3, private-attribute post-fix durability by P0T2, terminal identity/QUESTION journaling by P0T1, and INV-2 false-green prevention by P0T4; do not duplicate those obligations here. This row retains every other successor/non-blocker: blocking-verdict promotion; configured reviewer identity where P5 does not close it; supervisor-success validation before authority; malformed/non-object receipt totality; collision-safe receipt names; remaining Phase B resume-binding cases outside P0T1-P0T4; mutating-implementer replay; and non-object checkpoint handling. Source: `reports/deferred/non_blocking/receipt-commit-robustness-from-codexflip-2026-07-11.md`. Founder QUESTION release remains separately policy-bound below. P0L findings 15-17 and P0R findings 11-25 remain deferred/nonblocking and cannot hold landing.
 
-41. **[DIALECTIC-CONTINUATION-DELIVERY-AND-LINEAGE]** NEXT
+42. **[DIALECTIC-CONTINUATION-DELIVERY-AND-LINEAGE]** NEXT
 
     Keep continuation delivery/lineage separate from pbnogo and from founder QUESTION policy until exact overlap is proved.
 
-42. **[PR-LIVE-CENSUS-RECONCILIATION]** NEXT
+43. **[PR-LIVE-CENSUS-RECONCILIATION]** NEXT
 
     Refresh the PR/thread census from live remote state before action. The July 13 seven-PR/eight-thread values in STATUS and the old queue are stale planning evidence, not current terminal authority.
 
-43. **[PR-DISPOSITION-EXECUTION]** NEXT
+44. **[PR-DISPOSITION-EXECUTION]** NEXT
 
     After the fresh census, execute only evidence-backed supersession, preservation, rebuild, notification, review-thread resolution, and terminal actions through commit executor.
 
-44. **[NEVER-BEHIND-FLEET-AUTHORITY]** NEXT
+45. **[NEVER-BEHIND-FLEET-AUTHORITY]** NEXT
 
     Build a fresh-current successor preserving unrelated WIP and ignored-file collision safety, reporting holds precisely, and requiring every terminal-action worktree to be at `behind(origin/dev)=0`. Current observed debt is primary HEAD 10 behind and local `dev` 113 behind.
 
-45. **[NIGHTLY-ADMISSION-INTEGRATION]** NEXT
+46. **[NIGHTLY-ADMISSION-INTEGRATION]** NEXT
 
     Reconcile capacity-one Node admission and safe flock leases through the pipeline.
 
-46. **[NIGHTLY-DEADLINE-TELEMETRY-PROOF]** NEXT
+47. **[NIGHTLY-DEADLINE-TELEMETRY-PROOF]** NEXT
 
     Make nested deadlines coherent, record capacity lifecycle telemetry, and require fresh exact-merge proof for both slow selectors. Historical green counts do not close the later `1 failed, 840 passed in 2402.09s` failure.
 
-47. **[PIPELINE-AGENT-MODEL-EFFORT-BUILDER]** NEXT
+48. **[PIPELINE-AGENT-MODEL-EFFORT-BUILDER]** NEXT
 
     Add builder flags for model and reasoning effort that atomically update both authoritative agent-default surfaces and verify resulting argv/config identity. Source: `HANDOFF_FOR_NEXT_LLM_2026-07-27.md`, DEBT-3.
 
-48. **[QUESTION-CHECKPOINT-AND-INV2-AUTHORITY]** NEXT
+49. **[QUESTION-CHECKPOINT-AND-INV2-AUTHORITY]** NEXT
 
     Repair the private-attribute QUESTION checkpoint path that can resume to commit-ready without founder input; retain INV-2 fail-closed evidence. P0T1, P0T2, or P0T4 may close an exact alias only with proof; otherwise this row remains open. Source: `reports/deferred/blocking/control-surface-question-checkpoint-and-inv2-2026-07-25.md`.
 
-49. **[CODEX-EFFECTIVE-MODEL-CATALOG-AUTHORITY]** NEXT
+50. **[CODEX-EFFECTIVE-MODEL-CATALOG-AUTHORITY]** NEXT
 
     Reconcile raw vendor cache auditing with the sanitized effective catalog used by the startup guard. Source: `reports/deferred/blocking/codex-startup-effective-model-catalog-audit-drift-2026-07-25.md`.
 
-50. **[PIPELINE-FIX-62C]** NEXT
+51. **[PIPELINE-FIX-62C]** NEXT
 
     Re-adjudicate and rebuild the capacity-review replay wave from current predecessor truth; do not launch the stale ignored July 24 config. Source: `reports/deferred/blocking/fix62c-capacity-replay-no-go-2026-07-25.md`.
 
-51. **[LEGACY-N3-LOCAL-EVIDENCE-ADJUDICATION]** NEXT
+52. **[LEGACY-N3-LOCAL-EVIDENCE-ADJUDICATION]** NEXT
 
     Adjudicate every still-open local/NO_GO/recovery/queued N3 row in the legacy NEXT queue before relaunch: bridge-doc closeout, JS binary decoder, source prerequisite, marker/debt syncs, kernel-driver implementation, residual host-loop follow-up, boundary design, post-continuation NO_GO, and Stage0 marker-truth recovery. Preserve the exact historical rows in the legacy NEXT section; close or promote each with current-code evidence rather than importing the old queue wholesale.
 
-52. **[MU-COINDUCTION-PRODUCTION-PROOF]** NEXT
+53. **[MU-COINDUCTION-PRODUCTION-PROOF]** NEXT
 
     Prove production productivity, bisimulation, scheduler, stream-runtime, and self-hosting obligations. Foundation merge history is retained below as history, not completion of this action.
 
-53. **[MU-FIXPOINT-PRODUCTION-PROOF]** NEXT
+54. **[MU-FIXPOINT-PRODUCTION-PROOF]** NEXT
 
     Prove evaluator self-application, fixed-point behavior, and meta-circular closure. Foundation merge history is retained below as history, not completion of this action.
 
-54. **[MU-EVIDENCE-RESIDUES]** NEXT
+55. **[MU-EVIDENCE-RESIDUES]** NEXT
 
     Close or explicitly disposition Stage5 ordinal-to-binary-N and Stage0 bool/str evidence gaps, plus retained Coinduction packet-status and Fixpoint gate-phrase doc findings.
 
-55. **[MU-OPTIMIZATION-LAST]** NEXT
+56. **[MU-OPTIMIZATION-LAST]** NEXT
 
     Execute only after every authorized structural migration and production-proof action above has completed; optimize Mu projections without introducing host shortcuts.
 
-Parallelism rule: only code-disjoint waves with unique worktrees, buses, bridge configs, ports, and monitor sessions may run concurrently. Any shared `executor_dispatch.py`, `executor_config.json`, `bridge_*`, `recovery_gate.py`, `commit_executor.py`, `TASKS.md`, PR terminal action, or merge authority serializes behind the active owner. P0IC2 → P0IA → P0IM → P0IB → P0T1 → P0T2 → P0T3 → P0T4 → P0R2 → P1 → P2 → P3 → P4 → P5 is strictly serial. P0R2 remains code-disjoint from the P0T runtime/checker packets but does not launch before P0T4 lands.
+Parallelism rule: only code-disjoint waves with unique worktrees, buses, bridge configs, ports, and monitor sessions may run concurrently. Any shared `executor_dispatch.py`, `executor_config.json`, `bridge_*`, `recovery_gate.py`, `commit_executor.py`, `TASKS.md`, PR terminal action, or merge authority serializes behind the active owner. P0IA → P0IM → P0IB → P0T1 → P0T2 → P0T3 → P0T4 → P0R2 → P1 → P2 → P3 → P4 → P5 is strictly serial. P0R2 remains code-disjoint from the P0T runtime/checker packets but does not launch before P0T4 lands.
 
 ## NON-LAUNCHABLE PROGRAM GOVERNANCE AND HISTORY
 
@@ -946,6 +950,8 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-08-21, roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21): **ROLES-ALL-CODEX-PR1219-P0IC0-THEATER-ALLOWLIST-EXPIRY-RENEWAL — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21_2026-08-21.md`. evidence_command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21 --output reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21.json`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21_2026-08-21.md. (2) Commit handoff carries 4 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface. scope_refs: `TASKS.md`, `mu/tools/checks/theater_allowlist.json`, `reports/control_plane/roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21_2026-08-21.md`, `reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21.json`.. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21 with 4 wave-owned file(s), bridge rounds=2, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21 --output reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 - Tracker sync note (2026-08-21, roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21): **ROLES-ALL-CODEX-PR1219-P0IC1-LINKED-WORKTREE-REPO-IDENTITY — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21_2026-08-21.md`. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_meta_bridge_supervisor.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21_2026-08-21.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_meta_bridge_supervisor.py`, `mu/tools/agents/meta_bridge_supervisor.py`, `reports/control_plane/roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21_2026-08-21.md`, `reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21.json`.. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21 with 5 wave-owned file(s), bridge rounds=1, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21 --output reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic1-linked-worktree-repo-identity-2026-08-21.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 - Tracker sync note (2026-08-21, roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21): **ROLES-ALL-CODEX-PR1219-P0IC2-COMMIT-GENERATED-GOVERNANCE-AUTHORITY — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21_2026-08-21.md`. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21_2026-08-21.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_commit_executor_receipt.py`, `mu/tools/executors/commit_executor.py`, `reports/control_plane/roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21_2026-08-21.md`, `reports/control_plane/roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-20_2026-08-21.md`, `reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21.json`.. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21 with 6 wave-owned file(s), bridge rounds=3, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21 --output reports/l4_wave_indicators/roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+- Tracker sync note (2026-08-21, roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20): **ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20_2026-08-20.md`. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_growth_caps.py mu/tests/tools/test_candidate_authority.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20_2026-08-20.md. (2) Final pytest gate covered 10 pytest selector(s) across 3 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_candidate_authority.py`, `mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tools/executors/candidate_authority.py`, `mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_b_executor.py`, `reports/control_plane/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20_2026-08-20.md`, `reports/l4_wave_indicators/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20.json`, `mu/tests/docs/test_growth_caps.py`. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20 with 9 wave-owned file(s), bridge rounds=4, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20 --output reports/l4_wave_indicators/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+
 - Tracker sync follow-up (2026-08-21T08:19:40Z, roles-all-codex-pr1219-p0ic2-commit-generated-governance-authority-2026-08-21): same-wave follow-up commit touched tracker-relevant file(s) without phase/task-state change: mu/tools/executors/commit_executor.py.
 
 

@@ -20,6 +20,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,6 +31,7 @@ from mu.tests.tools.module_loader import load_module
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
 
 pb_mod = load_module("phase_b_executor", _EXECUTORS_DIR / "phase_b_executor.py")
+candidate_authority_mod = sys.modules["candidate_authority"]
 pa_mod = load_module("phase_a_executor", _EXECUTORS_DIR / "phase_a_executor.py")
 impl_mod = load_module("phase_b_implementer", _EXECUTORS_DIR / "phase_b_implementer.py")
 commit_mod = load_module("commit_executor", _EXECUTORS_DIR / "commit_executor.py")
@@ -93,8 +95,9 @@ def isolate_legacy_run_phase_b_pre_review_boundaries(request):
         wave_class,
         step_prefix,
         context,
+        candidate_authority_required=False,
     ):
-        del wave_id, wave_class
+        del wave_id, wave_class, candidate_authority_required
         prepared = list(dict.fromkeys(candidate_files))
         if plan_path and not plan_path.startswith("<") and plan_path not in prepared:
             prepared.append(plan_path)
@@ -170,6 +173,27 @@ def _write_canonical_tasks(repo: Path, wave_id: str) -> None:
         "---\n",
         encoding="utf-8",
     )
+
+
+def _write_pre_review_plan(repo: Path, wave_id: str) -> tuple[str, str]:
+    plan_path = "reports/control_plane/plan.md"
+    indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+    (repo / "reports" / "control_plane").mkdir(parents=True, exist_ok=True)
+    (repo / plan_path).write_text(
+        "# Plan\n"
+        f"Wave ID: {wave_id}\n"
+        "Phase-A-Lock: LOCKED\n"
+        "Task: [PIPELINE-RECOVERY]\n"
+        "Class: L4_ENABLER\n\n"
+        "## Scope\n\n"
+        "This lock package may stage exactly these same-wave files:\n\n"
+        "- `TASKS.md`\n"
+        "- `f.py`\n"
+        f"- `{plan_path}`\n"
+        f"- `{indicator_path}`\n",
+        encoding="utf-8",
+    )
+    return plan_path, indicator_path
 
 
 def _run_phase_b_public_target_gate_path(
@@ -4330,6 +4354,8 @@ class TestMaintenanceTrackerMetadataPropagation:
             f"FOUNDER_OVERRIDE:{wave_id}\n",
             encoding="utf-8",
         )
+        (repo / "mu" / "tools").mkdir(parents=True)
+        (repo / "mu" / "tools" / "f.py").write_text("print('candidate')\n", encoding="utf-8")
         mock_impl = _make_mock_impl()
         routing = {
             **_VALID_ROUTING_RECORD,
@@ -4925,7 +4951,7 @@ class TestPhaseBHardFailPagerEvents:
                     pb_mod._phase_b_hard_fail_transition_key(  # ANTICHEAT_OK: testing internal executor functions
                         repo_root,
                         state=kwargs["state"],
-                        changed_files=["f.py", "reports/control_plane/plan.md"],
+                        changed_files=["mu/tools/f.py", "reports/control_plane/plan.md"],
                         reentry=False,
                     )
                 )
@@ -4948,8 +4974,8 @@ class TestPhaseBHardFailPagerEvents:
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
              patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
-             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
-             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tools/f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tools/f.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_request_changes), \
              patch.object(pb_mod, "_read_bridge_render", return_value="bridge findings text"), \
@@ -6245,6 +6271,188 @@ class TestBridgeLoopReinvokesImplementer:
         # Step 5b adds plan_path to changed_files before staging
         assert mock_stage.call_args_list[0].args[1] == ["TASKS.md", "f.py", "reports/control_plane/plan.md"]
         assert mock_stage.call_args_list[1].args[1] == ["TASKS.md", "f.py", "reports/control_plane/plan.md"]
+
+    def test_sdk_candidate_authority_failure_blocks_sdk_review(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        wave_id = "phase-b-sdk-authority-block-2026-08-21"
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Class: L4_ENABLER\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text("# TASKS\n", encoding="utf-8")
+        mock_impl = _make_mock_impl()
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md"]), \
+             patch.object(
+                 pb_mod,
+                 "prepare_candidate_authority_if_configured",
+                 return_value=(None, "stale SDK authority"),
+             ), \
+             patch.object(pb_mod, "run_sdk_agents") as mock_sdk, \
+             patch.object(pb_mod, "run_bridge_review") as mock_bridge:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "sdk_candidate_authority"
+        mock_sdk.assert_not_called()
+        mock_bridge.assert_not_called()
+
+    def test_bridge_candidate_authority_failure_blocks_reviewer_started_event(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = "phase-b-bridge-authority-block-2026-08-21"
+        plan_path, indicator_path = _write_pre_review_plan(repo, wave_id)
+        _write_canonical_tasks(repo, wave_id)
+        mock_impl = _make_mock_impl()
+        pager_events: list[dict[str, Any]] = []
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md", "f.py", plan_path, indicator_path]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md", "f.py", plan_path, indicator_path]), \
+             patch.object(pb_mod, "_unstage_out_of_exact_scope", return_value=(True, "")), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_tasks_has_canonical_wave_tracker_note", return_value=True), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", return_value=(indicator_path, None)), \
+             patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope", return_value=(True, None)), \
+             patch.object(
+                 pb_mod,
+                 "prepare_candidate_authority_if_configured",
+                 side_effect=[("sdk-receipt", None), (None, "stale bridge authority")],
+             ), \
+             patch.object(pb_mod, "_emit_phase_b_event", side_effect=lambda *a, **kw: pager_events.append(kw) or {}), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}) as mock_sdk, \
+             patch.object(pb_mod, "run_bridge_review") as mock_bridge:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "bridge_pre_review_candidate_authority"
+        mock_sdk.assert_called_once()
+        mock_bridge.assert_not_called()
+        assert "phase_b_reviewer_started" not in [
+            event.get("event_type") for event in pager_events
+        ]
+
+    @pytest.mark.parametrize(
+        "step_prefix",
+        [
+            "bridge_pre_review",
+            "private_attr_bridge_review",
+            "reentry_bridge_pre_review",
+        ],
+    )
+    def test_shared_pre_review_hook_blocks_all_bridge_reviewer_contexts(
+        self,
+        tmp_path,
+        real_pre_review_package,
+        step_prefix,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = f"{step_prefix.replace('_', '-')}-authority-block-2026-08-21"
+        plan_path, indicator_path = _write_pre_review_plan(repo, wave_id)
+        _write_canonical_tasks(repo, wave_id)
+
+        with patch.object(pb_mod, "_unstage_out_of_exact_scope", return_value=(True, "")), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_tasks_has_canonical_wave_tracker_note", return_value=True), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", return_value=(indicator_path, None)), \
+             patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope", return_value=(True, None)), \
+             patch.object(
+                 pb_mod,
+                 "prepare_candidate_authority_if_configured",
+                 return_value=(None, "stale candidate receipt"),
+             ):
+            _prepared, error = pb_mod._prepare_phase_b_pre_review_package(  # ANTICHEAT_OK: focused unit test for shared pre-review authority hook
+                repo,
+                candidate_files=["TASKS.md", "f.py", plan_path, indicator_path],
+                exact_stage_scope_files={"TASKS.md", "f.py", plan_path, indicator_path},
+                plan_path=plan_path,
+                wave_id=wave_id,
+                wave_class="L4_ENABLER",
+                step_prefix=step_prefix,
+                context=f"{step_prefix} context",
+                candidate_authority_required=True,
+            )
+
+        assert error is not None
+        assert error["step"] == f"{step_prefix}_candidate_authority"
+        assert "stale candidate receipt" in error["stderr"]
+
+    def test_candidate_authority_helper_targets_active_candidate_repo(self, tmp_path):
+        repo = tmp_path / "candidate-lane"
+        repo.mkdir()
+        wave_id = "phase-b-candidate-lane-target-2026-08-21"
+        spec_path = repo / ".agent_bus" / "meta" / "candidate_authority" / f"{wave_id}.spec.json"
+        spec_path.parent.mkdir(parents=True)
+        spec_path.write_text("{}", encoding="utf-8")
+        captured: dict[str, Any] = {}
+
+        class DummySpec:
+            def to_dict(self):
+                return {
+                    "wave_id": wave_id,
+                    "comparison_commit": "0" * 40,
+                    "candidate_allowlist": ["TASKS.md"],
+                    "phase": "phase_b",
+                    "review_round": "old",
+                }
+
+        def prepare_side(repo_root, spec, *, bus_dir=None):
+            captured["repo_root"] = Path(repo_root)
+            captured["bus_dir"] = bus_dir
+            captured["phase"] = spec.phase
+            captured["review_round"] = spec.review_round
+            return {"receipt_path": str(repo / ".agent_bus" / "receipt.json")}
+
+        with patch.object(candidate_authority_mod, "load_authority_spec", return_value=DummySpec()), \
+             patch.object(candidate_authority_mod, "prepare_candidate_authority", side_effect=prepare_side), \
+             patch.object(candidate_authority_mod, "verify_current_receipt", return_value={"status": "current"}):
+            receipt_path, error = pb_mod.prepare_candidate_authority_if_configured(
+                repo,
+                wave_id=wave_id,
+                phase="phase_b",
+                review_round="bridge_pre_review",
+                context="bridge review",
+            )
+
+        assert error is None
+        assert receipt_path.endswith("receipt.json")
+        assert captured == {
+            "repo_root": repo,
+            "bus_dir": None,
+            "phase": "phase_b",
+            "review_round": "bridge_pre_review",
+        }
+
+    def test_candidate_authority_helper_fails_closed_when_spec_missing(self, tmp_path):
+        repo = tmp_path / "candidate-lane"
+        repo.mkdir()
+
+        receipt_path, error = pb_mod.prepare_candidate_authority_if_configured(
+            repo,
+            wave_id="definitely-no-such-authority-spec-2026-08-21",
+            phase="phase_b",
+            review_round="bridge_pre_review",
+            context="bridge review",
+        )
+
+        assert receipt_path is None
+        assert error is not None
+        assert "Candidate authority spec is required before bridge review" in error
+        assert "definitely-no-such-authority-spec-2026-08-21.spec.json" in error
 
     def test_bridge_rounds_prepare_same_wave_indicator_before_each_review(
         self,

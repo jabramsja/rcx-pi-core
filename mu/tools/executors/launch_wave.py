@@ -71,6 +71,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import shlex
 import subprocess
 import sys
@@ -92,6 +93,7 @@ import executor_common as _ec  # noqa: E402,I001  (path insert must precede impo
 import tracker_sync_note as _tsn  # noqa: E402
 import phase_a_executor as _pa  # noqa: E402
 import executor_dispatch as _ed  # noqa: E402
+import candidate_authority as _ca  # noqa: E402
 
 
 def _load_line_ref_checker() -> Any:
@@ -219,6 +221,13 @@ class WaveConfig:
     pager_route: str = ""
     max_turns: int | None = None
 
+    # Optional post-P0IA candidate-authority contract. Empty/default values keep
+    # the historical simple launcher configs valid.
+    comparison_commit: str = ""
+    candidate_allowlist: list[str] = field(default_factory=list)
+    pre_review_authority: bool = False
+    precommit_inventory: bool = False
+
     # Packet body
     scope_summary: str = ""
     scope_items: list[str] = field(default_factory=list)
@@ -260,6 +269,7 @@ class WaveConfig:
         self.implementer_agent = self.implementer_agent.strip()
         self.reviewer_agent = self.reviewer_agent.strip()
         self.pager_route = self.pager_route.strip()
+        self.comparison_commit = str(self.comparison_commit or "").strip()
         self.request_for_agent = self.request_for_agent.strip()
         self.request_for_claude = self.request_for_claude.strip()
         if not self.founder_override:
@@ -282,8 +292,23 @@ class WaveConfig:
         """Build a WaveConfig from a plain dict, rejecting unknown keys."""
         if not isinstance(data, dict):
             raise LaunchWaveError("wave-config must be a JSON object")
+        aliases = {
+            "comparison-commit": "comparison_commit",
+            "candidate-allowlist": "candidate_allowlist",
+            "pre-review-authority": "pre_review_authority",
+            "precommit-inventory": "precommit_inventory",
+        }
+        normalized_data = dict(data)
+        for alias, canonical in aliases.items():
+            if alias not in normalized_data:
+                continue
+            if canonical in normalized_data:
+                raise LaunchWaveError(
+                    f"wave-config cannot contain both {alias!r} and {canonical!r}"
+                )
+            normalized_data[canonical] = normalized_data.pop(alias)
         known = {f.name for f in cls.__dataclass_fields__.values()}
-        unknown = sorted(set(data) - known)
+        unknown = sorted(set(normalized_data) - known)
         if unknown:
             raise LaunchWaveError(f"wave-config has unknown key(s): {unknown}")
         missing = sorted(
@@ -291,11 +316,19 @@ class WaveConfig:
             for name, f in cls.__dataclass_fields__.items()
             if f.default is MISSING
             and f.default_factory is MISSING  # type: ignore[misc]
-            and name not in data
+            and name not in normalized_data
         )
         if missing:
             raise LaunchWaveError(f"wave-config missing required key(s): {missing}")
-        return cls(**data)
+        return cls(**normalized_data)
+
+    def candidate_authority_enabled(self) -> bool:
+        return bool(
+            self.comparison_commit
+            or self.candidate_allowlist
+            or self.pre_review_authority
+            or self.precommit_inventory
+        )
 
     def validate(
         self,
@@ -359,6 +392,58 @@ class WaveConfig:
                     f"max_turns must be <= {_MAX_SAFE_MAX_TURNS} "
                     f"(got {self.max_turns!r})"
                 )
+        if not isinstance(self.pre_review_authority, bool):
+            errors.append("pre_review_authority must be a boolean")
+        if not isinstance(self.precommit_inventory, bool):
+            errors.append("precommit_inventory must be a boolean")
+        if self.candidate_allowlist and not isinstance(self.candidate_allowlist, list):
+            errors.append("candidate_allowlist must be a list of repo-relative paths")
+        authority_enabled = self.candidate_authority_enabled()
+        normalized_allowlist: tuple[str, ...] = ()
+        if authority_enabled:
+            if not self.comparison_commit:
+                errors.append("comparison_commit is required when candidate authority is configured")
+            if not self.candidate_allowlist:
+                errors.append("candidate_allowlist is required when candidate authority is configured")
+            else:
+                try:
+                    normalized_allowlist = _ca.normalize_allowlist(self.candidate_allowlist)
+                except _ca.CandidateAuthorityError as exc:
+                    errors.append(f"invalid candidate_allowlist: {exc}")
+            if repo_root is not None and self.comparison_commit:
+                try:
+                    _ca.validate_comparison_commit(Path(repo_root), self.comparison_commit)
+                except _ca.CandidateAuthorityError as exc:
+                    errors.append(f"invalid comparison_commit: {exc}")
+        if self.pre_review_authority and normalized_allowlist:
+            allowset = set(normalized_allowlist)
+            required_paths = ["TASKS.md", self.tracked_packet]
+            if self.indicator_artifact_ref:
+                required_paths.append(self.indicator_artifact_ref)
+            else:
+                errors.append("indicator_artifact_ref is required for pre_review_authority")
+            if not self.indicator_collection_command:
+                errors.append("indicator_collection_command is required for pre_review_authority")
+            for required_path in required_paths:
+                try:
+                    normalized_required = _ca._normalize_repo_path(required_path)
+                except _ca.CandidateAuthorityError as exc:
+                    errors.append(f"invalid generated-governance path: {exc}")
+                    continue
+                if normalized_required not in allowset:
+                    errors.append(
+                        "candidate_allowlist must include generated governance path "
+                        f"{normalized_required!r} for pre_review_authority"
+                    )
+            if self.indicator_artifact_ref and self.indicator_collection_command:
+                try:
+                    _ca.validate_indicator_declaration(
+                        wave_id=self.wave_id,
+                        indicator_artifact_ref=self.indicator_artifact_ref,
+                        indicator_collection_command=self.indicator_collection_command,
+                    )
+                except _ca.CandidateAuthorityError as exc:
+                    errors.append(f"invalid indicator declaration: {exc}")
         return errors
 
 
@@ -824,7 +909,41 @@ def setup_routing_record(
         raise LaunchWaveError(
             "routing-record build failed: " + "; ".join(errors)
         )
+    if config.candidate_authority_enabled():
+        spec_path = _ca.authority_spec_path(
+            Path(repo_root),
+            bus_dir=bus_dir,
+            wave_id=config.wave_id,
+        )
+        record["candidate_authority_required"] = bool(config.pre_review_authority)
+        record["candidate_authority"] = {
+            "required": bool(config.pre_review_authority),
+            "precommit_inventory": bool(config.precommit_inventory),
+            "spec_path": str(spec_path),
+        }
+        routing_path = _ec.routing_record_path(Path(repo_root), bus_dir)
+        routing_path.write_text(
+            json.dumps(record, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     return record
+
+
+def setup_candidate_authority_spec(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None = None,
+) -> Path | None:
+    """Write the ignored bus-local candidate-authority spec when configured."""
+    if not config.candidate_authority_enabled():
+        return None
+    spec = _ca.build_spec_from_wave_config(
+        config,
+        phase="phase_b",
+        review_round="prepare-review",
+    )
+    return _ca.write_authority_spec(repo_root, spec, bus_dir=bus_dir)
 
 
 def setup_bridge_config(
@@ -1245,6 +1364,71 @@ def maybe_launch_dispatcher(
     }
 
 
+def _bridge_db_path(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
+    if bus_dir is None:
+        return repo_root / ".agent_bus" / "bridge.db"
+    raw = Path(bus_dir)
+    if raw.is_absolute():
+        return raw / "bridge.db"
+    return repo_root / raw / "bridge.db"
+
+
+def _active_reviewer_jobs(repo_root: Path, bus_dir: str | Path | None = None) -> list[str]:
+    db_path = _bridge_db_path(repo_root, bus_dir)
+    if not db_path.exists():
+        return []
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            rows = conn.execute(
+                "SELECT job_id FROM jobs WHERE status = 'REVIEWER_RUNNING'"
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        raise LaunchWaveError(
+            f"cannot inspect bridge reviewer state at {db_path}: {exc}"
+        ) from exc
+    return sorted(str(row[0]) for row in rows if row and row[0])
+
+
+def prepare_review_authority(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None = None,
+    phase: str = "phase_b",
+    review_round: str = "prepare-review",
+) -> dict[str, Any]:
+    """Bounded recovery entry point: prepare authority without launching."""
+    errors = config.validate(repo_root, bus_dir=bus_dir)
+    if errors:
+        raise LaunchWaveError("invalid wave-config: " + "; ".join(errors))
+    if not config.pre_review_authority:
+        raise LaunchWaveError(
+            "prepare-review requires pre_review_authority=true in the wave-config"
+        )
+    active_jobs = _active_reviewer_jobs(repo_root, bus_dir)
+    if active_jobs:
+        raise LaunchWaveError(
+            "prepare-review refused because reviewer job(s) are already active: "
+            + ", ".join(active_jobs)
+        )
+    spec = _ca.build_spec_from_wave_config(
+        config,
+        phase=phase,
+        review_round=review_round,
+    )
+    spec_path = _ca.write_authority_spec(repo_root, spec, bus_dir=bus_dir)
+    receipt = _ca.prepare_candidate_authority(repo_root, spec, bus_dir=bus_dir)
+    return {
+        "prepared": True,
+        "authority_spec_path": str(spec_path),
+        "receipt_path": receipt.get("receipt_path", ""),
+        "receipt": receipt,
+    }
+
+
 def build_tracker_fields(config: WaveConfig) -> Any:
     """Build the typed tracker-note fields from the config."""
     return _tsn.TrackerSyncNoteFields(
@@ -1286,6 +1470,7 @@ class WaveSetupResult:
     tracked_packet: str
     tracker_note_written: bool
     routing_record_path: str
+    candidate_authority_spec_path: str | None
     bridge_config_path: str | None
     precondition_ok: bool
     guards_ok: bool
@@ -1298,6 +1483,7 @@ class WaveSetupResult:
             "tracked_packet": self.tracked_packet,
             "tracker_note_written": self.tracker_note_written,
             "routing_record_path": self.routing_record_path,
+            "candidate_authority_spec_path": self.candidate_authority_spec_path,
             "bridge_config_path": self.bridge_config_path,
             "precondition_ok": self.precondition_ok,
             "guards_ok": self.guards_ok,
@@ -1329,6 +1515,11 @@ def run_wave_setup(
     packet_path = setup_packet(repo_root, config)
     setup_tracker_note(repo_root, config)
     setup_routing_record(repo_root, config, bus_dir=bus_dir)
+    candidate_authority_spec = setup_candidate_authority_spec(
+        repo_root,
+        config,
+        bus_dir=bus_dir,
+    )
     bridge_config_path = setup_bridge_config(repo_root, bus_dir=bus_dir)
     max_turns_result = setup_bridge_max_turns_override(
         repo_root, config, bus_dir=bus_dir
@@ -1360,6 +1551,9 @@ def run_wave_setup(
         tracked_packet=config.tracked_packet,
         tracker_note_written=True,
         routing_record_path=str(routing_path),
+        candidate_authority_spec_path=(
+            str(candidate_authority_spec) if candidate_authority_spec is not None else None
+        ),
         bridge_config_path=(
             str(bridge_config_path) if bridge_config_path is not None else None
         ),
@@ -1419,6 +1613,24 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also launch the dispatcher after setup (default: off).",
     )
+    parser.add_argument(
+        "--prepare-review",
+        action="store_true",
+        help=(
+            "Prepare pre-review candidate authority only; refuses active reviewers "
+            "and never launches the dispatcher."
+        ),
+    )
+    parser.add_argument(
+        "--review-phase",
+        default="phase_b",
+        help="Authority receipt phase label for --prepare-review.",
+    )
+    parser.add_argument(
+        "--review-round",
+        default="prepare-review",
+        help="Authority receipt round label for --prepare-review.",
+    )
     args = parser.parse_args(argv)
 
     repo_root = (
@@ -1428,13 +1640,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     config = load_wave_config(Path(args.config))
     try:
+        if args.prepare_review:
+            if args.launch:
+                raise LaunchWaveError("--prepare-review cannot be combined with --launch")
+            result = prepare_review_authority(
+                repo_root,
+                config,
+                bus_dir=args.bus_dir,
+                phase=args.review_phase,
+                review_round=args.review_round,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
         result = run_wave_setup(
             repo_root, config, launch=args.launch, bus_dir=args.bus_dir
-        )
+        ).to_dict()
     except LaunchWaveError as exc:
         print(f"launch_wave: {exc}", file=sys.stderr)
         return 1
-    print(json.dumps(result.to_dict(), indent=2))
+    print(json.dumps(result, indent=2))
     return 0
 
 
