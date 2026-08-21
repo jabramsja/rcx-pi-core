@@ -5013,6 +5013,37 @@ def _phase_b_target_branch_for_current_worktree(
     return observed_branch
 
 
+def _launch_target_branch_authority_from_routing_record(
+    routing_record: dict[str, Any],
+    *,
+    wave_id: str,
+) -> tuple[str, str, str | None]:
+    metadata = _candidate_authority_metadata_from_routing_record(routing_record)
+    authority = (
+        metadata.get("target_branch_authority")
+        if isinstance(metadata, dict)
+        else None
+    )
+    if authority is None:
+        return "", "", None
+    if not isinstance(authority, dict):
+        return "", "", "launch target-branch authority must be a JSON object"
+    target_branch = str(authority.get("target_branch") or "").strip()
+    branch_prefix = str(authority.get("branch_prefix") or "").strip()
+    if not target_branch or not branch_prefix:
+        return "", "", "launch target-branch authority is missing target_branch or branch_prefix"
+    if _wave_bound_target_branch(
+        target_branch,
+        wave_id=wave_id,
+        branch_prefix=branch_prefix,
+    ) != target_branch:
+        return "", "", (
+            "launch target-branch authority is not wave-bound: "
+            f"{target_branch!r}"
+        )
+    return branch_prefix, target_branch, None
+
+
 def _phase_b_tracker_scope_refs(changed_files: list[str], indicator_path: str, *, limit: int = 32) -> str:
     refs: list[str] = []
     for raw_path in [*changed_files, indicator_path]:
@@ -5718,6 +5749,13 @@ def _candidate_authority_required_from_routing_record(
     return required if isinstance(required, bool) else False
 
 
+def _candidate_authority_metadata_from_routing_record(
+    routing_record: dict[str, Any],
+) -> dict[str, Any] | None:
+    metadata = routing_record.get("candidate_authority")
+    return metadata if isinstance(metadata, dict) else None
+
+
 def _prepare_candidate_authority_if_configured(
     repo_root: Path,
     *,
@@ -5726,9 +5764,21 @@ def _prepare_candidate_authority_if_configured(
     review_round: str,
     context: str,
     required: bool = True,
+    trusted_metadata: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None]:
     """Run launch-owned candidate authority before reviewer entry."""
     spec_path = _candidate_authority_spec_path(repo_root, wave_id=wave_id)
+    if trusted_metadata is not None:
+        trusted_spec_path = str(trusted_metadata.get("spec_path") or "").strip()
+        if trusted_spec_path:
+            spec_path = Path(trusted_spec_path)
+            if not spec_path.is_absolute():
+                spec_path = repo_root / spec_path
+        elif required:
+            return None, (
+                f"Candidate authority launch metadata is required before {context}: "
+                "missing spec_path"
+            )
     if not spec_path.exists():
         if not required:
             return None, None
@@ -5738,6 +5788,23 @@ def _prepare_candidate_authority_if_configured(
         )
     try:
         base_spec = _candidate_authority.load_authority_spec(spec_path)
+        trusted_identity = (
+            trusted_metadata.get("spec_identity")
+            if isinstance(trusted_metadata, dict)
+            else None
+        )
+        if trusted_identity is None:
+            if required:
+                return None, (
+                    "Candidate authority launch-bound spec identity is required "
+                    f"before {context}"
+                )
+        else:
+            _candidate_authority.verify_authority_spec_identity(
+                repo_root,
+                base_spec,
+                trusted_identity,
+            )
         spec = _candidate_authority.CandidateAuthoritySpec.from_mapping(
             {
                 **base_spec.to_dict(),
@@ -5756,7 +5823,13 @@ def _prepare_candidate_authority_if_configured(
         )
     receipt_path = str(receipt.get("receipt_path") or "")
     try:
-        _candidate_authority.verify_current_receipt(repo_root, Path(receipt_path))
+        _candidate_authority.verify_current_receipt(
+            repo_root,
+            Path(receipt_path),
+            trusted_spec=spec,
+            phase=phase,
+            review_round=review_round,
+        )
     except _candidate_authority.CandidateAuthorityError as exc:
         return None, (
             f"Candidate authority receipt verification failed before {context}: {exc}"
@@ -5772,6 +5845,7 @@ def prepare_candidate_authority_if_configured(
     review_round: str,
     context: str,
     required: bool = True,
+    trusted_metadata: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None]:
     """Public review-entry seam for candidate authority refresh."""
     return _prepare_candidate_authority_if_configured(
@@ -5781,7 +5855,57 @@ def prepare_candidate_authority_if_configured(
         review_round=review_round,
         context=context,
         required=required,
+        trusted_metadata=trusted_metadata,
     )
+
+
+def _guard_candidate_authority_scope_if_configured(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    context: str,
+    required: bool,
+    trusted_metadata: dict[str, Any] | None,
+) -> str | None:
+    spec_path = _candidate_authority_spec_path(repo_root, wave_id=wave_id)
+    if trusted_metadata is not None:
+        trusted_spec_path = str(trusted_metadata.get("spec_path") or "").strip()
+        if trusted_spec_path:
+            spec_path = Path(trusted_spec_path)
+            if not spec_path.is_absolute():
+                spec_path = repo_root / spec_path
+        elif required:
+            return (
+                f"Candidate authority launch metadata is required before {context}: "
+                "missing spec_path"
+            )
+    if not spec_path.exists():
+        if not required:
+            return None
+        return f"Candidate authority spec is required before {context}: missing {spec_path}"
+    try:
+        base_spec = _candidate_authority.load_authority_spec(spec_path)
+        trusted_identity = (
+            trusted_metadata.get("spec_identity")
+            if isinstance(trusted_metadata, dict)
+            else None
+        )
+        if trusted_identity is None:
+            if required:
+                return (
+                    "Candidate authority launch-bound spec identity is required "
+                    f"before {context}"
+                )
+        else:
+            _candidate_authority.verify_authority_spec_identity(
+                repo_root,
+                base_spec,
+                trusted_identity,
+            )
+        _candidate_authority.guard_candidate_scope_before_mutation(repo_root, base_spec)
+    except _candidate_authority.CandidateAuthorityError as exc:
+        return f"Candidate authority scope guard failed before {context}: {exc}"
+    return None
 
 
 def _prepare_phase_b_pre_review_package(
@@ -5795,6 +5919,7 @@ def _prepare_phase_b_pre_review_package(
     step_prefix: str,
     context: str,
     candidate_authority_required: bool = False,
+    candidate_authority_metadata: dict[str, Any] | None = None,
 ) -> tuple[list[str], dict[str, Any] | None]:
     """Prepare one complete, staged Phase B package before bridge review."""
     prepared_files = [
@@ -5821,6 +5946,33 @@ def _prepare_phase_b_pre_review_package(
         if detail:
             error["stderr"] = detail
         return prepared_files, error
+
+    normalized_wave = ""
+    if not plan_path.startswith("<planless:") and wave_class in {
+        "L4_STRUCTURAL",
+        "L4_ENABLER",
+        "MAINTENANCE",
+    }:
+        normalized_wave = normalize_wave_id(str(wave_id or ""))
+        if not normalized_wave:
+            return _failure(
+                "tracker_authority",
+                f"Canonical same-wave TASKS authority is unavailable before {context}: "
+                "wave_id is missing or invalid",
+            )
+        authority_guard_error = _guard_candidate_authority_scope_if_configured(
+            repo_root,
+            wave_id=normalized_wave,
+            context=f"{context} collector",
+            required=candidate_authority_required,
+            trusted_metadata=candidate_authority_metadata,
+        )
+        if authority_guard_error is not None:
+            return _failure(
+                "candidate_authority_scope",
+                f"Candidate authority scope is required before {context}",
+                detail=authority_guard_error,
+            )
 
     staged_files = set(_collect_staged_files(repo_root))
     staged_refresh_temps = {
@@ -5878,13 +6030,6 @@ def _prepare_phase_b_pre_review_package(
     if wave_class not in {"L4_STRUCTURAL", "L4_ENABLER", "MAINTENANCE"}:
         return prepared_files, None
 
-    normalized_wave = normalize_wave_id(str(wave_id or ""))
-    if not normalized_wave:
-        return _failure(
-            "tracker_authority",
-            f"Canonical same-wave TASKS authority is unavailable before {context}: "
-            "wave_id is missing or invalid",
-        )
     try:
         tracker_authorized = _tasks_has_canonical_wave_tracker_note(
             repo_root,
@@ -5963,6 +6108,7 @@ def _prepare_phase_b_pre_review_package(
         review_round=step_prefix,
         context=context,
         required=candidate_authority_required,
+        trusted_metadata=candidate_authority_metadata,
     )
     if authority_error is not None:
         return _failure(
@@ -6515,6 +6661,16 @@ def run_phase_b(
     candidate_authority_required = _candidate_authority_required_from_routing_record(
         routing_record
     )
+    candidate_authority_metadata = _candidate_authority_metadata_from_routing_record(
+        routing_record
+    )
+    candidate_authority_package_kwargs: dict[str, Any] = {
+        "candidate_authority_required": candidate_authority_required,
+    }
+    if candidate_authority_metadata is not None:
+        candidate_authority_package_kwargs["candidate_authority_metadata"] = (
+            candidate_authority_metadata
+        )
 
     plan_content = plan.get("content", "")
 
@@ -7075,7 +7231,7 @@ def run_phase_b(
             wave_class=wave_class,
             step_prefix=step_name,
             context="private-attr remediation bridge review",
-            candidate_authority_required=candidate_authority_required,
+            **candidate_authority_package_kwargs,
         )
         if preparation_error is not None:
             return current_files, preparation_error
@@ -7625,6 +7781,7 @@ def run_phase_b(
                     review_round="sdk_agent_review",
                     context="SDK agent review",
                     required=candidate_authority_required,
+                    trusted_metadata=candidate_authority_metadata,
                 )
                 if authority_error is not None:
                     _clear_state(repo_root)
@@ -7784,7 +7941,7 @@ def run_phase_b(
             wave_class=wave_class,
             step_prefix="bridge_pre_review",
             context=f"bridge review round {round_num}",
-            candidate_authority_required=candidate_authority_required,
+            **candidate_authority_package_kwargs,
         )
         if preparation_error is not None:
             _clear_state(repo_root)
@@ -8499,6 +8656,20 @@ def run_phase_b(
             changed_files=changed_files,
         )
         if should_collect_l4_indicator:
+            authority_guard_error = _guard_candidate_authority_scope_if_configured(
+                repo_root,
+                wave_id=wave_id,
+                context="pre-supervisor L4 indicator collector",
+                required=candidate_authority_required,
+                trusted_metadata=candidate_authority_metadata,
+            )
+            if authority_guard_error is not None:
+                _clear_state(repo_root)
+                return {
+                    "status": "error",
+                    "step": "pre_supervisor_candidate_authority_scope",
+                    "errors": [authority_guard_error],
+                }
             indicator_path, indicator_error = _collect_and_stage_l4_indicator_artifact(
                 repo_root,
                 wave_id=wave_id,
@@ -8852,7 +9023,7 @@ def run_phase_b(
                 wave_class=wave_class,
                 step_prefix="reentry_bridge_pre_review",
                 context="re-entry bridge review",
-                candidate_authority_required=candidate_authority_required,
+                **candidate_authority_package_kwargs,
             )
             if preparation_error is not None:
                 _clear_state(repo_root)
@@ -9447,6 +9618,20 @@ def run_phase_b(
             changed_files=changed_files,
         )
         if reentry_should_collect_l4_indicator:
+            authority_guard_error = _guard_candidate_authority_scope_if_configured(
+                repo_root,
+                wave_id=wave_id,
+                context="re-entry pre-supervisor L4 indicator collector",
+                required=candidate_authority_required,
+                trusted_metadata=candidate_authority_metadata,
+            )
+            if authority_guard_error is not None:
+                _clear_state(repo_root)
+                return {
+                    "status": "error",
+                    "step": "reentry_pre_supervisor_candidate_authority_scope",
+                    "errors": [authority_guard_error],
+                }
             indicator_path, indicator_error = _collect_and_stage_l4_indicator_artifact(
                 repo_root,
                 wave_id=wave_id,
@@ -10047,13 +10232,31 @@ def run_phase_b(
     )
     commit_target_branch: str | None = None
     commit_branch_prefix = "jabramsja"
-    branch_result = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=str(repo_root),
-        capture_output=True,
-        text=True,
+    (
+        routed_branch_prefix,
+        routed_target_branch,
+        routed_target_branch_error,
+    ) = _launch_target_branch_authority_from_routing_record(
+        routing_record,
+        wave_id=wave_id,
     )
-    if branch_result.returncode == 0:
+    if routed_target_branch_error is not None:
+        result["status"] = "error"
+        result["step"] = "commit_target_branch_authority"
+        result["errors"] = [routed_target_branch_error]
+        _clear_state(repo_root)
+        return result
+    if routed_target_branch:
+        commit_branch_prefix = routed_branch_prefix
+        commit_target_branch = routed_target_branch
+    else:
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+        )
+        if branch_result.returncode == 0:
             observed_branch = branch_result.stdout.strip()
             if "/" in observed_branch and observed_branch not in ("dev", "main", "master", "HEAD"):
                 observed_branch_prefix = observed_branch.split("/", 1)[0].strip() or "jabramsja"

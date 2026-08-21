@@ -34,6 +34,7 @@ CANONICAL_COLLECTOR_PATHS = frozenset(
 )
 _VALID_L4_SKIP_REASONS = frozenset({"missing_l4_checker", "spec_disabled"})
 _RECEIPT_VERSION = 1
+_AUTHORITY_SPEC_IDENTITY_VERSION = 1
 
 
 def _run_git(
@@ -437,6 +438,12 @@ def _receipt_require_l4_staged(receipt: dict[str, Any]) -> bool:
     return raw
 
 
+def _require_bool(value: Any, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise CandidateAuthorityError(f"{label} must be a boolean")
+    return value
+
+
 def _read_file_hash(repo_root: Path, rel_path: str) -> str:
     path = repo_root / rel_path
     if not path.is_file():
@@ -559,6 +566,7 @@ class CandidateAuthoritySpec:
     def from_mapping(cls, data: dict[str, Any]) -> "CandidateAuthoritySpec":
         if not isinstance(data, dict):
             raise CandidateAuthorityError("candidate authority spec must be a JSON object")
+        require_l4_staged = data.get("require_l4_staged", True)
         return cls(
             wave_id=str(data.get("wave_id", "")).strip(),
             comparison_commit=str(data.get("comparison_commit", "")).strip(),
@@ -570,7 +578,7 @@ class CandidateAuthoritySpec:
             indicator_artifact_ref=str(data.get("indicator_artifact_ref", "")).strip(),
             indicator_collection_command=str(data.get("indicator_collection_command", "")).strip(),
             wave_class=str(data.get("wave_class", "L4_ENABLER")).strip() or "L4_ENABLER",
-            require_l4_staged=bool(data.get("require_l4_staged", True)),
+            require_l4_staged=_require_bool(require_l4_staged, "require_l4_staged"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -625,6 +633,101 @@ def load_authority_spec(path: Path) -> CandidateAuthoritySpec:
     except json.JSONDecodeError as exc:
         raise CandidateAuthorityError(f"authority spec is not JSON: {path}: {exc}") from exc
     return CandidateAuthoritySpec.from_mapping(data)
+
+
+def _normalized_plan_path(plan_path: str) -> str:
+    raw = str(plan_path or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("<"):
+        return raw
+    return _normalize_repo_path(raw)
+
+
+def _authority_spec_identity_payload(
+    repo_root: Path,
+    spec: CandidateAuthoritySpec,
+    *,
+    authority_required: bool | None = None,
+) -> dict[str, Any]:
+    comparison_commit = validate_comparison_commit(repo_root, spec.comparison_commit)
+    allowlist = normalize_allowlist(spec.candidate_allowlist)
+    plan_path = _normalized_plan_path(spec.plan_path)
+    indicator_path = ""
+    if spec.indicator_artifact_ref:
+        indicator_path = _normalize_repo_path(spec.indicator_artifact_ref)
+        validate_indicator_declaration(
+            wave_id=spec.wave_id,
+            indicator_artifact_ref=indicator_path,
+            indicator_collection_command=spec.indicator_collection_command,
+        )
+    payload: dict[str, Any] = {
+        "identity_version": _AUTHORITY_SPEC_IDENTITY_VERSION,
+        "wave_id": _normalize_token(spec.wave_id, "wave id"),
+        "comparison_commit": comparison_commit,
+        "candidate_allowlist": list(allowlist),
+        "candidate_allowlist_hash": _json_hash(list(allowlist)),
+        "plan_path": plan_path,
+        "declared_plan_hash": spec.plan_hash,
+        "indicator_artifact_ref": indicator_path,
+        "indicator_collection_command": spec.indicator_collection_command,
+        "wave_class": spec.wave_class,
+        "require_l4_staged": bool(spec.require_l4_staged),
+    }
+    if authority_required is not None:
+        payload["authority_required"] = _require_bool(
+            authority_required,
+            "authority_required",
+        )
+    return payload
+
+
+def authority_spec_identity(
+    repo_root: Path,
+    spec: CandidateAuthoritySpec,
+    *,
+    authority_required: bool | None = None,
+) -> dict[str, Any]:
+    """Return the deterministic launch-bound identity for immutable spec fields."""
+    repo_root = Path(repo_root).resolve()
+    payload = _authority_spec_identity_payload(
+        repo_root,
+        spec,
+        authority_required=authority_required,
+    )
+    return {**payload, "spec_hash": _json_hash(payload)}
+
+
+def verify_authority_spec_identity(
+    repo_root: Path,
+    spec: CandidateAuthoritySpec,
+    trusted_identity: dict[str, Any],
+) -> dict[str, Any]:
+    """Fail closed when a bus-local spec no longer matches launch-owned truth."""
+    if not isinstance(trusted_identity, dict):
+        raise CandidateAuthorityError("trusted authority spec identity must be a JSON object")
+    authority_required = None
+    if "authority_required" in trusted_identity:
+        authority_required = _require_bool(
+            trusted_identity.get("authority_required"),
+            "authority_required",
+        )
+    expected = authority_spec_identity(
+        repo_root,
+        spec,
+        authority_required=authority_required,
+    )
+    mismatches = [
+        key
+        for key in sorted(set(expected) | set(trusted_identity))
+        if trusted_identity.get(key) != expected.get(key)
+    ]
+    if mismatches:
+        raise CandidateAuthorityError(
+            "authority spec does not match launch-bound identity; "
+            "mismatched field(s): " + ", ".join(mismatches)
+        )
+    return expected
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -688,17 +791,10 @@ def _receipt_payload(
     }
 
 
-def prepare_candidate_authority(
-    repo_root: Path,
+def _validate_spec_declared_paths(
     spec: CandidateAuthoritySpec,
-    *,
-    bus_dir: str | Path | None = None,
-) -> dict[str, Any]:
-    repo_root = Path(repo_root).resolve()
-    comparison_commit = validate_comparison_commit(repo_root, spec.comparison_commit)
-    allowlist = normalize_allowlist(spec.candidate_allowlist)
-    allowset = set(allowlist)
-
+    allowset: set[str],
+) -> str:
     if spec.plan_path and not spec.plan_path.startswith("<"):
         plan_path = _normalize_repo_path(spec.plan_path)
         if plan_path not in allowset:
@@ -717,6 +813,43 @@ def prepare_candidate_authority(
             raise CandidateAuthorityError(
                 f"indicator artifact is outside candidate allowlist: {indicator_path}"
             )
+    return indicator_path
+
+
+def guard_candidate_scope_before_mutation(
+    repo_root: Path,
+    spec: CandidateAuthoritySpec,
+) -> dict[str, Any]:
+    """Read-only scope guard for candidate state before collector/packet mutation."""
+    repo_root = Path(repo_root).resolve()
+    comparison_commit = validate_comparison_commit(repo_root, spec.comparison_commit)
+    allowlist = normalize_allowlist(spec.candidate_allowlist)
+    allowset = set(allowlist)
+    _validate_spec_declared_paths(spec, allowset)
+    inventory = collect_literal_base_inventory(repo_root, comparison_commit)
+    _reject_outside_allowlist(inventory, allowset)
+    staged_inventory = collect_staged_literal_base_inventory(repo_root, comparison_commit)
+    _reject_outside_allowlist(staged_inventory, allowset)
+    return {
+        "status": "scope-current",
+        "comparison_commit": comparison_commit,
+        "candidate_allowlist": list(allowlist),
+        "literal_base_inventory_hash": _json_hash(inventory),
+        "staged_literal_base_inventory_hash": _json_hash(staged_inventory),
+    }
+
+
+def prepare_candidate_authority(
+    repo_root: Path,
+    spec: CandidateAuthoritySpec,
+    *,
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    repo_root = Path(repo_root).resolve()
+    comparison_commit = validate_comparison_commit(repo_root, spec.comparison_commit)
+    allowlist = normalize_allowlist(spec.candidate_allowlist)
+    allowset = set(allowlist)
+    indicator_path = _validate_spec_declared_paths(spec, allowset)
 
     pre_inventory = collect_literal_base_inventory(repo_root, comparison_commit)
     _reject_outside_allowlist(pre_inventory, allowset)
@@ -784,30 +917,62 @@ def prepare_candidate_authority(
     return receipt
 
 
-def _receipt_verification_payload(repo_root: Path, receipt: dict[str, Any]) -> dict[str, Any]:
+def _receipt_verification_payload(
+    repo_root: Path,
+    receipt: dict[str, Any],
+    *,
+    trusted_spec: CandidateAuthoritySpec | None = None,
+    phase: str | None = None,
+    review_round: str | None = None,
+) -> dict[str, Any]:
     _normalize_l4_contract_result(receipt.get("l4_contract"))
-    require_l4_staged = _receipt_require_l4_staged(receipt)
-    spec = CandidateAuthoritySpec.from_mapping(
-        {
-            "wave_id": receipt.get("wave_id", ""),
-            "comparison_commit": receipt.get("comparison_commit", ""),
-            "candidate_allowlist": receipt.get("candidate_allowlist", []),
-            "plan_path": receipt.get("plan_path", ""),
-            "plan_hash": receipt.get("plan_hash", ""),
-            "phase": receipt.get("phase", ""),
-            "review_round": receipt.get("review_round", ""),
-            "indicator_artifact_ref": receipt.get("indicator_artifact_ref", ""),
-            "indicator_collection_command": "",
-            "wave_class": receipt.get("wave_class", "L4_ENABLER"),
-            "require_l4_staged": require_l4_staged,
-        }
-    )
+    if trusted_spec is None:
+        require_l4_staged = _receipt_require_l4_staged(receipt)
+        spec = CandidateAuthoritySpec.from_mapping(
+            {
+                "wave_id": receipt.get("wave_id", ""),
+                "comparison_commit": receipt.get("comparison_commit", ""),
+                "candidate_allowlist": receipt.get("candidate_allowlist", []),
+                "plan_path": receipt.get("plan_path", ""),
+                "plan_hash": receipt.get("plan_hash", ""),
+                "phase": receipt.get("phase", ""),
+                "review_round": receipt.get("review_round", ""),
+                "indicator_artifact_ref": receipt.get("indicator_artifact_ref", ""),
+                "indicator_collection_command": "",
+                "wave_class": receipt.get("wave_class", "L4_ENABLER"),
+                "require_l4_staged": require_l4_staged,
+            }
+        )
+    else:
+        spec = CandidateAuthoritySpec.from_mapping(
+            {
+                **trusted_spec.to_dict(),
+                "phase": phase or trusted_spec.phase,
+                "review_round": review_round or trusted_spec.review_round,
+            }
+        )
     comparison_commit = validate_comparison_commit(repo_root, spec.comparison_commit)
     inventory = collect_literal_base_inventory(repo_root, comparison_commit)
     allowlist = normalize_allowlist(spec.candidate_allowlist)
-    _reject_outside_allowlist(inventory, set(allowlist))
+    allowset = set(allowlist)
+    if trusted_spec is not None:
+        _validate_spec_declared_paths(spec, allowset)
+    else:
+        if spec.plan_path and not spec.plan_path.startswith("<"):
+            plan_path = _normalize_repo_path(spec.plan_path)
+            if plan_path not in allowset:
+                raise CandidateAuthorityError(
+                    f"plan path is outside candidate allowlist: {plan_path}"
+                )
+        if spec.indicator_artifact_ref:
+            indicator_path = _normalize_repo_path(spec.indicator_artifact_ref)
+            if indicator_path not in allowset:
+                raise CandidateAuthorityError(
+                    f"indicator artifact is outside candidate allowlist: {indicator_path}"
+                )
+    _reject_outside_allowlist(inventory, allowset)
     staged_inventory = collect_staged_literal_base_inventory(repo_root, comparison_commit)
-    _reject_outside_allowlist(staged_inventory, set(allowlist))
+    _reject_outside_allowlist(staged_inventory, allowset)
     residue = _unstaged_allowed_residue(repo_root, allowlist)
     if residue:
         raise CandidateAuthorityError(
@@ -841,7 +1006,14 @@ def _receipt_verification_payload(repo_root: Path, receipt: dict[str, Any]) -> d
     )
 
 
-def verify_current_receipt(repo_root: Path, receipt_path: Path) -> dict[str, Any]:
+def verify_current_receipt(
+    repo_root: Path,
+    receipt_path: Path,
+    *,
+    trusted_spec: CandidateAuthoritySpec | None = None,
+    phase: str | None = None,
+    review_round: str | None = None,
+) -> dict[str, Any]:
     repo_root = Path(repo_root).resolve()
     try:
         receipt = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
@@ -854,16 +1026,28 @@ def verify_current_receipt(repo_root: Path, receipt_path: Path) -> dict[str, Any
     if receipt.get("version") != _RECEIPT_VERSION:
         raise CandidateAuthorityError("authority receipt has unsupported version")
     receipt_wave_id = str(receipt.get("wave_id") or "")
-    if f"/{receipt_wave_id}/" not in Path(receipt_path).as_posix():
+    expected_wave_id = trusted_spec.wave_id if trusted_spec is not None else receipt_wave_id
+    if receipt_wave_id != expected_wave_id:
+        raise CandidateAuthorityError(
+            "authority receipt is tampered; wave_id does not match trusted spec"
+        )
+    if f"/{expected_wave_id}/" not in Path(receipt_path).as_posix():
         raise CandidateAuthorityError(
             "authority receipt is tampered; wave_id does not match receipt path"
         )
 
-    expected = _receipt_verification_payload(repo_root, receipt)
+    expected = _receipt_verification_payload(
+        repo_root,
+        receipt,
+        trusted_spec=trusted_spec,
+        phase=phase,
+        review_round=review_round,
+    )
     compared_keys = (
         "repository",
         "wave_id",
         "comparison_commit",
+        "candidate_allowlist",
         "candidate_allowlist_hash",
         "phase",
         "review_round",
@@ -873,7 +1057,9 @@ def verify_current_receipt(repo_root: Path, receipt_path: Path) -> dict[str, Any
         "indicator_hash",
         "wave_class",
         "require_l4_staged",
+        "literal_base_inventory",
         "literal_base_inventory_hash",
+        "staged_literal_base_inventory",
         "staged_literal_base_inventory_hash",
         "index_tree_hash",
         "staged_binary_diff_sha256",

@@ -285,10 +285,80 @@ def test_authority_config_writes_bus_local_spec(wave_repo):
         ).read_text(encoding="utf-8")
     )
     assert routing["candidate_authority_required"] is True
-    assert routing["candidate_authority"] == {
-        "required": True,
-        "precommit_inventory": True,
-        "spec_path": str(spec_path),
+    authority = routing["candidate_authority"]
+    assert authority["required"] is True
+    assert authority["precommit_inventory"] is True
+    assert authority["spec_path"] == str(spec_path)
+    identity = authority["spec_identity"]
+    assert identity["identity_version"] == 1
+    assert identity["wave_id"] == config.wave_id
+    assert identity["comparison_commit"] == comparison_commit
+    assert identity["candidate_allowlist"] == sorted(_authority_allowlist(config))
+    assert identity["candidate_allowlist_hash"]
+    assert identity["plan_path"] == config.tracked_packet
+    assert identity["indicator_artifact_ref"] == config.indicator_artifact_ref
+    assert identity["indicator_collection_command"] == config.indicator_collection_command
+    assert identity["authority_required"] is True
+    assert identity["spec_hash"]
+    assert "target_branch_authority" not in authority
+
+
+def test_authority_scope_guard_runs_before_l4_indicator_prestage(wave_repo):
+    _write_fake_indicator_collector(wave_repo)
+    config = make_config()
+    comparison_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=wave_repo,
+        text=True,
+    ).strip()
+    config = make_config(
+        indicator_artifact_ref=_authority_indicator_ref(config),
+        indicator_collection_command=_authority_indicator_command(config),
+        comparison_commit=comparison_commit,
+        candidate_allowlist=_authority_allowlist(config),
+        pre_review_authority=True,
+    )
+    (wave_repo / "outside.txt").write_text("outside scope\n", encoding="utf-8")
+
+    with pytest.raises(lw.LaunchWaveError, match="before L4 indicator pre-stage") as excinfo:
+        lw.run_wave_setup(wave_repo, config, bus_dir=".agent_bus-authority")
+
+    assert "outside.txt" in str(excinfo.value)
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+
+
+def test_authority_config_records_launch_owned_restart_branch(wave_repo):
+    config = make_config()
+    comparison_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=wave_repo,
+        text=True,
+    ).strip()
+    config = make_config(
+        indicator_artifact_ref=_authority_indicator_ref(config),
+        indicator_collection_command=_authority_indicator_command(config),
+        comparison_commit=comparison_commit,
+        candidate_allowlist=_authority_allowlist(config),
+        pre_review_authority=True,
+    )
+    target_branch = f"jabramsja/{config.wave_id}-restart-20260821"
+    subprocess.run(
+        ["git", "checkout", "-q", "-b", target_branch],
+        cwd=wave_repo,
+        check=True,
+    )
+
+    lw.run_wave_setup(wave_repo, config, bus_dir=".agent_bus-authority")
+
+    routing = json.loads(
+        (
+            wave_repo / ".agent_bus-authority" / "meta" / "post_merge_routing.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert routing["candidate_authority"]["target_branch_authority"] == {
+        "source": "launch_current_branch",
+        "branch_prefix": "jabramsja",
+        "target_branch": target_branch,
     }
 
 
