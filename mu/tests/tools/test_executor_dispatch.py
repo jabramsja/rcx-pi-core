@@ -9374,8 +9374,8 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout="")
             raise AssertionError(f"Unexpected command: {cmd} cwd={cwd}")
 
-        def fake_auto_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
-            auto_resolve_calls.append((repo_root, pr_number, base_branch, branch_name))
+        def fake_auto_resolve(repo_root, *, pr_number, base_branch, branch_name, wave_id=None, log=None):
+            auto_resolve_calls.append((repo_root, pr_number, base_branch, branch_name, wave_id))
             return {
                 "resolved": True,
                 "action": "tasks_md_resolved",
@@ -9417,7 +9417,7 @@ class TestCommitContinuationAndBotFreshness:
             log=lambda _: None,
         )
 
-        assert auto_resolve_calls == [(repo, "673", "dev", "jabramsja/test-wave-id")]
+        assert auto_resolve_calls == [(repo, "673", "dev", "jabramsja/test-wave-id", "test-wave-id")]
         assert len(ci_watch_calls) == 6
         assert merge_attempts["count"] == 2
         assert post_commit["merge_sha"] == "merge789"

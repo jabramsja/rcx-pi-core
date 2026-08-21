@@ -1,0 +1,24 @@
+{
+  "wave_id": "p0ic4s-dispatch-testfix-2026-08-21",
+  "repeat_run_speedup_ratio": 0.954047,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.292169,
+  "repeat_run_raw_seconds": [
+    0.278743,
+    0.292169
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.278743
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.570912
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-08-21T15:17:41Z",
+  "collector_version": "2.2.0"
+}
