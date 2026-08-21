@@ -28,6 +28,11 @@ class CandidateAuthorityError(RuntimeError):
 
 
 CANONICAL_COLLECTOR_PATH = "tools/metrics/collect_l4_wave_indicators.py"
+CANONICAL_MU_COLLECTOR_PATH = "mu/tools/metrics/collect_l4_wave_indicators.py"
+CANONICAL_COLLECTOR_PATHS = frozenset(
+    {CANONICAL_COLLECTOR_PATH, CANONICAL_MU_COLLECTOR_PATH}
+)
+_VALID_L4_SKIP_REASONS = frozenset({"missing_l4_checker", "spec_disabled"})
 _RECEIPT_VERSION = 1
 
 
@@ -286,10 +291,10 @@ def _validate_indicator_command(
     if len(argv) < 2:
         raise CandidateAuthorityError("indicator_collection_command is incomplete")
     script = _normalize_repo_path(argv[1] if Path(argv[0]).name.startswith("python") else argv[0])
-    if script != CANONICAL_COLLECTOR_PATH:
+    if script not in CANONICAL_COLLECTOR_PATHS:
         raise CandidateAuthorityError(
-            "indicator_collection_command must use "
-            f"{CANONICAL_COLLECTOR_PATH!r} (got {script!r})"
+            "indicator_collection_command must use one of "
+            f"{sorted(CANONICAL_COLLECTOR_PATHS)!r} (got {script!r})"
         )
     parsed_wave = ""
     parsed_output = ""
@@ -398,6 +403,38 @@ def _enforce_staged_l4_contract(repo_root: Path, *, wave_id: str, wave_class: st
             f"staged L4 execution contract failed with exit={result.returncode}: {detail}"
         )
     return {"status": "passed"}
+
+
+def _normalize_l4_contract_result(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise CandidateAuthorityError("l4_contract must be a JSON object")
+    status = value.get("status")
+    if status == "passed":
+        if set(value) != {"status"}:
+            raise CandidateAuthorityError(
+                "l4_contract passed result must contain only status"
+            )
+        return {"status": "passed"}
+    if status == "skipped":
+        reason = value.get("reason")
+        if reason not in _VALID_L4_SKIP_REASONS:
+            raise CandidateAuthorityError(
+                "l4_contract skipped result has invalid reason: "
+                f"{reason!r}"
+            )
+        if set(value) != {"status", "reason"}:
+            raise CandidateAuthorityError(
+                "l4_contract skipped result must contain only status and reason"
+            )
+        return {"status": "skipped", "reason": str(reason)}
+    raise CandidateAuthorityError(f"l4_contract has invalid status: {status!r}")
+
+
+def _receipt_require_l4_staged(receipt: dict[str, Any]) -> bool:
+    raw = receipt.get("require_l4_staged", True)
+    if not isinstance(raw, bool):
+        raise CandidateAuthorityError("require_l4_staged must be a boolean")
+    return raw
 
 
 def _read_file_hash(repo_root: Path, rel_path: str) -> str:
@@ -624,6 +661,7 @@ def _receipt_payload(
     l4_contract: dict[str, Any],
 ) -> dict[str, Any]:
     allowlist = normalize_allowlist(spec.candidate_allowlist)
+    normalized_l4_contract = _normalize_l4_contract_result(l4_contract)
     return {
         "version": _RECEIPT_VERSION,
         "repository": _repo_identity(repo_root),
@@ -638,13 +676,15 @@ def _receipt_payload(
         "indicator_artifact_ref": spec.indicator_artifact_ref,
         "indicator_hash": indicator_hash,
         "wave_class": spec.wave_class,
+        "require_l4_staged": bool(spec.require_l4_staged),
         "literal_base_inventory": inventory,
         "literal_base_inventory_hash": _json_hash(inventory),
         "staged_literal_base_inventory": staged_inventory,
         "staged_literal_base_inventory_hash": _json_hash(staged_inventory),
         "index_tree_hash": _index_tree_hash(repo_root),
         "staged_binary_diff_sha256": _staged_binary_diff_hash(repo_root, comparison_commit),
-        "l4_contract": l4_contract,
+        "l4_contract": normalized_l4_contract,
+        "l4_contract_hash": _json_hash(normalized_l4_contract),
     }
 
 
@@ -745,6 +785,8 @@ def prepare_candidate_authority(
 
 
 def _receipt_verification_payload(repo_root: Path, receipt: dict[str, Any]) -> dict[str, Any]:
+    _normalize_l4_contract_result(receipt.get("l4_contract"))
+    require_l4_staged = _receipt_require_l4_staged(receipt)
     spec = CandidateAuthoritySpec.from_mapping(
         {
             "wave_id": receipt.get("wave_id", ""),
@@ -757,7 +799,7 @@ def _receipt_verification_payload(repo_root: Path, receipt: dict[str, Any]) -> d
             "indicator_artifact_ref": receipt.get("indicator_artifact_ref", ""),
             "indicator_collection_command": "",
             "wave_class": receipt.get("wave_class", "L4_ENABLER"),
-            "require_l4_staged": False,
+            "require_l4_staged": require_l4_staged,
         }
     )
     comparison_commit = validate_comparison_commit(repo_root, spec.comparison_commit)
@@ -783,6 +825,11 @@ def _receipt_verification_payload(repo_root: Path, receipt: dict[str, Any]) -> d
         if spec.indicator_artifact_ref
         else ""
     )
+    l4_contract = (
+        _enforce_staged_l4_contract(repo_root, wave_id=spec.wave_id, wave_class=spec.wave_class)
+        if spec.require_l4_staged
+        else {"status": "skipped", "reason": "spec_disabled"}
+    )
     return _receipt_payload(
         repo_root,
         spec,
@@ -790,7 +837,7 @@ def _receipt_verification_payload(repo_root: Path, receipt: dict[str, Any]) -> d
         inventory=inventory,
         staged_inventory=staged_inventory,
         indicator_hash=indicator_hash,
-        l4_contract=receipt.get("l4_contract", {}),
+        l4_contract=l4_contract,
     )
 
 
@@ -825,10 +872,13 @@ def verify_current_receipt(repo_root: Path, receipt_path: Path) -> dict[str, Any
         "indicator_artifact_ref",
         "indicator_hash",
         "wave_class",
+        "require_l4_staged",
         "literal_base_inventory_hash",
         "staged_literal_base_inventory_hash",
         "index_tree_hash",
         "staged_binary_diff_sha256",
+        "l4_contract",
+        "l4_contract_hash",
     )
     mismatches = [
         key for key in compared_keys

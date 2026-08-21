@@ -122,12 +122,12 @@ FOUNDER_OVERRIDE:roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026
 
 - Refresh wave: `roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20`
 - Step-5e provenance: `already_recorded`
-- Purpose: commit automation may stage the exact same-wave growth-cap governance file after Phase B review; this block authorizes only that commit-time generated governance path.
+- Purpose: commit automation may bind the exact same-wave growth-cap governance file after Phase B review; first bumps require staged-index proof, while already-recorded reuse requires clean HEAD/index proof.
 - Authorized generated governance path(s):
   - `mu/tests/docs/test_growth_caps.py`
-- Scope binding: the path above is in scope only as the Step-5e same-wave growth-cap governance mutation with staged-index proof.
+- Scope binding: the path above is in scope only as the Step-5e same-wave growth-cap governance mutation or exact clean same-wave continuation evidence.
 - Pre-review boundary: this block does not add the path to the locked Phase B/pre-review candidate allowlist and cannot authorize arbitrary implementation files.
-- Acceptance binding: unsupported, unstaged, malformed, outside-repo, or provenance-free generated governance paths fail before supervisor.
+- Acceptance binding: unsupported, malformed, outside-repo, dirty, wrong-wave, worktree-only, index/HEAD-mismatched, or provenance-free generated governance paths fail before supervisor.
 <!-- COMMIT_GENERATED_GOVERNANCE_AUTH:end -->
 
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
@@ -147,13 +147,8 @@ FOUNDER_OVERRIDE:roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026
   - `indicator`: `reports/l4_wave_indicators/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/docs/test_growth_caps.py`
-  - `mu/tests/tools/test_candidate_authority.py`
-  - `mu/tests/tools/test_launch_wave.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
   - `mu/tools/executors/candidate_authority.py`
   - `mu/tools/executors/launch_wave.py`
-  - `mu/tools/executors/phase_b_executor.py`
   - `reports/control_plane/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20_2026-08-20.md`
   - `reports/l4_wave_indicators/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

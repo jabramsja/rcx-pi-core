@@ -96,6 +96,10 @@ import executor_dispatch as _ed  # noqa: E402
 import candidate_authority as _ca  # noqa: E402
 
 
+_ACTIVE_BRIDGE_REVIEW_STATUSES = frozenset({"READER_RUNNING", "REVIEWER_RUNNING"})
+_ACTIVE_SDK_REVIEW_STATUSES = frozenset({"running"})
+
+
 def _load_line_ref_checker() -> Any:
     """Load the control-packet line-ref lint module (lives under checks/)."""
     import importlib.util as ilu
@@ -1373,15 +1377,53 @@ def _bridge_db_path(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
     return repo_root / raw / "bridge.db"
 
 
-def _active_reviewer_jobs(repo_root: Path, bus_dir: str | Path | None = None) -> list[str]:
-    db_path = _bridge_db_path(repo_root, bus_dir)
-    if not db_path.exists():
+def _active_sdk_review_statuses(repo_root: Path) -> list[str]:
+    scratch_dir = repo_root / ".scratch"
+    if not scratch_dir.exists():
         return []
+    active: list[str] = []
+    for status_path in sorted(scratch_dir.glob("phase_b_agent_review_*.status.json")):
+        rel_status = status_path.relative_to(repo_root).as_posix()
+        try:
+            payload = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise LaunchWaveError(
+                f"cannot inspect SDK review state at {rel_status}: {exc}"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise LaunchWaveError(
+                f"cannot inspect SDK review state at {rel_status}: status payload is not an object"
+            )
+        status = str(payload.get("status") or "").strip()
+        if status in _ACTIVE_SDK_REVIEW_STATUSES:
+            phase = str(payload.get("phase_label") or "").strip()
+            running_agents = payload.get("running_agents")
+            agents = (
+                ",".join(str(agent) for agent in running_agents)
+                if isinstance(running_agents, list)
+                else ""
+            )
+            detail = f"sdk:{rel_status}:status={status}"
+            if phase:
+                detail += f":phase={phase}"
+            if agents:
+                detail += f":agents={agents}"
+            active.append(detail)
+    return active
+
+
+def _active_review_jobs(repo_root: Path, bus_dir: str | Path | None = None) -> list[str]:
+    db_path = _bridge_db_path(repo_root, bus_dir)
+    active = _active_sdk_review_statuses(repo_root)
+    if not db_path.exists():
+        return sorted(active)
     try:
         conn = sqlite3.connect(db_path)
         try:
+            placeholders = ",".join("?" for _ in _ACTIVE_BRIDGE_REVIEW_STATUSES)
             rows = conn.execute(
-                "SELECT job_id FROM jobs WHERE status = 'REVIEWER_RUNNING'"
+                f"SELECT job_id, status FROM jobs WHERE status IN ({placeholders})",
+                tuple(sorted(_ACTIVE_BRIDGE_REVIEW_STATUSES)),
             ).fetchall()
         finally:
             conn.close()
@@ -1389,7 +1431,12 @@ def _active_reviewer_jobs(repo_root: Path, bus_dir: str | Path | None = None) ->
         raise LaunchWaveError(
             f"cannot inspect bridge reviewer state at {db_path}: {exc}"
         ) from exc
-    return sorted(str(row[0]) for row in rows if row and row[0])
+    active.extend(
+        f"bridge:{row[0]}:status={row[1]}"
+        for row in rows
+        if row and row[0] and row[1]
+    )
+    return sorted(str(item) for item in active)
 
 
 def prepare_review_authority(
@@ -1408,7 +1455,7 @@ def prepare_review_authority(
         raise LaunchWaveError(
             "prepare-review requires pre_review_authority=true in the wave-config"
         )
-    active_jobs = _active_reviewer_jobs(repo_root, bus_dir)
+    active_jobs = _active_review_jobs(repo_root, bus_dir)
     if active_jobs:
         raise LaunchWaveError(
             "prepare-review refused because reviewer job(s) are already active: "
@@ -1617,7 +1664,7 @@ def main(argv: list[str] | None = None) -> int:
         "--prepare-review",
         action="store_true",
         help=(
-            "Prepare pre-review candidate authority only; refuses active reviewers "
+            "Prepare pre-review candidate authority only; refuses active reviews "
             "and never launches the dispatcher."
         ),
     )
