@@ -112,6 +112,20 @@ except ImportError:
     TrackerSyncNoteFields = _tracker_mod.TrackerSyncNoteFields
     render_tracker_sync_note = _tracker_mod.render_tracker_sync_note
 
+try:
+    import candidate_authority as _candidate_authority
+except ImportError:
+    import importlib.util as _ilu
+    _candidate_authority_path = SCRIPT_DIR / "candidate_authority.py"
+    _candidate_authority_spec = _ilu.spec_from_file_location(
+        "candidate_authority",
+        str(_candidate_authority_path),
+    )
+    _candidate_authority = _ilu.module_from_spec(_candidate_authority_spec)
+    assert _candidate_authority_spec.loader is not None
+    sys.modules["candidate_authority"] = _candidate_authority
+    _candidate_authority_spec.loader.exec_module(_candidate_authority)
+
 
 class PhaseBExecutorError(RuntimeError):
     """Raised when Phase B executor cannot proceed."""
@@ -5684,6 +5698,92 @@ def _phase_b_same_wave_indicator_path(wave_id: str) -> str:
     return f"reports/l4_wave_indicators/{wave_id}.json"
 
 
+def _candidate_authority_spec_path(repo_root: Path, *, wave_id: str) -> Path:
+    return agent_bus_path(
+        repo_root,
+        _active_bus_dir(),
+        "meta",
+        "candidate_authority",
+        f"{wave_id}.spec.json",
+    )
+
+
+def _candidate_authority_required_from_routing_record(
+    routing_record: dict[str, Any],
+) -> bool:
+    metadata = routing_record.get("candidate_authority")
+    if isinstance(metadata, dict) and isinstance(metadata.get("required"), bool):
+        return metadata["required"]
+    required = routing_record.get("candidate_authority_required")
+    return required if isinstance(required, bool) else False
+
+
+def _prepare_candidate_authority_if_configured(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    phase: str,
+    review_round: str,
+    context: str,
+    required: bool = True,
+) -> tuple[str | None, str | None]:
+    """Run launch-owned candidate authority before reviewer entry."""
+    spec_path = _candidate_authority_spec_path(repo_root, wave_id=wave_id)
+    if not spec_path.exists():
+        if not required:
+            return None, None
+        return None, (
+            f"Candidate authority spec is required before {context}: "
+            f"missing {spec_path}"
+        )
+    try:
+        base_spec = _candidate_authority.load_authority_spec(spec_path)
+        spec = _candidate_authority.CandidateAuthoritySpec.from_mapping(
+            {
+                **base_spec.to_dict(),
+                "phase": phase,
+                "review_round": review_round,
+            }
+        )
+        receipt = _candidate_authority.prepare_candidate_authority(
+            repo_root,
+            spec,
+            bus_dir=_active_bus_dir(),
+        )
+    except _candidate_authority.CandidateAuthorityError as exc:
+        return None, (
+            f"Candidate authority failed before {context}: {exc}"
+        )
+    receipt_path = str(receipt.get("receipt_path") or "")
+    try:
+        _candidate_authority.verify_current_receipt(repo_root, Path(receipt_path))
+    except _candidate_authority.CandidateAuthorityError as exc:
+        return None, (
+            f"Candidate authority receipt verification failed before {context}: {exc}"
+        )
+    return receipt_path, None
+
+
+def prepare_candidate_authority_if_configured(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    phase: str,
+    review_round: str,
+    context: str,
+    required: bool = True,
+) -> tuple[str | None, str | None]:
+    """Public review-entry seam for candidate authority refresh."""
+    return _prepare_candidate_authority_if_configured(
+        repo_root,
+        wave_id=wave_id,
+        phase=phase,
+        review_round=review_round,
+        context=context,
+        required=required,
+    )
+
+
 def _prepare_phase_b_pre_review_package(
     repo_root: Path,
     *,
@@ -5694,6 +5794,7 @@ def _prepare_phase_b_pre_review_package(
     wave_class: str,
     step_prefix: str,
     context: str,
+    candidate_authority_required: bool = False,
 ) -> tuple[list[str], dict[str, Any] | None]:
     """Prepare one complete, staged Phase B package before bridge review."""
     prepared_files = [
@@ -5854,6 +5955,20 @@ def _prepare_phase_b_pre_review_package(
             "indicator_scope",
             f"Governing packet scope refresh failed before {context}",
             detail=packet_error,
+        )
+    _receipt_path, authority_error = prepare_candidate_authority_if_configured(
+        repo_root,
+        wave_id=normalized_wave,
+        phase="phase_b",
+        review_round=step_prefix,
+        context=context,
+        required=candidate_authority_required,
+    )
+    if authority_error is not None:
+        return _failure(
+            "candidate_authority",
+            f"Candidate authority is required before {context}",
+            detail=authority_error,
         )
     return prepared_files, None
 
@@ -6397,6 +6512,9 @@ def run_phase_b(
     model = config.get("model_overrides", {}).get("phase_b_executor")
     timeout = config.get("timeouts", {}).get("phase_b_executor", 1200)
     pytest_gate_timeout = _resolve_pytest_gate_timeout(timeout)
+    candidate_authority_required = _candidate_authority_required_from_routing_record(
+        routing_record
+    )
 
     plan_content = plan.get("content", "")
 
@@ -6957,6 +7075,7 @@ def run_phase_b(
             wave_class=wave_class,
             step_prefix=step_name,
             context="private-attr remediation bridge review",
+            candidate_authority_required=candidate_authority_required,
         )
         if preparation_error is not None:
             return current_files, preparation_error
@@ -7499,6 +7618,21 @@ def run_phase_b(
                         "Saved agent review checkpoint drifted or was incomplete; "
                         "re-running SDK agent review"
                     )
+                _receipt_path, authority_error = prepare_candidate_authority_if_configured(
+                    repo_root,
+                    wave_id=wave_id,
+                    phase="phase_b",
+                    review_round="sdk_agent_review",
+                    context="SDK agent review",
+                    required=candidate_authority_required,
+                )
+                if authority_error is not None:
+                    _clear_state(repo_root)
+                    return {
+                        "status": "error",
+                        "step": "sdk_candidate_authority",
+                        "errors": [authority_error],
+                    }
                 agent_timeout = config.get("timeouts", {}).get("agent_review", 1500)
                 agent_result = run_sdk_agents(
                     repo_root,
@@ -7650,6 +7784,7 @@ def run_phase_b(
             wave_class=wave_class,
             step_prefix="bridge_pre_review",
             context=f"bridge review round {round_num}",
+            candidate_authority_required=candidate_authority_required,
         )
         if preparation_error is not None:
             _clear_state(repo_root)
@@ -8717,6 +8852,7 @@ def run_phase_b(
                 wave_class=wave_class,
                 step_prefix="reentry_bridge_pre_review",
                 context="re-entry bridge review",
+                candidate_authority_required=candidate_authority_required,
             )
             if preparation_error is not None:
                 _clear_state(repo_root)

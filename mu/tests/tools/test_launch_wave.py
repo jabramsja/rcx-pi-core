@@ -19,8 +19,10 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import sqlite3
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -181,6 +183,44 @@ def _write_bridge_config(repo, agents):
     return path
 
 
+def _authority_allowlist(config):
+    return [
+        "TASKS.md",
+        config.tracked_packet,
+        _authority_indicator_ref(config),
+        "mu/tools/executors/candidate_authority.py",
+    ]
+
+
+def _authority_indicator_ref(config):
+    return f"reports/l4_wave_indicators/{config.wave_id}.json"
+
+
+def _authority_indicator_command(config):
+    indicator_ref = _authority_indicator_ref(config)
+    return (
+        "python3 tools/metrics/collect_l4_wave_indicators.py "
+        f"--wave-id {config.wave_id} --output {indicator_ref}"
+    )
+
+
+def _write_fake_indicator_collector(repo):
+    collector = repo / "tools" / "metrics" / "collect_l4_wave_indicators.py"
+    collector.parent.mkdir(parents=True, exist_ok=True)
+    collector.write_text(
+        "import argparse, json\n"
+        "from pathlib import Path\n"
+        "p=argparse.ArgumentParser(); p.add_argument('--wave-id', required=True); "
+        "p.add_argument('--output', required=True); a=p.parse_args()\n"
+        "out=Path(a.output); out.parent.mkdir(parents=True, exist_ok=True)\n"
+        "out.write_text(json.dumps({'wave_id': a.wave_id}, sort_keys=True)+'\\n')\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "--", str(collector.relative_to(repo))], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "collector"], cwd=repo, check=True)
+    return collector
+
+
 # --------------------------------------------------------------------------- #
 # Sequential setup                                                            #
 # --------------------------------------------------------------------------- #
@@ -208,6 +248,148 @@ def test_full_sequential_setup_produces_all_artifacts(wave_repo):
     assert routing["wave_name"] == config.wave_id
     assert [c["candidate"] for c in routing["next_candidates"]] == [config.wave_id]
     assert routing["next_candidates"][0]["tracked_packet"] == config.tracked_packet
+    assert "candidate_authority" not in routing
+    assert "candidate_authority_required" not in routing
+    assert result.candidate_authority_spec_path is None
+
+
+def test_authority_config_writes_bus_local_spec(wave_repo):
+    config = make_config()
+    comparison_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=wave_repo,
+        text=True,
+    ).strip()
+    config = make_config(
+        indicator_artifact_ref=_authority_indicator_ref(config),
+        indicator_collection_command=_authority_indicator_command(config),
+        comparison_commit=comparison_commit,
+        candidate_allowlist=_authority_allowlist(config),
+        pre_review_authority=True,
+        precommit_inventory=True,
+    )
+
+    result = lw.run_wave_setup(wave_repo, config, bus_dir=".agent_bus-authority")
+
+    spec_path = Path(result.candidate_authority_spec_path)
+    assert spec_path.is_file()
+    assert ".agent_bus-authority" in str(spec_path)
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    assert spec["wave_id"] == config.wave_id
+    assert spec["comparison_commit"] == comparison_commit
+    assert spec["candidate_allowlist"] == sorted(_authority_allowlist(config))
+    assert spec["indicator_artifact_ref"] == config.indicator_artifact_ref
+    routing = json.loads(
+        (
+            wave_repo / ".agent_bus-authority" / "meta" / "post_merge_routing.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert routing["candidate_authority_required"] is True
+    assert routing["candidate_authority"] == {
+        "required": True,
+        "precommit_inventory": True,
+        "spec_path": str(spec_path),
+    }
+
+
+def test_authority_config_validation_fails_closed_on_bad_schema(wave_repo):
+    config = make_config()
+    config = make_config(
+        indicator_artifact_ref=_authority_indicator_ref(config),
+        indicator_collection_command=_authority_indicator_command(config),
+        comparison_commit="not-a-commit",
+        candidate_allowlist=["TASKS.md", "TASKS.md"],
+        pre_review_authority=True,
+    )
+
+    errors = config.validate(wave_repo)
+
+    assert any("duplicate candidate allowlist path" in error for error in errors)
+    assert any("invalid comparison_commit" in error for error in errors)
+
+
+def test_authority_config_accepts_hyphenated_aliases(wave_repo):
+    base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=wave_repo, text=True).strip()
+    raw = dataclasses.asdict(make_config())
+    probe = lw.WaveConfig.from_dict(raw)
+    raw["indicator_artifact_ref"] = _authority_indicator_ref(probe)
+    raw["indicator_collection_command"] = _authority_indicator_command(probe)
+    raw.pop("comparison_commit", None)
+    raw.pop("candidate_allowlist", None)
+    raw.pop("pre_review_authority", None)
+    raw.pop("precommit_inventory", None)
+    raw["comparison-commit"] = base
+    raw["candidate-allowlist"] = _authority_allowlist(probe)
+    raw["pre-review-authority"] = True
+    raw["precommit-inventory"] = True
+
+    config = lw.WaveConfig.from_dict(raw)
+
+    assert config.comparison_commit == base
+    assert config.candidate_allowlist == _authority_allowlist(config)
+    assert config.pre_review_authority is True
+    assert config.precommit_inventory is True
+
+
+def test_prepare_review_refuses_when_reviewer_active(wave_repo):
+    config = make_config()
+    base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=wave_repo, text=True).strip()
+    config = make_config(
+        indicator_artifact_ref=_authority_indicator_ref(config),
+        indicator_collection_command=_authority_indicator_command(config),
+        comparison_commit=base,
+        candidate_allowlist=_authority_allowlist(config),
+        pre_review_authority=True,
+    )
+    db = wave_repo / ".agent_bus-active" / "bridge.db"
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE jobs (job_id TEXT, status TEXT)")
+    conn.execute("INSERT INTO jobs VALUES ('phase-b-r1-active', 'REVIEWER_RUNNING')")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(lw.LaunchWaveError, match="reviewer job"):
+        lw.prepare_review_authority(
+            wave_repo,
+            config,
+            bus_dir=".agent_bus-active",
+            phase="phase_b",
+            review_round="manual-recovery",
+        )
+
+
+def test_prepare_review_uses_shared_builder_without_launching(wave_repo):
+    _write_fake_indicator_collector(wave_repo)
+    config = make_config()
+    base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=wave_repo, text=True).strip()
+    config = make_config(
+        indicator_artifact_ref=_authority_indicator_ref(config),
+        indicator_collection_command=_authority_indicator_command(config),
+        comparison_commit=base,
+        candidate_allowlist=_authority_allowlist(config),
+        pre_review_authority=True,
+    )
+    lw.setup_packet(wave_repo, config)
+    lw.setup_tracker_note(wave_repo, config)
+    (wave_repo / "mu" / "tools" / "executors").mkdir(parents=True, exist_ok=True)
+    (wave_repo / "mu" / "tools" / "executors" / "candidate_authority.py").write_text(
+        "# candidate\n",
+        encoding="utf-8",
+    )
+
+    result = lw.prepare_review_authority(
+        wave_repo,
+        config,
+        bus_dir=".agent_bus-authority",
+        phase="phase_b",
+        review_round="manual-recovery",
+    )
+
+    assert result["prepared"] is True
+    assert Path(result["authority_spec_path"]).is_file()
+    assert Path(result["receipt_path"]).is_file()
+    assert (wave_repo / config.indicator_artifact_ref).is_file()
 
 
 def test_setup_reuses_existing_builders(wave_repo):
