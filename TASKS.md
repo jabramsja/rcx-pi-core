@@ -15,7 +15,7 @@ Execution constraint: follow `FOUNDER_SESSION_BOOTSTRAP.md`; launch waves throug
 
 ### CURRENT EXECUTION QUEUE (single launch authority; ordered; no implicit closure)
 
-0. **[ROLES-ALL-CODEX-PR1219-P0IC0-THEATER-ALLOWLIST-EXPIRY-RENEWAL]** NEXT
+0. **[ROLES-ALL-CODEX-PR1219-P0IC0-THEATER-ALLOWLIST-EXPIRY-RENEWAL] NEXT** Task: `[NEXT-CODEX-POST-REDTEAM]`. Wave ID: `roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21`. Class: `L4_ENABLER`. Category: docs/control-plane pre-push/CI unblocker. Packet: `reports/control_plane/roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21_2026-08-21.md`.
 
    Land the dev-wide pre-push/CI unblocker before refreshing P0IC1. Wave: `roles-all-codex-pr1219-p0ic0-theater-allowlist-expiry-renewal-2026-08-21`. Renew exactly the nine existing founder-owned `heuristic_false_positive` entries in `mu/tools/checks/theater_allowlist.json` from `expires_on: 2026-08-02` to `expires_on: 2026-09-20`. Add or remove no entry; change no file/class/method/classification/defer reason/owner/target wave; do not modify the classifier or any test/runtime/tool code. Exact scope is the allowlist JSON, TASKS, and generated same-wave packet/indicator governance. Require UTC ratchet output with `current_count=9`, `allowlist_count=9`, and empty `new`, `real`, `removals`, and `expired`. P0IC1 cannot refresh or relaunch before the exact P0IC0 merge SHA exists.
 
