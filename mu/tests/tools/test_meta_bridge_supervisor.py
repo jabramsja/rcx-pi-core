@@ -596,6 +596,67 @@ def _make_valid_package():
     }
 
 
+def _make_valid_post_merge_package():
+    """Return a post-merge package with schema-shaped fields."""
+    return {
+        "task_id": "[POST-MERGE]",
+        "merged_pr": 1219,
+        "merge_sha": "abc1234",
+        "wave_name": "post-merge-routing-wave",
+        "lane": "hooks/agents/bridge control-surface",
+        "rollout_packet_path": "reports/control_plane/post_merge_supervisor_plan_2026-03-21.md",
+        "deferred_items": [],
+        "next_candidates": [],
+        "tracker_state_summary": "stable",
+        "blocker_report_paths": [],
+    }
+
+
+def _git_env():
+    return {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+
+
+def _run_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_git_env(),
+    )
+
+
+@pytest.fixture
+def linked_repo_worktree(tmp_path):
+    linked = tmp_path / "linked"
+    _run_git(REPO_ROOT, "worktree", "add", "--detach", str(linked), "HEAD")
+    try:
+        yield linked
+    finally:
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(linked)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env=_git_env(),
+        )
+
+
+def _write_package(root: Path, name: str, package: dict[str, Any]) -> Path:
+    package_dir = root / ".agent_bus" / "meta" / "_repo_identity_tests"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    package_path = package_dir / name
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+    return package_path
+
+
 class TestPreCommitPackageSchema:
     """Schema validation for the 11-field pre-commit package."""
 
@@ -745,6 +806,155 @@ def test_meta_bridge_lock_error_clarifies_persistent_path(tmp_path):
 
 
 
+
+
+class TestRepositoryIdentity:
+    """Repository identity must use exact Git common-dir equality."""
+
+    def test_resolved_git_common_dir_anchors_relative_output(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        expected = (repo / ".git").resolve()
+        completed = subprocess.CompletedProcess(
+            args=["git", "rev-parse", "--git-common-dir"],
+            returncode=0,
+            stdout=".git\n",
+            stderr="",
+        )
+
+        with patch.object(meta.subprocess, "run", return_value=completed) as mock_run:
+            common_dir = meta._resolved_git_common_dir(repo)  # ANTICHEAT_OK: repo identity helper regression
+
+        assert common_dir == expected
+        assert mock_run.call_args.kwargs["cwd"] == str(repo)
+
+    @pytest.mark.parametrize(
+        "completed",
+        [
+            subprocess.CompletedProcess(
+                args=["git", "rev-parse", "--git-common-dir"],
+                returncode=1,
+                stdout="",
+                stderr="fatal",
+            ),
+            subprocess.CompletedProcess(
+                args=["git", "rev-parse", "--git-common-dir"],
+                returncode=0,
+                stdout="\n",
+                stderr="",
+            ),
+        ],
+    )
+    def test_resolved_git_common_dir_returns_none_for_failed_or_empty_probe(self, tmp_path, completed):
+        with patch.object(meta.subprocess, "run", return_value=completed):
+            assert meta._resolved_git_common_dir(tmp_path) is None  # ANTICHEAT_OK: fail-closed helper regression
+
+    def test_resolved_git_common_dir_returns_none_for_timeout(self, tmp_path):
+        with patch.object(
+            meta.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(cmd=["git"], timeout=1),
+        ):
+            assert meta._resolved_git_common_dir(tmp_path) is None  # ANTICHEAT_OK: fail-closed helper regression
+
+    def test_resolved_git_common_dir_returns_none_for_os_error(self, tmp_path):
+        with patch.object(meta.subprocess, "run", side_effect=OSError("git unavailable")):
+            assert meta._resolved_git_common_dir(tmp_path) is None  # ANTICHEAT_OK: fail-closed helper regression
+
+    def test_pre_commit_accepts_package_from_same_repository_linked_worktree(
+        self,
+        linked_repo_worktree,
+        tmp_path,
+    ):
+        package_path = _write_package(
+            linked_repo_worktree,
+            "pre_commit_package.json",
+            _make_valid_package(),
+        )
+        isolated_bus = tmp_path / "meta_bus"
+        isolated_paths = meta.MetaBridgePaths(
+            repo_root=linked_repo_worktree.resolve(),
+            bus_dir=isolated_bus,
+            db_path=isolated_bus / "meta_bridge.db",
+            lock_path=isolated_bus / "meta_bridge.lock",
+        )
+        passed_results = _make_validation_results(["dirty_state"], [])
+
+        with patch.object(meta, "ensure_not_agent_review_mode", return_value=None), \
+             patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_validation_gates", return_value=(passed_results, True)) as mock_gates, \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths):
+            response = meta.run_meta_bridge(package_path, dry_run=True)
+
+        assert response.status == "success"
+        assert response.decision == meta.Decision.NO_ACTION.value
+        mock_gates.assert_called_once()
+        assert mock_gates.call_args.args[0] == linked_repo_worktree.resolve()
+
+    def test_post_merge_accepts_package_from_same_repository_linked_worktree(
+        self,
+        linked_repo_worktree,
+        tmp_path,
+    ):
+        package_path = _write_package(
+            linked_repo_worktree,
+            "post_merge_package.json",
+            _make_valid_post_merge_package(),
+        )
+        isolated_bus = tmp_path / "post_merge_bus"
+        isolated_paths = meta.MetaBridgePaths(
+            repo_root=linked_repo_worktree.resolve(),
+            bus_dir=isolated_bus,
+            db_path=isolated_bus / "meta_bridge.db",
+            lock_path=isolated_bus / "meta_bridge.lock",
+        )
+        gate_results = [meta.ValidationResult("merge_verification", True)]
+        envelope = {
+            "decision": meta.Decision.CONTINUE_DIALECTIC.value,
+            "summary": "route ok",
+            "findings": [],
+            "request_for_claude": "Continue",
+        }
+
+        with patch.object(meta, "ensure_not_agent_review_mode", return_value=None), \
+             patch.object(meta, "meta_bridge_paths", return_value=isolated_paths), \
+             patch.object(meta, "validate_post_merge_package_schema", return_value=(True, [])) as mock_schema, \
+             patch.object(meta, "derive_changed_files", return_value=(["TASKS.md"], "")), \
+             patch.object(meta, "compute_repo_state", return_value=_FAKE_STATE), \
+             patch.object(meta, "run_post_merge_validation_gates", return_value=(gate_results, True, True)) as mock_gates, \
+             patch.object(meta, "_decide_post_merge_route_locally", return_value=envelope), \
+             patch.object(meta, "write_post_merge_routing_record", return_value=tmp_path / "routing.json"):
+            response = meta.run_post_merge_bridge(package_path)
+
+        assert response.status == "success"
+        assert response.decision == meta.Decision.CONTINUE_DIALECTIC.value
+        mock_schema.assert_called_once()
+        mock_gates.assert_called_once()
+        assert mock_gates.call_args.args[0] == linked_repo_worktree.resolve()
+
+    @pytest.mark.parametrize("entrypoint", [meta.run_meta_bridge, meta.run_post_merge_bridge])
+    def test_entrypoints_reject_unrelated_repository(self, tmp_path, entrypoint):
+        repo = tmp_path / "unrelated"
+        repo.mkdir()
+        _run_git(repo, "init")
+        package_path = _write_package(repo, "package.json", {})
+
+        with patch.object(meta, "ensure_not_agent_review_mode", return_value=None):
+            response = entrypoint(package_path)
+
+        assert response.status == "error"
+        assert response.error_code == "WRONG_GIT_REPO"
+
+    @pytest.mark.parametrize("entrypoint", [meta.run_meta_bridge, meta.run_post_merge_bridge])
+    def test_entrypoints_reject_failed_identity_probe(self, linked_repo_worktree, entrypoint):
+        package_path = _write_package(linked_repo_worktree, "package.json", {})
+
+        with patch.object(meta, "ensure_not_agent_review_mode", return_value=None), \
+             patch.object(meta, "_resolved_git_common_dir", return_value=None):
+            response = entrypoint(package_path)
+
+        assert response.status == "error"
+        assert response.error_code == "WRONG_GIT_REPO"
 
 
 class TestRunMetaBridgeLiveRouting:
