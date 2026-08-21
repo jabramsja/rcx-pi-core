@@ -8204,6 +8204,490 @@ def _is_tracker_note_only(buf: list[str]) -> bool:
     return True
 
 
+_P0IA_BASE_AUTHORITY_WAVE_ID = (
+    "roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20"
+)
+_P0IA_BASE_AUTHORITY_PR_NUMBER = "1223"
+_P0IA_BASE_AUTHORITY_BASE_BRANCH = "dev"
+_P0IA_BASE_AUTHORITY_TARGET_BRANCH = (
+    "jabramsja/roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-"
+    "2026-08-20-restart-2026-08-21"
+)
+_P0IA_BASE_AUTHORITY_PACKET = (
+    "reports/control_plane/roles-all-codex-pr1219-p0ia-pre-review-candidate-"
+    "authority-2026-08-20_2026-08-20.md"
+)
+_P0IA_BASE_AUTHORITY_INDICATOR = (
+    "reports/l4_wave_indicators/"
+    "roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-2026-08-20.json"
+)
+_P0IA_BASE_AUTHORITY_ALLOWED_SCOPE = frozenset(
+    {
+        "TASKS.md",
+        "mu/tests/docs/test_growth_caps.py",
+        "mu/tests/tools/test_candidate_authority.py",
+        "mu/tests/tools/test_launch_wave.py",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "mu/tools/executors/candidate_authority.py",
+        "mu/tools/executors/launch_wave.py",
+        "mu/tools/executors/phase_b_executor.py",
+        _P0IA_BASE_AUTHORITY_PACKET,
+        (
+            "reports/deferred/non_blocking/"
+            "roles-all-codex-pr1219-p0ia-pre-review-candidate-authority-"
+            "2026-08-20_bridge_nonblockers.md"
+        ),
+        _P0IA_BASE_AUTHORITY_INDICATOR,
+    }
+)
+_P0IC4R_QUEUE_LABELS = (
+    "ROLES-ALL-CODEX-PR1219-P0IC0-THEATER-ALLOWLIST-EXPIRY-RENEWAL",
+    "ROLES-ALL-CODEX-PR1219-P0IC1-LINKED-WORKTREE-REPO-IDENTITY",
+    "ROLES-ALL-CODEX-PR1219-P0IC2-COMMIT-GENERATED-GOVERNANCE-AUTHORITY",
+    "ROLES-ALL-CODEX-PR1219-P0IC3-IDEMPOTENT-GENERATED-GOVERNANCE-CONTINUATION",
+    "ROLES-ALL-CODEX-PR1219-P0IC4R-TASKS-BASE-AUTHORITY-RECOVERY",
+    "ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY",
+    "ROLES-ALL-CODEX-PR1219-P0IAH-CANDIDATE-AUTHORITY-TRUST-ORDERING-HARDENING",
+    "ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP",
+    "ROLES-ALL-CODEX-PR1219-P0IB-PRECOMMIT-INVENTORY-AUTHORITY",
+    "ROLES-ALL-CODEX-PR1219-P0T1-TERMINAL-IDENTITY-QUESTION-JOURNAL",
+    "ROLES-ALL-CODEX-PR1219-P0T2-PRIVATE-REVIEW-DURABILITY",
+    "ROLES-ALL-CODEX-PR1219-P0T3-PROCESS-TREE-CLOSURE",
+    "ROLES-ALL-CODEX-PR1219-P0T4-INV2-SEMANTIC-PROOF",
+    "ROLES-ALL-CODEX-PR1219-P0R2-ROLE-MODEL-AUTHORITY",
+    "ROLES-ALL-CODEX-PR1219-P1-BRIDGE-TERMINAL-REFUSAL",
+    "ROLES-ALL-CODEX-PR1219-P2-REVIEW-BINDING",
+    "ROLES-ALL-CODEX-PR1219-P3-RECOVERY-CHECKPOINTS",
+    "ROLES-ALL-CODEX-PR1219-P4-RECOVERY-AUTHORITY-ISOLATION",
+    "ROLES-ALL-CODEX-PR1219-P5-FINAL-RECONCILIATION",
+    "LAUNCH-WAVE-DETERMINISTIC-CANDIDATE-CARRY-FORWARD-BUILDER",
+    "PHASE-A-POST-REMEDIATION-LINE-REF-PREBRIDGE-GUARD",
+    "PIPELINE-FIX-61",
+    "PIPELINE-FIX-54A3",
+    "PIPELINE-FIX-60B",
+    "PIPELINE-FIX-60C",
+    "PIPELINE-FIX-60D",
+    "CANONICAL-DOCS-TRUTH-INTEGRATION",
+    "PBNOGO-INTEGRATION",
+    "PREPUSH-RECOVERY-CONTEXT-AUTHORITY",
+    "PIPELINE-FIX-56",
+    "PIPELINE-FIX-52",
+    "PIPELINE-FIX-55",
+    "PIPELINE-FIX-53",
+    "OBSERVER-DURABILITY",
+    "PIPELINE-FIX-50",
+    "PIPELINE-FIX-57",
+    "PAGER-ORCHESTRATOR-LABEL-TRUTH",
+    "L4-GROWTH-CAP-PREBUMP-BUILDER",
+    "BRIDGE-REVIEW-PRESERVATION-ARTIFACT-BOUNDS",
+    "BOT-REMEDIATION-PREPUSH-SELECTOR-BOUNDS",
+    "PIPELINE-NR5-DEFECT-HANDOFF-TRUTH",
+    "ORCHESTRATOR-SWITCH-DRIFT-FIX",
+    "PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX",
+    "GENERIC-NEXT-ROUTE-RECONCILIATION",
+    "RECEIPT-COMMIT-ROBUSTNESS-BOUNDED-SUCCESSORS",
+    "DIALECTIC-CONTINUATION-DELIVERY-AND-LINEAGE",
+    "PR-LIVE-CENSUS-RECONCILIATION",
+    "PR-DISPOSITION-EXECUTION",
+    "NEVER-BEHIND-FLEET-AUTHORITY",
+    "NIGHTLY-ADMISSION-INTEGRATION",
+    "NIGHTLY-DEADLINE-TELEMETRY-PROOF",
+    "PIPELINE-AGENT-MODEL-EFFORT-BUILDER",
+    "QUESTION-CHECKPOINT-AND-INV2-AUTHORITY",
+    "CODEX-EFFECTIVE-MODEL-CATALOG-AUTHORITY",
+    "PIPELINE-FIX-62C",
+    "LEGACY-N3-LOCAL-EVIDENCE-ADJUDICATION",
+    "MU-COINDUCTION-PRODUCTION-PROOF",
+    "MU-FIXPOINT-PRODUCTION-PROOF",
+    "MU-EVIDENCE-RESIDUES",
+    "MU-OPTIMIZATION-LAST",
+)
+_PROGRAM_QUEUE_ROW_RE = re.compile(r"^(?P<num>\d+)\.\s+\*\*\[(?P<label>[^\]]+)\]")
+
+
+def _is_p0ia_base_authority_identity(
+    *,
+    wave_id: str | None,
+    pr_number: str,
+    base_branch: str,
+    branch_name: str,
+) -> bool:
+    return (
+        str(wave_id or "") == _P0IA_BASE_AUTHORITY_WAVE_ID
+        and str(pr_number or "").strip().lstrip("#") == _P0IA_BASE_AUTHORITY_PR_NUMBER
+        and str(base_branch or "") == _P0IA_BASE_AUTHORITY_BASE_BRANCH
+        and str(branch_name or "") == _P0IA_BASE_AUTHORITY_TARGET_BRANCH
+    )
+
+
+def _well_formed_conflict_markers(path: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if "<<<<<<<" not in text:
+        return False
+    state = "normal"
+    for line in text.splitlines():
+        if line.startswith("<<<<<<<"):
+            if state != "normal":
+                return False
+            state = "head"
+            continue
+        if line.startswith("======="):
+            if state != "head":
+                return False
+            state = "origin"
+            continue
+        if line.startswith(">>>>>>>"):
+            if state != "origin":
+                return False
+            state = "normal"
+    return state == "normal"
+
+
+def _read_tasks_merge_stage_texts(repo_root: Path) -> tuple[str, str] | None:
+    try:
+        ls_proc = subprocess.run(
+            ["git", "ls-files", "-u", "--", "TASKS.md"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if ls_proc.returncode != 0:
+        return None
+    stages: dict[int, tuple[str, str]] = {}
+    for raw in (ls_proc.stdout or "").splitlines():
+        if "\t" not in raw:
+            return None
+        meta, path = raw.split("\t", 1)
+        fields = meta.split()
+        if len(fields) != 3:
+            return None
+        mode, oid, stage_text = fields
+        if path != "TASKS.md" or mode not in {"100644", "100755"}:
+            return None
+        try:
+            stage = int(stage_text)
+        except ValueError:
+            return None
+        if stage in stages:
+            return None
+        stages[stage] = (mode, oid)
+    if 2 not in stages or 3 not in stages:
+        return None
+    texts: list[str] = []
+    for stage in (2, 3):
+        try:
+            blob = subprocess.run(
+                ["git", "show", f":{stage}:TASKS.md"],
+                cwd=repo_root,
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return None
+        if blob.returncode != 0:
+            return None
+        try:
+            texts.append(blob.stdout.decode("utf-8"))
+        except UnicodeDecodeError:
+            return None
+    return texts[0], texts[1]
+
+
+def _tracker_value(note: str, marker: str) -> str:
+    return _tracker_marker_value(
+        note,
+        marker,
+        marker_names=_BUILDER_TRACKER_MARKER_NAMES,
+    ).strip()
+
+
+def _tracker_path_value(note: str, marker: str) -> str:
+    value = _tracker_value(note, marker)
+    if value.startswith("`"):
+        return _strip_tracker_inline_code(value).strip()
+    return value.strip("` .")
+
+
+def _p0ia_tracker_note_valid(note_line: str) -> bool:
+    note = note_line.rstrip("\n")
+    if _validate_tracker_note_text(
+        tracker_note_text=note,
+        wave_id=_P0IA_BASE_AUTHORITY_WAVE_ID,
+        wave_class="L4_ENABLER",
+        target_gate_id="G8",
+    ):
+        return False
+    if _tracker_value(note, "Class").rstrip(".") != "L4_ENABLER":
+        return False
+    if _tracker_value(note, "target_gate_id").strip("` .") != "G8":
+        return False
+    if _tracker_path_value(note, "Packet").rstrip(".") != _P0IA_BASE_AUTHORITY_PACKET:
+        return False
+    if (
+        _tracker_path_value(note, "indicator_artifact_ref").rstrip(".")
+        != _P0IA_BASE_AUTHORITY_INDICATOR
+    ):
+        return False
+    if _extract_founder_override_from_tracker_note(note) != _P0IA_BASE_AUTHORITY_WAVE_ID:
+        return False
+    return f"FOUNDER_OVERRIDE:{_P0IA_BASE_AUTHORITY_WAVE_ID}" in note
+
+
+_P0IA_FOLLOWUP_RE = re.compile(
+    rf"^- Tracker sync follow-up \([^,]+,\s*"
+    rf"{re.escape(_P0IA_BASE_AUTHORITY_WAVE_ID)}\): "
+    r"same-wave follow-up commit touched tracker-relevant file\(s\) "
+    r"without phase/task-state change: (?P<paths>.+)\.$"
+)
+
+
+def _p0ia_followup_valid(line: str) -> bool:
+    match = _P0IA_FOLLOWUP_RE.match(line.rstrip("\n"))
+    if match is None:
+        return False
+    raw_paths = match.group("paths")
+    if "(+" in raw_paths:
+        return False
+    paths = [_normalize_repo_relpath(part) for part in raw_paths.split(",")]
+    if not paths:
+        return False
+    for path in paths:
+        if (
+            not path
+            or path.startswith("/")
+            or path == "."
+            or path.startswith("../")
+            or "/../" in path
+            or path not in _P0IA_BASE_AUTHORITY_ALLOWED_SCOPE
+        ):
+            return False
+    return True
+
+
+def _p0ia_records_from_stage2_tasks(text: str) -> list[str] | None:
+    lines = text.splitlines(keepends=True)
+    ra_idx, ra_end_idx = _find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return None
+    matching_notes = _matching_tracker_note_indices_in_range(
+        lines,
+        _P0IA_BASE_AUTHORITY_WAVE_ID,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    canonical_notes = [
+        idx
+        for idx in matching_notes
+        if _is_canonical_tracker_note_line(
+            lines[idx].rstrip("\n"),
+            _P0IA_BASE_AUTHORITY_WAVE_ID,
+        )
+    ]
+    if len(matching_notes) != 1 or len(canonical_notes) != 1:
+        return None
+    note_idx = canonical_notes[0]
+    note_line = lines[note_idx]
+    if not note_line.endswith("\n") or not _p0ia_tracker_note_valid(note_line):
+        return None
+    records = [note_line]
+    followup_indices = _matching_tracker_followup_indices_in_range(
+        lines,
+        _P0IA_BASE_AUTHORITY_WAVE_ID,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    for idx in sorted(followup_indices):
+        if idx <= note_idx:
+            return None
+        line = lines[idx]
+        if not line.endswith("\n") or not _p0ia_followup_valid(line):
+            return None
+        records.append(line)
+    if len(set(records)) != len(records):
+        return None
+    return records
+
+
+def _p0ia_records_from_stage3_tasks(text: str) -> list[str] | None:
+    lines = text.splitlines(keepends=True)
+    ra_idx, ra_end_idx = _find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return None
+    records: list[str] = []
+    note_indices = _matching_tracker_note_indices_in_range(
+        lines,
+        _P0IA_BASE_AUTHORITY_WAVE_ID,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    followup_indices = _matching_tracker_followup_indices_in_range(
+        lines,
+        _P0IA_BASE_AUTHORITY_WAVE_ID,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    if len(note_indices) > 1:
+        return None
+    if note_indices:
+        records.append(lines[note_indices[0]])
+    records.extend(lines[idx] for idx in sorted(followup_indices))
+    if len(set(records)) != len(records):
+        return None
+    return records
+
+
+def _program_queue_text(text: str) -> str | None:
+    start = text.find("## PROGRAM QUEUE")
+    if start == -1:
+        return None
+    end = text.find("## NON-LAUNCHABLE PROGRAM GOVERNANCE AND HISTORY", start)
+    if end == -1:
+        return None
+    return text[start:end]
+
+
+def _queue_entry_texts(program_queue_text: str) -> dict[int, str] | None:
+    lines = program_queue_text.splitlines(keepends=True)
+    starts: list[tuple[int, int, str]] = []
+    for idx, line in enumerate(lines):
+        match = _PROGRAM_QUEUE_ROW_RE.match(line)
+        if match is not None:
+            starts.append((idx, int(match.group("num")), match.group("label")))
+    if len(starts) != len(_P0IC4R_QUEUE_LABELS):
+        return None
+    entries: dict[int, str] = {}
+    for ordinal, (line_idx, row_num, _label) in enumerate(starts):
+        next_idx = starts[ordinal + 1][0] if ordinal + 1 < len(starts) else len(lines)
+        entries[row_num] = "".join(lines[line_idx:next_idx])
+    return entries
+
+
+def _stage3_program_queue_is_p0ic4r_contract(text: str) -> bool:
+    queue = _program_queue_text(text)
+    if queue is None:
+        return False
+    entries = _queue_entry_texts(queue)
+    if entries is None:
+        return False
+    rows: list[tuple[int, str, str]] = []
+    for row_num in sorted(entries):
+        first_line = entries[row_num].splitlines()[0]
+        match = _PROGRAM_QUEUE_ROW_RE.match(first_line)
+        if match is None:
+            return False
+        rows.append((row_num, match.group("label"), entries[row_num]))
+    if [row for row, _label, _entry in rows] != list(range(len(_P0IC4R_QUEUE_LABELS))):
+        return False
+    labels = [label for _row, label, _entry in rows]
+    if labels != list(_P0IC4R_QUEUE_LABELS) or len(set(labels)) != len(labels):
+        return False
+    for row_num in range(4):
+        if "LANDED" not in rows[row_num][2]:
+            return False
+    row5 = rows[5][2]
+    if "BLOCKED" not in row5 or "P0IC4R" not in row5 or "LANDED" in row5:
+        return False
+    builder_entry = rows[19][2]
+    required_builder_fragments = (
+        "one canonical Phase-A-safe packet identity",
+        "fail before dispatch",
+        "reviewed lock authority",
+        "Phase B handoff",
+        "normalized alias/source files",
+        "must not enter or delay P0IC4R/P0IA",
+    )
+    return all(fragment in builder_entry for fragment in required_builder_fragments)
+
+
+def _stage3_p0ia_insert_index(stage3_text: str, *, note_already_present: bool) -> int | None:
+    lines = stage3_text.splitlines(keepends=True)
+    ra_idx, ra_end_idx = _find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return None
+    if note_already_present:
+        note_indices = _matching_tracker_note_indices_in_range(
+            lines,
+            _P0IA_BASE_AUTHORITY_WAVE_ID,
+            start_idx=ra_idx,
+            end_idx=ra_end_idx,
+        )
+        if len(note_indices) != 1:
+            return None
+        insert_idx = note_indices[0] + 1
+        while (
+            insert_idx < ra_end_idx
+            and _is_tracker_followup_note_line(
+                lines[insert_idx].rstrip("\n"),
+                _P0IA_BASE_AUTHORITY_WAVE_ID,
+            )
+        ):
+            insert_idx += 1
+    else:
+        tracker_note_indices = [
+            idx
+            for idx in range(ra_idx + 1, ra_end_idx)
+            if lines[idx].lstrip().startswith("- Tracker sync note")
+        ]
+        insert_idx = (tracker_note_indices[-1] + 1) if tracker_note_indices else ra_idx + 1
+    return len("".join(lines[:insert_idx]))
+
+
+def _resolve_tasks_md_p0ia_base_authority_conflict(repo_root: Path) -> bool:
+    tasks_path = repo_root / "TASKS.md"
+    if not _well_formed_conflict_markers(tasks_path):
+        return False
+    stage_texts = _read_tasks_merge_stage_texts(repo_root)
+    if stage_texts is None:
+        return False
+    stage2_text, stage3_text = stage_texts
+    if not _stage3_program_queue_is_p0ic4r_contract(stage3_text):
+        return False
+    stage2_records = _p0ia_records_from_stage2_tasks(stage2_text)
+    if stage2_records is None:
+        return False
+    stage3_records = _p0ia_records_from_stage3_tasks(stage3_text)
+    if stage3_records is None:
+        return False
+    source_record_set = set(stage2_records)
+    if any(record not in source_record_set for record in stage3_records):
+        return False
+    note_already_present = bool(stage3_records and stage3_records[0] == stage2_records[0])
+    if stage3_records and not note_already_present:
+        return False
+    missing_records = [record for record in stage2_records if record not in stage3_records]
+    insert_at = _stage3_p0ia_insert_index(
+        stage3_text,
+        note_already_present=note_already_present,
+    )
+    if insert_at is None:
+        return False
+    inserted_text = "".join(missing_records)
+    final_text = stage3_text[:insert_at] + inserted_text + stage3_text[insert_at:]
+    if _program_queue_text(final_text) != _program_queue_text(stage3_text):
+        return False
+    if final_text[:insert_at] + final_text[insert_at + len(inserted_text):] != stage3_text:
+        return False
+    tmp_path = tasks_path.with_name(f".{tasks_path.name}.p0ia-base-authority.tmp")
+    try:
+        tmp_path.write_text(final_text, encoding="utf-8")
+        tmp_path.replace(tasks_path)
+    except OSError:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
 # ── Growth-cap conflict resolution (mechanical CAP_* base+union + comment union) ──
 # A second known-mechanical merge conflict, alongside TASKS.md tracker notes:
 # when two waves each bump a CAP_* growth cap in mu/tests/docs/test_growth_caps.py,
@@ -8497,6 +8981,7 @@ def _try_auto_resolve_pr_conflict(
     pr_number: str,
     base_branch: str,
     branch_name: str,
+    wave_id: str | None = None,
     log: Any = None,
 ) -> dict[str, Any]:
     """Attempt automatic merge-base resolution for a stale-base PR.
@@ -8633,14 +9118,40 @@ def _try_auto_resolve_pr_conflict(
     # resolver. Each returns False WITHOUT modifying the file on any non-mechanical
     # content or malformed markers, so the helper aborts the WHOLE merge — a
     # semantic conflict INSIDE an allowed file still fails closed.
+    tasks_md_base_authority_resolved = False
     for rel in conflicted:
-        if not content_resolvers[rel](repo_root / rel):
+        resolved = content_resolvers[rel](repo_root / rel)
+        if (
+            not resolved
+            and rel == "TASKS.md"
+            and conflicted == ["TASKS.md"]
+            and _is_p0ia_base_authority_identity(
+                wave_id=wave_id,
+                pr_number=pr_number,
+                base_branch=base_branch,
+                branch_name=branch_name,
+            )
+        ):
+            resolved = _resolve_tasks_md_p0ia_base_authority_conflict(repo_root)
+            tasks_md_base_authority_resolved = resolved
+        if not resolved:
             _abort_merge(repo_root, log=log)
             if rel == "TASKS.md":
-                detail = (
-                    "TASKS.md conflict includes non-tracker-note content; "
-                    "manual recovery required"
-                )
+                if _is_p0ia_base_authority_identity(
+                    wave_id=wave_id,
+                    pr_number=pr_number,
+                    base_branch=base_branch,
+                    branch_name=branch_name,
+                ):
+                    detail = (
+                        "TASKS.md conflict is neither tracker-note-only nor the exact "
+                        "P0IA stage-3 base-authority shape; manual recovery required"
+                    )
+                else:
+                    detail = (
+                        "TASKS.md conflict includes non-tracker-note content; "
+                        "manual recovery required"
+                    )
             else:
                 detail = (
                     f"{rel} conflict includes non-CAP/non-comment content; "
@@ -8685,11 +9196,12 @@ def _try_auto_resolve_pr_conflict(
     # Preserve the pre-existing action label for the TASKS.md-only path so the
     # established Step-14 auto-resolve contract stays green; the growth-cap (or
     # combined) path reports the generalized mechanical-resolve action.
-    action = (
-        "tasks_md_resolved"
-        if conflicted == ["TASKS.md"]
-        else "mechanical_conflict_resolved"
-    )
+    if tasks_md_base_authority_resolved:
+        action = "tasks_md_base_authority_resolved"
+    elif conflicted == ["TASKS.md"]:
+        action = "tasks_md_resolved"
+    else:
+        action = "mechanical_conflict_resolved"
     if log is not None:
         log(
             "Step 14 auto-resolve: merged origin/"
@@ -8701,7 +9213,8 @@ def _try_auto_resolve_pr_conflict(
         "action": action,
         "detail": (
             f"merged origin/{base_branch}, resolved {conflicted} "
-            "(TASKS.md keep-both / growth-cap base+union), committed with "
+            "(TASKS.md keep-both or exact P0IA stage-3 base authority / "
+            "growth-cap base+union), committed with "
             "RCX_SKIP_RECEIPT_CHECK, pushed"
         ),
     }
@@ -9172,12 +9685,17 @@ def _wait_for_expected_pr_check_surface_to_pass(
                         f"Step 14 mid-poll: PR #{pr_number} became {conflict_state} "
                         "during expected check-surface wait; re-firing auto-resolve"
                     )
+                resolve_kwargs = {
+                    "pr_number": pr_number,
+                    "base_branch": midpoll_autoresolve["base_branch"],
+                    "branch_name": midpoll_autoresolve["branch_name"],
+                    "log": log,
+                }
+                if "wave_id" in midpoll_autoresolve:
+                    resolve_kwargs["wave_id"] = midpoll_autoresolve.get("wave_id")
                 resolve_result = _try_auto_resolve_pr_conflict(
                     repo_root,
-                    pr_number=pr_number,
-                    base_branch=midpoll_autoresolve["base_branch"],
-                    branch_name=midpoll_autoresolve["branch_name"],
-                    log=log,
+                    **resolve_kwargs,
                 )
                 if not resolve_result.get("resolved"):
                     # Fail closed: a non-tracker-note conflict or a fetch/
@@ -9334,12 +9852,17 @@ def _midpoll_conflict_recheck_before_ci_failure(
             "cancelled the required workflows); re-firing auto-resolve before "
             "treating this as a CI failure"
         )
+    resolve_kwargs = {
+        "pr_number": pr_number,
+        "base_branch": midpoll_autoresolve["base_branch"],
+        "branch_name": midpoll_autoresolve["branch_name"],
+        "log": log,
+    }
+    if "wave_id" in midpoll_autoresolve:
+        resolve_kwargs["wave_id"] = midpoll_autoresolve.get("wave_id")
     resolve_result = _try_auto_resolve_pr_conflict(
         repo_root,
-        pr_number=pr_number,
-        base_branch=midpoll_autoresolve["base_branch"],
-        branch_name=midpoll_autoresolve["branch_name"],
-        log=log,
+        **resolve_kwargs,
     )
     if resolve_result.get("resolved"):
         return {"midpoll_conflict_resolved": True}
@@ -10665,12 +11188,17 @@ def _wait_for_required_checks_to_register(
                         f"Step 14 mid-poll: PR #{pr_number} became {conflict_state} "
                         "during required-checks registration wait; re-firing auto-resolve"
                     )
+                resolve_kwargs = {
+                    "pr_number": pr_number,
+                    "base_branch": midpoll_autoresolve["base_branch"],
+                    "branch_name": midpoll_autoresolve["branch_name"],
+                    "log": log,
+                }
+                if "wave_id" in midpoll_autoresolve:
+                    resolve_kwargs["wave_id"] = midpoll_autoresolve.get("wave_id")
                 resolve_result = _try_auto_resolve_pr_conflict(
                     repo_root,
-                    pr_number=pr_number,
-                    base_branch=midpoll_autoresolve["base_branch"],
-                    branch_name=midpoll_autoresolve["branch_name"],
-                    log=log,
+                    **resolve_kwargs,
                 )
                 if not resolve_result.get("resolved"):
                     # Fail closed: a non-tracker-note conflict or a fetch/
@@ -12685,6 +13213,7 @@ def _run_post_commit_pipeline(
             pr_number=pr_number,
             base_branch=base_branch,
             branch_name=target_branch,
+            wave_id=str(handoff.get("wave_id") or ""),
             log=log,
         )
         if not resolve_result.get("resolved"):
@@ -12707,6 +13236,7 @@ def _run_post_commit_pipeline(
             midpoll_autoresolve={
                 "base_branch": base_branch,
                 "branch_name": target_branch,
+                "wave_id": str(handoff.get("wave_id") or ""),
             },
         )
         if ci_response is not None:
@@ -12924,6 +13454,7 @@ def _run_post_commit_pipeline(
                 pr_number=pr_number,
                 base_branch=base_branch,
                 branch_name=target_branch,
+                wave_id=str(handoff.get("wave_id") or ""),
                 log=log,
             )
             if resolve_result.get("resolved") and resolve_result.get("action") != "no_action":
