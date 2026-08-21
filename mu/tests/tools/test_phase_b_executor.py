@@ -164,6 +164,17 @@ def _init_git_repo(repo: Path) -> None:
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
 
 
+def _git_stdout(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
 def _write_canonical_tasks(repo: Path, wave_id: str) -> None:
     (repo / "TASKS.md").write_text(
         "## Ra\n\n"
@@ -1425,6 +1436,42 @@ class TestPrepareCommitHandoff:
             branch_prefix="codex",
         )
         assert target_branch == "codex/test-wave-restart-2026-04-21"
+
+    def test_launch_owned_restart_branch_authority_feeds_commit_handoff(self, tmp_path):
+        wave_id = "test-wave"
+        target_branch = "jabramsja/test-wave-restart-2026-08-21"
+        routing_record = {
+            "candidate_authority": {
+                "target_branch_authority": {
+                    "source": "launch_current_branch",
+                    "branch_prefix": "jabramsja",
+                    "target_branch": target_branch,
+                }
+            }
+        }
+
+        prefix, routed_target, error = pb_mod._launch_target_branch_authority_from_routing_record(  # ANTICHEAT_OK: validating routed launch branch authority
+            routing_record,
+            wave_id=wave_id,
+        )
+        assert error is None
+        path = pb_mod.prepare_commit_handoff(
+            tmp_path,
+            wave_id=wave_id,
+            task_id="[TEST]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            branch_prefix=prefix,
+            target_branch=routed_target,
+            files_to_stage=["file.py"],
+            commit_message="test",
+            fixes_implemented=["test handoff"],
+            pr_title="test",
+            pr_body="test",
+        )
+        handoff = json.loads(path.read_text())
+        assert handoff["branch_prefix"] == "jabramsja"
+        assert handoff["target_branch"] == target_branch
 
     def test_build_phase_b_tracker_note_is_l4_compliant(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
@@ -6370,6 +6417,7 @@ class TestBridgeLoopReinvokesImplementer:
              patch.object(pb_mod, "_tasks_has_canonical_wave_tracker_note", return_value=True), \
              patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", return_value=(indicator_path, None)), \
              patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope", return_value=(True, None)), \
+             patch.object(pb_mod, "_guard_candidate_authority_scope_if_configured", return_value=None), \
              patch.object(
                  pb_mod,
                  "prepare_candidate_authority_if_configured",
@@ -6390,6 +6438,243 @@ class TestBridgeLoopReinvokesImplementer:
         assert error is not None
         assert error["step"] == f"{step_prefix}_candidate_authority"
         assert "stale candidate receipt" in error["stderr"]
+
+    def test_pre_collector_candidate_scope_guard_blocks_collector(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = "phase-b-precollector-authority-block-2026-08-21"
+        plan_path, indicator_path = _write_pre_review_plan(repo, wave_id)
+        _write_canonical_tasks(repo, wave_id)
+
+        with patch.object(pb_mod, "_unstage_out_of_exact_scope", return_value=(True, "")), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_tasks_has_canonical_wave_tracker_note", return_value=True), \
+             patch.object(
+                 pb_mod,
+                 "_guard_candidate_authority_scope_if_configured",
+                 return_value="outside allowlist: tools/metrics/collect_l4_wave_indicators.py",
+             ), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact") as mock_collector, \
+             patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope") as mock_refresh:
+            _prepared, error = pb_mod._prepare_phase_b_pre_review_package(  # ANTICHEAT_OK: focused unit test for pre-collector authority ordering
+                repo,
+                candidate_files=["TASKS.md", "f.py", plan_path, indicator_path],
+                exact_stage_scope_files={"TASKS.md", "f.py", plan_path, indicator_path},
+                plan_path=plan_path,
+                wave_id=wave_id,
+                wave_class="L4_ENABLER",
+                step_prefix="bridge_pre_review",
+                context="bridge review",
+                candidate_authority_required=True,
+                candidate_authority_metadata={"spec_identity": {"spec_hash": "trusted"}},
+            )
+
+        assert error is not None
+        assert error["step"] == "bridge_pre_review_candidate_authority_scope"
+        assert "outside allowlist" in error["stderr"]
+        mock_collector.assert_not_called()
+        mock_refresh.assert_not_called()
+
+    def test_pre_supervisor_scope_guard_blocks_indicator_collector(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".agent_bus").mkdir()
+        wave_id = "phase-b-pre-supervisor-authority-block-2026-08-21"
+        plan_path, indicator_path = _write_pre_review_plan(repo, wave_id)
+        _write_canonical_tasks(repo, wave_id)
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": wave_id,
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+        }
+        changed = ["TASKS.md", "f.py", plan_path]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=list(changed)), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=list(changed)), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: list(files)), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0,
+                 "passed": True,
+                 "stdout": "",
+                 "stderr": "",
+             }), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "",
+                 "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(
+                 pb_mod,
+                 "_guard_candidate_authority_scope_if_configured",
+                 return_value="outside allowlist: outside.txt",
+             ), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact") as mock_collector, \
+             patch.object(pb_mod, "run_pre_commit_supervisor") as mock_supervisor:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "pre_supervisor_candidate_authority_scope"
+        assert "outside.txt" in result["errors"][0]
+        mock_collector.assert_not_called()
+        mock_supervisor.assert_not_called()
+        assert not (repo / indicator_path).exists()
+
+    def test_reentry_pre_supervisor_scope_guard_blocks_indicator_collector(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".agent_bus").mkdir()
+        wave_id = "phase-b-reentry-supervisor-authority-block-2026-08-21"
+        plan_path, indicator_path = _write_pre_review_plan(repo, wave_id)
+        _write_canonical_tasks(repo, wave_id)
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": wave_id,
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+        }
+        changed = ["TASKS.md", "f.py", plan_path, indicator_path]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=list(changed)), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=list(changed)), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: list(files)), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0,
+                 "passed": True,
+                 "stdout": "",
+                 "stderr": "",
+             }), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=[
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1"},
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j2"},
+             ]), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", side_effect=[False, True]), \
+             patch.object(
+                 pb_mod,
+                 "_guard_candidate_authority_scope_if_configured",
+                 return_value="outside allowlist: outside.txt",
+             ), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact") as mock_collector, \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {
+                     "decision": "NEEDS_PHASE_B",
+                     "summary": "collect the same-wave indicator after re-entry",
+                     "status": "success",
+                     "findings": [],
+                 },
+                 "receipt_path": "",
+             }) as mock_supervisor:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "reentry_pre_supervisor_candidate_authority_scope"
+        assert "outside.txt" in result["errors"][0]
+        mock_collector.assert_not_called()
+        assert mock_supervisor.call_count == 1
+        assert not (repo / indicator_path).exists()
+
+    def test_pre_collector_guard_rejects_index_only_outside_before_exact_scope_unstage(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "phase-b-index-only-outside-2026-08-21"
+        plan_path, indicator_path = _write_pre_review_plan(repo, wave_id)
+        _write_canonical_tasks(repo, wave_id)
+        (repo / "f.py").write_text("base\n", encoding="utf-8")
+        (repo / "outside.txt").write_text("base\n", encoding="utf-8")
+        _git_stdout(repo, "add", "-A")
+        _git_stdout(repo, "commit", "-q", "-m", "base")
+        comparison_commit = _git_stdout(repo, "rev-parse", "HEAD")
+        indicator_command = (
+            "python3 tools/metrics/collect_l4_wave_indicators.py "
+            f"--wave-id {wave_id} --output {indicator_path}"
+        )
+        allowlist = ["TASKS.md", "f.py", plan_path, indicator_path]
+        spec = candidate_authority_mod.CandidateAuthoritySpec.from_mapping(
+            {
+                "wave_id": wave_id,
+                "comparison_commit": comparison_commit,
+                "candidate_allowlist": allowlist,
+                "plan_path": plan_path,
+                "phase": "phase_b",
+                "review_round": "bridge_pre_review",
+                "indicator_artifact_ref": indicator_path,
+                "indicator_collection_command": indicator_command,
+                "wave_class": "L4_ENABLER",
+                "require_l4_staged": True,
+            }
+        )
+        spec_path = candidate_authority_mod.write_authority_spec(
+            repo,
+            spec,
+            bus_dir=".agent_bus",
+        )
+        trusted_metadata = {
+            "spec_path": str(spec_path),
+            "spec_identity": candidate_authority_mod.authority_spec_identity(
+                repo,
+                spec,
+                authority_required=True,
+            ),
+        }
+        (repo / "outside.txt").write_text("staged outside\n", encoding="utf-8")
+        _git_stdout(repo, "add", "outside.txt")
+        _git_stdout(repo, "restore", "--worktree", "--source=HEAD", "--", "outside.txt")
+
+        with patch.object(pb_mod, "_tasks_has_canonical_wave_tracker_note", return_value=True), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact") as mock_collector, \
+             patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope") as mock_refresh, \
+             patch.object(
+                 pb_mod,
+                 "prepare_candidate_authority_if_configured",
+                 return_value=("receipt.json", None),
+             ) as mock_authority:
+            _prepared, error = pb_mod._prepare_phase_b_pre_review_package(  # ANTICHEAT_OK: regression for index-only out-of-scope staged state before guard
+                repo,
+                candidate_files=allowlist,
+                exact_stage_scope_files=set(allowlist),
+                plan_path=plan_path,
+                wave_id=wave_id,
+                wave_class="L4_ENABLER",
+                step_prefix="bridge_pre_review",
+                context="bridge review",
+                candidate_authority_required=True,
+                candidate_authority_metadata=trusted_metadata,
+            )
+
+        assert error is not None
+        assert error["step"] == "bridge_pre_review_candidate_authority_scope"
+        assert "outside.txt" in error["stderr"]
+        mock_collector.assert_not_called()
+        mock_refresh.assert_not_called()
+        mock_authority.assert_not_called()
+        assert "outside.txt" in _git_stdout(repo, "diff", "--cached", "--name-only").splitlines()
 
     def test_candidate_authority_helper_targets_active_candidate_repo(self, tmp_path):
         repo = tmp_path / "candidate-lane"
@@ -6418,14 +6703,19 @@ class TestBridgeLoopReinvokesImplementer:
             return {"receipt_path": str(repo / ".agent_bus" / "receipt.json")}
 
         with patch.object(candidate_authority_mod, "load_authority_spec", return_value=DummySpec()), \
+             patch.object(candidate_authority_mod, "verify_authority_spec_identity", return_value={"status": "trusted"}), \
              patch.object(candidate_authority_mod, "prepare_candidate_authority", side_effect=prepare_side), \
-             patch.object(candidate_authority_mod, "verify_current_receipt", return_value={"status": "current"}):
+             patch.object(candidate_authority_mod, "verify_current_receipt", return_value={"status": "current"}) as mock_verify:
             receipt_path, error = pb_mod.prepare_candidate_authority_if_configured(
                 repo,
                 wave_id=wave_id,
                 phase="phase_b",
                 review_round="bridge_pre_review",
                 context="bridge review",
+                trusted_metadata={
+                    "spec_path": str(spec_path),
+                    "spec_identity": {"spec_hash": "trusted"},
+                },
             )
 
         assert error is None
@@ -6436,6 +6726,9 @@ class TestBridgeLoopReinvokesImplementer:
             "phase": "phase_b",
             "review_round": "bridge_pre_review",
         }
+        assert mock_verify.call_args.kwargs["phase"] == "phase_b"
+        assert mock_verify.call_args.kwargs["review_round"] == "bridge_pre_review"
+        assert mock_verify.call_args.kwargs["trusted_spec"].review_round == "bridge_pre_review"
 
     def test_candidate_authority_helper_fails_closed_when_spec_missing(self, tmp_path):
         repo = tmp_path / "candidate-lane"

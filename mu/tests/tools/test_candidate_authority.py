@@ -215,6 +215,102 @@ def test_receipt_tampering_is_rejected(tmp_path: Path):
         ca.verify_current_receipt(repo, receipt_path)
 
 
+def test_launch_bound_spec_identity_rejects_bus_spec_tampering(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    spec = _spec(base, _default_allowlist())
+    trusted_identity = ca.authority_spec_identity(
+        repo,
+        spec,
+        authority_required=True,
+    )
+    tampered = ca.CandidateAuthoritySpec.from_mapping(
+        {
+            **spec.to_dict(),
+            "candidate_allowlist": [*_default_allowlist(), "src/extra.txt"],
+        }
+    )
+
+    with pytest.raises(ca.CandidateAuthorityError, match="launch-bound identity"):
+        ca.verify_authority_spec_identity(repo, tampered, trusted_identity)
+
+
+@pytest.mark.parametrize(
+    ("field", "tampered_value"),
+    [
+        ("wave_id", "wrong-wave"),
+        ("phase", "wrong_phase"),
+        ("review_round", "wrong_round"),
+        ("plan_path", "TASKS.md"),
+        ("plan_hash", "0" * 64),
+        ("indicator_hash", "0" * 64),
+        ("literal_base_inventory", []),
+        ("literal_base_inventory_hash", "0" * 64),
+        ("staged_literal_base_inventory", []),
+        ("staged_literal_base_inventory_hash", "0" * 64),
+        ("index_tree_hash", "0" * 40),
+        ("staged_binary_diff_sha256", "0" * 64),
+        ("l4_contract", {"status": "passed"}),
+        ("l4_contract_hash", "0" * 64),
+    ],
+)
+def test_receipt_verification_uses_trusted_spec_and_recomputed_evidence(
+    tmp_path: Path,
+    field: str,
+    tampered_value,
+):
+    repo, base = _init_repo(tmp_path)
+    (repo / "src" / "keep.txt").write_text("changed\n", encoding="utf-8")
+    spec = _spec(base, _default_allowlist(), review_round="trusted-round")
+    receipt = ca.prepare_candidate_authority(
+        repo,
+        spec,
+        bus_dir=".agent_bus-test",
+    )
+    receipt_path = Path(receipt["receipt_path"])
+    tampered = json.loads(receipt_path.read_text(encoding="utf-8"))
+    tampered[field] = tampered_value
+    receipt_path.write_text(json.dumps(tampered, indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(ca.CandidateAuthorityError, match="tampered|mismatched"):
+        ca.verify_current_receipt(
+            repo,
+            receipt_path,
+            trusted_spec=spec,
+            phase="phase_b",
+            review_round="trusted-round",
+        )
+
+
+def test_receipt_verification_rejects_caller_owned_round_mismatch(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    (repo / "src" / "keep.txt").write_text("changed\n", encoding="utf-8")
+    spec = _spec(base, _default_allowlist(), review_round="trusted-round")
+    receipt = ca.prepare_candidate_authority(
+        repo,
+        spec,
+        bus_dir=".agent_bus-test",
+    )
+
+    with pytest.raises(ca.CandidateAuthorityError, match="review_round"):
+        ca.verify_current_receipt(
+            repo,
+            Path(receipt["receipt_path"]),
+            trusted_spec=spec,
+            phase="phase_b",
+            review_round="different-round",
+        )
+
+
+def test_pre_mutation_scope_guard_is_read_only_and_rejects_outside_state(tmp_path: Path):
+    repo, base = _init_repo(tmp_path)
+    (repo / "outside.txt").write_text("outside\n", encoding="utf-8")
+
+    with pytest.raises(ca.CandidateAuthorityError, match="outside allowlist"):
+        ca.guard_candidate_scope_before_mutation(repo, _spec(base, _default_allowlist()))
+
+    assert _git(repo, "diff", "--cached", "--name-only") == ""
+
+
 def test_prepare_is_deterministic_for_same_candidate(tmp_path: Path):
     repo, base = _init_repo(tmp_path)
     (repo / "src" / "keep.txt").write_text("changed\n", encoding="utf-8")
