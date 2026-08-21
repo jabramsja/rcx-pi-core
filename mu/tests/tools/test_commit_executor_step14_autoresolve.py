@@ -33,6 +33,120 @@ commit_mod = load_module(
 )
 
 
+def _p0ia_note(
+    *,
+    wave_id: str | None = None,
+    packet: str | None = None,
+    indicator: str | None = None,
+    wave_class: str = "L4_ENABLER",
+) -> str:
+    wave = wave_id or commit_mod._P0IA_BASE_AUTHORITY_WAVE_ID  # ANTICHEAT_OK: exact P0IA identity fixture
+    packet_ref = packet or commit_mod._P0IA_BASE_AUTHORITY_PACKET  # ANTICHEAT_OK: exact P0IA identity fixture
+    indicator_ref = indicator or commit_mod._P0IA_BASE_AUTHORITY_INDICATOR  # ANTICHEAT_OK: exact P0IA identity fixture
+    return (
+        f"- Tracker sync note (2026-08-21, {wave}): "
+        "**ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY "
+        "\u2014 pre-commit supervisor package refresh.**. "
+        f"Class: {wave_class}. target_gate_id: G8. Packet: `{packet_ref}`. "
+        "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+        "mu/tests/docs/test_growth_caps.py mu/tests/tools/test_candidate_authority.py "
+        "mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py`. "
+        "evidence_delta: Phase B converged on the locked plan. "
+        "progress_proof_before: pending supervisor authority. "
+        "progress_proof_after: package-bound L4 authority pending pre-commit "
+        "supervisor validation. "
+        "scope_refs: `TASKS.md`, `mu/tests/docs/test_growth_caps.py`, "
+        "`mu/tests/tools/test_candidate_authority.py`, "
+        "`mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_b_executor.py`, "
+        "`mu/tools/executors/candidate_authority.py`, "
+        "`mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_b_executor.py`, "
+        f"`{packet_ref}`, "
+        "`reports/deferred/non_blocking/roles-all-codex-pr1219-p0ia-pre-review-"
+        "candidate-authority-2026-08-20_bridge_nonblockers.md`, "
+        f"`{indicator_ref}`.. "
+        f"FOUNDER_OVERRIDE:{wave}. primary_blocker_class: INTEGRATION. "
+        "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+        f"indicator_artifact_ref: {indicator_ref}. "
+        "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py "
+        f"--wave-id {wave} --output {indicator_ref}. "
+        "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+        "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+    )
+
+
+def _p0ia_followup(path: str = "mu/tools/executors/candidate_authority.py") -> str:
+    return (
+        "- Tracker sync follow-up (2026-08-21T12:00:00Z, "
+        f"{commit_mod._P0IA_BASE_AUTHORITY_WAVE_ID}): same-wave follow-up commit "  # ANTICHEAT_OK: exact P0IA identity fixture
+        "touched tracker-relevant file(s) without phase/task-state change: "
+        f"{path}.\n"
+    )
+
+
+def _tasks_doc(*, labels: tuple[str, ...], records: str = "") -> str:
+    rows: list[str] = []
+    for idx, label in enumerate(labels):
+        status = "NEXT"
+        if idx in {0, 1, 2, 3}:
+            status = "LANDED (PR #1224, `7f13c4f`)" if idx == 3 else "LANDED"
+        if idx == 5:
+            status = "BLOCKED -- pending P0IC4R PR #1223 refresh"
+        rows.append(f"{idx}. **[{label}] {status}**\n\n")
+        if idx == 19:
+            rows.append(
+                "   Preserve the deterministic candidate/hunk-ledger builder. "
+                "Launch preparation must produce one canonical Phase-A-safe packet "
+                "identity, or fail before dispatch; reviewed lock authority and "
+                "Phase B handoff may never split across normalized alias/source "
+                "files. This queued builder work must not enter or delay P0IC4R/P0IA.\n\n"
+            )
+        else:
+            rows.append(f"   Queue entry for `{label}`.\n\n")
+    return (
+        "# RCX Task List (Canonical)\n\n"
+        "## PROGRAM QUEUE (priority order -- refreshed 2026-08-21 P0IC4R)\n\n"
+        "### CURRENT EXECUTION QUEUE (single launch authority; ordered; no implicit closure)\n\n"
+        + "".join(rows)
+        + "Parallelism rule: P0IC4R precedes P0IA.\n\n"
+        "## NON-LAUNCHABLE PROGRAM GOVERNANCE AND HISTORY\n\n"
+        "History only.\n\n"
+        "## Ra (Resolved / Merged)\n\n"
+        "- Tracker sync note (2026-08-21, prior-wave): **prior**. Class: L4_ENABLER.\n"
+        + records
+    )
+
+
+def _p0ic4r_stage3_tasks(records: str = "") -> str:
+    return _tasks_doc(labels=commit_mod._P0IC4R_QUEUE_LABELS, records=records)  # ANTICHEAT_OK: exact queue-contract fixture
+
+
+def _p0ia_stage2_tasks(records: str | None = None) -> str:
+    labels = (
+        "ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY",
+        "ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP",
+    )
+    return _tasks_doc(labels=labels, records=records if records is not None else _p0ia_note())
+
+
+def _write_conflicted_tasks(path: Path, *, malformed: bool = False) -> str:
+    if malformed:
+        text = "<<<<<<< HEAD\nold queue\n=======\ncurrent queue\n"
+    else:
+        text = "<<<<<<< HEAD\nold queue\n=======\ncurrent queue\n>>>>>>> origin/dev\n"
+    path.write_text(text, encoding="utf-8")
+    return text
+
+
+def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=check,
+        text=True,
+        capture_output=True,
+    )
+
+
 class TestIsTrackerNoteOnly:
     def test_accepts_standard_tracker_notes(self):
         buf = [
@@ -431,6 +545,251 @@ class TestTryAutoResolvePrConflict:
         assert "tracker-note" in result["detail"]
         assert aborted["flag"] is True
         assert "<<<<<<<" in (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+
+
+class TestP0IATasksBaseAuthorityResolver:
+    def test_temp_git_p0ia_stage3_base_authority_resolution(self, tmp_path):
+        remote = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+        work = tmp_path / "work"
+        subprocess.run(["git", "clone", str(remote), str(work)], check=True, capture_output=True)
+        _git(work, "config", "user.email", "rcx@example.invalid")
+        _git(work, "config", "user.name", "RCX Test")
+        _git(work, "checkout", "-b", "dev")
+
+        tasks_path = work / "TASKS.md"
+        tasks_path.write_text("# RCX Task List\n\nbase\n", encoding="utf-8")
+        _git(work, "add", "TASKS.md")
+        _git(work, "commit", "-m", "base")
+        _git(work, "push", "-u", "origin", "dev")
+
+        branch = commit_mod._P0IA_BASE_AUTHORITY_TARGET_BRANCH  # ANTICHEAT_OK: exact P0IA identity fixture
+        _git(work, "checkout", "-b", branch)
+        stage2_text = _p0ia_stage2_tasks(records=_p0ia_note() + _p0ia_followup())
+        tasks_path.write_text(stage2_text, encoding="utf-8")
+        _git(work, "add", "TASKS.md")
+        _git(work, "commit", "-m", "p0ia candidate")
+
+        _git(work, "checkout", "dev")
+        stage3_text = _p0ic4r_stage3_tasks()
+        tasks_path.write_text(stage3_text, encoding="utf-8")
+        _git(work, "add", "TASKS.md")
+        _git(work, "commit", "-m", "p0ic4r queue")
+        _git(work, "push", "origin", "dev")
+        _git(work, "checkout", branch)
+
+        with patch.object(
+            commit_mod,
+            "_check_pr_conflict_state",
+            return_value="mergeable=CONFLICTING",
+        ), patch.object(commit_mod, "_push_branch", return_value=(True, "")):
+            result = commit_mod._try_auto_resolve_pr_conflict(  # ANTICHEAT_OK: temp git merge verify
+                work,
+                pr_number=commit_mod._P0IA_BASE_AUTHORITY_PR_NUMBER,  # ANTICHEAT_OK: exact P0IA identity fixture
+                base_branch=commit_mod._P0IA_BASE_AUTHORITY_BASE_BRANCH,  # ANTICHEAT_OK: exact P0IA identity fixture
+                branch_name=commit_mod._P0IA_BASE_AUTHORITY_TARGET_BRANCH,  # ANTICHEAT_OK: exact P0IA identity fixture
+                wave_id=commit_mod._P0IA_BASE_AUTHORITY_WAVE_ID,  # ANTICHEAT_OK: exact P0IA identity fixture
+                log=None,
+            )
+
+        assert result["resolved"] is True
+        assert result["action"] == "tasks_md_base_authority_resolved"
+        resolved = tasks_path.read_text(encoding="utf-8")
+        assert commit_mod._program_queue_text(resolved) == commit_mod._program_queue_text(stage3_text)  # ANTICHEAT_OK: exact queue contract verify
+        assert resolved.count("Tracker sync note (2026-08-21, " + commit_mod._P0IA_BASE_AUTHORITY_WAVE_ID) == 1  # ANTICHEAT_OK: exact P0IA identity verify
+        assert resolved.count("Tracker sync follow-up (2026-08-21T12:00:00Z, " + commit_mod._P0IA_BASE_AUTHORITY_WAVE_ID) == 1  # ANTICHEAT_OK: exact P0IA identity verify
+        assert "old queue" not in resolved
+        assert _p0ia_followup().strip() in resolved
+
+    def test_exact_identity_gate_rejects_mismatches(self):
+        exact = {
+            "wave_id": commit_mod._P0IA_BASE_AUTHORITY_WAVE_ID,  # ANTICHEAT_OK: exact P0IA identity fixture
+            "pr_number": commit_mod._P0IA_BASE_AUTHORITY_PR_NUMBER,  # ANTICHEAT_OK: exact P0IA identity fixture
+            "base_branch": commit_mod._P0IA_BASE_AUTHORITY_BASE_BRANCH,  # ANTICHEAT_OK: exact P0IA identity fixture
+            "branch_name": commit_mod._P0IA_BASE_AUTHORITY_TARGET_BRANCH,  # ANTICHEAT_OK: exact P0IA identity fixture
+        }
+        assert commit_mod._is_p0ia_base_authority_identity(**exact)  # ANTICHEAT_OK: identity gate verify
+        for key, value in {
+            "wave_id": "roles-all-codex-pr1219-p0ia-pre-review-candidate-authority",
+            "pr_number": "1224",
+            "base_branch": "main",
+            "branch_name": commit_mod._P0IA_BASE_AUTHORITY_TARGET_BRANCH + "-alias",  # ANTICHEAT_OK: exact P0IA identity fixture
+        }.items():
+            candidate = dict(exact)
+            candidate[key] = value
+            assert not commit_mod._is_p0ia_base_authority_identity(**candidate)  # ANTICHEAT_OK: negative identity gate verify
+
+    def test_identity_mismatch_does_not_invoke_p0ia_fallback(self, tmp_path):
+        (tmp_path / "TASKS.md").write_text(
+            "<<<<<<< HEAD\nold queue\n=======\ncurrent queue\n>>>>>>> origin/dev\n",
+            encoding="utf-8",
+        )
+        payload = '{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}'
+
+        def fake_run(cmd, **kw):
+            if cmd[:2] == ["gh", "pr"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=payload, stderr="")
+            if cmd[:2] == ["git", "fetch"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[:2] == ["git", "merge"] and cmd[2] == "origin/dev":
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+            if cmd[:3] == ["git", "diff", "--name-only"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="TASKS.md\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=fake_run), \
+             patch.object(
+                 commit_mod,
+                 "_resolve_tasks_md_p0ia_base_authority_conflict",
+                 side_effect=AssertionError("P0IA fallback must not run"),
+             ):
+            result = commit_mod._try_auto_resolve_pr_conflict(  # ANTICHEAT_OK: mismatch gate verify
+                tmp_path,
+                pr_number=commit_mod._P0IA_BASE_AUTHORITY_PR_NUMBER,  # ANTICHEAT_OK: exact P0IA identity fixture
+                base_branch=commit_mod._P0IA_BASE_AUTHORITY_BASE_BRANCH,  # ANTICHEAT_OK: exact P0IA identity fixture
+                branch_name=commit_mod._P0IA_BASE_AUTHORITY_TARGET_BRANCH + "-wrong",  # ANTICHEAT_OK: exact P0IA identity fixture
+                wave_id=commit_mod._P0IA_BASE_AUTHORITY_WAVE_ID,  # ANTICHEAT_OK: exact P0IA identity fixture
+                log=None,
+            )
+        assert result["resolved"] is False
+        assert result["action"] == "aborted"
+        assert "tracker-note" in result["detail"]
+
+    def test_second_conflict_blocks_p0ia_fallback(self, tmp_path):
+        (tmp_path / "TASKS.md").write_text(
+            "<<<<<<< HEAD\nold queue\n=======\ncurrent queue\n>>>>>>> origin/dev\n",
+            encoding="utf-8",
+        )
+        payload = '{"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY"}'
+
+        def fake_run(cmd, **kw):
+            if cmd[:2] == ["gh", "pr"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=payload, stderr="")
+            if cmd[:2] == ["git", "fetch"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[:2] == ["git", "merge"] and cmd[2] == "origin/dev":
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+            if cmd[:3] == ["git", "diff", "--name-only"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="TASKS.md\nmu/tests/docs/test_growth_caps.py\n",
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=fake_run), \
+             patch.object(
+                 commit_mod,
+                 "_resolve_tasks_md_p0ia_base_authority_conflict",
+                 side_effect=AssertionError("P0IA fallback must not run"),
+             ):
+            result = commit_mod._try_auto_resolve_pr_conflict(  # ANTICHEAT_OK: second conflict gate verify
+                tmp_path,
+                pr_number=commit_mod._P0IA_BASE_AUTHORITY_PR_NUMBER,  # ANTICHEAT_OK: exact P0IA identity fixture
+                base_branch=commit_mod._P0IA_BASE_AUTHORITY_BASE_BRANCH,  # ANTICHEAT_OK: exact P0IA identity fixture
+                branch_name=commit_mod._P0IA_BASE_AUTHORITY_TARGET_BRANCH,  # ANTICHEAT_OK: exact P0IA identity fixture
+                wave_id=commit_mod._P0IA_BASE_AUTHORITY_WAVE_ID,  # ANTICHEAT_OK: exact P0IA identity fixture
+                log=None,
+            )
+        assert result["resolved"] is False
+        assert result["action"] == "aborted"
+
+    def _direct_resolve(
+        self,
+        tmp_path,
+        *,
+        stage2: str | None = None,
+        stage3: str | None = None,
+        malformed_markers: bool = False,
+    ) -> tuple[bool, str, str]:
+        tasks_path = tmp_path / "TASKS.md"
+        original = _write_conflicted_tasks(tasks_path, malformed=malformed_markers)
+        with patch.object(
+            commit_mod,
+            "_read_tasks_merge_stage_texts",
+            return_value=(
+                stage2 if stage2 is not None else _p0ia_stage2_tasks(records=_p0ia_note()),
+                stage3 if stage3 is not None else _p0ic4r_stage3_tasks(),
+            ),
+        ):
+            ok = commit_mod._resolve_tasks_md_p0ia_base_authority_conflict(tmp_path)  # ANTICHEAT_OK: direct resolver verify
+        return ok, original, tasks_path.read_text(encoding="utf-8")
+
+    def test_missing_or_non_utf8_stage_blobs_fail_without_modifying_tasks(self, tmp_path):
+        original = _write_conflicted_tasks(tmp_path / "TASKS.md")
+        with patch.object(commit_mod, "_read_tasks_merge_stage_texts", return_value=None):
+            ok = commit_mod._resolve_tasks_md_p0ia_base_authority_conflict(tmp_path)  # ANTICHEAT_OK: missing stage verify
+        assert ok is False
+        assert (tmp_path / "TASKS.md").read_text(encoding="utf-8") == original
+
+    def test_malformed_duplicate_and_differing_records_fail_closed(self, tmp_path):
+        malformed_stage2 = _p0ia_stage2_tasks(records=_p0ia_note(wave_class="MAINTENANCE"))
+        ok, original, after = self._direct_resolve(tmp_path, stage2=malformed_stage2)
+        assert ok is False
+        assert after == original
+
+        duplicate_stage2 = _p0ia_stage2_tasks(records=_p0ia_note() + _p0ia_note())
+        ok, original, after = self._direct_resolve(tmp_path, stage2=duplicate_stage2)
+        assert ok is False
+        assert after == original
+
+        differing_stage3 = _p0ic4r_stage3_tasks(
+            records=_p0ia_note(packet="reports/control_plane/foreign.md")
+        )
+        ok, original, after = self._direct_resolve(tmp_path, stage3=differing_stage3)
+        assert ok is False
+        assert after == original
+
+    def test_phase_changing_or_outside_scope_followups_fail_closed(self, tmp_path):
+        phase_changing_followup = (
+            "- Tracker sync follow-up (2026-08-21T12:00:00Z, "
+            f"{commit_mod._P0IA_BASE_AUTHORITY_WAVE_ID}): phase/task-state changed: TASKS.md.\n"  # ANTICHEAT_OK: exact P0IA identity fixture
+        )
+        ok, original, after = self._direct_resolve(
+            tmp_path,
+            stage2=_p0ia_stage2_tasks(records=_p0ia_note() + phase_changing_followup),
+        )
+        assert ok is False
+        assert after == original
+
+        ok, original, after = self._direct_resolve(
+            tmp_path,
+            stage2=_p0ia_stage2_tasks(records=_p0ia_note() + _p0ia_followup("unowned.py")),
+        )
+        assert ok is False
+        assert after == original
+
+    def test_invalid_queue_count_order_and_builder_contract_fail_closed(self, tmp_path):
+        short_labels = commit_mod._P0IC4R_QUEUE_LABELS[:-1]  # ANTICHEAT_OK: exact queue-contract fixture
+        ok, original, after = self._direct_resolve(
+            tmp_path,
+            stage3=_tasks_doc(labels=short_labels),
+        )
+        assert ok is False
+        assert after == original
+
+        swapped = list(commit_mod._P0IC4R_QUEUE_LABELS)  # ANTICHEAT_OK: exact queue-contract fixture
+        swapped[4], swapped[5] = swapped[5], swapped[4]
+        ok, original, after = self._direct_resolve(
+            tmp_path,
+            stage3=_tasks_doc(labels=tuple(swapped)),
+        )
+        assert ok is False
+        assert after == original
+
+        broken_builder = _p0ic4r_stage3_tasks().replace(
+            "one canonical Phase-A-safe packet identity",
+            "several packet aliases",
+        )
+        ok, original, after = self._direct_resolve(tmp_path, stage3=broken_builder)
+        assert ok is False
+        assert after == original
+
+    def test_malformed_worktree_conflict_markers_fail_closed(self, tmp_path):
+        ok, original, after = self._direct_resolve(tmp_path, malformed_markers=True)
+        assert ok is False
+        assert after == original
 
 
 class TestStep14MidPollConflictRecheck:
