@@ -2273,6 +2273,29 @@ def _tracker_field_span(note: str, marker: str) -> tuple[int, int] | None:
     return start, end
 
 
+def _tracker_scope_ref_paths(evidence_delta: str) -> set[str]:
+    match = re.search(r"\bscope_refs:\s*", evidence_delta)
+    if match is None:
+        return set()
+    refs: set[str] = set()
+    pos = match.end()
+    while pos < len(evidence_delta):
+        while pos < len(evidence_delta) and evidence_delta[pos] in " \t\r\n,":
+            pos += 1
+        if pos >= len(evidence_delta) or evidence_delta[pos] in ".;":
+            break
+        if evidence_delta[pos] != "`":
+            break
+        close = evidence_delta.find("`", pos + 1)
+        if close == -1:
+            break
+        ref = evidence_delta[pos + 1 : close].strip()
+        if ref:
+            refs.add(ref)
+        pos = close + 1
+    return refs
+
+
 def _append_tracker_scope_refs(note: str, paths: list[str]) -> str:
     scoped_paths = _dedupe_repo_paths(paths)
     if not scoped_paths:
@@ -2284,7 +2307,8 @@ def _append_tracker_scope_refs(note: str, paths: list[str]) -> str:
     raw_value = note[start:end]
     stripped_value = raw_value.rstrip()
     suffix = raw_value[len(stripped_value):]
-    missing = [path for path in scoped_paths if f"`{path}`" not in stripped_value]
+    registered_scope_refs = _tracker_scope_ref_paths(stripped_value)
+    missing = [path for path in scoped_paths if path not in registered_scope_refs]
     if not missing:
         return note
     refs = ", ".join(f"`{path}`" for path in missing)
@@ -3324,12 +3348,14 @@ def refresh_commit_path_packet_truth(
             )
         return handoff, _current_staged_diff_paths(repo_root), None
 
-    if str(handoff.get("wave_class") or "").strip() != "L4_ENABLER":
-        if settled_generated_paths:
+    handoff_wave_class = str(handoff.get("wave_class") or "").strip()
+    if settled_generated_paths:
+        if not _wave_class_allows_founder_override(handoff_wave_class):
             return handoff, [], (
                 "commit-generated governance settlement requires an L4_ENABLER "
-                "handoff before supervisor"
+                "or MAINTENANCE handoff before supervisor"
             )
+    elif handoff_wave_class != "L4_ENABLER":
         return handoff, _current_staged_diff_paths(repo_root), None
 
     tracker_note_text = str(handoff.get("tracker_note_text") or "")
