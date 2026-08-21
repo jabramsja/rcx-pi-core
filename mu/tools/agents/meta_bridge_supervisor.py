@@ -592,6 +592,41 @@ def git_output(repo_root: Path, args: list[str], *, text: bool = True) -> str | 
     return result.stdout
 
 
+def _resolved_git_common_dir(directory: Path) -> Path | None:
+    """Return the resolved Git common dir for directory, or None on probe failure."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=str(directory),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=GIT_COMMAND_TIMEOUT_S,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    raw_common_dir = result.stdout.strip()
+    if not raw_common_dir:
+        return None
+    common_dir = Path(raw_common_dir)
+    if not common_dir.is_absolute():
+        common_dir = directory / common_dir
+    try:
+        return common_dir.resolve()
+    except OSError:
+        return None
+
+
+def _same_resolved_git_common_dir(left_directory: Path, right_directory: Path) -> bool:
+    left_common_dir = _resolved_git_common_dir(left_directory)
+    right_common_dir = _resolved_git_common_dir(right_directory)
+    if left_common_dir is None or right_common_dir is None:
+        return False
+    return left_common_dir == right_common_dir
+
+
 def _hash_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
@@ -3379,11 +3414,9 @@ def run_post_merge_bridge(
             recovery_hint="Ensure package file is inside a git repository",
         )
 
-    # Verify this is the RCX repo
-    script_path = Path(__file__).resolve()
-    try:
-        script_path.relative_to(repo_root)
-    except ValueError:
+    # Verify this is the same RCX repository, including sibling linked worktrees.
+    script_dir = Path(__file__).resolve().parent
+    if not _same_resolved_git_common_dir(package_dir, script_dir):
         return MetaBridgeResponse(
             status="error",
             decision=Decision.ERROR_INTERNAL.value,
@@ -3685,12 +3718,11 @@ def run_meta_bridge(
             recovery_hint="Ensure package file is inside a git repository",
         )
 
-    # Verify this is the RCX repo, not an unrelated git checkout
-    # Check that this script is inside the detected repo (works with sparse checkouts)
-    script_path = Path(__file__).resolve()
-    try:
-        script_path.relative_to(repo_root)
-    except ValueError:
+    # Verify this is the RCX repo, not an unrelated git checkout.
+    # Exact common-dir identity admits sibling linked worktrees while rejecting
+    # unrelated repositories and failed Git identity probes.
+    script_dir = Path(__file__).resolve().parent
+    if not _same_resolved_git_common_dir(package_dir, script_dir):
         return MetaBridgeResponse(
             status="error",
             decision=Decision.ERROR_INTERNAL.value,
