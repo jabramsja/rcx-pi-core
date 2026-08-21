@@ -1213,6 +1213,51 @@ def _setup_repo(tmp_path):
     return repo
 
 
+def _commit_all_for_test(repo: Path, message: str) -> None:
+    import subprocess
+
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", message], cwd=repo, check=True, capture_output=True)
+
+
+def _seed_growth_cap_repo_for_test(repo: Path) -> None:
+    cap_path = repo / "mu" / "tests" / "docs" / "test_growth_caps.py"
+    cap_path.parent.mkdir(parents=True, exist_ok=True)
+    cap_path.write_text(
+        "BASELINE_TEST_FILES = 1\n"
+        "CAP_TEST_FILES = 0\n"
+        "BASELINE_TOOL_SCRIPTS = 0\n"
+        "CAP_TOOL_SCRIPTS = 0\n",
+        encoding="utf-8",
+    )
+    _commit_all_for_test(repo, "baseline growth cap")
+
+
+def _write_governance_packet_for_test(repo: Path, wave_id: str, packet_path: str) -> str:
+    pre_review_block = (
+        "<!-- PRE_REVIEW_AUTH:start -->\n"
+        "## Phase B Pre-Review Candidate Authorization\n\n"
+        "- Authorized pre-review file(s):\n"
+        "  - `file.py`\n"
+        "- Boundary: commit-time generated governance is not part of this allowlist.\n"
+        "<!-- PRE_REVIEW_AUTH:end -->"
+    )
+    packet_file = repo / packet_path
+    packet_file.parent.mkdir(parents=True, exist_ok=True)
+    packet_file.write_text(
+        "# Commit Generated Governance Wave\n\n"
+        "Status: Phase B ready\n"
+        f"Wave ID: {wave_id}\n"
+        "Wave class: L4_ENABLER\n"
+        "Target gate: G8\n"
+        "Lane: control-surface\n\n"
+        f"{pre_review_block}\n\n"
+        f"FOUNDER_OVERRIDE:{wave_id}\n",
+        encoding="utf-8",
+    )
+    return pre_review_block
+
+
 class TestSkipSupervisorBypassClosure:
     def test_run_commit_pipeline_rejects_skip_supervisor_without_synthesized_receipt(
         self,
@@ -1831,10 +1876,7 @@ class TestReceiptChainEndToEnd:
         with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
             commit_mod,
             "_run_post_commit_pipeline",
-            side_effect=lambda **kwargs: {
-                "status": "success",
-                "steps_completed": kwargs["result"]["steps_completed"],
-            },
+            side_effect=lambda **kwargs: {**kwargs["result"], "status": "success"},
         ):
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
@@ -1855,6 +1897,443 @@ class TestReceiptChainEndToEnd:
         assert "- Commit status: `pre_commit_supervisor_pending`" in packet_text
         assert f"  - `reports/l4_wave_indicators/{wave_id}.json`" in packet_text
         assert "  - `TASKS.md`" in packet_text
+
+    def test_commit_generated_growth_cap_first_bump_settles_scope_before_supervisor(self, tmp_path):
+        from collections import namedtuple
+        import types
+
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "commit-generated-growth-cap-wave"
+        packet_path = "reports/control_plane/commit_generated_growth_cap_wave.md"
+        pre_review_block = _write_governance_packet_for_test(repo, wave_id, packet_path)
+        new_test_path = "mu/tests/generated/test_growth_cap_new_case.py"
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        (repo / new_test_path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / new_test_path).write_text("def test_generated_case():\n    assert True\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-08-21T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+        captured_package = {}
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+
+        def mock_supervisor(package_path, *a, **kw):
+            captured_package.update(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            return SupervisorResult("COMMIT_GO", "test", sup_receipt_path)
+
+        tracker_note = _with_founder_override(
+            _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"],
+            wave_id,
+        )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", new_test_path, packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            evidence_handles={"phase_b_receipt": ".agent_bus/meta/pre_commit_receipt.json"},
+            tracker_note_text=tracker_note,
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {**kwargs["result"], "status": "success"},
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        assert result["status"] == "success", result
+        assert result["growth_cap_autobump_outcome"]["reason"] == "bumped"
+        assert result["commit_generated_governance_paths"] == [growth_path]
+        assert "settle_commit_generated_governance" in result["steps_completed"]
+        assert growth_path in captured_package["changed_files"]
+        assert growth_path in captured_package["scope_items"]
+        assert (
+            captured_package["evidence_handles"][commit_mod.COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY]
+            == growth_path
+        )
+
+        durable_handoff = json.loads(
+            (repo / ".agent_bus" / "executors" / "phase_b_handoff.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert growth_path in durable_handoff["files_to_stage"]
+        assert durable_handoff["scope_items"].count(growth_path) == 1
+        assert (
+            durable_handoff["evidence_handles"][commit_mod.COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY]
+            == growth_path
+        )
+
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        packet_text = (repo / packet_path).read_text(encoding="utf-8")
+        refreshed_pre_review = packet_text[
+            packet_text.index("<!-- PRE_REVIEW_AUTH:start -->"):
+            packet_text.index("<!-- PRE_REVIEW_AUTH:end -->") + len("<!-- PRE_REVIEW_AUTH:end -->")
+        ]
+        assert refreshed_pre_review == pre_review_block
+        assert "## Commit-Time Generated Governance Authorization" in packet_text
+        assert f"  - `{growth_path}`" in packet_text
+        assert f"`{growth_path}`" in tasks_text
+        assert "scope_refs:" in tasks_text
+        assert f"`{growth_path}`" in captured_package["tracker_note_text"]
+
+    def test_commit_generated_growth_cap_same_wave_retry_reconstructs_scope(self, tmp_path):
+        from collections import namedtuple
+        import subprocess
+        import types
+
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "commit-generated-growth-cap-retry-wave"
+        packet_path = "reports/control_plane/commit_generated_growth_cap_retry_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        cap_file = repo / growth_path
+        cap_file.write_text(
+            "BASELINE_TEST_FILES = 1\n"
+            f"CAP_TEST_FILES = 1  # +1 for prior.py ({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})\n"
+            "BASELINE_TOOL_SCRIPTS = 0\n"
+            "CAP_TOOL_SCRIPTS = 0\n",
+            encoding="utf-8",
+        )
+        new_test_path = "mu/tests/generated/test_growth_cap_retry_case.py"
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        (repo / new_test_path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / new_test_path).write_text("def test_retry_case():\n    assert True\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", growth_path], cwd=repo, check=True)
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-08-21T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+        captured_package = {}
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+
+        def mock_supervisor(package_path, *a, **kw):
+            captured_package.update(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            return SupervisorResult("COMMIT_GO", "test", sup_receipt_path)
+
+        tracker_note = _with_founder_override(
+            _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"],
+            wave_id,
+        )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", new_test_path, packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            tracker_note_text=tracker_note,
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {**kwargs["result"], "status": "success"},
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success", result
+        assert "growth_cap_autobump_outcome" in result, result
+        assert result["growth_cap_autobump_outcome"]["reason"] == "already_recorded"
+        assert result["commit_generated_governance_paths"] == [growth_path]
+        assert captured_package["scope_items"].count(growth_path) == 1
+        assert captured_package["changed_files"].count(growth_path) == 1
+        assert (
+            captured_package["evidence_handles"][commit_mod.COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY]
+            == growth_path
+        )
+        packet_text = (repo / packet_path).read_text(encoding="utf-8")
+        assert packet_text.count("## Commit-Time Generated Governance Authorization") == 1
+        assert packet_text.count(f"`{growth_path}`") >= 1
+        assert cap_file.read_text(encoding="utf-8").count(f"FOUNDER_OVERRIDE:{wave_id}") == 1
+
+    def test_commit_generated_growth_cap_mixed_retry_preserves_scope(self, tmp_path):
+        from collections import namedtuple
+        import subprocess
+        import types
+
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "commit-generated-growth-cap-mixed-retry-wave"
+        packet_path = "reports/control_plane/commit_generated_growth_cap_mixed_retry_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        cap_file = repo / growth_path
+        cap_file.write_text(
+            "BASELINE_TEST_FILES = 1\n"
+            f"CAP_TEST_FILES = 1  # +1 for prior.py ({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})\n"
+            "BASELINE_TOOL_SCRIPTS = 1\n"
+            "CAP_TOOL_SCRIPTS = 1\n",
+            encoding="utf-8",
+        )
+        new_test_path = "mu/tests/generated/test_growth_cap_mixed_retry_case.py"
+        new_tool_path = "mu/tools/generated_mixed_retry_probe.sh"
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        (repo / new_test_path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / new_test_path).write_text(
+            "def test_mixed_retry_case():\n    assert True\n",
+            encoding="utf-8",
+        )
+        (repo / new_tool_path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / new_tool_path).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", growth_path], cwd=repo, check=True)
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-08-21T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+        captured_package = {}
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+
+        def mock_supervisor(package_path, *a, **kw):
+            captured_package.update(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            return SupervisorResult("COMMIT_GO", "test", sup_receipt_path)
+
+        tracker_note = _with_founder_override(
+            _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"],
+            wave_id,
+        )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", new_test_path, new_tool_path, packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            tracker_note_text=tracker_note,
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {**kwargs["result"], "status": "success"},
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        outcome = result.get("growth_cap_autobump_outcome", {})
+        assert result["status"] == "success", result
+        assert outcome["reason"] == "zero_shortfall", outcome
+        assert outcome["cap_bumps"]["CAP_TEST_FILES"]["reason"] == "already_recorded", outcome
+        assert outcome["cap_bumps"]["CAP_TOOL_SCRIPTS"]["reason"] == "zero_shortfall", outcome
+        assert outcome["commit_generated_governance_paths"] == [growth_path]
+        assert result["commit_generated_governance_paths"] == [growth_path]
+        assert captured_package["scope_items"].count(growth_path) == 1
+        assert captured_package["changed_files"].count(growth_path) == 1
+        assert (
+            captured_package["evidence_handles"][commit_mod.COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY]
+            == growth_path
+        )
+
+    def test_commit_generated_governance_refresh_rejects_unsupported_path(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "commit-generated-unsupported-wave"
+        packet_path = "reports/control_plane/commit_generated_unsupported_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+        _refreshed, _staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+            commit_generated_governance_paths=["mu/tests/docs/not_growth_caps.py"],
+            commit_generated_governance_provenance="bumped",
+        )
+
+        assert error == (
+            "unsupported commit-generated governance path before supervisor: "
+            "mu/tests/docs/not_growth_caps.py"
+        )
+
+    def test_commit_generated_governance_refresh_rejects_provenance_free_path(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "commit-generated-refresh-provenance-free-wave"
+        packet_path = "reports/control_plane/commit_generated_refresh_provenance_free_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        (repo / growth_path).write_text(
+            "BASELINE_TEST_FILES = 1\n"
+            f"CAP_TEST_FILES = 1  # +1 for prior.py ({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})\n"
+            "BASELINE_TOOL_SCRIPTS = 0\n"
+            "CAP_TOOL_SCRIPTS = 0\n",
+            encoding="utf-8",
+        )
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py", growth_path], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+        packet_text_before = (repo / packet_path).read_text(encoding="utf-8")
+        _refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+            commit_generated_governance_paths=[growth_path],
+            commit_generated_governance_provenance="",
+        )
+
+        assert error == "commit-generated governance provenance is required before supervisor"
+        assert staged == []
+        packet_text_after = (repo / packet_path).read_text(encoding="utf-8")
+        assert packet_text_after == packet_text_before
+        assert "Step-5e provenance: `unspecified`" not in packet_text_after
+
+    def test_commit_generated_governance_fails_before_supervisor_when_not_staged(self, tmp_path):
+        import types
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "commit-generated-not-staged-wave"
+        packet_path = "reports/control_plane/commit_generated_not_staged_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        supervisor_called = False
+
+        def mock_supervisor(*a, **kw):
+            nonlocal supervisor_called
+            supervisor_called = True
+            raise AssertionError("supervisor must not run")
+
+        def fake_autobump(*a, **kw):
+            return {
+                "bumped": True,
+                "reason": "bumped",
+                "commit_generated_governance_paths": [commit_mod.GROWTH_CAP_TEST_RELPATH],
+            }
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_maybe_autobump_growth_cap_for_founder_override",
+            side_effect=fake_autobump,
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "settle_commit_generated_governance"
+        assert "not staged before supervisor" in result["errors"][0]
+        assert "build_and_run_supervisor" not in result.get("steps_completed", [])
+        assert supervisor_called is False
+
+    def test_commit_generated_governance_fails_before_supervisor_without_provenance(self, tmp_path):
+        import subprocess
+        import types
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "commit-generated-provenance-free-wave"
+        packet_path = "reports/control_plane/commit_generated_provenance_free_wave.md"
+        _write_governance_packet_for_test(repo, wave_id, packet_path)
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        growth_file = repo / growth_path
+        growth_file.parent.mkdir(parents=True, exist_ok=True)
+        growth_file.write_text("BASELINE_TEST_FILES = 1\nCAP_TEST_FILES = 0\n", encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", growth_path], cwd=repo, check=True)
+        supervisor_called = False
+
+        def mock_supervisor(*a, **kw):
+            nonlocal supervisor_called
+            supervisor_called = True
+            raise AssertionError("supervisor must not run")
+
+        def fake_autobump(*a, **kw):
+            return {
+                "bumped": False,
+                "reason": "zero_shortfall",
+                "commit_generated_governance_paths": [growth_path],
+            }
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_maybe_autobump_growth_cap_for_founder_override",
+            side_effect=fake_autobump,
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "settle_commit_generated_governance"
+        assert "without bumped or same-wave already_recorded provenance" in result["errors"][0]
+        assert "build_and_run_supervisor" not in result.get("steps_completed", [])
+        assert supervisor_called is False
 
     def test_commit_supervisor_package_fences_unstaged_out_of_scope_dirty_files(self, tmp_path):
         from collections import namedtuple
