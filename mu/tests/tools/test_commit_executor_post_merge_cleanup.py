@@ -675,6 +675,85 @@ def test_post_merge_package_refresh_uses_matching_program_queue_config(tmp_path)
     assert "launch_wave.py" in candidate["request_for_claude"]
 
 
+def test_post_merge_package_refresh_keeps_unmerged_explicit_current_row_open(tmp_path):
+    repo = _init_repo(tmp_path)
+    p0imf_wave = "pr1219-p0imf-launch-bound-model-authority-freeze-2026-08-22"
+    p0imrp_wave = "pr1219-p0imrp-receipt-model-provenance-2026-08-22"
+    assert commit_mod._simple_program_queue_explicit_label_wave_id(  # ANTICHEAT_OK: testing private helper
+        "[P0IMF] CURRENT"
+    ) == ""
+    assert commit_mod._simple_program_queue_merge_log_wave_ids(  # ANTICHEAT_OK: testing private helper
+        {
+            "wave_id": "plain-prose-current-row",
+            "derived_wave_id": "plain-prose-current-row",
+        }
+    ) == set()
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            "9. **[PR1219-P0IMF-LAUNCH-BOUND-MODEL-AUTHORITY-FREEZE-2026-08-22] CURRENT**\n"
+            "10. **[PR1219-P0IMRP-RECEIPT-MODEL-PROVENANCE-2026-08-22] NEXT**\n"
+            "11. **[ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP] "
+            "QUEUED -- nonlaunchable until exact P0IMRP merge**\n"
+            "\n---\n\n"
+            "## Ra\n"
+        ),
+        encoding="utf-8",
+    )
+
+    result = {"pr_number": "1230"}
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result=result,
+        merge_sha="d609cf19",
+        log=_noop_log,
+    )
+
+    candidate = package["next_candidates"][0]
+    assert package["wave_name"] == p0imf_wave
+    assert candidate["candidate"] == p0imf_wave
+    assert candidate["tracked_packet"] is None
+    assert result["post_merge_next_wave"] == p0imf_wave
+    assert "-current" not in candidate["candidate"]
+    assert "CURRENT" in package["tracker_state_summary"]
+    assert p0imrp_wave not in candidate["candidate"]
+
+
+def test_post_merge_package_refresh_advances_from_merged_explicit_current_row_without_wave_config(tmp_path):
+    repo = _init_repo(tmp_path)
+    p0imf_wave = "pr1219-p0imf-launch-bound-model-authority-freeze-2026-08-22"
+    p0imrp_wave = "pr1219-p0imrp-receipt-model-provenance-2026-08-22"
+    _merge_wave_with_pr(repo, wave_id=p0imf_wave, pr_number=1230)
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            "9. **[PR1219-P0IMF-LAUNCH-BOUND-MODEL-AUTHORITY-FREEZE-2026-08-22] CURRENT**\n"
+            "10. **[PR1219-P0IMRP-RECEIPT-MODEL-PROVENANCE-2026-08-22] NEXT**\n"
+            "11. **[ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP] "
+            "QUEUED -- nonlaunchable until exact P0IMRP merge**\n"
+            "\n---\n\n"
+            "## Ra\n"
+        ),
+        encoding="utf-8",
+    )
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "1230"},
+        merge_sha="d609cf19",
+        log=_noop_log,
+    )
+
+    candidate = package["next_candidates"][0]
+    assert package["wave_name"] == p0imrp_wave
+    assert candidate["candidate"] == p0imrp_wave
+    assert candidate["tracked_packet"] is None
+    assert "P0IMRP" in package["tracker_state_summary"]
+    assert "P0IMF" not in candidate["summary"]
+
+
 def test_post_merge_package_refresh_skips_completed_simple_program_queue_items_with_explicit_wave_id(tmp_path):
     repo = _init_repo(tmp_path)
     recursive_wave = "recursive-ordinals-as-structure-2026-06-26"

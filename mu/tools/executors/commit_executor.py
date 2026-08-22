@@ -12224,9 +12224,12 @@ _SIMPLE_QUEUE_STATE_TRAILER_RE = re.compile(
     r"(?:NEXT|LAST(?:\s*\([^)]*\))?|"
     r"LANDED(?:\s+in\s+PR\s+#?\d+(?:\s+\([^)]*\))?)?|"
     r"MERGED(?:\s+in\s+PR\s+#?\d+(?:\s+\([^)]*\))?)?|"
-    r"COMPLETED|CLOSED|CURRENT[-_\s]+DEV)"
+    r"COMPLETED|CLOSED|CURRENT[-_\s]+DEV|CURRENT)"
     r"\.?\s*$",
     re.IGNORECASE,
+)
+_EXPLICIT_BRACKETED_WAVE_LABEL_RE = re.compile(
+    r"^\[(?P<wave_id>[A-Za-z0-9][A-Za-z0-9_-]*-\d{4}-\d{2}-\d{2}[a-z]?)\]$"
 )
 
 
@@ -12336,12 +12339,32 @@ def _program_queue_section_lines(repo_root: Path) -> list[str]:
     return section
 
 
-def _simple_program_queue_wave_id(label: str, queue_text: str) -> str:
-    raw = " ".join(part.strip() for part in (label, queue_text) if part.strip())
+def _strip_simple_program_queue_state_trailers(text: str) -> str:
+    raw = str(text or "").strip()
     previous = None
     while raw and raw != previous:
         previous = raw
         raw = _SIMPLE_QUEUE_STATE_TRAILER_RE.sub("", raw).rstrip()
+    return raw.strip()
+
+
+def _simple_program_queue_explicit_label_wave_id(label: str) -> str:
+    stripped_label = _strip_simple_program_queue_state_trailers(label)
+    match = _EXPLICIT_BRACKETED_WAVE_LABEL_RE.match(stripped_label)
+    if not match:
+        return ""
+    wave_id = normalize_wave_id(match.group("wave_id"))
+    if not _WAVE_ID_DATE_SUFFIX_RE.search(wave_id):
+        return ""
+    return wave_id
+
+
+def _simple_program_queue_wave_id(label: str, queue_text: str) -> str:
+    explicit_label_wave_id = _simple_program_queue_explicit_label_wave_id(label)
+    if explicit_label_wave_id:
+        return explicit_label_wave_id
+    raw = " ".join(part.strip() for part in (label, queue_text) if part.strip())
+    raw = _strip_simple_program_queue_state_trailers(raw)
     return normalize_wave_id(raw)
 
 
@@ -12511,7 +12534,7 @@ def _git_merge_history_contains_wave_id(repo_root: Path, wave_id: str) -> bool:
     normalized_log = result.stdout.lower()
     return bool(
         re.search(
-            rf"(?<![a-z0-9]){re.escape(normalized_wave_id)}(?![a-z0-9])",
+            rf"(?<![a-z0-9_-]){re.escape(normalized_wave_id)}(?![a-z0-9_-])",
             normalized_log,
         )
     )
@@ -12542,6 +12565,12 @@ def _simple_program_queue_merge_log_wave_ids(entry: dict[str, Any]) -> set[str]:
     entry_wave_id = normalize_wave_id(str(entry.get("wave_id") or ""))
     if entry_wave_id and entry_wave_id != derived_wave_id:
         merge_log_ids.add(entry_wave_id)
+
+    explicit_label_wave_id = normalize_wave_id(
+        str(entry.get("explicit_label_wave_id") or "")
+    )
+    if explicit_label_wave_id:
+        merge_log_ids.add(explicit_label_wave_id)
 
     return {
         wave_id
@@ -12599,6 +12628,7 @@ def _simple_program_queue_entries(
         queue_text = " ".join(part for part in (label, tail) if part).strip()
         if not queue_text:
             continue
+        explicit_label_wave_id = _simple_program_queue_explicit_label_wave_id(label)
         wave_id = _simple_program_queue_wave_id(label, tail)
         if wave_id in existing_wave_ids:
             continue
@@ -12622,6 +12652,7 @@ def _simple_program_queue_entries(
                 "state": queue_text,
                 "wave_id": wave_id,
                 "derived_wave_id": _simple_program_queue_wave_id(label, tail),
+                "explicit_label_wave_id": explicit_label_wave_id,
                 "config_wave_id": config_wave_id,
                 "packet_wave_id": packet_wave_id,
                 "category": "PROGRAM QUEUE",
