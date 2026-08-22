@@ -118,6 +118,14 @@ class LaunchWaveError(RuntimeError):
     """Raised when the wave launcher cannot complete a setup step."""
 
 
+_GIT_COMMON_DIR_PROBE_TIMEOUT_S = 10
+_GIT_REPOSITORY_OVERRIDE_ENV_KEYS = frozenset(
+    {
+        "GIT_DIR",
+        "GIT_COMMON_DIR",
+        "GIT_WORK_TREE",
+    }
+)
 _IMPLEMENTER_AGENT_OVERRIDE_ENV = "RCX_IMPLEMENTER_AGENT_OVERRIDE"
 _REVIEWER_AGENT_OVERRIDE_ENV = "RCX_REVIEWER_AGENT_OVERRIDE"
 _ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV = "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT"
@@ -138,6 +146,81 @@ _DISPATCHER_OVERRIDE_TRIGGER_ENV_KEYS = (
     _DISPATCHER_OVERRIDE_ENV_KEYS - {_ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV}
 )
 _MAX_SAFE_MAX_TURNS = 1000
+
+
+def _git_probe_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    for key in _GIT_REPOSITORY_OVERRIDE_ENV_KEYS:
+        env.pop(key, None)
+    return env
+
+
+def _resolve_git_common_dir_for_probe(probe_cwd: Path, *, label: str) -> Path:
+    """Resolve one plain ``git rev-parse --git-common-dir`` probe fail-closed."""
+    cwd = Path(probe_cwd)
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=str(cwd),
+            env=_git_probe_environment(),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=_GIT_COMMON_DIR_PROBE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise LaunchWaveError(
+            f"launcher repository identity check failed: {label} Git common-dir "
+            f"probe timed out after {_GIT_COMMON_DIR_PROBE_TIMEOUT_S}s"
+        ) from exc
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise LaunchWaveError(
+            f"launcher repository identity check failed: {label} Git common-dir "
+            f"probe could not run: {exc}"
+        ) from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        if detail:
+            detail = f": {detail[:300]}"
+        raise LaunchWaveError(
+            f"launcher repository identity check failed: {label} Git common-dir "
+            f"probe exited {result.returncode}{detail}"
+        )
+
+    lines = result.stdout.splitlines()
+    if len(lines) != 1 or not lines[0].strip() or lines[0] != lines[0].strip():
+        raise LaunchWaveError(
+            f"launcher repository identity check failed: {label} Git common-dir "
+            "probe returned malformed output"
+        )
+    common_dir = Path(lines[0])
+    if not common_dir.is_absolute():
+        common_dir = cwd / common_dir
+    try:
+        return common_dir.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise LaunchWaveError(
+            f"launcher repository identity check failed: {label} Git common-dir "
+            f"path could not be resolved: {common_dir}"
+        ) from exc
+
+
+def _verify_launcher_source_target_common_dir(repo_root: Path) -> None:
+    """Require the runtime launcher source and target to share one Git common dir."""
+    source_common_dir = _resolve_git_common_dir_for_probe(
+        SCRIPT_DIR,
+        label="launcher source",
+    )
+    target_common_dir = _resolve_git_common_dir_for_probe(
+        Path(repo_root),
+        label="target repo_root",
+    )
+    if source_common_dir != target_common_dir:
+        raise LaunchWaveError(
+            "launcher repository identity check failed: launcher source and "
+            "target repo_root must share the exact resolved Git common directory "
+            f"(source={source_common_dir}, target={target_common_dir})"
+        )
 
 
 def _agent_pin_valid_names(repo_root: Path | None) -> set[str]:
@@ -1516,6 +1599,8 @@ def prepare_review_authority(
     review_round: str = "prepare-review",
 ) -> dict[str, Any]:
     """Bounded recovery entry point: prepare authority without launching."""
+    repo_root = Path(repo_root)
+    _verify_launcher_source_target_common_dir(repo_root)
     errors = config.validate(repo_root, bus_dir=bus_dir)
     if errors:
         raise LaunchWaveError("invalid wave-config: " + "; ".join(errors))
@@ -1621,6 +1706,7 @@ def run_wave_setup(
     re-run recovery contract).
     """
     repo_root = Path(repo_root)
+    _verify_launcher_source_target_common_dir(repo_root)
 
     config_errors = config.validate(repo_root, bus_dir=bus_dir)
     if config_errors:
