@@ -57,9 +57,11 @@ def _git(repo, *args):
 
 
 @pytest.fixture
-def wave_repo(tmp_path):
+def wave_repo(tmp_path, monkeypatch):
     """A minimal git repo with the structure launch_wave's builders expect."""
     repo = tmp_path
+    launcher_source = repo / "mu" / "tools" / "executors"
+    launcher_source.mkdir(parents=True)
     (repo / "pyproject.toml").write_text("[tool.placeholder]\n", encoding="utf-8")
     (repo / "reports" / "control_plane").mkdir(parents=True)
     # The Ra section must already carry at least one tracker note so the upsert
@@ -76,6 +78,7 @@ def wave_repo(tmp_path):
     _git(repo, "config", "user.name", "test")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "init")
+    monkeypatch.setattr(lw, "SCRIPT_DIR", launcher_source)
     return repo
 
 
@@ -219,6 +222,227 @@ def _write_fake_indicator_collector(repo):
     subprocess.run(["git", "add", "--", str(collector.relative_to(repo))], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "collector"], cwd=repo, check=True)
     return collector
+
+
+def _head_sha(repo):
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        text=True,
+    ).strip()
+
+
+def _clone_repo(repo, target):
+    subprocess.run(["git", "clone", "-q", str(repo), str(target)], check=True)
+    assert _head_sha(repo) == _head_sha(target)
+    return target
+
+
+def _authority_config_for_repo(repo):
+    probe = make_config()
+    return make_config(
+        indicator_artifact_ref=_authority_indicator_ref(probe),
+        indicator_collection_command=_authority_indicator_command(probe),
+        comparison_commit=_head_sha(repo),
+        candidate_allowlist=_authority_allowlist(probe),
+        pre_review_authority=True,
+    )
+
+
+def _assert_no_setup_artifacts(repo, config, *, bus_dir=".agent_bus"):
+    assert not (repo / config.tracked_packet).exists()
+    assert config.wave_id not in (repo / "TASKS.md").read_text(encoding="utf-8")
+    assert not (repo / bus_dir).exists()
+
+
+# --------------------------------------------------------------------------- #
+# Launcher source / target Git common-dir guard                               #
+# --------------------------------------------------------------------------- #
+
+
+def test_launcher_common_dir_guard_accepts_canonical_target(wave_repo):
+    config = make_config()
+
+    result = lw.run_wave_setup(wave_repo, config)
+
+    assert result.precondition_ok is True
+    assert result.guards_ok is True
+    assert (wave_repo / config.tracked_packet).is_file()
+
+
+def test_launcher_common_dir_guard_accepts_registered_linked_worktree(wave_repo):
+    linked = wave_repo.parent / f"{wave_repo.name}-linked"
+    _git(wave_repo, "worktree", "add", "-q", "--detach", str(linked), "HEAD")
+    config = make_config()
+
+    result = lw.run_wave_setup(linked, config)
+
+    assert result.precondition_ok is True
+    assert result.guards_ok is True
+    assert (linked / config.tracked_packet).is_file()
+
+
+def test_launcher_common_dir_guard_rejects_identical_head_standalone_clone(wave_repo):
+    clone = _clone_repo(wave_repo, wave_repo.parent / f"{wave_repo.name}-clone")
+    config = make_config()
+
+    with pytest.raises(lw.LaunchWaveError, match="exact resolved Git common directory"):
+        lw.run_wave_setup(clone, config)
+
+    _assert_no_setup_artifacts(clone, config)
+
+
+def test_launcher_common_dir_guard_scrubs_inherited_git_repository_env(
+    wave_repo,
+    monkeypatch,
+):
+    clone = _clone_repo(wave_repo, wave_repo.parent / f"{wave_repo.name}-clone")
+    for key in ("GIT_DIR", "GIT_COMMON_DIR"):
+        monkeypatch.setenv(key, str(wave_repo / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(wave_repo))
+    seen_probe_envs = []
+    real_run = subprocess.run
+
+    def run_spy(cmd, *args, **kwargs):
+        if list(cmd) == ["git", "rev-parse", "--git-common-dir"]:
+            seen_probe_envs.append(dict(kwargs.get("env") or {}))
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(lw.subprocess, "run", run_spy)
+    config = make_config()
+
+    with pytest.raises(lw.LaunchWaveError, match="exact resolved Git common directory"):
+        lw.run_wave_setup(clone, config)
+
+    assert len(seen_probe_envs) == 2
+    for env in seen_probe_envs:
+        assert "GIT_DIR" not in env
+        assert "GIT_COMMON_DIR" not in env
+        assert "GIT_WORK_TREE" not in env
+    _assert_no_setup_artifacts(clone, config)
+
+
+def test_launcher_common_dir_guard_rejects_source_probe_failure(wave_repo, monkeypatch):
+    bad_source = wave_repo.parent / f"{wave_repo.name}-not-a-source-repo"
+    bad_source.mkdir()
+    monkeypatch.setattr(lw, "SCRIPT_DIR", bad_source)
+    config = make_config()
+
+    with pytest.raises(lw.LaunchWaveError, match="launcher source Git common-dir"):
+        lw.run_wave_setup(wave_repo, config)
+
+    _assert_no_setup_artifacts(wave_repo, config)
+
+
+def test_launcher_common_dir_guard_rejects_target_probe_failure(wave_repo):
+    bad_target = wave_repo.parent / f"{wave_repo.name}-not-a-target-repo"
+    bad_target.mkdir()
+
+    with pytest.raises(lw.LaunchWaveError, match="target repo_root Git common-dir"):
+        lw.run_wave_setup(bad_target, make_config())
+
+    assert not (bad_target / "reports").exists()
+    assert not (bad_target / ".agent_bus").exists()
+
+
+def test_launcher_common_dir_guard_rejects_malformed_probe_output(
+    wave_repo,
+    monkeypatch,
+):
+    real_run = subprocess.run
+
+    class _Malformed:
+        returncode = 0
+        stdout = ".git\nextra\n"
+        stderr = ""
+
+    def malformed_run(cmd, *args, **kwargs):
+        if list(cmd) == ["git", "rev-parse", "--git-common-dir"]:
+            return _Malformed()
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(lw.subprocess, "run", malformed_run)
+    config = make_config()
+
+    with pytest.raises(lw.LaunchWaveError, match="malformed output"):
+        lw.run_wave_setup(wave_repo, config)
+
+    _assert_no_setup_artifacts(wave_repo, config)
+
+
+def test_launcher_common_dir_guard_rejects_timed_out_probe(wave_repo, monkeypatch):
+    real_run = subprocess.run
+
+    def timeout_run(cmd, *args, **kwargs):
+        if list(cmd) == ["git", "rev-parse", "--git-common-dir"]:
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(lw.subprocess, "run", timeout_run)
+    config = make_config()
+
+    with pytest.raises(lw.LaunchWaveError, match="timed out"):
+        lw.run_wave_setup(wave_repo, config)
+
+    _assert_no_setup_artifacts(wave_repo, config)
+
+
+def test_run_wave_setup_repo_identity_failure_precedes_mutation_and_dispatch(
+    wave_repo,
+):
+    clone = _clone_repo(wave_repo, wave_repo.parent / f"{wave_repo.name}-clone")
+    config = make_config()
+    runner_called = False
+
+    class _R:
+        returncode = 0
+
+    def runner(cmd, **kwargs):
+        nonlocal runner_called
+        runner_called = True
+        return _R()
+
+    with pytest.raises(lw.LaunchWaveError, match="exact resolved Git common directory"):
+        lw.run_wave_setup(
+            clone,
+            config,
+            launch=True,
+            bus_dir=".agent_bus-identity",
+            runner=runner,
+        )
+
+    assert runner_called is False
+    _assert_no_setup_artifacts(clone, config, bus_dir=".agent_bus-identity")
+
+
+def test_prepare_review_repo_identity_failure_precedes_authority_mutation(
+    wave_repo,
+):
+    clone = _clone_repo(wave_repo, wave_repo.parent / f"{wave_repo.name}-clone")
+    config = _authority_config_for_repo(clone)
+
+    with pytest.raises(lw.LaunchWaveError, match="exact resolved Git common directory"):
+        lw.prepare_review_authority(
+            clone,
+            config,
+            bus_dir=".agent_bus-authority",
+            phase="phase_b",
+            review_round="manual-recovery",
+        )
+
+    _assert_no_setup_artifacts(clone, config, bus_dir=".agent_bus-authority")
+
+
+def test_repo_identity_failure_precedes_config_validation(wave_repo):
+    clone = _clone_repo(wave_repo, wave_repo.parent / f"{wave_repo.name}-clone")
+    invalid_config = make_config(title="Bad *Title*")
+
+    with pytest.raises(lw.LaunchWaveError) as exc:
+        lw.run_wave_setup(clone, invalid_config)
+
+    assert "exact resolved Git common directory" in str(exc.value)
+    assert "invalid wave-config" not in str(exc.value)
+    _assert_no_setup_artifacts(clone, invalid_config)
 
 
 # --------------------------------------------------------------------------- #
