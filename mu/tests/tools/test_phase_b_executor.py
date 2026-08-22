@@ -5943,6 +5943,88 @@ class TestFinalPytestGate:
         assert mock_bridge.call_count == 3
         assert "private-attr remediation review R3" in mock_bridge.call_args_list[2].args[1]
 
+    def test_private_attr_question_is_terminal_and_routine_resume_does_not_launch_work(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        gate_fail = {
+            "passed": False,
+            "skipped": False,
+            "exit_code": 1,
+            "stdout": "ERROR: Found private attr access in tests/:",
+            "stderr": "",
+            "test_files": ["mu/tests/tools/test_foo.py"],
+        }
+        gate_pass = {
+            "passed": True,
+            "skipped": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": ["mu/tests/tools/test_foo.py"],
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=[
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1"},
+                 {
+                     "exit_code": 0,
+                     "stdout": "QUESTION\n",
+                     "stderr": "",
+                     "decision": "QUESTION",
+                     "job_id": "j2",
+                     "stdout_path": ".scratch/stdout.log",
+                     "stderr_path": ".scratch/stderr.log",
+                 },
+             ]) as mock_bridge, \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=[gate_fail, gate_pass]), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="founder question render"), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True):
+            first = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=3)
+
+        assert first["status"] == "question_for_founder"
+        assert first["step"] == "private_attr_bridge_review"
+        assert mock_bridge.call_count == 2
+
+        state = pb_mod._load_state(repo)  # ANTICHEAT_OK: private-attr terminal resume regression
+        assert state["completed_step"] == "private_attr_remediation_question_for_founder"
+        assert state["terminal_result"]["status"] == "question_for_founder"
+        assert state["terminal_result"]["bridge_render"] == "founder question render"
+
+        second_impl = _make_mock_impl()
+        sdk_mock = MagicMock()
+        bridge_mock = MagicMock()
+        gate_mock = MagicMock()
+        pytest_mock = MagicMock()
+        supervisor_mock = MagicMock()
+        with patch.dict(sys.modules, {"phase_b_implementer": second_impl}), \
+             patch.object(pb_mod, "load_routing_record") as routing_mock, \
+             patch.object(pb_mod, "run_sdk_agents", sdk_mock), \
+             patch.object(pb_mod, "run_bridge_review", bridge_mock), \
+             patch.object(pb_mod, "run_private_attr_gate", gate_mock), \
+             patch.object(pb_mod, "_run_pytest_on_files", pytest_mock), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", supervisor_mock):
+            second = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=3)
+
+        assert second["status"] == "question_for_founder"
+        assert second["resumed_from"] == "private_attr_remediation_question_for_founder"
+        routing_mock.assert_not_called()
+        second_impl.invoke_implementer.assert_not_called()
+        sdk_mock.assert_not_called()
+        bridge_mock.assert_not_called()
+        gate_mock.assert_not_called()
+        pytest_mock.assert_not_called()
+        supervisor_mock.assert_not_called()
+
     def test_resume_private_attr_remediation_requires_fresh_bridge_review(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -6310,6 +6392,7 @@ class TestBridgeReviewMonitoring:
         with patch.object(pb_mod.os, "getpgid", return_value=12345), \
              patch.object(pb_mod.os, "killpg") as mock_killpg, \
              patch.object(pb_mod.os, "kill") as mock_kill, \
+             patch.object(pb_mod, "_pid_is_live", return_value=False), \
              patch.object(pb_mod.time, "sleep", return_value=None):
             pb_mod._terminate_bridge_subprocess(  # ANTICHEAT_OK: testing subprocess cleanup helper
                 proc,
@@ -6319,6 +6402,116 @@ class TestBridgeReviewMonitoring:
         assert (200, pb_mod.signal.SIGTERM) in [call.args for call in mock_killpg.call_args_list]
         assert (12345, pb_mod.signal.SIGTERM) in [call.args for call in mock_killpg.call_args_list]
         assert not mock_kill.called
+
+    def test_terminate_bridge_subprocess_kills_recorded_sigterm_ignoring_child_after_parent_exit(self, tmp_path):
+        child_code = (
+            "import signal, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "time.sleep(60)\n"
+        )
+        parent_code = (
+            "import subprocess, sys, time\n"
+            "child = subprocess.Popen([sys.executable, '-c', sys.argv[1]], start_new_session=True)\n"
+            "print(child.pid, flush=True)\n"
+            "time.sleep(60)\n"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", parent_code, child_code],
+            cwd=tmp_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        assert proc.stdout is not None
+        child_pid = int(proc.stdout.readline().strip())
+
+        try:
+            pb_mod._terminate_bridge_subprocess(  # ANTICHEAT_OK: real-process cleanup regression
+                proc,
+                child_pids=(child_pid,),
+            )
+            assert proc.poll() is not None
+            assert not pb_mod._pid_is_live(child_pid)  # ANTICHEAT_OK: confirms recorded detached child was killed
+        finally:
+            for pid in (child_pid, proc.pid):
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
+
+    def test_bridge_monitoring_exception_cleans_owned_process_tree(self, tmp_path):
+        proc = MagicMock()
+        proc.pid = 12345
+        proc.poll.return_value = None
+        first_snapshot = {
+            "child_pids": (200,),
+            "cpu_fingerprint": ((12345, 1.0), (200, 1.0)),
+            "artifact_fingerprint": (),
+        }
+
+        with patch.object(pb_mod.subprocess, "Popen", return_value=proc), \
+             patch.object(pb_mod, "_bridge_progress_snapshot", side_effect=[
+                 first_snapshot,
+                 RuntimeError("snapshot exploded"),
+             ]), \
+             patch.object(pb_mod, "_terminate_bridge_subprocess") as mock_terminate:
+            with pytest.raises(RuntimeError, match="snapshot exploded"):
+                pb_mod._run_bridge_review_subprocess(  # ANTICHEAT_OK: exception-safe bridge ownership regression
+                    tmp_path,
+                    [sys.executable, "-c", "print('hi')"],
+                    job_id="exception-job",
+                    timeout=30,
+                    verbose=False,
+                )
+
+        mock_terminate.assert_called_once_with(proc, child_pids=(200,))
+
+    def test_bridge_on_started_exception_cleans_detached_child_spawned_before_snapshot(self, tmp_path):
+        child_code = (
+            "import signal, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "time.sleep(60)\n"
+        )
+        parent_code = (
+            "import subprocess, sys, time\n"
+            "child = subprocess.Popen([sys.executable, '-c', sys.argv[1]], start_new_session=True)\n"
+            "print(child.pid, flush=True)\n"
+            "time.sleep(60)\n"
+        )
+        child_pids: list[int] = []
+        stdout_path = tmp_path / ".scratch" / "phase_b_bridge_callback-job.stdout.log"
+
+        def on_started() -> None:
+            deadline = pb_mod.time.monotonic() + 5.0
+            while pb_mod.time.monotonic() < deadline:
+                if stdout_path.exists():
+                    text = stdout_path.read_text(encoding="utf-8").strip()
+                    if text:
+                        child_pids.append(int(text.splitlines()[0]))
+                        raise RuntimeError("callback exploded")
+                pb_mod.time.sleep(0.05)
+            raise RuntimeError("child pid was not observed")
+
+        try:
+            with pytest.raises(RuntimeError, match="callback exploded"):
+                pb_mod._run_bridge_review_subprocess(  # ANTICHEAT_OK: real-process callback cleanup regression
+                    tmp_path,
+                    [sys.executable, "-c", parent_code, child_code],
+                    job_id="callback-job",
+                    timeout=30,
+                    verbose=False,
+                    on_started=on_started,
+                )
+
+            assert child_pids
+            assert not pb_mod._pid_is_live(child_pids[0])  # ANTICHEAT_OK: recorded detached child cleanup proof
+        finally:
+            for pid in child_pids:
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
 
 
 class TestImplementerIsConfigDriven:
@@ -8249,7 +8442,9 @@ class TestProtectedBranchCheckout:
             assert kwargs["text"] is True
             if cmd[:3] == ["git", "stash", "list"]:
                 return completed(cmd, stdout="stash@{1}\x00abc123\x00On dev: phase_b:jabramsja/example-wave:abc123\n")
-            if cmd[:3] == ["git", "stash", "pop"]:
+            if cmd[:3] == ["git", "stash", "apply"]:
+                return completed(cmd, stdout="Restored worktree")
+            if cmd[:3] == ["git", "stash", "drop"]:
                 return completed(cmd, stdout="Dropped refs/stash@{1}")
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -8258,7 +8453,8 @@ class TestProtectedBranchCheckout:
 
         assert error is None
         assert ["git", "stash", "list", "--format=%gd%x00%H%x00%s"] in commands
-        assert ["git", "stash", "pop", "--index", "stash@{1}"] in commands
+        assert ["git", "stash", "apply", "--index", "stash@{1}"] in commands
+        assert ["git", "stash", "drop", "stash@{1}"] in commands
         assert not state_path.exists()
 
     def test_startup_reresolves_persisted_mutable_branch_switch_stash_ref(self, tmp_path):
@@ -8295,7 +8491,9 @@ class TestProtectedBranchCheckout:
                         "stash@{1}\x00marker-oid\x00On dev: phase_b:jabramsja/example-wave:abc123\n"
                     ),
                 )
-            if cmd[:3] == ["git", "stash", "pop"]:
+            if cmd[:3] == ["git", "stash", "apply"]:
+                return completed(cmd, stdout=f"Applied {cmd[-1]}")
+            if cmd[:3] == ["git", "stash", "drop"]:
                 return completed(cmd, stdout=f"Dropped {cmd[-1]}")
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -8303,8 +8501,9 @@ class TestProtectedBranchCheckout:
             error = pb_mod._restore_pending_branch_switch_stash(repo)  # ANTICHEAT_OK: recovery helper regression
 
         assert error is None
-        assert ["git", "stash", "pop", "--index", "stash@{1}"] in commands
-        assert ["git", "stash", "pop", "--index", "stash@{0}"] not in commands
+        assert ["git", "stash", "apply", "--index", "stash@{1}"] in commands
+        assert ["git", "stash", "drop", "stash@{1}"] in commands
+        assert ["git", "stash", "apply", "--index", "stash@{0}"] not in commands
         assert not state_path.exists()
 
     def test_startup_rejects_branch_switch_stash_oid_mismatch(self, tmp_path):
@@ -8342,7 +8541,7 @@ class TestProtectedBranchCheckout:
 
         assert error is not None
         assert "object id mismatch" in error
-        assert all(cmd[:3] != ["git", "stash", "pop"] for cmd in commands)
+        assert all(cmd[:3] != ["git", "stash", "apply"] for cmd in commands)
         state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["status"] == "stash_oid_mismatch"
 
@@ -8390,7 +8589,7 @@ class TestProtectedBranchCheckout:
                 return completed(cmd, stdout=f"stash@{{0}}\x00abc123\x00On dev: {marker_holder['marker']}\n")
             if cmd[:2] == ["git", "checkout"]:
                 return completed(cmd, stdout="Switched to branch")
-            if cmd[:3] == ["git", "stash", "pop"]:
+            if cmd[:3] == ["git", "stash", "apply"]:
                 return completed(cmd, returncode=1, stderr="CONFLICT (content): file")
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -8405,8 +8604,8 @@ class TestProtectedBranchCheckout:
 
         assert error is not None
         assert "dirty worktree restore failed" in error
-        assert "git stash pop --index stash@{0} failed" in error
-        assert ["git", "stash", "pop", "--index", "stash@{0}"] in commands
+        assert "git stash apply --index stash@{0} failed" in error
+        assert ["git", "stash", "apply", "--index", "stash@{0}"] in commands
 
         state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -8416,6 +8615,182 @@ class TestProtectedBranchCheckout:
         assert state["current_branch"] == "dev"
         assert state["feature_branch"] == "jabramsja/example-wave"
         assert "CONFLICT" in state["output"]
+
+    def test_startup_drops_restore_applied_branch_switch_stash_without_reapplying(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(
+            json.dumps({
+                "status": "restore_applied",
+                "marker": "phase_b:jabramsja/example-wave:abc123",
+                "stash_ref": "stash@{0}",
+                "stash_oid": "marker-oid",
+                "current_branch": "dev",
+                "feature_branch": "jabramsja/example-wave",
+            }),
+            encoding="utf-8",
+        )
+        commands: list[list[str]] = []
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            commands.append(list(cmd))
+            assert kwargs["cwd"] == str(repo)
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="stash@{2}\x00marker-oid\x00On dev: phase_b:jabramsja/example-wave:abc123\n")
+            if cmd[:3] == ["git", "stash", "drop"]:
+                return completed(cmd, stdout="Dropped refs/stash@{2}")
+            if cmd[:3] == ["git", "stash", "apply"]:
+                raise AssertionError("restore_applied restart must not apply the stash again")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with patch.object(pb_mod.subprocess, "run", side_effect=fake_run):
+            error = pb_mod._restore_pending_branch_switch_stash(repo)  # ANTICHEAT_OK: branch-stash restore_applied restart
+
+        assert error is None
+        assert ["git", "stash", "drop", "stash@{2}"] in commands
+        assert all(cmd[:3] != ["git", "stash", "apply"] for cmd in commands)
+        assert not state_path.exists()
+
+    def test_startup_clears_restore_applied_branch_switch_state_when_marker_already_dropped(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(
+            json.dumps({
+                "status": "restore_applied",
+                "marker": "phase_b:jabramsja/example-wave:abc123",
+                "stash_ref": "stash@{0}",
+                "stash_oid": "marker-oid",
+                "current_branch": "dev",
+                "feature_branch": "jabramsja/example-wave",
+            }),
+            encoding="utf-8",
+        )
+        commands: list[list[str]] = []
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            commands.append(list(cmd))
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with patch.object(pb_mod.subprocess, "run", side_effect=fake_run):
+            error = pb_mod._restore_pending_branch_switch_stash(repo)  # ANTICHEAT_OK: branch-stash post-drop restart
+
+        assert error is None
+        assert commands == [["git", "stash", "list", "--format=%gd%x00%H%x00%s"]]
+        assert not state_path.exists()
+
+    def test_startup_clears_restore_dropped_branch_switch_state_without_git(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(
+            json.dumps({
+                "status": "restore_dropped",
+                "marker": "phase_b:jabramsja/example-wave:abc123",
+            }),
+            encoding="utf-8",
+        )
+
+        with patch.object(pb_mod.subprocess, "run") as mock_run:
+            error = pb_mod._restore_pending_branch_switch_stash(repo)  # ANTICHEAT_OK: branch-stash pre-cleanup restart
+
+        assert error is None
+        mock_run.assert_not_called()
+        assert not state_path.exists()
+
+    def test_branch_switch_stash_restore_restart_after_apply_drops_without_duplicate_application(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / ".gitignore").write_text(".agent_bus/\n", encoding="utf-8")
+        (repo / "file.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", ".gitignore", "file.txt"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+        (repo / "file.txt").write_text("changed\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=repo, check=True, capture_output=True)
+
+        stash_state, stash_error = pb_mod._stash_dirty_worktree_for_branch_switch(  # ANTICHEAT_OK: branch-stash transaction setup
+            repo,
+            current_branch="dev",
+            feature_branch="jabramsja/example-wave",
+        )
+        assert stash_error is None
+        assert stash_state is not None
+        subprocess.run(["git", "checkout", "-b", "jabramsja/example-wave"], cwd=repo, check=True, capture_output=True)
+
+        with patch.object(pb_mod, "_drop_branch_switch_stash_record", side_effect=RuntimeError("crash after apply")):
+            with pytest.raises(RuntimeError, match="crash after apply"):
+                pb_mod._restore_branch_switch_stash(repo, stash_state)  # ANTICHEAT_OK: branch-stash crash seam
+
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["status"] == "restore_applied"
+        assert (repo / "file.txt").read_text(encoding="utf-8") == "changed\n"
+        assert _git_stdout(repo, "diff", "--cached", "--name-only") == "file.txt"
+
+        error = pb_mod._restore_pending_branch_switch_stash(repo)  # ANTICHEAT_OK: branch-stash crash restart
+
+        assert error is None
+        assert not state_path.exists()
+        assert (repo / "file.txt").read_text(encoding="utf-8") == "changed\n"
+        assert _git_stdout(repo, "diff", "--cached", "--name-only") == "file.txt"
+        assert "phase_b:jabramsja/example-wave" not in _git_stdout(repo, "stash", "list")
+
+    def test_branch_switch_stash_restore_started_restart_proves_applied_untracked_wip(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / ".gitignore").write_text(".agent_bus/\n", encoding="utf-8")
+        (repo / "file.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", ".gitignore", "file.txt"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+        (repo / "file.txt").write_text("changed\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=repo, check=True, capture_output=True)
+        (repo / "new.txt").write_text("new\n", encoding="utf-8")
+
+        stash_state, stash_error = pb_mod._stash_dirty_worktree_for_branch_switch(  # ANTICHEAT_OK: branch-stash transaction setup
+            repo,
+            current_branch="dev",
+            feature_branch="jabramsja/example-wave",
+        )
+        assert stash_error is None
+        assert stash_state is not None
+        subprocess.run(["git", "checkout", "-b", "jabramsja/example-wave"], cwd=repo, check=True, capture_output=True)
+        stash_state.update({
+            "status": "restore_started",
+            "restore_started_at": "2026-08-21T00:00:00+00:00",
+        })
+        pb_mod._write_branch_stash_state(repo, stash_state)  # ANTICHEAT_OK: branch-stash restore_started seam
+        subprocess.run(
+            ["git", "stash", "apply", "--index", stash_state["stash_ref"]],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        error = pb_mod._restore_pending_branch_switch_stash(repo)  # ANTICHEAT_OK: branch-stash crash restart
+
+        assert error is None
+        assert not (repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json").exists()
+        assert (repo / "file.txt").read_text(encoding="utf-8") == "changed\n"
+        assert (repo / "new.txt").read_text(encoding="utf-8") == "new\n"
+        assert _git_stdout(repo, "diff", "--cached", "--name-only") == "file.txt"
+        assert "phase_b:jabramsja/example-wave" not in _git_stdout(repo, "stash", "list")
 
     def test_branch_switch_stash_restore_preserves_staged_index_state(self, tmp_path):
         repo = tmp_path / "repo"
@@ -9703,6 +10078,138 @@ class TestStatePersistence:
     def test_load_state_returns_none_when_missing(self, tmp_path):
         """_load_state returns None when no state file exists."""
         assert pb_mod._load_state(tmp_path) is None  # ANTICHEAT_OK: testing internal executor functions
+
+    def test_load_state_malformed_json_returns_typed_fail_closed_state(self, tmp_path):
+        state_path = pb_mod._state_file_path(tmp_path)  # ANTICHEAT_OK: testing state path helper
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text('{"plan_path": "test.md"', encoding="utf-8")
+
+        loaded = pb_mod._load_state(tmp_path)  # ANTICHEAT_OK: malformed checkpoint regression
+
+        assert pb_mod._is_state_load_error(loaded)  # ANTICHEAT_OK: typed checkpoint load error
+        assert loaded["state_error"] == "malformed_json"
+        assert "refusing mutable replay" in loaded["errors"][0]
+
+    def test_load_state_non_object_returns_typed_fail_closed_state(self, tmp_path):
+        state_path = pb_mod._state_file_path(tmp_path)  # ANTICHEAT_OK: testing state path helper
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text("[]", encoding="utf-8")
+
+        loaded = pb_mod._load_state(tmp_path)  # ANTICHEAT_OK: non-object checkpoint regression
+
+        assert pb_mod._is_state_load_error(loaded)  # ANTICHEAT_OK: typed checkpoint load error
+        assert loaded["state_error"] == "non_object"
+
+    def test_load_state_unreadable_returns_typed_fail_closed_state(self, tmp_path):
+        state_path = pb_mod._state_file_path(tmp_path)  # ANTICHEAT_OK: testing state path helper
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text("{}", encoding="utf-8")
+
+        with patch.object(Path, "read_text", side_effect=PermissionError("blocked")):
+            loaded = pb_mod._load_state(tmp_path)  # ANTICHEAT_OK: unreadable checkpoint regression
+
+        assert pb_mod._is_state_load_error(loaded)  # ANTICHEAT_OK: typed checkpoint load error
+        assert loaded["state_error"] == "unreadable"
+
+    def test_load_state_without_plan_path_returns_typed_fail_closed_state(self, tmp_path):
+        state_path = pb_mod._state_file_path(tmp_path)  # ANTICHEAT_OK: testing state path helper
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text("{}", encoding="utf-8")
+
+        loaded = pb_mod._load_state(tmp_path)  # ANTICHEAT_OK: unmatchable checkpoint regression
+
+        assert pb_mod._is_state_load_error(loaded)  # ANTICHEAT_OK: typed checkpoint load error
+        assert loaded["state_error"] == "incomplete"
+        assert "plan_path" in loaded["errors"][0]
+        assert "refusing mutable replay" in loaded["errors"][0].lower()
+
+    def test_run_phase_b_malformed_state_fails_closed_before_routing_or_implementation(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_state.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text("{", encoding="utf-8")
+        mock_impl = _make_mock_impl()
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record") as routing_mock, \
+             patch.object(pb_mod, "run_bridge_review") as bridge_mock:
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md")
+
+        assert result["status"] == "error"
+        assert result["step"] == "load_state"
+        assert result["state_error"] == "malformed_json"
+        routing_mock.assert_not_called()
+        mock_impl.invoke_implementer.assert_not_called()
+        bridge_mock.assert_not_called()
+
+    def test_run_phase_b_incomplete_matching_state_fails_closed_before_replay(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_rel = "reports/control_plane/plan.md"
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / plan_rel).write_text("# Plan\nPhase-A-Lock: LOCKED\n", encoding="utf-8")
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_state.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(json.dumps({"plan_path": plan_rel}), encoding="utf-8")
+        mock_impl = _make_mock_impl()
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record") as routing_mock, \
+             patch.object(pb_mod, "run_sdk_agents") as sdk_mock, \
+             patch.object(pb_mod, "run_bridge_review") as bridge_mock, \
+             patch.object(pb_mod, "run_pre_commit_supervisor") as supervisor_mock:
+            result = pb_mod.run_phase_b(repo, plan_rel, max_bridge_rounds=1)
+
+        assert result["status"] == "error"
+        assert result["step"] == "load_state"
+        assert result["state_error"] == "incomplete"
+        assert "completed_step" in result["errors"][0]
+        routing_mock.assert_not_called()
+        mock_impl.invoke_implementer.assert_not_called()
+        sdk_mock.assert_not_called()
+        bridge_mock.assert_not_called()
+        supervisor_mock.assert_not_called()
+
+    def test_run_phase_b_mismatched_state_fails_closed_before_replay(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\nPhase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        pb_mod._save_state(repo, {  # ANTICHEAT_OK: mismatched checkpoint setup
+            "plan_path": "reports/control_plane/other.md",
+            "completed_step": "implementer",
+            "wave_id": "other",
+        })
+        mock_impl = _make_mock_impl()
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record") as routing_mock, \
+             patch.object(pb_mod, "run_bridge_review") as bridge_mock:
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md")
+
+        assert result["status"] == "error"
+        assert result["step"] == "load_state"
+        assert result["state_error"] == "plan_mismatch"
+        routing_mock.assert_not_called()
+        mock_impl.invoke_implementer.assert_not_called()
+        bridge_mock.assert_not_called()
+
+    def test_save_state_atomic_replace_failure_preserves_prior_checkpoint(self, tmp_path):
+        old_state = {"plan_path": "test.md", "completed_step": "implementer", "wave_id": "w1"}
+        new_state = {"plan_path": "test.md", "completed_step": "bridge_round_1", "wave_id": "w1"}
+        path = pb_mod._save_state(tmp_path, old_state)  # ANTICHEAT_OK: atomic checkpoint setup
+
+        with patch.object(pb_mod.os, "replace", side_effect=OSError("replace failed")):
+            with pytest.raises(pb_mod.PhaseBExecutorError, match="atomic Phase B state replacement failed"):
+                pb_mod._save_state(tmp_path, new_state)  # ANTICHEAT_OK: atomic checkpoint replacement regression
+
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        assert loaded == old_state
+        assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
     def test_clear_state_removes_file(self, tmp_path):
         """_clear_state removes the state file."""
@@ -14607,8 +15114,49 @@ class TestPlanlessResume:
             f"Planless run should resume from saved state. Got: {result}"
         )
 
-    def test_explicit_plan_does_not_resume_from_planless_state(self, tmp_path):
-        """Saved planless state must NOT match an explicit --plan invocation."""
+    def test_planless_resume_fails_closed_when_saved_wave_differs(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".scratch").mkdir()
+
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        (state_dir / "phase_b_state.json").write_text(json.dumps({
+            "plan_path": "<planless:old-wave>",
+            "completed_step": "implementer",
+            "wave_id": "old-wave",
+            "bridge_rounds": 1,
+            "deferred_packet_path": None,
+        }))
+
+        bus = repo / ".agent_bus" / "meta"
+        bus.mkdir(parents=True)
+        (bus / "post_merge_routing.json").write_text(json.dumps({
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test planless mismatch",
+            "wave_name": "new-wave",
+            "next_candidates": [{"candidate": "do something"}],
+        }))
+
+        mock_impl = _make_mock_impl()
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "run_sdk_agents") as sdk_mock, \
+             patch.object(pb_mod, "run_bridge_review") as bridge_mock, \
+             patch.object(pb_mod, "run_pre_commit_supervisor") as supervisor_mock:
+            result = pb_mod.run_phase_b(repo, None, verbose=True)
+
+        assert result["status"] == "error"
+        assert result["step"] == "load_state"
+        assert result["state_error"] == "plan_mismatch"
+        assert "<planless:old-wave>" in result["errors"][0]
+        assert "<planless:new-wave>" in result["errors"][0]
+        mock_impl.invoke_implementer.assert_not_called()
+        sdk_mock.assert_not_called()
+        bridge_mock.assert_not_called()
+        supervisor_mock.assert_not_called()
+
+    def test_explicit_plan_fails_closed_on_planless_state_mismatch(self, tmp_path):
+        """Saved planless state must not be ignored by an explicit --plan invocation."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / ".scratch").mkdir()
@@ -14626,16 +15174,9 @@ class TestPlanlessResume:
             "bridge_rounds": 1,
         }))
 
-        # Write routing record
-        bus = repo / ".agent_bus" / "meta"
-        bus.mkdir(parents=True)
-        (bus / "post_merge_routing.json").write_text(json.dumps({
-            "decision": "ROUTE_PHASE_B",
-            "summary": "test",
-        }))
-
         mock_impl = _make_mock_impl()
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record") as routing_mock, \
              patch.object(pb_mod, "_collect_changed_files", return_value=[]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=[]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
@@ -14649,10 +15190,11 @@ class TestPlanlessResume:
                  "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json"}):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", verbose=True)
 
-        # Should NOT resume — plan path mismatch
-        assert result.get("resumed_from") is None, (
-            f"Explicit --plan should not match planless saved state. Got: {result}"
-        )
+        assert result["status"] == "error"
+        assert result["step"] == "load_state"
+        assert result["state_error"] == "plan_mismatch"
+        routing_mock.assert_not_called()
+        mock_impl.invoke_implementer.assert_not_called()
 
 
 class TestAgentReviewResume:

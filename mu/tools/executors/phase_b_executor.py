@@ -18,8 +18,9 @@ Control flow:
 8. On NEEDS_PHASE_B: re-invoke implementer with findings, then bridge review loop
 9. On other decisions: report and stop
 
-All terminal exits (max_rounds, question, supervisor_rejected) clear persisted
-state to prevent stale resume on next invocation.
+Most terminal exits clear persisted state to prevent stale resume on next
+invocation. Founder-wait QUESTION verdicts that must block routine redispatch
+are journaled as explicit terminal checkpoints.
 
 See: reports/control_plane/executor_surfaces_plan_2026-03-22.md Section B.3
 """
@@ -1957,6 +1958,21 @@ def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 100
 
 STATE_FILE_NAME = "phase_b_state.json"
 BRANCH_STASH_STATE_FILE_NAME = "phase_b_branch_stash.json"
+STATE_LOAD_ERROR_KEY = "__phase_b_state_load_error__"
+PRIVATE_ATTR_QUESTION_STEPS = {
+    "private_attr_remediation_question_for_founder",
+    "reentry_private_attr_remediation_question_for_founder",
+}
+RESUMABLE_STATE_STEPS = {
+    "implementer",
+    "agent_review",
+    "bridge_fix_pending",
+    "bridge_converged",
+    "private_attr_remediation_pending_review",
+    "needs_phase_b_reentry",
+    "reentry_private_attr_remediation_pending_review",
+    *PRIVATE_ATTR_QUESTION_STEPS,
+}
 
 
 def _state_file_path(repo_root: Path) -> Path:
@@ -1965,6 +1981,54 @@ def _state_file_path(repo_root: Path) -> Path:
 
 def _branch_stash_state_file_path(repo_root: Path) -> Path:
     return agent_bus_path(repo_root, _active_bus_dir(), "executors", BRANCH_STASH_STATE_FILE_NAME)
+
+
+def _atomic_write_text(path: Path, content: str, *, default_mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = default_mode
+    if path.exists():
+        try:
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        except OSError:
+            mode = default_mode
+
+    tmp_path: Path | None = None
+    fd: int | None = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        tmp_path = Path(tmp_name)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = None
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, path)
+        tmp_path = None
+        try:
+            dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except BaseException:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise
 
 
 def _write_branch_stash_state(repo_root: Path, state: dict[str, Any]) -> Path:
@@ -2006,6 +2070,93 @@ def _clear_branch_stash_state(repo_root: Path) -> None:
 
 def _git_output(result: subprocess.CompletedProcess[str]) -> str:
     return "\n".join(part.strip() for part in (result.stdout, result.stderr) if part and part.strip())
+
+
+def _git_binary_output(repo_root: Path, args: list[str]) -> bytes | None:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _git_revision_exists(repo_root: Path, revision: str) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", revision],
+        cwd=str(repo_root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def _reverse_stash_patch_applies(
+    repo_root: Path,
+    left_revision: str,
+    right_revision: str,
+    *,
+    cached: bool,
+) -> bool:
+    patch = _git_binary_output(
+        repo_root,
+        ["diff", "--binary", left_revision, right_revision],
+    )
+    if patch is None:
+        return False
+    if not patch:
+        return True
+    apply_cmd = ["git", "apply", "--reverse", "--check"]
+    if cached:
+        apply_cmd.insert(2, "--cached")
+    apply_result = subprocess.run(
+        apply_cmd,
+        cwd=str(repo_root),
+        input=patch,
+        capture_output=True,
+    )
+    return apply_result.returncode == 0
+
+
+def _branch_switch_stash_appears_applied(
+    repo_root: Path,
+    stash_record: dict[str, str],
+) -> bool:
+    """Prove a restore_started stash already reached the worktree/index."""
+    stash_ref = stash_record["stash_ref"]
+    base_revision = f"{stash_ref}^1"
+    index_revision = f"{stash_ref}^2"
+    untracked_revision = f"{stash_ref}^3"
+    empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+    if not _git_revision_exists(repo_root, base_revision):
+        return False
+    if not _git_revision_exists(repo_root, index_revision):
+        return False
+    if not _reverse_stash_patch_applies(
+        repo_root,
+        base_revision,
+        index_revision,
+        cached=True,
+    ):
+        return False
+    if not _reverse_stash_patch_applies(
+        repo_root,
+        index_revision,
+        stash_ref,
+        cached=False,
+    ):
+        return False
+    if _git_revision_exists(repo_root, untracked_revision):
+        return _reverse_stash_patch_applies(
+            repo_root,
+            empty_tree,
+            untracked_revision,
+            cached=False,
+        )
+    return True
 
 
 def _find_stash_record_for_marker(repo_root: Path, marker: str) -> dict[str, str] | None:
@@ -2056,8 +2207,14 @@ def _resolve_branch_switch_stash_record(
         _write_branch_stash_state(repo_root, stash_state)
         return None, detail
 
+    prior_status = str(stash_state.get("status") or "").strip()
+    resolved_status = prior_status if prior_status in {
+        "restore_started",
+        "restore_applied",
+        "drop_failed",
+    } else "stashed"
     stash_state.update({
-        "status": "stashed",
+        "status": resolved_status,
         "stash_ref": stash_record["stash_ref"],
         "stash_oid": stash_record["stash_oid"],
         "stash_subject": stash_record["stash_subject"],
@@ -2072,29 +2229,138 @@ def _pop_branch_switch_stash_record(
     stash_record: dict[str, str],
 ) -> str | None:
     stash_ref = stash_record["stash_ref"]
-    pop_cmd = ["git", "stash", "pop", "--index", stash_ref]
-    pop_result = subprocess.run(
-        pop_cmd,
+    apply_cmd = ["git", "stash", "apply", "--index", stash_ref]
+    stash_state.update({
+        "status": "restore_started",
+        "stash_ref": stash_ref,
+        "stash_oid": stash_record["stash_oid"],
+        "stash_subject": stash_record["stash_subject"],
+        "restore_started_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _write_branch_stash_state(repo_root, stash_state)
+
+    apply_result = subprocess.run(
+        apply_cmd,
         cwd=str(repo_root),
         capture_output=True,
         text=True,
     )
-    if pop_result.returncode != 0:
+    if apply_result.returncode != 0:
         stash_state.update({
             "status": "pop_failed",
-            "returncode": pop_result.returncode,
+            "returncode": apply_result.returncode,
             "stash_ref": stash_ref,
             "stash_oid": stash_record["stash_oid"],
             "stash_subject": stash_record["stash_subject"],
-            "output": _git_output(pop_result),
+            "output": _git_output(apply_result),
         })
         _write_branch_stash_state(repo_root, stash_state)
         return (
-            f"{' '.join(pop_cmd)} failed; recovery state preserved at "
+            f"{' '.join(apply_cmd)} failed; recovery state preserved at "
             f"{agent_bus_relpath(_active_bus_dir(), 'executors', BRANCH_STASH_STATE_FILE_NAME)}: "
-            f"{_git_output(pop_result) or pop_result.returncode}"
+            f"{_git_output(apply_result) or apply_result.returncode}"
         )
+    stash_state.update({
+        "status": "restore_applied",
+        "returncode": apply_result.returncode,
+        "stash_ref": stash_ref,
+        "stash_oid": stash_record["stash_oid"],
+        "stash_subject": stash_record["stash_subject"],
+        "apply_output": _git_output(apply_result),
+        "restore_applied_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _write_branch_stash_state(repo_root, stash_state)
+
+    drop_error = _drop_branch_switch_stash_record(repo_root, stash_state)
+    if drop_error:
+        return drop_error
     _clear_branch_stash_state(repo_root)
+    return None
+
+
+def _complete_already_applied_branch_switch_stash(
+    repo_root: Path,
+    stash_state: dict[str, Any],
+    stash_record: dict[str, str],
+) -> tuple[bool, str | None]:
+    if not _branch_switch_stash_appears_applied(repo_root, stash_record):
+        return False, None
+
+    stash_state.update({
+        "status": "restore_applied",
+        "stash_ref": stash_record["stash_ref"],
+        "stash_oid": stash_record["stash_oid"],
+        "stash_subject": stash_record["stash_subject"],
+        "apply_output": (
+            "branch-switch stash restore was already present in the "
+            "worktree/index; reverse patch checks proved restart idempotence"
+        ),
+        "restore_applied_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _write_branch_stash_state(repo_root, stash_state)
+
+    drop_error = _drop_branch_switch_stash_record(repo_root, stash_state)
+    if drop_error:
+        return True, drop_error
+    _clear_branch_stash_state(repo_root)
+    return True, None
+
+
+def _drop_branch_switch_stash_record(repo_root: Path, stash_state: dict[str, Any]) -> str | None:
+    marker = str(stash_state.get("marker") or "").strip()
+    stash_record = _find_stash_record_for_marker(repo_root, marker) if marker else None
+    if not stash_record:
+        stash_state.update({
+            "status": "restore_dropped",
+            "drop_output": "branch-switch stash marker is already absent from git stash list",
+            "restore_dropped_at": datetime.now(timezone.utc).isoformat(),
+        })
+        _write_branch_stash_state(repo_root, stash_state)
+        return None
+
+    stash_ref = stash_record["stash_ref"]
+    drop_cmd = ["git", "stash", "drop", stash_ref]
+    drop_result = subprocess.run(
+        drop_cmd,
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if drop_result.returncode != 0:
+        if marker and _find_stash_record_for_marker(repo_root, marker) is None:
+            stash_state.update({
+                "status": "restore_dropped",
+                "drop_output": _git_output(drop_result),
+                "restore_dropped_at": datetime.now(timezone.utc).isoformat(),
+            })
+            _write_branch_stash_state(repo_root, stash_state)
+            return None
+        stash_state.update({
+            "status": "drop_failed",
+            "returncode": drop_result.returncode,
+            "stash_ref": stash_ref,
+            "stash_oid": stash_record["stash_oid"],
+            "stash_subject": stash_record["stash_subject"],
+            "output": _git_output(drop_result),
+        })
+        _write_branch_stash_state(repo_root, stash_state)
+        return (
+            f"{' '.join(drop_cmd)} failed after branch-switch stash restore; "
+            "recovery state preserved at "
+            f"{agent_bus_relpath(_active_bus_dir(), 'executors', BRANCH_STASH_STATE_FILE_NAME)}: "
+            f"{_git_output(drop_result) or drop_result.returncode}"
+        )
+
+    stash_state.update({
+        "status": "restore_dropped",
+        "returncode": drop_result.returncode,
+        "stash_ref": stash_ref,
+        "stash_oid": stash_record["stash_oid"],
+        "stash_subject": stash_record["stash_subject"],
+        "drop_output": _git_output(drop_result),
+        "restore_dropped_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _write_branch_stash_state(repo_root, stash_state)
     return None
 
 
@@ -2160,6 +2426,14 @@ def _restore_branch_switch_stash(repo_root: Path, stash_state: dict[str, Any]) -
         return resolve_error
     if stash_record is None:
         return "branch-switch stash recovery record resolution failed"
+    if str(stash_state.get("status") or "").strip() == "restore_started":
+        completed, completion_error = _complete_already_applied_branch_switch_stash(
+            repo_root,
+            stash_state,
+            stash_record,
+        )
+        if completed:
+            return completion_error
     return _pop_branch_switch_stash_record(repo_root, stash_state, stash_record)
 
 
@@ -2169,6 +2443,15 @@ def _restore_pending_branch_switch_stash(repo_root: Path) -> str | None:
         return None
 
     status = str(stash_state.get("status") or "").strip()
+    if status == "restore_dropped":
+        _clear_branch_stash_state(repo_root)
+        return None
+    if status in {"restore_applied", "drop_failed"}:
+        drop_error = _drop_branch_switch_stash_record(repo_root, stash_state)
+        if drop_error:
+            return drop_error
+        _clear_branch_stash_state(repo_root)
+        return None
     if status == "pop_failed":
         return (
             "branch-switch stash recovery previously failed; resolve the worktree conflict "
@@ -2250,20 +2533,199 @@ def _checkout_feature_branch_from_protected_branch(
 def _save_state(repo_root: Path, state: dict[str, Any]) -> Path:
     """Persist executor state to disk for resume capability."""
     state_path = _state_file_path(repo_root)
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    try:
+        _atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
+    except OSError as exc:
+        raise PhaseBExecutorError(
+            f"atomic Phase B state replacement failed for "
+            f"{agent_bus_relpath(_active_bus_dir(), 'executors', STATE_FILE_NAME)}: {exc}"
+        ) from exc
     return state_path
+
+
+def _state_load_error(error_type: str, detail: str) -> dict[str, Any]:
+    return {
+        STATE_LOAD_ERROR_KEY: True,
+        "status": "error",
+        "step": "load_state",
+        "state_error": error_type,
+        "state_path": agent_bus_relpath(_active_bus_dir(), "executors", STATE_FILE_NAME),
+        "errors": [detail],
+    }
+
+
+def _is_state_load_error(state: Any) -> bool:
+    return isinstance(state, dict) and bool(state.get(STATE_LOAD_ERROR_KEY))
+
+
+def _state_missing_fields_error(
+    state_path: Path,
+    *,
+    fields: list[str],
+    completed_step: str | None = None,
+) -> dict[str, Any]:
+    fields_text = ", ".join(fields)
+    step_text = f" for completed_step={completed_step!r}" if completed_step else ""
+    return _state_load_error(
+        "incomplete",
+        "Phase B checkpoint is incomplete"
+        f"{step_text}; missing or invalid field(s): {fields_text}. "
+        f"Refusing mutable replay from {state_path}.",
+    )
+
+
+def _valid_state_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _valid_state_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_loaded_state_container(state_path: Path, state: dict[str, Any]) -> dict[str, Any] | None:
+    missing: list[str] = []
+    if not _valid_state_string(state.get("plan_path")):
+        missing.append("plan_path")
+    if missing:
+        return _state_missing_fields_error(state_path, fields=missing)
+    return None
+
+
+def _validate_resumable_state_shape(state_path: Path, state: dict[str, Any]) -> dict[str, Any] | None:
+    missing: list[str] = []
+    completed_step = state.get("completed_step")
+    if not _valid_state_string(completed_step):
+        missing.append("completed_step")
+    if not _valid_state_string(state.get("wave_id")):
+        missing.append("wave_id")
+    if not _valid_state_int(state.get("bridge_rounds")):
+        missing.append("bridge_rounds")
+    if missing:
+        return _state_missing_fields_error(state_path, fields=missing)
+
+    completed_step = str(completed_step).strip()
+    bridge_round_step = completed_step.startswith("bridge_round_")
+    if completed_step not in RESUMABLE_STATE_STEPS and not bridge_round_step:
+        return _state_load_error(
+            "unknown_step",
+            "Phase B checkpoint has unrecognized completed_step "
+            f"{completed_step!r}; refusing mutable replay from {state_path}.",
+        )
+    if bridge_round_step:
+        try:
+            round_num = int(completed_step.removeprefix("bridge_round_"))
+        except ValueError:
+            round_num = 0
+        if round_num <= 0:
+            return _state_load_error(
+                "unknown_step",
+                "Phase B checkpoint has invalid bridge_round completed_step "
+                f"{completed_step!r}; refusing mutable replay from {state_path}.",
+            )
+    if completed_step == "bridge_fix_pending":
+        step_missing: list[str] = []
+        if not _valid_state_int(state.get("current_bridge_round")) or state.get("current_bridge_round", 0) <= 0:
+            step_missing.append("current_bridge_round")
+        if not _valid_state_string(state.get("bridge_fix_findings")):
+            step_missing.append("bridge_fix_findings")
+        if step_missing:
+            return _state_missing_fields_error(
+                state_path,
+                fields=step_missing,
+                completed_step=completed_step,
+            )
+    if completed_step in PRIVATE_ATTR_QUESTION_STEPS:
+        terminal_result = state.get("terminal_result")
+        if not isinstance(terminal_result, dict) or terminal_result.get("status") != "question_for_founder":
+            return _state_missing_fields_error(
+                state_path,
+                fields=["terminal_result"],
+                completed_step=completed_step,
+            )
+    return None
+
+
+def _state_load_error_result(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "step": "load_state",
+        "state_error": state.get("state_error", "invalid"),
+        "state_path": state.get(
+            "state_path",
+            agent_bus_relpath(_active_bus_dir(), "executors", STATE_FILE_NAME),
+        ),
+        "errors": list(state.get("errors") or ["Phase B checkpoint is invalid"]),
+    }
+
+
+def _saved_state_matches_invocation(saved_plan: Any, plan_path: str | None) -> bool:
+    return saved_plan == plan_path
+
+
+def _state_plan_mismatch_result(saved_state: dict[str, Any], plan_path: str | None) -> dict[str, Any]:
+    saved_plan = saved_state.get("plan_path")
+    return {
+        "status": "error",
+        "step": "load_state",
+        "state_error": "plan_mismatch",
+        "state_path": agent_bus_relpath(_active_bus_dir(), "executors", STATE_FILE_NAME),
+        "errors": [
+            "Phase B checkpoint plan_path does not match this invocation; "
+            "refusing mutable replay from a mismatched checkpoint "
+            f"(saved={saved_plan!r}, requested={plan_path!r})."
+        ],
+    }
+
+
+def _private_attr_question_result_from_state(saved_state: dict[str, Any]) -> dict[str, Any]:
+    terminal_result = saved_state.get("terminal_result")
+    if isinstance(terminal_result, dict):
+        result = dict(terminal_result)
+    else:
+        result = {
+            "status": "question_for_founder",
+            "step": saved_state.get("question_step", "private_attr_bridge_review"),
+            "errors": list(saved_state.get("errors") or [
+                "Bridge returned QUESTION after private-attr remediation. Founder input required."
+            ]),
+        }
+    result["resumed_from"] = saved_state.get("completed_step")
+    result["terminal_checkpoint"] = agent_bus_relpath(
+        _active_bus_dir(),
+        "executors",
+        STATE_FILE_NAME,
+    )
+    return result
 
 
 def _load_state(repo_root: Path) -> dict[str, Any] | None:
     """Load persisted executor state, or None if not found."""
     state_path = _state_file_path(repo_root)
-    if state_path.exists():
-        try:
-            return json.loads(state_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return None
+    try:
+        raw = state_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return _state_load_error(
+            "unreadable",
+            f"Phase B checkpoint is unreadable; refusing mutable replay: {state_path}: {exc}",
+        )
+    try:
+        state = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return _state_load_error(
+            "malformed_json",
+            f"Phase B checkpoint is malformed or torn; refusing mutable replay: {state_path}: {exc}",
+        )
+    if not isinstance(state, dict):
+        return _state_load_error(
+            "non_object",
+            f"Phase B checkpoint must be a JSON object; refusing mutable replay: {state_path}",
+        )
+    shape_error = _validate_loaded_state_container(state_path, state)
+    if shape_error is not None:
+        return shape_error
+    return state
 
 
 def _clear_state(repo_root: Path) -> None:
@@ -3169,6 +3631,60 @@ def _signal_process_group_or_pid(pid: int, sig: int) -> None:
         pass
 
 
+def _pid_is_live(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _reap_pid_if_child(pid: int) -> None:
+    if pid <= 0:
+        return
+    try:
+        while True:
+            reaped_pid, _status = os.waitpid(pid, os.WNOHANG)
+            if reaped_pid == 0:
+                return
+            if reaped_pid == pid:
+                return
+    except ChildProcessError:
+        return
+    except OSError:
+        return
+
+
+def _live_recorded_bridge_children(child_pids: tuple[int, ...]) -> tuple[int, ...]:
+    live: list[int] = []
+    for child_pid in child_pids:
+        _reap_pid_if_child(child_pid)
+        if _pid_is_live(child_pid):
+            live.append(child_pid)
+    return tuple(live)
+
+
+def _wait_for_bridge_subprocess_exit(
+    proc: subprocess.Popen[str],
+    child_pids: tuple[int, ...],
+    *,
+    deadline: float,
+) -> bool:
+    while time.monotonic() < deadline:
+        proc_done = proc.poll() is not None
+        live_children = _live_recorded_bridge_children(child_pids)
+        if proc_done and not live_children:
+            return True
+        time.sleep(0.1)
+    return proc.poll() is not None and not _live_recorded_bridge_children(child_pids)
+
+
 def _terminate_bridge_subprocess(
     proc: subprocess.Popen[str],
     *,
@@ -3194,11 +3710,12 @@ def _terminate_bridge_subprocess(
     except (OSError, ProcessLookupError):
         pass
 
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        if proc.poll() is not None:
-            return
-        time.sleep(0.1)
+    if _wait_for_bridge_subprocess_exit(
+        proc,
+        detached_child_pids,
+        deadline=time.monotonic() + 2.0,
+    ):
+        return
 
     try:
         if pgid is not None:
@@ -3207,12 +3724,17 @@ def _terminate_bridge_subprocess(
             proc.kill()
     except (OSError, ProcessLookupError):
         pass
-    for child_pid in detached_child_pids:
+    for child_pid in _live_recorded_bridge_children(detached_child_pids):
         _signal_process_group_or_pid(child_pid, signal.SIGKILL)
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         pass
+    _wait_for_bridge_subprocess_exit(
+        proc,
+        detached_child_pids,
+        deadline=time.monotonic() + 5.0,
+    )
 
 
 def _run_bridge_review_subprocess(
@@ -3247,107 +3769,125 @@ def _run_bridge_review_subprocess(
             env=env,
             start_new_session=True,
         )
-        if on_started is not None:
-            try:
+        last_child_pids: tuple[int, ...] = ()
+        try:
+            if on_started is not None:
                 on_started()
-            except Exception:
-                _terminate_bridge_subprocess(proc)
-                raise
 
-        def _read_logs() -> tuple[str, str]:
-            stdout_handle.flush()
-            stderr_handle.flush()
-            return (
-                stdout_path.read_text(encoding="utf-8"),
-                stderr_path.read_text(encoding="utf-8"),
-            )
+            def _read_logs() -> tuple[str, str]:
+                stdout_handle.flush()
+                stderr_handle.flush()
+                return (
+                    stdout_path.read_text(encoding="utf-8"),
+                    stderr_path.read_text(encoding="utf-8"),
+                )
 
-        last_snapshot = _bridge_progress_snapshot(
-            repo_root, job_id, proc.pid, stdout_path, stderr_path
-        )
-        last_progress_at = time.monotonic()
-        start_time = last_progress_at
-        last_heartbeat_at = 0.0
-
-        while True:
-            exit_code = proc.poll()
-            snapshot = _bridge_progress_snapshot(
+            last_snapshot = _bridge_progress_snapshot(
                 repo_root, job_id, proc.pid, stdout_path, stderr_path
             )
-            now = time.monotonic()
-            if snapshot != last_snapshot:
-                last_progress_at = now
-            idle_for = now - last_progress_at
+            last_child_pids = tuple(last_snapshot.get("child_pids") or ())
+            last_progress_at = time.monotonic()
+            start_time = last_progress_at
+            last_heartbeat_at = 0.0
 
-            if verbose and (now - last_heartbeat_at >= poll_interval):
-                stderr_bytes = snapshot["artifact_fingerprint"][1][1]
-                print(
-                    "[phase-b] Bridge heartbeat: "
-                    f"job={job_id} pid={proc.pid} child_pids={list(snapshot['child_pids'])} "
-                    f"idle_seconds={idle_for:.1f} stderr_bytes={stderr_bytes}",
-                    file=sys.stderr,
-                    flush=True,
+            while True:
+                exit_code = proc.poll()
+                snapshot = _bridge_progress_snapshot(
+                    repo_root, job_id, proc.pid, stdout_path, stderr_path
                 )
-                last_heartbeat_at = now
+                last_child_pids = tuple(snapshot.get("child_pids") or ())
+                now = time.monotonic()
+                if snapshot != last_snapshot:
+                    last_progress_at = now
+                idle_for = now - last_progress_at
 
-            if exit_code is not None:
-                stdout, stderr = _read_logs()
-                return {
-                    "exit_code": exit_code,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "stdout_path": str(stdout_path.relative_to(repo_root)),
-                    "stderr_path": str(stderr_path.relative_to(repo_root)),
-                }
+                if verbose and (now - last_heartbeat_at >= poll_interval):
+                    stderr_bytes = snapshot["artifact_fingerprint"][1][1]
+                    print(
+                        "[phase-b] Bridge heartbeat: "
+                        f"job={job_id} pid={proc.pid} child_pids={list(snapshot['child_pids'])} "
+                        f"idle_seconds={idle_for:.1f} stderr_bytes={stderr_bytes}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    last_heartbeat_at = now
 
-            if not snapshot["child_pids"] and idle_for >= aggregation_hang_timeout:
-                _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
-                stdout, stderr = _read_logs()
-                return {
-                    "exit_code": -3,
-                    "stdout": stdout,
-                    "stderr": (
-                        f"Bridge review aggregation hang after {idle_for:.1f}s "
-                        f"(job_id={job_id}, stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
-                        f"{stderr}"
-                    ).strip(),
-                    "stdout_path": str(stdout_path.relative_to(repo_root)),
-                    "stderr_path": str(stderr_path.relative_to(repo_root)),
-                }
+                if exit_code is not None:
+                    stdout, stderr = _read_logs()
+                    return {
+                        "exit_code": exit_code,
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "stdout_path": str(stdout_path.relative_to(repo_root)),
+                        "stderr_path": str(stderr_path.relative_to(repo_root)),
+                    }
 
-            if idle_for >= stale_timeout:
-                _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
-                stdout, stderr = _read_logs()
-                return {
-                    "exit_code": -2,
-                    "stdout": stdout,
-                    "stderr": (
-                        f"Bridge review stale after {idle_for:.1f}s "
-                        f"(job_id={job_id}, child_pids={list(snapshot['child_pids'])}, "
-                        f"stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
-                        f"{stderr}"
-                    ).strip(),
-                    "stdout_path": str(stdout_path.relative_to(repo_root)),
-                    "stderr_path": str(stderr_path.relative_to(repo_root)),
-                }
+                if not snapshot["child_pids"] and idle_for >= aggregation_hang_timeout:
+                    _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
+                    stdout, stderr = _read_logs()
+                    return {
+                        "exit_code": -3,
+                        "stdout": stdout,
+                        "stderr": (
+                            f"Bridge review aggregation hang after {idle_for:.1f}s "
+                            f"(job_id={job_id}, stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
+                            f"{stderr}"
+                        ).strip(),
+                        "stdout_path": str(stdout_path.relative_to(repo_root)),
+                        "stderr_path": str(stderr_path.relative_to(repo_root)),
+                    }
 
-            if now - start_time >= timeout:
-                _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
-                stdout, stderr = _read_logs()
-                return {
-                    "exit_code": -1,
-                    "stdout": stdout,
-                    "stderr": (
-                        f"Bridge review timed out after {timeout}s "
-                        f"(job_id={job_id}, stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
-                        f"{stderr}"
-                    ).strip(),
-                    "stdout_path": str(stdout_path.relative_to(repo_root)),
-                    "stderr_path": str(stderr_path.relative_to(repo_root)),
-                }
+                if idle_for >= stale_timeout:
+                    _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
+                    stdout, stderr = _read_logs()
+                    return {
+                        "exit_code": -2,
+                        "stdout": stdout,
+                        "stderr": (
+                            f"Bridge review stale after {idle_for:.1f}s "
+                            f"(job_id={job_id}, child_pids={list(snapshot['child_pids'])}, "
+                            f"stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
+                            f"{stderr}"
+                        ).strip(),
+                        "stdout_path": str(stdout_path.relative_to(repo_root)),
+                        "stderr_path": str(stderr_path.relative_to(repo_root)),
+                    }
 
-            last_snapshot = snapshot
-            time.sleep(poll_sleep)
+                if now - start_time >= timeout:
+                    _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
+                    stdout, stderr = _read_logs()
+                    return {
+                        "exit_code": -1,
+                        "stdout": stdout,
+                        "stderr": (
+                            f"Bridge review timed out after {timeout}s "
+                            f"(job_id={job_id}, stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
+                            f"{stderr}"
+                        ).strip(),
+                        "stdout_path": str(stdout_path.relative_to(repo_root)),
+                        "stderr_path": str(stderr_path.relative_to(repo_root)),
+                    }
+
+                last_snapshot = snapshot
+                time.sleep(poll_sleep)
+        except BaseException:
+            cleanup_child_pids = set(last_child_pids)
+            try:
+                cleanup_snapshot = _bridge_progress_snapshot(
+                    repo_root,
+                    job_id,
+                    proc.pid,
+                    stdout_path,
+                    stderr_path,
+                )
+                cleanup_child_pids.update(cleanup_snapshot.get("child_pids") or ())
+            except BaseException:
+                pass
+            _terminate_bridge_subprocess(
+                proc,
+                child_pids=tuple(sorted(pid for pid in cleanup_child_pids if pid)),
+            )
+            raise
 
 
 def run_bridge_review(
@@ -6487,6 +7027,36 @@ def run_phase_b(
         if verbose:
             print(f"[phase-b] {msg}")
 
+    def _activate_matching_saved_state(saved: dict[str, Any]) -> str | dict[str, Any]:
+        shape_error = _validate_resumable_state_shape(_state_file_path(repo_root), saved)
+        if shape_error is not None:
+            return _state_load_error_result(shape_error)
+        completed_step = saved.get("completed_step", "")
+        if completed_step in PRIVATE_ATTR_QUESTION_STEPS:
+            return _private_attr_question_result_from_state(saved)
+        log(f"Resuming from saved state (completed_step={completed_step})")
+        result["resumed_from"] = completed_step
+        if saved.get("bridge_rounds"):
+            result["bridge_rounds"] = saved["bridge_rounds"]
+        if saved.get("deferred_packet_path"):
+            result["deferred_packet_path"] = saved["deferred_packet_path"]
+        return str(completed_step)
+
+    # Check for resumable state
+    saved_state = _load_state(repo_root)
+    if _is_state_load_error(saved_state):
+        return _state_load_error_result(saved_state)
+    resume_after: str = ""
+    if saved_state and plan_path is not None:
+        saved_plan = saved_state.get("plan_path")
+        if _saved_state_matches_invocation(saved_plan, plan_path):
+            activated_state = _activate_matching_saved_state(saved_state)
+            if isinstance(activated_state, dict):
+                return activated_state
+            resume_after = activated_state
+        else:
+            return _state_plan_mismatch_result(saved_state, plan_path)
+
     branch_stash_error = _restore_pending_branch_switch_stash(repo_root)
     if branch_stash_error:
         return {
@@ -6494,32 +7064,6 @@ def run_phase_b(
             "step": "restore_branch_switch_stash",
             "errors": [branch_stash_error],
         }
-
-    # Check for resumable state
-    saved_state = _load_state(repo_root)
-    resume_after: str = ""
-    if saved_state:
-        saved_plan = saved_state.get("plan_path")
-        # For planless invocations (plan_path is None on entry), the saved
-        # state stores the derived "<planless:wave_id>" path.  Match if the
-        # saved path is a planless marker — the actual plan_path will be set
-        # after _derive_planless_context runs, so we match on the marker
-        # prefix here instead of requiring an exact None == None comparison.
-        plan_matches = (
-            saved_plan == plan_path  # explicit --plan case
-            or (plan_path is None and isinstance(saved_plan, str)
-                and saved_plan.startswith("<planless:"))
-        )
-        if plan_matches:
-            completed_step = saved_state.get("completed_step", "")
-            log(f"Resuming from saved state (completed_step={completed_step})")
-            result["resumed_from"] = completed_step
-            resume_after = completed_step
-            # Restore key fields from saved state
-            if saved_state.get("bridge_rounds"):
-                result["bridge_rounds"] = saved_state["bridge_rounds"]
-            if saved_state.get("deferred_packet_path"):
-                result["deferred_packet_path"] = saved_state["deferred_packet_path"]
 
     # Step 1: Load and validate
     # Routing validation is FATAL: wrong routing token → error (not silent rewrite).
@@ -6600,6 +7144,14 @@ def run_phase_b(
             log(f"Planless mode: derived context from routing record (wave={plan.get('wave_id', '?')})")
         except PhaseBExecutorError as exc:
             return {"status": "error", "step": "derive_planless_context", "errors": [str(exc)]}
+
+    if saved_state and not resume_after:
+        if not _saved_state_matches_invocation(saved_state.get("plan_path"), plan_path):
+            return _state_plan_mismatch_result(saved_state, plan_path)
+        activated_state = _activate_matching_saved_state(saved_state)
+        if isinstance(activated_state, dict):
+            return activated_state
+        resume_after = activated_state
 
     plan_task_id = str(plan.get("task_id", "")).strip()
     if plan_task_id and not str(routing_record.get("task_id", "")).strip():
@@ -7066,6 +7618,13 @@ def run_phase_b(
             else "private_attr_remediation_pending_review"
         )
 
+    def _private_attr_question_step(*, reentry: bool) -> str:
+        return (
+            "reentry_private_attr_remediation_question_for_founder"
+            if reentry
+            else "private_attr_remediation_question_for_founder"
+        )
+
     def _save_private_attr_pending_review_state(
         candidate_files: list[str],
         *,
@@ -7380,14 +7939,43 @@ def run_phase_b(
             return current_files, None
 
         if bridge_decision == "QUESTION":
-            return current_files, {
+            question_result: dict[str, Any] = {
                 "status": "question_for_founder",
                 "step": step_name,
+                "bridge_rounds": next_round,
+                "bridge_job_id": bridge_job_id,
+                "bridge_stdout_path": bridge_result.get("stdout_path"),
+                "bridge_stderr_path": bridge_result.get("stderr_path"),
                 "errors": [
                     "Bridge returned QUESTION after private-attr remediation. "
                     "Founder input required."
                 ],
             }
+            render = _read_bridge_render(repo_root, bridge_job_id)
+            if render:
+                question_result["bridge_render"] = render[:2000]
+            _save_state(repo_root, {
+                "plan_path": plan_path,
+                "completed_step": _private_attr_question_step(reentry=reentry),
+                "wave_id": wave_id,
+                "bridge_rounds": next_round,
+                "bridge_job_id": bridge_job_id,
+                "bridge_decision": bridge_decision,
+                "bridge_stdout_path": bridge_result.get("stdout_path"),
+                "bridge_stderr_path": bridge_result.get("stderr_path"),
+                "bridge_render": question_result.get("bridge_render", ""),
+                "question_step": step_name,
+                "errors": list(question_result["errors"]),
+                "terminal_result": question_result,
+                "deferred_packet_path": deferred_packet_path,
+                "implementer_changed": sorted(implementer_changed),
+                "executor_created": sorted(executor_created),
+                "baseline_wave_files": sorted(baseline_wave_files),
+                "all_non_blocking": all_non_blocking,
+                "finding_history": finding_history,
+                "private_attr_gate_test_files": result.get("private_attr_gate_test_files", []),
+            })
+            return current_files, question_result
 
         if bridge_result["exit_code"] == 0 and bridge_decision not in RECOGNIZED_BRIDGE_DECISIONS:
             return current_files, {
@@ -9481,7 +10069,8 @@ def run_phase_b(
                 reentry=True,
             )
             if private_attr_bridge_error is not None:
-                _clear_state(repo_root)
+                if private_attr_bridge_error.get("status") != "question_for_founder":
+                    _clear_state(repo_root)
                 return private_attr_bridge_error
             _normalize_control_packet_line_refs(
                 repo_root,
