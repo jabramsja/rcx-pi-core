@@ -207,6 +207,94 @@ def _write_pre_review_plan(repo: Path, wave_id: str) -> tuple[str, str]:
     return plan_path, indicator_path
 
 
+def _write_bridge_receipt_fixture_repo(
+    repo: Path,
+    wave_id: str,
+) -> tuple[str, str, str]:
+    plan_path = "reports/control_plane/plan.md"
+    test_path = "mu/tests/tools/test_public_bridge_receipt.py"
+    indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+    (repo / ".agent_bus").mkdir(parents=True, exist_ok=True)
+    (repo / "reports" / "control_plane").mkdir(parents=True, exist_ok=True)
+    (repo / "mu" / "tools" / "metrics").mkdir(parents=True, exist_ok=True)
+    (repo / "mu" / "tests" / "tools").mkdir(parents=True, exist_ok=True)
+    (repo / "f.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / test_path).write_text(
+        "def test_public_bridge_receipt_smoke():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+    (repo / "mu" / "tools" / "metrics" / "collect_l4_wave_indicators.py").write_text(
+        "import argparse\n"
+        "import json\n"
+        "from pathlib import Path\n"
+        "\n"
+        "parser = argparse.ArgumentParser()\n"
+        "parser.add_argument('--wave-id', required=True)\n"
+        "parser.add_argument('--output', required=True)\n"
+        "args = parser.parse_args()\n"
+        "output = Path(args.output)\n"
+        "output.parent.mkdir(parents=True, exist_ok=True)\n"
+        "output.write_text(json.dumps({'wave_id': args.wave_id}, sort_keys=True) + '\\n', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    (repo / plan_path).write_text(
+        "# Plan\n"
+        f"Wave ID: {wave_id}\n"
+        "Phase-A-Lock: LOCKED\n"
+        "Task: [PIPELINE-RECOVERY]\n"
+        "Class: L4_ENABLER\n\n"
+        "## Scope\n\n"
+        "This lock package may stage exactly these same-wave files:\n\n"
+        "- `TASKS.md`\n"
+        "- `f.py`\n"
+        f"- `{test_path}`\n"
+        f"- `{plan_path}`\n"
+        f"- `{indicator_path}`\n",
+        encoding="utf-8",
+    )
+    _write_canonical_tasks(repo, wave_id)
+    _init_git_repo(repo)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "base"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "checkout", "-b", f"jabramsja/{wave_id}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    return plan_path, test_path, indicator_path
+
+
+def _make_successful_impl_with_edits(test_path: str) -> MagicMock:
+    mock_impl = _make_mock_impl()
+    edit_targets = ["f.py", test_path, "f.py", test_path, "f.py"]
+    call_count = 0
+
+    def invoke_side(repo_root, *_args, **_kwargs):
+        nonlocal call_count
+        target = edit_targets[min(call_count, len(edit_targets) - 1)]
+        with (Path(repo_root) / target).open("a", encoding="utf-8") as handle:
+            handle.write(f"# implementer edit {call_count + 1}\n")
+        call_count += 1
+        return {
+            "status": "success",
+            "output": "done",
+            "stderr": "",
+            "exit_code": 0,
+            "job_id": f"impl-{call_count}",
+            "model_override_applied": False,
+        }
+
+    mock_impl.invoke_implementer.side_effect = invoke_side
+    return mock_impl
+
+
 def _run_phase_b_public_target_gate_path(
     tmp_path: Path,
     *,
@@ -6746,6 +6834,300 @@ class TestBridgeLoopReinvokesImplementer:
         assert error is not None
         assert "Candidate authority spec is required before bridge review" in error
         assert "definitely-no-such-authority-spec-2026-08-21.spec.json" in error
+
+    def test_bridge_reviewer_rebinds_canonical_receipt_after_private_attr_edits(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = "phase-b-canonical-receipt-rebind-2026-08-21"
+        plan_path, test_path, _indicator_path = _write_bridge_receipt_fixture_repo(
+            repo,
+            wave_id,
+        )
+        mock_impl = _make_successful_impl_with_edits(test_path)
+        canonical_receipt = (
+            repo
+            / ".agent_bus"
+            / "meta"
+            / "candidate_authority_receipts"
+            / wave_id
+            / "phase_b-bridge_pre_review.json"
+        )
+        prepared_rounds: list[dict[str, Any]] = []
+        observed_bridge_receipts: list[dict[str, Any]] = []
+
+        def prepare_authority_side(
+            repo_root,
+            *,
+            wave_id,
+            phase,
+            review_round,
+            context,
+            **_kwargs,
+        ):
+            sequence = len(prepared_rounds) + 1
+            receipt_path = (
+                Path(repo_root)
+                / ".agent_bus"
+                / "meta"
+                / "candidate_authority_receipts"
+                / wave_id
+                / f"{phase}-{review_round}.json"
+            )
+            receipt_path.parent.mkdir(parents=True, exist_ok=True)
+            receipt = {
+                "sequence": sequence,
+                "review_round": review_round,
+                "context": context,
+            }
+            receipt_path.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
+            prepared_rounds.append(receipt)
+            return str(receipt_path), None
+
+        bridge_decisions = iter([
+            ("GO", 0),
+            ("NO_GO", 1),
+            ("GO", 0),
+        ])
+
+        def bridge_side(repo_root, summary, **kwargs):
+            on_started = kwargs.get("on_started")
+            if on_started is not None:
+                on_started()
+            observed = json.loads(canonical_receipt.read_text(encoding="utf-8"))
+            observed_bridge_receipts.append({
+                **observed,
+                "summary": summary,
+            })
+            decision, exit_code = next(bridge_decisions)
+            return {
+                "exit_code": exit_code,
+                "stdout": f"{decision}\nfix current candidate\n",
+                "stderr": "",
+                "decision": decision,
+                "job_id": kwargs.get("job_id", decision.lower()),
+            }
+
+        gate_fail = {
+            "passed": False,
+            "skipped": False,
+            "exit_code": 1,
+            "stdout": "private access through implementation detail",
+            "stderr": "",
+            "test_files": [test_path],
+        }
+        gate_pass = {
+            "passed": True,
+            "skipped": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": [test_path],
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "prepare_candidate_authority_if_configured", side_effect=prepare_authority_side), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=[gate_fail, gate_pass, gate_pass]), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(
+                repo,
+                plan_path,
+                max_bridge_rounds=3,
+                routing_record_override={
+                    **_VALID_ROUTING_RECORD,
+                    "task_id": "[PIPELINE-RECOVERY]",
+                    "wave_name": wave_id,
+                    "wave_class": "L4_ENABLER",
+                    "target_gate_id": "G8",
+                },
+            )
+
+        assert result["status"] == "commit_ready", result
+        assert [entry["review_round"] for entry in prepared_rounds] == [
+            "bridge_pre_review",
+            "bridge_pre_review",
+            "bridge_pre_review",
+        ]
+        assert [entry["sequence"] for entry in observed_bridge_receipts] == [1, 2, 3]
+        assert all(
+            entry["review_round"] == "bridge_pre_review"
+            for entry in observed_bridge_receipts
+        )
+        assert "private-attr remediation review" in observed_bridge_receipts[1]["summary"]
+        assert "private-attr remediation review" in observed_bridge_receipts[2]["summary"]
+
+    @pytest.mark.parametrize(
+        ("scenario", "expected_step"),
+        [
+            ("initial", "bridge_pre_review_candidate_authority"),
+            ("private_attr", "private_attr_bridge_review_candidate_authority"),
+            ("reentry", "reentry_bridge_pre_review_candidate_authority"),
+            ("reentry_private_attr", "reentry_private_attr_bridge_review_candidate_authority"),
+        ],
+    )
+    def test_bridge_review_context_failures_keep_distinct_steps_and_canonical_receipt(
+        self,
+        tmp_path,
+        real_pre_review_package,
+        scenario,
+        expected_step,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = f"phase-b-{scenario.replace('_', '-')}-canonical-receipt-2026-08-21"
+        plan_path, test_path, _indicator_path = _write_bridge_receipt_fixture_repo(
+            repo,
+            wave_id,
+        )
+        mock_impl = _make_successful_impl_with_edits(test_path)
+        prepared_bridge_contexts: list[str] = []
+
+        fail_state = {"private_attr_seen": 0}
+        expected_context = (
+            "bridge review round 1"
+            if scenario == "initial"
+            else "private-attr remediation bridge review"
+            if scenario in {"private_attr", "reentry_private_attr"}
+            else "re-entry bridge review"
+        )
+
+        def should_fail(context: str) -> bool:
+            if scenario == "initial":
+                return context.startswith("bridge review round")
+            if scenario == "private_attr" and context == "private-attr remediation bridge review":
+                return True
+            if scenario == "reentry":
+                return context == "re-entry bridge review"
+            if scenario == "reentry_private_attr" and context == "private-attr remediation bridge review":
+                fail_state["private_attr_seen"] += 1
+                return fail_state["private_attr_seen"] == 1
+            return False
+
+        def prepare_authority_side(
+            repo_root,
+            *,
+            wave_id,
+            phase,
+            review_round,
+            context,
+            **_kwargs,
+        ):
+            if review_round == "bridge_pre_review":
+                prepared_bridge_contexts.append(context)
+            receipt_path = (
+                Path(repo_root)
+                / ".agent_bus"
+                / "meta"
+                / "candidate_authority_receipts"
+                / wave_id
+                / f"{phase}-{review_round}.json"
+            )
+            receipt_path.parent.mkdir(parents=True, exist_ok=True)
+            receipt_path.write_text(
+                json.dumps({"review_round": review_round, "context": context}) + "\n",
+                encoding="utf-8",
+            )
+            if should_fail(context):
+                return None, "stale bridge authority"
+            return str(receipt_path), None
+
+        bridge_decisions_by_scenario = {
+            "initial": [],
+            "private_attr": [("GO", 0)],
+            "reentry": [("GO", 0)],
+            "reentry_private_attr": [("GO", 0), ("GO", 0)],
+        }
+        bridge_decisions = iter(bridge_decisions_by_scenario[scenario])
+
+        def bridge_side(_repo_root, _summary, **kwargs):
+            on_started = kwargs.get("on_started")
+            if on_started is not None:
+                on_started()
+            decision, exit_code = next(bridge_decisions)
+            return {
+                "exit_code": exit_code,
+                "stdout": f"{decision}\n",
+                "stderr": "",
+                "decision": decision,
+                "job_id": kwargs.get("job_id", decision.lower()),
+            }
+
+        gate_pass = {
+            "passed": True,
+            "skipped": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": [test_path],
+        }
+        gate_fail = {
+            "passed": False,
+            "skipped": False,
+            "exit_code": 1,
+            "stdout": "private attr",
+            "stderr": "",
+            "test_files": [test_path],
+        }
+        gate_results_by_scenario = {
+            "initial": [gate_pass],
+            "private_attr": [gate_fail, gate_pass],
+            "reentry": [gate_pass],
+            "reentry_private_attr": [gate_pass, gate_fail, gate_pass],
+        }
+        gate_results = iter(gate_results_by_scenario[scenario])
+
+        supervisor_decision = (
+            "NEEDS_PHASE_B"
+            if scenario in {"reentry", "reentry_private_attr"}
+            else "COMMIT_GO"
+        )
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "prepare_candidate_authority_if_configured", side_effect=prepare_authority_side), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=lambda *_args, **_kwargs: next(gate_results)), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {
+                     "decision": supervisor_decision,
+                     "summary": "re-enter Phase B" if supervisor_decision == "NEEDS_PHASE_B" else "",
+                     "status": "success",
+                     "findings": [],
+                 },
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(
+                repo,
+                plan_path,
+                max_bridge_rounds=3,
+                routing_record_override={
+                    **_VALID_ROUTING_RECORD,
+                    "task_id": "[PIPELINE-RECOVERY]",
+                    "wave_name": wave_id,
+                    "wave_class": "L4_ENABLER",
+                    "target_gate_id": "G8",
+                },
+            )
+
+        assert result["status"] == "error", result
+        assert result["step"] == expected_step
+        assert result["errors"] == [
+            f"Candidate authority is required before {expected_context}",
+            "stale bridge authority",
+        ]
+        assert expected_context in prepared_bridge_contexts
 
     def test_bridge_rounds_prepare_same_wave_indicator_before_each_review(
         self,

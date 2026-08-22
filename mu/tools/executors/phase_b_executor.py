@@ -134,6 +134,7 @@ class PhaseBExecutorError(RuntimeError):
 ALLOWED_FINDING_DISPOSITIONS = {"blocking", "non_blocking"}
 BRIDGE_JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 RECOGNIZED_BRIDGE_DECISIONS = {"GO", "REQUEST_CHANGES", "NO_GO", "QUESTION"}
+PHASE_B_BRIDGE_AUTHORITY_ROUND = "bridge_pre_review"
 ALLOWED_REVIEW_DEPTHS = {"quick", "full", "founder", "all"}
 BRIDGE_REVIEW_POLL_INTERVAL = 30.0
 BRIDGE_REVIEW_POLL_SLEEP = 5.0
@@ -6105,7 +6106,7 @@ def _prepare_phase_b_pre_review_package(
         repo_root,
         wave_id=normalized_wave,
         phase="phase_b",
-        review_round=step_prefix,
+        review_round=PHASE_B_BRIDGE_AUTHORITY_ROUND,
         context=context,
         required=candidate_authority_required,
         trusted_metadata=candidate_authority_metadata,
