@@ -97,6 +97,20 @@ def _write_pager_config(repo_root: Path, *, route: str = "both") -> None:
     )
 
 
+def _write_bot_remediation_executor_config(
+    repo_root: Path,
+    *,
+    backend: str = "claude",
+    raw_config: object | None = None,
+) -> Path:
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    if raw_config is None:
+        raw_config = {"backends": {"bot_remediation": backend}}
+    config_path.write_text(json.dumps(raw_config) + "\n", encoding="utf-8")
+    return config_path
+
+
 def _valid_supervisor_package() -> dict:
     return {
         "task_id": "[TEST]",
@@ -6662,10 +6676,215 @@ class TestBotRemediationValidation:
             ],
         }
 
+    def _adapter_lookup_failure_bridge(self, seen):
+        from types import SimpleNamespace
+
+        class BridgeAdapterError(Exception):
+            pass
+
+        def load_bridge_config(_path):
+            seen.setdefault("load_bridge_config_calls", 0)
+            seen["load_bridge_config_calls"] += 1
+            return {}
+
+        def get_adapter(_config, name):
+            seen.setdefault("adapter_names", []).append(name)
+            raise BridgeAdapterError("adapter lookup failed")
+
+        def run_adapter(*_args, **_kwargs):
+            raise AssertionError("adapter must not run after lookup failure")
+
+        return SimpleNamespace(
+            AdapterSpec=lambda **kwargs: SimpleNamespace(**kwargs),
+            BridgeAdapterError=BridgeAdapterError,
+            load_bridge_config=load_bridge_config,
+            get_adapter=get_adapter,
+            run_adapter=run_adapter,
+        )
+
+    def _run_step15_adapter_probe(self, repo):
+        logs: list[str] = []
+        result = commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: direct Step 15 adapter authority regression
+            [{
+                "path": "file.py",
+                "body": "P1 adapter authority regression",
+                "author": commit_mod.BOT_REVIEW_LOGIN,
+                "line": 1,
+            }],
+            repo_root=repo,
+            repo_owner="owner",
+            repo_name="repo",
+            pr_number="1036",
+            target_branch="bot-remediation-test",
+            head_sha="old-head",
+            wave_id="bot-remediation-adapter-authority-test",
+            continuation_path=repo / ".agent_bus" / "meta" / "commit_continuation.json",
+            result=self._base_result(),
+            log=logs.append,
+        )
+        return result, logs
+
+    def test_bot_remediation_target_scoped_role_override_selects_target_codex(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        repo = _setup_repo(tmp_path)
+        _write_bot_remediation_executor_config(repo, backend="fable")
+        monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", "codex")
+        monkeypatch.setenv(
+            commit_mod.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV,
+            str(repo.resolve()),
+        )
+        assert commit_mod.BOT_REMEDIATION_ADAPTER != "fable"
+
+        seen: dict[str, object] = {}
+        with patch.object(
+            commit_mod,
+            "BOT_REMEDIATION_ADAPTER",
+            "legacy-global-must-not-be-used",
+        ), patch.object(
+            commit_mod,
+            "_bridge_adapters",
+            self._adapter_lookup_failure_bridge(seen),
+        ):
+            result, _logs = self._run_step15_adapter_probe(repo)
+
+        assert result["status"] == "bot_findings_pending"
+        assert seen["adapter_names"] == ["codex"]
+
+    def test_bot_remediation_mismatched_override_root_uses_target_committed_role(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        repo = _setup_repo(tmp_path)
+        _write_bot_remediation_executor_config(repo, backend="fable")
+        monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", "codex")
+        monkeypatch.setenv(
+            commit_mod.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV,
+            str(tmp_path / "other-target"),
+        )
+
+        seen: dict[str, object] = {}
+        with patch.object(
+            commit_mod,
+            "BOT_REMEDIATION_ADAPTER",
+            "legacy-global-must-not-be-used",
+        ), patch.object(
+            commit_mod,
+            "_bridge_adapters",
+            self._adapter_lookup_failure_bridge(seen),
+        ):
+            result, _logs = self._run_step15_adapter_probe(repo)
+
+        assert result["status"] == "bot_findings_pending"
+        assert seen["adapter_names"] == ["fable"]
+
+    def test_bot_remediation_missing_target_config_blocks_fallback_adapter_lookup(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        repo = _setup_repo(tmp_path)
+        for env_name in commit_mod.ROLE_AGENT_ENV_VARS.get("implementer", ()):
+            monkeypatch.delenv(env_name, raising=False)
+        monkeypatch.delenv(commit_mod.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV, raising=False)
+        fallback_config = commit_mod.load_executor_config(repo)
+        assert fallback_config["backends"]["bot_remediation"]
+
+        seen: dict[str, object] = {}
+        with patch.object(
+            commit_mod,
+            "BOT_REMEDIATION_ADAPTER",
+            "legacy-global-must-not-be-used",
+        ), patch.object(
+            commit_mod,
+            "_bridge_adapters",
+            self._adapter_lookup_failure_bridge(seen),
+        ):
+            result, logs = self._run_step15_adapter_probe(repo)
+
+        assert result["status"] == "bot_findings_pending"
+        assert seen.get("adapter_names", []) == []
+        assert seen.get("load_bridge_config_calls", 0) == 0
+        assert "target executor config missing" in "\n".join(logs)
+
+    @pytest.mark.parametrize(
+        "config_content",
+        [
+            pytest.param("{not json\n", id="malformed-json"),
+            pytest.param("[]\n", id="non-object-config"),
+            pytest.param("{}\n", id="missing-backends"),
+            pytest.param(json.dumps({"backends": []}) + "\n", id="non-object-backends"),
+            pytest.param(json.dumps({"backends": {}}) + "\n", id="missing-backend"),
+            pytest.param(
+                json.dumps({"backends": {"bot_remediation": ""}}) + "\n",
+                id="blank-backend",
+            ),
+            pytest.param(
+                json.dumps({"backends": {"bot_remediation": 42}}) + "\n",
+                id="non-string-backend",
+            ),
+        ],
+    )
+    def test_bot_remediation_invalid_target_config_blocks_adapter_lookup(
+        self,
+        tmp_path,
+        config_content,
+    ):
+        repo = _setup_repo(tmp_path)
+        config_path = repo / "mu" / "tools" / "executors" / "executor_config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(config_content, encoding="utf-8")
+
+        seen: dict[str, object] = {}
+        with patch.object(
+            commit_mod,
+            "BOT_REMEDIATION_ADAPTER",
+            "legacy-global-must-not-be-used",
+        ), patch.object(
+            commit_mod,
+            "_bridge_adapters",
+            self._adapter_lookup_failure_bridge(seen),
+        ):
+            result, _logs = self._run_step15_adapter_probe(repo)
+
+        assert result["status"] == "bot_findings_pending"
+        assert seen.get("adapter_names", []) == []
+        assert seen.get("load_bridge_config_calls", 0) == 0
+
+    def test_bot_remediation_valid_target_config_adapter_lookup_failure_pending(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        repo = _setup_repo(tmp_path)
+        _write_bot_remediation_executor_config(repo, backend="fable")
+        for env_name in commit_mod.ROLE_AGENT_ENV_VARS.get("implementer", ()):
+            monkeypatch.delenv(env_name, raising=False)
+        monkeypatch.delenv(commit_mod.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV, raising=False)
+
+        seen: dict[str, object] = {}
+        with patch.object(
+            commit_mod,
+            "BOT_REMEDIATION_ADAPTER",
+            "legacy-global-must-not-be-used",
+        ), patch.object(
+            commit_mod,
+            "_bridge_adapters",
+            self._adapter_lookup_failure_bridge(seen),
+        ):
+            result, _logs = self._run_step15_adapter_probe(repo)
+
+        assert result["status"] == "bot_findings_pending"
+        assert seen["adapter_names"] == ["fable"]
+
     def test_bot_remediation_private_attr_gate_blocks_before_commit_or_push(self, tmp_path):
         import subprocess
 
         repo = _setup_repo(tmp_path)
+        _write_bot_remediation_executor_config(repo)
         linters = repo / "mu" / "tools" / "checks" / "linters"
         linters.mkdir(parents=True, exist_ok=True)
         (linters / "check_private_attr_access.py").write_text(
@@ -6751,6 +6970,7 @@ class TestBotRemediationValidation:
         import subprocess
 
         repo = _setup_repo(tmp_path)
+        _write_bot_remediation_executor_config(repo)
         linters = repo / "mu" / "tools" / "checks" / "linters"
         linters.mkdir(parents=True, exist_ok=True)
         (linters / "check_private_attr_access.py").write_text(
@@ -6837,6 +7057,7 @@ class TestBotRemediationValidation:
         """
         import subprocess
 
+        _write_bot_remediation_executor_config(repo)
         # Baseline commit so only the adapter's change is in-scope (sibling tests
         # do the same; otherwise the seed files show as untracked out-of-scope).
         subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
@@ -6923,6 +7144,7 @@ class TestBotRemediationValidation:
         """
         import subprocess
 
+        _write_bot_remediation_executor_config(repo)
         # Mirror production .gitignore: bus dirs and the .scratch prompt dir are
         # ignored, so neither minting a receipt into .agent_bus-laneN/meta nor the
         # remediation prompt file dirties `git status --porcelain` (the clean-tree
@@ -7068,6 +7290,7 @@ class TestBotRemediationValidation:
         amend mechanics (covered by
         ``test_auto_defer_amend_mints_fresh_receipt_for_staged_report``).
         """
+        _write_bot_remediation_executor_config(repo)
         with patch.object(
             commit_mod, "_bridge_adapters", self._fake_bridge_adapters_timeout(),
         ), patch.object(
