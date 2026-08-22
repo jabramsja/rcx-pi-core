@@ -49,6 +49,11 @@ CANONICAL_COLLECTOR_PATHS = frozenset(
 _VALID_L4_SKIP_REASONS = frozenset({"missing_l4_checker", "spec_disabled"})
 _RECEIPT_VERSION = 1
 _AUTHORITY_SPEC_IDENTITY_VERSION = 1
+_STANDALONE_REQUIRED_REVIEWER_PROVENANCE_FIELDS = (
+    "reviewer_agent",
+    "reviewer_launch_provenance",
+    "reviewer_launch_provenance_hash",
+)
 
 
 def _run_git(
@@ -795,6 +800,33 @@ def _normalize_reviewer_launch_provenance(
     }
 
 
+def _require_standalone_reviewer_provenance(receipt: dict[str, Any]) -> None:
+    """Enforce the receipt-schema provenance anchor before mutable recovery."""
+    missing = [
+        field
+        for field in _STANDALONE_REQUIRED_REVIEWER_PROVENANCE_FIELDS
+        if field not in receipt
+    ]
+    if missing:
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance is required by standalone receipt "
+            "schema; missing field(s): " + ", ".join(missing)
+        )
+    reviewer_agent = _normalize_optional_token(
+        receipt.get("reviewer_agent", ""),
+        "reviewer agent",
+    )
+    if not reviewer_agent:
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance is required by standalone receipt "
+            "schema; reviewer_agent is missing"
+        )
+    _require_hex_digest(
+        receipt.get("reviewer_launch_provenance_hash"),
+        "reviewer_launch_provenance_hash",
+    )
+
+
 @dataclass(frozen=True)
 class CandidateAuthoritySpec:
     wave_id: str
@@ -1197,6 +1229,7 @@ def _receipt_verification_payload(
 ) -> dict[str, Any]:
     _normalize_l4_contract_result(receipt.get("l4_contract"))
     if trusted_spec is None:
+        _require_standalone_reviewer_provenance(receipt)
         require_l4_staged = _receipt_require_l4_staged(receipt)
         reviewer_agent = _launch_bound_reviewer_agent(
             repo_root,

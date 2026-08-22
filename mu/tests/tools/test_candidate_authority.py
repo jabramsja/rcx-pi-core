@@ -439,6 +439,38 @@ def test_receipt_verification_rejects_removed_reviewer_provenance_downgrade(
         ca.verify_current_receipt(repo, receipt_path)
 
 
+def test_receipt_verification_rejects_removed_reviewer_provenance_and_spec_downgrade(
+    tmp_path: Path,
+):
+    repo, base = _init_repo(tmp_path)
+    (repo / "src" / "keep.txt").write_text("changed\n", encoding="utf-8")
+    receipt = ca.prepare_candidate_authority(
+        repo,
+        _spec(base, _default_allowlist()),
+        bus_dir=BUS_DIR,
+    )
+    receipt_path = Path(receipt["receipt_path"])
+    tampered_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    tampered_receipt.pop("reviewer_agent")
+    tampered_receipt.pop("reviewer_launch_provenance")
+    tampered_receipt.pop("reviewer_launch_provenance_hash")
+    receipt_path.write_text(
+        json.dumps(tampered_receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    spec_path = ca.authority_spec_path(repo, bus_dir=BUS_DIR, wave_id=WAVE_ID)
+    tampered_spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    tampered_spec["reviewer_agent"] = ""
+    spec_path.write_text(
+        json.dumps(tampered_spec, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ca.CandidateAuthorityError, match="reviewer_launch_provenance"):
+        ca.verify_current_receipt(repo, receipt_path)
+
+
 def test_receipt_verification_rejects_reviewer_bridge_config_drift(tmp_path: Path):
     repo, base = _init_repo(tmp_path)
     (repo / "src" / "keep.txt").write_text("changed\n", encoding="utf-8")
@@ -499,6 +531,36 @@ def test_launch_bound_spec_identity_rejects_bus_spec_tampering(tmp_path: Path):
 
     with pytest.raises(ca.CandidateAuthorityError, match="launch-bound identity"):
         ca.verify_authority_spec_identity(repo, tampered, trusted_identity)
+
+
+def test_receipt_verification_trusted_spec_survives_bus_spec_reviewer_downgrade(
+    tmp_path: Path,
+):
+    repo, base = _init_repo(tmp_path)
+    (repo / "src" / "keep.txt").write_text("changed\n", encoding="utf-8")
+    spec = _spec(base, _default_allowlist(), review_round="trusted-round")
+    receipt = ca.prepare_candidate_authority(
+        repo,
+        spec,
+        bus_dir=BUS_DIR,
+    )
+    spec_path = ca.authority_spec_path(repo, bus_dir=BUS_DIR, wave_id=WAVE_ID)
+    tampered_spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    tampered_spec["reviewer_agent"] = ""
+    spec_path.write_text(
+        json.dumps(tampered_spec, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    result = ca.verify_current_receipt(
+        repo,
+        Path(receipt["receipt_path"]),
+        trusted_spec=spec,
+        phase="phase_b",
+        review_round="trusted-round",
+    )
+
+    assert result["status"] == "current"
 
 
 @pytest.mark.parametrize(
