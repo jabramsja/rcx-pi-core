@@ -510,136 +510,6 @@ def _expand_value(value: str, context: dict[str, str]) -> str:
         raise BridgeAdapterError(f"Missing bridge command placeholder: {missing}") from exc
 
 
-def _repo_root_from_bridge_config_path(config_path: Path) -> Path | None:
-    resolved = config_path.expanduser().resolve()
-    bus_name = resolved.parent.name
-    if resolved.name != "bridge_config.json":
-        return None
-    if bus_name != ".agent_bus" and not _AGENT_BUS_NAMESPACE_RE.fullmatch(bus_name):
-        return None
-    return resolved.parent.parent
-
-
-def _nonempty_string(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    cleaned = value.strip()
-    return cleaned or None
-
-
-def _load_bridge_agent_defaults(config_path: Path) -> dict[str, dict[str, Any]]:
-    repo_root = _repo_root_from_bridge_config_path(config_path)
-    if repo_root is None:
-        return {}
-    executor_config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
-    if not executor_config_path.exists():
-        return {}
-    try:
-        payload = json.loads(executor_config_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
-    defaults = payload.get("bridge_agent_defaults")
-    if not isinstance(defaults, dict):
-        return {}
-    return {
-        name: data
-        for name, data in defaults.items()
-        if isinstance(name, str) and isinstance(data, dict)
-    }
-
-
-def _replace_option_value(
-    cmd: list[str],
-    flags: tuple[str, ...],
-    value: str,
-) -> tuple[list[str], bool]:
-    updated = list(cmd)
-    for index, part in enumerate(updated):
-        if part in flags and index + 1 < len(updated):
-            updated[index + 1] = value
-            return updated, True
-        for flag in flags:
-            prefix = f"{flag}="
-            if part.startswith(prefix):
-                updated[index] = f"{prefix}{value}"
-                return updated, True
-    return updated, False
-
-
-def _replace_codex_reasoning_effort(cmd: list[str], effort: str) -> tuple[list[str], bool]:
-    updated = list(cmd)
-    option = f'model_reasoning_effort="{effort}"'
-    for index, part in enumerate(updated):
-        if part == "-c" and index + 1 < len(updated):
-            next_part = updated[index + 1]
-            if next_part.startswith("model_reasoning_effort="):
-                updated[index + 1] = option
-                return updated, True
-        if part.startswith("model_reasoning_effort="):
-            updated[index] = option
-            return updated, True
-    updated.extend(["-c", option])
-    return updated, False
-
-
-def _apply_agent_defaults(
-    agent_name: str,
-    agent_config: dict[str, Any],
-    defaults: dict[str, Any],
-) -> dict[str, Any]:
-    updated = dict(agent_config)
-    display_name = _nonempty_string(defaults.get("display_name"))
-    if display_name is not None:
-        updated["display_name"] = display_name
-
-    cmd = updated.get("cmd")
-    if not isinstance(cmd, list) or not all(isinstance(part, str) for part in cmd):
-        return updated
-
-    command = list(cmd)
-    model = _nonempty_string(defaults.get("model"))
-    if model is not None:
-        model_flags = ("-m", "--model") if agent_name == "codex" else ("--model", "-m")
-        command, found = _replace_option_value(command, model_flags, model)
-        if not found:
-            command.extend([model_flags[0], model])
-
-    if agent_name == "codex":
-        reasoning_effort = _nonempty_string(defaults.get("reasoning_effort"))
-        if reasoning_effort is not None:
-            command, _found = _replace_codex_reasoning_effort(command, reasoning_effort)
-
-    effort = _nonempty_string(defaults.get("effort"))
-    if effort is not None:
-        command, found = _replace_option_value(command, ("--effort",), effort)
-        if not found:
-            command.extend(["--effort", effort])
-
-    updated["cmd"] = command
-    return updated
-
-
-def _apply_bridge_agent_defaults(
-    config: dict[str, Any],
-    config_path: Path,
-) -> dict[str, Any]:
-    defaults = _load_bridge_agent_defaults(config_path)
-    if not defaults:
-        return config
-    agents = config.get("agents")
-    if not isinstance(agents, dict):
-        return config
-    for agent_name, agent_defaults in defaults.items():
-        agent_config = agents.get(agent_name)
-        if isinstance(agent_config, dict):
-            agents[agent_name] = _apply_agent_defaults(
-                agent_name,
-                agent_config,
-                agent_defaults,
-            )
-    return config
-
-
 def load_bridge_config(config_path: Path) -> dict[str, Any]:
     if not config_path.exists():
         raise BridgeAdapterError(
@@ -652,7 +522,7 @@ def load_bridge_config(config_path: Path) -> dict[str, Any]:
         raise BridgeAdapterError(f"Bridge config is not valid JSON: {exc}") from exc
     if not isinstance(config, dict):
         raise BridgeAdapterError("Bridge config must be a JSON object")
-    return _apply_bridge_agent_defaults(config, config_path)
+    return config
 
 
 def get_adapter(config: dict[str, Any], adapter_name: str) -> AdapterSpec:
