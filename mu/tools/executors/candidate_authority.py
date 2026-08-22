@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import shlex
@@ -21,6 +22,19 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
+
+try:
+    import executor_common as _ec
+except ImportError:
+    _COMMON_PATH = Path(__file__).resolve().parent / "executor_common.py"
+    _COMMON_SPEC = importlib.util.spec_from_file_location(
+        "executor_common",
+        str(_COMMON_PATH),
+    )
+    if _COMMON_SPEC is None or _COMMON_SPEC.loader is None:
+        raise
+    _ec = importlib.util.module_from_spec(_COMMON_SPEC)
+    _COMMON_SPEC.loader.exec_module(_ec)
 
 
 class CandidateAuthorityError(RuntimeError):
@@ -35,6 +49,11 @@ CANONICAL_COLLECTOR_PATHS = frozenset(
 _VALID_L4_SKIP_REASONS = frozenset({"missing_l4_checker", "spec_disabled"})
 _RECEIPT_VERSION = 1
 _AUTHORITY_SPEC_IDENTITY_VERSION = 1
+_STANDALONE_REQUIRED_REVIEWER_PROVENANCE_FIELDS = (
+    "reviewer_agent",
+    "reviewer_launch_provenance",
+    "reviewer_launch_provenance_hash",
+)
 
 
 def _run_git(
@@ -548,6 +567,266 @@ def _normalize_token(value: str, label: str) -> str:
     return token
 
 
+def _normalize_optional_token(value: Any, label: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise CandidateAuthorityError(f"{label} must be a string")
+    token = value.strip()
+    if not token:
+        return ""
+    return _normalize_token(token, label)
+
+
+def _receipt_bus_dir(repo_root: Path, receipt_path: Path) -> Path:
+    root = Path(repo_root).resolve()
+    path = Path(receipt_path)
+    absolute = path if path.is_absolute() else root / path
+    try:
+        rel = absolute.resolve(strict=False).relative_to(root)
+    except ValueError as exc:
+        raise CandidateAuthorityError(
+            f"authority receipt path escapes repository: {receipt_path}"
+        ) from exc
+    parts = rel.parts
+    if len(parts) < 5 or parts[1:3] != ("meta", "candidate_authority_receipts"):
+        raise CandidateAuthorityError(
+            "authority receipt path must be under "
+            ".agent_bus-<id>/meta/candidate_authority_receipts/"
+        )
+    try:
+        return _ec.normalize_agent_bus_dir(parts[0])
+    except _ec.ExecutorCommonError as exc:
+        raise CandidateAuthorityError(
+            f"authority receipt path does not identify a valid bus: {exc}"
+        ) from exc
+
+
+def _reviewer_launch_provenance(
+    repo_root: Path,
+    spec: "CandidateAuthoritySpec",
+    *,
+    bus_dir: str | Path | None,
+) -> dict[str, Any] | None:
+    reviewer_agent = _normalize_optional_token(spec.reviewer_agent, "reviewer agent")
+    if not reviewer_agent:
+        return None
+    try:
+        return _ec.reviewer_launch_provenance(
+            repo_root,
+            bus_dir=bus_dir,
+            selected_agent=reviewer_agent,
+        )
+    except _ec.ExecutorCommonError as exc:
+        raise CandidateAuthorityError(
+            f"reviewer launch provenance is invalid: {exc}"
+        ) from exc
+
+
+def _ensure_authority_spec_snapshot(
+    repo_root: Path,
+    spec: "CandidateAuthoritySpec",
+    *,
+    bus_dir: str | Path | None,
+) -> None:
+    wave_id = _normalize_token(spec.wave_id, "wave id")
+    path = authority_spec_path(repo_root, bus_dir=bus_dir, wave_id=wave_id)
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_json(path, spec.to_dict())
+
+
+def _load_launch_authority_spec(
+    repo_root: Path,
+    *,
+    bus_dir: str | Path | None,
+    wave_id: Any,
+) -> "CandidateAuthoritySpec | None":
+    normalized_wave_id = _normalize_optional_token(wave_id, "wave id")
+    if not normalized_wave_id:
+        return None
+    path = authority_spec_path(repo_root, bus_dir=bus_dir, wave_id=normalized_wave_id)
+    if not path.exists():
+        return None
+    try:
+        return load_authority_spec(path)
+    except CandidateAuthorityError as exc:
+        raise CandidateAuthorityError(
+            f"launch-bound authority spec is invalid: {exc}"
+        ) from exc
+
+
+def _routing_identity_reviewer_agent(
+    repo_root: Path,
+    *,
+    bus_dir: str | Path | None,
+) -> str:
+    try:
+        path = _ec.routing_record_path(repo_root, bus_dir)
+    except _ec.ExecutorCommonError as exc:
+        raise CandidateAuthorityError(
+            f"launch-bound routing record path is invalid: {exc}"
+        ) from exc
+    if not path.exists():
+        return ""
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise CandidateAuthorityError(
+            f"cannot read launch-bound routing record {path}: {exc}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise CandidateAuthorityError(
+            f"launch-bound routing record is not JSON: {path}: {exc}"
+        ) from exc
+    if not isinstance(loaded, dict):
+        raise CandidateAuthorityError("launch-bound routing record must be a JSON object")
+    metadata = loaded.get("candidate_authority")
+    if not isinstance(metadata, dict):
+        return ""
+    identity = metadata.get("spec_identity")
+    if not isinstance(identity, dict):
+        return ""
+    return _normalize_optional_token(
+        identity.get("reviewer_agent", ""),
+        "launch-bound reviewer agent",
+    )
+
+
+def _launch_bound_reviewer_agent(
+    repo_root: Path,
+    receipt: dict[str, Any],
+    *,
+    bus_dir: str | Path | None,
+) -> str:
+    sources: list[tuple[str, str]] = []
+    receipt_agent = _normalize_optional_token(
+        receipt.get("reviewer_agent", ""),
+        "reviewer agent",
+    )
+    if receipt_agent:
+        sources.append(("receipt", receipt_agent))
+    launch_spec = _load_launch_authority_spec(
+        repo_root,
+        bus_dir=bus_dir,
+        wave_id=receipt.get("wave_id", ""),
+    )
+    if launch_spec is not None:
+        spec_agent = _normalize_optional_token(
+            launch_spec.reviewer_agent,
+            "launch-bound reviewer agent",
+        )
+        if spec_agent:
+            sources.append(("launch-bound authority spec", spec_agent))
+    routing_agent = _routing_identity_reviewer_agent(repo_root, bus_dir=bus_dir)
+    if routing_agent:
+        sources.append(("launch-bound routing identity", routing_agent))
+    agents = {agent for _source, agent in sources}
+    if len(agents) > 1:
+        details = ", ".join(f"{source}={agent}" for source, agent in sources)
+        raise CandidateAuthorityError(
+            "reviewer_agent conflicts with launch-bound authority: " + details
+        )
+    if not sources:
+        return ""
+    return sources[0][1]
+
+
+def _require_hex_digest(value: Any, label: str) -> str:
+    if not isinstance(value, str) or len(value) != 64:
+        raise CandidateAuthorityError(f"{label} must be a SHA-256 hex digest")
+    lowered = value.lower()
+    if lowered != value or any(ch not in "0123456789abcdef" for ch in value):
+        raise CandidateAuthorityError(
+            f"{label} must be a lowercase SHA-256 hex digest"
+        )
+    return value
+
+
+def _normalize_reviewer_launch_provenance(
+    value: Any,
+    spec: "CandidateAuthoritySpec",
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance must be a JSON object"
+        )
+    reviewer_agent = _normalize_token(spec.reviewer_agent, "reviewer agent")
+    version = value.get("version")
+    if version != _ec.REVIEWER_LAUNCH_PROVENANCE_VERSION:
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance has unsupported version"
+        )
+    selected_agent = _normalize_token(
+        value.get("selected_agent", ""),
+        "reviewer_launch_provenance selected_agent",
+    )
+    if selected_agent != reviewer_agent:
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance selected_agent does not match reviewer_agent"
+        )
+    model = value.get("model")
+    effort = value.get("effort")
+    if not isinstance(model, str) or not model.strip() or model.strip() != model:
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance model must be a non-empty string"
+        )
+    if not isinstance(effort, str) or not effort.strip() or effort.strip() != effort:
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance effort must be a non-empty string"
+        )
+    bridge_config_path_raw = value.get("bridge_config_path")
+    if not isinstance(bridge_config_path_raw, str):
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance bridge_config_path must be a string"
+        )
+    bridge_config_path = _normalize_repo_path(bridge_config_path_raw)
+    if not bridge_config_path.endswith("/bridge_config.json"):
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance bridge_config_path must target bridge_config.json"
+        )
+    return {
+        "version": _ec.REVIEWER_LAUNCH_PROVENANCE_VERSION,
+        "selected_agent": selected_agent,
+        "model": model,
+        "effort": effort,
+        "command_sha256": _require_hex_digest(value.get("command_sha256"), "command_sha256"),
+        "bridge_config_path": bridge_config_path,
+        "bridge_config_sha256": _require_hex_digest(
+            value.get("bridge_config_sha256"),
+            "bridge_config_sha256",
+        ),
+    }
+
+
+def _require_standalone_reviewer_provenance(receipt: dict[str, Any]) -> None:
+    """Enforce the receipt-schema provenance anchor before mutable recovery."""
+    missing = [
+        field
+        for field in _STANDALONE_REQUIRED_REVIEWER_PROVENANCE_FIELDS
+        if field not in receipt
+    ]
+    if missing:
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance is required by standalone receipt "
+            "schema; missing field(s): " + ", ".join(missing)
+        )
+    reviewer_agent = _normalize_optional_token(
+        receipt.get("reviewer_agent", ""),
+        "reviewer agent",
+    )
+    if not reviewer_agent:
+        raise CandidateAuthorityError(
+            "reviewer_launch_provenance is required by standalone receipt "
+            "schema; reviewer_agent is missing"
+        )
+    _require_hex_digest(
+        receipt.get("reviewer_launch_provenance_hash"),
+        "reviewer_launch_provenance_hash",
+    )
+
+
 @dataclass(frozen=True)
 class CandidateAuthoritySpec:
     wave_id: str
@@ -561,6 +840,7 @@ class CandidateAuthoritySpec:
     indicator_collection_command: str = ""
     wave_class: str = "L4_ENABLER"
     require_l4_staged: bool = True
+    reviewer_agent: str = ""
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "CandidateAuthoritySpec":
@@ -579,6 +859,7 @@ class CandidateAuthoritySpec:
             indicator_collection_command=str(data.get("indicator_collection_command", "")).strip(),
             wave_class=str(data.get("wave_class", "L4_ENABLER")).strip() or "L4_ENABLER",
             require_l4_staged=_require_bool(require_l4_staged, "require_l4_staged"),
+            reviewer_agent=_normalize_optional_token(data.get("reviewer_agent", ""), "reviewer agent"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -594,6 +875,7 @@ class CandidateAuthoritySpec:
             "indicator_collection_command": self.indicator_collection_command,
             "wave_class": self.wave_class,
             "require_l4_staged": self.require_l4_staged,
+            "reviewer_agent": self.reviewer_agent,
         }
 
 
@@ -609,6 +891,10 @@ def build_spec_from_wave_config(config: Any, *, phase: str, review_round: str) -
         indicator_collection_command=str(config.indicator_collection_command).strip(),
         wave_class=str(config.wave_class).strip() or "L4_ENABLER",
         require_l4_staged=bool(config.pre_review_authority),
+        reviewer_agent=_normalize_optional_token(
+            str(getattr(config, "reviewer_agent", "") or "").strip(),
+            "reviewer agent",
+        ),
     )
 
 
@@ -673,6 +959,7 @@ def _authority_spec_identity_payload(
         "indicator_collection_command": spec.indicator_collection_command,
         "wave_class": spec.wave_class,
         "require_l4_staged": bool(spec.require_l4_staged),
+        "reviewer_agent": _normalize_optional_token(spec.reviewer_agent, "reviewer agent"),
     }
     if authority_required is not None:
         payload["authority_required"] = _require_bool(
@@ -762,10 +1049,11 @@ def _receipt_payload(
     staged_inventory: list[dict[str, Any]],
     indicator_hash: str,
     l4_contract: dict[str, Any],
+    reviewer_launch_provenance: dict[str, Any] | None,
 ) -> dict[str, Any]:
     allowlist = normalize_allowlist(spec.candidate_allowlist)
     normalized_l4_contract = _normalize_l4_contract_result(l4_contract)
-    return {
+    payload = {
         "version": _RECEIPT_VERSION,
         "repository": _repo_identity(repo_root),
         "wave_id": spec.wave_id,
@@ -789,6 +1077,16 @@ def _receipt_payload(
         "l4_contract": normalized_l4_contract,
         "l4_contract_hash": _json_hash(normalized_l4_contract),
     }
+    reviewer_agent = _normalize_optional_token(spec.reviewer_agent, "reviewer agent")
+    if reviewer_agent:
+        provenance = _normalize_reviewer_launch_provenance(
+            reviewer_launch_provenance,
+            spec,
+        )
+        payload["reviewer_agent"] = reviewer_agent
+        payload["reviewer_launch_provenance"] = provenance
+        payload["reviewer_launch_provenance_hash"] = _json_hash(provenance)
+    return payload
 
 
 def _validate_spec_declared_paths(
@@ -846,6 +1144,9 @@ def prepare_candidate_authority(
     bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     repo_root = Path(repo_root).resolve()
+    _ensure_bus_ignored(repo_root, bus_dir)
+    _ensure_authority_spec_snapshot(repo_root, spec, bus_dir=bus_dir)
+    reviewer_provenance = _reviewer_launch_provenance(repo_root, spec, bus_dir=bus_dir)
     comparison_commit = validate_comparison_commit(repo_root, spec.comparison_commit)
     allowlist = normalize_allowlist(spec.candidate_allowlist)
     allowset = set(allowlist)
@@ -903,6 +1204,7 @@ def prepare_candidate_authority(
         staged_inventory=post_staged_inventory,
         indicator_hash=indicator_hash,
         l4_contract=l4_contract,
+        reviewer_launch_provenance=reviewer_provenance,
     )
     receipt_path = receipt_path_for(
         repo_root,
@@ -911,7 +1213,6 @@ def prepare_candidate_authority(
         phase=spec.phase,
         review_round=spec.review_round,
     )
-    _ensure_bus_ignored(repo_root, bus_dir)
     receipt["receipt_path"] = str(receipt_path)
     _atomic_write_json(receipt_path, receipt)
     return receipt
@@ -921,13 +1222,20 @@ def _receipt_verification_payload(
     repo_root: Path,
     receipt: dict[str, Any],
     *,
+    bus_dir: str | Path | None,
     trusted_spec: CandidateAuthoritySpec | None = None,
     phase: str | None = None,
     review_round: str | None = None,
 ) -> dict[str, Any]:
     _normalize_l4_contract_result(receipt.get("l4_contract"))
     if trusted_spec is None:
+        _require_standalone_reviewer_provenance(receipt)
         require_l4_staged = _receipt_require_l4_staged(receipt)
+        reviewer_agent = _launch_bound_reviewer_agent(
+            repo_root,
+            receipt,
+            bus_dir=bus_dir,
+        )
         spec = CandidateAuthoritySpec.from_mapping(
             {
                 "wave_id": receipt.get("wave_id", ""),
@@ -941,6 +1249,7 @@ def _receipt_verification_payload(
                 "indicator_collection_command": "",
                 "wave_class": receipt.get("wave_class", "L4_ENABLER"),
                 "require_l4_staged": require_l4_staged,
+                "reviewer_agent": reviewer_agent,
             }
         )
     else:
@@ -950,6 +1259,13 @@ def _receipt_verification_payload(
                 "phase": phase or trusted_spec.phase,
                 "review_round": review_round or trusted_spec.review_round,
             }
+        )
+    _ensure_bus_ignored(repo_root, bus_dir)
+    reviewer_provenance = _reviewer_launch_provenance(repo_root, spec, bus_dir=bus_dir)
+    if spec.reviewer_agent:
+        _normalize_reviewer_launch_provenance(
+            receipt.get("reviewer_launch_provenance"),
+            spec,
         )
     comparison_commit = validate_comparison_commit(repo_root, spec.comparison_commit)
     inventory = collect_literal_base_inventory(repo_root, comparison_commit)
@@ -1003,6 +1319,7 @@ def _receipt_verification_payload(
         staged_inventory=staged_inventory,
         indicator_hash=indicator_hash,
         l4_contract=l4_contract,
+        reviewer_launch_provenance=reviewer_provenance,
     )
 
 
@@ -1035,10 +1352,12 @@ def verify_current_receipt(
         raise CandidateAuthorityError(
             "authority receipt is tampered; wave_id does not match receipt path"
         )
+    bus_dir = _receipt_bus_dir(repo_root, Path(receipt_path))
 
     expected = _receipt_verification_payload(
         repo_root,
         receipt,
+        bus_dir=bus_dir,
         trusted_spec=trusted_spec,
         phase=phase,
         review_round=review_round,
@@ -1065,6 +1384,9 @@ def verify_current_receipt(
         "staged_binary_diff_sha256",
         "l4_contract",
         "l4_contract_hash",
+        "reviewer_agent",
+        "reviewer_launch_provenance",
+        "reviewer_launch_provenance_hash",
     )
     mismatches = [
         key for key in compared_keys

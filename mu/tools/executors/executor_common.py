@@ -9,10 +9,12 @@ dialectic_executor.py.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
 import signal
+import shlex
 import shutil
 import stat
 import subprocess
@@ -116,6 +118,7 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     },
 }
 ALLOWED_PIPELINE_AGENT_PAGER_ROUTES = frozenset({"codex", "claude", "both", "notify-only"})
+REVIEWER_LAUNCH_PROVENANCE_VERSION = 1
 
 DEFAULT_AGENT_DISPLAY_NAMES = {
     name: str(data.get("display_name")).strip()
@@ -870,6 +873,164 @@ def load_bridge_agent_catalog(
             if display_name is not None:
                 catalog.setdefault(name, {})["display_name"] = display_name
     return catalog
+
+
+def _json_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _selector_value(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise ExecutorCommonError(f"{label} selector value must be a string")
+    cleaned = value.strip()
+    if not cleaned:
+        raise ExecutorCommonError(f"{label} selector value cannot be empty")
+    if cleaned != value:
+        raise ExecutorCommonError(f"{label} selector value must not contain outer whitespace")
+    if cleaned.startswith("-"):
+        raise ExecutorCommonError(f"{label} selector value is missing before {cleaned!r}")
+    return cleaned
+
+
+def _bridge_command_tokens(cmd: Any, *, selected_agent: str) -> list[str]:
+    if not isinstance(cmd, list) or not cmd:
+        raise ExecutorCommonError(
+            f"bridge_config agent {selected_agent!r} cmd must be a non-empty list"
+        )
+    tokens: list[str] = []
+    for index, token in enumerate(cmd):
+        if not isinstance(token, str):
+            raise ExecutorCommonError(
+                f"bridge_config agent {selected_agent!r} cmd token {index} "
+                "must be a string"
+            )
+        tokens.append(token)
+    return tokens
+
+
+def _single_flag_selector(
+    cmd: list[str],
+    flags: tuple[str, ...],
+    label: str,
+) -> tuple[str, str] | None:
+    values: list[tuple[str, str]] = []
+    for index, token in enumerate(cmd):
+        if token not in flags:
+            continue
+        if index + 1 >= len(cmd):
+            raise ExecutorCommonError(f"{label} selector {token!r} is missing a value")
+        values.append((token, _selector_value(cmd[index + 1], label)))
+    if len(values) > 1:
+        raise ExecutorCommonError(
+            f"{label} selector is duplicate or conflicting: "
+            + ", ".join(flag for flag, _value in values)
+        )
+    return values[0] if values else None
+
+
+def _model_reasoning_effort_value(raw: str) -> str:
+    try:
+        parts = shlex.split(raw)
+    except ValueError as exc:
+        raise ExecutorCommonError(
+            f"model_reasoning_effort selector is malformed: {exc}"
+        ) from exc
+    if len(parts) != 1:
+        raise ExecutorCommonError(
+            "model_reasoning_effort selector must contain exactly one value"
+        )
+    return _selector_value(parts[0], "model_reasoning_effort")
+
+
+def _single_effort_selector(cmd: list[str]) -> tuple[str, str] | None:
+    values: list[tuple[str, str]] = []
+    flag_value = _single_flag_selector(cmd, ("--effort",), "effort")
+    if flag_value is not None:
+        values.append(flag_value)
+    prefix = "model_reasoning_effort="
+    for token in cmd:
+        if token.startswith(prefix):
+            values.append(
+                (
+                    "model_reasoning_effort",
+                    _model_reasoning_effort_value(token[len(prefix):]),
+                )
+            )
+    if len(values) > 1:
+        raise ExecutorCommonError(
+            "effort selector is duplicate or conflicting: "
+            + ", ".join(flag for flag, _value in values)
+        )
+    return values[0] if values else None
+
+
+def reviewer_launch_provenance(
+    repo_root: Path,
+    *,
+    bus_dir: str | Path | None,
+    selected_agent: str,
+) -> dict[str, Any]:
+    """Return launch-bound reviewer command provenance from a namespaced bus.
+
+    The receipt needs enough identity to detect selected-agent, command, and
+    bridge-config drift without serializing command tokens, environment values,
+    or other adapter secrets. The only unhashed selector values retained are
+    the model and effort values required for reviewer authority.
+    """
+    selected = _selector_value(selected_agent, "selected agent")
+    rel_bus = normalize_agent_bus_dir(bus_dir)
+    if rel_bus == DEFAULT_AGENT_BUS_DIR:
+        raise ExecutorCommonError(
+            "reviewer launch provenance requires a namespaced .agent_bus-<id> bus"
+        )
+    config_path = bridge_config_path(repo_root, rel_bus)
+    try:
+        config_bytes = config_path.read_bytes()
+    except OSError as exc:
+        raise ExecutorCommonError(
+            f"cannot read launch-bound bridge_config at {config_path}: {exc}"
+        ) from exc
+    try:
+        loaded = json.loads(config_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ExecutorCommonError(
+            f"launch-bound bridge_config is malformed at {config_path}: {exc}"
+        ) from exc
+    if not isinstance(loaded, dict):
+        raise ExecutorCommonError("launch-bound bridge_config must be a JSON object")
+    agents = loaded.get("agents")
+    if not isinstance(agents, dict):
+        raise ExecutorCommonError("launch-bound bridge_config must contain an agents object")
+    agent_config = agents.get(selected)
+    if not isinstance(agent_config, dict):
+        raise ExecutorCommonError(
+            f"selected reviewer agent {selected!r} is absent from launch-bound bridge_config"
+        )
+    cmd = _bridge_command_tokens(agent_config.get("cmd"), selected_agent=selected)
+    model = _single_flag_selector(cmd, ("--model", "-m"), "model")
+    if model is None:
+        raise ExecutorCommonError(
+            f"selected reviewer agent {selected!r} command is missing --model/-m"
+        )
+    effort = _single_effort_selector(cmd)
+    if effort is None:
+        raise ExecutorCommonError(
+            f"selected reviewer agent {selected!r} command is missing effort selector"
+        )
+    return {
+        "version": REVIEWER_LAUNCH_PROVENANCE_VERSION,
+        "selected_agent": selected,
+        "model": model[1],
+        "effort": effort[1],
+        "command_sha256": _json_sha256(cmd),
+        "bridge_config_path": agent_bus_relpath(rel_bus, "bridge_config.json").as_posix(),
+        "bridge_config_sha256": hashlib.sha256(config_bytes).hexdigest(),
+    }
 
 
 def _set_bridge_cmd_model(cmd: list[Any], model: str) -> bool:
