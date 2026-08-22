@@ -7943,6 +7943,152 @@ def _load_phase_b_implementer_module(repo_root: Path) -> Any:
         sys.dont_write_bytecode = prior_dont_write_bytecode
 
 
+class _HybridTrailingEnvelope(NamedTuple):
+    prefix: str
+    source_start: int
+    terminal: dict[str, Any]
+
+
+_HYBRID_BOOTSTRAP_ERROR_PHRASE_FRAGMENTS = (
+    "bridge adapter config error",
+    "cannot import bridge_adapters",
+    "adapter invocation/bootstrap",
+    "adapter selection",
+    "bridge config not found",
+    "bridge config is not valid json",
+    "bridge config must be a json object",
+)
+_HYBRID_BOOTSTRAP_OUTER_DIAGNOSTIC_KEYS = (
+    "step",
+    "executor",
+    "stderr",
+    "error",
+    "errors",
+    "detail",
+    "message",
+    "reason",
+)
+_HYBRID_BOOTSTRAP_TERMINAL_DIAGNOSTIC_KEYS = (
+    "step",
+    "executor",
+    "stderr",
+    "stdout",
+    "error",
+    "errors",
+    "detail",
+    "message",
+    "reason",
+)
+_HYBRID_BOOTSTRAP_ERROR_CHANNEL_KEYS = ("step", "stderr", "executor")
+
+
+def _parse_hybrid_trailing_envelope(stdout: Any) -> _HybridTrailingEnvelope | None:
+    if not isinstance(stdout, str):
+        return None
+    decoder = json.JSONDecoder()
+    for start in reversed([idx for idx, ch in enumerate(stdout) if ch == "{"]):
+        try:
+            parsed, end = decoder.raw_decode(stdout, start)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if stdout[end:].strip():
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        prefix = stdout[:start]
+        if not prefix.strip():
+            return None
+        return _HybridTrailingEnvelope(prefix=prefix, source_start=start, terminal=parsed)
+    return None
+
+
+def _hybrid_scalar_diagnostic_text(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (str, int, float, bool)):
+        return [str(value)]
+    if isinstance(value, (list, tuple)):
+        return [
+            str(item)
+            for item in value
+            if isinstance(item, (str, int, float, bool))
+        ]
+    return []
+
+
+def _hybrid_bootstrap_text_from_keys(envelope: dict[str, Any], keys: tuple[str, ...]) -> str:
+    parts: list[str] = []
+    for key in keys:
+        parts.extend(_hybrid_scalar_diagnostic_text(envelope.get(key)))
+    return " ".join(parts).lower()
+
+
+def _coherent_hybrid_terminal_envelope(result: dict[str, Any]) -> dict[str, Any] | None:
+    trailing = _parse_hybrid_trailing_envelope(result.get("stdout"))
+    if trailing is None:
+        return None
+    terminal = trailing.terminal
+    if result.get("status") != "failed":
+        return None
+    if result.get("executor") != "commit_executor":
+        return None
+    if result.get("step"):
+        return None
+    failure_class = result.get("failure_class")
+    if failure_class == FailureClass.BOT_FINDINGS_PENDING.value:
+        if terminal.get("status") != "bot_findings_pending":
+            return None
+        if terminal.get("step") or terminal.get("executor"):
+            return None
+        return terminal
+    if failure_class == FailureClass.TEST_FAILURE.value:
+        if terminal.get("status") not in {"error", "failed"}:
+            return None
+        if terminal.get("step") != "run_pre_push_script":
+            return None
+        terminal_executor = terminal.get("executor")
+        if terminal_executor not in (None, "", "commit_executor"):
+            return None
+        return terminal
+    return None
+
+
+def _hybrid_bootstrap_diagnostic_haystacks(result: dict[str, Any]) -> tuple[str, str]:
+    terminal = _coherent_hybrid_terminal_envelope(result)
+    if terminal is None:
+        full_haystack = " ".join(
+            str(result.get(key, "") or "")
+            for key in ("step", "stderr", "stdout", "executor")
+        ).lower()
+        error_channel_haystack = " ".join(
+            str(result.get(key, "") or "")
+            for key in ("step", "stderr", "executor")
+        ).lower()
+        return full_haystack, error_channel_haystack
+
+    diagnostic_haystack = " ".join((
+        _hybrid_bootstrap_text_from_keys(
+            result,
+            _HYBRID_BOOTSTRAP_OUTER_DIAGNOSTIC_KEYS,
+        ),
+        _hybrid_bootstrap_text_from_keys(
+            terminal,
+            _HYBRID_BOOTSTRAP_TERMINAL_DIAGNOSTIC_KEYS,
+        ),
+    )).lower()
+    error_channel_haystack = " ".join((
+        _hybrid_bootstrap_text_from_keys(
+            result,
+            _HYBRID_BOOTSTRAP_ERROR_CHANNEL_KEYS,
+        ),
+        _hybrid_bootstrap_text_from_keys(
+            terminal,
+            _HYBRID_BOOTSTRAP_ERROR_CHANNEL_KEYS,
+        ),
+    )).lower()
+    return diagnostic_haystack, error_channel_haystack
+
+
 def _hybrid_bootstrap_fault_detected(
     result: dict[str, Any],
     files_in_scope: list[str],
@@ -7950,35 +8096,21 @@ def _hybrid_bootstrap_fault_detected(
     for rel_path in files_in_scope:
         if rel_path in _HYBRID_BOOTSTRAP_SURFACES:
             return True, f"hybrid delegation may not target bootstrap surface: {rel_path}"
-    # Adapter/bootstrap error PHRASES carry error semantics on their own, so they
-    # count wherever they surface -- including captured stdout (a real supervisor
-    # or phase step can print a "Bridge adapter config error" to stdout).
+    # Adapter/bootstrap error PHRASES carry error semantics on their own. Legacy
+    # direct/unstructured failures still scan captured stdout exactly as before,
+    # because a real supervisor or phase step can print a bridge-adapter load
+    # fault there. Only two mechanically coherent dispatcher aggregates narrow
+    # stdout authority: their proven transcript prefix is historical text, while
+    # explicit outer diagnostics and terminal top-level diagnostics, including
+    # terminal stdout, remain authoritative.
     #
     # The load_bridge_config BridgeAdapterError load-fault messages ("Bridge config
     # not found at '...'", "Bridge config is not valid JSON", "Bridge config must be
-    # a JSON object") are the same class: they only ever appear on a genuine
-    # bootstrap load fault, so they must be caught wherever they surface too. A real
-    # adapter bootstrap failure run through the dispatcher with verbose output can be
-    # captured in *stdout* (not stderr/step) as such a load error naming
-    # .agent_bus/bridge_config.json; because that message matches none of the other
-    # fragments, the bare-path check below -- which deliberately ignores stdout to
-    # avoid incidental bus-path leaks -- would otherwise let it fail OPEN. Matching
-    # the load-error phrase here keeps it fail-closed without reviving the incidental
-    # bare-path false positive (a bare path carries no error phrase).
-    full_haystack = " ".join(
-        str(result.get(key, "") or "")
-        for key in ("step", "stderr", "stdout", "executor")
-    ).lower()
-    error_phrase_fragments = (
-        "bridge adapter config error",
-        "cannot import bridge_adapters",
-        "adapter invocation/bootstrap",
-        "adapter selection",
-        "bridge config not found",
-        "bridge config is not valid json",
-        "bridge config must be a json object",
-    )
-    for fragment in error_phrase_fragments:
+    # a JSON object") are the same class. The provenance selector below keeps
+    # direct/unstructured load faults fail-closed without letting a proven aggregate
+    # transcript prefix impersonate a live bootstrap fault.
+    full_haystack, error_channel_haystack = _hybrid_bootstrap_diagnostic_haystacks(result)
+    for fragment in _HYBRID_BOOTSTRAP_ERROR_PHRASE_FRAGMENTS:
         if fragment in full_haystack:
             return True, f"hybrid delegation blocked for bootstrap/adapter fault: {fragment}"
     # A bare ".agent_bus/bridge_config.json" PATH mention -- one that carries no
@@ -7994,10 +8126,6 @@ def _hybrid_bootstrap_fault_detected(
     # (stdout included, e.g. a verbose dispatcher run of commit_executor); this
     # residual check only fail-closes on a phrase-less path mention in an error
     # channel, so an incidental stdout-only path stays safe.
-    error_channel_haystack = " ".join(
-        str(result.get(key, "") or "")
-        for key in ("step", "stderr", "executor")
-    ).lower()
     config_path_fragment = ".agent_bus/bridge_config.json"
     if config_path_fragment in error_channel_haystack:
         return True, (
