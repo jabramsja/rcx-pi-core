@@ -54,6 +54,7 @@ try:
         DEFAULT_EXECUTOR_CONFIG,
         MAX_WAVE_ID_LEN,
         WAVE_ID_RE,
+        ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY,
         ROLE_AGENT_ENV_VARS,
         ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV,
         agent_bus_path,
@@ -81,6 +82,7 @@ except ImportError:
     DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
     MAX_WAVE_ID_LEN = _mod.MAX_WAVE_ID_LEN
     WAVE_ID_RE = _mod.WAVE_ID_RE
+    ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY = _mod.ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY
     ROLE_AGENT_ENV_VARS = _mod.ROLE_AGENT_ENV_VARS
     ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV = _mod.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV
     agent_bus_path = _mod.agent_bus_path
@@ -3814,6 +3816,75 @@ def _commit_lifecycle_pager_enabled(repo_root: Path) -> bool:
     except Exception:
         return False
     return bool(config.get("pipeline_agent_pager", {}).get("enabled", False))
+
+
+class _BotRemediationTargetConfigError(RuntimeError):
+    pass
+
+
+def _nonempty_config_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _strict_target_bot_remediation_adapter(repo_root: Path) -> str:
+    """Resolve Step-15 bot remediation authority from the target worktree only."""
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    if not config_path.exists():
+        raise _BotRemediationTargetConfigError(
+            f"target executor config missing: {config_path}"
+        )
+    try:
+        raw_config = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise _BotRemediationTargetConfigError(
+            f"target executor config is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(raw_config, dict):
+        raise _BotRemediationTargetConfigError(
+            "target executor config must be a JSON object"
+        )
+    raw_backends = raw_config.get("backends")
+    if not isinstance(raw_backends, dict):
+        raise _BotRemediationTargetConfigError(
+            "target executor config missing object backends"
+        )
+    committed_adapter = _nonempty_config_string(raw_backends.get("bot_remediation"))
+    if committed_adapter is None:
+        raise _BotRemediationTargetConfigError(
+            "target executor config missing non-empty string backends.bot_remediation"
+        )
+
+    # Only after the target file has proved its existence and shape may Step 15
+    # ask the shared loader to materialize target-scoped role env overrides.
+    materialized = load_executor_config(repo_root)
+    scoped_env_overrides_apply = materialized.get(
+        ROLE_AGENT_ENV_OVERRIDES_APPLY_KEY,
+        True,
+    )
+    implementer_env_override_present = any(
+        _nonempty_config_string(os.environ.get(env_name)) is not None
+        for env_name in ROLE_AGENT_ENV_VARS.get("implementer", ())
+    )
+    if scoped_env_overrides_apply and implementer_env_override_present:
+        materialized_backends = materialized.get("backends")
+        if not isinstance(materialized_backends, dict):
+            raise _BotRemediationTargetConfigError(
+                "materialized target executor config missing object backends"
+            )
+        materialized_adapter = _nonempty_config_string(
+            materialized_backends.get("bot_remediation")
+        )
+        if materialized_adapter is None:
+            raise _BotRemediationTargetConfigError(
+                "materialized target executor config missing non-empty string "
+                "backends.bot_remediation"
+            )
+        return materialized_adapter
+
+    return committed_adapter
 
 
 def _run(
@@ -10522,8 +10593,9 @@ def _attempt_bot_finding_remediation(
         except Exception as heal_exc:
             log(f"Step 15: bridge_config.json auto-heal failed: {heal_exc}")
     try:
+        bot_remediation_adapter = _strict_target_bot_remediation_adapter(repo_root)
         config = _bridge_adapters.load_bridge_config(config_path)
-        adapter = _bridge_adapters.get_adapter(config, BOT_REMEDIATION_ADAPTER)
+        adapter = _bridge_adapters.get_adapter(config, bot_remediation_adapter)
     except Exception as exc:
         log(f"Step 15: cannot load bridge adapter: {exc}")
         return {
