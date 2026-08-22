@@ -157,87 +157,45 @@ def test_parse_envelope_ignores_replayed_stderr_envelope() -> None:
     assert parsed["summary"] == "current"
 
 
-def test_load_bridge_config_overlays_tracked_agent_model_defaults(tmp_path: Path) -> None:
-    config_path = tmp_path / ".agent_bus" / "bridge_config.json"
-    config_path.parent.mkdir()
-    config_path.write_text(
-        json.dumps(
-            {
-                "agents": {
-                    "claude": {
-                        "mode": "live",
-                        "display_name": "Claude old",
-                        "cmd": [
-                            "claude",
-                            "--print",
-                            "--model",
-                            "claude-old",
-                            "--effort",
-                            "low",
-                        ],
-                        "prompt_via_stdin": True,
-                        "timeout_s": 900,
-                    },
-                    "codex": {
-                        "mode": "live",
-                        "display_name": "Codex stale xhigh",
-                        "cmd": [
-                            "codex",
-                            "exec",
-                            "-",
-                            "--json",
-                            "-m",
-                            "gpt-stale-codex",
-                            "-c",
-                            'model_reasoning_effort="medium"',
-                            "--sandbox",
-                            "danger-full-access",
-                        ],
-                        "prompt_via_stdin": True,
-                        "timeout_s": 1200,
-                    },
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    executor_config_path = tmp_path / "mu" / "tools" / "executors" / "executor_config.json"
-    executor_config_path.parent.mkdir(parents=True)
+def _write_executor_bridge_defaults(
+    repo_root: Path,
+    *,
+    codex_display: str,
+    codex_model: str,
+    codex_reasoning_effort: str,
+) -> Path:
+    executor_config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    executor_config_path.parent.mkdir(parents=True, exist_ok=True)
     executor_config_path.write_text(
         json.dumps(
             {
                 "bridge_agent_defaults": {
-                    "claude": {
-                        "display_name": "Claude Opus 4.7 max",
-                        "model": "claude-opus-4-7",
-                        "effort": "max",
-                    },
                     "codex": {
-                        "display_name": "Codex 5.5 xhigh",
-                        "model": "gpt-5.5",
-                        "reasoning_effort": "xhigh",
+                        "display_name": codex_display,
+                        "model": codex_model,
+                        "reasoning_effort": codex_reasoning_effort,
                     },
                 }
             }
         ),
         encoding="utf-8",
     )
+    return executor_config_path
 
-    config = adapters.load_bridge_config(config_path)
 
-    claude = config["agents"]["claude"]
-    assert claude["display_name"] == "Claude Opus 4.7 max"
-    assert claude["cmd"] == [
-        "claude",
-        "--print",
-        "--model",
-        "claude-opus-4-7",
-        "--effort",
-        "max",
-    ]
-    codex = config["agents"]["codex"]
-    assert codex["display_name"] == "Codex 5.5 xhigh"
-    assert codex["cmd"] == [
+def test_load_bridge_config_keeps_namespaced_bus_command_after_executor_defaults_are_staged(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    config_path = (
+        repo_root
+        / ".agent_bus-pr1219-p0imf-launch-bound-model-authority-freeze-20260822-r1"
+        / "bridge_config.json"
+    )
+    config_path.parent.mkdir()
+    persisted_cmd = [
         "codex",
         "exec",
         "-",
@@ -248,11 +206,120 @@ def test_load_bridge_config_overlays_tracked_agent_model_defaults(tmp_path: Path
         'model_reasoning_effort="xhigh"',
         "--sandbox",
         "danger-full-access",
+        "--approval-policy",
+        "never",
     ]
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "codex": {
+                        "mode": "live",
+                        "display_name": "Codex launch gpt-5.5 xhigh",
+                        "cmd": persisted_cmd,
+                        "prompt_via_stdin": False,
+                        "timeout_s": 1200,
+                        "env": {"RCX_TEST": "persisted"},
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_executor_bridge_defaults(
+        repo_root,
+        codex_display="Codex 5.5 xhigh",
+        codex_model="gpt-5.5",
+        codex_reasoning_effort="xhigh",
+    )
+
+    before_config = adapters.load_bridge_config(config_path)
+    before_spec = adapters.get_adapter(before_config, "codex")
+
+    executor_config_path = _write_executor_bridge_defaults(
+        repo_root,
+        codex_display="Codex 5.6 Sol ultra",
+        codex_model="gpt-5.6-sol",
+        codex_reasoning_effort="ultra",
+    )
+    _git(repo_root, "add", str(executor_config_path.relative_to(repo_root)))
+
+    after_config = adapters.load_bridge_config(config_path)
+    after_spec = adapters.get_adapter(after_config, "codex")
+
+    assert before_config["agents"]["codex"]["display_name"] == "Codex launch gpt-5.5 xhigh"
+    assert after_config["agents"]["codex"]["display_name"] == "Codex launch gpt-5.5 xhigh"
+    assert before_spec.cmd == persisted_cmd
+    assert after_spec.cmd == persisted_cmd
+    assert before_spec == after_spec
+    assert after_spec.prompt_via_stdin is False
+    assert after_spec.timeout_s == 1200
+    assert after_spec.env == {"RCX_TEST": "persisted"}
 
 
-def test_load_bridge_config_appends_missing_codex_reasoning_default(tmp_path: Path) -> None:
-    config_path = tmp_path / ".agent_bus" / "bridge_config.json"
+def test_load_bridge_config_fails_closed_for_missing_or_malformed_bus_config(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / ".agent_bus-pr1219-p0imf" / "bridge_config.json"
+
+    with pytest.raises(adapters.BridgeAdapterError, match="Bridge config not found"):
+        adapters.load_bridge_config(config_path)
+
+    config_path.parent.mkdir()
+    config_path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(adapters.BridgeAdapterError, match="Bridge config is not valid JSON"):
+        adapters.load_bridge_config(config_path)
+
+    config_path.write_text("[]", encoding="utf-8")
+    with pytest.raises(adapters.BridgeAdapterError, match="Bridge config must be a JSON object"):
+        adapters.load_bridge_config(config_path)
+
+
+def test_get_adapter_preserves_live_adapter_parsing_and_validation() -> None:
+    config = {
+        "agents": {
+            "codex": {
+                "mode": "live",
+                "cmd": [
+                    "codex",
+                    "exec",
+                    "-",
+                    "--json",
+                    "-m",
+                    "gpt-5.5",
+                    "-c",
+                    'model_reasoning_effort="xhigh"',
+                    "--sandbox",
+                    "danger-full-access",
+                ],
+                "prompt_via_stdin": True,
+                "timeout_s": 45,
+                "env": {"A": "B"},
+            }
+        }
+    }
+
+    spec = adapters.get_adapter(config, "codex")
+
+    assert spec.name == "codex"
+    assert spec.cmd == config["agents"]["codex"]["cmd"]
+    assert spec.prompt_via_stdin is True
+    assert spec.timeout_s == 45
+    assert spec.env == {"A": "B"}
+    assert spec.mode == "live"
+
+    bad_config = {"agents": {"codex": {**config["agents"]["codex"], "timeout_s": 0}}}
+    with pytest.raises(adapters.BridgeAdapterError, match="timeout_s must be a positive integer"):
+        adapters.get_adapter(bad_config, "codex")
+
+
+def test_launch_time_sync_still_materializes_current_defaults_into_new_bus(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    bus_dir = ".agent_bus-fresh-p0imf"
+    config_path = repo_root / bus_dir / "bridge_config.json"
     config_path.parent.mkdir()
     config_path.write_text(
         json.dumps(
@@ -260,82 +327,60 @@ def test_load_bridge_config_appends_missing_codex_reasoning_default(tmp_path: Pa
                 "agents": {
                     "codex": {
                         "mode": "live",
-                        "cmd": ["codex", "exec", "-", "--json", "-m", "gpt-stale-codex"],
+                        "display_name": "Codex old launch",
+                        "cmd": [
+                            "codex",
+                            "exec",
+                            "-",
+                            "--json",
+                            "-m",
+                            "gpt-5.5",
+                            "-c",
+                            'model_reasoning_effort="xhigh"',
+                            "--sandbox",
+                            "danger-full-access",
+                            "--approval-policy",
+                            "never",
+                        ],
                         "prompt_via_stdin": True,
                         "timeout_s": 1200,
+                        "env": {"RCX_TEST": "kept"},
                     },
                 }
             }
         ),
         encoding="utf-8",
     )
-    executor_config_path = tmp_path / "mu" / "tools" / "executors" / "executor_config.json"
-    executor_config_path.parent.mkdir(parents=True)
-    executor_config_path.write_text(
-        json.dumps(
-            {
-                "bridge_agent_defaults": {
-                    "codex": {
-                        "model": "gpt-5.5",
-                        "reasoning_effort": "xhigh",
-                    },
-                }
-            }
-        ),
-        encoding="utf-8",
+    _write_executor_bridge_defaults(
+        repo_root,
+        codex_display="Codex 5.6 Sol ultra",
+        codex_model="gpt-5.6-sol",
+        codex_reasoning_effort="ultra",
     )
 
-    config = adapters.load_bridge_config(config_path)
+    synced_path = executor_common.sync_bridge_config_agents_from_defaults(repo_root, bus_dir=bus_dir)
 
-    assert config["agents"]["codex"]["cmd"] == [
+    assert synced_path == config_path
+    synced = json.loads(config_path.read_text(encoding="utf-8"))
+    codex = synced["agents"]["codex"]
+    assert codex["display_name"] == "Codex 5.6 Sol ultra"
+    assert codex["cmd"] == [
         "codex",
         "exec",
         "-",
         "--json",
         "-m",
-        "gpt-5.5",
+        "gpt-5.6-sol",
         "-c",
-        'model_reasoning_effort="xhigh"',
+        'model_reasoning_effort="ultra"',
+        "--sandbox",
+        "danger-full-access",
+        "--approval-policy",
+        "never",
     ]
-
-
-def test_bridge_agent_display_name_uses_tracked_defaults_over_hidden_config(tmp_path: Path) -> None:
-    config_path = tmp_path / ".agent_bus" / "bridge_config.json"
-    config_path.parent.mkdir()
-    config_path.write_text(
-        json.dumps(
-            {
-                "agents": {
-                    "codex": {
-                        "mode": "live",
-                        "display_name": "Codex stale xhigh",
-                        "cmd": ["codex", "exec", "-", "--json", "-m", "gpt-stale-codex"],
-                        "prompt_via_stdin": True,
-                        "timeout_s": 1200,
-                    },
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    executor_config_path = tmp_path / "mu" / "tools" / "executors" / "executor_config.json"
-    executor_config_path.parent.mkdir(parents=True)
-    executor_config_path.write_text(
-        json.dumps(
-            {
-                "bridge_agent_defaults": {
-                    "codex": {
-                        "display_name": "Codex 5.5 xhigh",
-                        "model": "gpt-5.5",
-                        "reasoning_effort": "xhigh",
-                    },
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    assert executor_common.bridge_agent_display_name(tmp_path, "codex") == "Codex 5.5 xhigh"
+    assert codex["prompt_via_stdin"] is True
+    assert codex["timeout_s"] == 1200
+    assert codex["env"] == {"RCX_TEST": "kept"}
 
 
 def test_prepare_adapter_env_uses_real_home_when_writable(
