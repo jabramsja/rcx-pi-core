@@ -18,6 +18,7 @@ Covers:
 
 from __future__ import annotations
 
+import json
 import subprocess
 import types
 from pathlib import Path
@@ -2156,6 +2157,23 @@ class TestStep15RemediationMidPollSurfaceConflictRecheck:
         result = {"steps_completed": ["git_commit"]}
         cfg = tmp_path / "bridge_config.json"
         cfg.write_text("{}", encoding="utf-8")
+        executor_config_path = tmp_path / "mu" / "tools" / "executors" / "executor_config.json"
+        executor_config_path.parent.mkdir(parents=True)
+        executor_config_path.write_text(
+            json.dumps(
+                {
+                    "role_agents": {
+                        "implementer": "codex",
+                        "reviewer": "codex",
+                    },
+                    "backends": {
+                        "bot_remediation": "codex",
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
         with patch.object(commit_mod, "_bridge_adapters", self._fake_bridge_adapters()), \
              patch.object(commit_mod, "bridge_config_path", lambda *a, **k: cfg), \

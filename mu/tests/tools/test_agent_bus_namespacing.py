@@ -622,6 +622,23 @@ def test_commit_bot_remediation_adapter_receives_active_bus_dir(monkeypatch, tmp
     config_path = repo / ".agent_bus-test" / "bridge_config.json"
     config_path.parent.mkdir(parents=True)
     config_path.write_text(json.dumps({"adapters": {}}) + "\n", encoding="utf-8")
+    executor_config_path = repo / "mu" / "tools" / "executors" / "executor_config.json"
+    executor_config_path.parent.mkdir(parents=True)
+    executor_config_path.write_text(
+        json.dumps(
+            {
+                "role_agents": {
+                    "implementer": "codex",
+                    "reviewer": "codex",
+                },
+                "backends": {
+                    "bot_remediation": "codex",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     seen: dict[str, object] = {}
     adapter = SimpleNamespace(
