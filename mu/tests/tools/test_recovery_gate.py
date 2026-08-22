@@ -7497,7 +7497,16 @@ class TestHybridDelegateRuntime:
         assert out["exhausted"] is True
         assert "disabled" in out["log"][0]["detail"]
 
-    def test_delegate_implementer_success_path_invokes_reused_implementer(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize(
+        ("bus_dir", "expected_bus_dir"),
+        [
+            (None, None),
+            (".agent_bus-wave-hybrid", Path(".agent_bus-wave-hybrid")),
+        ],
+    )
+    def test_delegate_implementer_success_path_invokes_reused_implementer(
+        self, tmp_path, monkeypatch, bus_dir, expected_bus_dir
+    ):
         init_hybrid_delegate_tree(tmp_path)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         (config_dir / "executor_config.json").write_text(
@@ -7538,15 +7547,20 @@ class TestHybridDelegateRuntime:
         ), \
              patch.object(rg_mod.subprocess, "Popen", return_value=fake), \
              patch.object(rg_mod, "_load_phase_b_implementer_module", return_value=fake_module):
+            recovery_kwargs = {}
+            if bus_dir is not None:
+                recovery_kwargs["bus_dir"] = bus_dir
             out = rg_mod.run_recovery_loop(
                 tmp_path,
                 {"status": "failed", "step": "phase_b_executor", "stderr": "FAILED test_x", "stdout": ""},
                 "wave-hybrid",
                 max_iterations=1,
+                **recovery_kwargs,
             )
 
         assert out["recovered"] is True
         assert fake_module.invoke_calls
+        assert fake_module.invoke_calls[0]["bus_dir"] == expected_bus_dir
         assert fake_module.prompt_calls
         prompt_call = fake_module.prompt_calls[0]
         assert "Learning Context" in prompt_call["learning_context"]
