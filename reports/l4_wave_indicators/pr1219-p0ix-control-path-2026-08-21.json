@@ -1,0 +1,24 @@
+{
+  "wave_id": "pr1219-p0ix-control-path-2026-08-21",
+  "repeat_run_speedup_ratio": 1.142627,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.229564,
+  "repeat_run_raw_seconds": [
+    0.262306,
+    0.229564
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.262306
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.49187
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-08-22T02:17:46Z",
+  "collector_version": "2.2.0"
+}
