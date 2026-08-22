@@ -111,8 +111,32 @@ FOUNDER_OVERRIDE:pr1219-p0imrp-receipt-model-provenance-activation-2026-08-22
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/pr1219-p0imrp-receipt-model-provenance-activation-2026-08-22_2026-08-22.md. (2) Commit handoff carries 3 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface. scope_refs: `TASKS.md`, `reports/control_plane/pr1219-p0imrp-receipt-model-provenance-activation-2026-08-22_2026-08-22.md`, `reports/l4_wave_indicators/pr1219-p0imrp-receipt-model-provenance-activation-2026-08-22.json`..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/pr1219-p0imrp-receipt-model-provenance-activation-2026-08-22.json`
+  - `candidate_authority_receipt`: `.agent_bus-pr1219-p0imrp-receipt-model-provenance-activation-20260822/meta/candidate_authority_receipts/pr1219-p0imrp-receipt-model-provenance-activation-2026-08-22/phase_b-bridge_pre_review.json` (bus-local evidence, excluded from candidate content; durable proof retained below before cleanup)
 - Current staged files:
   - `TASKS.md`
   - `reports/control_plane/pr1219-p0imrp-receipt-model-provenance-activation-2026-08-22_2026-08-22.md`
   - `reports/l4_wave_indicators/pr1219-p0imrp-receipt-model-provenance-activation-2026-08-22.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
+
+<!-- CANDIDATE_AUTHORITY_RECEIPT_PROOF:start -->
+## Candidate Authority Receipt Proof
+
+- Receipt path: `.agent_bus-pr1219-p0imrp-receipt-model-provenance-activation-20260822/meta/candidate_authority_receipts/pr1219-p0imrp-receipt-model-provenance-activation-2026-08-22/phase_b-bridge_pre_review.json`
+- Receipt sha256: `90a9f2a4c109885498f19000a1226a0a20bc0351920c0af765993d16531ba9d9`
+- Review round: `bridge_pre_review`
+- Comparison commit: `c0bcd910d5e835411b23ac56c830819356161a5b`
+- Candidate allowlist hash: `a981bf11a95520260a3dc480a45cfdc7045bbedf129b7754543469201f2bc0bc`
+- L4 contract status: `passed`
+- Reviewer agent: `codex`
+- Reviewer launch provenance:
+  - `version`: `1`
+  - `selected_agent`: `codex`
+  - `model`: `gpt-5.5`
+  - `effort`: `xhigh`
+  - `command_sha256`: `bfb43827a29d3b9908cc86d45bd8c66ab5dbd50b0e00f76d7c163d882e8e4f33`
+  - `bridge_config_path`: `.agent_bus-pr1219-p0imrp-receipt-model-provenance-activation-20260822/bridge_config.json`
+  - `bridge_config_sha256`: `27ae6d0e8b77e34fdd82063451bd6bc4c29958ca5cba9459275e289d296bc932`
+- Reviewer launch provenance hash: `11d1e2849b711724764c95a12808752506ee3f3606390caa6e2472b8a973838d`
+- Verification summary: Phase B reviewer summary recorded `status current` for the exact receipt above with codex/gpt-5.5/xhigh launch provenance.
+- Durability note: the receipt remains excluded from candidate content and staged files, but this packet now carries the receipt hash and verified launch-provenance tuple so required namespaced-bus cleanup does not erase the only durable proof.
+<!-- CANDIDATE_AUTHORITY_RECEIPT_PROOF:end -->
