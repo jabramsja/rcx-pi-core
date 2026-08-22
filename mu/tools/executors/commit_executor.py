@@ -12534,7 +12534,7 @@ def _git_merge_history_contains_wave_id(repo_root: Path, wave_id: str) -> bool:
     normalized_log = result.stdout.lower()
     return bool(
         re.search(
-            rf"(?<![a-z0-9]){re.escape(normalized_wave_id)}(?![a-z0-9])",
+            rf"(?<![a-z0-9_-]){re.escape(normalized_wave_id)}(?![a-z0-9_-])",
             normalized_log,
         )
     )
