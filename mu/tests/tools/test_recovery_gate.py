@@ -7753,6 +7753,84 @@ class TestHybridValidatorContract:
 
 
 class TestHybridScopeAudit:
+    BOOTSTRAP_ERROR_PHRASES = (
+        "Bridge adapter config error: missing backend",
+        "cannot import bridge_adapters",
+        "adapter invocation/bootstrap failed",
+        "adapter selection produced no backend",
+        "Bridge config not found at X",
+        "Bridge config is not valid JSON",
+        "Bridge config must be a JSON object",
+    )
+    BOOTSTRAP_OUTER_DIAGNOSTIC_KEYS = (
+        "step",
+        "executor",
+        "stderr",
+        "error",
+        "errors",
+        "detail",
+        "message",
+        "reason",
+    )
+    BOOTSTRAP_TERMINAL_DIAGNOSTIC_KEYS = (
+        "step",
+        "executor",
+        "stderr",
+        "stdout",
+        "error",
+        "errors",
+        "detail",
+        "message",
+        "reason",
+    )
+
+    @staticmethod
+    def terminal_aggregate_object(kind, **overrides):
+        if kind == "bot":
+            terminal = {
+                "status": "bot_findings_pending",
+                "bot_findings": [],
+                "p1_unresolved": False,
+                "pr_number": 1219,
+                "steps_completed": ["review"],
+                "remediation_rounds_attempted": 1,
+            }
+        elif kind == "pre_push":
+            terminal = {
+                "status": "error",
+                "step": "run_pre_push_script",
+                "stdout": "2 failed, 900 passed",
+                "stderr": "pre-push-fast failed",
+            }
+        else:
+            raise AssertionError(f"unknown aggregate kind: {kind}")
+        terminal.update(overrides)
+        return terminal
+
+    @classmethod
+    def coherent_aggregate_result(
+        cls,
+        kind,
+        *,
+        prefix="historical transcript without adapter bootstrap fault\n",
+        terminal_overrides=None,
+        outer_overrides=None,
+    ):
+        failure_class = {
+            "bot": "bot_findings_pending",
+            "pre_push": "test_failure",
+        }[kind]
+        terminal = cls.terminal_aggregate_object(kind, **(terminal_overrides or {}))
+        result = {
+            "status": "failed",
+            "failure_class": failure_class,
+            "executor": "commit_executor",
+            "stderr": "",
+            "stdout": prefix + json.dumps(terminal, sort_keys=True),
+        }
+        result.update(outer_overrides or {})
+        return result
+
     def test_lazy_import_does_not_create_pycache_drift(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)
         for rel in (
@@ -8739,6 +8817,167 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
+    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("prefix", [
+        "TASKS.md diff summary says historical bridge config not found\n",
+        "bot finding body: bridge config not found in old report text\n",
+        (
+            '{"type":"item.completed","item":{"aggregated_output":'
+            '"Bridge config not found in preserved stream body"}}\n'
+        ),
+    ])
+    def test_bootstrap_fault_ignores_proven_aggregate_prefix(self, kind, prefix):
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: proven aggregate prefix loses bootstrap authority
+            self.coherent_aggregate_result(kind, prefix=prefix),
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is False
+        assert detail == ""
+
+    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    def test_bootstrap_fault_ignores_coherent_nested_non_diagnostic_bodies(self, kind):
+        terminal_overrides = {
+            "aggregated_output": "Bridge config not found in nested stream body",
+            "summary": "Bridge adapter config error in summary text",
+            "diff": "cannot import bridge_adapters in a historical diff",
+            "document": {"body": "adapter selection in a document body"},
+            "findings": [{"body": "adapter invocation/bootstrap in finding body"}],
+            "bot_findings": [{"body": "bridge config must be a JSON object"}],
+        }
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: coherent aggregate nested bodies are not error authority
+            self.coherent_aggregate_result(kind, terminal_overrides=terminal_overrides),
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is False
+        assert detail == ""
+
+    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("phrase", BOOTSTRAP_ERROR_PHRASES)
+    def test_bootstrap_fault_blocks_terminal_stdout_phrase_in_coherent_aggregate(self, kind, phrase):
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: terminal stdout stays diagnostic authority
+            self.coherent_aggregate_result(kind, terminal_overrides={"stdout": phrase}),
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("location", ["outer", "terminal"])
+    @pytest.mark.parametrize("key", BOOTSTRAP_OUTER_DIAGNOSTIC_KEYS)
+    def test_bootstrap_fault_blocks_explicit_aggregate_diagnostic_fields(self, kind, location, key):
+        phrase = "Bridge config not found at X"
+        if location == "outer":
+            value = [phrase] if key == "errors" else phrase
+            result = self.coherent_aggregate_result(kind, outer_overrides={key: value})
+        elif key in self.BOOTSTRAP_TERMINAL_DIAGNOSTIC_KEYS:
+            value = [phrase] if key == "errors" else phrase
+            result = self.coherent_aggregate_result(kind, terminal_overrides={key: value})
+        else:
+            pytest.skip(f"{key} is not a terminal diagnostic key")
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: explicit aggregate diagnostics remain fail-closed
+            result,
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    @pytest.mark.parametrize("key", ["stdout", "error", "detail", "message", "reason"])
+    def test_bootstrap_fault_blocks_terminal_only_diagnostic_fields(self, key):
+        phrase = "Bridge config not found at X"
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: terminal diagnostic field matrix
+            self.coherent_aggregate_result("pre_push", terminal_overrides={key: phrase}),
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    @pytest.mark.parametrize("stdout", [
+        "historical bridge config not found without terminal json",
+        'historical bridge config not found\n{"status": "failed"',
+        (
+            "historical bridge config not found\n"
+            + json.dumps({"status": "failed", "step": "run_pre_push_script"})
+            + "\nnot eof"
+        ),
+        json.dumps({
+            "status": "failed",
+            "step": "run_pre_push_script",
+            "stdout": "Bridge config not found at X",
+        }),
+        (
+            "historical bridge config not found\n"
+            + json.dumps({"status": "failed", "step": "run_pre_push_script"})
+            + "\n"
+            + json.dumps({"status": "failed", "step": "other_step"})
+        ),
+    ])
+    def test_bootstrap_fault_unproven_aggregates_remain_full_stdout_fail_closed(self, stdout):
+        result = {
+            "status": "failed",
+            "failure_class": "test_failure",
+            "executor": "commit_executor",
+            "stderr": "",
+            "stdout": stdout,
+        }
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: malformed aggregate full-stdout fail-closed controls
+            result,
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    @pytest.mark.parametrize("outer_overrides", [
+        {"failure_class": "unknown_error"},
+        {"failure_class": None},
+        {"status": "success"},
+        {"executor": "phase_b_executor"},
+        {"step": "run_pre_push_script"},
+    ])
+    def test_bootstrap_fault_identity_mismatched_aggregates_remain_fail_closed(self, outer_overrides):
+        result = self.coherent_aggregate_result(
+            "pre_push",
+            prefix="historical bridge config not found\n",
+            outer_overrides=outer_overrides,
+        )
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: tuple mismatch full-stdout fail-closed controls
+            result,
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    @pytest.mark.parametrize("terminal_overrides", [
+        {"status": "ok"},
+        {"step": "run_pre_commit_script"},
+        {"executor": "phase_b_executor"},
+    ])
+    def test_bootstrap_fault_terminal_identity_mismatch_remains_fail_closed(self, terminal_overrides):
+        result = self.coherent_aggregate_result(
+            "pre_push",
+            prefix="historical bridge config not found\n",
+            terminal_overrides=terminal_overrides,
+        )
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: terminal identity mismatch full-stdout fail-closed controls
+            result,
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    def test_bootstrap_fault_class_present_only_inside_stdout_remains_fail_closed(self):
+        terminal = self.terminal_aggregate_object("pre_push")
+        stdout = (
+            "historical bridge config not found and failure_class test_failure text\n"
+            + json.dumps(terminal, sort_keys=True)
+        )
+        result = {"status": "failed", "executor": "commit_executor", "stderr": "", "stdout": stdout}
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: class in stdout cannot authorize prefix suppression
+            result,
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
     def test_bootstrap_fault_ignores_incidental_config_path_in_pre_push_stdout(self):
         # Regression matching the failed pipeline-fix-37b recovery context: Step 11
         # pre-push-fast failed on a NON-adapter test (the pager receipt test) and
@@ -8789,13 +9028,7 @@ class TestHybridScopeAudit:
         # Negative control (actual bridge adapter failure): adapter/bootstrap error
         # PHRASES carry their own error semantics, so they stay fail-closed wherever
         # they surface -- including captured stdout (unchanged from prior behavior).
-        phrases = (
-            "Bridge adapter config error: missing backend",
-            "cannot import bridge_adapters",
-            "adapter invocation/bootstrap failed",
-            "adapter selection produced no backend",
-        )
-        for phrase in phrases:
+        for phrase in self.BOOTSTRAP_ERROR_PHRASES:
             for channel in ("stderr", "stdout"):
                 result = {"status": "error", "step": "build_and_run_supervisor", "stderr": "", "stdout": ""}
                 result[channel] = phrase
