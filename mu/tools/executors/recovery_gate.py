@@ -8424,6 +8424,7 @@ def _run_delegate_implementer_action(
         model_override=config.get("model_overrides", {}).get("phase_b_executor"),
         timeout=implementer_timeout,
         verbose=verbose,
+        bus_dir=_active_bus_dir(),
     )
     exception_paths = _hybrid_exception_paths(
         implementer_result.get("job_id") or None,
