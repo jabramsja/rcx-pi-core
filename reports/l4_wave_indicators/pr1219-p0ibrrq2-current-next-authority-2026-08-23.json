@@ -1,0 +1,24 @@
+{
+  "wave_id": "pr1219-p0ibrrq2-current-next-authority-2026-08-23",
+  "repeat_run_speedup_ratio": 1.019555,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.278849,
+  "repeat_run_raw_seconds": [
+    0.284302,
+    0.278849
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.284302
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.563151
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-08-23T23:11:31Z",
+  "collector_version": "2.2.0"
+}
