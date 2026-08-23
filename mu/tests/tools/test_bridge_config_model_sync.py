@@ -69,9 +69,9 @@ _DEFAULT_BRIDGE_AGENT_DEFAULTS = {
         "effort": "max",
     },
     "codex": {
-        "display_name": "Codex 5.5 xhigh",
-        "model": "gpt-5.5",
-        "reasoning_effort": "xhigh",
+        "display_name": "Codex 5.6 Sol ultra",
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "ultra",
     },
 }
 
@@ -105,6 +105,39 @@ def _seed_bridge_config(root: Path, agents: dict) -> Path:
 
 def _agent_cmd(path: Path, agent: str) -> list[str]:
     return json.loads(path.read_text())["agents"][agent]["cmd"]
+
+
+def test_committed_codex_menu_and_fallback_metadata_are_gpt_56_sol_ultra():
+    committed = json.loads(
+        (REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json").read_text()
+    )
+    expected_codex = {
+        "display_name": "Codex 5.6 Sol ultra",
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "ultra",
+    }
+
+    assert committed["bridge_agent_defaults"]["codex"] == expected_codex
+    assert (
+        executor_common.DEFAULT_EXECUTOR_CONFIG["bridge_agent_defaults"]["codex"]
+        == expected_codex
+    )
+    assert (
+        executor_common.merge_executor_config_overrides({})["bridge_agent_defaults"]["codex"]
+        == expected_codex
+    )
+
+    assert committed["role_agents"] == {"implementer": "claude", "reviewer": "claude"}
+    assert committed["backends"] == {
+        "post_merge_supervisor": "claude",
+        "dialectic_executor": "claude",
+        "phase_a_executor": "claude",
+        "phase_b_executor": "claude",
+        "bot_remediation": "claude",
+        "commit_executor": None,
+    }
+    assert committed["bridge_reviewers"] == {"phase_a": "claude", "phase_b": "claude"}
+    assert committed["pipeline_agent_pager"] == {"enabled": True, "route": "claude"}
 
 
 def test_sync_corrects_model_drift(tmp_path):
@@ -158,9 +191,10 @@ def test_sync_corrects_effort_and_display_name_both_shapes(tmp_path):
     claude, codex = data["agents"]["claude"], data["agents"]["codex"]
     assert claude["cmd"][claude["cmd"].index("--effort") + 1] == "max"
     assert claude["display_name"] == "Claude Opus 4.8 max"
-    assert 'model_reasoning_effort="xhigh"' in codex["cmd"]
+    assert codex["cmd"][codex["cmd"].index("-m") + 1] == "gpt-5.6-sol"
+    assert 'model_reasoning_effort="ultra"' in codex["cmd"]
     assert 'model_reasoning_effort="medium"' not in codex["cmd"]
-    assert codex["display_name"] == "Codex 5.5 xhigh"
+    assert codex["display_name"] == "Codex 5.6 Sol ultra"
 
 
 def test_sync_leaves_other_cmd_args_and_fields_untouched(tmp_path):
