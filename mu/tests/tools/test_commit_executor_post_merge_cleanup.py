@@ -876,6 +876,254 @@ def test_post_merge_package_refresh_does_not_skip_simple_queue_item_from_precomm
     assert "W-types / inductive types" in package["tracker_state_summary"]
 
 
+def test_post_merge_package_refresh_uses_exact_commit_over_stale_dirty_tree(tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / ".gitignore").write_text(".agent_bus/\n", encoding="utf-8")
+    _git(["add", ".gitignore"], cwd=repo)
+    _git(["commit", "-m", "ignore active bus output"], cwd=repo)
+
+    history_wave = "history-completed-queue-wave-2026-08-23"
+    tracker_wave = "tracker-completed-queue-wave-2026-08-23"
+    expected_wave = "expected-fetched-successor-2026-08-23"
+    fallback_wave = "fallback-after-fetched-successor-2026-08-23"
+    dirty_wave = "dirty-live-routed-wave-2026-08-23"
+    standalone_wave = "standalone-governance-renewal-2026-08-23"
+    expected_packet = f"reports/control_plane/{expected_wave}.md"
+    generic_config = (
+        "reports/control_plane/generic_fetched_successor_wave_config.json"
+    )
+    dirty_config = "reports/control_plane/aaa_dirty_live_wave_config.json"
+    exact_blocker = "reports/deferred/blocking/exact_commit_blocker.md"
+    dirty_packet = f"reports/control_plane/{dirty_wave}.md"
+    dirty_blocker = "reports/deferred/blocking/dirty_live_blocker.md"
+
+    _merge_wave_with_pr(repo, wave_id=history_wave, pr_number=1217)
+    _write_program_queue_packet(
+        repo,
+        expected_packet,
+        wave_id=expected_wave,
+        status="QUEUED - EXACT COMMIT AUTHORITY",
+    )
+    _write_program_queue_packet(
+        repo,
+        dirty_packet,
+        wave_id=dirty_wave,
+        status="COMPLETED - NOT A ROUTED AUTHORITY ENTRY",
+    )
+    config_path = repo / generic_config
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "title": "Generic fetched successor launcher",
+                "tracked_packet": expected_packet,
+                "request_for_agent": "Use the immutable fetched-tree request only.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    exact_blocker_path = repo / exact_blocker
+    exact_blocker_path.parent.mkdir(parents=True, exist_ok=True)
+    exact_blocker_path.write_text("# Exact commit blocker\n", encoding="utf-8")
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            f"1. **[{history_wave.upper()}] CURRENT**\n"
+            f"2. **[{tracker_wave.upper()}] NEXT**\n"
+            f"3. **[{expected_wave.upper()}] NEXT**\n"
+            f"4. **[{fallback_wave.upper()}] LAST**\n\n"
+            "---\n\n"
+            "## Ra\n"
+            f"- Tracker sync note (2026-08-23, {tracker_wave}): "
+            "**COMPLETED / POST-MERGE.**\n"
+            f"- Tracker sync note (2026-08-23, {standalone_wave}): "
+            "**NEXT-CODEX-POST-REDTEAM - standalone governance renewal.** "
+            "Packet: `(standalone governance renewal; no Phase-A packet)`.\n"
+            f"- Tracker sync note (2026-08-23, {expected_wave}): "
+            "**PRE-COMMIT / RECEIPT PENDING.**\n"
+            f"- Tracker sync note (2026-08-23, {dirty_wave}): "
+            "**STATUS AUTHORITY PROBE.** Class: L4_ENABLER. Category: tests. "
+            f"Packet: `{dirty_packet}`.\n"
+        ),
+        encoding="utf-8",
+    )
+    _git(
+        ["add", "TASKS.md", "reports/control_plane", "reports/deferred/blocking"],
+        cwd=repo,
+    )
+    _git(["commit", "-m", "record immutable queue authority"], cwd=repo)
+    authority_sha = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+
+    # A later merge on the live branch proves exact completion history is
+    # bounded to authority_sha rather than HEAD or another moving ref.
+    _merge_wave_with_pr(repo, wave_id=expected_wave, pr_number=1218)
+    live_head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    _git(["update-ref", "refs/remotes/origin/dev", live_head], cwd=repo)
+    authority_log = _git(
+        ["log", "--merges", "--format=%s%n%b", authority_sha, "--"],
+        cwd=repo,
+    ).stdout
+    live_log = _git(
+        ["log", "--merges", "--format=%s%n%b", "HEAD", "--"],
+        cwd=repo,
+    ).stdout
+    assert history_wave in authority_log
+    assert expected_wave not in authority_log
+    assert expected_wave in live_log
+
+    # Deliberately make every live queue surface stale or contradictory.
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            f"1. **[{expected_wave.upper()}] CURRENT**\n"
+            f"2. **[{fallback_wave.upper()}] LAST**\n\n"
+            "---\n\n"
+            "## Ra\n"
+            f"- Tracker sync note (2026-08-23, {expected_wave}): "
+            "**COMPLETED / POST-MERGE.**\n"
+            f"- Tracker sync note (2026-08-23, {dirty_wave}): "
+            "**DIRTY LIVE ROUTE.** Class: L4_ENABLER. Category: tests. "
+            f"Packet: `{dirty_packet}`.\n"
+        ),
+        encoding="utf-8",
+    )
+    config_path.unlink()
+    dirty_config_path = repo / dirty_config
+    dirty_config_path.write_text(
+        json.dumps(
+            {
+                "wave_id": expected_wave,
+                "tracked_packet": dirty_packet,
+                "request_for_agent": "Use the dirty filesystem request.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (repo / expected_packet).unlink()
+    exact_blocker_path.unlink()
+    _write_program_queue_packet(
+        repo,
+        dirty_packet,
+        wave_id=dirty_wave,
+        status="Routed - Phase A required before implementation",
+    )
+    dirty_blocker_path = repo / dirty_blocker
+    dirty_blocker_path.write_text("# Dirty live blocker\n", encoding="utf-8")
+    dirty_sentinel = repo / "dirty-untracked-sentinel.txt"
+    dirty_sentinel.write_text("preserve me exactly\n", encoding="utf-8")
+
+    observed_paths = [
+        "TASKS.md",
+        generic_config,
+        dirty_config,
+        expected_packet,
+        exact_blocker,
+        dirty_packet,
+        dirty_blocker,
+        dirty_sentinel.name,
+    ]
+
+    def git_visible_state() -> dict[str, object]:
+        return {
+            "branch": _git(["symbolic-ref", "--short", "HEAD"], cwd=repo).stdout,
+            "head": _git(["rev-parse", "HEAD"], cwd=repo).stdout,
+            "dev_ref": _git(["rev-parse", "refs/heads/dev"], cwd=repo).stdout,
+            "origin_dev_ref": _git(
+                ["rev-parse", "refs/remotes/origin/dev"], cwd=repo
+            ).stdout,
+            "porcelain": _git(
+                ["status", "--porcelain=v1", "--untracked-files=all"], cwd=repo
+            ).stdout,
+            "cached_diff": _git(["diff", "--cached", "--binary"], cwd=repo).stdout,
+            "content": {
+                relpath: (repo / relpath).read_bytes()
+                if (repo / relpath).is_file()
+                else None
+                for relpath in observed_paths
+            },
+        }
+
+    before = git_visible_state()
+    legacy_entry = commit_mod._next_open_founder_ordered_queue_entry(repo)  # ANTICHEAT_OK: compare legacy dirty filesystem queue parsing
+    assert legacy_entry is not None
+    assert legacy_entry["wave_id"] == dirty_wave
+
+    result = {"pr_number": "1219"}
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: exact-commit queue/package regression
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result=result,
+        merge_sha=authority_sha,
+        log=_noop_log,
+        queue_commit_sha=authority_sha,
+    )
+    after = git_visible_state()
+
+    candidate = package["next_candidates"][0]
+    assert package["merge_sha"] == authority_sha
+    assert package["wave_name"] == expected_wave
+    assert "queue_commit_sha" not in package
+    assert candidate["candidate"] == expected_wave
+    assert candidate["tracked_packet"] == expected_packet
+    assert "immutable fetched-tree request" in candidate["request_for_claude"]
+    assert "dirty filesystem request" not in candidate["request_for_claude"]
+    assert package["blocker_report_paths"] == [exact_blocker]
+    assert dirty_blocker not in package["blocker_report_paths"]
+    assert result["post_merge_package_path"] == (
+        ".agent_bus/meta/post_merge_package.json"
+    )
+    package_path = repo / result["post_merge_package_path"]
+    assert json.loads(package_path.read_text(encoding="utf-8")) == package
+    assert before == after
+
+
+def test_exact_commit_queue_read_failure_preserves_existing_package(tmp_path):
+    repo = _init_repo(tmp_path)
+    commit_without_tasks = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    (repo / "TASKS.md").write_text(
+        "## PROGRAM QUEUE (priority order)\n\n1. **Dirty fallback** item.\n",
+        encoding="utf-8",
+    )
+    package_path = repo / ".agent_bus" / "meta" / "post_merge_package.json"
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    original_package = b'{"sentinel":"preserve-existing-package"}\n'
+    package_path.write_bytes(original_package)
+    result = {"pr_number": "1219", "sentinel": "unchanged"}
+    original_result = dict(result)
+
+    with pytest.raises(
+        commit_mod.QueueCommitAuthorityError,
+        match="required queue blob is absent",
+    ):
+        commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: fail-closed exact-object read regression
+            repo_root=repo,
+            handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+            result=result,
+            merge_sha=commit_without_tasks,
+            log=_noop_log,
+            queue_commit_sha=commit_without_tasks,
+        )
+
+    assert package_path.read_bytes() == original_package
+    assert result == original_result
+
+    with pytest.raises(
+        commit_mod.QueueCommitAuthorityError,
+        match="merge_sha must equal queue_commit_sha",
+    ):
+        commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: reject split merge/content authority before writing
+            repo_root=repo,
+            handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+            result=result,
+            merge_sha="f" * 40,
+            log=_noop_log,
+            queue_commit_sha=commit_without_tasks,
+        )
+
+    assert package_path.read_bytes() == original_package
+    assert result == original_result
+
+
 def test_skips_when_cleanup_root_not_on_base_branch(tmp_path):
     repo = _init_repo(tmp_path)
     wave_id = "test-wave-wrong-branch-2026-04-17"

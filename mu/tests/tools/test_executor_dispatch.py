@@ -9568,12 +9568,18 @@ class TestCommitContinuationAndBotFreshness:
         repo.mkdir()
         dev_worktree = tmp_path / "dev-worktree"
         dev_worktree.mkdir()
+        fetched_sha = "789abcde" * 5
         handoff = _make_new_handoff()
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
         continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text('{"sentinel":"clear-after-merge"}\n', encoding="utf-8")
         merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
         merge_script.parent.mkdir(parents=True, exist_ok=True)
         merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        package_path = dev_worktree / ".agent_bus" / "meta" / "post_merge_package.json"
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        original_package = b'{"sentinel":"preserve-on-exact-read-failure"}\n'
+        package_path.write_bytes(original_package)
         result = {
             "steps_completed": [
                 "validate_inputs",
@@ -9592,6 +9598,8 @@ class TestCommitContinuationAndBotFreshness:
         }
         merge_cwds = []
         fetch_cwds = []
+        origin_dev_rev_parse_calls = []
+        package_refresh_calls = []
 
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
@@ -9602,7 +9610,8 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout="abc123\n")
             if cmd[:3] == ["git", "rev-parse", "origin/dev"]:
-                return completed(cmd, stdout="merge789\n")
+                origin_dev_rev_parse_calls.append((list(cmd), cwd))
+                return completed(cmd, stdout=f"{fetched_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 # The linked dev worktree is on 'dev'; the feature worktree
                 # (repo) is on its own branch. _resolve_post_merge_verify_root's
@@ -9683,6 +9692,18 @@ class TestCommitContinuationAndBotFreshness:
 
         monkeypatch.setattr(commit_mod, "_run", fake_run)
 
+        def fail_exact_package_refresh(**kwargs):
+            package_refresh_calls.append(kwargs)
+            raise commit_mod.QueueCommitAuthorityError(
+                "forced exact-object read failure"
+            )
+
+        monkeypatch.setattr(
+            commit_mod,
+            "_refresh_post_merge_package_for_next_open_queue",
+            fail_exact_package_refresh,
+        )
+
         post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: reproduces dirty linked-base verify root after successful merge
             repo_root=repo,
             handoff=handoff,
@@ -9693,12 +9714,25 @@ class TestCommitContinuationAndBotFreshness:
             log=lambda _: None,
         )
 
-        assert "step" not in post_commit
-        assert post_commit["merge_sha"] == "merge789"
+        assert post_commit["status"] == "error"
+        assert post_commit["step"] == "refresh_post_merge_package"
+        assert "forced exact-object read failure" in post_commit["errors"][0]
+        assert post_commit["merge_sha"] == fetched_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert "post_merge_cleanup" in post_commit["steps_completed"]
+        assert post_commit["post_merge_cleanup"]["branch_deleted"] is True
         assert "TASKS.md" in post_commit["post_merge_verify_warning"]
+        assert continuation_path.exists() is False
+        assert package_path.read_bytes() == original_package
         assert merge_cwds == [repo.parent]
         assert fetch_cwds == [dev_worktree]
+        assert origin_dev_rev_parse_calls == [
+            (["git", "rev-parse", "origin/dev"], dev_worktree)
+        ]
+        assert len(package_refresh_calls) == 1
+        assert package_refresh_calls[0]["repo_root"] == dev_worktree
+        assert package_refresh_calls[0]["merge_sha"] == fetched_sha
+        assert package_refresh_calls[0]["queue_commit_sha"] == fetched_sha
 
 
 class TestModularSurfaceEntrypoints:

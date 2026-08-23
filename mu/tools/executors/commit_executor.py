@@ -12333,16 +12333,243 @@ def _queue_entry_has_explicit_mu_structural_authorization(
     return bool(_MU_STRUCTURAL_PHASE_A_AUTHORIZATION_RE.search(explicit_state))
 
 
+_FULL_QUEUE_COMMIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_QUEUE_PACKET_SCAN_LIMIT = 40
+
+
+class QueueCommitAuthorityError(RuntimeError):
+    """Exact queue-object authority could not be read without fallback."""
+
+
+def _queue_repo_relpath_error(field_name: str, raw_path: str) -> str | None:
+    """Return an error for a path that is unsafe in a SHA-qualified object read."""
+    path = _normalize_repo_relpath(raw_path)
+    error = _path_field_error(field_name, path)
+    if error:
+        return error
+    if any(ord(char) < 32 or ord(char) == 127 for char in path):
+        return f"{field_name} contains control characters: {path!r}"
+    if ":" in path:
+        return f"{field_name} contains a Git revision separator: {path!r}"
+    if any(part in {"", ".", ".."} for part in path.split("/")):
+        return f"{field_name} must be a normalized repo-relative path: {path!r}"
+    return None
+
+
+def _validated_queue_repo_relpath(field_name: str, raw_path: str) -> str:
+    path = _normalize_repo_relpath(raw_path)
+    error = _queue_repo_relpath_error(field_name, path)
+    if error:
+        raise QueueCommitAuthorityError(error)
+    return path
+
+
+def _queue_git_object_output(
+    repo_root: Path,
+    args: list[str],
+    *,
+    operation: str,
+) -> str:
+    """Run one fail-closed Git-object query and return its text output."""
+    try:
+        proc = _run(args, cwd=repo_root, check=False, timeout=10)
+    except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
+        raise QueueCommitAuthorityError(
+            f"exact queue {operation} failed: {exc}"
+        ) from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()
+        raise QueueCommitAuthorityError(
+            f"exact queue {operation} failed: {detail[:500]}"
+        )
+    return proc.stdout
+
+
+def _validate_queue_commit_sha(repo_root: Path, queue_commit_sha: str) -> str:
+    """Validate one immutable full commit SHA without resolving a symbolic ref."""
+    commit_sha = str(queue_commit_sha or "").strip()
+    if not commit_sha:
+        return ""
+    if not _FULL_QUEUE_COMMIT_SHA_RE.fullmatch(commit_sha):
+        raise QueueCommitAuthorityError(
+            "queue_commit_sha must be a full lowercase 40-hex commit SHA"
+        )
+    _queue_git_object_output(
+        repo_root,
+        ["git", "cat-file", "-e", f"{commit_sha}^{{commit}}"],
+        operation=f"commit validation at {commit_sha}",
+    )
+    return commit_sha
+
+
+def _queue_commit_tree_paths(
+    repo_root: Path,
+    *,
+    queue_commit_sha: str,
+    tree_prefix: str,
+) -> list[str]:
+    """Enumerate validated paths below ``tree_prefix`` at one exact commit."""
+    commit_sha = str(queue_commit_sha or "").strip()
+    if not _FULL_QUEUE_COMMIT_SHA_RE.fullmatch(commit_sha):
+        raise QueueCommitAuthorityError(
+            "queue_commit_sha must be a full lowercase 40-hex commit SHA"
+        )
+    prefix = _validated_queue_repo_relpath("queue tree prefix", tree_prefix)
+    output = _queue_git_object_output(
+        repo_root,
+        [
+            "git",
+            "ls-tree",
+            "-r",
+            "-z",
+            "--name-only",
+            commit_sha,
+            "--",
+            prefix,
+        ],
+        operation=f"tree enumeration at {commit_sha}:{prefix}",
+    )
+    paths: list[str] = []
+    for raw_path in output.split("\0"):
+        if not raw_path:
+            continue
+        path = _validated_queue_repo_relpath("queue tree path", raw_path)
+        if path != prefix and not path.startswith(f"{prefix}/"):
+            raise QueueCommitAuthorityError(
+                f"exact queue tree returned path outside {prefix}: {path}"
+            )
+        paths.append(path)
+    return paths
+
+
+def _queue_commit_blob_text(
+    repo_root: Path,
+    relpath: str,
+    *,
+    queue_commit_sha: str,
+    required: bool,
+) -> str | None:
+    """Read a blob from one exact commit, distinguishing absence from read failure."""
+    commit_sha = str(queue_commit_sha or "").strip()
+    if not _FULL_QUEUE_COMMIT_SHA_RE.fullmatch(commit_sha):
+        raise QueueCommitAuthorityError(
+            "queue_commit_sha must be a full lowercase 40-hex commit SHA"
+        )
+    path = _validated_queue_repo_relpath("queue blob path", relpath)
+    if path not in _queue_commit_tree_paths(
+        repo_root,
+        queue_commit_sha=commit_sha,
+        tree_prefix=path,
+    ):
+        if required:
+            raise QueueCommitAuthorityError(
+                f"required queue blob is absent at {commit_sha}:{path}"
+            )
+        return None
+    return _queue_git_object_output(
+        repo_root,
+        ["git", "show", f"{commit_sha}:{path}"],
+        operation=f"blob read at {commit_sha}:{path}",
+    )
+
+
+def _queue_tasks_lines(repo_root: Path, *, queue_commit_sha: str = "") -> list[str]:
+    if queue_commit_sha:
+        text = _queue_commit_blob_text(
+            repo_root,
+            "TASKS.md",
+            queue_commit_sha=queue_commit_sha,
+            required=True,
+        )
+        assert text is not None
+        return text.splitlines()
+    try:
+        return (repo_root / "TASKS.md").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+
+def _queue_control_plane_packet_text(
+    repo_root: Path,
+    packet: str,
+    *,
+    queue_commit_sha: str,
+) -> str | None:
+    if not queue_commit_sha:
+        return None
+    safe_packet = _safe_config_tracked_packet(
+        repo_root,
+        packet,
+        queue_commit_sha=queue_commit_sha,
+    )
+    if not safe_packet:
+        if str(packet or "").strip():
+            raise QueueCommitAuthorityError(
+                f"invalid exact-queue control-plane packet path: {packet!r}"
+            )
+        return None
+    return _queue_commit_blob_text(
+        repo_root,
+        safe_packet,
+        queue_commit_sha=queue_commit_sha,
+        required=False,
+    )
+
+
+def _queue_control_plane_packet_status(
+    repo_root: Path,
+    packet: str,
+    *,
+    queue_commit_sha: str = "",
+) -> str | None:
+    if not queue_commit_sha:
+        return read_control_plane_packet_status(repo_root, packet)
+    packet_text = _queue_control_plane_packet_text(
+        repo_root,
+        packet,
+        queue_commit_sha=queue_commit_sha,
+    )
+    if packet_text is None:
+        return None
+    for line in packet_text.splitlines()[:_QUEUE_PACKET_SCAN_LIMIT]:
+        clean = line.strip()
+        if clean.lower().startswith("status:"):
+            return clean.partition(":")[2].strip() or None
+    return None
+
+
+def _queue_control_plane_packet_wave_id(
+    repo_root: Path,
+    packet: str,
+    *,
+    queue_commit_sha: str = "",
+) -> str | None:
+    if not queue_commit_sha:
+        return read_control_plane_packet_wave_id(repo_root, packet)
+    packet_text = _queue_control_plane_packet_text(
+        repo_root,
+        packet,
+        queue_commit_sha=queue_commit_sha,
+    )
+    if packet_text is None:
+        return None
+    for line in packet_text.splitlines()[:_QUEUE_PACKET_SCAN_LIMIT]:
+        clean = line.strip()
+        lower = clean.lower()
+        if lower.startswith("wave id:") or lower.startswith("wave_id:"):
+            value = clean.partition(":")[2].strip().strip("`")
+            normalized = normalize_wave_id(value) if value else ""
+            return normalized if normalized != "wave-unknown" else None
+    return None
+
+
 def _routed_tracker_queue_entries(
     repo_root: Path,
     *,
     existing_wave_ids: set[str],
+    queue_commit_sha: str = "",
 ) -> list[dict[str, Any]]:
-    tasks_path = repo_root / "TASKS.md"
-    try:
-        lines = tasks_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
+    lines = _queue_tasks_lines(repo_root, queue_commit_sha=queue_commit_sha)
 
     entries: list[dict[str, Any]] = []
     for line in lines:
@@ -12352,9 +12579,19 @@ def _routed_tracker_queue_entries(
         if not wave_id or wave_id in existing_wave_ids:
             continue
         packet = _queue_entry_backtick_value(line, "Packet")
+        if queue_commit_sha:
+            packet = _safe_config_tracked_packet(
+                repo_root,
+                packet,
+                queue_commit_sha=queue_commit_sha,
+            )
         if not packet:
             continue
-        status = read_control_plane_packet_status(repo_root, packet)
+        status = _queue_control_plane_packet_status(
+            repo_root,
+            packet,
+            queue_commit_sha=queue_commit_sha,
+        )
         status_upper = str(status or "").upper()
         if not status_upper.startswith("ROUTED - PHASE A"):
             continue
@@ -12391,12 +12628,12 @@ def _routed_tracker_queue_entries(
     return entries
 
 
-def _program_queue_section_lines(repo_root: Path) -> list[str]:
-    tasks_path = repo_root / "TASKS.md"
-    try:
-        lines = tasks_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
+def _program_queue_section_lines(
+    repo_root: Path,
+    *,
+    queue_commit_sha: str = "",
+) -> list[str]:
+    lines = _queue_tasks_lines(repo_root, queue_commit_sha=queue_commit_sha)
 
     section: list[str] = []
     in_program_queue = False
@@ -12467,14 +12704,30 @@ def _program_queue_identity_matches(*, candidate: str, derived_wave_id: str) -> 
     )
 
 
-def _safe_config_tracked_packet(repo_root: Path, raw_packet: Any) -> str:
+def _safe_config_tracked_packet(
+    repo_root: Path,
+    raw_packet: Any,
+    *,
+    queue_commit_sha: str = "",
+) -> str:
     packet = _normalize_repo_relpath(str(raw_packet or ""))
     if not packet:
         return ""
     if _path_field_error("tracked_packet", packet):
+        if queue_commit_sha:
+            raise QueueCommitAuthorityError(
+                _path_field_error("tracked_packet", packet)
+                or f"invalid tracked_packet: {packet!r}"
+            )
         return ""
+    if queue_commit_sha:
+        queue_path_error = _queue_repo_relpath_error("tracked_packet", packet)
+        if queue_path_error:
+            raise QueueCommitAuthorityError(queue_path_error)
     if not packet.startswith("reports/control_plane/") or not packet.endswith(".md"):
         return ""
+    if queue_commit_sha:
+        return packet
     packet_path = (repo_root / packet).resolve()
     control_plane_dir = (repo_root / "reports" / "control_plane").resolve()
     try:
@@ -12490,10 +12743,21 @@ def _wave_config_matches_program_queue_entry(
     config: dict[str, Any],
     *,
     derived_wave_id: str,
+    queue_commit_sha: str = "",
 ) -> bool:
-    packet = _safe_config_tracked_packet(repo_root, config.get("tracked_packet"))
+    packet = _safe_config_tracked_packet(
+        repo_root,
+        config.get("tracked_packet"),
+        queue_commit_sha=queue_commit_sha,
+    )
     packet_wave_id = (
-        read_control_plane_packet_wave_id(repo_root, packet) if packet else ""
+        _queue_control_plane_packet_wave_id(
+            repo_root,
+            packet,
+            queue_commit_sha=queue_commit_sha,
+        )
+        if packet
+        else ""
     )
     config_ids = [
         str(config.get("wave_id") or ""),
@@ -12516,16 +12780,41 @@ def _matching_program_queue_wave_config(
     repo_root: Path,
     *,
     derived_wave_id: str,
+    queue_commit_sha: str = "",
 ) -> dict[str, Any]:
     control_plane_dir = repo_root / "reports" / "control_plane"
-    if not control_plane_dir.is_dir():
-        return {}
+    if queue_commit_sha:
+        config_paths = sorted(
+            Path(path)
+            for path in _queue_commit_tree_paths(
+                repo_root,
+                queue_commit_sha=queue_commit_sha,
+                tree_prefix="reports/control_plane",
+            )
+            if path.startswith("reports/control_plane/")
+            and "/" not in path.removeprefix("reports/control_plane/")
+            and path.endswith("_wave_config.json")
+        )
+    else:
+        if not control_plane_dir.is_dir():
+            return {}
+        config_paths = sorted(control_plane_dir.glob("*_wave_config.json"))
 
     exact_matches: list[tuple[str, dict[str, Any]]] = []
     prefix_matches: list[tuple[str, dict[str, Any]]] = []
-    for config_path in sorted(control_plane_dir.glob("*_wave_config.json")):
+    for config_path in config_paths:
         try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
+            if queue_commit_sha:
+                config_text = _queue_commit_blob_text(
+                    repo_root,
+                    config_path.as_posix(),
+                    queue_commit_sha=queue_commit_sha,
+                    required=True,
+                )
+                assert config_text is not None
+            else:
+                config_text = config_path.read_text(encoding="utf-8")
+            config = json.loads(config_text)
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(config, dict):
@@ -12542,6 +12831,7 @@ def _matching_program_queue_wave_config(
             config_path,
             config,
             derived_wave_id=derived_wave_id,
+            queue_commit_sha=queue_commit_sha,
         ):
             prefix_matches.append((config_path.name, config))
     matches = exact_matches or prefix_matches
@@ -12560,14 +12850,11 @@ def _program_queue_tracker_notes_for_wave_ids(
     repo_root: Path,
     *,
     wave_ids: set[str],
+    queue_commit_sha: str = "",
 ) -> list[str]:
     if not wave_ids:
         return []
-    tasks_path = repo_root / "TASKS.md"
-    try:
-        lines = tasks_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
+    lines = _queue_tasks_lines(repo_root, queue_commit_sha=queue_commit_sha)
 
     notes: list[str] = []
     for line in lines:
@@ -12588,10 +12875,41 @@ def _simple_program_queue_text_has_post_merge_marker(text: Any) -> bool:
     return bool(_SIMPLE_QUEUE_TERMINAL_MARKER_RE.search(clean))
 
 
-def _git_merge_history_contains_wave_id(repo_root: Path, wave_id: str) -> bool:
+def _git_merge_history_contains_wave_id(
+    repo_root: Path,
+    wave_id: str,
+    *,
+    queue_commit_sha: str = "",
+) -> bool:
     normalized_wave_id = normalize_wave_id(wave_id)
     if not normalized_wave_id or normalized_wave_id == "wave-unknown":
         return False
+    if queue_commit_sha:
+        commit_sha = str(queue_commit_sha or "").strip()
+        if not _FULL_QUEUE_COMMIT_SHA_RE.fullmatch(commit_sha):
+            raise QueueCommitAuthorityError(
+                "queue_commit_sha must be a full lowercase 40-hex commit SHA"
+            )
+        normalized_log = _queue_git_object_output(
+            repo_root,
+            [
+                "git",
+                "log",
+                "--merges",
+                "--format=%s%n%b",
+                "-n",
+                "400",
+                commit_sha,
+                "--",
+            ],
+            operation=f"merge history at {commit_sha}",
+        ).lower()
+        return bool(
+            re.search(
+                rf"(?<![a-z0-9_-]){re.escape(normalized_wave_id)}(?![a-z0-9_-])",
+                normalized_log,
+            )
+        )
     try:
         result = _run(
             ["git", "log", "--merges", "--format=%s%n%b", "-n", "400"],
@@ -12654,6 +12972,8 @@ def _simple_program_queue_merge_log_wave_ids(entry: dict[str, Any]) -> set[str]:
 def _simple_program_queue_entry_is_completed(
     repo_root: Path,
     entry: dict[str, Any],
+    *,
+    queue_commit_sha: str = "",
 ) -> bool:
     wave_ids = {
         normalize_wave_id(str(raw or ""))
@@ -12670,7 +12990,11 @@ def _simple_program_queue_entry_is_completed(
         entry.get("status"),
     ]
     completion_texts.extend(
-        _program_queue_tracker_notes_for_wave_ids(repo_root, wave_ids=wave_ids)
+        _program_queue_tracker_notes_for_wave_ids(
+            repo_root,
+            wave_ids=wave_ids,
+            queue_commit_sha=queue_commit_sha,
+        )
     )
     if any(
         _simple_program_queue_text_has_post_merge_marker(text)
@@ -12678,7 +13002,11 @@ def _simple_program_queue_entry_is_completed(
     ):
         return True
     return any(
-        _git_merge_history_contains_wave_id(repo_root, wave_id)
+        _git_merge_history_contains_wave_id(
+            repo_root,
+            wave_id,
+            queue_commit_sha=queue_commit_sha,
+        )
         for wave_id in _simple_program_queue_merge_log_wave_ids(entry)
     )
 
@@ -12687,9 +13015,13 @@ def _simple_program_queue_entries(
     repo_root: Path,
     *,
     existing_wave_ids: set[str],
+    queue_commit_sha: str = "",
 ) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
-    for line in _program_queue_section_lines(repo_root):
+    for line in _program_queue_section_lines(
+        repo_root,
+        queue_commit_sha=queue_commit_sha,
+    ):
         match = _PROGRAM_QUEUE_NUMBERED_ENTRY_RE.match(line)
         if not match:
             continue
@@ -12707,6 +13039,7 @@ def _simple_program_queue_entries(
         config = _matching_program_queue_wave_config(
             repo_root,
             derived_wave_id=wave_id,
+            queue_commit_sha=queue_commit_sha,
         )
         raw_config_wave_id = str(config.get("wave_id") or "").strip()
         config_wave_id = (
@@ -12714,9 +13047,19 @@ def _simple_program_queue_entries(
         )
         if config_wave_id:
             wave_id = config_wave_id
-        packet = _safe_config_tracked_packet(repo_root, config.get("tracked_packet"))
+        packet = _safe_config_tracked_packet(
+            repo_root,
+            config.get("tracked_packet"),
+            queue_commit_sha=queue_commit_sha,
+        )
         packet_wave_id = (
-            read_control_plane_packet_wave_id(repo_root, packet) if packet else None
+            _queue_control_plane_packet_wave_id(
+                repo_root,
+                packet,
+                queue_commit_sha=queue_commit_sha,
+            )
+            if packet
+            else None
         )
         entries.append(
             {
@@ -12730,7 +13073,11 @@ def _simple_program_queue_entries(
                 "category": "PROGRAM QUEUE",
                 "packet": packet,
                 "source_packet": "",
-                "status": read_control_plane_packet_status(repo_root, packet)
+                "status": _queue_control_plane_packet_status(
+                    repo_root,
+                    packet,
+                    queue_commit_sha=queue_commit_sha,
+                )
                 if packet
                 else None,
                 "hard_stop": False,
@@ -12744,12 +13091,12 @@ def _simple_program_queue_entries(
     return entries
 
 
-def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
-    tasks_path = repo_root / "TASKS.md"
-    try:
-        lines = tasks_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
+def _founder_ordered_queue_entries(
+    repo_root: Path,
+    *,
+    queue_commit_sha: str = "",
+) -> list[dict[str, Any]]:
+    lines = _queue_tasks_lines(repo_root, queue_commit_sha=queue_commit_sha)
 
     entries: list[dict[str, Any]] = []
     seen_wave_ids: set[str] = set()
@@ -12776,7 +13123,13 @@ def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
             else "founder-ordered redteam"
         )
         source_packet = _queue_entry_backtick_value(line, "Source audit packet")
-        status = read_control_plane_packet_status(repo_root, packet)
+        if queue_commit_sha and source_packet:
+            _validated_queue_repo_relpath("source_packet", source_packet)
+        status = _queue_control_plane_packet_status(
+            repo_root,
+            packet,
+            queue_commit_sha=queue_commit_sha,
+        )
         state = label_match.group("state").strip()
         line_upper = line.upper()
         status_upper = str(status or "").upper()
@@ -12803,19 +13156,38 @@ def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
             }
         )
     entries.extend(
-        _routed_tracker_queue_entries(repo_root, existing_wave_ids=seen_wave_ids)
+        _routed_tracker_queue_entries(
+            repo_root,
+            existing_wave_ids=seen_wave_ids,
+            queue_commit_sha=queue_commit_sha,
+        )
     )
     entries.extend(
-        _simple_program_queue_entries(repo_root, existing_wave_ids=seen_wave_ids)
+        _simple_program_queue_entries(
+            repo_root,
+            existing_wave_ids=seen_wave_ids,
+            queue_commit_sha=queue_commit_sha,
+        )
     )
     return entries
 
 
-def _next_open_founder_ordered_queue_entry(repo_root: Path) -> dict[str, Any] | None:
+def _next_open_founder_ordered_queue_entry(
+    repo_root: Path,
+    *,
+    queue_commit_sha: str = "",
+) -> dict[str, Any] | None:
     open_entries: list[dict[str, Any]] = []
-    for entry in _founder_ordered_queue_entries(repo_root):
+    for entry in _founder_ordered_queue_entries(
+        repo_root,
+        queue_commit_sha=queue_commit_sha,
+    ):
         if entry.get("simple_program_queue"):
-            if _simple_program_queue_entry_is_completed(repo_root, entry):
+            if _simple_program_queue_entry_is_completed(
+                repo_root,
+                entry,
+                queue_commit_sha=queue_commit_sha,
+            ):
                 continue
             open_entries.append(entry)
             continue
@@ -12830,7 +13202,25 @@ def _next_open_founder_ordered_queue_entry(repo_root: Path) -> dict[str, Any] | 
     return open_entries[0] if open_entries else None
 
 
-def _post_merge_blocker_report_paths(repo_root: Path) -> list[str]:
+def _post_merge_blocker_report_paths(
+    repo_root: Path,
+    *,
+    queue_commit_sha: str = "",
+) -> list[str]:
+    if queue_commit_sha:
+        prefix = "reports/deferred/blocking/"
+        return sorted(
+            path
+            for path in _queue_commit_tree_paths(
+                repo_root,
+                queue_commit_sha=queue_commit_sha,
+                tree_prefix="reports/deferred/blocking",
+            )
+            if path.startswith(prefix)
+            and "/" not in path.removeprefix(prefix)
+            and path.endswith(".md")
+            and path != f"{prefix}README.md"
+        )
     blocking_dir = repo_root / "reports" / "deferred" / "blocking"
     if not blocking_dir.is_dir():
         return []
@@ -12924,9 +13314,22 @@ def _refresh_post_merge_package_for_next_open_queue(
     result: dict[str, Any],
     merge_sha: str,
     log: Any,
+    queue_commit_sha: str = "",
 ) -> dict[str, Any]:
-    """Write a fresh post-merge package from the founder-ordered queue state."""
-    entry = _next_open_founder_ordered_queue_entry(repo_root)
+    """Write a fresh package, optionally sourcing queue truth from one commit."""
+    exact_queue_commit = _validate_queue_commit_sha(repo_root, queue_commit_sha)
+    if exact_queue_commit:
+        recorded_merge_sha = str(merge_sha or "").strip()
+        if recorded_merge_sha != exact_queue_commit:
+            raise QueueCommitAuthorityError(
+                "merge_sha must equal queue_commit_sha for exact queue authority: "
+                f"{recorded_merge_sha or '<empty>'} != {exact_queue_commit}"
+            )
+        merge_sha = exact_queue_commit
+    entry = _next_open_founder_ordered_queue_entry(
+        repo_root,
+        queue_commit_sha=exact_queue_commit,
+    )
     queue_task_id = "[NEXT-CODEX-POST-REDTEAM]"
     pr_number_raw = result.get("pr_number")
     try:
@@ -12955,7 +13358,10 @@ def _refresh_post_merge_package_for_next_open_queue(
                 "No open founder-ordered queue packets remain."
             ),
             "next_candidates": [],
-            "blocker_report_paths": _post_merge_blocker_report_paths(repo_root),
+            "blocker_report_paths": _post_merge_blocker_report_paths(
+                repo_root,
+                queue_commit_sha=exact_queue_commit,
+            ),
         }
         package_path.parent.mkdir(parents=True, exist_ok=True)
         package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
@@ -13005,7 +13411,10 @@ def _refresh_post_merge_package_for_next_open_queue(
             + _post_merge_tracker_summary_for_queue_entry(entry)
         ),
         "next_candidates": next_candidates,
-        "blocker_report_paths": _post_merge_blocker_report_paths(repo_root),
+        "blocker_report_paths": _post_merge_blocker_report_paths(
+            repo_root,
+            queue_commit_sha=exact_queue_commit,
+        ),
     }
     package_path.parent.mkdir(parents=True, exist_ok=True)
     package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
@@ -13602,6 +14011,7 @@ def _run_post_commit_pipeline(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
+    queue_commit_sha = ""
     try:
         verify_root = _resolve_post_merge_verify_root(repo_root, base_branch, log=log)
         _run(["git", "fetch", "origin", base_branch], cwd=verify_root, timeout=60)
@@ -13613,6 +14023,7 @@ def _run_post_commit_pipeline(
             ).stdout.strip()
             status_output = pre_verify_status or "\n".join(sorted(pre_verify_dirty))
             result["merge_sha"] = head_sha
+            queue_commit_sha = head_sha
             if "ensure_review_clear_and_merge" not in result["steps_completed"]:
                 result["steps_completed"].append("ensure_review_clear_and_merge")
             _clear_continuation_record(continuation_path)
@@ -13670,13 +14081,31 @@ def _run_post_commit_pipeline(
         repo_root, base_branch, log=log,
     )
 
-    _refresh_post_merge_package_for_next_open_queue(
-        repo_root=verify_root,
-        handoff=handoff,
-        result=result,
-        merge_sha=str(result.get("merge_sha") or ""),
-        log=log,
-    )
+    queue_authority_error: str | None = None
+    if queue_commit_sha:
+        try:
+            _refresh_post_merge_package_for_next_open_queue(
+                repo_root=verify_root,
+                handoff=handoff,
+                result=result,
+                merge_sha=str(result.get("merge_sha") or ""),
+                log=log,
+                queue_commit_sha=queue_commit_sha,
+            )
+        except QueueCommitAuthorityError as exc:
+            queue_authority_error = str(exc)
+            log(
+                "Step 15b: exact post-merge queue refresh failed closed; "
+                f"continuing to step 16 cleanup: {queue_authority_error}"
+            )
+    else:
+        _refresh_post_merge_package_for_next_open_queue(
+            repo_root=verify_root,
+            handoff=handoff,
+            result=result,
+            merge_sha=str(result.get("merge_sha") or ""),
+            log=log,
+        )
 
     # ── Step 16: post_merge_cleanup ────────────────────────────────────
     # Best-effort cleanup of wave-local state that would otherwise
@@ -13693,6 +14122,14 @@ def _run_post_commit_pipeline(
     )
     result["post_merge_cleanup"] = cleanup_outcome
     result["steps_completed"].append("post_merge_cleanup")
+
+    if queue_authority_error is not None:
+        result["status"] = "error"
+        result["step"] = "refresh_post_merge_package"
+        result["errors"] = [
+            "Exact post-merge queue refresh failed at "
+            f"{queue_commit_sha}: {queue_authority_error}"
+        ]
 
     return result
 
