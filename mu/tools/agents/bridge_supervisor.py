@@ -14,6 +14,7 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,7 +28,17 @@ EXECUTOR_DIR = SCRIPT_DIR.parent / "executors"
 if str(EXECUTOR_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTOR_DIR))
 
-from bridge_adapters import BridgeAdapterError, _prepare_adapter_env, get_adapter, load_bridge_config, run_adapter
+from bridge_adapters import (
+    AGENT_DECISION_PLACEHOLDER,
+    AGENT_ENVELOPE_REQUIRED_KEYS,
+    BridgeAdapterError,
+    _prepare_adapter_env,
+    extract_agent_envelope_candidates,
+    get_adapter,
+    is_agent_decision_placeholder,
+    load_bridge_config,
+    run_adapter,
+)
 from bridge_migrations import MIGRATIONS, MigrationVersionError, run_pending_migrations
 from executor_common import (
     ExecutorCommonError,
@@ -55,7 +66,7 @@ JSON_SCHEMA_STUB = json.dumps(
         "job_id": "string",
         "turn_id": "string",
         "agent_role": "reader|reviewer",
-        "decision": "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR|SYNTHETIC",
+        "decision": AGENT_DECISION_PLACEHOLDER,
         "summary": "string",
         "touched_files_claimed": ["string"],
         "findings": [
@@ -80,10 +91,6 @@ JSON_SCHEMA_STUB = json.dumps(
         "request_for_next_agent": "string",
     },
     indent=2,
-)
-ENVELOPE_RE = re.compile(
-    r"BEGIN_AGENT_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_AGENT_ENVELOPE",
-    re.DOTALL,
 )
 _STDERR_SENTINEL = "\n[stderr]\n"
 AUTHORIZED_DECISIONS = frozenset(
@@ -816,43 +823,44 @@ def parse_envelope(output: str) -> dict[str, Any]:
         stdout_only = ""
         stderr_only = output[len("[stderr]\n"):]
         has_stderr = True
-    if ENVELOPE_RE.search(stdout_only):
+    stdout_candidates = extract_agent_envelope_candidates(stdout_only)
+    stderr_candidates = extract_agent_envelope_candidates(stderr_only)
+    if stdout_candidates:
         output = stdout_only
-    elif has_stderr and ENVELOPE_RE.search(stderr_only):
+        candidates = stdout_candidates
+    elif has_stderr and stderr_candidates:
         raise BridgeError(
             "Agent envelope found only in stderr, not in authoritative stdout. "
             "Refusing stderr-sourced envelope."
         )
-    matches = list(ENVELOPE_RE.finditer(output))
-    if not matches:
+    else:
+        candidates = extract_agent_envelope_candidates(output)
+    if not candidates:
+        if (
+            "BEGIN_AGENT_ENVELOPE" in output
+            and "END_AGENT_ENVELOPE" in output
+        ):
+            raise BridgeError(
+                "Agent output contained envelope marker text but none were valid."
+            )
         raise BridgeError("Agent output missing BEGIN_AGENT_ENVELOPE / END_AGENT_ENVELOPE block")
     envelopes: list[dict[str, Any]] = []
     canonical_payloads: set[str] = set()
-    required = {
-        "job_id", "turn_id", "agent_role", "decision", "summary",
-        "touched_files_claimed", "findings", "validations_claimed",
-        "request_for_next_agent",
-    }
-    parse_errors: list[str] = []
-    for index, match in enumerate(matches, start=1):
-        try:
-            envelope = json.loads(match.group(1))
-        except json.JSONDecodeError as exc:
-            # Codex emits the prompt template (with truncated strings) and
-            # draft envelopes during reasoning.  Skip malformed entries and
-            # only fail if NO valid envelope is found after the loop.
-            parse_errors.append(f"Agent envelope #{index} is not valid JSON: {exc}")
+    for candidate in candidates:
+        decoded = candidate.decoded
+        if not isinstance(decoded, Mapping):
             continue
-        missing = required.difference(envelope)
+        envelope = dict(decoded)
+        missing = AGENT_ENVELOPE_REQUIRED_KEYS.difference(envelope)
         if missing:
             # Draft envelopes may omit required keys — skip, don't abort.
             continue
         decision = envelope["decision"]
-        if decision not in AUTHORIZED_DECISIONS:
-            # The live adapter transcript can contain the prompt template before
-            # the model reply. Ignore only the pipe-delimited enum placeholder.
-            if isinstance(decision, str) and "|" in decision:
-                continue
+        if is_agent_decision_placeholder(decision):
+            # The live transcript can contain the exact schema stub before the
+            # model reply. Near-miss strings remain fatal.
+            continue
+        if not isinstance(decision, str) or decision not in AUTHORIZED_DECISIONS:
             raise BridgeError(
                 f"Agent envelope has invalid decision {decision!r}; "
                 f"authorized decisions: {sorted(AUTHORIZED_DECISIONS)}"
@@ -861,11 +869,6 @@ def parse_envelope(output: str) -> dict[str, Any]:
         canonical_payloads.add(json.dumps(envelope, sort_keys=True, separators=(",", ":")))
 
     if not envelopes:
-        if parse_errors:
-            raise BridgeError(
-                f"Agent output contained {len(matches)} envelope block(s) but none were valid. "
-                f"Parse errors: {'; '.join(parse_errors[:3])}"
-            )
         raise BridgeError("Agent output contained only non-authoritative template envelope blocks")
 
     if len(canonical_payloads) > 1:

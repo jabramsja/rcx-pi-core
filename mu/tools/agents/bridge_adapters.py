@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -84,9 +85,28 @@ def _seed_codex_runtime_home(runtime_home: Path) -> None:
 
 _AGENT_ENVELOPE_BEGIN = "BEGIN_AGENT_ENVELOPE"
 _AGENT_ENVELOPE_END = "END_AGENT_ENVELOPE"
-_AGENT_ENVELOPE_RE = re.compile(
-    r"BEGIN_AGENT_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_AGENT_ENVELOPE",
-    re.DOTALL,
+_AGENT_ENVELOPE_BEGIN_RE = re.compile(
+    rf"(?<![A-Za-z0-9_]){_AGENT_ENVELOPE_BEGIN}(?![A-Za-z0-9_])"
+)
+_JSON_WHITESPACE = frozenset(" \t\n\r")
+_ASCII_IDENTIFIER_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
+)
+AGENT_DECISION_PLACEHOLDER = (
+    "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR|SYNTHETIC"
+)
+AGENT_ENVELOPE_REQUIRED_KEYS = frozenset(
+    {
+        "job_id",
+        "turn_id",
+        "agent_role",
+        "decision",
+        "summary",
+        "touched_files_claimed",
+        "findings",
+        "validations_claimed",
+        "request_for_next_agent",
+    }
 )
 _AUTHORIZED_AGENT_DECISIONS = frozenset(
     {"GO", "NO_GO", "REQUEST_CHANGES", "QUESTION", "STALE", "ERROR", "SYNTHETIC"}
@@ -119,6 +139,113 @@ _AUTHORIZED_META_DECISIONS = frozenset(
         "RETRY_SUGGESTED",
     }
 )
+
+
+@dataclass(frozen=True)
+class AgentEnvelopeCandidate:
+    """One syntactically complete, raw-decoded agent-envelope candidate."""
+
+    decoded: Any
+    source_start: int
+    source_end: int
+    json_start: int
+    json_end: int
+
+    @property
+    def source_span(self) -> tuple[int, int]:
+        return self.source_start, self.source_end
+
+    @property
+    def json_span(self) -> tuple[int, int]:
+        return self.json_start, self.json_end
+
+
+def _skip_json_whitespace(text: str, start: int) -> int:
+    cursor = start
+    while cursor < len(text) and text[cursor] in _JSON_WHITESPACE:
+        cursor += 1
+    return cursor
+
+
+def _has_exact_token_at(text: str, start: int, token: str) -> bool:
+    if not text.startswith(token, start):
+        return False
+    before = text[start - 1] if start else ""
+    after_index = start + len(token)
+    after = text[after_index] if after_index < len(text) else ""
+    return (
+        before not in _ASCII_IDENTIFIER_CHARS
+        and after not in _ASCII_IDENTIFIER_CHARS
+    )
+
+
+def is_agent_decision_placeholder(decision: object) -> bool:
+    """Return whether *decision* is exactly the shared schema placeholder."""
+
+    return isinstance(decision, str) and decision == AGENT_DECISION_PLACEHOLDER
+
+
+def extract_agent_envelope_candidates(text: str) -> list[AgentEnvelopeCandidate]:
+    """Extract marker-safe, syntactically complete agent-envelope candidates.
+
+    Framing is intentionally independent of envelope semantics. Each returned
+    value is decoded exactly once with ``JSONDecoder.raw_decode`` and carries
+    both the full framed source span and the decoded JSON extent.
+    """
+
+    decoder = json.JSONDecoder()
+    candidates: list[AgentEnvelopeCandidate] = []
+    search_from = 0
+
+    while begin_match := _AGENT_ENVELOPE_BEGIN_RE.search(text, search_from):
+        cursor = _skip_json_whitespace(text, begin_match.end())
+        fenced = False
+        if text.startswith("```json", cursor):
+            fenced = True
+            cursor += len("```json")
+            cursor = _skip_json_whitespace(text, cursor)
+        elif text.startswith("```", cursor):
+            fenced = True
+            cursor += len("```")
+            cursor = _skip_json_whitespace(text, cursor)
+
+        json_start = cursor
+        try:
+            decoded, json_end = decoder.raw_decode(text, json_start)
+        except (json.JSONDecodeError, ValueError):
+            search_from = begin_match.end()
+            continue
+
+        cursor = _skip_json_whitespace(text, json_end)
+        if fenced:
+            if not text.startswith("```", cursor):
+                # The JSON value decoded successfully, so marker text inside
+                # its source extent remains payload even though framing failed.
+                search_from = json_end
+                continue
+            cursor += len("```")
+            cursor = _skip_json_whitespace(text, cursor)
+
+        if not _has_exact_token_at(text, cursor, _AGENT_ENVELOPE_END):
+            # Resume after the decoded extent so a marker-like substring in a
+            # valid JSON string cannot become an independent candidate.
+            search_from = json_end
+            continue
+
+        source_end = cursor + len(_AGENT_ENVELOPE_END)
+        candidates.append(
+            AgentEnvelopeCandidate(
+                decoded=decoded,
+                source_start=begin_match.start(),
+                source_end=source_end,
+                json_start=json_start,
+                json_end=json_end,
+            )
+        )
+        # Successfully decoded marker text is payload data, not another opener.
+        search_from = source_end
+
+    return candidates
 
 
 def _validated_bus_dir_name(raw_bus_dir: str | Path | None) -> str:
@@ -423,18 +550,30 @@ def _line_is_terminal_result_event(line: str) -> bool:
 
 
 def _contains_complete_adapter_envelope(text: str) -> bool:
-    for pattern, authorized_decisions in (
-        (_AGENT_ENVELOPE_RE, _AUTHORIZED_AGENT_DECISIONS),
-        (_META_ENVELOPE_RE, _AUTHORIZED_META_DECISIONS),
-    ):
-        for match in pattern.finditer(text):
-            try:
-                envelope = json.loads(match.group(1))
-            except json.JSONDecodeError:
-                continue
-            decision = envelope.get("decision")
-            if isinstance(decision, str) and decision in authorized_decisions:
-                return True
+    for candidate in extract_agent_envelope_candidates(text):
+        envelope = candidate.decoded
+        if not isinstance(envelope, Mapping):
+            continue
+        if AGENT_ENVELOPE_REQUIRED_KEYS.difference(envelope):
+            continue
+        decision = envelope["decision"]
+        if is_agent_decision_placeholder(decision):
+            continue
+        if not isinstance(decision, str) or decision not in _AUTHORIZED_AGENT_DECISIONS:
+            # Poison only agent-envelope arbitration. The independent legacy
+            # meta-envelope branch must still retain its stop authority.
+            break
+        return True
+
+    # Meta-envelope framing and decision policy are intentionally unchanged.
+    for match in _META_ENVELOPE_RE.finditer(text):
+        try:
+            envelope = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        decision = envelope.get("decision")
+        if isinstance(decision, str) and decision in _AUTHORIZED_META_DECISIONS:
+            return True
     return False
 
 
