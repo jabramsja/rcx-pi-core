@@ -150,11 +150,6 @@ FOUNDER_OVERRIDE:pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25.json`
 - Current staged files:
-  - `TASKS.md`
-  - `mu/tests/tools/test_agent_bridge_supervisor.py`
-  - `mu/tools/agents/bridge_adapters.py`
-  - `mu/tools/agents/bridge_supervisor.py`
   - `reports/control_plane/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25_2026-08-25.md`
-  - `reports/deferred/non_blocking/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
