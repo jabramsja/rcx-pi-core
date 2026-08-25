@@ -200,9 +200,27 @@ def _shared_deferrable_on_go(finding: dict[str, Any]) -> bool:
         _rg_spec = importlib.util.spec_from_file_location("recovery_gate", str(_rg_path))
         _rg_mod = importlib.util.module_from_spec(_rg_spec)
         assert _rg_spec.loader is not None
+        sys.modules[_rg_spec.name] = _rg_mod
         _rg_spec.loader.exec_module(_rg_mod)
         _finding_is_deferrable_on_go = _rg_mod._finding_is_deferrable_on_go
     return _finding_is_deferrable_on_go(finding)
+
+
+def _shared_mandatory_blocking_evidence(finding: dict[str, Any]) -> bool:
+    """Return recovery_gate's exact mandatory-evidence promotion verdict."""
+    try:
+        from recovery_gate import _finding_has_mandatory_blocking_evidence
+    except ImportError:
+        _rg_path = SCRIPT_DIR / "recovery_gate.py"
+        _rg_spec = importlib.util.spec_from_file_location("recovery_gate", str(_rg_path))
+        _rg_mod = importlib.util.module_from_spec(_rg_spec)
+        assert _rg_spec.loader is not None
+        sys.modules[_rg_spec.name] = _rg_mod
+        _rg_spec.loader.exec_module(_rg_mod)
+        _finding_has_mandatory_blocking_evidence = (
+            _rg_mod._finding_has_mandatory_blocking_evidence
+        )
+    return _finding_has_mandatory_blocking_evidence(finding)
 
 
 def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
@@ -212,15 +230,14 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
 
     Priority:
     1. Severity 'critical'/'high' — always blocking.
-    2. Explicit 'disposition' field — used when valid, EXCEPT an explicit
-       'blocking' below the high/critical floor defers to 'non_blocking' via
-       recovery_gate._finding_is_deferrable_on_go (one shared rule, no divergent
-       local definition).
-    3. Medium/low governance/doc-only findings — non-blocking by default.
-    4. Medium/low severity — non-blocking UNLESS blocking keyword match.
-    5. No severity — keyword match, then fail-closed blocking.
+    2. Exact mandatory evidence_result conjunction — promotion to blocking.
+    3. Explicit 'disposition' field — canonical values are authoritative below
+       independent floors; invalid or ambiguous values fail closed.
+    4. Medium/low governance/doc-only findings — non-blocking by default.
+    5. Medium/low severity — non-blocking UNLESS blocking keyword match.
+    6. No severity — keyword match, then fail-closed blocking.
     """
-    severity = (finding.get("severity") or "").lower()
+    severity = str(finding.get("severity") or "").strip().lower()
     disposition = finding.get("disposition")
     finding_class = str(finding.get("class") or "").upper()
 
@@ -241,32 +258,26 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
             return "blocking", "high severity overrides explicit non_blocking disposition"
         return "blocking", "high severity (always blocking)"
 
-    if disposition is not None:
-        if disposition in ALLOWED_FINDING_DISPOSITIONS:
-            # Single deferrability source of truth: route the explicit-blocking
-            # case through recovery_gate._finding_is_deferrable_on_go (via
-            # _shared_deferrable_on_go) rather than a divergent local rule — the
-            # prior attempt was NO_GO'd for adding a second definition. The
-            # critical/high floor already returned "blocking" above, so an
-            # explicit disposition=blocking reaching here is BELOW that floor and
-            # the shared rule defers it (the recurring mislabel strand). We ASK
-            # the shared rule rather than hard-code the sub-floor conclusion so
-            # phase_b tracks any future change to the floor automatically and the
-            # two executors can never diverge.
-            #
-            # The fall-through (return disposition) honors the explicit label for
-            # every case the shared rule does NOT defer and is genuinely
-            # reachable: a non_blocking label always falls through, and a blocking
-            # label the rule declines to defer (a malformed/non-dict finding)
-            # falls through to stay blocking — so explicit blocking is still
-            # honored, never weakened to force a GO.
-            if disposition == "blocking" and _shared_deferrable_on_go(finding):
-                return "non_blocking", (
-                    "explicit disposition=blocking deferred — severity below "
-                    "high/critical floor "
-                    "(matches recovery_gate._finding_is_deferrable_on_go)"
-                )
-            return disposition, "explicit disposition field"
+    # Exact mandatory impact is an independent promotion. It intentionally runs
+    # after the severity floor (for stable floor reasons) and before every
+    # structured/fallback branch so disposition=non_blocking cannot bypass it.
+    if _shared_mandatory_blocking_evidence(finding):
+        return "blocking", (
+            "mandatory evidence_result promotion: declared hard-invariant "
+            "violation with merge disposition blocking"
+        )
+
+    if "disposition" in finding:
+        if (
+            isinstance(disposition, str)
+            and disposition in ALLOWED_FINDING_DISPOSITIONS
+        ):
+            # Delegate the structured sub-floor decision to recovery_gate's one
+            # shared authority. A canonical non_blocking value is deferrable;
+            # canonical blocking is not.
+            if _shared_deferrable_on_go(finding):
+                return "non_blocking", "explicit disposition field"
+            return "blocking", "explicit disposition field"
         return "blocking", f"invalid disposition {disposition!r} (fail-closed)"
 
     # Governance/doc-only findings: DOC_ACCURACY or POLICY_BOUND on governance
@@ -341,8 +352,9 @@ def _classify_findings(
     """Separate findings into blocking and non-blocking lists.
 
     Uses _disposition_for_finding to resolve each finding's effective
-    disposition (explicit field → keyword heuristic → fail-closed blocking).
-    Logs the classification decision with reason for each finding.
+    disposition (independent floors/promotions → explicit field → fallback
+    heuristics → fail-closed blocking). Logs the classification decision with
+    reason for each finding.
 
     If *finding_history* is provided, it maps finding keys to the number of
     consecutive rounds they have appeared as blocking.  The dict is updated

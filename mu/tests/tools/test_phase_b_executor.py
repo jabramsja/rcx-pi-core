@@ -7977,24 +7977,50 @@ class TestEmptyReceiptPathRejected:
 class TestFindingDisposition:
     """Bridge findings with disposition field are correctly classified.
 
-    Classification contract (shared via executor_common.py):
+    Structured deferrability and mandatory-promotion authority are shared via
+    recovery_gate.py; keyword lists remain sourced from executor_common.py:
     1. Critical/high severity — fail closed to blocking.
-    2. Explicit disposition field — use as-is when valid.
-    3. Keyword match against title/summary (BLOCKING_KEYWORDS / NON_BLOCKING_KEYWORDS).
-    4. Medium/low severity without blocking keyword — non_blocking.
-    5. Fail-closed default — blocking.
+    2. Exact mandatory evidence_result conjunction — promote to blocking.
+    3. Explicit disposition field — canonical values are authoritative.
+    4. Keyword match against title/summary (BLOCKING_KEYWORDS / NON_BLOCKING_KEYWORDS).
+    5. Medium/low severity without blocking keyword — non_blocking.
+    6. Fail-closed default — blocking.
     """
 
-    def test_classify_all_blocking(self):
-        """High/critical severity (or explicit blocking AT the severity floor) are blocking.
+    def test_package_import_can_load_shared_recovery_authority(self):
+        """Package import registers the fallback module before dataclass loading."""
+        repo_root = Path(__file__).resolve().parents[3]
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-        Explicit disposition=blocking below the high/critical floor now defers
-        (shared recovery_gate rule), so the second finding carries severity=high
-        to remain a genuine blocker.
-        """
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import mu.tools.executors.phase_b_executor as pb; "
+                    "print(pb._disposition_for_finding("  # ANTICHEAT_OK: exact package-import shared-authority regression
+                    "{'title': 'ordinary finding', 'severity': 'medium'}))"
+                ),
+            ],
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert probe.returncode == 0, probe.stderr
+        assert probe.stdout.strip() == (
+            "('non_blocking', 'medium severity, no keyword match')"
+        )
+
+    def test_classify_all_blocking(self):
+        """High severity and explicit sub-floor blocking are both blocking."""
         findings = [
             {"title": "Bug causes runtime failure", "class": "DEFECT", "severity": "high"},
-            {"title": "Bug2", "severity": "high", "disposition": "blocking"},
+            {"title": "Bug2", "severity": "medium", "disposition": "blocking"},
         ]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 2
@@ -8013,14 +8039,12 @@ class TestFindingDisposition:
     def test_classify_mixed(self):
         """Mixed disposition findings separated correctly."""
         findings = [
-            # severity=high keeps "Bug" a genuine blocker: explicit disposition=blocking
-            # below the high/critical floor now defers (shared recovery_gate rule).
-            {"title": "Bug", "severity": "high", "disposition": "blocking"},
+            {"title": "Bug", "severity": "low", "disposition": "blocking"},
             {"title": "Nit", "disposition": "non_blocking"},
             {"title": "NoDisposition causes crash", "class": "DEFECT"},
         ]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
-        assert len(blocking) == 2  # "Bug" (high) + "NoDisposition causes crash" (keyword match)
+        assert len(blocking) == 2  # "Bug" (explicit) + "NoDisposition causes crash" (keyword match)
         assert len(non_blocking) == 1
 
     def test_missing_disposition_is_blocking(self):
@@ -8052,13 +8076,8 @@ class TestFindingDisposition:
     # --- Classification contract tests ---
 
     def test_explicit_disposition_blocking(self):
-        """Explicit disposition=blocking is honored as blocking AT the severity floor.
-
-        Below the high/critical floor an explicit blocking label defers (shared
-        recovery_gate rule; see test_disposition_for_finding_returns_reason and the
-        medium-severity regression), so this fixture is a genuine critical blocker.
-        """
-        findings = [{"title": "Anything", "severity": "critical", "disposition": "blocking"}]
+        """Explicit disposition=blocking is honored below the severity floor."""
+        findings = [{"title": "Anything", "severity": "medium", "disposition": "blocking"}]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
         assert len(non_blocking) == 0
@@ -8106,14 +8125,9 @@ class TestFindingDisposition:
         assert len(non_blocking) == 0
 
     def test_disposition_for_finding_returns_reason(self):
-        """_disposition_for_finding returns (disposition, reason) tuple.
-
-        A no-severity explicit disposition=blocking finding is below the
-        high/critical floor, so it defers to non_blocking via the shared
-        recovery_gate rule; the reason still names the explicit label.
-        """
+        """_disposition_for_finding returns (disposition, reason) tuple."""
         disp, reason = pb_mod._disposition_for_finding({"title": "X", "disposition": "blocking"})  # ANTICHEAT_OK: testing internal executor functions
-        assert disp == "non_blocking"
+        assert disp == "blocking"
         assert "explicit" in reason
 
         disp, reason = pb_mod._disposition_for_finding({"title": "crash in pipeline", "severity": "high"})  # ANTICHEAT_OK: testing internal executor functions
@@ -8153,17 +8167,27 @@ class TestFindingDisposition:
 
     # --- Single shared deferrability rule (reused from recovery_gate) ---
 
-    def test_medium_severity_explicit_blocking_defers_to_non_blocking(self):
-        """Medium severity + explicit disposition=blocking → non_blocking.
-
-        Below the high/critical floor an explicit blocking label is deferred via
-        the one shared rule (recovery_gate._finding_is_deferrable_on_go), not
-        honored as blocking — the recurring mislabel strand the wave fixes.
-        """
+    @pytest.mark.parametrize(
+        ("severity", "status", "candidate_relationship"),
+        [
+            ("low", "persisting", "pre-existing"),
+            ("medium", "new", "candidate-introduced"),
+        ],
+    )
+    def test_low_medium_explicit_blocking_stays_blocking(
+        self, severity, status, candidate_relationship
+    ):
         disp, reason = pb_mod._disposition_for_finding(  # ANTICHEAT_OK: testing internal executor functions
-            {"title": "Nit", "severity": "medium", "disposition": "blocking"}
+            {
+                "title": "Hardening-only nonblocking-looking context",
+                "summary": "theoretical defense in depth",
+                "severity": severity,
+                "disposition": "blocking",
+                "status": status,
+                "candidate_relationship": candidate_relationship,
+            }
         )
-        assert disp == "non_blocking", reason
+        assert disp == "blocking", reason
 
     def test_high_severity_explicit_blocking_stays_blocking(self):
         """High severity + explicit disposition=blocking → blocking (severity floor preserved)."""
@@ -8172,37 +8196,135 @@ class TestFindingDisposition:
         )
         assert disp == "blocking", reason
 
-    def test_disposition_matches_recovery_gate_deferrability(self):
+    @pytest.mark.parametrize(
+        "finding",
+        [
+            {"title": "F", "severity": "low", "disposition": "blocking"},
+            {"title": "F", "severity": "medium", "disposition": "non_blocking"},
+            {"title": "F", "severity": "high", "disposition": "non_blocking"},
+            {"title": "F", "severity": "medium", "disposition": "invalid"},
+            {"title": "F", "severity": "medium", "disposition": None},
+            {"title": "F", "severity": "medium", "disposition": []},
+            {
+                "title": "F",
+                "severity": "medium",
+                "disposition": "non_blocking",
+                "evidence_result": (
+                    "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation; "
+                    "MERGE_DISPOSITION=blocking"
+                ),
+            },
+            {
+                "title": "F",
+                "severity": "low",
+                "evidence_result": (
+                    "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation; "
+                    "MERGE_DISPOSITION=blocking"
+                ),
+            },
+            {
+                "title": "F",
+                "severity": "medium",
+                "evidence_result": (
+                    "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation"
+                ),
+            },
+        ],
+        ids=[
+            "explicit-blocking",
+            "explicit-nonblocking",
+            "severity-floor",
+            "invalid",
+            "explicit-null",
+            "unhashable-invalid",
+            "promotion-overrides-nonblocking",
+            "promotion-with-omission",
+            "incomplete-pair",
+        ],
+    )
+    def test_disposition_matches_recovery_gate_deferrability(self, finding):
         """phase_b and recovery_gate share ONE deferrability rule (no divergence).
 
-        For an explicit disposition=blocking finding across severities, phase_b's
-        _disposition_for_finding defers (non_blocking) iff
+        For structured dispositions, severity floors, and exact evidence
+        promotion, phase_b's _disposition_for_finding defers iff
         recovery_gate._finding_is_deferrable_on_go marks it deferrable. They must
-        agree on every case — the prior attempt was NO_GO'd for adding a second,
-        divergent definition in phase_b.
+        agree on every case.
         """
         rg_mod = load_module("recovery_gate", _EXECUTORS_DIR / "recovery_gate.py")
-        for severity in ("critical", "high", "medium", "low", ""):
-            finding = {"title": "F", "severity": severity, "disposition": "blocking"}
-            phase_b_defers = (
-                pb_mod._disposition_for_finding(finding)[0] == "non_blocking"  # ANTICHEAT_OK: testing internal executor functions
-            )
-            recovery_defers = rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: testing internal executor functions
-            assert phase_b_defers == recovery_defers, (
-                f"severity={severity!r}: phase_b defers={phase_b_defers} "
-                f"but recovery_gate defers={recovery_defers}"
-            )
+        phase_b_defers = (
+            pb_mod._disposition_for_finding(finding)[0] == "non_blocking"  # ANTICHEAT_OK: testing internal executor functions
+        )
+        recovery_defers = rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: testing internal executor functions
+        assert phase_b_defers == recovery_defers
+
+    @pytest.mark.parametrize("severity", ["low", "medium"])
+    def test_canonical_explicit_nonblockers_remain_deferrable(self, severity):
+        disp, reason = pb_mod._disposition_for_finding(  # ANTICHEAT_OK: testing internal executor functions
+            {"title": "Nit", "severity": severity, "disposition": "non_blocking"}
+        )
+        assert disp == "non_blocking", reason
+
+    @pytest.mark.parametrize(
+        "disposition",
+        ["BLOCKING", "ambiguous", "", None, ["non_blocking"]],
+        ids=["case-shifted", "ambiguous", "empty", "null", "unhashable-list"],
+    )
+    def test_invalid_explicit_disposition_fails_closed(self, disposition):
+        disp, reason = pb_mod._disposition_for_finding(  # ANTICHEAT_OK: testing internal executor functions
+            {"title": "F", "severity": "medium", "disposition": disposition}
+        )
+        assert disp == "blocking"
+        assert "invalid disposition" in reason
+
+    @pytest.mark.parametrize("structured_disposition", [None, "non_blocking"])
+    def test_exact_mandatory_evidence_promotes_with_distinct_reason(
+        self, structured_disposition
+    ):
+        finding = {
+            "title": "Omitted disposition marker probe",
+            "severity": "medium",
+            "evidence_result": (
+                " technical_impact_class = DECLARED HARD-INVARIANT VIOLATION \n"
+                " merge_disposition = BLOCKING "
+            ),
+        }
+        if structured_disposition is not None:
+            finding["disposition"] = structured_disposition
+
+        disp, reason = pb_mod._disposition_for_finding(finding)  # ANTICHEAT_OK: testing exact shared evidence promotion
+
+        assert disp == "blocking"
+        assert "mandatory evidence_result promotion" in reason
+
+    @pytest.mark.parametrize(
+        "evidence_result",
+        [
+            "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation",
+            "MERGE_DISPOSITION=blocking",
+            (
+                "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation; "
+                "MERGE_DISPOSITION=non_blocking"
+            ),
+            (
+                "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation and more; "
+                "MERGE_DISPOSITION=blocking"
+            ),
+        ],
+    )
+    def test_incomplete_marker_pairs_retain_missing_disposition_fallback(
+        self, evidence_result
+    ):
+        disp, reason = pb_mod._disposition_for_finding(  # ANTICHEAT_OK: exact omission fallback regression
+            {
+                "title": "Ordinary medium finding",
+                "severity": "medium",
+                "evidence_result": evidence_result,
+            }
+        )
+        assert disp == "non_blocking", reason
 
     def test_explicit_non_blocking_uses_reachable_fall_through(self):
-        """The explicit-disposition fall-through is reachable and honors non_blocking.
-
-        After the disposition-reuse recovery the explicit-`disposition` branch is a
-        single compound condition, so `return disposition, "explicit disposition
-        field"` is the genuine fall-through rather than dead code. An explicit
-        non_blocking label below the high/critical floor reaches it and is honored
-        verbatim — this locks the restructure that removed the unreachable
-        honor-explicit-blocking branch (the recovery's first review finding).
-        """
+        """The explicit-disposition branch honors canonical non_blocking."""
         disp, reason = pb_mod._disposition_for_finding(  # ANTICHEAT_OK: testing internal executor functions
             {"title": "Nit", "disposition": "non_blocking"}
         )
@@ -8234,8 +8356,8 @@ class TestGovernanceDowngrade:
 
         The high/critical floor fires before the governance downgrade, so an
         explicit-blocking governance finding at high severity remains blocking.
-        (Below the floor, explicit blocking now defers under the shared
-        recovery_gate rule — covered by the medium-severity regression.)
+        Explicit blocking also remains blocking below the floor, as covered by
+        the medium-severity regression.
         """
         findings = [{
             "title": "Control packet cites stale code line",
@@ -9431,7 +9553,7 @@ class TestOnlyBlockingToImplementer:
             "touched_files_claimed": [], "validations_claimed": [],
             "request_for_next_agent": "",
             "findings": [
-                {"title": "Style nit", "class": "DOC_ACCURACY", "severity": "low",
+                {"title": "Style nit", "class": "DOC_ACCURACY", "severity": "medium",
                  "file": "f.py", "disposition": "non_blocking", "status": "new"},
             ],
         })
@@ -9499,7 +9621,35 @@ class TestOnlyBlockingToImplementer:
         assert result["status"] == "commit_ready"
         assert result.get("deferred_packet_path") is not None
 
-    def test_bridge_go_with_blocking_findings_fails_closed(self, tmp_path):
+    @pytest.mark.parametrize(
+        "blocking_finding",
+        [
+            {
+                "title": "Pre-existing hardening context remains a blocker",
+                "class": "DEFECT",
+                "severity": "medium",
+                "file": "f.py",
+                "disposition": "blocking",
+                "status": "persisting",
+                "candidate_relationship": "pre-existing",
+            },
+            {
+                "title": "Exact omission fallback",
+                "class": "DEFECT",
+                "severity": "low",
+                "file": "f.py",
+                "evidence_result": (
+                    "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation; "
+                    "MERGE_DISPOSITION=blocking"
+                ),
+                "status": "new",
+            },
+        ],
+        ids=["medium-explicit-blocker", "exact-mandatory-evidence-omission"],
+    )
+    def test_bridge_go_with_blocking_findings_fails_closed(
+        self, tmp_path, blocking_finding
+    ):
         """A GO transcript that still carries blocking findings is inconsistent and must fail closed."""
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -9512,10 +9662,7 @@ class TestOnlyBlockingToImplementer:
             "decision": "GO", "summary": "looks good",
             "touched_files_claimed": [], "validations_claimed": [],
             "request_for_next_agent": "",
-            "findings": [
-                {"title": "Real bug", "class": "DEFECT", "severity": "high",
-                 "file": "f.py", "disposition": "blocking", "status": "new"},
-            ],
+            "findings": [blocking_finding],
         })
         render_text = f"BEGIN_AGENT_ENVELOPE\n{envelope}\nEND_AGENT_ENVELOPE"
 
@@ -9534,6 +9681,8 @@ class TestOnlyBlockingToImplementer:
         assert result["status"] == "error"
         assert result["step"] == "bridge_decision"
         assert "blocking finding" in result["errors"][0]
+        assert result.get("deferred_packet_path") is None
+        assert not (repo / "reports" / "deferred" / "non_blocking").exists()
 
     def test_blocking_findings_sent_to_implementer(self, tmp_path):
         """Blocking findings are sent to implementer; non-blocking deferred."""
@@ -9553,8 +9702,9 @@ class TestOnlyBlockingToImplementer:
             "touched_files_claimed": [], "validations_claimed": [],
             "request_for_next_agent": "",
             "findings": [
-                {"title": "Real bug", "class": "DEFECT", "severity": "high",
-                 "file": "f.py", "disposition": "blocking", "status": "new"},
+                {"title": "Real bug", "class": "DEFECT", "severity": "medium",
+                 "file": "f.py", "disposition": "blocking", "status": "persisting",
+                 "candidate_relationship": "pre-existing"},
                 {"title": "Style nit", "class": "DOC_ACCURACY", "severity": "low",
                  "file": "f.py", "disposition": "non_blocking", "status": "new"},
             ],
@@ -9597,14 +9747,11 @@ class TestOnlyBlockingToImplementer:
         # The blocking finding title should appear in prompt
         assert "Real bug" in prompt_text or "BLOCKING" in prompt_text
 
-    def test_rendered_raw_output_preserves_blocking_disposition(self, tmp_path):
-        """Rendered REQUEST_CHANGES must honor a blocking finding from reviewer raw output.
-
-        Severity=high keeps the raw finding a genuine blocker (explicit
-        disposition=blocking below the high/critical floor now defers under the
-        shared recovery_gate rule); the point under test is that phase_b reads the
-        raw reviewer envelope rather than the summarized render.
-        """
+    @pytest.mark.parametrize("review_decision", ["REQUEST_CHANGES", "NO_GO"])
+    def test_non_go_raw_output_preserves_medium_blocker(
+        self, tmp_path, review_decision
+    ):
+        """Non-GO raw output cannot auto-converge a medium explicit blocker."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -9614,12 +9761,13 @@ class TestOnlyBlockingToImplementer:
         raw_path.parent.mkdir(parents=True, exist_ok=True)
         raw_envelope = json.dumps({
             "job_id": "j1", "turn_id": "t1", "agent_role": "reviewer",
-            "decision": "REQUEST_CHANGES", "summary": "issues",
+            "decision": review_decision, "summary": "issues",
             "touched_files_claimed": [], "validations_claimed": [],
             "request_for_next_agent": "",
             "findings": [
-                {"title": "Raw blocker", "class": "DEFECT", "severity": "high",
-                 "file": "f.py", "disposition": "blocking", "status": "persisting"},
+                {"title": "Raw blocker", "class": "DEFECT", "severity": "medium",
+                 "file": "f.py", "disposition": "blocking", "status": "persisting",
+                 "candidate_relationship": "pre-existing"},
             ],
         })
         raw_path.write_text(
@@ -9631,9 +9779,9 @@ class TestOnlyBlockingToImplementer:
         render_text = (
             "### reviewer\n"
             "- Status: completed\n"
-            "- Decision: REQUEST_CHANGES\n"
+            f"- Decision: {review_decision}\n"
             "- **Findings (1):**\n"
-            "  1. **DEFECT** (high): Raw blocker\n"
+            "  1. **DEFECT** (medium): Raw blocker\n"
             "     - File: `f.py:1` | Status: persisting\n"
             "     - Evidence: preserved via raw output\n"
             f"- Raw output: {raw_path}\n"
@@ -9645,8 +9793,13 @@ class TestOnlyBlockingToImplementer:
         def bridge_side(*a, **kw):
             bridge_calls[0] += 1
             if bridge_calls[0] == 1:
-                return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "",
-                        "decision": "REQUEST_CHANGES", "job_id": "j1"}
+                return {
+                    "exit_code": 1 if review_decision == "REQUEST_CHANGES" else 0,
+                    "stdout": f"{review_decision}\n",
+                    "stderr": "",
+                    "decision": review_decision,
+                    "job_id": "j1",
+                }
             return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
                     "decision": "GO", "job_id": "j2"}
 
@@ -9655,7 +9808,11 @@ class TestOnlyBlockingToImplementer:
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
-             patch.object(pb_mod, "_read_bridge_render", return_value=render_text), \
+             patch.object(
+                 pb_mod,
+                 "_read_bridge_render",
+                 side_effect=lambda _repo, job_id: render_text if job_id == "j1" else "",
+             ), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
              patch.object(pb_mod, "_run_pytest_on_files", return_value={"exit_code": 0, "passed": True, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
@@ -9664,8 +9821,10 @@ class TestOnlyBlockingToImplementer:
              }):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
+        assert result["status"] == "commit_ready"
         assert mock_impl.invoke_implementer.call_count >= 2
         assert result.get("deferred_packet_path") is None
+        assert not (repo / "reports" / "deferred" / "non_blocking").exists()
 
     def test_stale_render_still_uses_job_raw_reviewer_findings(self, tmp_path):
         """Phase B must prefer raw reviewer files by job id when the render is stale."""
@@ -9704,10 +9863,8 @@ class TestOnlyBlockingToImplementer:
                     "request_for_next_agent": "",
                     "findings": [
                         {
-                            # severity=high keeps this a genuine blocker (explicit
-                            # disposition=blocking below the floor now defers); the
-                            # point under test is raw-by-job-id preference over a
-                            # stale render, not the disposition contract.
+                            # The point under test is raw-by-job-id preference over
+                            # a stale render; explicit blocking remains authoritative.
                             "title": "Real blocker from raw reviewer",
                             "class": "POLICY_BOUND",
                             "severity": "high",
@@ -12250,12 +12407,11 @@ class TestResumeNeedsPhaseB:
             "implementer_changed": ["f.py"],
             "executor_created": [],
             "all_non_blocking": [{
-                # severity=high makes this a genuine hidden blocker the resume guard
-                # must reject; an explicit disposition=blocking below the high/critical
-                # floor now defers (shared recovery_gate rule) and would not strand.
+                # The resume guard must reject an explicit medium blocker even if
+                # stale state previously placed it in all_non_blocking.
                 "title": "Control packet line-reference finding was classified blocking",
                 "class": "POLICY_BOUND",
-                "severity": "high",
+                "severity": "medium",
                 "file": "reports/control_plane/plan.md",
                 "disposition": "blocking",
             }],
@@ -12301,12 +12457,11 @@ class TestResumeNeedsPhaseB:
             encoding="utf-8",
         )
         blocking_finding = {
-            # severity=high keeps this a genuine blocker that drives the bridge-fix
-            # path; an explicit disposition=blocking below the high/critical floor now
-            # defers (shared recovery_gate rule) and would not re-invoke the implementer.
+            # Explicit medium blocking drives the bridge-fix path independently
+            # of the high/critical severity floor.
             "title": "Control packet line-reference finding",
             "class": "POLICY_BOUND",
-            "severity": "high",
+            "severity": "medium",
             "file": plan_path,
             "disposition": "blocking",
         }
