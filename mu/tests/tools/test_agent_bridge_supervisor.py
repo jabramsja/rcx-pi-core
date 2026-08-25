@@ -42,6 +42,68 @@ def _init_temp_repo(repo: Path) -> None:
     _git(repo, "commit", "-m", "init")
 
 
+_AGENT_ENVELOPE_KEYS = (
+    "job_id",
+    "turn_id",
+    "agent_role",
+    "decision",
+    "summary",
+    "touched_files_claimed",
+    "findings",
+    "validations_claimed",
+    "request_for_next_agent",
+)
+_AUTHORIZED_AGENT_DECISIONS = (
+    "GO",
+    "NO_GO",
+    "REQUEST_CHANGES",
+    "QUESTION",
+    "STALE",
+    "ERROR",
+    "SYNTHETIC",
+)
+
+
+def _complete_agent_envelope(
+    *,
+    decision: object = "GO",
+    summary: str = "framing test",
+) -> dict[str, object]:
+    return {
+        "job_id": "job-1",
+        "turn_id": "r1-reviewer",
+        "agent_role": "reviewer",
+        "decision": decision,
+        "summary": summary,
+        "touched_files_claimed": [],
+        "findings": [],
+        "validations_claimed": [],
+        "request_for_next_agent": "",
+    }
+
+
+def _frame_agent_value(
+    value: object,
+    *,
+    fence: str | None = None,
+    json_text: str | None = None,
+) -> tuple[str, str]:
+    encoded = json.dumps(value, indent=2) if json_text is None else json_text
+    if fence is None:
+        return (
+            f"BEGIN_AGENT_ENVELOPE\n{encoded}\nEND_AGENT_ENVELOPE",
+            encoded,
+        )
+    if fence not in {"bare", "json"}:
+        raise ValueError(f"unsupported test fence: {fence}")
+    opening_fence = "```" if fence == "bare" else "```json"
+    return (
+        f"BEGIN_AGENT_ENVELOPE\n{opening_fence}\n{encoded}\n```\n"
+        "END_AGENT_ENVELOPE",
+        encoded,
+    )
+
+
 def test_parse_envelope_from_mixed_output() -> None:
     output = """Some prose\nBEGIN_AGENT_ENVELOPE\n{\n  \"job_id\": \"job-1\",\n  \"turn_id\": \"r1-reader\",\n  \"agent_role\": \"reader\",\n  \"decision\": \"REQUEST_CHANGES\",\n  \"summary\": \"Need review\",\n  \"touched_files_claimed\": [],\n  \"findings\": [],\n  \"validations_claimed\": [],\n  \"request_for_next_agent\": \"review\"\n}\nEND_AGENT_ENVELOPE\nMore prose\n"""
     envelope = bridge.parse_envelope(output)
@@ -155,6 +217,365 @@ def test_parse_envelope_ignores_replayed_stderr_envelope() -> None:
     parsed = bridge.parse_envelope(output)
     assert parsed["decision"] == "GO"
     assert parsed["summary"] == "current"
+
+
+@pytest.mark.parametrize("fence", [None, "bare", "json"])
+def test_shared_agent_envelope_extractor_preserves_decoded_value_and_exact_spans(
+    fence: str | None,
+) -> None:
+    envelope = _complete_agent_envelope(
+        summary=(
+            "payload data: {nested} ``` BEGIN_AGENT_ENVELOPE "
+            "null END_AGENT_ENVELOPE"
+        )
+    )
+    envelope["findings"] = [
+        {
+            "class": "DEFECT",
+            "title": "nested finding",
+            "details": {
+                "sample": "a closing brace } and an opening brace {",
+                "markers": ["BEGIN_AGENT_ENVELOPE", "END_AGENT_ENVELOPE", "```json"],
+            },
+        }
+    ]
+    source, encoded = _frame_agent_value(envelope, fence=fence)
+    transcript = f"prose before\n{source}\nprose after"
+
+    candidates = adapters.extract_agent_envelope_candidates(transcript)
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.decoded == envelope
+    assert candidate.source_span == (candidate.source_start, candidate.source_end)
+    assert candidate.json_span == (candidate.json_start, candidate.json_end)
+    assert transcript[candidate.source_start:candidate.source_end] == source
+    assert transcript[candidate.json_start:candidate.json_end] == encoded
+    assert adapters._contains_complete_adapter_envelope(transcript)  # ANTICHEAT_OK: direct shared-boundary regression
+    assert bridge.parse_envelope(transcript) == envelope
+
+
+def test_shared_extractor_accepts_all_json_whitespace_around_payload_and_closers() -> None:
+    envelope = _complete_agent_envelope(summary="JSON whitespace")
+    encoded = json.dumps(envelope)
+    source = (
+        f"BEGIN_AGENT_ENVELOPE \t\r\n```json\r\n\t{encoded} \t\r\n```\r\n\t"
+        "END_AGENT_ENVELOPE"
+    )
+
+    candidates = adapters.extract_agent_envelope_candidates(source)
+    assert len(candidates) == 1
+    assert candidates[0].decoded == envelope
+    assert bridge.parse_envelope(source) == envelope
+
+
+def test_decoded_payload_markers_are_not_rescanned_after_outer_framing_failure() -> None:
+    malformed = (
+        'BEGIN_AGENT_ENVELOPE\n'
+        '"BEGIN_AGENT_ENVELOPE null END_AGENT_ENVELOPE"'
+    )
+
+    assert adapters.extract_agent_envelope_candidates(malformed) == []
+    assert not adapters._contains_complete_adapter_envelope(malformed)  # ANTICHEAT_OK: decoded payload marker isolation
+    with pytest.raises(bridge.BridgeError):
+        bridge.parse_envelope(malformed)
+
+    valid = _complete_agent_envelope(summary="valid after malformed outer closer")
+    valid_source, _ = _frame_agent_value(valid, fence="json")
+    transcript = f"{malformed}\n{valid_source}"
+
+    candidates = adapters.extract_agent_envelope_candidates(transcript)
+    assert len(candidates) == 1
+    assert candidates[0].decoded == valid
+    assert adapters._contains_complete_adapter_envelope(transcript)  # ANTICHEAT_OK: later exact candidate recovery
+    assert bridge.parse_envelope(transcript) == valid
+
+
+def test_agent_decision_placeholder_is_one_exact_shared_literal() -> None:
+    placeholder = "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR|SYNTHETIC"
+
+    assert adapters.AGENT_DECISION_PLACEHOLDER == placeholder
+    assert json.loads(bridge.JSON_SCHEMA_STUB)["decision"] == placeholder
+    assert adapters.is_agent_decision_placeholder(placeholder)
+    for near_miss in (
+        None,
+        0,
+        [],
+        "GO|NO_GO",
+        "BOGUS|GO",
+        f"{placeholder}|BOGUS",
+    ):
+        assert not adapters.is_agent_decision_placeholder(near_miss)
+
+
+@pytest.mark.parametrize("decision", _AUTHORIZED_AGENT_DECISIONS)
+def test_all_authorized_decisions_arm_adapter_and_parse(decision: str) -> None:
+    envelope = _complete_agent_envelope(decision=decision)
+    source, _ = _frame_agent_value(envelope)
+
+    assert adapters._contains_complete_adapter_envelope(source)  # ANTICHEAT_OK: direct adapter completeness regression
+    assert bridge.parse_envelope(source)["decision"] == decision
+
+
+@pytest.mark.parametrize("missing_key", _AGENT_ENVELOPE_KEYS)
+def test_each_missing_key_is_skipped_until_a_complete_candidate(missing_key: str) -> None:
+    incomplete = _complete_agent_envelope()
+    incomplete.pop(missing_key)
+    incomplete_source, _ = _frame_agent_value(incomplete)
+    valid = _complete_agent_envelope(summary=f"valid after missing {missing_key}")
+    valid_source, _ = _frame_agent_value(valid, fence="json")
+
+    assert not adapters._contains_complete_adapter_envelope(  # ANTICHEAT_OK: direct adapter completeness regression
+        incomplete_source
+    )
+    with pytest.raises(bridge.BridgeError):
+        bridge.parse_envelope(incomplete_source)
+
+    transcript = f"{incomplete_source}\n{valid_source}"
+    assert adapters._contains_complete_adapter_envelope(  # ANTICHEAT_OK: delayed complete candidate regression
+        transcript
+    )
+    assert bridge.parse_envelope(transcript)["summary"] == valid["summary"]
+
+
+@pytest.mark.parametrize(
+    ("value", "case_name"),
+    [
+        (0, "scalar"),
+        ("string-value", "string scalar"),
+        (True, "boolean scalar"),
+        (None, "null"),
+        (["list-value"], "list"),
+    ],
+)
+def test_non_mapping_candidates_are_safe_and_skipped_for_a_later_valid_mapping(
+    value: object,
+    case_name: str,
+) -> None:
+    non_mapping_source, _ = _frame_agent_value(value)
+    candidates = adapters.extract_agent_envelope_candidates(non_mapping_source)
+
+    assert len(candidates) == 1
+    assert candidates[0].decoded == value
+    assert not adapters._contains_complete_adapter_envelope(  # ANTICHEAT_OK: semantic type-gate regression
+        non_mapping_source
+    )
+    with pytest.raises(bridge.BridgeError):
+        bridge.parse_envelope(non_mapping_source)
+
+    valid = _complete_agent_envelope(summary=f"valid after framed {case_name}")
+    valid_source, _ = _frame_agent_value(valid, fence="bare")
+    transcript = f"{non_mapping_source}\n{valid_source}"
+    assert adapters._contains_complete_adapter_envelope(transcript)  # ANTICHEAT_OK: non-mapping skip regression
+    assert bridge.parse_envelope(transcript)["summary"] == valid["summary"]
+
+
+@pytest.mark.parametrize("decision", [0, []], ids=["hashable-int", "unhashable-list"])
+def test_complete_non_string_decision_poisoning_is_type_safe(
+    decision: object,
+) -> None:
+    invalid = _complete_agent_envelope(decision=decision)
+    invalid_source, _ = _frame_agent_value(invalid)
+
+    assert not adapters._contains_complete_adapter_envelope(  # ANTICHEAT_OK: non-string decision poison regression
+        invalid_source
+    )
+    with pytest.raises(bridge.BridgeError, match="decision"):
+        bridge.parse_envelope(invalid_source)
+
+    valid = _complete_agent_envelope(summary="must not override poisoned decision")
+    valid_source, _ = _frame_agent_value(valid, fence="json")
+    transcript = f"{invalid_source}\n{valid_source}"
+    assert not adapters._contains_complete_adapter_envelope(  # ANTICHEAT_OK: complete mapping poison regression
+        transcript
+    )
+    with pytest.raises(bridge.BridgeError, match="decision"):
+        bridge.parse_envelope(transcript)
+
+
+def test_exact_placeholder_is_skipped_for_a_later_valid_candidate() -> None:
+    placeholder = _complete_agent_envelope(
+        decision=adapters.AGENT_DECISION_PLACEHOLDER,
+    )
+    placeholder_source, _ = _frame_agent_value(placeholder, fence="json")
+    valid = _complete_agent_envelope(summary="valid after exact placeholder")
+    valid_source, _ = _frame_agent_value(valid)
+
+    assert not adapters._contains_complete_adapter_envelope(  # ANTICHEAT_OK: placeholder authority regression
+        placeholder_source
+    )
+    with pytest.raises(bridge.BridgeError):
+        bridge.parse_envelope(placeholder_source)
+
+    transcript = f"{placeholder_source}\n{valid_source}"
+    assert adapters._contains_complete_adapter_envelope(transcript)  # ANTICHEAT_OK: exact placeholder skip regression
+    assert bridge.parse_envelope(transcript)["summary"] == valid["summary"]
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        "BOGUS|GO",
+        "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR|SYNTHETIC|BOGUS",
+        "BOGUS",
+    ],
+)
+def test_complete_unauthorized_string_poisoning_rejects_a_later_valid_candidate(
+    decision: str,
+) -> None:
+    invalid_source, _ = _frame_agent_value(
+        _complete_agent_envelope(decision=decision),
+    )
+    valid_source, _ = _frame_agent_value(
+        _complete_agent_envelope(summary="must not override unauthorized decision"),
+        fence="bare",
+    )
+    transcript = f"{invalid_source}\n{valid_source}"
+
+    assert not adapters._contains_complete_adapter_envelope(  # ANTICHEAT_OK: unauthorized decision poison regression
+        transcript
+    )
+    with pytest.raises(bridge.BridgeError, match="decision"):
+        bridge.parse_envelope(transcript)
+
+
+@pytest.mark.parametrize("agent_first", [True, False], ids=["agent-first", "meta-first"])
+def test_poisoned_agent_envelope_does_not_suppress_meta_envelope_stop_authority(
+    agent_first: bool,
+) -> None:
+    poisoned_agent, _ = _frame_agent_value(
+        _complete_agent_envelope(decision="BOGUS"),
+    )
+    meta_envelope = (
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision":"ROUTE_PHASE_A","summary":"route independently",'
+        '"findings":[],"request_for_claude":"Continue"}\n'
+        "END_META_ENVELOPE"
+    )
+    ordered = (
+        (poisoned_agent, meta_envelope)
+        if agent_first
+        else (meta_envelope, poisoned_agent)
+    )
+
+    assert not adapters._contains_complete_adapter_envelope(  # ANTICHEAT_OK: agent poison precondition
+        poisoned_agent
+    )
+    assert adapters._contains_complete_adapter_envelope(  # ANTICHEAT_OK: independent meta authority regression
+        "\n".join(ordered)
+    )
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    [
+        "identifier-prefixed-begin",
+        "identifier-suffixed-begin",
+        "identifier-prefixed-end",
+        "identifier-suffixed-end",
+        "unmatched-bare-opening-fence",
+        "unmatched-json-opening-fence",
+        "stray-closing-fence",
+        "missing-end",
+        "reordered-fence-and-end",
+        "post-json-junk",
+        "non-json-whitespace",
+        "fenced-post-json-junk",
+        "post-closing-fence-junk",
+        "malformed-json",
+        "nonexact-json-fence",
+    ],
+)
+def test_malformed_or_lookalike_frame_is_rejected_but_a_later_exact_frame_recovers(
+    malformation: str,
+) -> None:
+    valid = _complete_agent_envelope(summary=f"valid after {malformation}")
+    exact_source, encoded = _frame_agent_value(valid)
+    malformed_sources = {
+        "identifier-prefixed-begin": exact_source.replace(
+            "BEGIN_AGENT_ENVELOPE", "XBEGIN_AGENT_ENVELOPE", 1
+        ),
+        "identifier-suffixed-begin": exact_source.replace(
+            "BEGIN_AGENT_ENVELOPE", "BEGIN_AGENT_ENVELOPEX", 1
+        ),
+        "identifier-prefixed-end": exact_source.replace(
+            "END_AGENT_ENVELOPE", "XEND_AGENT_ENVELOPE", 1
+        ),
+        "identifier-suffixed-end": exact_source.replace(
+            "END_AGENT_ENVELOPE", "END_AGENT_ENVELOPEX", 1
+        ),
+        "unmatched-bare-opening-fence": (
+            f"BEGIN_AGENT_ENVELOPE\n```\n{encoded}\nEND_AGENT_ENVELOPE"
+        ),
+        "unmatched-json-opening-fence": (
+            f"BEGIN_AGENT_ENVELOPE\n```json\n{encoded}\nEND_AGENT_ENVELOPE"
+        ),
+        "stray-closing-fence": (
+            f"BEGIN_AGENT_ENVELOPE\n{encoded}\n```\nEND_AGENT_ENVELOPE"
+        ),
+        "missing-end": f"BEGIN_AGENT_ENVELOPE\n{encoded}",
+        "reordered-fence-and-end": (
+            f"BEGIN_AGENT_ENVELOPE\n```json\n{encoded}\nEND_AGENT_ENVELOPE\n```"
+        ),
+        "post-json-junk": (
+            f"BEGIN_AGENT_ENVELOPE\n{encoded}\nnot-json-whitespace\n"
+            "END_AGENT_ENVELOPE"
+        ),
+        "non-json-whitespace": (
+            f"BEGIN_AGENT_ENVELOPE\n{encoded}\vEND_AGENT_ENVELOPE"
+        ),
+        "fenced-post-json-junk": (
+            f"BEGIN_AGENT_ENVELOPE\n```json\n{encoded}\nnot-json-whitespace\n"
+            "```\nEND_AGENT_ENVELOPE"
+        ),
+        "post-closing-fence-junk": (
+            f"BEGIN_AGENT_ENVELOPE\n```json\n{encoded}\n```\n"
+            "not-json-whitespace\nEND_AGENT_ENVELOPE"
+        ),
+        "malformed-json": (
+            'BEGIN_AGENT_ENVELOPE\n{"job_id": ]\nEND_AGENT_ENVELOPE'
+        ),
+        "nonexact-json-fence": (
+            f"BEGIN_AGENT_ENVELOPE\n```JSON\n{encoded}\n```\n"
+            "END_AGENT_ENVELOPE"
+        ),
+    }
+    malformed = malformed_sources[malformation]
+
+    assert adapters.extract_agent_envelope_candidates(malformed) == []
+    assert not adapters._contains_complete_adapter_envelope(malformed)  # ANTICHEAT_OK: malformed framing rejection
+    with pytest.raises(bridge.BridgeError):
+        bridge.parse_envelope(malformed)
+
+    later_source, _ = _frame_agent_value(valid, fence="json")
+    transcript = f"{malformed}\n{later_source}"
+    candidates = adapters.extract_agent_envelope_candidates(transcript)
+    assert len(candidates) == 1
+    assert candidates[0].decoded == valid
+    assert adapters._contains_complete_adapter_envelope(transcript)  # ANTICHEAT_OK: later exact opening recovery
+    assert bridge.parse_envelope(transcript)["summary"] == valid["summary"]
+
+
+def test_identical_decoded_candidates_with_different_framing_are_accepted() -> None:
+    envelope = _complete_agent_envelope(summary="same decoded envelope")
+    unfenced, _ = _frame_agent_value(envelope)
+    json_fenced, _ = _frame_agent_value(envelope, fence="json")
+    transcript = f"{unfenced}\n{json_fenced}"
+
+    assert len(adapters.extract_agent_envelope_candidates(transcript)) == 2
+    assert bridge.parse_envelope(transcript) == envelope
+
+
+def test_differing_nested_candidates_remain_fail_closed_ambiguity() -> None:
+    first = _complete_agent_envelope(summary="first")
+    first["findings"] = [{"details": {"value": "{one}"}}]
+    second = _complete_agent_envelope(summary="second")
+    second["findings"] = [{"details": {"value": "{two}"}}]
+    first_source, _ = _frame_agent_value(first, fence="bare")
+    second_source, _ = _frame_agent_value(second, fence="json")
+
+    with pytest.raises(bridge.BridgeError, match="multiple differing envelope blocks"):
+        bridge.parse_envelope(f"{first_source}\n{second_source}")
 
 
 def _write_executor_bridge_defaults(
@@ -614,6 +1035,58 @@ time.sleep(10.0)
     parsed = bridge.parse_envelope(output)
     assert parsed["decision"] == "GO"
     assert parsed["summary"] == "linger-safe"
+    assert elapsed < 2.0
+
+
+@pytest.mark.parametrize("fence", ["bare", "json"])
+def test_run_adapter_stop_after_envelope_uses_shared_fenced_framing(
+    tmp_path: Path,
+    fence: str,
+) -> None:
+    envelope = _complete_agent_envelope(
+        summary=f"live early stop with {fence} fence",
+    )
+    envelope["findings"] = [
+        {
+            "title": "nested payload",
+            "details": {"text": "braces { } and END_AGENT_ENVELOPE are data"},
+        }
+    ]
+    source, _ = _frame_agent_value(envelope, fence=fence)
+    lingering_agent = tmp_path / f"lingering_{fence}_fenced_agent.py"
+    lingering_agent.write_text(
+        "import sys\n"
+        "import time\n"
+        "sys.stdin.read()\n"
+        f"print({source!r}, flush=True)\n"
+        "time.sleep(10.0)\n",
+        encoding="utf-8",
+    )
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(lingering_agent)],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="review prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="r1-reviewer",
+        agent_role="reviewer",
+        raw_output_path=raw_output_path,
+        stop_after_envelope=True,
+    )
+    elapsed = time.monotonic() - start
+
+    assert bridge.parse_envelope(output) == envelope
     assert elapsed < 2.0
 
 
@@ -1949,6 +2422,78 @@ def _setup_bridge_repo(tmp_path: Path) -> tuple:
     config = _make_fake_config(repo_root, fake_agent)
     paths.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     return paths, fake_agent
+
+
+def test_execute_agent_turn_recovers_from_malformed_frame_to_shared_valid_frame(
+    tmp_path: Path,
+) -> None:
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = "shared-framing-turn-job"
+    envelope = _complete_agent_envelope(
+        summary="execute_agent_turn accepted shared frame",
+    )
+    envelope["job_id"] = job_id
+    envelope["findings"] = [
+        {"details": {"sample": "nested {value} and BEGIN_AGENT_ENVELOPE data"}}
+    ]
+    valid_source, encoded = _frame_agent_value(envelope, fence="json")
+    malformed_source = (
+        f"BEGIN_AGENT_ENVELOPE\n```json\n{encoded}\nEND_AGENT_ENVELOPE"
+    )
+    agent = paths.repo_root / "shared_framing_agent.py"
+    agent.write_text(
+        "import sys\n"
+        "import time\n"
+        "sys.stdin.read()\n"
+        f"print({malformed_source!r}, flush=True)\n"
+        f"print({valid_source!r}, flush=True)\n"
+        "time.sleep(10.0)\n",
+        encoding="utf-8",
+    )
+    config = json.loads(paths.config_path.read_text(encoding="utf-8"))
+    config["agents"]["codex"] = {
+        "mode": "live",
+        "cmd": [sys.executable, str(agent)],
+        "prompt_via_stdin": True,
+        "timeout_s": 30,
+        "env": {},
+    }
+    paths.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    bridge.submit_job(
+        paths,
+        task_text="shared framing execute turn test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id=job_id,
+    )
+
+    with bridge.open_db(paths) as conn:
+        job = bridge.read_job(conn, job_id)
+        start = time.monotonic()
+        turn_id, parsed, _, _, _ = bridge.execute_agent_turn(
+            conn,
+            paths,
+            job,
+            round_no=1,
+            agent_role="reviewer",
+            adapter_name="codex",
+            prompt_text="review shared framing",
+        )
+        elapsed = time.monotonic() - start
+        turn = conn.execute(
+            "SELECT * FROM turns WHERE turn_id = ?",
+            (turn_id,),
+        ).fetchone()
+
+    assert parsed == envelope
+    assert turn is not None
+    assert turn["status"] == "completed"
+    assert elapsed < 2.0
 
 
 def test_pause_after_reader_stops_before_reviewer(tmp_path: Path) -> None:
