@@ -106,13 +106,10 @@ class FailureClass(Enum):
     PHASE_A_STRICT_L4_SCOPE_AUTHORITY = "phase_a_strict_l4_scope_authority"
     PHASE_A_PACKET_LINE_REF_CLEANUP = "phase_a_packet_line_ref_cleanup"
     STAGE_PATH_SYMLINK_ALIAS = "stage_path_symlink_alias"
-    # A bridge round the supervisor decided GO, carrying ONLY low/medium
-    # (non-high/critical) findings, is a defer-and-proceed-to-commit case --
-    # NOT a reviewer/agent/bridge crash. Files those findings as deferred
-    # non-blockers and resumes Phase B so the GO'd wave commits instead of
-    # stranding in tier-3. Fires ONLY on decision=GO with zero high/critical
-    # (true-blocking) findings; a genuine NO_GO, or a GO carrying a
-    # high/critical finding, still routes to AGENT_REVIEW_CRASH (strand).
+    # A bridge round the supervisor decided GO, carrying ONLY findings accepted
+    # by the shared deferrability contract, is a defer-and-proceed-to-commit
+    # case -- NOT a reviewer/agent/bridge crash. Explicit/promoted blockers,
+    # invalid dispositions, and high/critical findings keep stranding.
     BRIDGE_GO_DEFERRABLE_FINDINGS = "bridge_go_deferrable_findings"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
@@ -347,6 +344,9 @@ _BRIDGE_GO_DECISIONS = frozenset({"GO"})
 # stranding. This mirrors phase_b_executor._disposition_for_finding, whose
 # critical/high floor overrides even an explicit non_blocking disposition.
 _TRUE_BLOCKING_SEVERITIES = frozenset({"high", "critical"})
+_CANONICAL_FINDING_DISPOSITIONS = frozenset({"blocking", "non_blocking"})
+_MANDATORY_IMPACT_CLASS = "declared hard-invariant violation"
+_MANDATORY_MERGE_DISPOSITION = "blocking"
 
 
 def _bridge_decision_and_findings(result: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -385,21 +385,63 @@ def _bridge_decision_and_findings(result: dict[str, Any]) -> tuple[str, list[Any
     return decision, findings
 
 
-def _finding_is_deferrable_on_go(finding: Any) -> bool:
-    """Return True when a finding is deferrable on a GO round.
+def _finding_has_mandatory_blocking_evidence(finding: Any) -> bool:
+    """Return whether exact structured evidence promotes *finding* to blocking.
 
-    On a GO round only a HIGH/CRITICAL-severity finding is genuinely blocking;
-    everything else (a low/medium nit, a doc-accuracy note, a reviewer-
-    acknowledged gap such as 'no dedicated regression test for X') is a
-    deferrable non-blocker -- even when it carries an explicit
-    ``disposition: blocking`` label, which is exactly the mislabel the recurring
-    strand produced. A non-dict / unreadable finding is conservatively treated
-    as NOT deferrable (fail-closed -- it keeps stranding).
+    ``evidence_result`` is reviewer prose containing optional ``key=value``
+    clauses separated by semicolons or newlines. Only the complete, normalized
+    clause pair for the declared hard-invariant impact and blocking merge
+    disposition has authority. Free text, partial clauses, and substring
+    matches neither promote nor downgrade a finding.
+    """
+    if not isinstance(finding, dict):
+        return False
+    evidence_result = finding.get("evidence_result")
+    if not isinstance(evidence_result, str):
+        return False
+
+    clauses: set[tuple[str, str]] = set()
+    for raw_clause in re.split(r"[;\r\n]+", evidence_result):
+        raw_key, separator, raw_value = raw_clause.partition("=")
+        if not separator:
+            continue
+        key = raw_key.strip().casefold()
+        value = raw_value.strip().casefold()
+        if key and value:
+            clauses.add((key, value))
+
+    return {
+        ("technical_impact_class", _MANDATORY_IMPACT_CLASS),
+        ("merge_disposition", _MANDATORY_MERGE_DISPOSITION),
+    }.issubset(clauses)
+
+
+def _finding_is_deferrable_on_go(finding: Any) -> bool:
+    """Return True when a finding may be deferred on a GO round.
+
+    High/critical severity and exact mandatory-impact evidence are independent
+    blocking floors. Below those floors, a canonical structured disposition is
+    authoritative: ``blocking`` remains blocking and ``non_blocking`` may be
+    deferred. A present but non-canonical disposition fails closed. Findings
+    that omit the disposition field retain the existing sub-high deferrability
+    behavior outside the exact mandatory-evidence promotion case. Non-dict
+    input is not deferrable.
     """
     if not isinstance(finding, dict):
         return False
     severity = str(finding.get("severity") or "").strip().lower()
-    return severity not in _TRUE_BLOCKING_SEVERITIES
+    if severity in _TRUE_BLOCKING_SEVERITIES:
+        return False
+    if _finding_has_mandatory_blocking_evidence(finding):
+        return False
+    if "disposition" in finding:
+        disposition = finding["disposition"]
+        if not isinstance(disposition, str):
+            return False
+        if disposition not in _CANONICAL_FINDING_DISPOSITIONS:
+            return False
+        return disposition == "non_blocking"
+    return True
 
 
 def _is_bridge_go_with_only_deferrable_findings(
@@ -408,9 +450,10 @@ def _is_bridge_go_with_only_deferrable_findings(
     """Return True for a bridge GO round whose findings are ALL deferrable.
 
     The deferrable-GO guard fires ONLY when the supervisor decided GO AND there
-    is at least one finding AND every finding is deferrable (zero high/critical
-    true-blocking findings). A genuine NO_GO, or a GO carrying any high/critical
-    finding, returns False and keeps its existing strand classification.
+    is at least one finding AND every finding passes the shared deferrability
+    contract. A genuine NO_GO, or a GO carrying any structured, promoted,
+    invalid, or severity-floor blocker, returns False and keeps its existing
+    strand classification.
     """
     if str(decision or "").strip().upper() not in _BRIDGE_GO_DECISIONS:
         return False
@@ -723,15 +766,14 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.UNCLASSIFIED
     # Deferrable bridge GO guard -- placed AHEAD of the broad review-crash
     # branches below. A bridge round the supervisor decided GO, carrying ONLY
-    # low/medium (non-high/critical) findings -- even ones mislabeled
-    # disposition=blocking -- is a defer-and-proceed-to-commit case, NOT a
-    # reviewer/agent/bridge crash. Without this guard such a round matches the
+    # findings accepted by the shared disposition contract, is a
+    # defer-and-proceed-to-commit case, NOT a reviewer/agent/bridge crash.
+    # Without this guard such a round matches the
     # broad "reviewer" text hint (or an "agent"/"bridge" step) and misclassifies
     # as AGENT_REVIEW_CRASH -> tier 3 -> tier3_exhausted strand (the recurring
-    # GO-with-deferrable-findings strand). Fires ONLY on decision=GO with zero
-    # high/critical true-blocking findings, so a genuine NO_GO, or a GO carrying
-    # a high/critical finding, still falls through to AGENT_REVIEW_CRASH and
-    # strands unchanged. The real codex-auth-crash terminal above still wins
+    # GO-with-deferrable-findings strand). A genuine NO_GO or any GO carrying a
+    # structured, promoted, invalid, or severity-floor blocker still falls
+    # through to AGENT_REVIEW_CRASH. The real codex-auth-crash terminal above wins
     # (a crashed reviewer cannot have produced a genuine GO verdict).
     if status_failed:
         _go_decision, _go_findings = _bridge_decision_and_findings(result)
@@ -3911,9 +3953,10 @@ def _write_recovery_deferred_non_blocking_packet(
         f"Wave: {wave_id}",
         "Status: DEFERRED_NON_BLOCKING",
         (
-            "Filed by recovery_gate: bridge decision GO carried only low/medium "
-            "(non-high/critical) findings -- deferred so the GO'd wave proceeds "
-            "to commit instead of stranding in tier-3 recovery."
+            "Filed by recovery_gate: bridge decision GO carried only findings "
+            "the shared disposition contract classified as deferrable -- filed "
+            "so the GO'd wave proceeds to commit instead of stranding in "
+            "tier-3 recovery."
         ),
         f"{len(non_blocking_findings)} finding(s).",
         "",
@@ -3932,18 +3975,14 @@ def _write_recovery_deferred_non_blocking_packet(
 
 
 def fix_bridge_go_deferrable_findings(repo_root: Path, **kw: Any) -> dict[str, Any]:
-    """Defer a GO round's low/medium findings and proceed to commit.
+    """Defer a GO round's explicitly or implicitly deferrable findings.
 
-    A bridge round the supervisor decided GO, carrying ONLY non-high/critical
-    findings (e.g. 'no dedicated regression test for X', a doc-accuracy nit),
-    must PROCEED to commit -- not strand in tier-3 recovery. This files those
-    findings as deferred non-blockers under reports/deferred/non_blocking/,
-    records them (rewritten to disposition=non_blocking) on the result's
-    all_non_blocking carry-forward, and reuses the proven Phase B resume channel
-    (fix_post_reentry_needs_phase_b) to seed phase_b_state.json + the
-    ROUTE_PHASE_B retry_record so the re-dispatched wave converges with the
-    findings already deferred. Returns fixed=True (recovered) so the wave leaves
-    the strand path.
+    A bridge round the supervisor decided GO, carrying ONLY findings accepted by
+    the shared deferrability predicate, must proceed to commit rather than strand
+    in tier-3 recovery. Explicit blockers, invalid dispositions, severity-floor
+    blockers, and exact mandatory-evidence promotions never reach the rewrite
+    below. Accepted findings are filed under reports/deferred/non_blocking/ and
+    carried through the proven Phase B resume channel.
     """
     result = kw.get("result", {})
     if not isinstance(result, dict):
@@ -3951,8 +3990,8 @@ def fix_bridge_go_deferrable_findings(repo_root: Path, **kw: Any) -> dict[str, A
     wave_id = str(kw.get("wave_id") or "").strip()
     decision, findings = _bridge_decision_and_findings(result)
     # Fail-closed re-confirmation of the classification guard's contract: never
-    # defer unless this really is a GO round whose findings are ALL deferrable
-    # (zero high/critical). Protects against a stale/learned route landing a real
+    # defer unless this really is a GO round whose findings are ALL deferrable.
+    # Protects against a stale/learned route landing any structured or promoted
     # blocker here.
     if not _is_bridge_go_with_only_deferrable_findings(decision, findings):
         return _fix_result(
@@ -3980,8 +4019,8 @@ def fix_bridge_go_deferrable_findings(repo_root: Path, **kw: Any) -> dict[str, A
 
     # Carry the deferred findings forward as non-blockers so the Phase B resume
     # treats them as already-deferred. They survive phase_b's convergence
-    # re-check (_blocking_findings_in_deferred_convergence): low/medium severity
-    # + explicit non_blocking disposition stays non_blocking. _merge_result_candidates
+    # re-check (_blocking_findings_in_deferred_convergence): sub-high severity +
+    # explicit non_blocking disposition stays non_blocking. _merge_result_candidates
     # reads the top-level result, so the resume seed below copies this list into
     # phase_b_state.json's all_non_blocking.
     existing = result.get("all_non_blocking")

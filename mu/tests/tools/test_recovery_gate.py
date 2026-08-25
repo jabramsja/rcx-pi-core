@@ -760,12 +760,9 @@ class TestStagePathSymlinkAliasRecovery:
              "stderr": "agent died"}) == FailureClass.AGENT_REVIEW_CRASH
 
     def test_bridge_go_with_only_deferrable_findings_proceeds_not_agent_review_crash(self):
-        # A bridge round the supervisor decided GO, carrying ONLY a low-severity
-        # finding mislabeled disposition=blocking (e.g. 'no dedicated regression
-        # test for X'), is a defer-and-proceed-to-commit case -- NOT a reviewer
-        # crash. Without the guard the bare "reviewer" text hint + "bridge" step
-        # would misclassify it as AGENT_REVIEW_CRASH -> tier 3 -> tier3_exhausted
-        # strand (the recurring GO-with-deferrable-findings strand).
+        # A bridge round the supervisor decided GO, carrying ONLY a canonical
+        # low-severity nonblocker, is a defer-and-proceed-to-commit case -- NOT a
+        # reviewer crash.
         result = {
             "status": "failed",
             "step": "bridge_loop",
@@ -774,7 +771,7 @@ class TestStagePathSymlinkAliasRecovery:
                 {
                     "title": "no dedicated regression test for X",
                     "severity": "low",
-                    "disposition": "blocking",
+                    "disposition": "non_blocking",
                     "class": "DOC_ACCURACY",
                     "file": "reports/x.md",
                 }
@@ -801,7 +798,7 @@ class TestStagePathSymlinkAliasRecovery:
                         "findings": [
                             {
                                 "severity": "medium",
-                                "disposition": "blocking",
+                                "disposition": "non_blocking",
                                 "title": "doc nit",
                                 "class": "DOC_ACCURACY",
                             }
@@ -846,7 +843,7 @@ class TestStagePathSymlinkAliasRecovery:
             "step": "bridge_loop",
             "decision": "GO",
             "findings": [
-                {"severity": "low", "disposition": "blocking"},
+                {"severity": "low", "disposition": "non_blocking"},
                 {"severity": "critical", "disposition": "blocking"},
             ],
             "stderr": "reviewer",
@@ -869,6 +866,198 @@ class TestStagePathSymlinkAliasRecovery:
         assert fc == FailureClass.AGENT_REVIEW_CRASH
         assert fc != FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
         assert rg_mod.tier_for(fc) == 3
+
+    @pytest.mark.parametrize(
+        "finding",
+        [
+            None,
+            "not-an-object",
+            {"severity": "low", "disposition": "blocking"},
+            {
+                "severity": "medium",
+                "disposition": "blocking",
+                "status": "persisting",
+                "candidate_relationship": "pre-existing",
+                "summary": "hardening only; normally non-blocking context",
+            },
+            {"severity": "high", "disposition": "non_blocking"},
+            {"severity": "critical", "disposition": "non_blocking"},
+            {"severity": "medium", "disposition": "BLOCKING"},
+            {"severity": "medium", "disposition": "ambiguous"},
+            {"severity": "medium", "disposition": None},
+            {"severity": "medium", "disposition": ["non_blocking"]},
+        ],
+        ids=[
+            "none",
+            "non-dict",
+            "low-blocking",
+            "persisting-preexisting-medium-blocking",
+            "high-nonblocking",
+            "critical-nonblocking",
+            "noncanonical-case",
+            "invalid-string",
+            "explicit-null",
+            "unhashable-list",
+        ],
+    )
+    def test_shared_go_deferrability_fails_closed(self, finding):
+        assert not rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: shared recovery/Phase-B disposition authority regression
+
+    @pytest.mark.parametrize("severity", ["low", "medium"])
+    def test_shared_go_deferrability_accepts_canonical_nonblockers(self, severity):
+        finding = {
+            "severity": severity,
+            "disposition": "non_blocking",
+            "status": "persisting",
+            "candidate_relationship": "pre-existing",
+        }
+        assert rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: shared recovery/Phase-B disposition authority regression
+
+    @pytest.mark.parametrize("severity", ["low", "medium"])
+    def test_missing_disposition_retains_sub_high_default(self, severity):
+        assert rg_mod._finding_is_deferrable_on_go({"severity": severity})  # ANTICHEAT_OK: exact omission fallback must not broaden ordinary findings
+
+    def test_exact_mandatory_evidence_pair_is_case_and_whitespace_normalized(self):
+        finding = {
+            "severity": "medium",
+            "evidence_result": (
+                "unrelated=value;\n"
+                "  TeChNiCaL_ImPaCt_ClAsS = Declared Hard-Invariant Violation  \n"
+                " MERGE_DISPOSITION = BLOCKING "
+            ),
+        }
+        assert rg_mod._finding_has_mandatory_blocking_evidence(finding)  # ANTICHEAT_OK: exact promotion helper contract
+        assert not rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: promoted blockers never enter Tier 1
+        assert not rg_mod._finding_is_deferrable_on_go({  # ANTICHEAT_OK: structured nonblocking cannot bypass exact promotion
+            **finding,
+            "disposition": "non_blocking",
+        })
+
+    @pytest.mark.parametrize(
+        "evidence_result",
+        [
+            "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation",
+            "MERGE_DISPOSITION=blocking",
+            (
+                "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation and "
+                "silently wrong output; MERGE_DISPOSITION=blocking"
+            ),
+            (
+                "narrative TECHNICAL_IMPACT_CLASS=declared hard-invariant "
+                "violation; MERGE_DISPOSITION=blocking"
+            ),
+            (
+                "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation; "
+                "MERGE_DISPOSITION=non_blocking"
+            ),
+            (
+                "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation, "
+                "MERGE_DISPOSITION=blocking"
+            ),
+        ],
+        ids=[
+            "missing-merge-clause",
+            "missing-impact-clause",
+            "impact-value-not-exact",
+            "key-is-free-text",
+            "free-text-nonblocking-is-not-promotion",
+            "comma-is-not-a-clause-delimiter",
+        ],
+    )
+    def test_incomplete_or_inexact_evidence_does_not_promote(self, evidence_result):
+        finding = {"severity": "medium", "evidence_result": evidence_result}
+        assert not rg_mod._finding_has_mandatory_blocking_evidence(finding)  # ANTICHEAT_OK: no generic substring promotion
+        assert rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: ordinary missing-disposition behavior preserved
+
+    @pytest.mark.parametrize("evidence_result", [None, [], {}])
+    def test_non_string_evidence_does_not_promote(self, evidence_result):
+        finding = {"severity": "medium", "evidence_result": evidence_result}
+        assert not rg_mod._finding_has_mandatory_blocking_evidence(finding)  # ANTICHEAT_OK: helper accepts only string evidence
+        assert rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: ordinary omission fallback remains intact
+
+    def test_free_text_nonblocking_cannot_downgrade_structured_blocker(self):
+        finding = {
+            "severity": "low",
+            "disposition": "blocking",
+            "evidence_result": "MERGE_DISPOSITION=non_blocking",
+        }
+        assert not rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: evidence text is promotion-only
+
+    @pytest.mark.parametrize("decision", ["GO", "REQUEST_CHANGES", "NO_GO"])
+    def test_medium_explicit_blocker_never_classifies_to_tier1(self, decision):
+        result = {
+            "status": "failed",
+            "step": "bridge_loop",
+            "decision": decision,
+            "findings": [
+                {
+                    "title": "Mandatory blocker",
+                    "severity": "medium",
+                    "disposition": "blocking",
+                    "status": "persisting",
+                }
+            ],
+            "stderr": "reviewer flagged a blocking finding",
+        }
+        failure_class = rg_mod.classify_failure(result)
+        assert failure_class != FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
+        assert rg_mod.tier_for(failure_class) != 1
+
+    def test_exact_mandatory_omission_probe_never_classifies_to_tier1(self):
+        result = {
+            "status": "failed",
+            "step": "bridge_loop",
+            "decision": "GO",
+            "findings": [
+                {
+                    "title": "Omitted structured disposition",
+                    "severity": "medium",
+                    "evidence_result": (
+                        "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation; "
+                        "MERGE_DISPOSITION=blocking"
+                    ),
+                }
+            ],
+            "stderr": "reviewer flagged a blocking finding",
+        }
+        failure_class = rg_mod.classify_failure(result)
+        assert failure_class != FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
+        assert rg_mod.tier_for(failure_class) != 1
+
+    @pytest.mark.parametrize(
+        "finding",
+        [
+            {"severity": "medium", "disposition": "blocking"},
+            {
+                "severity": "low",
+                "evidence_result": (
+                    "TECHNICAL_IMPACT_CLASS=declared hard-invariant violation; "
+                    "MERGE_DISPOSITION=blocking"
+                ),
+            },
+        ],
+        ids=["explicit-blocker", "mandatory-evidence-omission"],
+    )
+    def test_tier1_fix_refuses_blocker_without_packet_or_rewrite(self, tmp_path, finding):
+        original = dict(finding)
+        result = {
+            "status": "failed",
+            "step": "bridge_loop",
+            "decision": "GO",
+            "findings": [finding],
+        }
+
+        fixed = rg_mod.fix_bridge_go_deferrable_findings(  # ANTICHEAT_OK: direct Tier-1 rewrite-path regression
+            tmp_path,
+            result=result,
+            wave_id="mandatory-blocker-wave",
+        )
+
+        assert fixed["fixed"] is False
+        assert finding == original
+        assert "all_non_blocking" not in result
+        assert "deferred_packet_path" not in result
+        assert not (tmp_path / "reports" / "deferred" / "non_blocking").exists()
 
     def test_real_reviewer_crash_without_go_decision_still_agent_review_crash(self):
         # The guard must NOT broaden away from real reviewer/agent/bridge crashes:
@@ -3181,7 +3370,7 @@ class TestAttemptRecovery:
                 {
                     "title": "no dedicated regression test for X",
                     "severity": "low",
-                    "disposition": "blocking",
+                    "disposition": "non_blocking",
                     "class": "DOC_ACCURACY",
                     "file": "reports/x.md",
                 }
