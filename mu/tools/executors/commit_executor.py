@@ -12281,6 +12281,10 @@ _PROGRAM_QUEUE_HEADER_RE = re.compile(r"^##\s+PROGRAM QUEUE\b", re.IGNORECASE)
 _PROGRAM_QUEUE_NUMBERED_ENTRY_RE = re.compile(
     r"^\s*(?P<order>\d+)\.\s+\*\*(?P<label>[^*]+?)\*\*\s*(?P<tail>.*?)\s*$"
 )
+_PROGRAM_QUEUE_UNNUMBERED_BATON_RE = re.compile(
+    r"^\s*\*\*Unnumbered (?:prerequisite|reconstruction) baton — "
+    r"(?P<label>[^*]+?)\*\*\s*$"
+)
 _WAVE_ID_DATE_SUFFIX_RE = re.compile(r"-\d{4}-\d{2}-\d{2}[a-z]?$")
 _SIMPLE_QUEUE_TERMINAL_MARKER_RE = re.compile(
     r"\b(?:COMPLETED|LANDED|MERGED|CLOSED|CURRENT[-_\s]+DEV|POST[-_\s]+MERGE(?:D)?)\b",
@@ -12293,7 +12297,7 @@ _SIMPLE_QUEUE_PRECOMMIT_MARKER_RE = re.compile(
 )
 _SIMPLE_QUEUE_STATE_TRAILER_RE = re.compile(
     r"(?:\s+|\s*[-\u2013\u2014]+\s*)"
-    r"(?:NEXT|LAST(?:\s*\([^)]*\))?|"
+    r"(?:NEXT|AFTER\s+BOTH|LAST(?:\s*\([^)]*\))?|"
     r"LANDED(?:\s+in\s+PR\s+#?\d+(?:\s+\([^)]*\))?)?|"
     r"MERGED(?:\s+in\s+PR\s+#?\d+(?:\s+\([^)]*\))?)?|"
     r"COMPLETED|CLOSED|CURRENT[-_\s]+DEV|CURRENT)"
@@ -13022,13 +13026,18 @@ def _simple_program_queue_entries(
         repo_root,
         queue_commit_sha=queue_commit_sha,
     ):
-        match = _PROGRAM_QUEUE_NUMBERED_ENTRY_RE.match(line)
-        if not match:
+        numbered_match = _PROGRAM_QUEUE_NUMBERED_ENTRY_RE.match(line)
+        baton_match = _PROGRAM_QUEUE_UNNUMBERED_BATON_RE.match(line)
+        if numbered_match:
+            label = numbered_match.group("label").strip()
+            tail = numbered_match.group("tail").strip()
+        elif baton_match:
+            label = baton_match.group("label").strip()
+            tail = ""
+        else:
             continue
         if "Wave ID:" in line or "Packet:" in line:
             continue
-        label = match.group("label").strip()
-        tail = match.group("tail").strip()
         queue_text = " ".join(part for part in (label, tail) if part).strip()
         if not queue_text:
             continue
