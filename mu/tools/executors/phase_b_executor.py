@@ -7329,6 +7329,23 @@ def run_phase_b(
             learning_context=learning_context,
         )
 
+    def _build_reentry_fix_prompt(bridge_decision: str, findings_for_impl: str) -> str:
+        """Build a re-entry prompt with authoritative non-GO decision context."""
+        decision_suffix = (
+            f" ({bridge_decision})"
+            if bridge_decision in ("REQUEST_CHANGES", "NO_GO")
+            else ""
+        )
+        return build_implementation_prompt(
+            plan.get("content", "")
+            + f"\n\n## Re-entry Findings{decision_suffix}\n\n"
+            + findings_for_impl,
+            repo_root=repo_root,
+            wave_id=wave_id,
+            scope_hint="Fix findings from bridge/supervisor review",
+            learning_context=learning_context,
+        )
+
     def _complete_bridge_fix(
         round_num: int,
         fix_result: dict[str, Any],
@@ -8949,7 +8966,9 @@ def run_phase_b(
         )
         current_scope_fingerprint = _bridge_scope_fingerprint(repo_root, changed_files)
         saved_scope_fingerprint = (saved_state or {}).get("bridge_scope_fingerprint")
-        refresh_reentry_findings = saved_scope_fingerprint != current_scope_fingerprint
+        refresh_reentry_findings = bool(
+            (saved_state or {}).get("refresh_reentry_findings")
+        ) or saved_scope_fingerprint != current_scope_fingerprint
         if refresh_reentry_findings:
             findings_for_impl = "Refresh bridge findings from the current worktree before re-invoking the implementer."
             log("NEEDS_PHASE_B resume checkpoint drifted or lacked scope fingerprint; refreshing bridge findings first")
@@ -9484,7 +9503,11 @@ def run_phase_b(
         # Re-entry: implementer fixes → bridge reviews → loop
         log("NEEDS_PHASE_B — re-invoking implementer then bridge loop")
         reentry_converged = _resume_reentry_private_attr_review
-        bridge_decision = str((saved_state or {}).get("last_reentry_bridge_decision") or "")
+        bridge_decision = (
+            ""
+            if refresh_reentry_findings
+            else str((saved_state or {}).get("last_reentry_bridge_decision") or "")
+        )
         # Initial findings come from supervisor; subsequent rounds use bridge findings
         findings_for_impl = result.get("pre_commit_summary") or supervisor_parsed.get("summary", "Fix required")
 
@@ -9508,6 +9531,8 @@ def run_phase_b(
                 "all_non_blocking": all_non_blocking,
                 "finding_history": finding_history,
                 "reentry_findings": findings_for_impl,
+                "last_reentry_bridge_decision": bridge_decision,
+                "refresh_reentry_findings": refresh_reentry_findings,
                 "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
             })
 
@@ -9540,13 +9565,9 @@ def run_phase_b(
             else:
                 log("Re-invoking implementer for fixes...")
                 pre_reentry_files = set(_collect_changed_files(repo_root))
-                reentry_prompt = build_implementation_prompt(
-                    plan.get("content", "") + "\n\n## Re-entry Findings\n\n"
-                    + findings_for_impl,
-                    repo_root=repo_root,
-                    wave_id=wave_id,
-                    scope_hint="Fix findings from bridge/supervisor review",
-                    learning_context=learning_context,
+                reentry_prompt = _build_reentry_fix_prompt(
+                    bridge_decision,
+                    findings_for_impl,
                 )
                 try:
                     _emit_phase_b_event(
@@ -9901,13 +9922,9 @@ def run_phase_b(
                 })
                 log("Re-entry: checkpointed bridge findings; re-invoking implementer in-branch")
                 pre_reentry_files = set(_collect_changed_files(repo_root))
-                reentry_prompt = build_implementation_prompt(
-                    plan.get("content", "") + "\n\n## Re-entry Findings\n\n"
-                    + findings_for_impl,
-                    repo_root=repo_root,
-                    wave_id=wave_id,
-                    scope_hint="Fix findings from bridge/supervisor review",
-                    learning_context=learning_context,
+                reentry_prompt = _build_reentry_fix_prompt(
+                    bridge_decision,
+                    findings_for_impl,
                 )
                 try:
                     _emit_phase_b_event(

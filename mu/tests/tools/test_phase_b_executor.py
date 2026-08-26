@@ -7899,6 +7899,14 @@ class TestReentryLoopMirrorsInitial:
         assert len(transition_keys) == len(set(transition_keys))
         assert transition_keys[0].endswith(":supervisor:implementer_started")
         assert ":phase-b-reentry-r2-" in transition_keys[1]
+        supervisor_reentry_source = mock_impl.build_implementation_prompt.call_args_list[1].args[0]
+        bridge_reentry_source = mock_impl.build_implementation_prompt.call_args_list[2].args[0]
+        assert "## Re-entry Findings\n\nneeds fix" in supervisor_reentry_source
+        assert "## Re-entry Findings (" not in supervisor_reentry_source
+        assert (
+            "## Re-entry Findings (REQUEST_CHANGES)\n\nbridge findings text"
+            in bridge_reentry_source
+        )
 
 
 class TestExactReceiptAuthority:
@@ -12104,6 +12112,112 @@ class TestResumeNeedsPhaseB:
         assert bridge_calls[0] >= 1
         # Should reach commit_ready (not error or supervisor_rejected)
         assert result["status"] == "commit_ready", f"Expected commit_ready, got {result}"
+        reentry_source = mock_impl.build_implementation_prompt.call_args_list[0].args[0]
+        assert "## Re-entry Findings\n\nFix the thing" in reentry_source
+        assert "## Re-entry Findings (" not in reentry_source
+
+    @pytest.mark.parametrize("saved_decision", ["REQUEST_CHANGES", "NO_GO"])
+    def test_resume_preserves_last_reentry_bridge_decision_in_implementer_prompt(
+        self,
+        tmp_path,
+        saved_decision,
+    ):
+        """An unchanged-scope resume carries exact non-GO context into its first fix."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\nPhase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        (repo / ".scratch").mkdir()
+
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        changed_files = ["mu/tools/executors/foo.py"]
+        exact_findings = (
+            "First saved finding: preserve punctuation exactly.\n"
+            "Second saved finding: keep this ordering and context."
+        )
+        (state_dir / "phase_b_state.json").write_text(json.dumps({
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "needs_phase_b_reentry",
+            "wave_id": "plan",
+            "bridge_rounds": 1,
+            "bridge_scope_fingerprint": pb_mod._bridge_scope_fingerprint(repo, changed_files),  # ANTICHEAT_OK: testing internal executor functions
+            "deferred_packet_path": None,
+            "implementer_changed": changed_files,
+            "executor_created": [],
+            "all_non_blocking": [],
+            "reentry_findings": exact_findings,
+            "last_reentry_bridge_decision": saved_decision,
+        }), encoding="utf-8")
+
+        mock_impl = _make_mock_impl()
+        mock_impl.build_implementation_prompt.side_effect = (
+            lambda plan_content, **kwargs: plan_content
+        )
+        call_order = []
+        implementer_prompts = []
+        pre_invocation_checkpoints = []
+
+        def invoke_side(repo_root, prompt, **kwargs):
+            call_order.append("implementer")
+            implementer_prompts.append(prompt)
+            pre_invocation_checkpoints.append(json.loads(
+                (state_dir / "phase_b_state.json").read_text(encoding="utf-8")
+            ))
+            return {
+                "status": "success",
+                "output": "done",
+                "stderr": "",
+                "exit_code": 0,
+                "job_id": "impl-reentry",
+                "model_override_applied": False,
+            }
+
+        mock_impl.invoke_implementer.side_effect = invoke_side
+
+        def bridge_side(*args, **kwargs):
+            call_order.append("bridge")
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": "reentry-go",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(
+                repo,
+                "reports/control_plane/plan.md",
+                max_bridge_rounds=5,
+            )
+
+        assert result["status"] == "commit_ready", result
+        assert call_order[0] == "implementer"
+        assert call_order.index("implementer") < call_order.index("bridge")
+        assert len(implementer_prompts) == 1
+        prompt = implementer_prompts[0]
+        heading = f"## Re-entry Findings ({saved_decision})"
+        assert prompt.count(exact_findings) == 1
+        assert prompt.index("# Plan") < prompt.index(heading) < prompt.index(exact_findings)
+        assert f"{heading}\n\n{exact_findings}" in prompt
+        checkpoint = pre_invocation_checkpoints[0]
+        assert checkpoint["completed_step"] == "needs_phase_b_reentry"
+        assert checkpoint["reentry_findings"] == exact_findings
+        assert checkpoint["last_reentry_bridge_decision"] == saved_decision
 
     def test_runtime_pre_push_reentry_refuses_control_only_commit_ready(self, tmp_path):
         """Runtime pre-push failures must not be repackaged as control-only COMMIT_GO."""
