@@ -1,7 +1,7 @@
 {
   "role_agents": {
-    "implementer": "claude",
-    "reviewer": "claude"
+    "implementer": "codex",
+    "reviewer": "codex"
   },
   "bridge_agent_defaults": {
     "claude": {
@@ -21,16 +21,16 @@
     }
   },
   "backends": {
-    "post_merge_supervisor": "claude",
-    "dialectic_executor": "claude",
-    "phase_a_executor": "claude",
-    "phase_b_executor": "claude",
-    "bot_remediation": "claude",
+    "post_merge_supervisor": "codex",
+    "dialectic_executor": "codex",
+    "phase_a_executor": "codex",
+    "phase_b_executor": "codex",
+    "bot_remediation": "codex",
     "commit_executor": null
   },
   "bridge_reviewers": {
-    "phase_a": "claude",
-    "phase_b": "claude"
+    "phase_a": "codex",
+    "phase_b": "codex"
   },
   "bridge_turn_timeouts": {
     "phase_a": 600,
@@ -42,7 +42,7 @@
   "hybrid_recovery_enabled": true,
   "pipeline_agent_pager": {
     "enabled": true,
-    "route": "claude"
+    "route": "codex"
   },
   "pipeline_monitor": {
     "lanes": {
