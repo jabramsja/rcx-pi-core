@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -144,6 +145,25 @@ class TestPreCommitSupervisorLifecyclePager:
         assert result == 1
         assert lifecycle_calls == []
 
+    def test_main_null_summary_rejected_before_receipt_write(self, tmp_path):
+        package_path = tmp_path / "pre_commit_package.json"
+        package_path.write_text("{}", encoding="utf-8")
+        response = meta.MetaBridgeResponse(
+            status="success",
+            decision=meta.Decision.COMMIT_GO.value,
+            summary=None,
+        )
+
+        with patch.object(sys, "argv", ["meta_bridge_supervisor.py", "--package", str(package_path), "--json"]), \
+             patch.object(meta, "run_meta_bridge", return_value=response), \
+             patch.object(meta, "write_pre_commit_receipt") as receipt_writer, \
+             patch.object(meta, "_safe_emit_pre_commit_supervisor_lifecycle_event"):
+            result = meta.main()
+
+        assert result == 1
+        receipt_writer.assert_not_called()
+        assert not (tmp_path / ".agent_bus" / "meta").exists()
+
     def test_receipt_write_failure_does_not_leave_canonical_commit_go(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -151,18 +171,69 @@ class TestPreCommitSupervisorLifecyclePager:
         package_path.write_text("{}", encoding="utf-8")
         receipt_dir = repo / ".agent_bus" / "meta"
         receipt_dir.mkdir(parents=True)
-        (receipt_dir / "pre_commit_receipts").write_text("not a directory", encoding="utf-8")
+        canonical_path = receipt_dir / meta.PRE_COMMIT_RECEIPT_NAME
+        canonical_path.write_text(
+            json.dumps(
+                {
+                    "decision": meta.Decision.COMMIT_GO.value,
+                    "staged_sha": "staged-sha",
+                    "timestamp_utc": meta.utc_now(),
+                    "package_digest": "older-package",
+                    "package_path": "older-package.json",
+                }
+            ) + "\n",
+            encoding="utf-8",
+        )
         response = meta.MetaBridgeResponse(
             status="success",
             decision=meta.Decision.COMMIT_GO.value,
             summary="ready",
         )
 
-        with patch.object(meta, "compute_staged_sha", return_value="staged-sha"), \
-             pytest.raises(FileExistsError):
-            meta.write_pre_commit_receipt(response, package_path, repo_root=repo)
+        with patch.object(meta, "compute_staged_sha", return_value="staged-sha"):
+            valid_before, _ = meta.verify_pre_commit_receipt(repo)
+            assert valid_before
 
-        assert not (receipt_dir / meta.PRE_COMMIT_RECEIPT_NAME).exists()
+            with patch.object(Path, "write_text", side_effect=OSError("exact receipt disk full")), \
+                 pytest.raises(OSError, match="exact receipt disk full"):
+                meta.write_pre_commit_receipt(response, package_path, repo_root=repo)
+
+            valid_after, message = meta.verify_pre_commit_receipt(repo)
+
+        assert not valid_after
+        assert "No pre-commit receipt found" in message
+        assert not canonical_path.exists()
+
+
+class TestPreCommitReceiptResponseValidation:
+    @pytest.mark.parametrize("field_name", ["decision", "summary", "status"])
+    @pytest.mark.parametrize("malformation", ["missing", "null"])
+    def test_writer_rejects_malformed_response_before_receipt_side_effects(
+        self,
+        tmp_path,
+        field_name,
+        malformation,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        package_path = repo / "pre_commit_package.json"
+        package_path.write_text("{}", encoding="utf-8")
+        response = SimpleNamespace(
+            status="success",
+            decision=meta.Decision.COMMIT_GO.value,
+            summary="ready",
+        )
+        if malformation == "missing":
+            delattr(response, field_name)
+        else:
+            setattr(response, field_name, None)
+
+        with patch.object(meta, "compute_staged_sha") as staged_sha:
+            with pytest.raises(meta.MetaBridgeError, match=field_name):
+                meta.write_pre_commit_receipt(response, package_path, repo_root=repo)
+
+        staged_sha.assert_not_called()
+        assert not (repo / ".agent_bus").exists()
 
 
 class TestCommitBlockedOnFailedValidation:

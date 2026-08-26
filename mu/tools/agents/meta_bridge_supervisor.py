@@ -2368,6 +2368,23 @@ PRE_COMMIT_RECEIPT_NAME = "pre_commit_receipt.json"
 # Decisions that satisfy the receipt check for allowing commit
 RECEIPT_CAPABLE_DECISIONS = {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}
 
+_REQUIRED_RECEIPT_RESPONSE_FIELDS = ("decision", "summary", "status")
+_MISSING_RESPONSE_FIELD = object()
+
+
+def _validate_receipt_response_fields(response: Any) -> None:
+    """Require the complete supervisor response contract before receipt work."""
+    for field_name in _REQUIRED_RECEIPT_RESPONSE_FIELDS:
+        value = getattr(response, field_name, _MISSING_RESPONSE_FIELD)
+        if value is _MISSING_RESPONSE_FIELD:
+            raise MetaBridgeError(
+                f"Malformed supervisor response: missing required field '{field_name}'"
+            )
+        if value is None:
+            raise MetaBridgeError(
+                f"Malformed supervisor response: required field '{field_name}' is null"
+            )
+
 
 def compute_staged_sha(repo_root: Path) -> str:
     """Compute SHA256 of staged diff content (deterministic state binding)."""
@@ -2385,6 +2402,8 @@ def write_pre_commit_receipt(
     Receipt binds to current staged state so it cannot be reused after
     staging changes.
     """
+    _validate_receipt_response_fields(response)
+
     if response.decision not in RECEIPT_CAPABLE_DECISIONS:
         raise MetaBridgeError(
             f"Cannot write receipt for decision {response.decision}. "
@@ -2432,6 +2451,15 @@ def write_pre_commit_receipt(
     receipt_dir = agent_bus_path(repo_root, bus_dir, "meta")
     receipt_dir.mkdir(parents=True, exist_ok=True)
 
+    # Revoke older hook authority before any exact-receipt creation work.  If
+    # the new exact write fails, the previous canonical COMMIT_GO must not
+    # remain usable for a later commit attempt.
+    canonical_path = receipt_dir / PRE_COMMIT_RECEIPT_NAME
+    try:
+        canonical_path.unlink()
+    except FileNotFoundError:
+        pass
+
     # Write per-invocation receipt — this is the exact artifact for executor flow
     receipts_dir = receipt_dir / "pre_commit_receipts"
     receipts_dir.mkdir(parents=True, exist_ok=True)
@@ -2445,7 +2473,6 @@ def write_pre_commit_receipt(
     # Write canonical hook-compatible receipt last.  If the exact
     # per-invocation receipt cannot be written, the commit-capable decision is
     # void and the canonical hook receipt must not advertise COMMIT_GO.
-    canonical_path = receipt_dir / PRE_COMMIT_RECEIPT_NAME
     canonical_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
 
     # Return the per-invocation path — callers get the exact receipt for this invocation.
@@ -4078,11 +4105,14 @@ def main() -> int:
             )
         return 1
 
-    # Pre-commit mode: write receipt on commit-capable decisions
+    # Pre-commit mode: validate the complete response before testing receipt
+    # capability or calling the independent writer entry point.
     receipt = None
-    if args.mode != "post-merge" and not args.dry_run and response.decision in RECEIPT_CAPABLE_DECISIONS:
+    if args.mode != "post-merge" and not args.dry_run:
         try:
-            receipt = write_pre_commit_receipt(response, args.package, bus_dir=args.bus_dir)
+            _validate_receipt_response_fields(response)
+            if response.decision in RECEIPT_CAPABLE_DECISIONS:
+                receipt = write_pre_commit_receipt(response, args.package, bus_dir=args.bus_dir)
         except Exception as exc:
             error_response = MetaBridgeResponse(
                 status="error",

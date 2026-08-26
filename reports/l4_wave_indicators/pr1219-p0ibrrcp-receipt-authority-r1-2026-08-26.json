@@ -1,0 +1,24 @@
+{
+  "wave_id": "pr1219-p0ibrrcp-receipt-authority-r1-2026-08-26",
+  "repeat_run_speedup_ratio": 1.292407,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.305352,
+  "repeat_run_raw_seconds": [
+    0.394639,
+    0.305352
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.394639
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.699991
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-08-26T09:32:24Z",
+  "collector_version": "2.2.0"
+}

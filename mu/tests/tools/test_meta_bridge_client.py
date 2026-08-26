@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import types
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -202,14 +203,76 @@ class TestReceiptUniqueness:
 class TestEnvelopeSchemaValidation:
     """Supervisor envelope must have required fields: decision, summary, status."""
 
-    def test_missing_decision_raises(self):
-        """Response without decision field raises MetaBridgeClientError."""
-        import inspect
-        src = inspect.getsource(client_mod.run_meta_bridge_package)
-        assert "_required_attrs" in src, (
-            "run_meta_bridge_package must validate required envelope fields"
-        )
-        assert '"decision"' in src or "'decision'" in src
+    @staticmethod
+    def _supervisor_module(response, receipt_writer):
+        supervisor = types.ModuleType("meta_bridge_supervisor")
+
+        class MetaBridgeError(RuntimeError):
+            pass
+
+        supervisor.MetaBridgeError = MetaBridgeError
+        supervisor.run_meta_bridge = MagicMock(return_value=response)
+        supervisor.write_pre_commit_receipt = receipt_writer
+        return supervisor
+
+    @staticmethod
+    def _commit_capable_response(**overrides):
+        values = {
+            "decision": "COMMIT_GO",
+            "summary": "ready to commit",
+            "status": "success",
+        }
+        values.update(overrides)
+        return types.SimpleNamespace(**values)
+
+    @pytest.mark.parametrize("required_field", ("decision", "summary", "status"))
+    def test_null_required_field_rejected_before_commit_receipt_write(
+        self,
+        tmp_path,
+        required_field,
+    ):
+        """Explicit null required fields cannot reach the receipt writer."""
+        package_path = tmp_path / "package.json"
+        package_path.write_text('{}')
+        bus_dir = tmp_path / ".agent_bus"
+        response = self._commit_capable_response(**{required_field: None})
+        receipt_writer = MagicMock()
+        supervisor = self._supervisor_module(response, receipt_writer)
+
+        with patch.dict(sys.modules, {"meta_bridge_supervisor": supervisor}):
+            with pytest.raises(
+                MetaBridgeClientError,
+                match=rf"missing required field: {required_field}",
+            ):
+                run_meta_bridge_package(package_path, bus_dir=bus_dir)
+
+        receipt_writer.assert_not_called()
+        assert not bus_dir.exists()
+
+    @pytest.mark.parametrize("required_field", ("decision", "summary", "status"))
+    def test_missing_required_field_rejected_before_commit_receipt_write(
+        self,
+        tmp_path,
+        required_field,
+    ):
+        """Absent required fields cannot reach the receipt writer."""
+        package_path = tmp_path / "package.json"
+        package_path.write_text('{}')
+        bus_dir = tmp_path / ".agent_bus"
+        response = self._commit_capable_response()
+        delattr(response, required_field)
+        receipt_writer = MagicMock()
+        supervisor = self._supervisor_module(response, receipt_writer)
+
+        with patch.dict(sys.modules, {"meta_bridge_supervisor": supervisor}):
+            with pytest.raises(
+                MetaBridgeClientError,
+                match=rf"missing required field: {required_field}",
+            ):
+                run_meta_bridge_package(package_path, bus_dir=bus_dir)
+
+        receipt_writer.assert_not_called()
+        assert not bus_dir.exists()
 
     def test_missing_optional_fields_default_safely(self):
         """Optional fields default to empty list/string when absent from response."""
