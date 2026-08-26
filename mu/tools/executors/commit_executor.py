@@ -12297,7 +12297,7 @@ _SIMPLE_QUEUE_PRECOMMIT_MARKER_RE = re.compile(
 )
 _SIMPLE_QUEUE_STATE_TRAILER_RE = re.compile(
     r"(?:\s+|\s*[-\u2013\u2014]+\s*)"
-    r"(?:NEXT|AFTER\s+BOTH|LAST(?:\s*\([^)]*\))?|"
+    r"(?P<state>NEXT|AFTER\s+BOTH|LAST(?:\s*\([^)]*\))?|"
     r"LANDED(?:\s+in\s+PR\s+#?\d+(?:\s+\([^)]*\))?)?|"
     r"MERGED(?:\s+in\s+PR\s+#?\d+(?:\s+\([^)]*\))?)?|"
     r"COMPLETED|CLOSED|CURRENT[-_\s]+DEV|CURRENT)"
@@ -12659,6 +12659,12 @@ def _strip_simple_program_queue_state_trailers(text: str) -> str:
         previous = raw
         raw = _SIMPLE_QUEUE_STATE_TRAILER_RE.sub("", raw).rstrip()
     return raw.strip()
+
+
+def _simple_program_queue_state_trailer(text: str) -> str:
+    """Return the trailing queue state without including the entry identity."""
+    match = _SIMPLE_QUEUE_STATE_TRAILER_RE.search(str(text or "").strip())
+    return match.group("state").strip() if match else ""
 
 
 def _simple_program_queue_explicit_label_wave_id(label: str) -> str:
@@ -13041,6 +13047,9 @@ def _simple_program_queue_entries(
         queue_text = " ".join(part for part in (label, tail) if part).strip()
         if not queue_text:
             continue
+        state = queue_text
+        if baton_match:
+            state = _simple_program_queue_state_trailer(label) or queue_text
         explicit_label_wave_id = _simple_program_queue_explicit_label_wave_id(label)
         wave_id = _simple_program_queue_wave_id(label, tail)
         if wave_id in existing_wave_ids:
@@ -13073,7 +13082,7 @@ def _simple_program_queue_entries(
         entries.append(
             {
                 "label": label,
-                "state": queue_text,
+                "state": state,
                 "wave_id": wave_id,
                 "derived_wave_id": _simple_program_queue_wave_id(label, tail),
                 "explicit_label_wave_id": explicit_label_wave_id,
