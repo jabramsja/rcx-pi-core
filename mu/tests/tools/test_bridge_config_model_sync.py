@@ -127,17 +127,17 @@ def test_committed_codex_menu_and_fallback_metadata_are_gpt_56_sol_ultra():
         == expected_codex
     )
 
-    assert committed["role_agents"] == {"implementer": "claude", "reviewer": "claude"}
+    assert committed["role_agents"] == {"implementer": "codex", "reviewer": "codex"}
     assert committed["backends"] == {
-        "post_merge_supervisor": "claude",
-        "dialectic_executor": "claude",
-        "phase_a_executor": "claude",
-        "phase_b_executor": "claude",
-        "bot_remediation": "claude",
+        "post_merge_supervisor": "codex",
+        "dialectic_executor": "codex",
+        "phase_a_executor": "codex",
+        "phase_b_executor": "codex",
+        "bot_remediation": "codex",
         "commit_executor": None,
     }
-    assert committed["bridge_reviewers"] == {"phase_a": "claude", "phase_b": "claude"}
-    assert committed["pipeline_agent_pager"] == {"enabled": True, "route": "claude"}
+    assert committed["bridge_reviewers"] == {"phase_a": "codex", "phase_b": "codex"}
+    assert committed["pipeline_agent_pager"] == {"enabled": True, "route": "codex"}
 
 
 def test_sync_corrects_model_drift(tmp_path):
