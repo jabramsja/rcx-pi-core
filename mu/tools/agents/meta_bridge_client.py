@@ -219,6 +219,15 @@ def run_meta_bridge_package(
             f"Last error: {last_error}"
         )
 
+    # Reject incomplete envelopes before decision validation or any receipt-capable
+    # branch can mint commit authority.
+    _required_attrs = ("decision", "summary", "status")
+    for attr in _required_attrs:
+        if not hasattr(response, attr) or getattr(response, attr) is None:
+            raise MetaBridgeClientError(
+                f"Supervisor response missing required field: {attr}"
+            )
+
     # Validate the decision is real, not a template placeholder
     _validate_decision(response.decision)
 
@@ -256,14 +265,6 @@ def run_meta_bridge_package(
                 f"Cannot convert receipt path to repo-relative — fail closed. "
                 f"absolute={exact_receipt_path}, error={exc}"
             ) from exc
-
-    # Validate envelope has required fields before constructing result
-    _required_attrs = ("decision", "summary", "status")
-    for attr in _required_attrs:
-        if not hasattr(response, attr) or getattr(response, attr) is None:
-            raise MetaBridgeClientError(
-                f"Supervisor response missing required field: {attr}"
-            )
 
     return SupervisorResult(
         decision=response.decision,
