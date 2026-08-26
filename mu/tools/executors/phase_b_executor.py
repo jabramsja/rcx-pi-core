@@ -8966,7 +8966,9 @@ def run_phase_b(
         )
         current_scope_fingerprint = _bridge_scope_fingerprint(repo_root, changed_files)
         saved_scope_fingerprint = (saved_state or {}).get("bridge_scope_fingerprint")
-        refresh_reentry_findings = saved_scope_fingerprint != current_scope_fingerprint
+        refresh_reentry_findings = bool(
+            (saved_state or {}).get("refresh_reentry_findings")
+        ) or saved_scope_fingerprint != current_scope_fingerprint
         if refresh_reentry_findings:
             findings_for_impl = "Refresh bridge findings from the current worktree before re-invoking the implementer."
             log("NEEDS_PHASE_B resume checkpoint drifted or lacked scope fingerprint; refreshing bridge findings first")
@@ -9501,7 +9503,11 @@ def run_phase_b(
         # Re-entry: implementer fixes → bridge reviews → loop
         log("NEEDS_PHASE_B — re-invoking implementer then bridge loop")
         reentry_converged = _resume_reentry_private_attr_review
-        bridge_decision = str((saved_state or {}).get("last_reentry_bridge_decision") or "")
+        bridge_decision = (
+            ""
+            if refresh_reentry_findings
+            else str((saved_state or {}).get("last_reentry_bridge_decision") or "")
+        )
         # Initial findings come from supervisor; subsequent rounds use bridge findings
         findings_for_impl = result.get("pre_commit_summary") or supervisor_parsed.get("summary", "Fix required")
 
@@ -9526,6 +9532,7 @@ def run_phase_b(
                 "finding_history": finding_history,
                 "reentry_findings": findings_for_impl,
                 "last_reentry_bridge_decision": bridge_decision,
+                "refresh_reentry_findings": refresh_reentry_findings,
                 "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
             })
 
