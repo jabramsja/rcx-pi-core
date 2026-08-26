@@ -876,6 +876,166 @@ def test_post_merge_package_refresh_does_not_skip_simple_queue_item_from_precomm
     assert "W-types / inductive types" in package["tracker_state_summary"]
 
 
+def test_post_merge_package_refresh_orders_unnumbered_batons_before_numbered_row(
+    tmp_path,
+):
+    repo = _init_repo(tmp_path)
+    landed_wave = "landed-queue-prerequisite-2026-08-26"
+    provider_isolation_wave = "test-provider-isolation-root-r3-2026-08-26"
+    hybrid_reader_wave = "hybrid-reader-terminality-prerequisite-r1-2026-08-26"
+    hybrid_reader_packet = f"reports/control_plane/{hybrid_reader_wave}.md"
+    numbered_wave = (
+        "roles-all-codex-pr1219-p0ibrrcp-normal-root-recorded-child-cleanup"
+    )
+    _write_program_queue_packet(
+        repo,
+        hybrid_reader_packet,
+        wave_id=hybrid_reader_wave,
+        status="QUEUED - AFTER PROVIDER ISOLATION",
+    )
+    _write_program_queue_config(
+        repo,
+        wave_id=hybrid_reader_wave,
+        title="Hybrid Reader Terminality",
+        tracked_packet=hybrid_reader_packet,
+    )
+    (repo / "TASKS.md").write_text(
+        (
+            "**Unnumbered prerequisite baton — outside-section decoy NEXT**\n\n"
+            "## PROGRAM QUEUE (priority order)\n\n"
+            f"**Unnumbered prerequisite baton — [{landed_wave.upper()}] LANDED**\n"
+            "**Unnumbered landed prerequisite — ignored landed prose**\n"
+            "**Unnumbered arbitrary baton — ignored arbitrary prose**\n"
+            "**Unnumbered prerequisite baton — "
+            f"[{provider_isolation_wave.upper()}] NEXT**\n"
+            "**Unnumbered prerequisite baton — hybrid-reader terminality NEXT**\n"
+            "**Unnumbered reconstruction baton — "
+            "provider-neutral bridge context AFTER BOTH**\n"
+            "23. **[ROLES-ALL-CODEX-PR1219-P0IBRRCP-NORMAL-ROOT-RECORDED-CHILD-CLEANUP] NEXT**\n\n"
+            "## NON-LAUNCHABLE PROGRAM GOVERNANCE AND HISTORY\n\n"
+            "**Unnumbered reconstruction baton — outside-section reconstruction NEXT**\n"
+        ),
+        encoding="utf-8",
+    )
+
+    entries = commit_mod._simple_program_queue_entries(  # ANTICHEAT_OK: exact parser ordering regression
+        repo,
+        existing_wave_ids=set(),
+    )
+    assert [entry["wave_id"] for entry in entries] == [
+        landed_wave,
+        provider_isolation_wave,
+        hybrid_reader_wave,
+        "provider-neutral-bridge-context",
+        numbered_wave,
+    ]
+    assert entries[3]["queue_text"] == "provider-neutral bridge context AFTER BOTH"
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: unnumbered queue ordering regression
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "1248"},
+        merge_sha="provider-isolation-predecessor",
+        log=_noop_log,
+    )
+    assert package["wave_name"] == provider_isolation_wave
+
+    _merge_wave_with_pr(repo, wave_id=provider_isolation_wave, pr_number=1249)
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: completed baton skip regression
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "1249"},
+        merge_sha="provider-isolation-merge",
+        log=_noop_log,
+    )
+    assert package["wave_name"] == hybrid_reader_wave
+    assert package["next_candidates"][0]["tracked_packet"] == hybrid_reader_packet
+
+    _merge_wave_with_pr(repo, wave_id=hybrid_reader_wave, pr_number=1250)
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: reconstruction baton ordering regression
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "1250"},
+        merge_sha="hybrid-reader-merge",
+        log=_noop_log,
+    )
+    assert package["wave_name"] == "provider-neutral-bridge-context"
+    assert "AFTER BOTH" in package["tracker_state_summary"]
+    assert numbered_wave not in json.dumps(package)
+
+
+def test_exact_commit_post_merge_package_refresh_skips_merged_self_baton_and_selects_provider_isolation_r3(
+    tmp_path,
+):
+    repo = _init_repo(tmp_path)
+    (repo / ".gitignore").write_text(".agent_bus/\n", encoding="utf-8")
+    _git(["add", ".gitignore"], cwd=repo)
+    _git(["commit", "-m", "ignore active bus output"], cwd=repo)
+
+    queue_fix_wave = "p0ibrrcp-postmerge-baton-queue-r1-2026-08-26"
+    provider_isolation_wave = "test-provider-isolation-root-r3-2026-08-26"
+    numbered_wave = (
+        "roles-all-codex-pr1219-p0ibrrcp-normal-root-recorded-child-cleanup"
+    )
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            "**Unnumbered prerequisite baton — "
+            f"[{queue_fix_wave.upper()}] CURRENT**\n"
+            "**Unnumbered prerequisite baton — "
+            f"[{provider_isolation_wave.upper()}] NEXT**\n"
+            "**Unnumbered prerequisite baton — hybrid-reader terminality NEXT**\n"
+            "**Unnumbered reconstruction baton — "
+            "provider-neutral bridge context AFTER BOTH**\n"
+            "23. **[ROLES-ALL-CODEX-PR1219-P0IBRRCP-NORMAL-ROOT-RECORDED-CHILD-CLEANUP] NEXT**\n\n"
+            "## NON-LAUNCHABLE PROGRAM GOVERNANCE AND HISTORY\n"
+        ),
+        encoding="utf-8",
+    )
+    _git(["add", "TASKS.md"], cwd=repo)
+    _git(["commit", "-m", "record baton queue authority"], cwd=repo)
+    _merge_wave_with_pr(repo, wave_id=queue_fix_wave, pr_number=1248)
+    authority_sha = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+
+    # Contradict the live filesystem after the exact merge. The SHA-qualified
+    # queue read must neither select this numbered row nor rewrite live TASKS.
+    (repo / "TASKS.md").write_text(
+        (
+            "## PROGRAM QUEUE (priority order)\n\n"
+            "23. **[ROLES-ALL-CODEX-PR1219-P0IBRRCP-NORMAL-ROOT-RECORDED-CHILD-CLEANUP] CURRENT**\n\n"
+            "## NON-LAUNCHABLE PROGRAM GOVERNANCE AND HISTORY\n"
+        ),
+        encoding="utf-8",
+    )
+    live_tasks = (repo / "TASKS.md").read_bytes()
+    live_status = _git(
+        ["status", "--porcelain=v1", "--untracked-files=all"], cwd=repo
+    ).stdout
+    live_entry = commit_mod._next_open_founder_ordered_queue_entry(repo)  # ANTICHEAT_OK: contradictory live queue proof
+    assert live_entry is not None
+    assert live_entry["wave_id"] == numbered_wave
+
+    result = {"pr_number": "1248"}
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: exact merge self-skip regression
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result=result,
+        merge_sha=authority_sha,
+        log=_noop_log,
+        queue_commit_sha=authority_sha,
+    )
+
+    assert package["merge_sha"] == authority_sha
+    assert package["wave_name"] == provider_isolation_wave
+    assert package["next_candidates"][0]["candidate"] == provider_isolation_wave
+    assert numbered_wave not in json.dumps(package)
+    assert result["post_merge_next_wave"] == provider_isolation_wave
+    assert (repo / "TASKS.md").read_bytes() == live_tasks
+    assert _git(
+        ["status", "--porcelain=v1", "--untracked-files=all"], cwd=repo
+    ).stdout == live_status
+
+
 def test_post_merge_package_refresh_uses_exact_commit_over_stale_dirty_tree(tmp_path):
     repo = _init_repo(tmp_path)
     (repo / ".gitignore").write_text(".agent_bus/\n", encoding="utf-8")
