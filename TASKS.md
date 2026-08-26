@@ -5,11 +5,11 @@ If a task is not listed here, it is NOT to be implemented.
 
 ---
 
-## PROGRAM QUEUE (priority order -- refreshed 2026-08-25 PR1219 P0IBRRCP shared-envelope-framing R4A2 current/next baton)
+## PROGRAM QUEUE (priority order -- refreshed 2026-08-25 PR1219 P0IBRRCP re-entry decision resume-context R2 current/next baton)
 
-Live repository truth at this refresh: `origin/dev == 926aee9de7b5cdd00c0fd72176ed7038b6ff89a0` (PR #1243, P0IBRRCP Phase B disposition authority, merged 2026-08-25). The predecessor chain now contains P0IC0 at PR #1220 (`4d69a3a4`, theater allowlist expiry renewal), P0IC1 at PR #1221 (`2ba6847a`, linked-worktree repo identity), P0IC2 at PR #1222 (`0b000e7b`, commit-generated governance authority), P0IC3 at PR #1224 (`7f13c4f`, idempotent generated-governance continuation), P0IC4R/P0IC4S at PR #1225 (`8fd5c898c8f18232e42a84356e29fd7150df1b99`, TASKS base-authority plus dispatch test repair), P0IA at PR #1223 (`0ccf8d18cb5149926e62d75a1b392120db9cfd32`, pre-review candidate authority), P0IAH at PR #1226 (`1a6c47371ec0b9829ea6023943d708dc573e3939`, candidate-authority trust-ordering hardening), P0IAR at PR #1227 (`01e0cf774aef8ac1b272df24ad9ad159b9ec0a1a`, canonical Phase B review receipt), P0IX at PR #1228 (`1a18a2e3146c0f573e7c71fdb0a42ab0d3899300`, Phase B control-path prerequisite), P0IMQ at PR #1229 (`08060fb8c09aaef32f82b24ad76431db1fe657fd`, program queue truth recovery), P0IMF at PR #1230 (`d609cf19b9d71411de2bbdfd5eb8aca9e7009e90`, launch-bound model authority freeze), P0IMQR at PR #1231 (`14f3bc4acc828e49ba3d8c6c251bc8e899f97837`, current-row identity), combined PR #1233 (`c0bcd910d5e835411b23ac56c830819356161a5b`, containing P0IMRPA commit `7e95e66d`, P0IMRPAS commit `ff2e0304`, and P0IMRPAT commit `97694300`), P0IMRP at PR #1234 (`3944a786d75709ee16433f0db785ba5a49160e11`, receipt model provenance activation), the target-role test-fixture prerequisite at PR #1235 (`e8cdfe69513c48e02712d72cabf5781f4482c656`), target-role authority activation at PR #1236 (`79e0bb59c8c035370fb2232c65526989cc4f5e5d`), recovery stdout provenance at PR #1237 (`ab0b58db13f8dc97b73acf17f3720380ae6e3630`), recovery delegate bus authority at PR #1238 (`e1ff9298c29f08f86d9ce8d1286db5d59526de9e`), launch source common-dir authority at PR #1239 (`2dde40675b3d7032b616e1855ebe64ccd0f7b32f`), P0IM at PR #1240 (`15356f3971ad3480b9d52271f2396a41c45541e7`), fetched-tree queue authority at PR #1241 (`e5b616ba612560d74dbca1d4c72b2021b0f7b80a`), P0IBRRQ2 at PR #1242 (`d59c591a7f802c3cfcd744a30e0edb2dd8d56760`), and disposition authority at PR #1243 (`926aee9de7b5cdd00c0fd72176ed7038b6ff89a0`). P0IMQ is the landed queue-truth transition recorded by the 2026-08-22 tracker note and governing packet; it is not a numbered PROGRAM QUEUE candidate. PR #1243 is landed, shared-envelope-framing R4A2 is the sole parser-visible CURRENT row, and provider-terminal R4B is its sole numbered immediate NEXT row. Root-exit R4C and remaining envelope-validation R3 are serialized nonlaunching obligations after R4B; every later P0IBRRCP and P0IB obligation remains serialized until its exact predecessor lands, and P0T1 plus the later queue remain behind them. P0L round-2 findings 15-17 and P0R findings 11-25 remain deferred/nonblocking and must never hold a landing. The old theater structural priority insertion is historical because its repair landed in PR #1215; P0IC0 was the distinct data-only expiry renewal needed to reopen pre-push and CI and does not close or rewrite `[THEATER-RATCHET-EXPIRY-POLICY] POLICY_BOUND`.
+Live repository truth at this refresh: `origin/dev == f5bcbd0a64de9e385680ba8313de9ddfc01e9445` (PR #1244, P0IBRRCP shared-envelope-framing R4A2, merged 2026-08-25). The predecessor chain now contains P0IC0 at PR #1220 (`4d69a3a4`, theater allowlist expiry renewal), P0IC1 at PR #1221 (`2ba6847a`, linked-worktree repo identity), P0IC2 at PR #1222 (`0b000e7b`, commit-generated governance authority), P0IC3 at PR #1224 (`7f13c4f`, idempotent generated-governance continuation), P0IC4R/P0IC4S at PR #1225 (`8fd5c898c8f18232e42a84356e29fd7150df1b99`, TASKS base-authority plus dispatch test repair), P0IA at PR #1223 (`0ccf8d18cb5149926e62d75a1b392120db9cfd32`, pre-review candidate authority), P0IAH at PR #1226 (`1a6c47371ec0b9829ea6023943d708dc573e3939`, candidate-authority trust-ordering hardening), P0IAR at PR #1227 (`01e0cf774aef8ac1b272df24ad9ad159b9ec0a1a`, canonical Phase B review receipt), P0IX at PR #1228 (`1a18a2e3146c0f573e7c71fdb0a42ab0d3899300`, Phase B control-path prerequisite), P0IMQ at PR #1229 (`08060fb8c09aaef32f82b24ad76431db1fe657fd`, program queue truth recovery), P0IMF at PR #1230 (`d609cf19b9d71411de2bbdfd5eb8aca9e7009e90`, launch-bound model authority freeze), P0IMQR at PR #1231 (`14f3bc4acc828e49ba3d8c6c251bc8e899f97837`, current-row identity), combined PR #1233 (`c0bcd910d5e835411b23ac56c830819356161a5b`, containing P0IMRPA commit `7e95e66d`, P0IMRPAS commit `ff2e0304`, and P0IMRPAT commit `97694300`), P0IMRP at PR #1234 (`3944a786d75709ee16433f0db785ba5a49160e11`, receipt model provenance activation), the target-role test-fixture prerequisite at PR #1235 (`e8cdfe69513c48e02712d72cabf5781f4482c656`), target-role authority activation at PR #1236 (`79e0bb59c8c035370fb2232c65526989cc4f5e5d`), recovery stdout provenance at PR #1237 (`ab0b58db13f8dc97b73acf17f3720380ae6e3630`), recovery delegate bus authority at PR #1238 (`e1ff9298c29f08f86d9ce8d1286db5d59526de9e`), launch source common-dir authority at PR #1239 (`2dde40675b3d7032b616e1855ebe64ccd0f7b32f`), P0IM at PR #1240 (`15356f3971ad3480b9d52271f2396a41c45541e7`), fetched-tree queue authority at PR #1241 (`e5b616ba612560d74dbca1d4c72b2021b0f7b80a`), P0IBRRQ2 at PR #1242 (`d59c591a7f802c3cfcd744a30e0edb2dd8d56760`), disposition authority at PR #1243 (`926aee9de7b5cdd00c0fd72176ed7038b6ff89a0`), and shared-envelope-framing R4A2 at PR #1244 (`f5bcbd0a64de9e385680ba8313de9ddfc01e9445`). P0IMQ is the landed queue-truth transition recorded by the 2026-08-22 tracker note and governing packet; it is not a numbered PROGRAM QUEUE candidate. PR #1244 is landed, re-entry decision resume-context prerequisite R2 is the sole parser-visible CURRENT row, and normal-exit recorded-child cleanup is its sole numbered immediate NEXT row. Fresh PBNOGO reconstruction, auto-defer timeout R3, recovery-timeout environment containment, provider-terminal R4B, root-exit R4C, and remaining envelope-validation R3 are serialized nonlaunching obligations in that exact order; every later P0IBRRCP and P0IB obligation remains serialized until its exact predecessor lands, and P0T1 plus the later queue remain behind them. P0L round-2 findings 15-17 and P0R findings 11-25 remain deferred/nonblocking and must never hold a landing. The old theater structural priority insertion is historical because its repair landed in PR #1215; P0IC0 was the distinct data-only expiry renewal needed to reopen pre-push and CI and does not close or rewrite `[THEATER-RATCHET-EXPIRY-POLICY] POLICY_BOUND`.
 
-P0IAH landed through PR #1226, P0IAR landed through PR #1227, P0IX landed through PR #1228, P0IMQ landed through PR #1229, P0IMF landed through PR #1230, P0IMQR landed through PR #1231, the combined P0IMRPA/P0IMRPAS/P0IMRPAT history landed through PR #1233 at `c0bcd910d5e835411b23ac56c830819356161a5b`, fresh P0IMRP producer/consumer activation landed through PR #1234 at `3944a786d75709ee16433f0db785ba5a49160e11`, the target-role test-fixture prerequisite landed through PR #1235 at `e8cdfe69513c48e02712d72cabf5781f4482c656`, target-root bot-remediation role-authority activation landed through PR #1236 at `79e0bb59c8c035370fb2232c65526989cc4f5e5d`, recovery stdout provenance landed through PR #1237 at `ab0b58db13f8dc97b73acf17f3720380ae6e3630`, recovery delegate bus authority landed through PR #1238 at `e1ff9298c29f08f86d9ce8d1286db5d59526de9e`, launch source common-dir authority landed through PR #1239 at `2dde40675b3d7032b616e1855ebe64ccd0f7b32f`, P0IM landed through PR #1240 at `15356f3971ad3480b9d52271f2396a41c45541e7`, fetched-tree queue authority landed through PR #1241 at `e5b616ba612560d74dbca1d4c72b2021b0f7b80a`, P0IBRRQ2 landed through PR #1242 at `d59c591a7f802c3cfcd744a30e0edb2dd8d56760`, and disposition authority landed through PR #1243 at exact merge `926aee9de7b5cdd00c0fd72176ed7038b6ff89a0`. The first live P0IMRP attempt after PR #1231 is preserved as stopped/rescoped evidence because it exposed the deterministic candidate-authority self-schema bootstrap boundary. P0IMRPA is landed as the predecessor-authorized parser/writer/verifier bootstrap under the predecessor receipt schema, and PR #1234 owns the first honest live new-schema receipt proof. The later target-role-authority attempt is PRESERVED_RESCOPED_NOT_COMPLETE: it reached local commit `2550e2c18b65edd1c4aa24c0edcaf1b9bff0b933` in the preserved worktree/branch/bus, was never pushed, failed pre-push on exactly two tests because synthetic Step-15 target repos lacked executor_config.json, and then exhausted three zero-token recovery attempts because aggregate stdout carried historical bridge-config wording. The old worktree, branch, bus, local commit, and retry state remain immutable evidence. Recovery stdout provenance, recovery delegate bus authority, and launch source common-dir authority have landed; the P0IM restart-2 lane is now PRESERVED_RESCOPED_NOT_COMPLETE after its unrelated launcher-source/common-dir commit failure and wrong-bus recovery-delegate evidence. Fresh P0IM restart-3 landed through PR #1240 at `15356f3971ad3480b9d52271f2396a41c45541e7`; fetched-tree queue authority landed through PR #1241 at `e5b616ba612560d74dbca1d4c72b2021b0f7b80a`; P0IBRRQ2 landed through PR #1242 at `d59c591a7f802c3cfcd744a30e0edb2dd8d56760`; disposition authority landed through PR #1243 at `926aee9de7b5cdd00c0fd72176ed7038b6ff89a0`; shared-envelope-framing R4A2 is now the sole CURRENT queue authority; provider-terminal R4B is the sole immediate NEXT; root-exit R4C and remaining envelope-validation R3 follow serially; every later obligation remains nonlaunching until promoted by exact predecessor landing; and no deferred finding or non-occurring edge may hold a landing.
+P0IAH landed through PR #1226, P0IAR landed through PR #1227, P0IX landed through PR #1228, P0IMQ landed through PR #1229, P0IMF landed through PR #1230, P0IMQR landed through PR #1231, the combined P0IMRPA/P0IMRPAS/P0IMRPAT history landed through PR #1233 at `c0bcd910d5e835411b23ac56c830819356161a5b`, fresh P0IMRP producer/consumer activation landed through PR #1234 at `3944a786d75709ee16433f0db785ba5a49160e11`, the target-role test-fixture prerequisite landed through PR #1235 at `e8cdfe69513c48e02712d72cabf5781f4482c656`, target-root bot-remediation role-authority activation landed through PR #1236 at `79e0bb59c8c035370fb2232c65526989cc4f5e5d`, recovery stdout provenance landed through PR #1237 at `ab0b58db13f8dc97b73acf17f3720380ae6e3630`, recovery delegate bus authority landed through PR #1238 at `e1ff9298c29f08f86d9ce8d1286db5d59526de9e`, launch source common-dir authority landed through PR #1239 at `2dde40675b3d7032b616e1855ebe64ccd0f7b32f`, P0IM landed through PR #1240 at `15356f3971ad3480b9d52271f2396a41c45541e7`, fetched-tree queue authority landed through PR #1241 at `e5b616ba612560d74dbca1d4c72b2021b0f7b80a`, P0IBRRQ2 landed through PR #1242 at `d59c591a7f802c3cfcd744a30e0edb2dd8d56760`, disposition authority landed through PR #1243 at exact merge `926aee9de7b5cdd00c0fd72176ed7038b6ff89a0`, and shared-envelope-framing R4A2 landed through PR #1244 at exact merge `f5bcbd0a64de9e385680ba8313de9ddfc01e9445`. The first live P0IMRP attempt after PR #1231 is preserved as stopped/rescoped evidence because it exposed the deterministic candidate-authority self-schema bootstrap boundary. P0IMRPA is landed as the predecessor-authorized parser/writer/verifier bootstrap under the predecessor receipt schema, and PR #1234 owns the first honest live new-schema receipt proof. The later target-role-authority attempt is PRESERVED_RESCOPED_NOT_COMPLETE: it reached local commit `2550e2c18b65edd1c4aa24c0edcaf1b9bff0b933` in the preserved worktree/branch/bus, was never pushed, failed pre-push on exactly two tests because synthetic Step-15 target repos lacked executor_config.json, and then exhausted three zero-token recovery attempts because aggregate stdout carried historical bridge-config wording. The old worktree, branch, bus, local commit, and retry state remain immutable evidence. Recovery stdout provenance, recovery delegate bus authority, and launch source common-dir authority have landed; the P0IM restart-2 lane is now PRESERVED_RESCOPED_NOT_COMPLETE after its unrelated launcher-source/common-dir commit failure and wrong-bus recovery-delegate evidence. Fresh P0IM restart-3 landed through PR #1240 at `15356f3971ad3480b9d52271f2396a41c45541e7`; fetched-tree queue authority landed through PR #1241 at `e5b616ba612560d74dbca1d4c72b2021b0f7b80a`; P0IBRRQ2 landed through PR #1242 at `d59c591a7f802c3cfcd744a30e0edb2dd8d56760`; disposition authority landed through PR #1243 at `926aee9de7b5cdd00c0fd72176ed7038b6ff89a0`; shared-envelope-framing R4A2 landed through PR #1244 at exact merge `f5bcbd0a64de9e385680ba8313de9ddfc01e9445`; re-entry decision resume-context prerequisite R2 is now the sole CURRENT queue authority; normal-exit recorded-child cleanup is the sole immediate NEXT; fresh PBNOGO reconstruction, auto-defer timeout R3, recovery-timeout environment containment, provider-terminal R4B, root-exit R4C, remaining envelope-validation R3, and then fresh reviewer-causality R4 follow serially; every later obligation remains nonlaunching until promoted by exact predecessor landing; and no deferred finding or non-occurring edge may hold a landing.
 
 Execution constraint: follow `FOUNDER_SESSION_BOOTSTRAP.md`; launch waves through the pipeline only, never manually. Use parallel pipeline lanes when safe. Structural conversion belongs in Mu/projections, with no new host-authority sites. If a pipeline failure needs a manual unblock, the same wave must also run or queue a root structural pipeline fix in the appropriate builder, dispatcher, recovery, commit, or pre-commit surface so the failure mode is permanently handled.
 
@@ -103,177 +103,195 @@ Execution constraint: follow `FOUNDER_SESSION_BOOTSTRAP.md`; launch waves throug
 
    Landed through PR #1243 at exact merge `926aee9de7b5cdd00c0fd72176ed7038b6ff89a0`. It owns only the shared Phase B/recovery disposition-authority prerequisite exposed by preserved reviewer-causality R3. Do not relaunch or widen it.
 
-21. **[pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25] CURRENT**
+21. **[pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25] LANDED (PR #1244, `f5bcbd0a64de9e385680ba8313de9ddfc01e9445`)**
 
    Task: `[ROLES-ALL-CODEX-PR1219-P0IBRRCP-SHARED-ENVELOPE-FRAMING-R4A2]`. Wave: `pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25`. Class: `L4_ENABLER`. Category: PROGRAM QUEUE. Packet: `reports/control_plane/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25_2026-08-25.md`.
 
-   Reconstruct fresh from exact PR #1243 merge authority. Land only one adapter-owned marker-safe decoded-value framing stream reused by adapter early-stop and supervisor parsing, plus adapter all-nine-key completeness and shared type-safe decision gates. The preserved envelope R1/R2, adapter R1/R2/R3, and framing R4A lanes are immutable noncomplete evidence, not source authority. After this row lands, the strict sequence is provider-terminal R4B -> root-exit R4C -> remaining envelope-validation R3 -> fresh reviewer-causality R4 -> commit-evidence R2 -> Phase-B evidence handoff R2 -> fresh routing R4 -> R3C5 -> R3C6 -> exact P0IBRRCP closure -> P0IBRRCO -> P0IBRRC -> P0IBRRT -> P0IBRR -> P0IB1 -> P0IB2. R3C5 and R3C6 remain bridge-fix replay prerequisites and do not themselves satisfy the later P0IBRRCO obligation.
+   Landed through PR #1244 at exact merge `f5bcbd0a64de9e385680ba8313de9ddfc01e9445`. It owns only the adapter-owned marker-safe decoded-value framing stream shared by adapter early-stop and supervisor parsing, adapter all-nine-key completeness, and shared type-safe decision gates. The preserved envelope R1/R2, adapter R1/R2/R3, and framing R4A lanes remain immutable noncomplete evidence, not source authority. Do not relaunch or widen R4A2.
 
-22. **[pr1219-p0ibrrcp-provider-terminal-r4b-2026-08-25] NEXT**
+22. **[pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25] CURRENT**
 
-   Task: `[ROLES-ALL-CODEX-PR1219-P0IBRRCP-PROVIDER-TERMINAL-R4B]`. Wave: `pr1219-p0ibrrcp-provider-terminal-r4b-2026-08-25`. Build and launch a fresh packet only after the exact merge of the CURRENT row, pin it to that actual merge SHA, and scope it only to provider-terminal authority. Root-exit R4C then remaining envelope-validation R3 stay serialized, nonnumbered, and nonlaunching until each exact predecessor lands. Never resume, copy, or mutate a preserved candidate.
+   Task: `[PBNOGO-INTEGRATION]`. Wave: `pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25`. Class: `L4_ENABLER`. Category: PROGRAM QUEUE. Packet: `reports/control_plane/pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25_2026-08-25.md`.
+
+   Reconstructed fresh from exact PR #1244 merge authority. Land only durable propagation of an already-saved `REQUEST_CHANGES` or `NO_GO` decision and exact findings through the first unchanged-scope resumed correction prompt and its pre-invocation checkpoint. The stopped resume-context R1 and all earlier stopped prerequisites remain immutable noncomplete evidence, not source authority.
+
+23. **[ROLES-ALL-CODEX-PR1219-P0IBRRCP-NORMAL-ROOT-RECORDED-CHILD-CLEANUP] NEXT**
+
+   Reconstruct the normal-exit recorded-child cleanup fresh only after the exact merge of the CURRENT row, pin it to that actual merge SHA, and preserve all stopped normal-return/recorded-child candidates as immutable noncomplete evidence. This is the sole numbered immediate NEXT row. After it lands, the strict sequence is fresh PBNOGO reconstruction -> auto-defer timeout R3 -> recovery-timeout environment containment -> provider-terminal R4B -> root-exit R4C -> remaining envelope-validation R3 -> fresh reviewer-causality R4 -> commit-evidence R2 -> Phase-B evidence handoff R2 -> fresh routing R4 -> R3C5 -> R3C6 -> exact P0IBRRCP closure -> P0IBRRCO -> P0IBRRC -> P0IBRRT -> P0IBRR -> P0IB1 -> P0IB2. R3C5 and R3C6 remain bridge-fix replay prerequisites and do not themselves satisfy the later P0IBRRCO obligation.
+
+24. **[PBNOGO-INTEGRATION] NEXT**
+
+   Preserve blocking `NO_GO`/`REQUEST_CHANGES`; defer only findings from a `GO` path; preserve terminal founder `QUESTION`; do not loop. This is the canonical alias for `phase-b-no-go-deferral-hardening-2026-06-30` and must not be duplicated. Reconstruct the stopped PBNOGO R1 scope fresh only after exact normal-exit cleanup merge authority.
+
+25. **[PR1219-P0IBRRCP-AUTO-DEFER-TIMEOUT-ONLY-PREREQ-R3] NEXT**
+
+   Reconstruct the auto-defer timeout repair fresh only after exact PBNOGO merge authority. Preserve stopped auto-defer R1/R2 as immutable noncomplete evidence; do not resume, copy, or mutate either candidate.
+
+26. **[PR1219-P0IBRRCP-RECOVERY-TIMEOUT-ENV-CONTAINMENT-PREREQ-R1] NEXT**
+
+   Land only commit-validation recovery-timeout environment containment after exact auto-defer timeout R3 merge authority. Keep provider-terminal, root-exit, convergence, and unrelated recovery behavior outside this prerequisite.
+
+27. **[pr1219-p0ibrrcp-provider-terminal-r4b-2026-08-25] NEXT**
+
+   Task: `[ROLES-ALL-CODEX-PR1219-P0IBRRCP-PROVIDER-TERMINAL-R4B]`. Wave: `pr1219-p0ibrrcp-provider-terminal-r4b-2026-08-25`. Build and launch a fresh packet only after the exact merge of recovery-timeout containment, pin it to that actual merge SHA, and scope it only to provider-terminal authority. Root-exit R4C then remaining envelope-validation R3 stay serialized, nonnumbered, and nonlaunching until each exact predecessor lands. Never resume, copy, or mutate a preserved candidate.
 
    Canonical broad-P0IB requirement mapping (preserved here but not numbered or launchable): together P0IB1 and P0IB2 extend the same candidate-authority builder through commit/recovery. P0IB1 must preserve or rebuild landed authority through recovery without importing untrusted candidate code. P0IB2 must rebuild and bind the exact-base inventory after every Step-5/5e mutation, before pre-commit supervision, then perform a nonmutating receipt/index recheck immediately before `git commit`. Stale receipts, outside-allowlist paths, missing same-wave generated artifacts, or index drift must fail closed.
 
    P0IB broad alias: Task `[ROLES-ALL-CODEX-PR1219-P0IB-PRECOMMIT-INVENTORY-AUTHORITY]` is preserved by P0IB1 and P0IB2 and is not separately launchable.
 
-23. **[ROLES-ALL-CODEX-PR1219-P0T1-TERMINAL-IDENTITY-QUESTION-JOURNAL] NEXT**
+28. **[ROLES-ALL-CODEX-PR1219-P0T1-TERMINAL-IDENTITY-QUESTION-JOURNAL] NEXT**
 
    After P0IB, land only P0L round-2 runtime findings 3, 4, and 7. Wave: `roles-all-codex-pr1219-p0t1-terminal-identity-question-journal-2026-08-20`. Validate the named bus before reading terminal state; bind plan identity path-canonically so a same-inode alias cannot erase founder authority; and journal a reviewer `QUESTION` before fallible cleanup can make it replayable. Recover only the exact wave/plan/invocation terminal result.
 
-24. **[ROLES-ALL-CODEX-PR1219-P0T2-PRIVATE-REVIEW-DURABILITY] NEXT**
+29. **[ROLES-ALL-CODEX-PR1219-P0T2-PRIVATE-REVIEW-DURABILITY] NEXT**
 
    After P0T1, land only P0L round-2 runtime findings 5 and 6. Wave: `roles-all-codex-pr1219-p0t2-private-review-durability-2026-08-20`. Persist owed post-fix review authority before private-attribute mutation can escape, and retain that authority across re-entry remediation/retry errors. Resume must neither replay the implementer nor skip the mandatory review.
 
-25. **[ROLES-ALL-CODEX-PR1219-P0T3-PROCESS-TREE-CLOSURE] NEXT**
+30. **[ROLES-ALL-CODEX-PR1219-P0T3-PROCESS-TREE-CLOSURE] NEXT**
 
    After P0T2, land only P0L round-2 runtime finding 8 and the subsumed P0A/P0B process obligations. Wave: `roles-all-codex-pr1219-p0t3-process-tree-closure-2026-08-20`. Close the snapshot-before-exit gap so a fast bridge root or `on_started` failure cannot orphan detached descendants; prove normal, exceptional, and monitor-cleanup paths with real-process tests.
 
-26. **[ROLES-ALL-CODEX-PR1219-P0T4-INV2-SEMANTIC-PROOF] NEXT**
+31. **[ROLES-ALL-CODEX-PR1219-P0T4-INV2-SEMANTIC-PROOF] NEXT**
 
    After P0T3, land only P0L round-2 checker findings 9-14. Wave: `roles-all-codex-pr1219-p0t4-inv2-semantic-proof-2026-08-20`. Make INV-2 reject no-op/unreachable persistence, disabled identity or private-QUESTION guards, nonterminal founder returns, post-checkpoint replay/wrong returns, review-before-remediation, and a missing executor surface. Findings 15-17 remain deferred/nonblocking and cannot delay P0T4 or any successor.
 
-27. **[ROLES-ALL-CODEX-PR1219-P0R2-ROLE-MODEL-AUTHORITY] NEXT**
+32. **[ROLES-ALL-CODEX-PR1219-P0R2-ROLE-MODEL-AUTHORITY] NEXT**
 
    After P0T4 lands, create a fresh code-disjoint role/model packet from the preserved `28081acd74c549a7afd4292351b214228d45f451` candidate evidence and deliver the net live model-authority result on refreshed current `dev`. Wave: `roles-all-codex-pr1219-p0r2-role-model-authority-2026-08-20`. Scope only P0R reviewer findings 1-3: exact all-Codex role/pager routing, Codex `gpt-5.6-sol`/`ultra` authority, deterministic selector normalization, and the same-wave indicator with focused negative controls. Version-neutral Phase B provenance is owned by the P0T chain. Do not reabsorb terminal/process/checker work or findings 11-25. P0R2 must land before P1.
 
-28. **[ROLES-ALL-CODEX-PR1219-P1-BRIDGE-TERMINAL-REFUSAL] NEXT**
+33. **[ROLES-ALL-CODEX-PR1219-P1-BRIDGE-TERMINAL-REFUSAL] NEXT**
 
    After P0R2, reconstruct and land only terminal Codex refusal chronology and bridge reliability from the preserved PR1219 candidate. Wave: `roles-all-codex-pr1219-p1-bridge-terminal-refusal-2026-08-20`. Scope is the adapter/supervisor/prompt/config pair and their focused tests; a non-terminal refusal-shaped event followed by completion must not consume refusal authority.
 
-29. **[ROLES-ALL-CODEX-PR1219-P2-REVIEW-BINDING] NEXT**
+34. **[ROLES-ALL-CODEX-PR1219-P2-REVIEW-BINDING] NEXT**
 
    After P1, bind Phase B review to the post-preparation candidate and exact Git/worktree identity. Wave: `roles-all-codex-pr1219-p2-review-binding-2026-08-20`. Scope is Phase B, dispatcher checkpoint preservation, and focused tests; mode-only, index-only, file-type, and symlink-target drift must invalidate stale review.
 
-30. **[ROLES-ALL-CODEX-PR1219-P3-RECOVERY-CHECKPOINTS] NEXT**
+35. **[ROLES-ALL-CODEX-PR1219-P3-RECOVERY-CHECKPOINTS] NEXT**
 
    After P2, reconcile validator ownership, iteration reservation, unfinished hybrid checkpoints, and typed terminalization. Wave: `roles-all-codex-pr1219-p3-recovery-checkpoints-2026-08-20`. Do not include authority-key isolation or bridge code.
 
-31. **[ROLES-ALL-CODEX-PR1219-P4-RECOVERY-AUTHORITY-ISOLATION] NEXT**
+36. **[ROLES-ALL-CODEX-PR1219-P4-RECOVERY-AUTHORITY-ISOLATION] NEXT**
 
    After P3 and explicit founder rescope for `phase_b_implementer.py`, establish an OS-enforced boundary for recovery implementer/validator descendants and make authority-key access crash-stable. Wave: `roles-all-codex-pr1219-p4-recovery-authority-isolation-2026-08-20`. Unsupported isolation must fail closed before mutation.
 
-32. **[ROLES-ALL-CODEX-PR1219-P5-FINAL-RECONCILIATION] NEXT**
+37. **[ROLES-ALL-CODEX-PR1219-P5-FINAL-RECONCILIATION] NEXT**
 
    After P1-P4, reconcile every preserved PR1219 path/hunk and run the original owner validation exactly once with durable results. Wave: `roles-all-codex-pr1219-p5-final-reconciliation-2026-08-20`. This is docs/evidence-only; any missing code requirement creates one bounded follow-up. P5 owns final alias adjudication for the prior `[PIPELINE-FIX-38]` role/operator lineage rather than leaving a duplicate queue item.
 
-33. **[LAUNCH-WAVE-DETERMINISTIC-CANDIDATE-CARRY-FORWARD-BUILDER] NEXT**
+38. **[LAUNCH-WAVE-DETERMINISTIC-CANDIDATE-CARRY-FORWARD-BUILDER] NEXT**
 
    After P5, implement recurrence prevention from `reports/control_plane/launch-wave-deterministic-candidate-carry-forward-builder-2026-08-20_wave_config.json`. Wave: `launch-wave-deterministic-candidate-carry-forward-builder-2026-08-20`. It must generate deterministic content-addressed narrow-packet inputs and a complete hunk ledger without applying, staging, committing, launching, or hiding candidate bytes. It may reuse the landed P0IA/P0IB authority primitive, but it must not widen either prerequisite packet. Launch preparation must produce one canonical Phase-A-safe packet identity, or fail before dispatch; reviewed lock authority and Phase B handoff may never split across normalized alias/source files. This queued builder work must not enter or delay P0IMQR/P0IMRP/P0IM/P0IB.
 
-34. **[PHASE-A-POST-REMEDIATION-LINE-REF-PREBRIDGE-GUARD] NEXT**
+39. **[PHASE-A-POST-REMEDIATION-LINE-REF-PREBRIDGE-GUARD] NEXT**
 
    After the deterministic carry-forward builder, mechanize the already-created Phase A post-remediation line-reference pre-bridge guard so stale control-packet file/line citations cannot survive packet preparation or bridge entry. Keep this queued after the builder and before FIX61; it must not delay active P0IMQR, P0IMRP, P0IM, or P0IB landings.
 
-35. **[PIPELINE-FIX-61] NEXT**
+40. **[PIPELINE-FIX-61] NEXT**
 
    Replace the blind Phase A total-wall kill with bounded activity-aware supervision. A progressing design must not die only because total wall time elapsed; a genuinely silent child must terminate with exact evidence. Do not replace one constant with another.
 
-36. **[PIPELINE-FIX-54A3] NEXT**
+41. **[PIPELINE-FIX-54A3] NEXT**
 
    Continue durable Phase A checkpoint/resume with ordered file-plus-directory durability, gap-free launch ownership, quiescence proof, exact packet/base/role identity, cumulative attempt logs, and fail-closed stale checkpoints.
 
-37. **[PIPELINE-FIX-60B] NEXT**
+42. **[PIPELINE-FIX-60B] NEXT**
 
    Implement opt-in managed adapter containment/cancellation without changing shared `run_adapter()` consumers. Exclude terminal-state schema and replay identity.
 
-38. **[PIPELINE-FIX-60C] NEXT**
+43. **[PIPELINE-FIX-60C] NEXT**
 
     Reconcile interrupted bridge terminal states with monotonic state-version CAS and deterministic SQLite race proof. Exclude adapter launch and replay fingerprint work.
 
-39. **[PIPELINE-FIX-60D] NEXT**
+44. **[PIPELINE-FIX-60D] NEXT**
 
     Add immutable bridge replay identity, serialized compare-or-create, terminal-result reuse, and legacy-NULL fail-closed behavior. Exclude process lifecycle and timeout work.
 
-40. **[CANONICAL-DOCS-TRUTH-INTEGRATION] NEXT**
+45. **[CANONICAL-DOCS-TRUTH-INTEGRATION] NEXT**
 
     Route STATUS/TASKS/handoff/report truth through one narrow docs pipeline. Classify every currently unregistered root or learning-archive Markdown file without deleting evidence; the July 27 source already added another file beyond the earlier eight-file count. Historical tracker logs remain evidence, not a second scheduler. Source: `HANDOFF_FOR_NEXT_LLM_2026-07-27.md`.
 
-41. **[PBNOGO-INTEGRATION] NEXT**
-
-    Preserve blocking `NO_GO`/`REQUEST_CHANGES`; defer only findings from a `GO` path; preserve terminal founder `QUESTION`; do not loop. This is the canonical alias for `phase-b-no-go-deferral-hardening-2026-06-30` and must not be duplicated.
-
-42. **[PREPUSH-RECOVERY-CONTEXT-AUTHORITY] NEXT**
+46. **[PREPUSH-RECOVERY-CONTEXT-AUTHORITY] NEXT**
 
     Replace fabricated Step-11 recovery context with the actual pytest short summary, captured stdout/stderr, status, and Git state. Source: `HANDOFF_FOR_NEXT_LLM_2026-07-27.md`, DEBT-1. Keep this separate from validation-selector work.
 
-43. **[PIPELINE-FIX-56] NEXT**
+47. **[PIPELINE-FIX-56] NEXT**
 
     Narrow `agent_review_crash` classification before later recovery/commit work.
 
-44. **[PIPELINE-FIX-52] NEXT**
+48. **[PIPELINE-FIX-52] NEXT**
 
     After FIX56, implement COMMENTED-review intake, remediation, and durable resolution evidence.
 
-45. **[PIPELINE-FIX-55] NEXT**
+49. **[PIPELINE-FIX-55] NEXT**
 
     After FIX52, classify supervisor/meta five-hour 429 envelopes as transient hold/resume rather than terminal policy. This is the canonical alias for July 27 DEBT-2.
 
-46. **[PIPELINE-FIX-53] NEXT**
+50. **[PIPELINE-FIX-53] NEXT**
 
     After FIX55, implement persistent open-PR lifecycle authority.
 
-47. **[OBSERVER-DURABILITY] NEXT**
+51. **[OBSERVER-DURABILITY] NEXT**
 
     Reconcile FIX51/FIX58 and the prepared OBSERVER-O2 packet serially: lane admission, authenticated bus/thread ownership, receipts/redrive, exact tmux identity, truthful labels/dashboard, independent liveness, and duplicate AUTO-PING prevention. Sources: `reports/control_plane/observer-o2-singleflight-owner-ready-2026-07-22_2026-07-22.md` and `reports/deferred/blocking/observer-autoping-singleflight-live-duplicates-2026-07-25.md`.
 
-48. **[PIPELINE-FIX-50] NEXT**
+52. **[PIPELINE-FIX-50] NEXT**
 
     After pbnogo and checkpoint foundations, establish role-scoped implementer-turn authority.
 
-49. **[PIPELINE-FIX-57] NEXT**
+53. **[PIPELINE-FIX-57] NEXT**
 
     After FIX50, add exact-stage `.js`/`.mjs`/`.cjs` parsing. This is the canonical alias for `[PHASEB-EXACT-STAGE-JS-PARSER-FIX-2026-06-30]` in NOW.
 
-50. **[PAGER-ORCHESTRATOR-LABEL-TRUTH] NEXT**
+54. **[PAGER-ORCHESTRATOR-LABEL-TRUTH] NEXT**
 
     Make orchestrator route selection, pager labels, tmux panes, and autoping identity follow one committed/effective source without wrong-bus drift.
 
-51. **[L4-GROWTH-CAP-PREBUMP-BUILDER] NEXT**
+55. **[L4-GROWTH-CAP-PREBUMP-BUILDER] NEXT**
 
     Mechanically add the required L4 structural growth-cap pre-bump at launch/package time or fail before commit handoff.
 
-52. **[BRIDGE-REVIEW-PRESERVATION-ARTIFACT-BOUNDS] NEXT**
+56. **[BRIDGE-REVIEW-PRESERVATION-ARTIFACT-BOUNDS] NEXT**
 
     Bound reviewer preservation input to manifests/stat/status artifacts while retaining complete evidence and stale-state safety.
 
-53. **[BOT-REMEDIATION-PREPUSH-SELECTOR-BOUNDS] NEXT**
+57. **[BOT-REMEDIATION-PREPUSH-SELECTOR-BOUNDS] NEXT**
 
     Select bounded same-wave bot-remediation validations from changed files/finding class while still requiring full CI before merge.
 
-54. **[PIPELINE-NR5-DEFECT-HANDOFF-TRUTH] NEXT**
+58. **[PIPELINE-NR5-DEFECT-HANDOFF-TRUTH] NEXT**
 
     Prevent a verifier wave that halts as DEFECT from regenerating indicator-only green commit metadata. Canonical alias: `[PIPELINE-NR5-DEFECT-HANDOFF-TRUTH-2026-06-30]` in NOW.
 
-55. **[ORCHESTRATOR-SWITCH-DRIFT-FIX] NEXT**
+59. **[ORCHESTRATOR-SWITCH-DRIFT-FIX] NEXT**
 
     Keep ordinary orchestrator selection bus-local/effective unless explicit config-edit authority is requested. Canonical alias: `[ORCHESTRATOR-SWITCH-DRIFT-FIX-2026-06-30]` in NOW.
 
-56. **[PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX] NEXT**
+60. **[PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX] NEXT**
 
     Retain a live L4 authorization anchor until the pre-commit receipt and commit path complete. Canonical alias: `[PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX-2026-06-30]` in NOW.
 
-57. **[GENERIC-NEXT-ROUTE-RECONCILIATION] NEXT**
+61. **[GENERIC-NEXT-ROUTE-RECONCILIATION] NEXT**
 
     Reconcile or retire stale generic NEXT routing/package records so no old observer, red-team, or autonomous-queue record can override the selected candidate.
 
-58. **[RECEIPT-COMMIT-ROBUSTNESS-BOUNDED-SUCCESSORS] NEXT**
+62. **[RECEIPT-COMMIT-ROBUSTNESS-BOUNDED-SUCCESSORS] NEXT**
 
     Create one bounded successor per coupled surface, never one monolith. Detached-child/monitor cleanup is owned by P0T3, private-attribute post-fix durability by P0T2, terminal identity/QUESTION journaling by P0T1, and INV-2 false-green prevention by P0T4; do not duplicate those obligations here. This row retains every other successor/non-blocker: blocking-verdict promotion; configured reviewer identity where P5 does not close it; supervisor-success validation before authority; malformed/non-object receipt totality; collision-safe receipt names; remaining Phase B resume-binding cases outside P0T1-P0T4; mutating-implementer replay; and non-object checkpoint handling. Source: `reports/deferred/non_blocking/receipt-commit-robustness-from-codexflip-2026-07-11.md`. Founder QUESTION release remains separately policy-bound below. P0L findings 15-17 and P0R findings 11-25 remain deferred/nonblocking and cannot hold landing.
 
-59. **[DIALECTIC-CONTINUATION-DELIVERY-AND-LINEAGE] NEXT**
+63. **[DIALECTIC-CONTINUATION-DELIVERY-AND-LINEAGE] NEXT**
 
     Keep continuation delivery/lineage separate from pbnogo and from founder QUESTION policy until exact overlap is proved.
 
-60. **[PR-LIVE-CENSUS-RECONCILIATION] NEXT**
+64. **[PR-LIVE-CENSUS-RECONCILIATION] NEXT**
 
     Refresh the PR/thread census from live remote state before action. The July 13 seven-PR/eight-thread values in STATUS and the old queue are stale planning evidence, not current terminal authority.
 
-61. **[NEVER-BEHIND-FLEET-AUTHORITY] NEXT**
+65. **[NEVER-BEHIND-FLEET-AUTHORITY] NEXT**
 
     After the fresh census, carry forward every unrelated WIP and preservation obligation before any terminal action. Build only fresh-current successors with ignored-file collision safety, report holds precisely, and require every terminal-action worktree to be reverified at `behind(origin/dev)=0`; volatile fleet counts are observation evidence, not queue authority.
 
-62. **[PR-DISPOSITION-EXECUTION] NEXT**
+66. **[PR-DISPOSITION-EXECUTION] NEXT**
 
     After the fresh census and NEVER-BEHIND carry-forward, execute only evidence-backed supersession, preservation, rebuild, notification, review-thread resolution, and terminal actions through commit executor.
 
@@ -281,51 +299,51 @@ Execution constraint: follow `FOUNDER_SESSION_BOOTSTRAP.md`; launch waves throug
 
     - **[FLEET-CLEANUP-APPLY] SERIALIZED APPLY OBLIGATION:** only after the exact builder plan lands and a fresh census revalidates every target, apply the authorized bounded cleanup while preserving unrelated WIP and immutable evidence. Stop on drift, uncertainty, or any target absent from the landed builder plan.
 
-63. **[NIGHTLY-ADMISSION-INTEGRATION] NEXT**
+67. **[NIGHTLY-ADMISSION-INTEGRATION] NEXT**
 
     Reconcile capacity-one Node admission and safe flock leases through the pipeline.
 
-64. **[NIGHTLY-DEADLINE-TELEMETRY-PROOF] NEXT**
+68. **[NIGHTLY-DEADLINE-TELEMETRY-PROOF] NEXT**
 
     Make nested deadlines coherent, record capacity lifecycle telemetry, and require fresh exact-merge proof for both slow selectors. Historical green counts do not close the later `1 failed, 840 passed in 2402.09s` failure.
 
-65. **[PIPELINE-AGENT-MODEL-EFFORT-BUILDER] NEXT**
+69. **[PIPELINE-AGENT-MODEL-EFFORT-BUILDER] NEXT**
 
     Add builder flags for model and reasoning effort that atomically update both authoritative agent-default surfaces and verify resulting argv/config identity. Source: `HANDOFF_FOR_NEXT_LLM_2026-07-27.md`, DEBT-3.
 
-66. **[QUESTION-CHECKPOINT-AND-INV2-AUTHORITY] NEXT**
+70. **[QUESTION-CHECKPOINT-AND-INV2-AUTHORITY] NEXT**
 
     Repair the private-attribute QUESTION checkpoint path that can resume to commit-ready without founder input; retain INV-2 fail-closed evidence. P0T1, P0T2, or P0T4 may close an exact alias only with proof; otherwise this row remains open. Source: `reports/deferred/blocking/control-surface-question-checkpoint-and-inv2-2026-07-25.md`.
 
-67. **[CODEX-EFFECTIVE-MODEL-CATALOG-AUTHORITY] NEXT**
+71. **[CODEX-EFFECTIVE-MODEL-CATALOG-AUTHORITY] NEXT**
 
     Reconcile raw vendor cache auditing with the sanitized effective catalog used by the startup guard. Source: `reports/deferred/blocking/codex-startup-effective-model-catalog-audit-drift-2026-07-25.md`.
 
-68. **[PIPELINE-FIX-62C] NEXT**
+72. **[PIPELINE-FIX-62C] NEXT**
 
     Re-adjudicate and rebuild the capacity-review replay wave from current predecessor truth; do not launch the stale ignored July 24 config. Source: `reports/deferred/blocking/fix62c-capacity-replay-no-go-2026-07-25.md`.
 
-69. **[LEGACY-N3-LOCAL-EVIDENCE-ADJUDICATION] NEXT**
+73. **[LEGACY-N3-LOCAL-EVIDENCE-ADJUDICATION] NEXT**
 
     Adjudicate every still-open local/NO_GO/recovery/queued N3 row in the legacy NEXT queue before relaunch: bridge-doc closeout, JS binary decoder, source prerequisite, marker/debt syncs, kernel-driver implementation, residual host-loop follow-up, boundary design, post-continuation NO_GO, and Stage0 marker-truth recovery. Preserve the exact historical rows in the legacy NEXT section; close or promote each with current-code evidence rather than importing the old queue wholesale.
 
-70. **[MU-COINDUCTION-PRODUCTION-PROOF] NEXT**
+74. **[MU-COINDUCTION-PRODUCTION-PROOF] NEXT**
 
     Prove production productivity, bisimulation, scheduler, stream-runtime, and self-hosting obligations. Foundation merge history is retained below as history, not completion of this action.
 
-71. **[MU-FIXPOINT-PRODUCTION-PROOF] NEXT**
+75. **[MU-FIXPOINT-PRODUCTION-PROOF] NEXT**
 
     Prove evaluator self-application, fixed-point behavior, and meta-circular closure. Foundation merge history is retained below as history, not completion of this action.
 
-72. **[MU-EVIDENCE-RESIDUES] NEXT**
+76. **[MU-EVIDENCE-RESIDUES] NEXT**
 
     Close or explicitly disposition Stage5 ordinal-to-binary-N and Stage0 bool/str evidence gaps, plus retained Coinduction packet-status and Fixpoint gate-phrase doc findings.
 
-73. **[MU-OPTIMIZATION-LAST] NEXT**
+77. **[MU-OPTIMIZATION-LAST] NEXT**
 
     Execute only after every authorized structural migration and production-proof action above has completed; optimize Mu projections without introducing host shortcuts.
 
-Parallelism rule: only code-disjoint waves with unique worktrees, buses, bridge configs, ports, and monitor sessions may run concurrently. Any shared `executor_dispatch.py`, `executor_config.json`, `bridge_*`, `recovery_gate.py`, `commit_executor.py`, `TASKS.md`, PR terminal action, or merge authority serializes behind the active owner. The remaining shared-envelope-framing R4A2 -> provider-terminal R4B -> root-exit R4C -> remaining envelope-validation R3 -> fresh reviewer-causality R4 -> commit-evidence R2 -> Phase-B evidence handoff R2 -> fresh routing R4 -> R3C5 -> R3C6 -> exact P0IBRRCP closure -> P0IBRRCO -> P0IBRRC -> P0IBRRT -> P0IBRR -> P0IB1 -> P0IB2 -> P0T1 -> P0T2 -> P0T3 -> P0T4 -> P0R2 -> P1 -> P2 -> P3 -> P4 -> P5 chain is strictly serial. R3C5 and R3C6 do not satisfy P0IBRRCO. P0R2 remains code-disjoint from the P0T runtime/checker packets but does not launch before P0T4 lands. The later preservation-first cleanup order remains PR-LIVE-CENSUS -> NEVER-BEHIND carry-forward -> PR-DISPOSITION -> FLEET-CLEANUP-BUILDER -> FLEET-CLEANUP-APPLY.
+Parallelism rule: only code-disjoint waves with unique worktrees, buses, bridge configs, ports, and monitor sessions may run concurrently. Any shared `executor_dispatch.py`, `executor_config.json`, `bridge_*`, `recovery_gate.py`, `commit_executor.py`, `TASKS.md`, PR terminal action, or merge authority serializes behind the active owner. The remaining re-entry decision resume-context R2 -> normal-exit recorded-child cleanup -> fresh PBNOGO reconstruction -> auto-defer timeout R3 -> recovery-timeout environment containment -> provider-terminal R4B -> root-exit R4C -> remaining envelope-validation R3 -> fresh reviewer-causality R4 -> commit-evidence R2 -> Phase-B evidence handoff R2 -> fresh routing R4 -> R3C5 -> R3C6 -> exact P0IBRRCP closure -> P0IBRRCO -> P0IBRRC -> P0IBRRT -> P0IBRR -> P0IB1 -> P0IB2 -> P0T1 -> P0T2 -> P0T3 -> P0T4 -> P0R2 -> P1 -> P2 -> P3 -> P4 -> P5 chain is strictly serial. R3C5 and R3C6 do not satisfy P0IBRRCO. P0R2 remains code-disjoint from the P0T runtime/checker packets but does not launch before P0T4 lands. The later preservation-first cleanup order remains PR-LIVE-CENSUS -> NEVER-BEHIND carry-forward -> PR-DISPOSITION -> FLEET-CLEANUP-BUILDER -> FLEET-CLEANUP-APPLY.
 
 ## NON-LAUNCHABLE PROGRAM GOVERNANCE AND HISTORY
 
@@ -333,6 +351,10 @@ The scheduler must not interpret anything below this H2 as a PROGRAM QUEUE candi
 
 ### Preserved P0IBRRCP/P0IBRRCO candidate evidence
 
+- **[PR1219-P0IBRRCP-AUTO-DEFER-AMEND-PUSH-DURABILITY-PREREQ-R1] PRESERVED_STOPPED_NOT_COMPLETE:** Wave `pr1219-p0ibrrcp-auto-defer-amend-push-durability-prereq-r1-2026-08-25` stopped without a merge. Preserve its worktree, branch, bus, packet, reviews, candidate state, and incident evidence unchanged; it is not launch or completion authority and must not be resumed, copied, or mutated.
+- **[PR1219-P0IBRRCP-AUTO-DEFER-TIMEOUT-ONLY-PREREQ-R2] PRESERVED_STOPPED_NOT_COMPLETE:** Wave `pr1219-p0ibrrcp-auto-defer-timeout-only-prereq-r2-2026-08-25` stopped without a merge. Preserve its worktree, branch, bus, packet, reviews, staged candidate, and state unchanged; auto-defer timeout R3 must be reconstructed fresh in its serialized slot.
+- **[PR1219-P0IBRRCP-PBNOGO-DECISION-PRESERVATION-PREREQ-R1] PRESERVED_STOPPED_NOT_COMPLETE:** Wave `pr1219-p0ibrrcp-pbnogo-decision-preservation-prereq-r1-2026-08-25` stopped without a merge after its reviewer reproduced the narrower resume-context blocker. Preserve its lane, bus, packet, render, raw transcript, staged candidate, and state unchanged; fresh PBNOGO reconstruction remains serialized after normal-exit cleanup.
+- **[PR1219-P0IBRRCP-REENTRY-DECISION-RESUME-CONTEXT-PREREQ-R1] PRESERVED_STOPPED_NOT_COMPLETE:** Wave `pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r1-2026-08-25` stopped without a merge. Preserve its lane, bus, packet, render, raw transcript, candidate, and state unchanged; R2 is the sole current reconstruction and must not copy or resume R1.
 - **[PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R1] PRESERVED_STOPPED_NOT_COMPLETE:** Wave `pr1219-p0ibrrcp-bridge-envelope-validation-prereq-r1-2026-08-25` stopped without a merge and remains immutable noncomplete evidence only. It is not authority for shared-envelope-framing R4A2 or the later remaining envelope-validation R3; never resume, copy, or mutate it.
 - **[PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R2] PHASE_B_NO_GO / PRESERVED_NOT_COMPLETE:** Wave `pr1219-p0ibrrcp-bridge-envelope-validation-prereq-r2-2026-08-25` changed supervisor framing alone and reached repeated Phase B NO_GO because adapter early-stop still used the old framing contract. It had no merge and remains immutable noncomplete evidence only; never resume, copy, or mutate it.
 - **[PR1219-P0IBRRCP-BRIDGE-ADAPTER-STOP-AFTER-AUTHORITY-PREREQ-R1] PRESERVED_STOPPED_NOT_COMPLETE:** Wave `pr1219-p0ibrrcp-bridge-adapter-stop-after-authority-prereq-r1-2026-08-25` stopped without a merge. Preserve the lane unchanged as adapter R1 evidence; it is not launch or completion authority and must not be resumed, copied, or mutated.
@@ -1074,6 +1096,8 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-08-23, pr1219-p0ibrrq2-current-next-authority-2026-08-23): **ROLES-ALL-CODEX-PR1219-P0IBRRQ2-CURRENT-NEXT-AUTHORITY — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/pr1219-p0ibrrq2-current-next-authority-2026-08-23_2026-08-23.md`. evidence_command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id pr1219-p0ibrrq2-current-next-authority-2026-08-23 --output reports/l4_wave_indicators/pr1219-p0ibrrq2-current-next-authority-2026-08-23.json`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/pr1219-p0ibrrq2-current-next-authority-2026-08-23_2026-08-23.md. (2) Commit handoff carries 4 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface. scope_refs: `TASKS.md`, `reports/control_plane/pr1219-p0ibrrq2-current-next-authority-2026-08-23_2026-08-23.md`, `reports/deferred/non_blocking/pr1219-p0ibrrq2-current-next-authority-2026-08-23_bridge_nonblockers.md`, `reports/l4_wave_indicators/pr1219-p0ibrrq2-current-next-authority-2026-08-23.json`.. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for pr1219-p0ibrrq2-current-next-authority-2026-08-23 with 4 wave-owned file(s), bridge rounds=2, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:pr1219-p0ibrrq2-current-next-authority-2026-08-23. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/pr1219-p0ibrrq2-current-next-authority-2026-08-23.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id pr1219-p0ibrrq2-current-next-authority-2026-08-23 --output reports/l4_wave_indicators/pr1219-p0ibrrq2-current-next-authority-2026-08-23.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 - Tracker sync note (2026-08-25, pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25): **ROLES-ALL-CODEX-PR1219-P0IBRRCP-NORMAL-ROOT-RECORDED-CHILD-CLEANUP — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25_2026-08-25.md`. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25_2026-08-25.md. (2) Final pytest gate covered 9 pytest selector(s) across 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_recovery_gate.py`, `mu/tools/executors/phase_b_executor.py`, `mu/tools/executors/recovery_gate.py`, `reports/control_plane/pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25_2026-08-25.md`, `reports/deferred/non_blocking/pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25_bridge_nonblockers.md`, `reports/l4_wave_indicators/pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25.json`.. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25 with 8 wave-owned file(s), bridge rounds=2, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25 --output reports/l4_wave_indicators/pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 - Tracker sync note (2026-08-25, pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25): **ROLES-ALL-CODEX-PR1219-P0IBRRCP-SHARED-ENVELOPE-FRAMING-R4A2 — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25_2026-08-25.md`. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_agent_bridge_supervisor.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25_2026-08-25.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_agent_bridge_supervisor.py`, `mu/tools/agents/bridge_adapters.py`, `mu/tools/agents/bridge_supervisor.py`, `reports/control_plane/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25_2026-08-25.md`, `reports/deferred/non_blocking/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25_bridge_nonblockers.md`, `reports/l4_wave_indicators/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25.json`.. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25 with 7 wave-owned file(s), bridge rounds=1, reentry=true, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25 --output reports/l4_wave_indicators/pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+- Tracker sync note (2026-08-26, pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25): **PBNOGO-INTEGRATION — pre-commit supervisor package refresh.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25_2026-08-25.md`. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_phase_b_executor.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25_2026-08-25.md. (2) Final pytest gate covered 8 pytest selector(s) across 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tools/executors/phase_b_executor.py`, `reports/control_plane/pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25_2026-08-25.md`, `reports/deferred/non_blocking/pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25_bridge_nonblockers.md`, `reports/l4_wave_indicators/pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25.json`.. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B refreshed the pre-commit supervisor package for pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25 with 6 wave-owned file(s), bridge rounds=1, package-bound L4 authority pending pre-commit supervisor validation.. FOUNDER_OVERRIDE:pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25 --output reports/l4_wave_indicators/pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+
 
 
 
