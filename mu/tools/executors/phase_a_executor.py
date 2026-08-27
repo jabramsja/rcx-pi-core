@@ -2668,6 +2668,22 @@ def run_phase_a(
                             verbose=verbose,
                             bus_dir=bus_dir,
                         )
+                        # Always check if the plan file was modified, even on
+                        # adapter-level failure.  The implementer may have
+                        # successfully edited the file via Edit tool calls
+                        # before claude --print exited non-zero (e.g. session
+                        # ended mid-tool-call without a final text response,
+                        # causing the adapter to report error despite edits
+                        # having been applied).
+                        plan_file = repo_root / rel_plan_path
+                        try:
+                            new_content = plan_file.read_text(encoding="utf-8")
+                        except (OSError, UnicodeDecodeError) as exc:
+                            result["status"] = "error"
+                            result["error"] = (
+                                f"Phase A failed to read canonical plan after implementer: {exc}"
+                            )
+                            return False
                         try:
                             _emit_phase_a_event(
                                 repo_root,
@@ -2688,21 +2704,6 @@ def run_phase_a(
                             result["status"] = "error"
                             result["error"] = f"Phase A pager emission failed after implementer: {exc}"
                             return False
-                        # Always check if the plan file was modified, even on
-                        # adapter-level failure.  The implementer may have
-                        # successfully edited the file via Edit tool calls
-                        # before claude --print exited non-zero (e.g. session
-                        # ended mid-tool-call without a final text response,
-                        # causing the adapter to report error despite edits
-                        # having been applied).
-                        plan_file = repo_root / rel_plan_path
-                        try:
-                            new_content = plan_file.read_text(encoding="utf-8")
-                        except (OSError, FileNotFoundError):
-                            # Plan file missing/unreadable after implementer run.
-                            # Treat as unmodified — the bridge will detect the
-                            # missing file on its next round.
-                            new_content = current_plan_content
                         plan_actually_changed = hash(new_content) != plan_hash_before
                         if impl_result["status"] != "success":
                             if plan_actually_changed:
