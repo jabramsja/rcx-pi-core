@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from mu.tests.tools.module_loader import load_module
 
 _TOOLS_DIR = Path(__file__).resolve().parent.parent.parent / "tools"
@@ -66,6 +68,18 @@ def _fake_bridge(repo: Path, *, decision: str, exit_code: int = 0):
         return {"exit_code": exit_code, "stdout": decision, "stderr": "", "job_id": job_id}
 
     return _run_bridge
+
+
+def _write_blocking_reviewer_envelope(repo: Path, job_id: str, *, bus_dir: str) -> None:
+    raw_dir = repo / bus_dir / "raw" / job_id
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    (raw_dir / "reviewer.txt").write_text(
+        "BEGIN_AGENT_ENVELOPE\n"
+        '{"findings":[{"title":"missing scope","severity":"critical",'
+        '"disposition":"blocking"}]}\n'
+        "END_AGENT_ENVELOPE\n",
+        encoding="utf-8",
+    )
 
 
 def test_create_plan_draft_writes_authoritative_routing_identity(tmp_path):
@@ -348,6 +362,174 @@ def test_run_phase_a_emits_implementer_transition_and_no_go_event(tmp_path):
     assert "phase_a_implementer_completed" in [call["event_type"] for call in pager_calls]
     assert [call["event_type"] for call in pager_calls][-1] == "phase_a_no_go"
     assert {call["bus_dir"] for call in pager_calls} == {".agent_bus-test"}
+
+
+@pytest.mark.parametrize(
+    "failure_kind",
+    ["missing", "directory", "permission", "invalid_utf8"],
+)
+def test_run_phase_a_post_implementer_canonical_read_failures_fail_closed(
+    tmp_path,
+    failure_kind,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plan = _write_phase_a_plan(repo)
+    bus_dir = ".agent_bus-test"
+    job_id = "phase-a-r1-aaaa1111"
+    _write_blocking_reviewer_envelope(repo, job_id, bus_dir=bus_dir)
+
+    actions = []
+    post_implementer_reads = []
+    read_errors = []
+    state = {"after_implementer": False, "canonical_read_recorded": False}
+    real_read_text = Path.read_text
+
+    def fake_emit(repo_root, **kwargs):
+        actions.append(kwargs["event_type"])
+        return {"enabled": True, "event_id": kwargs["event_type"], "attempted": []}
+
+    def fake_implementer(repo_root, prompt, *, backend, timeout, verbose, bus_dir=None):
+        if failure_kind == "missing":
+            plan.unlink()
+        elif failure_kind == "directory":
+            plan.unlink()
+            plan.mkdir()
+        elif failure_kind == "invalid_utf8":
+            plan.write_bytes(b"\xff")
+        state["after_implementer"] = True
+        return {"status": "success", "exit_code": 0, "stderr": ""}
+
+    def tracking_read_text(path, *args, **kwargs):
+        is_post_implementer_plan_read = state["after_implementer"] and path == plan
+        if is_post_implementer_plan_read:
+            post_implementer_reads.append(path)
+            if not state["canonical_read_recorded"]:
+                actions.append("canonical_read")
+                state["canonical_read_recorded"] = True
+            if failure_kind == "permission":
+                error = PermissionError("canonical read permission denied")
+                read_errors.append(error)
+                raise error
+        try:
+            return real_read_text(path, *args, **kwargs)
+        except (OSError, UnicodeDecodeError) as exc:
+            if is_post_implementer_plan_read:
+                read_errors.append(exc)
+            raise
+
+    bridge = _fake_bridge(repo, decision="NO_GO", exit_code=1)
+    with patch.object(Path, "read_text", new=tracking_read_text), \
+         patch.object(phase_a_mod, "load_routing_record", return_value={"decision": "ROUTE_PHASE_A"}), \
+         patch.object(phase_a_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+         patch.object(phase_a_mod, "run_sdk_agents", return_value={"exit_code": 0}), \
+         patch.object(phase_a_mod, "run_bridge_design_review", side_effect=bridge) as bridge_mock, \
+         patch.object(phase_a_mod, "_invoke_implementer", side_effect=fake_implementer) as implementer_mock, \
+         patch.object(phase_a_mod, "lock_plan") as lock_mock, \
+         patch.object(phase_a_mod, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="aaaa1111bbbb2222"))):
+        result = phase_a_mod.run_phase_a(
+            repo,
+            "pager_plan",
+            max_bridge_rounds=2,
+            bus_dir=bus_dir,
+        )
+
+    assert result["status"] == "error"
+    assert result["error"].startswith(
+        "Phase A failed to read canonical plan after implementer: "
+    )
+    assert len(read_errors) == 1
+    assert str(read_errors[0]) in result["error"]
+    assert post_implementer_reads == [plan]
+    assert actions == [
+        "phase_a_entered",
+        "phase_a_reviewer_started",
+        "phase_a_reviewer_completed",
+        "phase_a_implementer_started",
+        "canonical_read",
+    ]
+    assert "phase_a_implementer_completed" not in actions
+    assert "phase_a_no_go" not in actions
+    assert result["bridge_rounds"] == 1
+    assert bridge_mock.call_count == 1
+    assert implementer_mock.call_count == 1
+    lock_mock.assert_not_called()
+
+
+def test_run_phase_a_readable_unchanged_plan_preserves_existing_failure(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plan = _write_phase_a_plan(repo)
+    original_bytes = plan.read_bytes()
+    bus_dir = ".agent_bus-test"
+    job_id = "phase-a-r1-bbbb2222"
+    _write_blocking_reviewer_envelope(repo, job_id, bus_dir=bus_dir)
+
+    actions = []
+    post_implementer_reads = []
+    successful_reads = []
+    state = {"after_implementer": False, "canonical_read_recorded": False}
+    real_read_text = Path.read_text
+
+    def fake_emit(repo_root, **kwargs):
+        actions.append(kwargs["event_type"])
+        return {"enabled": True, "event_id": kwargs["event_type"], "attempted": []}
+
+    def fake_implementer(repo_root, prompt, *, backend, timeout, verbose, bus_dir=None):
+        state["after_implementer"] = True
+        return {"status": "success", "exit_code": 0, "stderr": ""}
+
+    def tracking_read_text(path, *args, **kwargs):
+        is_post_implementer_plan_read = state["after_implementer"] and path == plan
+        if is_post_implementer_plan_read:
+            post_implementer_reads.append(path)
+            if not state["canonical_read_recorded"]:
+                actions.append("canonical_read")
+                state["canonical_read_recorded"] = True
+        content = real_read_text(path, *args, **kwargs)
+        if is_post_implementer_plan_read:
+            successful_reads.append(content)
+        return content
+
+    bridge = _fake_bridge(repo, decision="NO_GO", exit_code=1)
+    with patch.object(Path, "read_text", new=tracking_read_text), \
+         patch.object(phase_a_mod, "load_routing_record", return_value={"decision": "ROUTE_PHASE_A"}), \
+         patch.object(phase_a_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+         patch.object(phase_a_mod, "run_sdk_agents", return_value={"exit_code": 0}), \
+         patch.object(phase_a_mod, "run_bridge_design_review", side_effect=bridge) as bridge_mock, \
+         patch.object(phase_a_mod, "_invoke_implementer", side_effect=fake_implementer) as implementer_mock, \
+         patch.object(phase_a_mod, "lock_plan") as lock_mock, \
+         patch.object(phase_a_mod, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="bbbb2222cccc3333"))):
+        result = phase_a_mod.run_phase_a(
+            repo,
+            "pager_plan",
+            max_bridge_rounds=2,
+            bus_dir=bus_dir,
+        )
+
+    assert result["status"] == "error"
+    assert result["error"] == (
+        "Implementer did not modify reports/control_plane/pager_plan.md. "
+        "Check if plan was written to a different file."
+    )
+    assert not result["error"].startswith(
+        "Phase A failed to read canonical plan after implementer: "
+    )
+    assert plan.read_bytes() == original_bytes
+    assert post_implementer_reads[0] == plan
+    assert successful_reads[0].encode("utf-8") == original_bytes
+    assert actions == [
+        "phase_a_entered",
+        "phase_a_reviewer_started",
+        "phase_a_reviewer_completed",
+        "phase_a_implementer_started",
+        "canonical_read",
+        "phase_a_implementer_completed",
+    ]
+    assert result["bridge_rounds"] == 1
+    assert bridge_mock.call_count == 1
+    assert implementer_mock.call_count == 1
+    lock_mock.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
