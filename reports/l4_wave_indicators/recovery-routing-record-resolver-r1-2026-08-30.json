@@ -1,24 +1,24 @@
 {
   "wave_id": "recovery-routing-record-resolver-r1-2026-08-30",
-  "repeat_run_speedup_ratio": 1.60617,
+  "repeat_run_speedup_ratio": 1.351464,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.25803,
+  "step_growth_slope": 0.275405,
   "repeat_run_raw_seconds": [
-    0.41444,
-    0.25803
+    0.3722,
+    0.275405
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.41444
+      "elapsed_seconds": 0.3722
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.67247
+      "elapsed_seconds": 0.647605
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-08-31T00:21:35Z",
+  "collection_timestamp_utc": "2026-08-31T00:28:46Z",
   "collector_version": "2.2.0"
 }

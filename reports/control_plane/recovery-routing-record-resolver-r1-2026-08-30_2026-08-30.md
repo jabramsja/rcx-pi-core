@@ -145,10 +145,6 @@ recovery-routing-record-resolver-r1-2026-08-30
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/recovery-routing-record-resolver-r1-2026-08-30.json`
 - Current staged files:
-  - `TASKS.md`
-  - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/executors/recovery_gate.py`
   - `reports/control_plane/recovery-routing-record-resolver-r1-2026-08-30_2026-08-30.md`
-  - `reports/deferred/non_blocking/recovery-routing-record-resolver-r1-2026-08-30_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/recovery-routing-record-resolver-r1-2026-08-30.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
