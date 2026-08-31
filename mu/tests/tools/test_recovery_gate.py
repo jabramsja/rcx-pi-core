@@ -54,6 +54,238 @@ def _isolate_recovery_timeout_env():
     _clear_recovery_timeout_test_env(pager_route=None)
 
 
+class TestRoutingRecordResolverBoundary:
+    def test_canonical_loader_has_one_resolver_and_no_production_bypasses(self):
+        import ast as _ast
+
+        source_path = _EXECUTORS_DIR / "recovery_gate.py"
+        tree = _ast.parse(source_path.read_text(encoding="utf-8"))
+        parent_map = {
+            id(child): parent
+            for parent in _ast.walk(tree)
+            for child in _ast.iter_child_nodes(parent)
+        }
+
+        def enclosing_function(
+            node: _ast.AST,
+        ) -> _ast.FunctionDef | _ast.AsyncFunctionDef | None:
+            current = parent_map.get(id(node))
+            while current is not None:
+                if isinstance(current, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                    return current
+                current = parent_map.get(id(current))
+            return None
+
+        def is_canonical_loader_call(node: _ast.AST) -> bool:
+            if not isinstance(node, _ast.Call):
+                return False
+            return (
+                isinstance(node.func, _ast.Name)
+                and node.func.id == "load_routing_record"
+            ) or (
+                isinstance(node.func, _ast.Attribute)
+                and node.func.attr == "load_routing_record"
+            )
+
+        resolver_defs = [
+            node
+            for node in tree.body
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+            and node.name == "_resolve_routing_record"
+        ]
+        assert len(resolver_defs) == 1, "expected exactly one private routing-record resolver"
+        resolver = resolver_defs[0]
+        assert [arg.arg for arg in resolver.args.args] == ["repo_root", "bus_dir"]
+
+        loader_calls = [node for node in _ast.walk(tree) if is_canonical_loader_call(node)]
+        assert loader_calls, "the routing-record resolver must delegate to the canonical loader"
+        bypasses = [call for call in loader_calls if enclosing_function(call) is not resolver]
+        assert not bypasses, (
+            "canonical routing-record loads must be confined to the resolver; "
+            f"found owners "
+            f"{[(enclosing_function(call).name if enclosing_function(call) else None) for call in bypasses]}"
+        )
+        assert len(loader_calls) == 1, "the resolver must delegate exactly once"
+
+        loader_symbol_bypasses = [
+            node
+            for node in _ast.walk(tree)
+            if isinstance(node, _ast.Name)
+            and isinstance(node.ctx, _ast.Load)
+            and node.id == "load_routing_record"
+            and enclosing_function(node) is not resolver
+        ]
+        assert not loader_symbol_bypasses, (
+            "the canonical loader symbol must not be read outside the resolver"
+        )
+
+    @pytest.mark.parametrize(
+        "selected_bus_dir",
+        [None, Path(".agent_bus-non-default")],
+        ids=["default_bus", "non_default_bus"],
+    )
+    def test_resolver_forwards_selected_bus_and_returns_loader_result_unchanged(
+        self,
+        tmp_path,
+        monkeypatch,
+        selected_bus_dir,
+    ):
+        loaded_record = object()
+        loader_calls = []
+
+        def fake_load_routing_record(repo_root, *, bus_dir=None):
+            loader_calls.append((repo_root, bus_dir))
+            return loaded_record
+
+        monkeypatch.setattr(rg_mod, "load_routing_record", fake_load_routing_record)
+
+        resolved = rg_mod._resolve_routing_record(  # ANTICHEAT_OK: direct seam contract
+            tmp_path,
+            selected_bus_dir,
+        )
+
+        assert resolved is loaded_record
+        assert loader_calls == [(tmp_path, selected_bus_dir)]
+
+    @pytest.mark.parametrize(
+        "selected_bus_dir",
+        [None, Path(".agent_bus-non-default")],
+        ids=["default_bus", "non_default_bus"],
+    )
+    def test_resolver_propagates_loader_exception_unchanged(
+        self,
+        tmp_path,
+        monkeypatch,
+        selected_bus_dir,
+    ):
+        loader_failure = OSError("routing record unavailable")
+        loader_calls = []
+
+        def fake_load_routing_record(repo_root, *, bus_dir=None):
+            loader_calls.append((repo_root, bus_dir))
+            raise loader_failure
+
+        monkeypatch.setattr(rg_mod, "load_routing_record", fake_load_routing_record)
+
+        with pytest.raises(OSError) as exc_info:
+            rg_mod._resolve_routing_record(  # ANTICHEAT_OK: direct seam contract
+                tmp_path,
+                selected_bus_dir,
+            )
+
+        assert exc_info.value is loader_failure
+        assert loader_calls == [(tmp_path, selected_bus_dir)]
+
+    @pytest.mark.parametrize(
+        "selected_bus_dir",
+        [None, Path(".agent_bus-non-default")],
+        ids=["default_bus", "non_default_bus"],
+    )
+    def test_caller_success_uses_selected_bus_without_result_drift(
+        self,
+        tmp_path,
+        monkeypatch,
+        selected_bus_dir,
+    ):
+        loader_calls = []
+
+        def fake_load_routing_record(repo_root, *, bus_dir=None):
+            loader_calls.append((repo_root, bus_dir))
+            return {"pager_route": "  pager-selected-route  "}
+
+        monkeypatch.setattr(rg_mod, "load_routing_record", fake_load_routing_record)
+        token = rg_mod._ACTIVE_BUS_DIR.set(  # ANTICHEAT_OK: selected-bus seam setup
+            selected_bus_dir
+        )
+        try:
+            route = rg_mod._recovery_pager_route(  # ANTICHEAT_OK: focused consumer contract
+                tmp_path,
+                status={},
+            )
+        finally:
+            rg_mod._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: restore ContextVar
+
+        assert route == "pager-selected-route"
+        assert loader_calls == [(tmp_path, selected_bus_dir)]
+
+    @pytest.mark.parametrize(
+        ("selected_bus_dir", "failure_mode"),
+        [
+            (None, "exception"),
+            (None, "empty"),
+            (Path(".agent_bus-non-default"), "exception"),
+            (Path(".agent_bus-non-default"), "empty"),
+        ],
+        ids=[
+            "default_bus_exception",
+            "default_bus_empty",
+            "non_default_bus_exception",
+            "non_default_bus_empty",
+        ],
+    )
+    def test_caller_preserves_loader_failure_and_empty_fallback(
+        self,
+        tmp_path,
+        monkeypatch,
+        selected_bus_dir,
+        failure_mode,
+    ):
+        loader_calls = []
+
+        def fake_load_routing_record(repo_root, *, bus_dir=None):
+            loader_calls.append((repo_root, bus_dir))
+            if failure_mode == "exception":
+                raise OSError("routing record unavailable")
+            return {}
+
+        monkeypatch.setattr(rg_mod, "load_routing_record", fake_load_routing_record)
+        token = rg_mod._ACTIVE_BUS_DIR.set(  # ANTICHEAT_OK: selected-bus seam setup
+            selected_bus_dir
+        )
+        try:
+            route = rg_mod._recovery_pager_route(  # ANTICHEAT_OK: focused consumer contract
+                tmp_path,
+                status={},
+            )
+        finally:
+            rg_mod._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: restore ContextVar
+
+        assert route is None
+        assert loader_calls == [(tmp_path, selected_bus_dir)]
+
+    @pytest.mark.parametrize(
+        "selected_bus_dir",
+        [None, Path(".agent_bus-non-default")],
+        ids=["default_bus", "non_default_bus"],
+    )
+    def test_caller_keeps_malformed_record_handling_outside_resolver(
+        self,
+        tmp_path,
+        monkeypatch,
+        selected_bus_dir,
+    ):
+        loader_calls = []
+
+        def fake_load_routing_record(repo_root, *, bus_dir=None):
+            loader_calls.append((repo_root, bus_dir))
+            return []
+
+        monkeypatch.setattr(rg_mod, "load_routing_record", fake_load_routing_record)
+        token = rg_mod._ACTIVE_BUS_DIR.set(  # ANTICHEAT_OK: selected-bus seam setup
+            selected_bus_dir
+        )
+        try:
+            with pytest.raises(AttributeError):
+                rg_mod._recovery_pager_route(  # ANTICHEAT_OK: focused consumer contract
+                    tmp_path,
+                    status={},
+                )
+        finally:
+            rg_mod._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: restore ContextVar
+
+        assert loader_calls == [(tmp_path, selected_bus_dir)]
+
+
 def _shell_quote(text: str) -> str:
     import shlex as _shlex
     return _shlex.quote(text)

@@ -67,6 +67,10 @@ def _active_bus_dir() -> Path | None:
     return _ACTIVE_BUS_DIR.get()
 
 
+def _resolve_routing_record(repo_root: Path, bus_dir: Path | None) -> Any:
+    return load_routing_record(repo_root, bus_dir=bus_dir)
+
+
 def _bus_path(repo_root: Path, *parts: str) -> Path:
     return agent_bus_path(repo_root, _active_bus_dir(), *parts)
 
@@ -1917,7 +1921,7 @@ def fix_phase_a_plan_name_normalization(repo_root: Path, **kw: Any) -> dict[str,
         )
 
     try:
-        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+        routing_record = _resolve_routing_record(repo_root, _active_bus_dir())
     except Exception as exc:
         return _fix_result(
             False,
@@ -1947,7 +1951,7 @@ def _phase_a_retry_record_for_existing_packet(
     wave_id: str,
 ) -> dict[str, Any]:
     try:
-        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+        routing_record = _resolve_routing_record(repo_root, _active_bus_dir())
     except Exception:
         routing_record = {}
     if not isinstance(routing_record, dict):
@@ -2434,7 +2438,7 @@ def fix_missing_plan_task_header(repo_root: Path, **kw: Any) -> dict[str, Any]:
         return _fix_result(False, "module_load_failed", f"could not load plan helpers: {exc}")
 
     try:
-        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+        routing_record = _resolve_routing_record(repo_root, _active_bus_dir())
     except Exception:
         routing_record = {}
     routing_task_id = (
@@ -2555,7 +2559,7 @@ def fix_mismatched_plan_task_header(repo_root: Path, **kw: Any) -> dict[str, Any
     packet_wave_id = str(parsed.get("wave_id", "") or "").strip()
 
     try:
-        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+        routing_record = _resolve_routing_record(repo_root, _active_bus_dir())
     except Exception:
         routing_record = {}
     live_routing_task_id = str(routing_record.get("task_id", "") or "").strip()
@@ -3325,7 +3329,7 @@ def fix_handoff_receipt_builder_refresh(repo_root: Path, **kw: Any) -> dict[str,
     result = kw.get("result") if isinstance(kw.get("result"), dict) else {}
 
     try:
-        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+        routing_record = _resolve_routing_record(repo_root, _active_bus_dir())
     except Exception as exc:
         return _fix_result(False, "routing_record_missing", f"could not load routing record: {exc}")
     if not isinstance(routing_record, dict):
@@ -3729,7 +3733,7 @@ def _post_reentry_resume_task_id(
 
     # 2) Live routing record — the proven ROUTE_PHASE_B retry-record source.
     try:
-        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+        routing_record = _resolve_routing_record(repo_root, _active_bus_dir())
         routing_task_id = str(routing_record.get("task_id", "") or "").strip()
         if routing_task_id:
             return routing_task_id
@@ -4076,7 +4080,7 @@ def fix_phase_b_plan_required(repo_root: Path, **kw: Any) -> dict[str, Any]:
     if not plan_path:
         try:
             plan_path = _routing_plan_path(
-                load_routing_record(repo_root, bus_dir=_active_bus_dir())
+                _resolve_routing_record(repo_root, _active_bus_dir())
             )
         except Exception:
             plan_path = ""
@@ -11056,7 +11060,7 @@ def _recovery_event_context(
     ).strip()
     if not task_id or not plan_path:
         try:
-            routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+            routing_record = _resolve_routing_record(repo_root, _active_bus_dir())
         except Exception:
             routing_record = {}
         if not task_id:
@@ -11105,7 +11109,7 @@ def _recovery_pager_route(repo_root: Path, *, status: dict[str, Any]) -> str | N
     if route:
         return route
     try:
-        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+        routing_record = _resolve_routing_record(repo_root, _active_bus_dir())
     except Exception:
         routing_record = {}
     route = str(routing_record.get("pager_route") or "").strip()
