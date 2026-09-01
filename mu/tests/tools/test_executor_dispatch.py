@@ -382,6 +382,8 @@ class TestDispatcherConfig:
         monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", raising=False)
         committed = json.loads(
             (REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json").read_text()
         )["role_agents"]
@@ -4721,8 +4723,10 @@ END_AGENT_ENVELOPE"""
         assert argv[argv.index("--reviewer") + 1] == "claude"
         assert result["exit_code"] == 0
 
-    def test_bridge_design_review_sets_configured_turn_timeout_env(self, tmp_path):
+    def test_bridge_design_review_sets_configured_turn_timeout_env(self, tmp_path, monkeypatch):
         """Phase A bridge review should pass its turn-time budget to bridge_supervisor."""
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", raising=False)
         tools_agents = tmp_path / "tools" / "agents"
         tools_agents.mkdir(parents=True)
         fake_bridge = tools_agents / "bridge_supervisor.py"

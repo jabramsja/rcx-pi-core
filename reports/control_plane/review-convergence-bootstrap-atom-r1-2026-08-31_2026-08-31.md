@@ -104,8 +104,8 @@ review-convergence-bootstrap-atom-r1-2026-08-31
 - `indicator_artifact_ref`: reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json.
 - `indicator_collection_command`: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id review-convergence-bootstrap-atom-r1-2026-08-31 --output reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json.
 - `target_gate_id`: G8.
-- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_agent_bridge_supervisor.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py`.
-- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md. (2) Final pytest gate covered 10 pytest selector(s) across 3 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_agent_bridge_supervisor.py`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_recovery_gate.py`, `mu/tools/agents/bridge_supervisor.py`, `mu/tools/agents/templates/bridge_reviewer_prompt.txt`, `mu/tools/executors/phase_b_executor.py`, `mu/tools/executors/recovery_gate.py`, `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md`, `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`..
+- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_control_surface_review.py mu/tests/tools/test_executor_dispatch.py`.
+- `evidence_delta`: (1) The preserved Phase B implementation remains committed at `95e8abc5035ba18e0f693920fdd62c171c3dcddf`. (2) Current recovery evidence passed 627 tests across 2 test files. (3) The current pre-commit supervisor package contains exactly 5 staged files and remains pending. scope_refs: `TASKS.md`, `mu/tests/tools/test_control_surface_review.py`, `mu/tests/tools/test_executor_dispatch.py`, `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md`, `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`..
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
 - `boot0_progress_state`: HOLD.
@@ -120,9 +120,9 @@ review-convergence-bootstrap-atom-r1-2026-08-31
 - Refresh wave: `review-convergence-bootstrap-atom-r1-2026-08-31`
 - Active packet: `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md`
 - Indicator artifact: `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`
-- Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
+- Purpose: This historical block records the original Phase B implementation scope; the current five-file recovery package is bound separately by the Commit Path Truth Refresh block below.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
-- Authorized staged files:
+- Original Phase B implementation files:
   - `TASKS.md`
   - `mu/tests/tools/test_agent_bridge_supervisor.py`
   - `mu/tests/tools/test_phase_b_executor.py`
@@ -141,13 +141,16 @@ review-convergence-bootstrap-atom-r1-2026-08-31
 - Refresh wave: `review-convergence-bootstrap-atom-r1-2026-08-31`
 - Active packet: `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `c5a75aaedbb25eb0970cc171ce47dd5acccabb5ffd00983734120b7a66bdd463`
+- Tracker note sha256: `222c4c22531f603e96848a07c0c58aa21f376bc01ea117a5ca5c5280c86ab695`
 - Indicator artifact: `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_agent_bridge_supervisor.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md. (2) Final pytest gate covered 10 pytest selector(s) across 3 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_agent_bridge_supervisor.py`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_recovery_gate.py`, `mu/tools/agents/bridge_supervisor.py`, `mu/tools/agents/templates/bridge_reviewer_prompt.txt`, `mu/tools/executors/phase_b_executor.py`, `mu/tools/executors/recovery_gate.py`, `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md`, `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`..
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_control_surface_review.py mu/tests/tools/test_executor_dispatch.py`.
+- Evidence delta: (1) The preserved Phase B implementation remains committed at `95e8abc5035ba18e0f693920fdd62c171c3dcddf`. (2) Current recovery evidence passed 627 tests across 2 test files. (3) The current pre-commit supervisor package contains exactly 5 staged files and remains pending. scope_refs: `TASKS.md`, `mu/tests/tools/test_control_surface_review.py`, `mu/tests/tools/test_executor_dispatch.py`, `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md`, `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`
 - Current staged files:
+  - `TASKS.md`
+  - `mu/tests/tools/test_control_surface_review.py`
+  - `mu/tests/tools/test_executor_dispatch.py`
   - `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md`
   - `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

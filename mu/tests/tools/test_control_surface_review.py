@@ -353,7 +353,7 @@ class TestBridgeReviewerPromptActivation:
             reader_summary="implementation done",
             diff_text="+ some code",
         )
-        assert "CONTROL-SURFACE REVIEW MODE" in instructions
+        assert "CONTROL-SURFACE EVIDENCE TOPICS (activated" in instructions
         assert "Implementer surface" in instructions
         assert "Bridge loop mechanics" in instructions
         assert "Receipt authority chain" in instructions
@@ -372,7 +372,7 @@ class TestBridgeReviewerPromptActivation:
             reader_summary="kernel fix",
             diff_text="+ code",
         )
-        assert "CONTROL-SURFACE REVIEW MODE" not in instructions
+        assert "CONTROL-SURFACE EVIDENCE TOPICS (activated" not in instructions
 
 
 class TestBridgeReviewerMuPathActivation:
@@ -392,7 +392,7 @@ class TestBridgeReviewerMuPathActivation:
             unstaged="", validation_results_text="pass",
             reader_summary="bridge fix", diff_text="+ code",
         )
-        assert "CONTROL-SURFACE REVIEW MODE" in instructions
+        assert "CONTROL-SURFACE EVIDENCE TOPICS (activated" in instructions
 
 
 class TestMetaBridgePromptControlSurface:
