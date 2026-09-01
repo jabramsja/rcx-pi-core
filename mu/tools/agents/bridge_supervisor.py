@@ -308,11 +308,11 @@ def _format_authoritative_acceptance_criteria(
     acceptance_checks: list[str],
     locked_packet_criteria: str = "",
 ) -> str:
-    if locked_packet_criteria:
-        return locked_packet_criteria
-    if not acceptance_checks:
+    criteria = [locked_packet_criteria] if locked_packet_criteria else []
+    criteria.extend(f"- {criterion}" for criterion in acceptance_checks)
+    if not criteria:
         return "(none)"
-    return "\n".join(f"- {criterion}" for criterion in acceptance_checks)
+    return "\n".join(criteria)
 
 
 def _build_code_review_disposition_contract(

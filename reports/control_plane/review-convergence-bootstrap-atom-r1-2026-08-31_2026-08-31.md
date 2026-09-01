@@ -9,7 +9,7 @@ Purpose: Define one portable Phase B atom that closes the coupled reviewer-contr
 
 ## Scope
 
-Phase B is limited to the following current-wave writable files:
+The original Phase B implementation is limited to the following current-wave writable files:
 
 - `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md` -- Phase A contract and revisions through lock.
 - `TASKS.md` -- builder-owned same-wave tracker synchronization, missing deferred-non-blocker queue entries, and the ordered successor entries described below.
@@ -21,19 +21,28 @@ Phase B is limited to the following current-wave writable files:
 - `mu/tests/tools/test_phase_b_executor.py` -- focused Phase B classifier regressions.
 - `mu/tests/tools/test_recovery_gate.py` -- focused recovery classifier regressions.
 
-The outer Phase B pipeline also owns exactly two same-wave generated package
-artifacts. They are permitted staged outputs, but are not implementer-writable:
+The original outer Phase B pipeline also permits at most two same-wave generated
+package artifacts. They are permitted staged outputs, but are not implementer-writable:
 
 - `reports/deferred/non_blocking/review-convergence-bootstrap-atom-r1-2026-08-31_bridge_nonblockers.md` -- executor-generated deferred-review output.
 - `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json` -- pipeline-collected L4 evidence.
+
+The later same-wave recovery follow-up is separately limited to exactly these
+five staged files:
+
+- `TASKS.md` -- current recovery tracker reconciliation.
+- `mu/tests/tools/test_control_surface_review.py` -- focused recovery control-surface regressions.
+- `mu/tests/tools/test_executor_dispatch.py` -- focused recovery dispatch regressions.
+- `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md` -- current package and evidence reconciliation.
+- `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json` -- refreshed pipeline-collected L4 evidence.
 
 Only the staged indexes in these preserved sibling worktree directories are in scope as read-only evidence sources:
 
 - `WorkingRCX-phase-b-code-review-prompt-precedence-r4-20260831/` -- useful staged code and test hunks only.
 - `WorkingRCX-phase-b-current-impact-disposition-r1-20260831/` -- useful staged code and test hunks only.
 
-No other implementer-writable file, generated package artifact, or preserved
-evidence source is in scope.
+No other original implementation file, current recovery file, generated package
+artifact, or preserved evidence source is in scope.
 
 ## Work items
 
@@ -48,7 +57,7 @@ evidence source is in scope.
    - treat executor-provided successful validation results as evidence receipts, forbid reviewer reruns of the canonical evidence suite, and permit only a focused candidate-specific probe when a supplied receipt is insufficient; and
    - require `GO` when every finding is `non_blocking`.
 4. In `phase_b_executor.py` and `recovery_gate.py`, implement the same decision precedence: preserve mandatory-evidence promotion first; then honor a present canonical `blocking` or `non_blocking` disposition ahead of severity; fail closed on an invalid present disposition; and invoke the existing severity and lower fallback behavior only when disposition is absent. Preserve all behavior outside this precedence seam.
-5. Add focused regressions only to the three authorized existing test files. Cover the exact R5 `GO` plus high-severity `non_blocking` case, required schema disposition, current-candidate blocker eligibility, every absolute deferred category, bounded/no-rerun reviewer instructions, explicit blockers, invalid present values, omitted-disposition high/critical fallback, and mandatory-evidence promotion.
+5. Add focused implementation regressions only to the three originally authorized existing test files. Cover the exact R5 `GO` plus high-severity `non_blocking` case, required schema disposition, current-candidate blocker eligibility, every absolute deferred category, bounded/no-rerun reviewer instructions, explicit blockers, invalid present values, omitted-disposition high/critical fallback, and mandatory-evidence promotion. The later recovery follow-up may place recovery/commit-path regressions only in the two separately enumerated existing recovery test files.
 6. Synchronize `TASKS.md` through the builder-owned same-wave entry. If absent, queue the excluded stopped-reviewer edge cases as deferred non-blockers. Record the next landing-critical successor as a fresh native-stub packet-contract wave for `launch_wave.py` and Phase A aggregate packet validation; record a separate reviewer evidence-budget enforcement atom after it only if still needed.
 7. Keep `gpt-5.6-sol` with `ultra` reasoning for every model-bearing role and pager, and keep commit execution providerless/null.
 
@@ -57,7 +66,7 @@ evidence source is in scope.
 - Do not change runtime, substrate, host-semantics, parity, dispatcher, commit-surface, receipt, PR, fleet, Claude-owned, or unrelated edge-case implementation.
 - Do not copy or modify either preserved candidate's packet, TASKS text, L4 indicator, deferred report, agent-bus state, branch history, or worktree state. The preserved candidates remain evidence until this combined atom actually merges.
 - Do not implement malformed-finding handling, repeat recovery, crash replay, `QUESTION` persistence, non-`GO` semantics, receipt revocation, or any other stopped-reviewer edge case. Missing queue entries may be added only to `TASKS.md` as deferred non-blockers.
-- Do not add production files or test files. Tests are limited to the three existing files enumerated in Scope.
+- Do not add production files or test files. Original implementation regressions are limited to the three existing implementation test files enumerated in Scope; recovery/commit-path test regressions are limited to the two separately enumerated existing recovery test files.
 - Do not alter behavior outside the exact reviewer-eligibility and disposition-precedence seams.
 - Do not implement either successor wave in this atom, and do not add evidence-budget enforcement unless the ordered later atom is still needed.
 - Do not hand-edit the auto-derived L4 field block below; its canonical source remains the same-wave `TASKS.md` tracker note.
@@ -79,8 +88,8 @@ evidence source is in scope.
 4. Synthetic-only, failure- or interruption-injected, theoretical or not-occurring, pre-existing-unworsened, and unrelated-adjacent findings remain `non_blocking` at every severity. When all findings are `non_blocking`, the reviewer emits `GO`, including the exact R5 high-severity `non_blocking` case.
 5. Successful executor validation results are accepted as evidence receipts. Reviewer instructions prohibit rerunning the canonical evidence suite and allow only a focused candidate-specific probe when the provided evidence is insufficient.
 6. Phase B and recovery apply the same precedence: mandatory-evidence promotion first; a valid present canonical disposition before severity; invalid present values fail closed; and existing severity/lower fallback behavior only when disposition is absent. Explicit blockers, omitted-disposition high/critical findings, and mandatory-evidence failures retain their required blocking behavior.
-7. Focused regressions for criteria 2-6 exist only in the three authorized test files, and the exact `evidence_command` in the L4 field block passes under executor control.
-8. The current-wave staged package is limited to the nine implementer-writable files enumerated in Scope plus the two separately enumerated outer-generated governance artifacts. This governing packet is the sole manually authored new file; the deferred non-blocker report and L4 indicator are the only additional new files. No new production or test files are created, preserved evidence is unchanged, and behavior outside the two named seams is unchanged.
+7. Focused implementation regressions for criteria 2-6 exist only in the three originally authorized test files. Recovery/commit-path regressions exist only in the two separately authorized existing recovery test files, and the exact `evidence_command` in the L4 field block passes under executor control.
+8. The original Phase B staged package is limited to the nine implementer-writable files enumerated in Scope plus the two separately permitted outer-generated governance artifacts. The current recovery staged package is limited to the five separately enumerated recovery paths. This governing packet is the sole manually authored new file; the deferred non-blocker report, if emitted, and the L4 indicator are the only permitted additional new files. No new production or test files are created, preserved evidence is unchanged, and behavior outside the two named seams is unchanged.
 9. The builder-owned `TASKS.md` entry reflects same-wave completion evidence, any missing excluded-edge deferred non-blockers, and the required successor ordering. The preserved R5 and classifier candidates remain intact until this atom merges.
 10. Every model-bearing role and pager uses Codex `gpt-5.6-sol` with `ultra` reasoning, and commit execution remains providerless/null.
 
