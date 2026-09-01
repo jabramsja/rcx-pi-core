@@ -2206,6 +2206,335 @@ print("END_AGENT_ENVELOPE")
     assert turns[1]["status"] == "completed"
 
 
+# --- Reviewer current-impact disposition contract ---
+
+
+def _submit_reviewer_prompt_job(
+    paths,
+    *,
+    task_text: str = "reviewer current-impact policy test",
+    acceptance_checks: list[str] | None = None,
+) -> str:
+    return bridge.submit_job(
+        paths,
+        task_text=task_text,
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=acceptance_checks or [],
+        job_id="reviewer-prompt-policy-job",
+    )
+
+
+def _render_reviewer_prompt(
+    paths,
+    job_id: str,
+    *,
+    include_diff: bool = True,
+    validation_results: list[dict[str, object]] | None = None,
+    reader_summary: str | None = None,
+) -> str:
+    with bridge.open_db(paths) as conn:
+        job = bridge.read_job(conn, job_id)
+        if reader_summary is None:
+            return bridge.build_reviewer_prompt(
+                conn,
+                paths,
+                job,
+                1,
+                validation_results or [],
+                include_diff=include_diff,
+            )
+        with patch.object(bridge, "latest_envelope", return_value={"summary": reader_summary}):
+            return bridge.build_reviewer_prompt(
+                conn,
+                paths,
+                job,
+                1,
+                validation_results or [],
+                include_diff=include_diff,
+            )
+
+
+def _authoritative_criteria_block(prompt: str) -> str:
+    _, marker, remainder = prompt.partition("AUTHORITATIVE_LOCKED_ACCEPTANCE_CRITERIA:\n")
+    assert marker, "code-review prompt must contain the authoritative criteria heading"
+    criteria, separator, _ = remainder.partition("\n\nBlocking eligibility:")
+    assert separator, "code-review prompt must delimit the authoritative criteria list"
+    return criteria
+
+
+def test_reviewer_prompt_template_has_one_required_disposition_substitution() -> None:
+    template = (
+        REPO_ROOT / "mu" / "tools" / "agents" / "templates" / "bridge_reviewer_prompt.txt"
+    ).read_text(encoding="utf-8")
+    finding_schema = json.loads(bridge.JSON_SCHEMA_STUB)["findings"][0]
+
+    assert template.count("$disposition_contract") == 1
+    assert "BLOCKING (must fix before merge):" not in template
+    assert finding_schema["disposition"] == "blocking|non_blocking"
+
+
+def test_reviewer_prompt_code_review_renders_candidate_criteria_and_required_schema(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    (repo_root / "unstaged.txt").write_text("committed baseline\n", encoding="utf-8")
+    _git(repo_root, "add", "unstaged.txt")
+    _git(repo_root, "commit", "-m", "add second tracked file")
+
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+    (repo_root / "README.md").write_text("staged candidate content\n", encoding="utf-8")
+    (repo_root / "unstaged.txt").write_text("outside staged candidate\n", encoding="utf-8")
+    _git(repo_root, "add", "README.md")
+    acceptance_checks = [
+        "python3 tools/checks/check_agent_runtime.py",
+        "./tools/pre-push-fast",
+    ]
+    job_id = _submit_reviewer_prompt_job(paths, acceptance_checks=acceptance_checks)
+
+    prompt = _render_reviewer_prompt(paths, job_id)
+
+    assert "$disposition_contract" not in prompt
+    assert prompt.count("CODE-REVIEW CURRENT-IMPACT DISPOSITION CONTRACT") == 1
+    assert prompt.count("\nAUTHORITATIVE_LOCKED_ACCEPTANCE_CRITERIA:\n") == 1
+    assert _authoritative_criteria_block(prompt) == "\n".join(
+        f"- {criterion}" for criterion in acceptance_checks
+    )
+    assert '"disposition": "blocking|non_blocking"' in prompt
+    assert "- CHANGED_FILES_ACTUAL: README.md\n" in prompt
+    assert "- STAGED_FILES: README.md\n" in prompt
+    assert "- UNSTAGED_FILES: (out of scope — only staged files are under review)\n" in prompt
+    assert "+staged candidate content" in prompt
+
+
+def test_reviewer_prompt_code_review_current_candidate_blocker_eligibility_and_exclusions(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+    (repo_root / "README.md").write_text("candidate content\n", encoding="utf-8")
+    job_id = _submit_reviewer_prompt_job(paths, acceptance_checks=[])
+
+    prompt = _render_reviewer_prompt(paths, job_id)
+
+    assert _authoritative_criteria_block(prompt) == "(none)"
+    assert "branch 2 is disabled and cannot\n  authorize a blocking finding" in prompt
+    assert "reproduces a regression on the CURRENT authorized execution path" in prompt
+    assert "introduced or worsened that regression" in prompt
+    assert "directly demonstrates failure of an exact item" in prompt
+    assert "sole authority for code-review disposition" in prompt
+    assert "takes precedence over every\n  generic exhaustive-review instruction, control-surface instruction" in prompt
+    for category in (
+        "A synthetic-only finding is always non_blocking.",
+        "A failure- or interruption-injected finding is always non_blocking.",
+        "A theoretical or not-occurring finding is always non_blocking.",
+        "A pre-existing-unworsened finding is always non_blocking.",
+        "An unrelated-adjacent finding is always non_blocking.",
+    ):
+        assert category in prompt
+    assert "no severity exception" in prompt
+    assert "When every finding is non_blocking, MUST emit decision GO" in prompt
+    assert "has high or critical severity" in prompt
+
+
+def test_reviewer_prompt_code_review_phase_b_task_supplies_locked_packet_criteria_without_checks(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    packet_rel = Path("reports/control_plane/locked-wave.md")
+    packet_path = repo_root / packet_rel
+    packet_path.parent.mkdir(parents=True)
+    staged_packet = """# Locked wave
+
+Phase-A-Lock: LOCKED
+
+## Purpose
+
+STAGED_PURPOSE_IS_NOT_A_CRITERION
+
+## Acceptance criteria
+
+1. The live Phase B review receives this exact locked criterion.
+2. Generic task prose cannot create an additional blocker.
+
+## Grounding / Authorization
+
+- Governing packet evidence.
+"""
+    packet_path.write_text(
+        staged_packet,
+        encoding="utf-8",
+    )
+    _git(repo_root, "add", str(packet_rel))
+    packet_path.write_text(
+        staged_packet.replace(
+            "The live Phase B review receives this exact locked criterion.",
+            "UNSTAGED_DECOY_CRITERION",
+        ),
+        encoding="utf-8",
+    )
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+    job_id = _submit_reviewer_prompt_job(
+        paths,
+        task_text=(
+            "TASK_TEXT_DECOY_CRITERION; "
+            f"Phase B implementation review R1 for {packet_rel}"
+        ),
+        acceptance_checks=[],
+    )
+
+    prompt = _render_reviewer_prompt(paths, job_id)
+    criteria = _authoritative_criteria_block(prompt)
+
+    assert criteria == (
+        "1. The live Phase B review receives this exact locked criterion.\n"
+        "2. Generic task prose cannot create an additional blocker."
+    )
+    assert "STAGED_PURPOSE_IS_NOT_A_CRITERION" in prompt
+    assert "STAGED_PURPOSE_IS_NOT_A_CRITERION" not in criteria
+    assert "TASK_TEXT_DECOY_CRITERION" in prompt
+    assert "TASK_TEXT_DECOY_CRITERION" not in criteria
+    assert "UNSTAGED_DECOY_CRITERION" not in prompt
+    assert "UNSTAGED_DECOY_CRITERION" not in criteria
+    assert "When AUTHORITATIVE_LOCKED_ACCEPTANCE_CRITERIA is `(none)`" in prompt
+    assert "only exact items rendered above from that\n" in prompt
+    assert "packet's `## Acceptance criteria` section have criterion authority" in prompt
+
+
+def test_reviewer_prompt_code_review_is_bounded_and_uses_validation_receipts(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+    (repo_root / "README.md").write_text("candidate content\n", encoding="utf-8")
+    evidence_command = "python3 tools/checks/check_agent_runtime.py"
+    job_id = _submit_reviewer_prompt_job(
+        paths,
+        acceptance_checks=[evidence_command],
+    )
+
+    prompt = _render_reviewer_prompt(
+        paths,
+        job_id,
+        validation_results=[
+            {"command": evidence_command, "result_summary": "PASS: 12 passed"},
+        ],
+    )
+
+    assert "Bounded review scope:" in prompt
+    assert "Review only staged-candidate behavior" in prompt
+    assert "Do not exhaustively enumerate crash timing" in prompt
+    assert "Do NOT stop at the first finding. Enumerate ALL issues" not in prompt
+    assert "a crash occurs before, during, and after each transition" not in prompt
+    assert "error handling, edge cases, and backward compatibility" not in prompt
+    assert "successful result under VALIDATION_RESULTS as an evidence receipt" in prompt
+    assert "MUST NOT rerun a canonical evidence suite" in prompt
+    assert "run only a focused\n  candidate-specific probe" in prompt
+    assert "Do not replace it with a suite rerun or a broad exploratory campaign" in prompt
+    assert f"- {evidence_command} => PASS: 12 passed" in prompt
+
+
+def test_reviewer_prompt_code_review_contract_precedes_control_surface_prose(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    candidate = repo_root / "mu" / "tools" / "executors" / "phase_b_executor.py"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_text("# staged control-surface candidate\n", encoding="utf-8")
+    _git(repo_root, "add", str(candidate.relative_to(repo_root)))
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+    job_id = _submit_reviewer_prompt_job(
+        paths,
+        acceptance_checks=["git status --short"],
+    )
+
+    prompt = _render_reviewer_prompt(paths, job_id)
+
+    control_offset = prompt.index("CONTROL-SURFACE EVIDENCE TOPICS")
+    contract_offset = prompt.index("CODE-REVIEW CURRENT-IMPACT DISPOSITION CONTRACT")
+    assert control_offset < contract_offset
+    assert "bounded evidence context, not independent blocking authority" in prompt
+    assert "authoritative code-review current-impact disposition contract below takes precedence" in prompt
+    assert "If you cannot verify any obligation from the available evidence, emit it as a CRITICAL finding" not in prompt
+    assert "Adjacent files you MUST read" not in prompt
+
+
+def test_reviewer_prompt_code_review_rejects_non_authoritative_criterion_substitutes(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+    task_decoy = "TASK_TEXT_DECOY_CRITERION"
+    validation_decoy = "VALIDATION_RESULTS_DECOY_CRITERION"
+    reader_decoy = "READER_OUTPUT_DECOY_CRITERION"
+    authoritative = "bash tools/checks/check_docs_consistency.sh"
+    job_id = _submit_reviewer_prompt_job(
+        paths,
+        task_text=task_decoy,
+        acceptance_checks=[authoritative],
+    )
+
+    prompt = _render_reviewer_prompt(
+        paths,
+        job_id,
+        validation_results=[
+            {"command": "validation-decoy-command", "result_summary": validation_decoy},
+        ],
+        reader_summary=reader_decoy,
+    )
+    criteria = _authoritative_criteria_block(prompt)
+
+    for decoy in (task_decoy, validation_decoy, reader_decoy):
+        assert decoy in prompt
+        assert decoy not in criteria
+    assert criteria == f"- {authoritative}"
+    assert "cannot create, infer, or substitute for a locked criterion" in prompt
+
+
+def test_reviewer_prompt_code_review_design_mode_preserves_general_contract(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+    job_id = _submit_reviewer_prompt_job(
+        paths,
+        acceptance_checks=["./tools/audit_fast.sh"],
+    )
+
+    prompt = _render_reviewer_prompt(paths, job_id, include_diff=False)
+
+    assert "THIS IS A DESIGN DELIBERATION, NOT A CODE REVIEW." in prompt
+    assert "BLOCKING (must fix before merge):" in prompt
+    assert "CODE-REVIEW CURRENT-IMPACT DISPOSITION CONTRACT" not in prompt
+    assert "AUTHORITATIVE_LOCKED_ACCEPTANCE_CRITERIA" not in prompt
+    assert "$disposition_contract" not in prompt
+
+
 # --- DESIGN-1: reviewer prompt includes staged diff ---
 
 

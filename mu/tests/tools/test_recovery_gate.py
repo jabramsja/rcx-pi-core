@@ -991,10 +991,9 @@ class TestStagePathSymlinkAliasRecovery:
             {"status": "error", "step": "agent_review",
              "stderr": "agent died"}) == FailureClass.AGENT_REVIEW_CRASH
 
-    def test_bridge_go_with_only_deferrable_findings_proceeds_not_agent_review_crash(self):
-        # A bridge round the supervisor decided GO, carrying ONLY a canonical
-        # low-severity nonblocker, is a defer-and-proceed-to-commit case -- NOT a
-        # reviewer crash.
+    def test_r5_bridge_go_all_explicit_nonblocking_including_high_is_deferrable(self):
+        # Exact R5 shape: GO with every finding explicitly non_blocking,
+        # including a high finding, is defer-and-proceed -- NOT a reviewer crash.
         result = {
             "status": "failed",
             "step": "bridge_loop",
@@ -1006,7 +1005,14 @@ class TestStagePathSymlinkAliasRecovery:
                     "disposition": "non_blocking",
                     "class": "DOC_ACCURACY",
                     "file": "reports/x.md",
-                }
+                },
+                {
+                    "title": "current-impact high finding",
+                    "severity": "high",
+                    "disposition": "non_blocking",
+                    "class": "DEFECT",
+                    "file": "mu/x.py",
+                },
             ],
             "stderr": "reviewer flagged 1 finding",
         }
@@ -1044,9 +1050,9 @@ class TestStagePathSymlinkAliasRecovery:
             == FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
         )
 
-    def test_bridge_go_with_high_severity_finding_still_strands(self):
-        # A GO carrying a HIGH-severity (true-blocking) finding must keep
-        # stranding -- the deferrable guard must NOT fire on it.
+    def test_bridge_go_with_explicit_high_blocker_still_strands(self):
+        # A GO carrying an explicit blocking finding must keep stranding at
+        # high severity -- the deferrable guard must NOT fire on it.
         result = {
             "status": "failed",
             "step": "bridge_loop",
@@ -1068,8 +1074,8 @@ class TestStagePathSymlinkAliasRecovery:
         assert rg_mod.tier_for(fc) == 3
 
     def test_bridge_go_with_mixed_low_and_critical_findings_still_strands(self):
-        # ANY high/critical finding on a GO round blocks the deferrable guard;
-        # the round must keep stranding (one critical among low findings).
+        # ANY explicit blocker on a GO round blocks the deferrable guard; the
+        # round must keep stranding (one critical blocker among nonblockers).
         result = {
             "status": "failed",
             "step": "bridge_loop",
@@ -1085,13 +1091,20 @@ class TestStagePathSymlinkAliasRecovery:
         assert fc != FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
 
     def test_genuine_no_go_still_strands(self):
-        # A genuine NO_GO must keep its existing strand classification even when
-        # its findings are all low-severity (decision, not severity, gates here).
+        # A genuine NO_GO keeps its existing strand classification even when
+        # every finding would be deferrable under a GO decision.
         result = {
             "status": "failed",
             "step": "bridge_loop",
             "decision": "NO_GO",
-            "findings": [{"title": "x", "severity": "low", "class": "DOC_ACCURACY"}],
+            "findings": [
+                {
+                    "title": "x",
+                    "severity": "high",
+                    "disposition": "non_blocking",
+                    "class": "DOC_ACCURACY",
+                }
+            ],
             "stderr": "reviewer flagged",
         }
         fc = rg_mod.classify_failure(result)
@@ -1112,8 +1125,6 @@ class TestStagePathSymlinkAliasRecovery:
                 "candidate_relationship": "pre-existing",
                 "summary": "hardening only; normally non-blocking context",
             },
-            {"severity": "high", "disposition": "non_blocking"},
-            {"severity": "critical", "disposition": "non_blocking"},
             {"severity": "medium", "disposition": "BLOCKING"},
             {"severity": "medium", "disposition": "ambiguous"},
             {"severity": "medium", "disposition": None},
@@ -1124,19 +1135,17 @@ class TestStagePathSymlinkAliasRecovery:
             "non-dict",
             "low-blocking",
             "persisting-preexisting-medium-blocking",
-            "high-nonblocking",
-            "critical-nonblocking",
             "noncanonical-case",
             "invalid-string",
             "explicit-null",
             "unhashable-list",
         ],
     )
-    def test_shared_go_deferrability_fails_closed(self, finding):
+    def test_current_impact_disposition_shared_go_deferrability_fails_closed(self, finding):
         assert not rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: shared recovery/Phase-B disposition authority regression
 
-    @pytest.mark.parametrize("severity", ["low", "medium"])
-    def test_shared_go_deferrability_accepts_canonical_nonblockers(self, severity):
+    @pytest.mark.parametrize("severity", ["low", "medium", "high", "critical"])
+    def test_current_impact_disposition_accepts_canonical_nonblockers(self, severity):
         finding = {
             "severity": severity,
             "disposition": "non_blocking",
@@ -1149,7 +1158,11 @@ class TestStagePathSymlinkAliasRecovery:
     def test_missing_disposition_retains_sub_high_default(self, severity):
         assert rg_mod._finding_is_deferrable_on_go({"severity": severity})  # ANTICHEAT_OK: exact omission fallback must not broaden ordinary findings
 
-    def test_exact_mandatory_evidence_pair_is_case_and_whitespace_normalized(self):
+    @pytest.mark.parametrize("severity", ["high", "critical"])
+    def test_missing_disposition_retains_high_critical_floor(self, severity):
+        assert not rg_mod._finding_is_deferrable_on_go({"severity": severity})  # ANTICHEAT_OK: absent structured disposition retains the severity floor
+
+    def test_current_impact_disposition_mandatory_evidence_promotes_first(self):
         finding = {
             "severity": "medium",
             "evidence_result": (
@@ -3583,8 +3596,9 @@ class TestAttemptRecovery:
             tmp_path, {"status": "error", "stderr": "bridge.lock held", "step": "bridge_loop"}, "w1")
         assert r["recovered"] is True and r["tier"] == 1
 
-    def test_tier1_bridge_go_deferrable_findings_defers_and_proceeds(self, tmp_path):
-        # End-to-end recovery for a GO-with-deferrable-findings round: it must
+    def test_r5_tier1_bridge_go_high_explicit_nonblocking_defers_and_proceeds(self, tmp_path):
+        # End-to-end recovery for the reproduced GO-with-deferrable-findings
+        # shape, including explicit high non_blocking: it must
         # PROCEED (recovered, tier 1, NOT exhausted), file the findings as
         # deferred non-blockers under reports/deferred/non_blocking/, and seed the
         # Phase B resume (ROUTE_PHASE_B + all_non_blocking) so the GO'd wave
@@ -3605,7 +3619,14 @@ class TestAttemptRecovery:
                     "disposition": "non_blocking",
                     "class": "DOC_ACCURACY",
                     "file": "reports/x.md",
-                }
+                },
+                {
+                    "title": "current-impact high finding",
+                    "severity": "high",
+                    "disposition": "non_blocking",
+                    "class": "DEFECT",
+                    "file": "mu/x.py",
+                },
             ],
             "stderr": "reviewer flagged 1 finding",
         }
@@ -3628,15 +3649,16 @@ class TestAttemptRecovery:
         assert "DEFERRED_NON_BLOCKING" in body
         # Carried forward as non_blocking (survives phase_b's convergence re-check).
         assert [f.get("disposition") for f in result["all_non_blocking"]] == [
-            "non_blocking"
+            "non_blocking",
+            "non_blocking",
         ]
         # Phase B resume seeded so the wave proceeds rather than stranding.
         assert result["retry_record"]["decision"] == "ROUTE_PHASE_B"
 
-    def test_tier1_bridge_go_high_severity_finding_does_not_defer(self, tmp_path):
-        # A GO carrying a HIGH-severity finding must NOT route to the deferrable
-        # Tier-1 fix: it stays AGENT_REVIEW_CRASH (tier 3), so no deferred packet
-        # is filed by this path.
+    def test_tier1_bridge_go_explicit_high_blocker_does_not_defer(self, tmp_path):
+        # A GO carrying an explicit high blocker must NOT route to the deferrable
+        # Tier-1 fix: it stays AGENT_REVIEW_CRASH (tier 3), so this path files no
+        # deferred packet.
         (tmp_path / ".agent_bus").mkdir()
         result = {
             "status": "failed",
