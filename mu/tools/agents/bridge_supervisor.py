@@ -73,6 +73,7 @@ JSON_SCHEMA_STUB = json.dumps(
             {
                 "class": "DEFECT|POLICY_BOUND|DOC_ACCURACY",
                 "severity": "low|medium|high|critical",
+                "disposition": "blocking|non_blocking",
                 "title": "string",
                 "file": "string",
                 "line_start": 1,
@@ -198,31 +199,176 @@ except ImportError:
 
 _CONTROL_SURFACE_PROOF_OBLIGATIONS = """\
 
-## CONTROL-SURFACE REVIEW MODE (activated — touched files are in the Phase B / commit authority chain)
+## CONTROL-SURFACE EVIDENCE TOPICS (activated — touched files are in the Phase B / commit authority chain)
 
-You MUST inspect the following cross-file invariants. Do NOT greenlight on summary/diff evidence alone.
+These topics are bounded evidence context, not independent blocking authority. Inspect only the
+topics directly implicated by staged-candidate behavior or an exact locked acceptance criterion.
+The authoritative code-review current-impact disposition contract below takes precedence over this
+section; do not turn an adjacent audit, unavailable broad proof, or claimed invariant into a blocker.
 
-Proof obligations:
+Potential evidence topics:
 1. **Implementer surface**: Read `mu/tools/executors/phase_b_implementer.py`. Verify it uses `bridge_adapters.run_adapter()` directly. It must NOT invoke `bridge_supervisor.py review` (that is review-only).
 2. **Bridge loop mechanics**: Read the bridge convergence loop in `mu/tools/executors/phase_b_executor.py`. Verify that `REQUEST_CHANGES` / `NO_GO` re-invoke the implementer with findings BEFORE the next bridge round. `QUESTION` must fail closed (not loop).
 3. **Receipt authority chain**: Trace the canonical live path only: `mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()` → return value → `mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()` → `receipt_path` field → `mu/tools/executors/phase_b_executor.py::prepare_commit_handoff()` → `mu/tools/executors/commit_executor.py` verification. The per-invocation receipt path must be exact, not discovered by sorting a directory.
 4. **Canonical hook receipt preserved**: `mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()` must still write the canonical receipt for hook compatibility. But the EXECUTOR flow must use the per-invocation receipt, not canonical. Do not use legacy/nonexistent aliases when verifying this chain.
 5. **No manual fallback in docs**: Protocol docs must not present manual git push/PR/merge as a normal commit path. Only narrow BOOTSTRAP_PHASE_B_EXCEPTION is allowed.
 
-Adjacent files you MUST read (not just the diff):
+Adjacent files you MAY read only when needed to trace candidate behavior or an exact criterion:
 - `mu/tools/executors/phase_b_executor.py` (bridge loop + handoff)
 - `mu/tools/executors/phase_b_implementer.py` (invocation surface)
 - `mu/tools/agents/meta_bridge_client.py` (receipt capture)
 - `mu/tools/agents/meta_bridge_supervisor.py` (receipt writer + validation gates)
 - `mu/tools/executors/commit_executor.py` (receipt verifier)
 
-If you cannot verify any obligation from the available evidence, emit it as a CRITICAL finding — do not skip it."""
+Do not audit this entire list by default. If an applicable topic cannot be verified from the supplied
+evidence receipt or a permitted focused probe, mark that limit as not checked; it is blocking only if
+the authoritative contract independently makes it eligible."""
 
 
 def _touches_control_surface(changed_files_str: str) -> bool:
     """Check if any changed file is a control-surface file."""
     files = [f.strip() for f in changed_files_str.split(",") if f.strip()]
     return bool(set(files) & _CONTROL_SURFACE_FILES)
+
+
+_DESIGN_DELIBERATION_DISPOSITION_CONTRACT = """\
+- DISPOSITION: Every finding MUST include a "disposition" field set to "blocking" or "non_blocking".
+  Apply the classification contract below (shared with phase_b_executor.py via executor_common.py):
+
+  BLOCKING (must fix before merge):
+  - Causes runtime failure, crash, or data loss in the live pipeline
+  - Violates a hard invariant (receipt authority, fail-closed behavior, process cleanup)
+  - Security bypass or privilege escalation
+  - Breaks an existing test or causes test regression
+  - Makes a pipeline step silently skip or produce wrong output
+
+  NON_BLOCKING (improvement, can be deferred):
+  - Hardening improvement that does not affect current correctness
+  - Theoretical edge case that requires synthetic/adversarial setup to trigger
+  - Code quality, style, or naming suggestion
+  - Defense-in-depth addition
+  - Documentation accuracy without behavioral impact
+  - Performance optimization
+
+  - When ALL remaining findings are "non_blocking", emit decision GO.
+  - If "disposition" is omitted, the executor infers it from content keywords and severity,
+    with fail-closed default (unrecognized findings treated as blocking)."""
+
+
+_CONTROL_PLANE_PACKET_RE = re.compile(
+    r"reports/control_plane/[A-Za-z0-9._-]+\.md(?![A-Za-z0-9._/-])"
+)
+_TOP_LEVEL_PACKET_SECTION_RE = re.compile(r"^##[ \t]+", re.MULTILINE)
+_ACCEPTANCE_CRITERIA_SECTION_RE = re.compile(
+    r"^##[ \t]+Acceptance criteria[ \t]*\r?\n"
+    r"(?P<body>.*?)"
+    r"(?=^##(?:[ \t]+|[ \t]*\r?$)|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
+_LOCKED_PHASE_A_PACKET_RE = re.compile(
+    r"^Phase-A-Lock:[ \t]+LOCKED[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def _locked_packet_acceptance_criteria(repo_root: Path, task_text: str) -> str:
+    """Read exact criteria from the staged locked packet named by the task.
+
+    Phase B identifies its packet in ``TASK_TEXT`` but does not pass ``--check``
+    values to the bridge review command. Limit fallback authority to an exact
+    ``## Acceptance criteria`` section in one staged, locked packet under
+    ``reports/control_plane`` so worktree or task prose cannot silently become
+    a blocking criterion.
+    """
+    packet_paths = {
+        Path(match.group(0)).as_posix()
+        for match in _CONTROL_PLANE_PACKET_RE.finditer(task_text)
+        if ".." not in Path(match.group(0)).parts
+    }
+    if len(packet_paths) != 1:
+        return ""
+    packet_path = next(iter(packet_paths))
+    try:
+        packet_text = git_output(repo_root, ["show", f":{packet_path}"])
+    except BridgeError:
+        return ""
+    first_section = _TOP_LEVEL_PACKET_SECTION_RE.search(packet_text)
+    packet_preamble = packet_text[:first_section.start()] if first_section else packet_text
+    if not _LOCKED_PHASE_A_PACKET_RE.search(packet_preamble):
+        return ""
+    section_match = _ACCEPTANCE_CRITERIA_SECTION_RE.search(packet_text)
+    if section_match:
+        criteria = section_match.group("body").strip()
+        if criteria:
+            return criteria
+    return ""
+
+
+def _format_authoritative_acceptance_criteria(
+    acceptance_checks: list[str],
+    locked_packet_criteria: str = "",
+) -> str:
+    if locked_packet_criteria:
+        return locked_packet_criteria
+    if not acceptance_checks:
+        return "(none)"
+    return "\n".join(f"- {criterion}" for criterion in acceptance_checks)
+
+
+def _build_code_review_disposition_contract(
+    acceptance_checks: list[str],
+    locked_packet_criteria: str = "",
+) -> str:
+    authoritative_criteria = _format_authoritative_acceptance_criteria(
+        acceptance_checks,
+        locked_packet_criteria,
+    )
+    return f"""\
+CODE-REVIEW CURRENT-IMPACT DISPOSITION CONTRACT (authoritative; applies only to code review):
+- Every finding MUST include "disposition": "blocking" or "non_blocking" exactly as required by
+  the authoritative JSON schema.
+- This contract is the sole authority for code-review disposition. It takes precedence over every
+  generic exhaustive-review instruction, control-surface instruction, severity label, or claimed
+  general, implicit, or current-wave invariant elsewhere in this prompt.
+
+AUTHORITATIVE_LOCKED_ACCEPTANCE_CRITERIA:
+{authoritative_criteria}
+
+Blocking eligibility:
+- A finding MAY be blocking only when it is outside every absolute non_blocking category below and
+  evidence establishes one of these two branches:
+  1. The evidence reproduces a regression on the CURRENT authorized execution path, and the staged
+     candidate identified by CHANGED_FILES_ACTUAL introduced or worsened that regression; or
+  2. The evidence directly demonstrates failure of an exact item rendered under
+     AUTHORITATIVE_LOCKED_ACCEPTANCE_CRITERIA above.
+- When AUTHORITATIVE_LOCKED_ACCEPTANCE_CRITERIA is `(none)`, branch 2 is disabled and cannot
+  authorize a blocking finding.
+- TASK_TEXT may identify the governing locked packet, but only exact items rendered above from that
+  packet's `## Acceptance criteria` section have criterion authority. Other TASK_TEXT content,
+  VALIDATION_RESULTS, READER_OUTPUT, generic proof obligations, and claimed invariants
+  cannot create, infer, or substitute for a locked criterion.
+- Severity never overrides current-path reproduction, candidate impact, exact-criterion authority,
+  or an absolute non_blocking category.
+
+Absolute non_blocking categories (no severity exception):
+- A synthetic-only finding is always non_blocking.
+- A failure- or interruption-injected finding is always non_blocking.
+- A theoretical or not-occurring finding is always non_blocking.
+- A pre-existing-unworsened finding is always non_blocking.
+- An unrelated-adjacent finding is always non_blocking.
+- If one is discovered during the bounded review, report and defer it as non_blocking; do not expand
+  review scope to enumerate hypothetical variants.
+
+Evidence receipts and probe budget:
+- Treat each executor-provided successful result under VALIDATION_RESULTS as an evidence receipt for
+  the command and scope it reports.
+- MUST NOT rerun a canonical evidence suite covered by a successful executor evidence receipt.
+- If a supplied receipt is insufficient to resolve a candidate-specific claim, run only a focused
+  candidate-specific probe. Do not replace it with a suite rerun or a broad exploratory campaign.
+
+Decision rule:
+- When every finding is non_blocking, MUST emit decision GO, including when a non_blocking finding
+  has high or critical severity."""
 
 
 def _build_code_review_instructions(
@@ -251,18 +397,17 @@ Evidence available:
 Staged diff (up to 10000 chars):
 {diff_text}
 
-Required review scope:
-- red-team ONLY the files listed in CHANGED_FILES_ACTUAL above
-- if UNSTAGED_FILES says "out of scope", do NOT read, review, or issue findings about unstaged files — they belong to other waves
-- red-team adjacent high-risk files implicated by the in-scope touches
-- classify findings as DEFECT, POLICY_BOUND, or DOC_ACCURACY
-
-Exhaustive enumeration requirement:
-- Do NOT stop at the first finding. Enumerate ALL issues before issuing your verdict.
-- For state machines / control flow: trace every state transition and check what happens if a crash occurs before, during, and after each transition.
-- For recovery paths: verify idempotency, primary key conflicts, format compatibility, and missing data.
-- For new APIs: verify error handling, edge cases, and backward compatibility.
-- Issue NO_GO only after you have listed every finding you can identify, not after finding just one.{cs_section}"""
+Bounded review scope:
+- Review only staged-candidate behavior in CHANGED_FILES_ACTUAL and the exact locked acceptance
+  criteria rendered in the authoritative disposition contract below.
+- If UNSTAGED_FILES says "out of scope", do NOT read, review, or issue findings about unstaged files;
+  they belong to other waves.
+- Read an adjacent file only when necessary to trace behavior changed by the staged candidate or to
+  evaluate an exact locked criterion. Do not treat it as an independent audit surface.
+- Do not exhaustively enumerate crash timing, interruption, recovery, state-transition, compatibility,
+  or hypothetical edge permutations. Follow a candidate-specific signal only within this bounded scope.
+- Classify each discovered finding as DEFECT, POLICY_BOUND, or DOC_ACCURACY, then apply the
+  authoritative current-impact disposition contract below.{cs_section}"""
 
 
 def _build_design_deliberation_instructions(
@@ -922,6 +1067,7 @@ def build_reviewer_prompt(
     validation_text = _validation_results_text(validation_results)
     reader_summary = reader_envelope.get("summary", "(none)")
     if include_diff:
+        acceptance_checks = json.loads(job["acceptance_checks_json"])
         diff_text = staged_diff_content(paths.repo_root)
         staged_list = changed_files(paths.repo_root, staged=True)
         unstaged_list = changed_files(paths.repo_root, staged=False)
@@ -938,10 +1084,19 @@ def build_reviewer_prompt(
         review_mode_instructions = _build_code_review_instructions(
             changed_actual, staged, unstaged, validation_text, reader_summary, diff_text,
         )
+        locked_packet_criteria = _locked_packet_acceptance_criteria(
+            paths.repo_root,
+            job["task_text"],
+        )
+        disposition_contract = _build_code_review_disposition_contract(
+            acceptance_checks,
+            locked_packet_criteria,
+        )
     else:
         review_mode_instructions = _build_design_deliberation_instructions(
             validation_text, reader_summary,
         )
+        disposition_contract = _DESIGN_DELIBERATION_DISPOSITION_CONTRACT
     # Inject prior-finding lifecycle context when available (round > 1)
     lifecycle_section = ""
     if round_no > 1:
@@ -954,6 +1109,7 @@ def build_reviewer_prompt(
         "wave_class": job["wave_class"] or "(unspecified)",
         "repo_root": str(paths.repo_root),
         "review_mode_instructions": review_mode_instructions,
+        "disposition_contract": disposition_contract,
         "json_schema_stub": JSON_SCHEMA_STUB,
         "prior_findings": lifecycle_section,
     }

@@ -7987,9 +7987,9 @@ class TestFindingDisposition:
 
     Structured deferrability and mandatory-promotion authority are shared via
     recovery_gate.py; keyword lists remain sourced from executor_common.py:
-    1. Critical/high severity — fail closed to blocking.
-    2. Exact mandatory evidence_result conjunction — promote to blocking.
-    3. Explicit disposition field — canonical values are authoritative.
+    1. Exact mandatory evidence_result conjunction — promote to blocking.
+    2. Present disposition field — canonical values are authoritative.
+    3. Critical/high severity with disposition absent — fail closed to blocking.
     4. Keyword match against title/summary (BLOCKING_KEYWORDS / NON_BLOCKING_KEYWORDS).
     5. Medium/low severity without blocking keyword — non_blocking.
     6. Fail-closed default — blocking.
@@ -8083,7 +8083,7 @@ class TestFindingDisposition:
 
     # --- Classification contract tests ---
 
-    def test_explicit_disposition_blocking(self):
+    def test_current_impact_disposition_explicit_blocking(self):
         """Explicit disposition=blocking is honored below the severity floor."""
         findings = [{"title": "Anything", "severity": "medium", "disposition": "blocking"}]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
@@ -8097,19 +8097,19 @@ class TestFindingDisposition:
         assert len(blocking) == 0
         assert len(non_blocking) == 1
 
-    def test_no_disposition_critical_severity_blocking(self):
+    def test_missing_disposition_retains_critical_severity_blocking(self):
         """No disposition + critical severity → always blocking."""
         findings = [{"title": "Something", "severity": "critical"}]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
         assert len(non_blocking) == 0
 
-    def test_critical_severity_overrides_explicit_non_blocking(self):
-        """Critical severity cannot be downgraded by explicit non_blocking disposition."""
+    def test_critical_explicit_non_blocking_controls_current_impact(self):
+        """Canonical explicit non_blocking remains authoritative at critical severity."""
         findings = [{"title": "Critical bug", "severity": "critical", "disposition": "non_blocking"}]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
-        assert len(blocking) == 1
-        assert len(non_blocking) == 0
+        assert len(blocking) == 0
+        assert len(non_blocking) == 1
 
     def test_no_disposition_medium_no_runtime_impact_non_blocking(self):
         """No disposition + medium severity + no runtime keywords → non_blocking."""
@@ -8142,7 +8142,7 @@ class TestFindingDisposition:
         assert disp == "blocking"
         assert "high severity" in reason.lower()
 
-    def test_no_disposition_high_severity_no_keywords_blocking(self):
+    def test_missing_disposition_retains_high_severity_no_keywords_blocking(self):
         """High severity without any keyword match → blocking (fail-closed)."""
         findings = [{"title": "Refactor suggestion", "severity": "high"}]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
@@ -8198,7 +8198,7 @@ class TestFindingDisposition:
         assert disp == "blocking", reason
 
     def test_high_severity_explicit_blocking_stays_blocking(self):
-        """High severity + explicit disposition=blocking → blocking (severity floor preserved)."""
+        """High severity + explicit disposition=blocking → blocking by disposition."""
         disp, reason = pb_mod._disposition_for_finding(  # ANTICHEAT_OK: testing internal executor functions
             {"title": "Bug", "severity": "high", "disposition": "blocking"}
         )
@@ -8241,7 +8241,7 @@ class TestFindingDisposition:
         ids=[
             "explicit-blocking",
             "explicit-nonblocking",
-            "severity-floor",
+            "high-explicit-nonblocking",
             "invalid",
             "explicit-null",
             "unhashable-invalid",
@@ -8253,8 +8253,8 @@ class TestFindingDisposition:
     def test_disposition_matches_recovery_gate_deferrability(self, finding):
         """phase_b and recovery_gate share ONE deferrability rule (no divergence).
 
-        For structured dispositions, severity floors, and exact evidence
-        promotion, phase_b's _disposition_for_finding defers iff
+        For structured dispositions, absent-disposition severity floors, and
+        exact evidence promotion, phase_b's _disposition_for_finding defers iff
         recovery_gate._finding_is_deferrable_on_go marks it deferrable. They must
         agree on every case.
         """
@@ -8265,7 +8265,7 @@ class TestFindingDisposition:
         recovery_defers = rg_mod._finding_is_deferrable_on_go(finding)  # ANTICHEAT_OK: testing internal executor functions
         assert phase_b_defers == recovery_defers
 
-    @pytest.mark.parametrize("severity", ["low", "medium"])
+    @pytest.mark.parametrize("severity", ["low", "medium", "high", "critical"])
     def test_canonical_explicit_nonblockers_remain_deferrable(self, severity):
         disp, reason = pb_mod._disposition_for_finding(  # ANTICHEAT_OK: testing internal executor functions
             {"title": "Nit", "severity": severity, "disposition": "non_blocking"}
@@ -8277,7 +8277,7 @@ class TestFindingDisposition:
         ["BLOCKING", "ambiguous", "", None, ["non_blocking"]],
         ids=["case-shifted", "ambiguous", "empty", "null", "unhashable-list"],
     )
-    def test_invalid_explicit_disposition_fails_closed(self, disposition):
+    def test_current_impact_disposition_invalid_present_fails_closed(self, disposition):
         disp, reason = pb_mod._disposition_for_finding(  # ANTICHEAT_OK: testing internal executor functions
             {"title": "F", "severity": "medium", "disposition": disposition}
         )
@@ -8285,7 +8285,7 @@ class TestFindingDisposition:
         assert "invalid disposition" in reason
 
     @pytest.mark.parametrize("structured_disposition", [None, "non_blocking"])
-    def test_exact_mandatory_evidence_promotes_with_distinct_reason(
+    def test_current_impact_disposition_mandatory_evidence_promotes_with_distinct_reason(
         self, structured_disposition
     ):
         finding = {
@@ -8360,12 +8360,11 @@ class TestGovernanceDowngrade:
         assert len(non_blocking) == 1
 
     def test_blocking_finding_convergence_honors_explicit_blocking_governance_finding(self):
-        """A high-severity governance finding stays blocking via the severity floor.
+        """A high-severity governance finding stays blocking via its disposition.
 
-        The high/critical floor fires before the governance downgrade, so an
-        explicit-blocking governance finding at high severity remains blocking.
-        Explicit blocking also remains blocking below the floor, as covered by
-        the medium-severity regression.
+        Canonical explicit blocking fires before the absent-disposition severity
+        floor and governance fallback. Explicit blocking also remains blocking
+        below the floor, as covered by the medium-severity regression.
         """
         findings = [{
             "title": "Control packet cites stale code line",
@@ -8440,14 +8439,14 @@ class TestGovernanceDowngrade:
 
     @pytest.mark.parametrize("severity", ["high", "critical"])
     def test_high_critical_governance_findings_stay_blocking(self, severity):
-        """Severity floor overrides governance downgrade.
+        """Absent-disposition severity floor overrides governance fallback.
 
         Closes deferred_consolidation_phaseb_fail_closed_hardening_2026-04-02 defect 1:
         prior behavior downgraded critical/high POLICY_BOUND/DOC_ACCURACY on
         governance paths to non-blocking, which let real policy violations
-        slip through. Contract is now: critical/high severity always blocks
-        regardless of class or path; governance downgrade only applies at
-        medium/low severity.
+        slip through. Contract is now: absent-disposition critical/high severity
+        blocks regardless of class or path; governance downgrade only applies
+        to the lower-severity fallback.
         """
         findings = [{
             "title": "Critical governance downgrade",
@@ -8458,7 +8457,7 @@ class TestGovernanceDowngrade:
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1, (
             f"{severity} POLICY_BOUND must block regardless of governance path "
-            "(severity floor applies before governance downgrade)"
+            "(absent-disposition severity floor applies before governance fallback)"
         )
         assert len(non_blocking) == 0
 
@@ -9590,8 +9589,8 @@ class TestOnlyBlockingToImplementer:
         # Deferred packet should be filed
         assert result.get("deferred_packet_path") is not None
 
-    def test_bridge_go_with_non_blocking_findings_still_files_deferred_packet(self, tmp_path):
-        """A GO render with non-blocking findings must still update deferred packet state."""
+    def test_r5_bridge_go_all_explicit_non_blocking_including_high_converges(self, tmp_path):
+        """The reproduced R5 GO shape converges and files its deferred findings."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -9606,6 +9605,8 @@ class TestOnlyBlockingToImplementer:
             "findings": [
                 {"title": "Observability nit", "class": "DEFECT", "severity": "low",
                  "file": "mu/tools/executors/supervision_poll.py", "disposition": "non_blocking", "status": "new"},
+                {"title": "Current-impact high finding", "class": "DEFECT", "severity": "high",
+                 "file": "mu/tools/executors/phase_b_executor.py", "disposition": "non_blocking", "status": "new"},
             ],
         })
         render_text = f"BEGIN_AGENT_ENVELOPE\n{envelope}\nEND_AGENT_ENVELOPE"
@@ -9627,6 +9628,7 @@ class TestOnlyBlockingToImplementer:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready"
+        assert result.get("step") != "bridge_decision"
         assert result.get("deferred_packet_path") is not None
 
     @pytest.mark.parametrize(
@@ -15241,15 +15243,15 @@ class TestValidateInputsAcceptsRoutingRecordAuthority:
             pb_mod.validate_inputs(record, plan)
 
 
-class TestHighSeverityCannotBeDowngradedByDisposition:
-    """Finding 962: high severity must not be downgraded by explicit disposition field."""
+class TestCurrentImpactDispositionPrecedesSeverityFallback:
+    """Present canonical disposition controls before the absent-only severity floor."""
 
-    def test_high_severity_with_non_blocking_disposition_stays_blocking(self):
-        """High severity + explicit non_blocking disposition → still blocking."""
+    def test_high_severity_with_non_blocking_disposition_is_non_blocking(self):
+        """High severity + explicit non_blocking disposition → non_blocking."""
         findings = [{"title": "Something", "severity": "high", "disposition": "non_blocking"}]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
-        assert len(blocking) == 1
-        assert len(non_blocking) == 0
+        assert len(blocking) == 0
+        assert len(non_blocking) == 1
 
     def test_high_severity_with_blocking_disposition_stays_blocking(self):
         """High severity + explicit blocking disposition → blocking."""
@@ -15272,13 +15274,13 @@ class TestHighSeverityCannotBeDowngradedByDisposition:
         assert len(blocking) == 0
         assert len(non_blocking) == 1
 
-    def test_disposition_for_finding_high_returns_override_reason(self):
-        """_disposition_for_finding for high + non_blocking returns override reason."""
+    def test_disposition_for_finding_high_returns_explicit_reason(self):
+        """High + explicit non_blocking reaches the structured-disposition branch."""
         disp, reason = pb_mod._disposition_for_finding(  # ANTICHEAT_OK: testing internal executor functions
             {"title": "X", "severity": "high", "disposition": "non_blocking"}
         )
-        assert disp == "blocking"
-        assert "overrides" in reason
+        assert disp == "non_blocking"
+        assert reason == "explicit disposition field"
 
 
 class TestEmptyEnvelopeDoesNotSpoofConflict:

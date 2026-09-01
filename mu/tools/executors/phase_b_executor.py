@@ -229,10 +229,10 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     Returns (disposition, reason) tuple for logging/auditability.
 
     Priority:
-    1. Severity 'critical'/'high' — always blocking.
-    2. Exact mandatory evidence_result conjunction — promotion to blocking.
-    3. Explicit 'disposition' field — canonical values are authoritative below
-       independent floors; invalid or ambiguous values fail closed.
+    1. Exact mandatory evidence_result conjunction — promotion to blocking.
+    2. Present 'disposition' field — canonical values are authoritative at
+       every severity; invalid or ambiguous values fail closed.
+    3. With disposition absent, severity 'critical'/'high' — blocking.
     4. Medium/low governance/doc-only findings — non-blocking by default.
     5. Medium/low severity — non-blocking UNLESS blocking keyword match.
     6. No severity — keyword match, then fail-closed blocking.
@@ -241,25 +241,7 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     disposition = finding.get("disposition")
     finding_class = str(finding.get("class") or "").upper()
 
-    # Fail-closed severity floor FIRST — critical/high always blocking regardless
-    # of class or path. Governance/doc downgrades only apply at medium/low below.
-    # Closes deferred_consolidation_phaseb_fail_closed_hardening_2026-04-02 defect 1:
-    # the prior order put the governance downgrade BEFORE the severity floor,
-    # letting a critical POLICY_BOUND on reports/ evade blocking. Docstring above
-    # (lines 135-140) already documented "Severity critical/high — always blocking"
-    # as priority 1; this now matches implementation.
-    if severity == "critical":
-        if disposition == "non_blocking":
-            return "blocking", "critical severity overrides explicit non_blocking disposition"
-        return "blocking", "critical severity (always blocking)"
-
-    if severity == "high":
-        if disposition == "non_blocking":
-            return "blocking", "high severity overrides explicit non_blocking disposition"
-        return "blocking", "high severity (always blocking)"
-
-    # Exact mandatory impact is an independent promotion. It intentionally runs
-    # after the severity floor (for stable floor reasons) and before every
+    # Exact mandatory impact is an independent promotion. It runs before every
     # structured/fallback branch so disposition=non_blocking cannot bypass it.
     if _shared_mandatory_blocking_evidence(finding):
         return "blocking", (
@@ -272,13 +254,22 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
             isinstance(disposition, str)
             and disposition in ALLOWED_FINDING_DISPOSITIONS
         ):
-            # Delegate the structured sub-floor decision to recovery_gate's one
-            # shared authority. A canonical non_blocking value is deferrable;
-            # canonical blocking is not.
+            # Delegate the structured decision to recovery_gate's one shared
+            # authority. Canonical dispositions control at every severity once
+            # exact mandatory-evidence promotion has been ruled out.
             if _shared_deferrable_on_go(finding):
                 return "non_blocking", "explicit disposition field"
             return "blocking", "explicit disposition field"
         return "blocking", f"invalid disposition {disposition!r} (fail-closed)"
+
+    # The existing severity floor applies only when the reviewer omitted the
+    # structured disposition. This preserves fail-closed handling for absent
+    # high/critical dispositions without relabeling explicit current impact.
+    if severity == "critical":
+        return "blocking", "critical severity with absent disposition"
+
+    if severity == "high":
+        return "blocking", "high severity with absent disposition"
 
     # Governance/doc-only findings: DOC_ACCURACY or POLICY_BOUND on governance
     # paths are editorial, not runtime risks. Downgrade to non-blocking for
@@ -352,9 +343,9 @@ def _classify_findings(
     """Separate findings into blocking and non-blocking lists.
 
     Uses _disposition_for_finding to resolve each finding's effective
-    disposition (independent floors/promotions → explicit field → fallback
-    heuristics → fail-closed blocking). Logs the classification decision with
-    reason for each finding.
+    disposition (mandatory promotion → explicit field → absent-disposition
+    severity floor/fallback heuristics → fail-closed blocking). Logs the
+    decision with reason for each finding.
 
     If *finding_history* is provided, it maps finding keys to the number of
     consecutive rounds they have appeared as blocking.  The dict is updated
