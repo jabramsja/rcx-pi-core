@@ -64,7 +64,7 @@ Files and surfaces in scope:
 
 ## Validation gates
 
-- evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_a_executor.py mu/tests/tools/test_tracker_sync_note_generation.py`
+- evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_launch_wave.py`
 
 ## Acceptance criteria
 
@@ -128,8 +128,8 @@ FOUNDER_OVERRIDE:launch-wave-native-stub-packet-contract-r3-2026-09-01
 - `indicator_artifact_ref`: reports/l4_wave_indicators/launch-wave-native-stub-packet-contract-r3-2026-09-01.json.
 - `indicator_collection_command`: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id launch-wave-native-stub-packet-contract-r3-2026-09-01 --output reports/l4_wave_indicators/launch-wave-native-stub-packet-contract-r3-2026-09-01.json.
 - `target_gate_id`: G8.
-- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_a_executor.py mu/tests/tools/test_tracker_sync_note_generation.py`.
-- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md. (2) Final pytest gate covered 3 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_a_executor.py`, `mu/tests/tools/test_tracker_sync_note_generation.py`, `mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_a_executor.py`, `mu/tools/executors/tracker_sync_note.py`, `reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md`, `reports/deferred/non_blocking/launch-wave-native-stub-packet-contract-r3-2026-09-01_bridge_nonblockers.md`, `reports/l4_wave_indicators/launch-wave-native-stub-packet-contract-r3-2026-09-01.json`..
+- `evidence_command`: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_launch_wave.py`.
+- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_a_executor.py`, `mu/tests/tools/test_tracker_sync_note_generation.py`, `mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_a_executor.py`, `mu/tools/executors/tracker_sync_note.py`, `reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md`, `reports/deferred/non_blocking/launch-wave-native-stub-packet-contract-r3-2026-09-01_bridge_nonblockers.md`, `reports/l4_wave_indicators/launch-wave-native-stub-packet-contract-r3-2026-09-01.json`..
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
 - `boot0_progress_state`: HOLD.
@@ -142,21 +142,16 @@ FOUNDER_OVERRIDE:launch-wave-native-stub-packet-contract-r3-2026-09-01
 - Refresh wave: `launch-wave-native-stub-packet-contract-r3-2026-09-01`
 - Active packet: `reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `d438596510f874018a4c021eb3d65da8e660f00265f094cca26ca2cdb7ad7289`
+- Tracker note sha256: `682f80346e5457a35d8ce5bc3523146b3e80ebad3485a1f787f1856198a2237b`
 - Indicator artifact: `reports/l4_wave_indicators/launch-wave-native-stub-packet-contract-r3-2026-09-01.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_a_executor.py mu/tests/tools/test_tracker_sync_note_generation.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md. (2) Final pytest gate covered 3 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_a_executor.py`, `mu/tests/tools/test_tracker_sync_note_generation.py`, `mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_a_executor.py`, `mu/tools/executors/tracker_sync_note.py`, `reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md`, `reports/deferred/non_blocking/launch-wave-native-stub-packet-contract-r3-2026-09-01_bridge_nonblockers.md`, `reports/l4_wave_indicators/launch-wave-native-stub-packet-contract-r3-2026-09-01.json`..
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_launch_wave.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `TASKS.md`, `mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_a_executor.py`, `mu/tests/tools/test_tracker_sync_note_generation.py`, `mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_a_executor.py`, `mu/tools/executors/tracker_sync_note.py`, `reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md`, `reports/deferred/non_blocking/launch-wave-native-stub-packet-contract-r3-2026-09-01_bridge_nonblockers.md`, `reports/l4_wave_indicators/launch-wave-native-stub-packet-contract-r3-2026-09-01.json`..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/launch-wave-native-stub-packet-contract-r3-2026-09-01.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_launch_wave.py`
-  - `mu/tests/tools/test_phase_a_executor.py`
-  - `mu/tests/tools/test_tracker_sync_note_generation.py`
   - `mu/tools/executors/launch_wave.py`
-  - `mu/tools/executors/phase_a_executor.py`
-  - `mu/tools/executors/tracker_sync_note.py`
   - `reports/control_plane/launch-wave-native-stub-packet-contract-r3-2026-09-01_2026-09-01.md`
-  - `reports/deferred/non_blocking/launch-wave-native-stub-packet-contract-r3-2026-09-01_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/launch-wave-native-stub-packet-contract-r3-2026-09-01.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

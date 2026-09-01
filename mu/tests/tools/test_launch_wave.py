@@ -136,6 +136,34 @@ def _phase_b_packet_content(config):
     return content
 
 
+def _same_wave_deferred_non_blocking_path(config):
+    return (
+        "reports/deferred/non_blocking/"
+        f"{config.wave_id}_bridge_nonblockers.md"
+    )
+
+
+def _commit_recovery_packet_content(config, downstream_status):
+    """Render the exact post-lock packet mutation owned by commit_executor."""
+    import commit_executor as ce  # executors dir is on sys.path (module top)
+
+    assert downstream_status in (
+        ce.COMMIT_RETRY_PENDING_STATUS,
+        ce.COMMIT_RETRY_RESTORED_STATUS,
+    )
+    phase_b_status = "Status: Phase B (pre-supervisor pending, bridge-converged)"
+    content = _phase_b_packet_content(config).replace(
+        phase_b_status,
+        f"Status: {downstream_status}",
+        1,
+    )
+    return ce._refresh_same_wave_deferred_packet_authorization(  # ANTICHEAT_OK: recovery regression uses commit_executor's exact downstream packet producer so launcher tolerance cannot drift into a hand-authored test fixture
+        content,
+        wave_id=config.wave_id,
+        deferred_paths=[_same_wave_deferred_non_blocking_path(config)],
+    )
+
+
 def _tracker_note_line(content, wave_id):
     matches = [
         line
@@ -2016,6 +2044,157 @@ def test_setup_packet_preserves_locked_phase_b_packet_on_rerun(wave_repo):
 
     assert rerun_path == packet_path
     assert packet_path.read_text(encoding="utf-8") == advanced
+
+
+@pytest.mark.parametrize(
+    "downstream_status",
+    (
+        "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT",
+        "IMPLEMENTED / LOCAL EVIDENCE",
+    ),
+)
+def test_same_config_recovery_restores_staged_commit_packet_mutations(
+    wave_repo,
+    downstream_status,
+):
+    """A later commit-owned packet outranks and survives an older Phase B blob."""
+    config = make_config()
+    lw.run_wave_setup(wave_repo, config)
+    packet_path = wave_repo / config.tracked_packet
+    phase_b_content = _phase_b_packet_content(config)
+    commit_content = _commit_recovery_packet_content(config, downstream_status)
+    deferred_path = _same_wave_deferred_non_blocking_path(config)
+
+    packet_path.write_text(commit_content, encoding="utf-8")
+    _git(wave_repo, "add", "--", config.tracked_packet)
+    indexed_commit_bytes = subprocess.check_output(
+        ["git", "show", f":{config.tracked_packet}"],
+        cwd=wave_repo,
+    )
+
+    # Model an interrupted recovery that left the earlier Phase B packet in the
+    # worktree while the commit-owned packet remains durable in the index.
+    packet_path.write_text(phase_b_content, encoding="utf-8")
+    assert packet_path.read_text(encoding="utf-8") != commit_content
+
+    result = lw.run_wave_setup(wave_repo, make_config())
+
+    restored = packet_path.read_text(encoding="utf-8")
+    assert result.wave_id == config.wave_id
+    assert restored == commit_content
+    assert packet_path.read_bytes() == indexed_commit_bytes
+    assert subprocess.check_output(
+        ["git", "show", f":{config.tracked_packet}"],
+        cwd=wave_repo,
+    ) == indexed_commit_bytes
+    assert f"Status: {downstream_status}" in restored
+    assert "Phase-A-Lock: LOCKED" in restored
+    assert (
+        f"- `{deferred_path}`\n"
+        "  - Same-wave Phase B/commit generated deferred non-blocking bridge "
+        "findings packet only; no unrelated deferred report is authorized by this wave."
+    ) in restored
+    assert restored.count(
+        "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->"
+    ) == 1
+    assert _artifact_counts(wave_repo, config.wave_id) == (1, 1, 1)
+
+
+def test_same_config_recovery_rejects_unauthorized_post_lock_scope_mutation(
+    wave_repo,
+):
+    """An exact machine block cannot authorize a wrong-wave Scope entry."""
+    config = make_config()
+    lw.run_wave_setup(wave_repo, config)
+    packet_path = wave_repo / config.tracked_packet
+    authorized_path = _same_wave_deferred_non_blocking_path(config)
+    other_path = (
+        "reports/deferred/non_blocking/"
+        "other-wave-2026-06-19_bridge_nonblockers.md"
+    )
+    authorized = _commit_recovery_packet_content(
+        config,
+        "IMPLEMENTED / LOCAL EVIDENCE",
+    )
+    tampered = authorized.replace(
+        f"- `{authorized_path}`\n"
+        "  - Same-wave Phase B/commit generated deferred non-blocking",
+        f"- `{other_path}`\n"
+        "  - Same-wave Phase B/commit generated deferred non-blocking",
+        1,
+    )
+    assert tampered != authorized
+    assert f"  - `{authorized_path}`" in tampered
+    assert f"- `{other_path}`" in tampered
+
+    packet_path.write_text(tampered, encoding="utf-8")
+    _git(wave_repo, "add", "--", config.tracked_packet)
+    packet_before = packet_path.read_bytes()
+    indexed_before = subprocess.check_output(
+        ["git", "show", f":{config.tracked_packet}"],
+        cwd=wave_repo,
+    )
+    tasks_path = wave_repo / "TASKS.md"
+    routing_path = ec.routing_record_path(wave_repo)
+    tasks_before = tasks_path.read_bytes()
+    routing_before = routing_path.read_bytes()
+    staged_before = _staged_paths(wave_repo)
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(wave_repo, make_config())
+
+    assert packet_path.read_bytes() == packet_before
+    assert subprocess.check_output(
+        ["git", "show", f":{config.tracked_packet}"],
+        cwd=wave_repo,
+    ) == indexed_before == packet_before
+    assert tasks_path.read_bytes() == tasks_before
+    assert routing_path.read_bytes() == routing_before
+    assert _staged_paths(wave_repo) == staged_before
+
+
+def test_same_config_recovery_rejects_status_with_lone_machine_marker(
+    wave_repo,
+):
+    """A marker-like clarification cannot authorize a downstream status."""
+    config = make_config()
+    lw.run_wave_setup(wave_repo, config)
+    packet_path = wave_repo / config.tracked_packet
+    unauthorized = lw.render_wave_packet(config).replace(
+        "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+        "Status: IMPLEMENTED / LOCAL EVIDENCE",
+        1,
+    ).replace(
+        "Phase-A-Lock: UNLOCKED",
+        "Phase-A-Lock: LOCKED",
+        1,
+    )
+    unauthorized += (
+        "\n## Non-normative review clarification\n\n"
+        "<!-- COMMIT_PATH_TRUTH_REFRESH:start -->\n"
+    )
+    packet_path.write_text(unauthorized, encoding="utf-8")
+    _git(wave_repo, "add", "--", config.tracked_packet)
+    packet_before = packet_path.read_bytes()
+    tasks_path = wave_repo / "TASKS.md"
+    routing_path = ec.routing_record_path(wave_repo)
+    tasks_before = tasks_path.read_bytes()
+    routing_before = routing_path.read_bytes()
+    staged_before = _staged_paths(wave_repo)
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(wave_repo, make_config())
+
+    assert packet_path.read_bytes() == packet_before
+    assert tasks_path.read_bytes() == tasks_before
+    assert routing_path.read_bytes() == routing_before
+    assert _staged_paths(wave_repo) == staged_before
 
 
 def test_setup_packet_restores_staged_phase_b_packet_after_worktree_clobber(wave_repo):

@@ -163,6 +163,58 @@ NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX = (
     _pa.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX
 )
 
+_SAME_WAVE_DEFERRED_AUTH_START = (
+    "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->"
+)
+_SAME_WAVE_DEFERRED_AUTH_END = (
+    "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->"
+)
+_NATIVE_STUB_CANONICAL_SECTION_HEADINGS = {
+    "scope": "## Scope",
+    "work items": "## Work items",
+    "constraints": "## Constraints",
+    "stop conditions": "## Stop conditions",
+    "validation gates": "## Validation gates",
+    "acceptance criteria": "## Acceptance criteria",
+}
+_POST_LOCK_RECOVERY_STATUS_PROJECTION = {
+    "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT": (
+        "Status: Phase B (pre-supervisor pending, bridge-converged)"
+    ),
+    "Status: IMPLEMENTED / LOCAL EVIDENCE": (
+        "Status: Phase B (pre-supervisor pending, bridge-converged)"
+    ),
+}
+_POST_LOCK_RECOVERY_MACHINE_BLOCKS = (
+    (
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->",
+        "## Phase B Indicator Scope Reconciliation",
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->",
+    ),
+    (
+        "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:start -->",
+        "## Commit-Time Generated Governance Authorization",
+        "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:end -->",
+    ),
+    (
+        _SAME_WAVE_DEFERRED_AUTH_START,
+        "## Same-Wave Deferred Non-Blocking Authorization",
+        _SAME_WAVE_DEFERRED_AUTH_END,
+    ),
+    (
+        "<!-- COMMIT_PATH_TRUTH_REFRESH:start -->",
+        "## Commit Path Truth Refresh",
+        "<!-- COMMIT_PATH_TRUTH_REFRESH:end -->",
+    ),
+)
+_POST_LOCK_RECOVERY_PROGRESS_MARKERS = (
+    ("<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->", 4),
+    ("<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:start -->", 16),
+    (_SAME_WAVE_DEFERRED_AUTH_START, 32),
+    ("<!-- L4_FIELDS_FROM_TRACKER:start -->", 64),
+    ("<!-- COMMIT_PATH_TRUTH_REFRESH:start -->", 128),
+)
+
 
 def _git_probe_environment() -> dict[str, str]:
     env = os.environ.copy()
@@ -838,6 +890,319 @@ def _h1_title_line(content: str) -> str | None:
     return None
 
 
+def _is_native_stub_h2_line(line: str) -> bool:
+    """Return whether *line* is an ATX H2 under the packet grammar."""
+    stripped = line.strip()
+    return (
+        stripped == "##"
+        or (
+            len(stripped) > 2
+            and stripped.startswith("##")
+            and not stripped.startswith("###")
+            and stripped[2] in " \t"
+        )
+    )
+
+
+def _native_stub_exact_section_bodies(content: str) -> dict[str, list[str]]:
+    """Extract exact canonical H2 bodies without weakening the strict validator."""
+    lines = content.split("\n")
+    sections: dict[str, list[str]] = {}
+    for section_title, heading in _NATIVE_STUB_CANONICAL_SECTION_HEADINGS.items():
+        bodies: list[str] = []
+        for heading_index, line in enumerate(lines):
+            if line != heading:
+                continue
+            section_end = next(
+                (
+                    index
+                    for index in range(heading_index + 1, len(lines))
+                    if _is_native_stub_h2_line(lines[index])
+                ),
+                len(lines),
+            )
+            body_start = heading_index + 1
+            while body_start < section_end and lines[body_start] == "":
+                body_start += 1
+            body_end = section_end
+            while body_end > body_start and lines[body_end - 1] == "":
+                body_end -= 1
+            bodies.append("\n".join(lines[body_start:body_end]))
+        sections[section_title] = bodies
+    return sections
+
+
+def _has_complete_post_lock_recovery_machine_block(content: str) -> bool:
+    """Require one balanced, ordered reserved H2 block for status projection."""
+    lines = content.splitlines()
+    for start_marker, heading, end_marker in _POST_LOCK_RECOVERY_MACHINE_BLOCKS:
+        if (
+            lines.count(start_marker) != 1
+            or lines.count(heading) != 1
+            or lines.count(end_marker) != 1
+        ):
+            continue
+        start_index = lines.index(start_marker)
+        heading_index = lines.index(heading)
+        end_index = lines.index(end_marker)
+        if start_index < heading_index < end_index:
+            return True
+    return False
+
+
+def _project_post_lock_recovery_status(content: str) -> str:
+    """Project exact downstream lifecycle status into Phase B for validation."""
+    if not _has_complete_post_lock_recovery_machine_block(content):
+        return content
+
+    lines = content.split("\n")
+    header_end = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if _is_native_stub_h2_line(line)
+        ),
+        len(lines),
+    )
+    header_lines = lines[:header_end]
+    if header_lines.count("Phase-A-Lock: LOCKED") != 1:
+        return content
+    status_positions = [
+        index for index, line in enumerate(header_lines) if line.startswith("Status:")
+    ]
+    if len(status_positions) != 1:
+        return content
+    status_index = status_positions[0]
+    projected = _POST_LOCK_RECOVERY_STATUS_PROJECTION.get(lines[status_index])
+    if projected is None:
+        return content
+    lines[status_index] = projected
+    return "\n".join(lines)
+
+
+def _same_wave_deferred_non_blocking_path(wave_id: str) -> str:
+    """Return commit_executor's one authorized same-wave deferred path."""
+    raw_wave = str(wave_id or "")
+    normalized_wave = _ec.normalize_wave_id(raw_wave)
+    if not normalized_wave or normalized_wave != raw_wave:
+        return ""
+    return (
+        "reports/deferred/non_blocking/"
+        f"{normalized_wave}_bridge_nonblockers.md"
+    )
+
+
+def _same_wave_deferred_authorization_block(
+    *,
+    wave_id: str,
+    deferred_path: str,
+) -> str:
+    """Return the exact commit-owned authorization needed for recovery leniency."""
+    return "\n".join(
+        [
+            _SAME_WAVE_DEFERRED_AUTH_START,
+            "## Same-Wave Deferred Non-Blocking Authorization",
+            "",
+            f"- Refresh wave: `{wave_id}`",
+            "- Purpose: Phase B and commit automation may stage the same-wave "
+            "non-blocking bridge findings packet as deferred follow-up instead of "
+            "blocking an otherwise commit-ready wave.",
+            "- Authorized deferred packet(s):",
+            f"  - `{deferred_path}`",
+            "- Scope binding: the packet(s) above are in scope only as generated "
+            "same-wave non-blocking bridge findings packets.",
+            "- Acceptance binding: the final touched-file set may include the packet(s) "
+            "above when they are also present in `deferred_items` or current staged files.",
+            _SAME_WAVE_DEFERRED_AUTH_END,
+        ]
+    )
+
+
+def _append_deferred_path_to_bounded_packet_line(
+    line: str,
+    deferred_path: str,
+) -> str:
+    """Mirror commit_executor's exact bounded-line augmentation."""
+    if f"`{deferred_path}`" in line:
+        return line
+    addition = f", `{deferred_path}`"
+    for anchor in (
+        ", or a canonical",
+        ", and the same-wave canonical",
+        ", or returns",
+        " or returns",
+    ):
+        if anchor in line:
+            return line.replace(anchor, addition + anchor, 1)
+    return line.rstrip(".") + addition + "."
+
+
+def _downstream_deferred_section_body(
+    section_title: str,
+    expected_body: str,
+    deferred_path: str,
+) -> str:
+    """Render the only canonical-section delta commit automation may own."""
+    lines = expected_body.splitlines()
+    if section_title == "scope" and f"`{deferred_path}`" not in expected_body:
+        scope_bullets = [
+            f"- `{deferred_path}`",
+            "  - Same-wave Phase B/commit generated deferred non-blocking "
+            "bridge findings packet only; no unrelated deferred report is "
+            "authorized by this wave.",
+        ]
+        insert_at = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if line.startswith("Only files under ")
+            ),
+            len(lines),
+        )
+        if insert_at > 0 and lines[insert_at - 1].strip():
+            scope_bullets.insert(0, "")
+        if insert_at < len(lines) and lines[insert_at].strip():
+            scope_bullets.append("")
+        lines[insert_at:insert_at] = scope_bullets
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("- The required fix resolves to files outside "):
+            lines[index] = _append_deferred_path_to_bounded_packet_line(
+                line,
+                deferred_path,
+            )
+        elif stripped.startswith("- The final touched-file set stays within "):
+            lines[index] = _append_deferred_path_to_bounded_packet_line(
+                line,
+                deferred_path,
+            )
+    return "\n".join(lines)
+
+
+def _replace_native_stub_section_body(
+    content: str,
+    *,
+    section_title: str,
+    old_body: str,
+    new_body: str,
+) -> str:
+    """Replace one recognized H2 body in a comparison-only packet copy."""
+    heading = _NATIVE_STUB_CANONICAL_SECTION_HEADINGS[section_title]
+    lines = content.split("\n")
+    heading_positions = [
+        index for index, line in enumerate(lines) if line == heading
+    ]
+    if len(heading_positions) != 1:
+        return content
+    heading_index = heading_positions[0]
+    section_end = next(
+        (
+            index
+            for index in range(heading_index + 1, len(lines))
+            if _is_native_stub_h2_line(lines[index])
+        ),
+        len(lines),
+    )
+    body_start = heading_index + 1
+    while body_start < section_end and lines[body_start] == "":
+        body_start += 1
+    body_end = section_end
+    while body_end > body_start and lines[body_end - 1] == "":
+        body_end -= 1
+    if "\n".join(lines[body_start:body_end]) != old_body:
+        return content
+    lines[body_start:body_end] = new_body.split("\n")
+    return "\n".join(lines)
+
+
+def _native_stub_recovery_validation_content(
+    content: str,
+    config: WaveConfig,
+) -> str:
+    """Return a strict-validation view of authorized downstream packet truth.
+
+    Phase B and commit automation own exact post-lock lifecycle status values,
+    machine sections, and one deterministic same-wave deferred Scope mutation.
+    Recovery validates an in-memory projection with those exact mutations folded
+    back to the routed version-1 contract. The real worktree/index bytes are never
+    rewritten. Missing, malformed, wrong-wave, or extra authority remains in the
+    view so the normal byte-exact validator rejects it.
+    """
+    validation_content = _project_post_lock_recovery_status(content)
+    deferred_path = _same_wave_deferred_non_blocking_path(config.wave_id)
+    if not deferred_path:
+        return validation_content
+    authorization_block = _same_wave_deferred_authorization_block(
+        wave_id=config.wave_id,
+        deferred_path=deferred_path,
+    )
+    content_lines = validation_content.splitlines()
+    if (
+        content_lines.count(_SAME_WAVE_DEFERRED_AUTH_START) != 1
+        or content_lines.count(_SAME_WAVE_DEFERRED_AUTH_END) != 1
+        or validation_content.count(authorization_block) != 1
+    ):
+        return validation_content
+
+    expected_sections = _native_stub_exact_section_bodies(
+        render_wave_packet(config)
+    )
+    actual_sections = _native_stub_exact_section_bodies(validation_content)
+    replacements: list[tuple[str, str, str]] = []
+    for section_title, expected_bodies in expected_sections.items():
+        if len(expected_bodies) != 1:
+            return validation_content
+        expected_body = expected_bodies[0]
+        actual_bodies = actual_sections.get(section_title, [])
+        if actual_bodies == [expected_body]:
+            continue
+        downstream_body = _downstream_deferred_section_body(
+            section_title,
+            expected_body,
+            deferred_path,
+        )
+        if downstream_body == expected_body or actual_bodies != [downstream_body]:
+            return validation_content
+        replacements.append((section_title, downstream_body, expected_body))
+
+    for section_title, downstream_body, expected_body in replacements:
+        replaced = _replace_native_stub_section_body(
+            validation_content,
+            section_title=section_title,
+            old_body=downstream_body,
+            new_body=expected_body,
+        )
+        if replaced == validation_content:
+            return _project_post_lock_recovery_status(content)
+        validation_content = replaced
+    return validation_content
+
+
+def _allow_completed_native_recovery_reroute(
+    repo_root: Path,
+    config: WaveConfig,
+) -> bool:
+    """Return whether the validated packet is in an exact commit-recovery state.
+
+    ``setup_routing_record`` calls the immutable-contract guard first. This helper
+    only selects the shared routing builder's explicit same-wave recovery mode for
+    a completed downstream lifecycle status; it does not independently authorize
+    packet content.
+    """
+    if config.routing_decision != "ROUTE_PHASE_A":
+        return False
+    status = _ec.read_control_plane_packet_status(repo_root, config.tracked_packet)
+    if not _ec.packet_status_is_completed(status):
+        return False
+    packet_path = Path(repo_root) / config.tracked_packet
+    try:
+        content = packet_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return _project_post_lock_recovery_status(content) != content
+
+
 def check_packet_fences(
     content: str,
     config: WaveConfig,
@@ -888,10 +1253,17 @@ def check_packet_fences(
     # not acquire a native contract through routing-decision inference.
     if config.routing_decision == "ROUTE_PHASE_A":
         try:
+            expected_routing = _native_stub_packet_contract_routing_record(config)
+            validation_content = content
+            if allow_post_lock_machine_sections:
+                validation_content = _native_stub_recovery_validation_content(
+                    content,
+                    config,
+                )
             _pa.validate_native_stub_packet_contract(
-                _native_stub_packet_contract_routing_record(config),
+                expected_routing,
                 config.tracked_packet,
-                content,
+                validation_content,
                 allow_post_lock_machine_sections=(
                     allow_post_lock_machine_sections
                 ),
@@ -1027,16 +1399,25 @@ def _native_relaunch_guard_identity_is_safe(config: WaveConfig) -> bool:
 
 
 def _packet_progress_score(content: str) -> int:
-    """Score packet progress beyond the launcher's initial Phase A render."""
+    """Score monotonic packet progress beyond the initial Phase A render.
+
+    Exact downstream lifecycle states and reserved machine markers outrank an
+    earlier Phase B blob. A malformed high-scoring candidate still fails the
+    strict fence check before it can replace worktree truth.
+    """
     score = 0
     if "Phase-A-Lock: LOCKED" in content:
         score += 1
     if any(line.startswith("Status: Phase B") for line in content.splitlines()):
         score += 2
-    if "PHASE_B_INDICATOR_SCOPE_REFRESH:start" in content:
-        score += 4
-    if "pre-supervisor" in content or "commit-ready" in content:
-        score += 1
+    if any(
+        line in _POST_LOCK_RECOVERY_STATUS_PROJECTION
+        for line in content.splitlines()
+    ):
+        score += 8
+    for marker, weight in _POST_LOCK_RECOVERY_PROGRESS_MARKERS:
+        if marker in content:
+            score += weight
     return score
 
 
@@ -1189,10 +1570,14 @@ def _require_native_stub_packet_contract_relaunch_safe(
         )
     for source, rel_path, packet_text in packet_sources:
         try:
+            validation_text = _native_stub_recovery_validation_content(
+                packet_text,
+                config,
+            )
             _pa.validate_native_stub_packet_contract(
                 expected_routing,
                 rel_path,
-                packet_text,
+                validation_text,
                 allow_post_lock_machine_sections=True,
             )
         except _pa.PhaseAExecutorError as exc:
@@ -1486,6 +1871,9 @@ def setup_routing_record(
         decision=config.routing_decision,
         repo_root=repo_root,
         bus_dir=bus_dir,
+        allow_completed_tracked_packet=(
+            _allow_completed_native_recovery_reroute(repo_root, config)
+        ),
         # Thread the wave's declared FOUNDER_OVERRIDE (defaults to wave_id) into
         # the routing record so it is durable from launch time. The commit-executor
         # growth-cap auto-bump reads it via _extract_founder_override_from_routing_record;
