@@ -127,8 +127,11 @@ def _provider_probe_plugin_source() -> str:
         BEFORE = snapshot()
         ACTIVE = None
 
-        def role():
-            return os.environ.get("PYTEST_XDIST_WORKER", "controller")
+        def role(config):
+            worker_input = getattr(config, "workerinput", None)
+            if worker_input is None:
+                return "controller"
+            return worker_input["workerid"]
 
         def active_paths(environment):
             stub_dir = Path(environment["PATH"][1].split(os.pathsep)[0])
@@ -145,7 +148,7 @@ def _provider_probe_plugin_source() -> str:
             stub_dir, websocket_guard = active_paths(ACTIVE)
             payload = {
                 "pid": os.getpid(),
-                "role": role(),
+                "role": role(session.config),
                 "before": BEFORE,
                 "active": ACTIVE,
                 "stub_dir": stub_dir,
@@ -162,7 +165,7 @@ def _provider_probe_plugin_source() -> str:
             stub_dir, websocket_guard = active_paths(ACTIVE)
             payload = {
                 "pid": os.getpid(),
-                "role": role(),
+                "role": role(config),
                 "before": BEFORE,
                 "active": ACTIVE,
                 "after": snapshot(),

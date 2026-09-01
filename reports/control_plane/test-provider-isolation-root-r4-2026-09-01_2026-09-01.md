@@ -114,8 +114,6 @@ FOUNDER_OVERRIDE:test-provider-isolation-root-r4-2026-09-01
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/test-provider-isolation-root-r4-2026-09-01.json`
 - Current staged files:
-  - `TASKS.md`
-  - `conftest.py`
   - `mu/tests/tools/test_pipeline_agent_pager.py`
   - `reports/control_plane/test-provider-isolation-root-r4-2026-09-01_2026-09-01.md`
   - `reports/l4_wave_indicators/test-provider-isolation-root-r4-2026-09-01.json`
