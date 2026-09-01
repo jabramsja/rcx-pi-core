@@ -3794,11 +3794,14 @@ def _run_bridge_review_subprocess(
             last_heartbeat_at = 0.0
 
             while True:
-                exit_code = proc.poll()
                 snapshot = _bridge_progress_snapshot(
                     repo_root, job_id, proc.pid, stdout_path, stderr_path
                 )
-                last_child_pids = tuple(snapshot.get("child_pids") or ())
+                current_child_pids = tuple(snapshot.get("child_pids") or ())
+                # Only a root known live after this snapshot may advance PID authority.
+                exit_code = proc.poll()
+                if exit_code is None:
+                    last_child_pids = current_child_pids
                 now = time.monotonic()
                 if snapshot != last_snapshot:
                     last_progress_at = now
@@ -3816,6 +3819,16 @@ def _run_bridge_review_subprocess(
                     last_heartbeat_at = now
 
                 if exit_code is not None:
+                    stdout_size, _ = artifact_size_mtime_ns(stdout_path)
+                    stderr_size, _ = artifact_size_mtime_ns(stderr_path)
+                    _terminate_bridge_subprocess(
+                        proc,
+                        child_pids=tuple(
+                            sorted(set(last_child_pids).union(current_child_pids))
+                        ),
+                    )
+                    os.truncate(stdout_path, stdout_size)
+                    os.truncate(stderr_path, stderr_size)
                     stdout, stderr = _read_logs()
                     return {
                         "exit_code": exit_code,
