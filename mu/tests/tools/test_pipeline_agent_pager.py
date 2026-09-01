@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 import shutil
+import socket
 import subprocess
+import sys
+import textwrap
 import threading
 import time
 from pathlib import Path
@@ -27,6 +32,231 @@ receiver_mod = load_module(
     "claude_pager_receiver",
     _TOOLS_DIR / "session" / "claude_pager_receiver.py",
 )
+_REAL_RECEIVER_ENSURE_DRAINING = receiver_mod.ClaudePagerReceiver.ensure_draining
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_PROVIDER_ENV_KEYS = (
+    "PATH",
+    "NODE_OPTIONS",
+    "RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN",
+    "RCX_CLAUDE_AUTOPING_CLAUDE_BIN",
+    "RCX_PIPELINE_AGENT_PAGER_CODEX_BIN",
+)
+_CLI_BLOCK_MARKER = "RCX_TEST_PROVIDER_ISOLATION_CLI_BLOCKED"
+_WEBSOCKET_BLOCK_MARKER = "RCX_TEST_PROVIDER_ISOLATION_WEBSOCKET_BLOCKED"
+_PROVIDER_COLLECTION_PID = os.getpid()
+_PROVIDER_ENV_AT_COLLECTION = {
+    key: (key in os.environ, os.environ.get(key, ""))
+    for key in _PROVIDER_ENV_KEYS
+}
+
+
+def _provider_environment_snapshot(environment=os.environ):
+    return {
+        key: (key in environment, environment.get(key, ""))
+        for key in _PROVIDER_ENV_KEYS
+    }
+
+
+def _node_require_paths(node_options: str) -> list[Path]:
+    return [
+        Path(token.removeprefix("--require="))
+        for token in shlex.split(node_options)
+        if token.startswith("--require=")
+    ]
+
+
+def _active_provider_paths(environment=os.environ) -> tuple[Path, Path]:
+    stub_dir = Path(environment["PATH"].split(os.pathsep)[0])
+    require_paths = _node_require_paths(environment["NODE_OPTIONS"])
+    assert require_paths, environment["NODE_OPTIONS"]
+    return stub_dir, require_paths[-1]
+
+
+def _root_conftest_plugin(pytestconfig):
+    expected = (_REPO_ROOT / "conftest.py").resolve()
+    direct = pytestconfig.pluginmanager.get_plugin(str(expected))
+    if direct is not None:
+        return direct
+    for plugin in pytestconfig.pluginmanager.get_plugins():
+        plugin_file = getattr(plugin, "__file__", None)
+        if plugin_file and Path(plugin_file).resolve() == expected:
+            return plugin
+    raise AssertionError(f"root conftest plugin not loaded from {expected}")
+
+
+def _write_executable(path: Path, source: str) -> None:
+    path.write_text(source, encoding="utf-8")
+    path.chmod(0o700)
+
+
+def _path_without_active_provider_stub() -> str:
+    active_stub_dir, _guard = _active_provider_paths()
+    return os.pathsep.join(
+        entry
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry and Path(entry) != active_stub_dir
+    )
+
+
+def _provider_probe_plugin_source() -> str:
+    return textwrap.dedent(
+        """
+        import json
+        import os
+        import shlex
+        from pathlib import Path
+
+        import pytest
+
+        KEYS = (
+            "PATH",
+            "NODE_OPTIONS",
+            "RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN",
+            "RCX_CLAUDE_AUTOPING_CLAUDE_BIN",
+            "RCX_PIPELINE_AGENT_PAGER_CODEX_BIN",
+        )
+        OUTPUT_DIR = Path(os.environ["RCX_PROVIDER_PROBE_OUTPUT_DIR"])
+
+        def snapshot():
+            return {
+                key: [key in os.environ, os.environ.get(key, "")]
+                for key in KEYS
+            }
+
+        BEFORE = snapshot()
+        ACTIVE = None
+
+        def role(config):
+            worker_input = getattr(config, "workerinput", None)
+            if worker_input is None:
+                return "controller"
+            return worker_input["workerid"]
+
+        def active_paths(environment):
+            stub_dir = Path(environment["PATH"][1].split(os.pathsep)[0])
+            requires = [
+                token.removeprefix("--require=")
+                for token in shlex.split(environment["NODE_OPTIONS"][1])
+                if token.startswith("--require=")
+            ]
+            return str(stub_dir), requires[-1]
+
+        def pytest_sessionstart(session):
+            global ACTIVE
+            ACTIVE = snapshot()
+            stub_dir, websocket_guard = active_paths(ACTIVE)
+            payload = {
+                "pid": os.getpid(),
+                "role": role(session.config),
+                "before": BEFORE,
+                "active": ACTIVE,
+                "stub_dir": stub_dir,
+                "websocket_guard": websocket_guard,
+            }
+            (OUTPUT_DIR / f"active-{os.getpid()}.json").write_text(
+                json.dumps(payload, sort_keys=True),
+                encoding="utf-8",
+            )
+
+        @pytest.hookimpl(hookwrapper=True)
+        def pytest_unconfigure(config):
+            yield
+            stub_dir, websocket_guard = active_paths(ACTIVE)
+            payload = {
+                "pid": os.getpid(),
+                "role": role(config),
+                "before": BEFORE,
+                "active": ACTIVE,
+                "after": snapshot(),
+                "stub_dir": stub_dir,
+                "websocket_guard": websocket_guard,
+            }
+            (OUTPUT_DIR / f"final-{os.getpid()}.json").write_text(
+                json.dumps(payload, sort_keys=True),
+                encoding="utf-8",
+            )
+        """
+    )
+
+
+def _run_provider_probe_pytest(
+    tmp_path: Path,
+    *targets: str,
+    workers: int | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[dict]]:
+    probe_root = tmp_path / "provider-probe"
+    output_dir = probe_root / "output"
+    output_dir.mkdir(parents=True)
+    (probe_root / "rcx_provider_probe.py").write_text(
+        _provider_probe_plugin_source(),
+        encoding="utf-8",
+    )
+    pythonpath = os.pathsep.join(
+        part
+        for part in (
+            str(probe_root),
+            str(_REPO_ROOT),
+            os.environ.get("PYTHONPATH", ""),
+        )
+        if part
+    )
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONHASHSEED": "0",
+            "PYTHONPATH": pythonpath,
+            "RCX_PROVIDER_PROBE_OUTPUT_DIR": str(output_dir),
+        }
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-p",
+        "rcx_provider_probe",
+    ]
+    if workers is not None:
+        command.extend(["-n", str(workers)])
+    command.extend(targets)
+    result = subprocess.run(
+        command,
+        cwd=_REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    records = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(output_dir.glob("final-*.json"))
+    ]
+    return result, records
+
+
+def _assert_active_provider_probe(record: dict) -> None:
+    pid = record["pid"]
+    active = record["active"]
+    stub_dir = Path(record["stub_dir"])
+    websocket_guard = Path(record["websocket_guard"])
+    assert stub_dir.name == "bin"
+    assert stub_dir.parent.name.startswith(
+        f"rcx-pytest-provider-isolation-{pid}-"
+    )
+    assert active["PATH"][1].split(os.pathsep)[0] == str(stub_dir)
+    assert active["RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN"][1] == "claude"
+    assert active["RCX_CLAUDE_AUTOPING_CLAUDE_BIN"][1] == "claude"
+    assert active["RCX_PIPELINE_AGENT_PAGER_CODEX_BIN"][1] == "codex"
+    assert websocket_guard.parent == stub_dir.parent
+    assert stub_dir.is_dir()
+    assert (stub_dir / "claude").is_file()
+    assert (stub_dir / "codex").is_file()
+    assert websocket_guard.is_file()
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +289,598 @@ def _stub_receiver_drain_spawn(monkeypatch):
         "_load_claude_pager_receiver_cls",
         lambda: receiver_mod.ClaudePagerReceiver,
     )
+
+
+def test_provider_isolation_root_configures_process_local_stubs_before_collection(
+    pytestconfig,
+):
+    assert _PROVIDER_COLLECTION_PID == os.getpid()
+    assert _PROVIDER_ENV_AT_COLLECTION == _provider_environment_snapshot()
+
+    _root_conftest_plugin(pytestconfig)
+    stub_dir, websocket_guard = _active_provider_paths()
+    guard_dir = stub_dir.parent
+
+    assert websocket_guard.parent == guard_dir
+    assert guard_dir.name.startswith(
+        f"rcx-pytest-provider-isolation-{os.getpid()}-"
+    )
+    assert os.environ["PATH"].split(os.pathsep)[0] == str(stub_dir)
+    assert os.environ["RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN"] == "claude"
+    assert os.environ["RCX_CLAUDE_AUTOPING_CLAUDE_BIN"] == "claude"
+    assert os.environ["RCX_PIPELINE_AGENT_PAGER_CODEX_BIN"] == "codex"
+    assert guard_dir.stat().st_mode & 0o777 == 0o700
+    assert stub_dir.stat().st_mode & 0o777 == 0o700
+    assert (stub_dir / "claude").stat().st_mode & 0o777 == 0o700
+    assert (stub_dir / "codex").stat().st_mode & 0o777 == 0o700
+    assert websocket_guard.stat().st_mode & 0o777 == 0o600
+    assert _CLI_BLOCK_MARKER in (stub_dir / "claude").read_text(
+        encoding="utf-8"
+    )
+    assert _WEBSOCKET_BLOCK_MARKER in websocket_guard.read_text(encoding="utf-8")
+
+
+def test_provider_isolation_stubs_fail_closed_without_live_model():
+    stub_dir, _websocket_guard = _active_provider_paths()
+    assert shutil.which("claude") == str(stub_dir / "claude")
+    assert shutil.which("codex") == str(stub_dir / "codex")
+
+    commands = {
+        "basename-claude": ["claude", "--version"],
+        "basename-codex": ["codex", "--version"],
+        "pager-claude-bin": [
+            os.environ["RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN"],
+            "--version",
+        ],
+        "autoping-claude-bin": [
+            os.environ["RCX_CLAUDE_AUTOPING_CLAUDE_BIN"],
+            "--version",
+        ],
+        "pager-codex-bin": [
+            os.environ["RCX_PIPELINE_AGENT_PAGER_CODEX_BIN"],
+            "--version",
+        ],
+    }
+    for label, command in commands.items():
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+        assert result.returncode == 86, (label, result)
+        assert result.stdout == "", (label, result.stdout)
+        assert result.stderr.strip() == (
+            f"{_CLI_BLOCK_MARKER}:{Path(command[0]).name}"
+        )
+
+
+def test_provider_isolation_codex_app_server_transport_fails_before_connect():
+    if shutil.which("node") is None:
+        pytest.skip("node is required to exercise the Codex websocket guard")
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(0.25)
+        port = listener.getsockname()[1]
+        with pytest.raises(
+            pager_mod.PipelineAgentPagerError,
+            match=_WEBSOCKET_BLOCK_MARKER,
+        ):
+            pager_mod._codex_app_server_exchange(  # ANTICHEAT_OK: real transport boundary proof
+                f"ws://127.0.0.1:{port}",
+                [
+                    {
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "clientInfo": {
+                                "name": "provider-isolation-test",
+                                "version": "1.0",
+                            }
+                        },
+                    }
+                ],
+                1.0,
+            )
+        with pytest.raises(socket.timeout):
+            listener.accept()
+    finally:
+        listener.close()
+
+
+def test_provider_isolation_late_detached_descendant_blocks_cli_and_codex_transport_after_teardown(
+    tmp_path,
+):
+    if shutil.which("node") is None:
+        pytest.skip("node is required to exercise the Codex websocket guard")
+    if os.name != "posix":
+        pytest.skip("detached provider lifecycle proof requires POSIX sessions")
+
+    fake_dir = tmp_path / "safe-fake-providers"
+    fake_dir.mkdir()
+    fake_hit = tmp_path / "safe-provider-hit"
+    for basename in ("claude", "codex"):
+        _write_executable(
+            fake_dir / basename,
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$0\" >> {shlex.quote(str(fake_hit))}\n"
+            "exit 0\n",
+        )
+
+    clean_path = _path_without_active_provider_stub()
+    assert shutil.which("node", path=clean_path) is not None
+
+    project = tmp_path / "nested-provider-project"
+    project.mkdir()
+    ready_path = tmp_path / "late-descendant-ready.json"
+    release_path = tmp_path / "late-descendant-release"
+    result_path = tmp_path / "late-descendant-result.json"
+    descendant_path = tmp_path / "late_descendant.py"
+    nested_test_path = project / "test_spawn_late_descendant.py"
+    coordinator_path = tmp_path / "nested_pytest_coordinator.py"
+
+    descendant_path.write_text(
+        textwrap.dedent(
+            """
+            import json
+            import os
+            import shlex
+            import subprocess
+            import time
+            from pathlib import Path
+
+            from mu.tests.tools.module_loader import load_module
+
+            ready_path = Path(os.environ["RCX_LATE_READY_PATH"])
+            release_path = Path(os.environ["RCX_LATE_RELEASE_PATH"])
+            result_path = Path(os.environ["RCX_LATE_RESULT_PATH"])
+            repo_root = Path(os.environ["RCX_LATE_REPO_ROOT"])
+            require_paths = [
+                token.removeprefix("--require=")
+                for token in shlex.split(os.environ["NODE_OPTIONS"])
+                if token.startswith("--require=")
+            ]
+            ready_path.write_text(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "stub_dir": str(
+                            Path(os.environ["PATH"].split(os.pathsep)[0])
+                        ),
+                        "websocket_guard": require_paths[-1],
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            deadline = time.monotonic() + 15
+            while not release_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            if not release_path.exists():
+                raise SystemExit("release was not observed")
+
+            commands = {
+                "basename-claude": ["claude", "--version"],
+                "basename-codex": ["codex", "--version"],
+                "explicit-claude": [
+                    os.environ["RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN"],
+                    "--version",
+                ],
+                "explicit-codex": [
+                    os.environ["RCX_PIPELINE_AGENT_PAGER_CODEX_BIN"],
+                    "--version",
+                ],
+            }
+            command_results = {}
+            for label, command in commands.items():
+                try:
+                    completed = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=3,
+                    )
+                    command_results[label] = {
+                        "returncode": completed.returncode,
+                        "stdout": completed.stdout,
+                        "stderr": completed.stderr,
+                    }
+                except OSError as exc:
+                    command_results[label] = {"os_error": str(exc)}
+
+            pager = load_module(
+                "late_descendant_pipeline_agent_pager",
+                repo_root / "mu" / "tools" / "observability" / "pipeline_agent_pager.py",
+            )
+            try:
+                pager._codex_app_server_exchange(
+                    os.environ["RCX_LATE_WEBSOCKET_URL"],
+                    [{"id": 1, "method": "initialize", "params": {}}],
+                    1.0,
+                )
+            except Exception as exc:
+                websocket_error = str(exc)
+            else:
+                websocket_error = "NO_ERROR"
+
+            result_path.write_text(
+                json.dumps(
+                    {
+                        "commands": command_results,
+                        "websocket_error": websocket_error,
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            """
+        ),
+        encoding="utf-8",
+    )
+    nested_test_path.write_text(
+        textwrap.dedent(
+            """
+            import os
+            import subprocess
+            import sys
+            import time
+            from pathlib import Path
+
+            def test_spawn_late_detached_descendant():
+                ready_path = Path(os.environ["RCX_LATE_READY_PATH"])
+                proc = subprocess.Popen(
+                    [sys.executable, os.environ["RCX_LATE_DESCENDANT_PATH"]],
+                    env=os.environ.copy(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                deadline = time.monotonic() + 10
+                while not ready_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                assert ready_path.exists(), f"descendant {proc.pid} did not become ready"
+            """
+        ),
+        encoding="utf-8",
+    )
+    coordinator_path.write_text(
+        textwrap.dedent(
+            """
+            import json
+            import os
+            import time
+            from pathlib import Path
+
+            import pytest
+
+            KEYS = (
+                "PATH",
+                "NODE_OPTIONS",
+                "RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN",
+                "RCX_CLAUDE_AUTOPING_CLAUDE_BIN",
+                "RCX_PIPELINE_AGENT_PAGER_CODEX_BIN",
+            )
+
+            def snapshot():
+                return {
+                    key: [key in os.environ, os.environ.get(key, "")]
+                    for key in KEYS
+                }
+
+            before = snapshot()
+            project = Path(os.environ["RCX_LATE_PROJECT"])
+            exit_code = pytest.main(
+                [
+                    "-q",
+                    "-p",
+                    "no:cacheprovider",
+                    "-p",
+                    "conftest",
+                    "--rootdir",
+                    str(project),
+                    "--confcutdir",
+                    str(project),
+                    str(Path(os.environ["RCX_LATE_NESTED_TEST"])),
+                ]
+            )
+            after = snapshot()
+            Path(os.environ["RCX_LATE_RELEASE_PATH"]).touch()
+            result_path = Path(os.environ["RCX_LATE_RESULT_PATH"])
+            deadline = time.monotonic() + 15
+            while not result_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            payload = {
+                "pid": os.getpid(),
+                "pytest_exit": int(exit_code),
+                "before": before,
+                "after": after,
+                "descendant_result_exists": result_path.exists(),
+            }
+            print("RCX_LATE_COORDINATOR=" + json.dumps(payload, sort_keys=True))
+            raise SystemExit(
+                0 if int(exit_code) == 0 and result_path.exists() else 3
+            )
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(0.25)
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "PATH": f"{fake_dir}{os.pathsep}{clean_path}",
+                "NODE_OPTIONS": "",
+                "RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN": str(
+                    fake_dir / "claude"
+                ),
+                "RCX_CLAUDE_AUTOPING_CLAUDE_BIN": str(fake_dir / "claude"),
+                "RCX_PIPELINE_AGENT_PAGER_CODEX_BIN": str(fake_dir / "codex"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONHASHSEED": "0",
+                "PYTHONPATH": os.pathsep.join(
+                    part
+                    for part in (
+                        str(_REPO_ROOT),
+                        os.environ.get("PYTHONPATH", ""),
+                    )
+                    if part
+                ),
+                "RCX_LATE_PROJECT": str(project),
+                "RCX_LATE_NESTED_TEST": str(nested_test_path),
+                "RCX_LATE_DESCENDANT_PATH": str(descendant_path),
+                "RCX_LATE_READY_PATH": str(ready_path),
+                "RCX_LATE_RELEASE_PATH": str(release_path),
+                "RCX_LATE_RESULT_PATH": str(result_path),
+                "RCX_LATE_REPO_ROOT": str(_REPO_ROOT),
+                "RCX_LATE_WEBSOCKET_URL": (
+                    f"ws://127.0.0.1:{listener.getsockname()[1]}"
+                ),
+            }
+        )
+        coordinator = subprocess.run(
+            [sys.executable, str(coordinator_path)],
+            cwd=_REPO_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=25,
+        )
+        assert coordinator.returncode == 0, (
+            coordinator.stdout,
+            coordinator.stderr,
+        )
+        payload_line = next(
+            line
+            for line in coordinator.stdout.splitlines()
+            if line.startswith("RCX_LATE_COORDINATOR=")
+        )
+        coordinator_payload = json.loads(payload_line.split("=", 1)[1])
+        assert coordinator_payload["pytest_exit"] == 0
+        assert coordinator_payload["before"] == coordinator_payload["after"]
+        assert coordinator_payload["descendant_result_exists"] is True
+
+        ready = json.loads(ready_path.read_text(encoding="utf-8"))
+        descendant = json.loads(result_path.read_text(encoding="utf-8"))
+        retained_stub_dir = Path(ready["stub_dir"])
+        retained_websocket_guard = Path(ready["websocket_guard"])
+        assert retained_stub_dir.parent.name.startswith(
+            f"rcx-pytest-provider-isolation-{coordinator_payload['pid']}-"
+        )
+        assert (retained_stub_dir / "claude").is_file()
+        assert (retained_stub_dir / "codex").is_file()
+        assert retained_websocket_guard.is_file()
+        assert retained_websocket_guard.parent == retained_stub_dir.parent
+        for label, result in descendant["commands"].items():
+            assert result["returncode"] == 86, (label, result)
+            assert _CLI_BLOCK_MARKER in result["stderr"], (label, result)
+        assert _WEBSOCKET_BLOCK_MARKER in descendant["websocket_error"]
+        assert not fake_hit.exists()
+        with pytest.raises(socket.timeout):
+            listener.accept()
+    finally:
+        listener.close()
+
+
+def test_provider_isolation_detached_receiver_inherits_stub(
+    tmp_path,
+    monkeypatch,
+):
+    if os.name != "posix":
+        pytest.skip("detached receiver proof requires POSIX sessions")
+    stub_dir, _websocket_guard = _active_provider_paths()
+    fake_dir = tmp_path / "safe-receiver-provider"
+    fake_dir.mkdir()
+    fake_hit = tmp_path / "safe-receiver-provider-hit"
+    _write_executable(
+        fake_dir / "claude",
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$0\" >> {shlex.quote(str(fake_hit))}\n"
+        "exit 0\n",
+    )
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join((str(stub_dir), str(fake_dir), _path_without_active_provider_stub())),
+    )
+    monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN", "claude")
+
+    repo = tmp_path / "receiver-repo"
+    repo.mkdir()
+    bus_dir = ".agent_bus-provider-isolation"
+    receiver = receiver_mod.ClaudePagerReceiver(
+        repo,
+        bus_dir=bus_dir,
+        timeout_s=2.0,
+    )
+    event_id = "provider-isolation-detached-receiver"
+    receiver.enqueue(
+        {
+            "event_id": event_id,
+            "event_type": "commit_ready",
+            "wave_id": "provider-isolation",
+            "summary": "safe fake page",
+        }
+    )
+    spawn = _REAL_RECEIVER_ENSURE_DRAINING(receiver)
+    assert spawn["started"] is True
+
+    base = repo / bus_dir / "observability" / "claude_pager_receiver"
+    deadline = time.monotonic() + 10
+    evidence = ""
+    while time.monotonic() < deadline:
+        evidence_parts = []
+        for path in base.rglob("*"):
+            try:
+                if path.is_file():
+                    evidence_parts.append(
+                        path.read_text(encoding="utf-8", errors="replace")
+                    )
+            except OSError:
+                continue
+        evidence = "\n".join(evidence_parts)
+        if _CLI_BLOCK_MARKER in evidence and not (
+            base / "active_drainer.json"
+        ).exists():
+            break
+        time.sleep(0.02)
+    assert _CLI_BLOCK_MARKER in evidence
+    assert not fake_hit.exists()
+    assert receiver.queued_event_ids() == [event_id]
+
+
+def test_provider_isolation_rcx_pi_only_child_loads_root_boundary(tmp_path):
+    result, records = _run_provider_probe_pytest(
+        tmp_path,
+        "rcx_pi/specs/test_vars_demo_contract.py",
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert len(records) == 1
+    record = records[0]
+    assert record["role"] == "controller"
+    _assert_active_provider_probe(record)
+    assert record["before"] == record["after"]
+
+
+def test_provider_isolation_ordinary_xdist_is_topology_independent(tmp_path):
+    result, records = _run_provider_probe_pytest(
+        tmp_path,
+        "rcx_pi/specs/test_vars_demo_contract.py",
+        "rcx_pi/specs/test_triad_plus_contract.py",
+        workers=2,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert {record["role"] for record in records} == {
+        "controller",
+        "gw0",
+        "gw1",
+    }
+    assert len(records) == 3
+    for record in records:
+        _assert_active_provider_probe(record)
+        assert record["before"] != record["active"]
+    assert len({record["stub_dir"] for record in records}) == 3
+    assert len({record["websocket_guard"] for record in records}) == 3
+
+
+def test_provider_isolation_two_worker_lifecycle_and_exact_restoration(tmp_path):
+    result, records = _run_provider_probe_pytest(
+        tmp_path,
+        "rcx_pi/specs/test_vars_demo_contract.py",
+        "rcx_pi/specs/test_triad_plus_contract.py",
+        workers=2,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert len(records) == 3
+    controller = next(
+        record for record in records if record["role"] == "controller"
+    )
+    workers = [record for record in records if record["role"] != "controller"]
+    assert {record["role"] for record in workers} == {"gw0", "gw1"}
+    for record in records:
+        _assert_active_provider_probe(record)
+        assert record["before"] == record["after"]
+    for worker in workers:
+        assert worker["before"] == controller["active"]
+
+
+def test_provider_isolation_helpers_restore_exact_environment(
+    tmp_path,
+    pytestconfig,
+):
+    root_conftest = _root_conftest_plugin(pytestconfig)
+    environment = {
+        "PATH": "",
+        "NODE_OPTIONS": "",
+        "RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN": "",
+        "RCX_PIPELINE_AGENT_PAGER_CODEX_BIN": "/safe/original/codex",
+        "UNRELATED": "preserved",
+    }
+    before = dict(environment)
+    state = root_conftest._install_provider_isolation(  # ANTICHEAT_OK: lifecycle helper contract
+        environment,
+        temporary_parent=tmp_path,
+    )
+    assert state.environment_before == {
+        "PATH": (True, ""),
+        "NODE_OPTIONS": (True, ""),
+        "RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN": (True, ""),
+        "RCX_CLAUDE_AUTOPING_CLAUDE_BIN": (False, ""),
+        "RCX_PIPELINE_AGENT_PAGER_CODEX_BIN": (
+            True,
+            "/safe/original/codex",
+        ),
+    }
+    assert environment["UNRELATED"] == "preserved"
+    assert environment != before
+
+    root_conftest._restore_provider_isolation(state)  # ANTICHEAT_OK: lifecycle helper contract
+    assert environment == before
+    assert state.restored is True
+    assert state.guard_dir.is_dir()
+    assert (state.stub_dir / "claude").is_file()
+    assert (state.stub_dir / "codex").is_file()
+    assert state.websocket_guard.is_file()
+
+    root_conftest._restore_provider_isolation(state)  # ANTICHEAT_OK: idempotent restore contract
+    assert environment == before
+
+
+def test_provider_isolation_helpers_preserve_projection_coverage(
+    tmp_path,
+    pytestconfig,
+):
+    root_conftest = _root_conftest_plugin(pytestconfig)
+    environment = {
+        "PATH": "/safe/bin",
+        "PYTHONHASHSEED": "0",
+        "RCX_PROJECTION_COVERAGE": "1",
+        "UNRELATED_TEST_STATE": "keep",
+    }
+    state = root_conftest._install_provider_isolation(  # ANTICHEAT_OK: lifecycle helper contract
+        environment,
+        temporary_parent=tmp_path,
+    )
+    assert environment["PYTHONHASHSEED"] == "0"
+    assert environment["RCX_PROJECTION_COVERAGE"] == "1"
+    assert environment["UNRELATED_TEST_STATE"] == "keep"
+
+    root_conftest._restore_provider_isolation(state)  # ANTICHEAT_OK: lifecycle helper contract
+    assert environment == {
+        "PATH": "/safe/bin",
+        "PYTHONHASHSEED": "0",
+        "RCX_PROJECTION_COVERAGE": "1",
+        "UNRELATED_TEST_STATE": "keep",
+    }
 
 
 def _write_receiver_authority_fixture(tmp_path: Path, source: str) -> tuple[Path, Path]:
