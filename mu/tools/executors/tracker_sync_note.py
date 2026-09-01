@@ -241,6 +241,21 @@ def render_tracker_sync_note(fields: TrackerSyncNoteFields) -> str:
     return ". ".join(parts) + "."
 
 
+def tracker_note_logical_block_end(
+    lines: list[str],
+    note_index: int,
+    search_end: int,
+) -> int:
+    """Return the first line after a top-level tracker note's logical block."""
+    block_end = note_index + 1
+    while block_end < search_end and (
+        lines[block_end].strip() == ""
+        or lines[block_end].startswith((" ", "\t"))
+    ):
+        block_end += 1
+    return block_end
+
+
 def upsert_tracker_sync_note(
     tasks_path: Path,
     fields: TrackerSyncNoteFields,
@@ -248,7 +263,8 @@ def upsert_tracker_sync_note(
     """Insert or update a tracker sync note in TASKS.md.
 
     - If wave_id already exists: replace the existing note
-    - If wave_id does not exist: append after the last tracker note in Ra section
+    - If wave_id does not exist: append after the last tracker note's complete
+      logical block (the note plus adjacent blank/indented continuation lines)
     - Fail closed on: missing Ra section, duplicate wave_id entries, file not found
     """
     if not tasks_path.exists():
@@ -298,11 +314,15 @@ def upsert_tracker_sync_note(
         if last_note_idx is None:
             raise TrackerSyncError("No existing tracker notes found in Ra section")
 
-        # Insert after the last note (before the blank line that follows it)
-        insert_at = last_note_idx + 1
-        # Skip blank lines between notes
-        while insert_at < search_end and lines[insert_at].strip() == "":
-            insert_at += 1
+        # Treat the top-level tracker note plus its immediately associated blank
+        # and indented continuation/evidence lines as one logical block.  A new
+        # top-level note inserted inside that block would reparent the existing
+        # indented evidence child to the new wave.
+        insert_at = tracker_note_logical_block_end(
+            lines,
+            last_note_idx,
+            search_end,
+        )
         lines.insert(insert_at, "")
         lines.insert(insert_at, note_text)
 

@@ -118,6 +118,53 @@ PHASE_A_BRIDGE_POLL_SLEEP = 2.0
 PHASE_A_BRIDGE_STALE_TIMEOUT = 120.0
 PHASE_A_BRIDGE_AGGREGATION_HANG_TIMEOUT = 60.0
 
+# Native launcher packet-contract applicability is explicit, never inferred from
+# ROUTE_PHASE_A.  The top-level key is absent on every legacy/direct route.  Once
+# the key is present, the marker values and the complete envelope are exact and
+# fail closed so a malformed native marker cannot silently downgrade to legacy
+# behavior.
+NATIVE_STUB_PACKET_CONTRACT_KEY = "native_stub_packet_contract"
+NATIVE_STUB_PACKET_CONTRACT_REQUIRED = True
+NATIVE_STUB_PACKET_CONTRACT_PRODUCER = "launch_wave.py"
+NATIVE_STUB_PACKET_CONTRACT_VERSION = 1
+_NATIVE_STUB_PACKET_CONTRACT_ENVELOPE_KEYS = frozenset(
+    {"required", "producer", "version", "digest", "contract"}
+)
+_NATIVE_STUB_PACKET_CONTRACT_KEYS = frozenset(
+    {
+        "identity",
+        "purpose",
+        "scope_summary",
+        "scope_items",
+        "work_items",
+        "constraints",
+        "stop_conditions",
+        "acceptance_criteria",
+        "evidence_command",
+        "slow_functions",
+    }
+)
+_NATIVE_STUB_PACKET_IDENTITY_KEYS = frozenset(
+    {"wave_id", "task_id", "title", "date", "tracked_packet"}
+)
+_NATIVE_STUB_PACKET_LIST_FIELDS = (
+    "scope_items",
+    "work_items",
+    "constraints",
+    "stop_conditions",
+    "acceptance_criteria",
+)
+NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE = (
+    "Native-Stub-Packet-Contract: required=true; producer=launch_wave.py; version=1"
+)
+NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX = (
+    "Native-Stub-Packet-Contract-Digest: "
+)
+_NATIVE_STUB_PACKET_CONTRACT_PROVENANCE_PREFIX = (
+    "Native-Stub-Packet-Contract"
+)
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
 
 def _trim_stderr(stderr: str, limit: int = 500, *, tail: bool = False) -> str:
     """Return a bounded stderr snippet for fail-closed error surfaces."""
@@ -501,6 +548,64 @@ _PHASE_A_LOCK_PENDING_REVIEW_RE = re.compile(
 )
 _PHASE_A_H2_RE = re.compile(r"^##(?!#)(?:[ \t]+|$)")
 _BRIDGE_RENDERED_SECTION_RE = re.compile(r"^##(?!#)[ \t]+(.+?)[ \t]*$")
+_NATIVE_STUB_PACKET_BASE_H2_LINES = (
+    "## Scope",
+    "## Work items",
+    "## Constraints",
+    "## Stop conditions",
+    "## Validation gates",
+    "## Acceptance criteria",
+    "## Grounding / Authorization",
+)
+_NATIVE_STUB_PACKET_CLARIFICATION_H2_LINE = (
+    "## Non-normative review clarification"
+)
+# These headings are emitted only after Phase A by existing machine-owned
+# governance surfaces.  They are not accepted by Phase A's normal validator;
+# launch_wave's bounded post-lock recovery check opts into them explicitly so a
+# SAME-config rerun can preserve an already advanced packet without reopening an
+# arbitrary H2 authority lane.
+_NATIVE_STUB_PACKET_POST_LOCK_MACHINE_H2_LINES = (
+    "## Phase B Indicator Scope Reconciliation",
+    "## Commit-Time Generated Governance Authorization",
+    "## Same-Wave Deferred Non-Blocking Authorization",
+    "## Commit Path Truth Refresh",
+)
+_NATIVE_STUB_PACKET_L4_BLOCK_START = "<!-- L4_FIELDS_FROM_TRACKER:start -->"
+_NATIVE_STUB_PACKET_L4_BLOCK_END = "<!-- L4_FIELDS_FROM_TRACKER:end -->"
+_NATIVE_STUB_PACKET_MACHINE_STATUS_LINES = frozenset(
+    {
+        "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+        "Status: Phase B (locked, implementing)",
+        "Status: Phase B (pre-supervisor pending, bridge-converged)",
+    }
+)
+_NATIVE_STUB_PACKET_MACHINE_LOCK_LINES = frozenset(
+    {
+        "Phase-A-Lock: UNLOCKED",
+        "Phase-A-Lock: LOCKED",
+        "Phase-A-Lock: LOCKED_FOR_REVIEW",
+        "Phase-A-Lock: UNLOCKED pending bridge re-review",
+    }
+)
+_NATIVE_STUB_PACKET_POST_LOCK_MACHINE_BLOCK_MARKERS = {
+    "## Phase B Indicator Scope Reconciliation": (
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->",
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->",
+    ),
+    "## Commit-Time Generated Governance Authorization": (
+        "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:start -->",
+        "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:end -->",
+    ),
+    "## Same-Wave Deferred Non-Blocking Authorization": (
+        "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->",
+        "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->",
+    ),
+    "## Commit Path Truth Refresh": (
+        "<!-- COMMIT_PATH_TRUTH_REFRESH:start -->",
+        "<!-- COMMIT_PATH_TRUTH_REFRESH:end -->",
+    ),
+}
 _STRICT_STAGED_L4_COMMAND_RE = re.compile(
     r"(?:python3[ \t]+)?tools/checks/enforce_l4_execution_contract\.py"
 )
@@ -588,6 +693,837 @@ def _extract_phase_a_sections(
 
 def _extract_phase_a_section_titles(content: str) -> set[str]:
     return set(_extract_phase_a_sections(content))
+
+
+def native_stub_packet_contract_digest(contract: dict[str, Any]) -> str:
+    """Return the version-1 canonical digest for a native packet contract."""
+    try:
+        encoded = json.dumps(
+            contract,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise PhaseAExecutorError(
+            f"native stub packet contract is not canonical JSON: {exc}"
+        ) from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _native_stub_packet_contract_shape_errors(contract: Any) -> list[str]:
+    """Return exact schema errors for the immutable version-1 contract body."""
+    if not isinstance(contract, dict):
+        return ["contract must be an object"]
+
+    errors: list[str] = []
+    keys = set(contract)
+    missing = sorted(_NATIVE_STUB_PACKET_CONTRACT_KEYS - keys)
+    unknown = sorted(keys - _NATIVE_STUB_PACKET_CONTRACT_KEYS)
+    if missing:
+        errors.append(f"contract missing key(s): {missing!r}")
+    if unknown:
+        errors.append(f"contract has unknown key(s): {unknown!r}")
+
+    identity = contract.get("identity")
+    if not isinstance(identity, dict):
+        errors.append("contract identity must be an object")
+    else:
+        identity_keys = set(identity)
+        missing_identity = sorted(
+            _NATIVE_STUB_PACKET_IDENTITY_KEYS - identity_keys
+        )
+        unknown_identity = sorted(
+            identity_keys - _NATIVE_STUB_PACKET_IDENTITY_KEYS
+        )
+        if missing_identity:
+            errors.append(
+                f"contract identity missing key(s): {missing_identity!r}"
+            )
+        if unknown_identity:
+            errors.append(
+                f"contract identity has unknown key(s): {unknown_identity!r}"
+            )
+        for field_name in sorted(_NATIVE_STUB_PACKET_IDENTITY_KEYS):
+            value = identity.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(
+                    f"contract identity {field_name} must be a nonblank string"
+                )
+            elif value != value.strip() or "\n" in value or "\r" in value:
+                errors.append(
+                    f"contract identity {field_name} must be one canonical line"
+                )
+
+    purpose = contract.get("purpose")
+    if not isinstance(purpose, str) or not purpose.strip():
+        errors.append("contract purpose must be a nonblank string")
+    elif purpose != purpose.strip() or "\n" in purpose or "\r" in purpose:
+        errors.append("contract purpose must be one canonical line")
+
+    scope_summary = contract.get("scope_summary")
+    if not isinstance(scope_summary, str) or not scope_summary.strip():
+        errors.append("contract scope_summary must be a nonblank string")
+    elif scope_summary != scope_summary.strip():
+        errors.append("contract scope_summary must not have outer whitespace")
+
+    evidence_command = contract.get("evidence_command")
+    if not isinstance(evidence_command, str) or not evidence_command.strip():
+        errors.append("contract evidence_command must be a nonblank string")
+    elif "\n" in evidence_command or "\r" in evidence_command:
+        errors.append("contract evidence_command must be one exact line")
+
+    slow_functions = contract.get("slow_functions")
+    if not isinstance(slow_functions, list):
+        errors.append("contract slow_functions must be a list")
+    else:
+        for index, item in enumerate(slow_functions):
+            if not isinstance(item, str):
+                errors.append(
+                    f"contract slow_functions[{index}] must be a string"
+                )
+            elif not item.strip():
+                errors.append(
+                    f"contract slow_functions[{index}] must not be blank"
+                )
+            elif "\n" in item or "\r" in item:
+                errors.append(
+                    f"contract slow_functions[{index}] must be one exact line"
+                )
+
+    for field_name in _NATIVE_STUB_PACKET_LIST_FIELDS:
+        value = contract.get(field_name)
+        if not isinstance(value, list):
+            errors.append(f"contract {field_name} must be a list")
+            continue
+        if not value:
+            errors.append(f"contract {field_name} must be nonempty")
+            continue
+        for index, item in enumerate(value):
+            if not isinstance(item, str):
+                errors.append(
+                    f"contract {field_name}[{index}] must be a string"
+                )
+            elif not item.strip():
+                errors.append(
+                    f"contract {field_name}[{index}] must not be blank"
+                )
+            elif item != item.strip() or "\n" in item or "\r" in item:
+                errors.append(
+                    f"contract {field_name}[{index}] must be one canonical line"
+                )
+    return errors
+
+
+def _raise_native_stub_packet_contract_error(errors: list[str]) -> None:
+    raise PhaseAExecutorError(
+        "Native stub packet contract validation failed: "
+        + "; ".join(errors)
+        + ". corrected-config-relaunch-required: builder-owned normative content "
+        "cannot be repaired in place; use launch_wave.py with a fresh wave id "
+        "and corrected WaveConfig."
+    )
+
+
+def native_stub_packet_contract_from_routing(
+    routing_record: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Return a validated native contract, or None only when its key is absent.
+
+    Presence of ``native_stub_packet_contract`` is the sole applicability test.
+    Any present-but-malformed or unknown envelope fails closed; ROUTE_PHASE_A by
+    itself never opts legacy/direct callers into this contract.
+    """
+    if NATIVE_STUB_PACKET_CONTRACT_KEY not in routing_record:
+        return None
+
+    envelope = routing_record.get(NATIVE_STUB_PACKET_CONTRACT_KEY)
+    if not isinstance(envelope, dict):
+        _raise_native_stub_packet_contract_error(
+            [f"{NATIVE_STUB_PACKET_CONTRACT_KEY} must be an object"]
+        )
+
+    errors: list[str] = []
+    envelope_keys = set(envelope)
+    missing = sorted(_NATIVE_STUB_PACKET_CONTRACT_ENVELOPE_KEYS - envelope_keys)
+    unknown = sorted(envelope_keys - _NATIVE_STUB_PACKET_CONTRACT_ENVELOPE_KEYS)
+    if missing:
+        errors.append(f"envelope missing key(s): {missing!r}")
+    if unknown:
+        errors.append(f"envelope has unknown key(s): {unknown!r}")
+    if envelope.get("required") is not NATIVE_STUB_PACKET_CONTRACT_REQUIRED:
+        errors.append("marker required must be exactly true")
+    if envelope.get("producer") != NATIVE_STUB_PACKET_CONTRACT_PRODUCER:
+        errors.append(
+            "marker producer must be exactly "
+            f"{NATIVE_STUB_PACKET_CONTRACT_PRODUCER!r}"
+        )
+    version = envelope.get("version")
+    if type(version) is not int or version != NATIVE_STUB_PACKET_CONTRACT_VERSION:
+        errors.append(
+            "marker version is unsupported; expected exactly "
+            f"{NATIVE_STUB_PACKET_CONTRACT_VERSION}"
+        )
+
+    digest = envelope.get("digest")
+    if not isinstance(digest, str) or not _SHA256_HEX_RE.fullmatch(digest):
+        errors.append("digest must be a lowercase SHA-256 hex digest")
+
+    contract = envelope.get("contract")
+    errors.extend(_native_stub_packet_contract_shape_errors(contract))
+    if errors:
+        _raise_native_stub_packet_contract_error(errors)
+
+    expected_digest = native_stub_packet_contract_digest(contract)
+    if digest != expected_digest:
+        _raise_native_stub_packet_contract_error(
+            [
+                "digest does not match the canonical version-1 contract "
+                f"(expected {expected_digest}, got {digest})"
+            ]
+        )
+    return contract
+
+
+def native_stub_scope_authority_item(*, date: str, wave_id: str) -> str:
+    """Render the launcher's deterministic machine-owned Scope authority item."""
+    return (
+        f"TASKS.md -- tracker-sync authority. The {date} tracker sync note "
+        f"for wave `{wave_id}` is the single source of truth for this "
+        "packet's L4 fields; the packet derives from it."
+    )
+
+
+def native_stub_validation_lines(
+    *,
+    evidence_command: str,
+    slow_functions: list[str],
+) -> list[str]:
+    """Render the exact validation payload shared by producer and consumer."""
+    lines = [f"- evidence_command: `{evidence_command}`"]
+    if slow_functions:
+        slow = ", ".join(f"`{name}`" for name in slow_functions)
+        lines.append(
+            f"- Slow-kernel guard-tests ({slow}) carry an in-function "
+            "`# SPEED_OK: <reason>` annotation so they stay out of the green-gate "
+            "speed lane."
+        )
+    return lines
+
+
+def _native_stub_expected_section_bodies(
+    contract: dict[str, Any],
+) -> dict[str, str]:
+    identity = contract["identity"]
+    scope_items = list(contract["scope_items"])
+    scope_items.append(
+        native_stub_scope_authority_item(
+            date=identity["date"],
+            wave_id=identity["wave_id"],
+        )
+    )
+
+    def _bullets(items: list[str]) -> str:
+        return "\n".join(f"- {item}" for item in items)
+
+    def _numbered(items: list[str]) -> str:
+        return "\n".join(
+            f"{index}. {item}" for index, item in enumerate(items, start=1)
+        )
+
+    return {
+        "scope": (
+            f"{contract['scope_summary']}\n\n"
+            "Files and surfaces in scope:\n\n"
+            f"{_bullets(scope_items)}"
+        ),
+        "work items": _numbered(contract["work_items"]),
+        "constraints": _bullets(contract["constraints"]),
+        "stop conditions": _bullets(contract["stop_conditions"]),
+        "validation gates": "\n".join(
+            native_stub_validation_lines(
+                evidence_command=contract["evidence_command"],
+                slow_functions=contract["slow_functions"],
+            )
+        ),
+        "acceptance criteria": _bullets(contract["acceptance_criteria"]),
+    }
+
+
+def _extract_native_stub_exact_sections(content: str) -> dict[str, list[str]]:
+    """Extract H2 bodies without erasing builder-owned trailing whitespace.
+
+    The legacy section parser intentionally strips bodies for broad plan-shape
+    recognition.  Native preservation is byte-exact, so it trims only the empty
+    separator lines introduced around Markdown sections; whitespace on an item
+    line remains observable and therefore rejectable.
+    """
+    sections: dict[str, list[str]] = {}
+    current_title: str | None = None
+    current_body: list[str] = []
+
+    def _store() -> None:
+        if current_title is None:
+            return
+        body_lines = list(current_body)
+        while body_lines and body_lines[0] == "":
+            body_lines.pop(0)
+        while body_lines and body_lines[-1] == "":
+            body_lines.pop()
+        sections.setdefault(current_title, []).append("\n".join(body_lines))
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if _PHASE_A_H2_RE.match(stripped):
+            _store()
+            current_title = _canonical_phase_a_section_title(stripped)
+            current_body = []
+        elif current_title is not None:
+            current_body.append(line)
+    _store()
+    return sections
+
+
+def _native_stub_packet_h2_layout_errors(
+    content: str,
+    *,
+    allow_post_lock_machine_sections: bool,
+) -> list[str]:
+    """Return structural authority errors for a marked native packet.
+
+    Native applicability must not depend on free-text keyword inference.  The
+    launcher's exact seven-H2 skeleton is therefore the authority grammar.  A
+    reviewer may create at most one exact trailing clarification section, whose
+    title makes it structurally non-normative.  Every other H2 is rejected.
+
+    Existing Phase B/commit machine headings are a separate recovery-only lane:
+    callers must opt in, the packet must already be LOCKED and in Phase B, and
+    the headings must be a unique ordered subsequence of the known machine list.
+    Phase A itself never enables that lane.
+    """
+    raw_h2_lines = [
+        line
+        for line in content.splitlines()
+        if _PHASE_A_H2_RE.match(line.strip())
+    ]
+    base_lines = list(_NATIVE_STUB_PACKET_BASE_H2_LINES)
+    if raw_h2_lines[: len(base_lines)] != base_lines:
+        return [
+            "marked native packet H2 layout must begin with the exact launcher "
+            f"skeleton {base_lines!r}"
+        ]
+
+    extras = raw_h2_lines[len(base_lines) :]
+    if extras[:1] == [_NATIVE_STUB_PACKET_CLARIFICATION_H2_LINE]:
+        extras = extras[1:]
+
+    if not extras:
+        return []
+
+    if allow_post_lock_machine_sections:
+        header, _body = _split_plan_header(content)
+        header_lines = header.splitlines()
+        status_lines = [
+            line for line in header_lines if line.startswith("Status:")
+        ]
+        is_locked_phase_b = (
+            header_lines.count("Phase-A-Lock: LOCKED") == 1
+            and len(status_lines) == 1
+            and status_lines[0].startswith("Status: Phase B")
+        )
+        if is_locked_phase_b:
+            machine_order = {
+                line: index
+                for index, line in enumerate(
+                    _NATIVE_STUB_PACKET_POST_LOCK_MACHINE_H2_LINES
+                )
+            }
+            positions = [machine_order.get(line) for line in extras]
+            if (
+                all(position is not None for position in positions)
+                and len(set(extras)) == len(extras)
+                and positions == sorted(positions)
+            ):
+                return []
+
+    return [
+        "marked native packet contains H2 section(s) outside the exact "
+        "launcher skeleton and reserved non-normative clarification lane: "
+        f"{extras!r}"
+    ]
+
+
+def _native_stub_clarification_authority_errors(content: str) -> list[str]:
+    """Reject only top-level Markdown authority inside the reserved lane."""
+    lines = content.splitlines()
+    clarification_positions = [
+        index
+        for index, line in enumerate(lines)
+        if line == _NATIVE_STUB_PACKET_CLARIFICATION_H2_LINE
+    ]
+    if len(clarification_positions) != 1:
+        # The exact H2 layout validator owns missing, decorated, and duplicate
+        # clarification headings. This scanner is deliberately narrower.
+        return []
+
+    start = clarification_positions[0] + 1
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if _PHASE_A_H2_RE.match(lines[index].strip()):
+            end = index
+            break
+    clarification = lines[start:end]
+    errors: list[str] = []
+    for index, line in enumerate(clarification):
+        if re.match(r"^[ \t]{0,3}#(?!#)(?:[ \t]+|$)", line):
+            errors.append(
+                "marked native packet clarification contains an ATX level-1 "
+                "heading"
+            )
+            break
+        if (
+            index > 0
+            and clarification[index - 1].strip()
+            and re.fullmatch(r"[ \t]{0,3}=+[ \t]*", line)
+        ):
+            errors.append(
+                "marked native packet clarification contains a Setext level-1 "
+                "heading"
+            )
+            break
+        if (
+            index > 0
+            and clarification[index - 1].strip()
+            and re.fullmatch(r"[ \t]{0,3}-+[ \t]*", line)
+        ):
+            errors.append(
+                "marked native packet clarification contains a Setext level-2 "
+                "heading"
+            )
+            break
+    return errors
+
+
+def native_stub_packet_has_contract_marker(content: str) -> bool:
+    """Return whether the packet header carries the exact native discriminator."""
+    if not isinstance(content, str):
+        return False
+    header, _body = _split_plan_header(content)
+    return NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE in header.splitlines()
+
+
+def native_stub_packet_has_contract_provenance(content: str) -> bool:
+    """Return whether packet text carries any reserved native provenance footprint.
+
+    This is intentionally broader than exact applicability: the launcher uses it
+    only to preserve a same-attempt packet whose exact marker was damaged or whose
+    digest survived while routing had not yet been written.  The strict validator
+    remains responsible for rejecting the malformed provenance.  Leading horizontal
+    whitespace or damage after the reserved namespace prefix (including a deleted
+    colon) is itself malformed, but must not hide it from the launcher's
+    worktree/index mutation guard.
+    """
+    if not isinstance(content, str):
+        return False
+    return any(
+        line.lstrip(" \t").startswith(
+            _NATIVE_STUB_PACKET_CONTRACT_PROVENANCE_PREFIX
+        )
+        for line in content.splitlines()
+    )
+
+
+def _native_stub_packet_provenance_errors(
+    content: str,
+    contract: dict[str, Any],
+) -> list[str]:
+    """Validate the packet-side marker and digest against the routed contract."""
+    packet_lines = content.splitlines()
+    expected_digest_line = (
+        NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX
+        + native_stub_packet_contract_digest(contract)
+    )
+    reserved_provenance_lines = [
+        line
+        for line in packet_lines
+        if line.lstrip(" \t").startswith(
+            _NATIVE_STUB_PACKET_CONTRACT_PROVENANCE_PREFIX
+        )
+    ]
+    marker_lines = [
+        line
+        for line in packet_lines
+        if line.lstrip(" \t").startswith("Native-Stub-Packet-Contract:")
+    ]
+    digest_lines = [
+        line
+        for line in packet_lines
+        if line.lstrip(" \t").startswith(
+            "Native-Stub-Packet-Contract-Digest:"
+        )
+    ]
+    errors: list[str] = []
+    if reserved_provenance_lines != [
+        NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE,
+        expected_digest_line,
+    ]:
+        errors.append(
+            "packet provenance must contain only the exact ordered native "
+            "marker and contract digest lines"
+        )
+    if marker_lines != [NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE]:
+        errors.append(
+            "packet provenance must contain exactly one exact native "
+            "required/producer/version marker"
+        )
+    if digest_lines != [expected_digest_line]:
+        errors.append(
+            "packet provenance must contain exactly one contract digest marker "
+            "matching the routing envelope"
+        )
+    return errors
+
+
+def _native_stub_packet_reserved_lane_errors(
+    content: str,
+    contract: dict[str, Any],
+    *,
+    allow_post_lock_machine_sections: bool,
+) -> list[str]:
+    """Reject text outside launcher-shaped or explicitly reserved lanes.
+
+    Exact comparison protects the five builder-owned canonical section bodies.
+    This companion grammar prevents an amendment from hiding in the header,
+    Validation gates, or Grounding as an H3 or plain paragraph.  Reviewer prose
+    belongs only in the exact trailing non-normative clarification H2.  The
+    marker-delimited L4 block and the already allowlisted post-lock machine H2s
+    remain opaque machine-owned lanes.
+    """
+    errors: list[str] = []
+    identity = contract["identity"]
+
+    header, _body = _split_plan_header(content)
+    header_lines = [line for line in header.splitlines() if line]
+    if len(header_lines) != 9:
+        errors.append(
+            "marked native packet header must contain only the nine exact "
+            "launcher metadata lines"
+        )
+    else:
+        expected_digest = native_stub_packet_contract_digest(contract)
+        expected_header_lines = {
+            0: f"# {identity['title']}",
+            1: f"Date: {identity['date']}",
+            3: f"Task: {identity['task_id']}",
+            4: f"Wave ID: {identity['wave_id']}",
+            6: NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE,
+            7: f"{NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX}{expected_digest}",
+            8: f"Purpose: {contract['purpose']}",
+        }
+        for index, expected_line in expected_header_lines.items():
+            if header_lines[index] != expected_line:
+                errors.append(
+                    "marked native packet header does not preserve the exact "
+                    f"launcher metadata order at line {index + 1}"
+                )
+        if header_lines[2] not in _NATIVE_STUB_PACKET_MACHINE_STATUS_LINES:
+            errors.append(
+                "marked native packet Status header is outside the exact "
+                "machine-owned lifecycle values"
+            )
+        if header_lines[5] not in _NATIVE_STUB_PACKET_MACHINE_LOCK_LINES:
+            errors.append(
+                "marked native packet Phase-A-Lock header is outside the exact "
+                "machine-owned lifecycle grammar"
+            )
+
+    sections = _extract_native_stub_exact_sections(content)
+
+    grounding_bodies = sections.get("grounding", [])
+    if len(grounding_bodies) != 1:
+        errors.append(
+            "marked native packet Grounding / Authorization must occur exactly once"
+        )
+        return errors
+
+    grounding_lines = grounding_bodies[0].splitlines()
+    l4_start_positions = [
+        index
+        for index, line in enumerate(grounding_lines)
+        if line == _NATIVE_STUB_PACKET_L4_BLOCK_START
+    ]
+    l4_end_positions = [
+        index
+        for index, line in enumerate(grounding_lines)
+        if line == _NATIVE_STUB_PACKET_L4_BLOCK_END
+    ]
+    if l4_start_positions or l4_end_positions:
+        if (
+            len(l4_start_positions) != 1
+            or len(l4_end_positions) != 1
+            or l4_end_positions[0] <= l4_start_positions[0]
+        ):
+            errors.append(
+                "marked native packet machine-owned L4 block must be one "
+                "balanced own-line marker pair"
+            )
+        else:
+            start = l4_start_positions[0]
+            end = l4_end_positions[0]
+            del grounding_lines[start : end + 1]
+
+    if allow_post_lock_machine_sections:
+        content_lines = content.splitlines()
+        raw_h2_lines = [
+            line
+            for line in content_lines
+            if _PHASE_A_H2_RE.match(line.strip())
+        ]
+        extras = raw_h2_lines[len(_NATIVE_STUB_PACKET_BASE_H2_LINES) :]
+        clarification_precedes_machine = (
+            extras[:1] == [_NATIVE_STUB_PACKET_CLARIFICATION_H2_LINE]
+        )
+        if clarification_precedes_machine:
+            extras = extras[1:]
+        previous_machine_end = -1
+        machine_ranges: list[tuple[int, int]] = []
+        for heading in extras:
+            marker_pair = (
+                _NATIVE_STUB_PACKET_POST_LOCK_MACHINE_BLOCK_MARKERS.get(heading)
+            )
+            if marker_pair is None:
+                continue
+            start_marker, end_marker = marker_pair
+            start_positions = [
+                index
+                for index, line in enumerate(content_lines)
+                if line == start_marker
+            ]
+            heading_positions = [
+                index
+                for index, line in enumerate(content_lines)
+                if line == heading
+            ]
+            end_positions = [
+                index
+                for index, line in enumerate(content_lines)
+                if line == end_marker
+            ]
+            if not (
+                len(start_positions) == 1
+                and len(heading_positions) == 1
+                and len(end_positions) == 1
+                and previous_machine_end < start_positions[0]
+                < heading_positions[0]
+                < end_positions[0]
+            ):
+                errors.append(
+                    f"marked native packet machine section {heading!r} must be "
+                    "inside one unique ordered own-line reserved marker pair"
+                )
+                continue
+            previous_machine_end = end_positions[0]
+            machine_ranges.append((start_positions[0], end_positions[0]))
+        for range_index, (_start, end) in enumerate(machine_ranges):
+            next_start = (
+                machine_ranges[range_index + 1][0]
+                if range_index + 1 < len(machine_ranges)
+                else len(content_lines)
+            )
+            gap_lines = content_lines[end + 1 : next_start]
+            nonblank_positions = [
+                index for index, line in enumerate(gap_lines) if line
+            ]
+            if not nonblank_positions:
+                continue
+            l4_starts = [
+                index
+                for index, line in enumerate(gap_lines)
+                if line == _NATIVE_STUB_PACKET_L4_BLOCK_START
+            ]
+            l4_ends = [
+                index
+                for index, line in enumerate(gap_lines)
+                if line == _NATIVE_STUB_PACKET_L4_BLOCK_END
+            ]
+            l4_only_gap = (
+                len(l4_starts) == 1
+                and len(l4_ends) == 1
+                and l4_starts[0] < l4_ends[0]
+                and all(
+                    not line
+                    for index, line in enumerate(gap_lines)
+                    if index < l4_starts[0] or index > l4_ends[0]
+                )
+            )
+            if not l4_only_gap:
+                errors.append(
+                    "marked native packet contains text outside the reserved "
+                    "post-lock machine marker blocks"
+                )
+        if extras and not clarification_precedes_machine:
+            marker_pair = (
+                _NATIVE_STUB_PACKET_POST_LOCK_MACHINE_BLOCK_MARKERS.get(extras[0])
+            )
+            expected_start_marker = marker_pair[0] if marker_pair is not None else None
+            while grounding_lines and grounding_lines[-1] == "":
+                grounding_lines.pop()
+            if (
+                expected_start_marker is not None
+                and grounding_lines
+                and grounding_lines[-1] == expected_start_marker
+            ):
+                grounding_lines.pop()
+
+    while grounding_lines and grounding_lines[0] == "":
+        grounding_lines.pop(0)
+    while grounding_lines and grounding_lines[-1] == "":
+        grounding_lines.pop()
+
+    expected_grounding_prefix = [
+        f"- Task: {identity['task_id']}; wave id `{identity['wave_id']}`.",
+        (
+            "- Governing packet: this file, "
+            f"`{identity['tracked_packet']}`."
+        ),
+        (
+            f"- TASKS.md authority: the {identity['date']} tracker sync note for "
+            f"wave `{identity['wave_id']}` is canonical for this packet's L4 "
+            "fields."
+        ),
+    ]
+    expected_founder_override = f"FOUNDER_OVERRIDE:{identity['wave_id']}"
+    exact_grounding = [
+        *expected_grounding_prefix,
+        "",
+        expected_founder_override,
+    ]
+    if grounding_lines != exact_grounding:
+        errors.append(
+            "marked native packet Grounding / Authorization contains text "
+            "outside the exact launcher core and reserved machine-owned blocks"
+        )
+    return errors
+
+
+def validate_native_stub_packet_contract(
+    routing_record: dict[str, Any],
+    plan_path: str | Path,
+    plan_content: str,
+    *,
+    allow_post_lock_machine_sections: bool = False,
+) -> bool:
+    """Validate marked native metadata and exact aggregate packet preservation.
+
+    Returns ``False`` for an unmarked legacy/direct route and ``True`` for a
+    valid marked native route.  A present marker never returns ``False``: every
+    metadata, digest, identity, and canonical-section defect raises.
+    """
+    contract = native_stub_packet_contract_from_routing(routing_record)
+    if contract is None:
+        return False
+
+    errors: list[str] = []
+    identity = contract["identity"]
+    wave_id = identity["wave_id"]
+    task_id = identity["task_id"]
+    tracked_packet = identity["tracked_packet"]
+
+    if routing_record.get("wave_name") != wave_id:
+        errors.append(
+            "routing wave_name does not match contract identity wave_id"
+        )
+    if routing_record.get("task_id") != task_id:
+        errors.append("routing task_id does not match contract identity task_id")
+    candidate = _first_bounded_next_candidate(routing_record)
+    if not candidate:
+        errors.append("routing record lacks the native bounded next-candidate")
+    else:
+        if candidate.get("candidate") != wave_id:
+            errors.append(
+                "bounded candidate does not match contract identity wave_id"
+            )
+        if candidate.get("tracked_packet") != tracked_packet:
+            errors.append(
+                "bounded candidate tracked_packet does not match contract identity"
+            )
+
+    raw_plan_path = Path(str(plan_path))
+    if raw_plan_path.is_absolute() or ".." in raw_plan_path.parts:
+        errors.append(f"plan path is unsafe: {str(plan_path)!r}")
+        normalized_plan_path = str(plan_path)
+    else:
+        normalized_plan_path = raw_plan_path.as_posix()
+        while normalized_plan_path.startswith("./"):
+            normalized_plan_path = normalized_plan_path[2:]
+    if normalized_plan_path != tracked_packet:
+        errors.append(
+            "loaded plan path does not match contract identity tracked_packet"
+        )
+
+    if not isinstance(plan_content, str):
+        errors.append("loaded plan content must be text")
+    else:
+        errors.extend(
+            _native_stub_packet_h2_layout_errors(
+                plan_content,
+                allow_post_lock_machine_sections=(
+                    allow_post_lock_machine_sections
+                ),
+            )
+        )
+        errors.extend(_native_stub_clarification_authority_errors(plan_content))
+        errors.extend(
+            _native_stub_packet_provenance_errors(plan_content, contract)
+        )
+        errors.extend(
+            _native_stub_packet_reserved_lane_errors(
+                plan_content,
+                contract,
+                allow_post_lock_machine_sections=(
+                    allow_post_lock_machine_sections
+                ),
+            )
+        )
+        header, _body = _split_plan_header(plan_content)
+        header_lines = header.splitlines()
+        expected_title = f"# {identity['title']}"
+        if not header_lines or header_lines[0] != expected_title:
+            errors.append("packet title does not match contract identity title")
+        expected_header_values = {
+            "Date": identity["date"],
+            "Task": task_id,
+            "Wave ID": wave_id,
+            "Purpose": contract["purpose"],
+        }
+        for key, expected_value in expected_header_values.items():
+            prefix = f"{key}:"
+            matching_lines = [
+                line for line in header_lines if line.startswith(prefix)
+            ]
+            if matching_lines != [f"{key}: {expected_value}"]:
+                errors.append(
+                    f"packet {key} header does not exactly match the contract"
+                )
+
+        sections = _extract_native_stub_exact_sections(plan_content)
+        expected_sections = _native_stub_expected_section_bodies(contract)
+        for section_title, expected_body in expected_sections.items():
+            bodies = sections.get(section_title, [])
+            if len(bodies) != 1:
+                errors.append(
+                    f"canonical section {section_title!r} must occur exactly once"
+                )
+            elif bodies[0] != expected_body:
+                errors.append(
+                    f"canonical section {section_title!r} does not byte-exactly "
+                    "preserve its ordered builder-owned content"
+                )
+
+    if errors:
+        _raise_native_stub_packet_contract_error(errors)
+    return True
 
 
 def _phase_a_header_value(content: str, key: str) -> str | None:
@@ -1886,6 +2822,15 @@ def lock_plan(
     """
     full_path = repo_root / plan_path
     content = full_path.read_text(encoding="utf-8")
+    # Marked native packets are immutable builder artifacts.  Validate before
+    # even the legacy identity-header repair can mutate the file, so a missing or
+    # changed native identity is evidence of drift rather than something Phase A
+    # may repair in place.
+    validate_native_stub_packet_contract(
+        routing_record or {},
+        plan_path,
+        content,
+    )
     content_with_identity = _ensure_phase_a_identity_header(content, routing_record)
     if content_with_identity != content:
         content = content_with_identity
@@ -2244,6 +3189,111 @@ def run_phase_a(
         "agent_review_ran": False,
     }
 
+    config = load_executor_config(repo_root)
+    implementer_backend = config.get("backends", {}).get("phase_a_executor", "codex")
+    if not isinstance(implementer_backend, str) or not implementer_backend.strip():
+        raise PhaseAExecutorError(
+            "Invalid implementer backend "
+            f"{implementer_backend!r} for phase_a_executor; expected non-empty string"
+        )
+    implementer_backend = implementer_backend.strip()
+
+    # Load routing record for scope context.  Legacy loading remains fail-soft,
+    # but a marker that was successfully loaded is never allowed to downgrade to
+    # legacy: its exact envelope is parsed outside the historical fallback.
+    try:
+        if routing_record_override is not None:
+            routing_record = dict(routing_record_override)
+        else:
+            routing_record = load_routing_record(repo_root, bus_dir=bus_dir)
+    except (PhaseAExecutorError, ExecutorCommonError):
+        routing_record = {}
+    try:
+        native_contract = native_stub_packet_contract_from_routing(routing_record)
+    except PhaseAExecutorError as exc:
+        result["status"] = "error"
+        result["error"] = str(exc)
+        return result
+    try:
+        scope = extract_plan_scope(routing_record)
+    except PhaseAExecutorError as exc:
+        if native_contract is not None:
+            result["status"] = "error"
+            result["error"] = str(exc)
+            return result
+        scope = {"request": "", "summary": "", "decision": "ROUTE_PHASE_A"}
+
+    # A marked packet is produced only by launch_wave.py.  Never create or
+    # refresh it here: require the exact tracked artifact to exist so omission or
+    # tamper remains visible.  Unmarked legacy/direct routes retain the existing
+    # create_plan_draft behavior unchanged.
+    if native_contract is not None:
+        identity = native_contract["identity"]
+        expected_plan_name = Path(identity["tracked_packet"]).stem
+        if plan_name != expected_plan_name:
+            result["status"] = "error"
+            result["error"] = (
+                "Native stub packet contract validation failed: plan_name does "
+                "not match contract identity tracked_packet stem. "
+                "corrected-config-relaunch-required: use launch_wave.py with a "
+                "fresh wave id and corrected WaveConfig."
+            )
+            return result
+        try:
+            plan_path = _tracked_plan_path_from_scope(
+                repo_root,
+                plan_name,
+                {"tracked_packet": identity["tracked_packet"]},
+            )
+        except PhaseAExecutorError as exc:
+            result["status"] = "error"
+            result["error"] = str(exc)
+            return result
+        if plan_path is None or not plan_path.is_file():
+            result["status"] = "error"
+            result["error"] = (
+                "Native stub packet contract validation failed: launcher-owned "
+                f"tracked packet is absent: {identity['tracked_packet']!r}. "
+                "corrected-config-relaunch-required: do not create or repair a "
+                "native packet in Phase A; relaunch through launch_wave.py with "
+                "a fresh wave id and corrected WaveConfig."
+            )
+            return result
+    else:
+        try:
+            plan_path = create_plan_draft(repo_root, plan_name, scope)
+        except PhaseAExecutorError as exc:
+            result["status"] = "error"
+            result["error"] = str(exc)
+            return result
+
+    rel_plan_path = str(plan_path.relative_to(repo_root))
+    result["plan_path"] = rel_plan_path
+    try:
+        plan_content = plan_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        result["status"] = "error"
+        result["error"] = f"Phase A failed to read canonical plan: {exc}"
+        return result
+
+    # Native aggregate validation precedes pager identity publication, SDK
+    # review, and bridge review.  A tampered Wave ID must not become an emitted
+    # lifecycle identity before the packet is rejected.
+    try:
+        validate_native_stub_packet_contract(
+            routing_record,
+            rel_plan_path,
+            plan_content,
+        )
+    except PhaseAExecutorError as exc:
+        result["status"] = "error"
+        result["error"] = str(exc)
+        return result
+
+    # The live log is an artifact.  Do not create or truncate it until a marked
+    # native packet has passed its envelope, tracked-stem, path, provenance, and
+    # aggregate-content checks.  In particular, a dispatcher identity mismatch
+    # must fail before every filesystem and pager side effect.
     _log_path = repo_root / ".scratch" / "phase_a_executor_live.log"
     _log_path.parent.mkdir(parents=True, exist_ok=True)
     _log_fp = open(_log_path, "w", encoding="utf-8")
@@ -2258,35 +3308,6 @@ def run_phase_a(
         except (OSError, ValueError):
             pass
 
-    config = load_executor_config(repo_root)
-    implementer_backend = config.get("backends", {}).get("phase_a_executor", "codex")
-    if not isinstance(implementer_backend, str) or not implementer_backend.strip():
-        raise PhaseAExecutorError(
-            "Invalid implementer backend "
-            f"{implementer_backend!r} for phase_a_executor; expected non-empty string"
-        )
-    implementer_backend = implementer_backend.strip()
-
-    # Load routing record for scope context
-    try:
-        if routing_record_override is not None:
-            routing_record = dict(routing_record_override)
-        else:
-            routing_record = load_routing_record(repo_root, bus_dir=bus_dir)
-        scope = extract_plan_scope(routing_record)
-    except (PhaseAExecutorError, ExecutorCommonError):
-        routing_record = {}
-        scope = {"request": "", "summary": "", "decision": "ROUTE_PHASE_A"}
-
-    # Create or load plan draft
-    try:
-        plan_path = create_plan_draft(repo_root, plan_name, scope)
-    except PhaseAExecutorError as exc:
-        result["status"] = "error"
-        result["error"] = str(exc)
-        return result
-    rel_plan_path = str(plan_path.relative_to(repo_root))
-    result["plan_path"] = rel_plan_path
     log(f"Plan draft: {rel_plan_path}")
     try:
         _emit_phase_a_event(
@@ -2307,7 +3328,6 @@ def run_phase_a(
         return result
     review_depth = resolve_review_depth(config, "phase_a")
     agent_timeout = config.get("timeouts", {}).get("agent_review", 900)
-    plan_content = plan_path.read_text(encoding="utf-8")
 
     # Plan-load pre-flight: reject control packets that cite code by line number
     # (<path>.<ext>:<line>). Fails closed BEFORE SDK review and the first bridge
@@ -2328,7 +3348,40 @@ def run_phase_a(
 
     defer_agent_review = _plan_is_placeholder_stub(plan_content)
 
+    def _validate_current_native_packet(
+        stage: str,
+        known_content: str | None = None,
+    ) -> bool:
+        if native_contract is None:
+            return True
+        current_content = known_content
+        if current_content is None:
+            try:
+                current_content = (repo_root / rel_plan_path).read_text(
+                    encoding="utf-8"
+                )
+            except (OSError, UnicodeDecodeError) as exc:
+                result["status"] = "error"
+                result["error"] = (
+                    f"Native stub packet contract validation failed {stage}: "
+                    f"cannot read canonical packet: {exc}"
+                )
+                return False
+        try:
+            validate_native_stub_packet_contract(
+                routing_record,
+                rel_plan_path,
+                current_content,
+            )
+        except PhaseAExecutorError as exc:
+            result["status"] = "error"
+            result["error"] = f"{stage}: {exc}"
+            return False
+        return True
+
     def _run_phase_a_agent_review(log_label: str) -> tuple[bool, str]:
+        if not _validate_current_native_packet("before SDK agent review"):
+            return False, ""
         log(log_label)
         agent_result = run_sdk_agents(
             repo_root,
@@ -2403,6 +3456,10 @@ def run_phase_a(
 
     def _run_bridge_convergence(*, start_round: int, agent_review_context: str) -> bool:
         for round_num in range(start_round, max_bridge_rounds + 1):
+            if not _validate_current_native_packet(
+                f"before bridge review round {round_num}"
+            ):
+                return False
             bridge_job_id = f"phase-a-r{round_num}-{uuid.uuid4().hex[:8]}"
             log(f"Bridge design review round {round_num}/{max_bridge_rounds} (job={bridge_job_id})...")
             result["bridge_rounds"] = round_num
@@ -2602,6 +3659,38 @@ def run_phase_a(
                                 "rewriting the packet with the required Phase A sections; do NOT try "
                                 "to solve the underlying implementation in this turn.\n\n"
                             )
+                        if native_contract is not None:
+                            packet_mutation_guidance = (
+                                "This route carries a required native launcher packet contract. "
+                                "Its Purpose, Scope summary, ordered Scope items, ordered Work "
+                                "items, ordered Constraints, ordered Stop conditions, and ordered "
+                                "Acceptance criteria are immutable for this attempt. Preserve those "
+                                "canonical sections byte-exactly. You may create or append to "
+                                "exactly one trailing `## Non-normative review clarification` "
+                                "section; every other added or renamed H2 is forbidden. If a "
+                                "blocking finding requires any builder-owned normative item to "
+                                "change, do not edit the contract in place; stop and report exactly "
+                                "`corrected-config-relaunch-required` so the operator can invoke "
+                                "launch_wave.py with a fresh wave id and corrected WaveConfig.\n\n"
+                            )
+                            completion_guidance = (
+                                "Update only additive text in the exact trailing "
+                                "`## Non-normative review clarification` section when that can "
+                                "resolve the blocker. Append to the existing section instead of "
+                                "creating a duplicate. Never replace or supersede the native "
+                                "contract in this file."
+                            )
+                        else:
+                            packet_mutation_guidance = (
+                                "TASKS.md authorizes the wave, but it does NOT prove every listed "
+                                "item is still unlanded. If a blocking finding proves a work item is "
+                                "already implemented in current code, remove it from pending work "
+                                "items and acceptance criteria instead of re-listing it as unresolved.\n"
+                                "Prefer current code truth over stale packet wording when they conflict.\n\n"
+                            )
+                            completion_guidance = (
+                                "Replace the stub with the real plan directly in that file."
+                            )
                         impl_prompt = (
                             f"You are updating a Phase A plan at `{rel_plan_path}`.\n\n"
                             f"IMPORTANT: Write ALL changes to `{rel_plan_path}` ONLY. "
@@ -2615,11 +3704,7 @@ def run_phase_a(
                             f"- `{rel_plan_path}`\n"
                             f"- exact TASKS.md lines for `{_task_id or 'the current task'}`\n"
                             "- files, lines, and docs explicitly cited in the blocking findings above\n\n"
-                            "TASKS.md authorizes the wave, but it does NOT prove every listed item "
-                            "is still unlanded. If a blocking finding proves a work item is already "
-                            "implemented in current code, remove it from pending work items and "
-                            "acceptance criteria instead of re-listing it as unresolved.\n"
-                            "Prefer current code truth over stale packet wording when they conflict.\n\n"
+                            f"{packet_mutation_guidance}"
                             f"{stub_rewrite_guidance}"
                             "Do NOT inspect unrelated dirty files, `git diff`, `git status`, "
                             "or unrelated executor/test changes. Do NOT widen scope beyond the "
@@ -2641,7 +3726,7 @@ def run_phase_a(
                             f"Read TASKS.md for the current task ({_task_id or 'see NEXT section'}) "
                             f"and use the plan file at `{rel_plan_path}` as the governing packet. "
                             f"Update ONLY `{rel_plan_path}`. Do NOT create new files. "
-                            "Replace the stub with the real plan directly in that file."
+                            f"{completion_guidance}"
                         )
                         log("Invoking implementer to fix blocking findings...")
                         try:
@@ -2684,6 +3769,11 @@ def run_phase_a(
                                 f"Phase A failed to read canonical plan after implementer: {exc}"
                             )
                             return False
+                        if not _validate_current_native_packet(
+                            "after reviewer-directed edit",
+                            new_content,
+                        ):
+                            return False
                         try:
                             _emit_phase_a_event(
                                 repo_root,
@@ -2705,6 +3795,15 @@ def run_phase_a(
                             result["error"] = f"Phase A pager emission failed after implementer: {exc}"
                             return False
                         plan_actually_changed = hash(new_content) != plan_hash_before
+                        if native_contract is not None and not plan_actually_changed:
+                            result["status"] = "error"
+                            result["error"] = (
+                                "corrected-config-relaunch-required: a blocking Phase A "
+                                "finding produced no contract-preserving packet edit. Do not "
+                                "amend builder-owned normative content in place; use "
+                                "launch_wave.py with a fresh wave id and corrected WaveConfig."
+                            )
+                            return False
                         if impl_result["status"] != "success":
                             if plan_actually_changed:
                                 log(

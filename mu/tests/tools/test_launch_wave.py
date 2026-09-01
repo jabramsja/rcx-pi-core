@@ -17,6 +17,7 @@ These tests cover:
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import re
 import sqlite3
@@ -475,6 +476,1003 @@ def test_full_sequential_setup_produces_all_artifacts(wave_repo):
     assert "candidate_authority" not in routing
     assert "candidate_authority_required" not in routing
     assert result.candidate_authority_spec_path is None
+
+
+_NATIVE_PACKET_STRUCTURED_FIELDS = (
+    "scope_items",
+    "work_items",
+    "constraints",
+    "stop_conditions",
+    "acceptance_criteria",
+)
+
+
+@pytest.mark.parametrize("field_name", _NATIVE_PACKET_STRUCTURED_FIELDS)
+@pytest.mark.parametrize(
+    ("input_kind", "bad_value"),
+    (
+        pytest.param("missing", None, id="missing"),
+        pytest.param("empty", [], id="empty"),
+        pytest.param("malformed", "not-a-list", id="malformed"),
+        pytest.param("blank-item", ["valid item", " \t "], id="blank-item"),
+    ),
+)
+def test_native_stub_packet_contract_refuses_incomplete_sections_before_mutation(
+    wave_repo,
+    field_name,
+    input_kind,
+    bad_value,
+):
+    """Every native structured section fails before any launcher-owned mutation."""
+    probe = make_config()
+    _write_indicator_generator(wave_repo)
+    indicator_command = (
+        f"{sys.executable} gen_indicator.py {probe.indicator_artifact_ref}"
+    )
+    if input_kind == "missing":
+        config_data = dataclasses.asdict(
+            make_config(indicator_collection_command=indicator_command)
+        )
+        config_data.pop(field_name)
+        config = lw.WaveConfig.from_dict(config_data)
+    else:
+        config = make_config(
+            indicator_collection_command=indicator_command,
+            **{field_name: bad_value},
+        )
+
+    tasks_path = wave_repo / "TASKS.md"
+    routing_path = ec.routing_record_path(wave_repo)
+    routing_path.parent.mkdir(parents=True, exist_ok=True)
+    routing_path.write_text('{"sentinel": "routing-before"}\n', encoding="utf-8")
+    bridge_path = _write_bridge_config(
+        wave_repo,
+        {"sentinel": {"cmd": ["python3", "sentinel_agent.py"]}},
+    )
+    indicator_path = wave_repo / config.indicator_artifact_ref
+    indicator_path.parent.mkdir(parents=True, exist_ok=True)
+    indicator_path.write_text("indicator-before\n", encoding="utf-8")
+
+    before = {
+        "tasks": tasks_path.read_bytes(),
+        "routing": routing_path.read_bytes(),
+        "bridge": bridge_path.read_bytes(),
+        "indicator": indicator_path.read_bytes(),
+        "staged": _staged_paths(wave_repo),
+    }
+    dispatch_calls = []
+
+    def runner(*args, **kwargs):
+        dispatch_calls.append((args, kwargs))
+        raise AssertionError("invalid native packet config must not dispatch")
+
+    with pytest.raises(lw.LaunchWaveError) as excinfo:
+        lw.run_wave_setup(wave_repo, config, launch=True, runner=runner)
+
+    assert field_name in str(excinfo.value)
+    assert not (wave_repo / config.tracked_packet).exists()
+    assert tasks_path.read_bytes() == before["tasks"]
+    assert routing_path.read_bytes() == before["routing"]
+    assert bridge_path.read_bytes() == before["bridge"]
+    assert indicator_path.read_bytes() == before["indicator"]
+    assert _staged_paths(wave_repo) == before["staged"]
+    assert dispatch_calls == []
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        pytest.param("evidence_command", "", id="blank-evidence-command"),
+        pytest.param(
+            "evidence_command",
+            "python3 -m pytest first.py\npython3 -m pytest second.py",
+            id="multiline-evidence-command",
+        ),
+        pytest.param("slow_functions", "run_mu", id="non-list-slow-functions"),
+        pytest.param(
+            "slow_functions",
+            ["run_mu", "  "],
+            id="blank-slow-function",
+        ),
+        pytest.param(
+            "slow_functions",
+            ["run_mu", "walk_mu\nrewrite_mu"],
+            id="multiline-slow-function",
+        ),
+    ],
+)
+def test_native_stub_packet_contract_refuses_invalid_validation_before_mutation(
+    wave_repo,
+    field_name,
+    bad_value,
+):
+    config = make_config(**{field_name: bad_value})
+    tasks_path = wave_repo / "TASKS.md"
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
+
+    with pytest.raises(lw.LaunchWaveError, match=field_name):
+        lw.run_wave_setup(wave_repo, config)
+
+    assert tasks_path.read_bytes() == before_tasks
+    assert not (wave_repo / config.tracked_packet).exists()
+    assert not ec.routing_record_path(wave_repo).exists()
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert _staged_paths(wave_repo) == before_staged
+
+
+def test_native_stub_packet_contract_rejects_dispatch_truncated_stem_before_mutation(
+    wave_repo,
+):
+    config = make_config(wave_id="w" * 70)
+    tracked_packet_stem = Path(config.tracked_packet).stem
+    assert len(tracked_packet_stem) == 81
+
+    tasks_path = wave_repo / "TASKS.md"
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
+    dispatch_calls = []
+
+    def runner(*args, **kwargs):
+        dispatch_calls.append((args, kwargs))
+        raise AssertionError("invalid native packet stem must not dispatch")
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="tracked_packet stem must remain exact through normal Phase A dispatch",
+    ):
+        lw.run_wave_setup(wave_repo, config, launch=True, runner=runner)
+
+    assert tasks_path.read_bytes() == before_tasks
+    assert not (wave_repo / config.tracked_packet).exists()
+    assert not ec.routing_record_path(wave_repo).exists()
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert _staged_paths(wave_repo) == before_staged
+    assert dispatch_calls == []
+
+
+@pytest.mark.parametrize("setup_helper", ["tracker", "routing"])
+def test_native_stub_packet_contract_direct_helpers_reject_incomplete_input_before_mutation(
+    wave_repo,
+    setup_helper,
+):
+    config = make_config(evidence_command="")
+    tasks_path = wave_repo / "TASKS.md"
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
+
+    with pytest.raises(lw.LaunchWaveError, match="evidence_command"):
+        if setup_helper == "tracker":
+            lw.setup_tracker_note(wave_repo, config)
+        else:
+            lw.setup_routing_record(wave_repo, config)
+
+    assert tasks_path.read_bytes() == before_tasks
+    assert not (wave_repo / config.tracked_packet).exists()
+    assert not ec.routing_record_path(wave_repo).exists()
+    assert _staged_paths(wave_repo) == before_staged
+
+
+def test_native_stub_packet_contract_refuses_unbound_authorization_before_mutation(
+    wave_repo,
+):
+    config = make_config(
+        authorization_note=(
+            "The acceptance criteria may be superseded during this attempt."
+        )
+    )
+    tasks_path = wave_repo / "TASKS.md"
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
+    dispatch_calls = []
+
+    def runner(*args, **kwargs):
+        dispatch_calls.append((args, kwargs))
+        raise AssertionError("unbound native authorization must not dispatch")
+
+    with pytest.raises(lw.LaunchWaveError, match="authorization_note"):
+        lw.run_wave_setup(wave_repo, config, launch=True, runner=runner)
+
+    assert tasks_path.read_bytes() == before_tasks
+    assert not (wave_repo / config.tracked_packet).exists()
+    assert not ec.routing_record_path(wave_repo).exists()
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert _staged_paths(wave_repo) == before_staged
+    assert dispatch_calls == []
+
+
+def test_native_stub_packet_contract_routing_marker_and_digest_binding(wave_repo):
+    config = make_config()
+    lw.setup_packet(wave_repo, config)
+
+    record = lw.setup_routing_record(wave_repo, config)
+    envelope = record[lw.NATIVE_STUB_PACKET_CONTRACT_KEY]
+    contract = envelope["contract"]
+
+    assert lw.NATIVE_STUB_PACKET_CONTRACT_KEY == "native_stub_packet_contract"
+    assert set(envelope) == {"required", "producer", "version", "digest", "contract"}
+    assert envelope["required"] is True
+    assert envelope["producer"] == "launch_wave.py"
+    assert isinstance(envelope["version"], int)
+    assert not isinstance(envelope["version"], bool)
+    assert envelope["version"] == 1
+    assert re.fullmatch(r"[0-9a-f]{64}", envelope["digest"])
+    assert contract == {
+        "identity": {
+            "wave_id": config.wave_id,
+            "task_id": config.task_id,
+            "title": config.title,
+            "date": config.date,
+            "tracked_packet": config.tracked_packet,
+        },
+        "purpose": config.purpose,
+        "scope_summary": config.scope_summary,
+        "scope_items": config.scope_items,
+        "work_items": config.work_items,
+        "constraints": config.constraints,
+        "stop_conditions": config.stop_conditions,
+        "acceptance_criteria": config.acceptance_criteria,
+        "evidence_command": config.evidence_command,
+        "slow_functions": config.slow_functions,
+    }
+    canonical = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    assert envelope["digest"] == hashlib.sha256(canonical).hexdigest()
+    assert envelope == lw.build_native_stub_packet_contract(config)
+
+    on_disk = json.loads(
+        ec.routing_record_path(wave_repo).read_text(encoding="utf-8")
+    )
+    assert on_disk[lw.NATIVE_STUB_PACKET_CONTRACT_KEY] == envelope
+    assert on_disk["wave_name"] == contract["identity"]["wave_id"]
+    assert on_disk["task_id"] == contract["identity"]["task_id"]
+    assert on_disk["next_candidates"][0]["tracked_packet"] == contract["identity"][
+        "tracked_packet"
+    ]
+    packet = (wave_repo / config.tracked_packet).read_text(encoding="utf-8")
+    digest_line = (
+        lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX + envelope["digest"]
+    )
+    assert packet.count(lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE) == 1
+    assert packet.count(digest_line) == 1
+    assert config.tracked_packet == (
+        f"reports/control_plane/{config.wave_id}_{config.date}.md"
+    )
+
+
+def test_native_stub_packet_contract_digest_binds_exact_validation_payload():
+    config = make_config(
+        evidence_command="PYTHONHASHSEED=0 python3 -m pytest -k 'exact value'",
+        slow_functions=["run_mu", "walk_mu"],
+    )
+    envelope = lw.build_native_stub_packet_contract(config)
+    content = lw.render_wave_packet(config)
+
+    changed_evidence = dataclasses.replace(
+        config,
+        evidence_command="PYTHONHASHSEED=0  python3 -m pytest -k 'exact value'",
+    )
+    reversed_slow_functions = dataclasses.replace(
+        config,
+        slow_functions=["walk_mu", "run_mu"],
+    )
+    empty_slow_functions = dataclasses.replace(config, slow_functions=[])
+
+    assert envelope["contract"]["evidence_command"] == config.evidence_command
+    assert envelope["contract"]["slow_functions"] == ["run_mu", "walk_mu"]
+    assert envelope["digest"] != lw.build_native_stub_packet_contract(
+        changed_evidence
+    )["digest"]
+    assert envelope["digest"] != lw.build_native_stub_packet_contract(
+        reversed_slow_functions
+    )["digest"]
+    assert envelope["digest"] != lw.build_native_stub_packet_contract(
+        empty_slow_functions
+    )["digest"]
+    assert f"- evidence_command: `{config.evidence_command}`" in content
+    assert (
+        "- Slow-kernel guard-tests (`run_mu`, `walk_mu`) carry an in-function "
+        "`# SPEED_OK: <reason>` annotation so they stay out of the green-gate "
+        "speed lane."
+    ) in content
+    empty_content = lw.render_wave_packet(empty_slow_functions)
+    assert "Slow-kernel guard-tests" not in empty_content
+
+
+def test_native_stub_packet_contract_renders_complete_canonical_packet():
+    config = make_config(
+        purpose="Unique native packet purpose.",
+        scope_summary="Unique native packet scope summary.",
+        scope_items=["scope item alpha", "scope item beta"],
+        work_items=["work item alpha", "work item beta"],
+        constraints=["constraint alpha", "constraint beta"],
+        stop_conditions=["stop condition alpha", "stop condition beta"],
+        acceptance_criteria=["acceptance alpha", "acceptance beta"],
+        evidence_command="python3 -m pytest exact-evidence.py",
+        slow_functions=["run_mu", "walk_mu"],
+    )
+
+    content = lw.render_wave_packet(config)
+
+    def section_body(title):
+        matches = list(
+            re.finditer(
+                rf"^## {re.escape(title)}\n\n(?P<body>.*?)(?=^## |\Z)",
+                content,
+                flags=re.MULTILINE | re.DOTALL,
+            )
+        )
+        assert len(matches) == 1
+        return matches[0].group("body").rstrip("\n")
+
+    scope_authority = (
+        "TASKS.md -- tracker-sync authority. The "
+        f"{config.date} tracker sync note for wave `{config.wave_id}` is the single "
+        "source of truth for this packet's L4 fields; the packet derives from it."
+    )
+    expected = {
+        "Scope": (
+            f"{config.scope_summary}\n\nFiles and surfaces in scope:\n\n"
+            f"- {config.scope_items[0]}\n- {config.scope_items[1]}\n"
+            f"- {scope_authority}"
+        ),
+        "Work items": (
+            f"1. {config.work_items[0]}\n2. {config.work_items[1]}"
+        ),
+        "Constraints": (
+            f"- {config.constraints[0]}\n- {config.constraints[1]}"
+        ),
+        "Stop conditions": (
+            f"- {config.stop_conditions[0]}\n- {config.stop_conditions[1]}"
+        ),
+        "Validation gates": (
+            f"- evidence_command: `{config.evidence_command}`\n"
+            "- Slow-kernel guard-tests (`run_mu`, `walk_mu`) carry an in-function "
+            "`# SPEED_OK: <reason>` annotation so they stay out of the green-gate "
+            "speed lane."
+        ),
+        "Acceptance criteria": (
+            f"- {config.acceptance_criteria[0]}\n"
+            f"- {config.acceptance_criteria[1]}"
+        ),
+    }
+
+    assert f"\nPurpose: {config.purpose}\n" in content
+    envelope = lw.build_native_stub_packet_contract(config)
+    assert content.count(lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE) == 1
+    assert content.count(
+        lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX + envelope["digest"]
+    ) == 1
+    for title, expected_body in expected.items():
+        body = section_body(title)
+        assert body
+        assert body == expected_body
+    for builder_owned_item in (
+        config.purpose,
+        config.scope_summary,
+        *config.scope_items,
+        *config.work_items,
+        *config.constraints,
+        *config.stop_conditions,
+        *config.acceptance_criteria,
+    ):
+        assert content.count(builder_owned_item) == 1
+    assert lw.check_packet_fences(content, config) == []
+
+
+def test_native_stub_packet_contract_rejects_same_wave_normative_relaunch_before_mutation(
+    wave_repo,
+):
+    """A corrected normative config must use a fresh wave id, never amend in place."""
+    probe = make_config()
+    _write_indicator_generator(wave_repo)
+    indicator_command = (
+        f"{sys.executable} gen_indicator.py {probe.indicator_artifact_ref}"
+    )
+    config = make_config(indicator_collection_command=indicator_command)
+    bridge_path = _write_bridge_config(
+        wave_repo,
+        {"sentinel": {"cmd": ["python3", "sentinel_agent.py"]}},
+    )
+
+    lw.run_wave_setup(wave_repo, config)
+
+    packet_path = wave_repo / config.tracked_packet
+    tasks_path = wave_repo / "TASKS.md"
+    routing_path = ec.routing_record_path(wave_repo)
+    indicator_path = wave_repo / config.indicator_artifact_ref
+    original_routing = json.loads(routing_path.read_text(encoding="utf-8"))
+    original_envelope = original_routing[lw.NATIVE_STUB_PACKET_CONTRACT_KEY]
+    before = {
+        "packet": packet_path.read_bytes(),
+        "tasks": tasks_path.read_bytes(),
+        "routing": routing_path.read_bytes(),
+        "bridge": bridge_path.read_bytes(),
+        "indicator": indicator_path.read_bytes(),
+        "staged": _staged_paths(wave_repo),
+    }
+    corrected_item = "Replace the original normative work items in place"
+    corrected = make_config(
+        indicator_collection_command=indicator_command,
+        work_items=[corrected_item],
+    )
+    dispatch_calls = []
+
+    def runner(*args, **kwargs):
+        dispatch_calls.append((args, kwargs))
+        raise AssertionError("same-wave corrected config must not dispatch")
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ) as excinfo:
+        lw.run_wave_setup(
+            wave_repo,
+            corrected,
+            launch=True,
+            runner=runner,
+        )
+
+    assert "fresh wave id" in str(excinfo.value)
+    assert packet_path.read_bytes() == before["packet"]
+    assert tasks_path.read_bytes() == before["tasks"]
+    assert routing_path.read_bytes() == before["routing"]
+    assert bridge_path.read_bytes() == before["bridge"]
+    assert indicator_path.read_bytes() == before["indicator"]
+    assert _staged_paths(wave_repo) == before["staged"]
+    assert dispatch_calls == []
+    packet_text = packet_path.read_text(encoding="utf-8")
+    assert config.work_items[0] in packet_text
+    assert corrected_item not in packet_text
+    persisted_envelope = json.loads(
+        routing_path.read_text(encoding="utf-8")
+    )[lw.NATIVE_STUB_PACKET_CONTRACT_KEY]
+    assert persisted_envelope == original_envelope
+
+
+@pytest.mark.parametrize("change_normative_item", [False, True])
+def test_native_stub_packet_contract_rejects_same_wave_route_downgrade_before_mutation(
+    wave_repo,
+    change_normative_item,
+):
+    """A marked native attempt cannot be downgraded by changing its route."""
+    probe = make_config()
+    _write_indicator_generator(wave_repo)
+    indicator_command = (
+        f"{sys.executable} gen_indicator.py {probe.indicator_artifact_ref}"
+    )
+    config = make_config(indicator_collection_command=indicator_command)
+    bridge_path = _write_bridge_config(
+        wave_repo,
+        {"sentinel": {"cmd": ["python3", "sentinel_agent.py"]}},
+    )
+    lw.run_wave_setup(wave_repo, config)
+
+    packet_path = wave_repo / config.tracked_packet
+    tasks_path = wave_repo / "TASKS.md"
+    routing_path = ec.routing_record_path(wave_repo)
+    indicator_path = wave_repo / config.indicator_artifact_ref
+    before = {
+        "packet": packet_path.read_bytes(),
+        "tasks": tasks_path.read_bytes(),
+        "routing": routing_path.read_bytes(),
+        "bridge": bridge_path.read_bytes(),
+        "indicator": indicator_path.read_bytes(),
+        "staged": _staged_paths(wave_repo),
+    }
+    changed_item = "Replace native work while downgrading the same attempt"
+    downgraded = dataclasses.replace(
+        config,
+        routing_decision="ROUTE_PHASE_B",
+        work_items=(
+            [changed_item] if change_normative_item else list(config.work_items)
+        ),
+    )
+    dispatch_calls = []
+
+    def runner(*args, **kwargs):
+        dispatch_calls.append((args, kwargs))
+        raise AssertionError("same-wave native route downgrade must not dispatch")
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.setup_packet(wave_repo, downgraded)
+
+    assert packet_path.read_bytes() == before["packet"]
+    assert routing_path.read_bytes() == before["routing"]
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(
+            wave_repo,
+            downgraded,
+            launch=True,
+            runner=runner,
+        )
+
+    assert packet_path.read_bytes() == before["packet"]
+    assert tasks_path.read_bytes() == before["tasks"]
+    assert routing_path.read_bytes() == before["routing"]
+    assert bridge_path.read_bytes() == before["bridge"]
+    assert indicator_path.read_bytes() == before["indicator"]
+    assert _staged_paths(wave_repo) == before["staged"]
+    assert dispatch_calls == []
+    packet_text = packet_path.read_text(encoding="utf-8")
+    assert config.work_items[0] in packet_text
+    assert changed_item not in packet_text
+    persisted_routing = json.loads(routing_path.read_text(encoding="utf-8"))
+    assert persisted_routing["decision"] == "ROUTE_PHASE_A"
+    assert lw.NATIVE_STUB_PACKET_CONTRACT_KEY in persisted_routing
+
+
+@pytest.mark.parametrize(
+    "change_case",
+    [
+        "route_downgrade",
+        "missing_validation_metadata",
+        "evidence_command",
+        "slow_function_order",
+        "title_identity",
+        "dated_packet_identity",
+    ],
+)
+def test_native_stub_packet_contract_rejects_packet_only_replacement_before_mutation(
+    wave_repo,
+    change_case,
+):
+    """Packet-side provenance protects an interrupted step-1-only attempt."""
+    config = make_config(slow_functions=["run_mu", "walk_mu"])
+    packet_path = lw.setup_packet(wave_repo, config)
+    tasks_path = wave_repo / "TASKS.md"
+    routing_path = ec.routing_record_path(wave_repo)
+    assert not routing_path.exists()
+    before = {
+        "packet": packet_path.read_bytes(),
+        "tasks": tasks_path.read_bytes(),
+        "staged": _staged_paths(wave_repo),
+    }
+
+    if change_case == "route_downgrade":
+        changed = dataclasses.replace(config, routing_decision="ROUTE_PHASE_B")
+    elif change_case == "missing_validation_metadata":
+        changed = dataclasses.replace(config, evidence_command="")
+    elif change_case == "evidence_command":
+        changed = dataclasses.replace(
+            config,
+            evidence_command="python3 -m pytest changed-validation.py",
+        )
+    elif change_case == "slow_function_order":
+        changed = dataclasses.replace(
+            config,
+            slow_functions=["walk_mu", "run_mu"],
+        )
+    elif change_case == "title_identity":
+        changed = dataclasses.replace(config, title="Changed Same-Wave Packet Title")
+    else:
+        changed = make_config(
+            date="2026-06-20",
+            slow_functions=list(config.slow_functions),
+        )
+        assert changed.tracked_packet != config.tracked_packet
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(wave_repo, changed)
+
+    assert packet_path.read_bytes() == before["packet"]
+    assert tasks_path.read_bytes() == before["tasks"]
+    assert not routing_path.exists()
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert _staged_paths(wave_repo) == before["staged"]
+    if changed.tracked_packet != config.tracked_packet:
+        assert not (wave_repo / changed.tracked_packet).exists()
+
+
+@pytest.mark.parametrize(
+    "tamper_case",
+    [
+        "digest",
+        "missing_marker",
+        "malformed_marker",
+        "missing_digest",
+        "malformed_digest",
+        "malformed_extra_digest_in_clarification",
+        "malformed_marker_missing_digest_route_downgrade",
+    ],
+)
+@pytest.mark.parametrize("packet_source", ["worktree", "index"])
+def test_native_stub_packet_contract_rejects_packet_only_provenance_tamper_before_mutation(
+    wave_repo,
+    tamper_case,
+    packet_source,
+):
+    config = make_config()
+    packet_path = lw.setup_packet(wave_repo, config)
+    envelope = lw.build_native_stub_packet_contract(config)
+    packet_text = packet_path.read_text(encoding="utf-8")
+    if tamper_case == "digest":
+        packet_text = packet_text.replace(
+            lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX + envelope["digest"],
+            lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX + ("0" * 64),
+            1,
+        )
+    elif tamper_case == "missing_marker":
+        packet_text = packet_text.replace(
+            lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE + "\n",
+            "",
+            1,
+        )
+    elif tamper_case == "malformed_marker":
+        packet_text = packet_text.replace(
+            "producer=launch_wave.py",
+            "producer=other.py",
+            1,
+        )
+    elif tamper_case == "missing_digest":
+        packet_text = packet_text.replace(
+            lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX
+            + envelope["digest"]
+            + "\n",
+            "",
+            1,
+        )
+    elif tamper_case == "malformed_digest":
+        packet_text = packet_text.replace(
+            lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX + envelope["digest"],
+            lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX.rstrip(),
+            1,
+        )
+    elif tamper_case == "malformed_extra_digest_in_clarification":
+        packet_text += (
+            "\n## Non-normative review clarification\n\n"
+            "Native-Stub-Packet-Contract-Digest " + ("0" * 64) + "\n"
+        )
+    else:
+        packet_text = packet_text.replace(
+            lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE,
+            lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE.replace(":", "", 1),
+            1,
+        ).replace(
+            lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX
+            + envelope["digest"]
+            + "\n",
+            "",
+            1,
+        )
+    packet_path.write_text(packet_text, encoding="utf-8")
+    packet_bytes = packet_path.read_bytes()
+    indexed_before = None
+    if packet_source == "index":
+        _git(wave_repo, "add", "--", config.tracked_packet)
+        indexed_before = subprocess.check_output(
+            ["git", "show", f":{config.tracked_packet}"],
+            cwd=wave_repo,
+        )
+        packet_path.unlink()
+    tasks_path = wave_repo / "TASKS.md"
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
+
+    relaunch_config = (
+        dataclasses.replace(config, routing_decision="ROUTE_PHASE_B")
+        if tamper_case == "malformed_marker_missing_digest_route_downgrade"
+        else config
+    )
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(wave_repo, relaunch_config)
+
+    if packet_source == "worktree":
+        assert packet_path.read_bytes() == packet_bytes
+    else:
+        assert not packet_path.exists()
+        assert subprocess.check_output(
+            ["git", "show", f":{config.tracked_packet}"],
+            cwd=wave_repo,
+        ) == indexed_before == packet_bytes
+    assert tasks_path.read_bytes() == before_tasks
+    assert not ec.routing_record_path(wave_repo).exists()
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert _staged_paths(wave_repo) == before_staged
+
+
+@pytest.mark.parametrize("packet_source", ["worktree", "index"])
+def test_native_stub_packet_contract_rejects_indented_packet_only_provenance_route_downgrade_before_mutation(
+    wave_repo,
+    packet_source,
+):
+    config = make_config()
+    packet_path = lw.setup_packet(wave_repo, config)
+    packet_text = packet_path.read_text(encoding="utf-8")
+    packet_text = packet_text.replace(
+        lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE,
+        " " + lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE,
+        1,
+    ).replace(
+        lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX,
+        " " + lw.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX,
+        1,
+    )
+    packet_path.write_text(packet_text, encoding="utf-8")
+    packet_bytes = packet_path.read_bytes()
+    indexed_before = None
+    if packet_source == "index":
+        _git(wave_repo, "add", "--", config.tracked_packet)
+        indexed_before = subprocess.check_output(
+            ["git", "show", f":{config.tracked_packet}"],
+            cwd=wave_repo,
+        )
+        packet_path.unlink()
+
+    tasks_path = wave_repo / "TASKS.md"
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
+    downgraded = dataclasses.replace(config, routing_decision="ROUTE_PHASE_B")
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(wave_repo, downgraded)
+
+    if packet_source == "worktree":
+        assert packet_path.read_bytes() == packet_bytes
+    else:
+        assert not packet_path.exists()
+        assert subprocess.check_output(
+            ["git", "show", f":{config.tracked_packet}"],
+            cwd=wave_repo,
+        ) == indexed_before == packet_bytes
+    assert tasks_path.read_bytes() == before_tasks
+    assert not ec.routing_record_path(wave_repo).exists()
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert _staged_paths(wave_repo) == before_staged
+
+
+def test_native_stub_packet_contract_rejects_index_only_route_downgrade_before_mutation(
+    wave_repo,
+):
+    config = make_config()
+    packet_path = lw.setup_packet(wave_repo, config)
+    _git(wave_repo, "add", "--", config.tracked_packet)
+    indexed_before = subprocess.check_output(
+        ["git", "show", f":{config.tracked_packet}"],
+        cwd=wave_repo,
+    )
+    packet_path.unlink()
+    tasks_path = wave_repo / "TASKS.md"
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
+    downgraded = dataclasses.replace(config, routing_decision="ROUTE_PHASE_B")
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(wave_repo, downgraded)
+
+    assert not packet_path.exists()
+    assert subprocess.check_output(
+        ["git", "show", f":{config.tracked_packet}"],
+        cwd=wave_repo,
+    ) == indexed_before
+    assert tasks_path.read_bytes() == before_tasks
+    assert not ec.routing_record_path(wave_repo).exists()
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert _staged_paths(wave_repo) == before_staged
+
+
+def test_native_stub_packet_contract_rejects_routing_only_changed_direct_setup(
+    wave_repo,
+):
+    config = make_config()
+    routing_path = ec.routing_record_path(wave_repo)
+    packet_path = lw.setup_packet(wave_repo, config)
+    lw.setup_routing_record(wave_repo, config)
+    packet_path.unlink()
+    assert not packet_path.exists()
+    before_routing = routing_path.read_bytes()
+    before_tasks = (wave_repo / "TASKS.md").read_bytes()
+    before_staged = _staged_paths(wave_repo)
+    changed = dataclasses.replace(
+        config,
+        evidence_command="python3 -m pytest changed-validation.py",
+    )
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.setup_packet(wave_repo, changed)
+
+    assert not packet_path.exists()
+    assert routing_path.read_bytes() == before_routing
+    assert (wave_repo / "TASKS.md").read_bytes() == before_tasks
+    assert _staged_paths(wave_repo) == before_staged
+
+
+def test_native_stub_packet_contract_does_not_infer_strictness_from_unmarked_phase_a_route(
+    wave_repo,
+):
+    config = make_config()
+    routing_path = ec.routing_record_path(wave_repo)
+    routing_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_routing = {
+        "decision": "ROUTE_PHASE_A",
+        "wave_name": config.wave_id,
+        "task_id": config.task_id,
+        "next_candidates": [
+            {
+                "candidate": config.wave_id,
+                "bounded": True,
+                "tracked_packet": config.tracked_packet,
+            }
+        ],
+    }
+    routing_path.write_text(
+        json.dumps(legacy_routing, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    before_routing = routing_path.read_bytes()
+
+    packet_path = lw.setup_packet(wave_repo, config)
+
+    assert packet_path.is_file()
+    assert lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE in packet_path.read_text(
+        encoding="utf-8"
+    )
+    assert routing_path.read_bytes() == before_routing
+
+
+def test_native_stub_packet_contract_full_setup_completes_exact_unmarked_route_transition(
+    wave_repo,
+):
+    config = make_config()
+    routing_path = ec.routing_record_path(wave_repo)
+    routing_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_routing = {
+        "decision": "ROUTE_PHASE_A",
+        "wave_name": config.wave_id,
+        "task_id": config.task_id,
+        "next_candidates": [
+            {
+                "candidate": config.wave_id,
+                "bounded": True,
+                "tracked_packet": config.tracked_packet,
+            }
+        ],
+    }
+    routing_path.write_text(
+        json.dumps(legacy_routing, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    result = lw.run_wave_setup(wave_repo, config)
+
+    packet_text = (wave_repo / config.tracked_packet).read_text(encoding="utf-8")
+    routing = json.loads(routing_path.read_text(encoding="utf-8"))
+    tasks = (wave_repo / "TASKS.md").read_text(encoding="utf-8")
+    assert result.wave_id == config.wave_id
+    assert packet_text.count(lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE) == 1
+    assert routing[lw.NATIVE_STUB_PACKET_CONTRACT_KEY] == (
+        lw.build_native_stub_packet_contract(config)
+    )
+    assert tasks.count(f", {config.wave_id}):") == 1
+
+
+def test_native_stub_packet_contract_direct_setup_preserves_unmarked_route_behavior(
+    wave_repo,
+):
+    """Packet-only setup does not infer native applicability from an unmarked route."""
+    config = make_config(routing_decision="ROUTE_PHASE_B")
+    packet_path = lw.setup_packet(wave_repo, config)
+    assert lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE not in packet_path.read_text(
+        encoding="utf-8"
+    )
+    routing_path = ec.routing_record_path(wave_repo)
+    routing_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_routing = {
+        "decision": "ROUTE_PHASE_B",
+        "wave_name": config.wave_id,
+        "task_id": config.task_id,
+        "next_candidates": [
+            {
+                "candidate": config.wave_id,
+                "bounded": True,
+                "tracked_packet": config.tracked_packet,
+            }
+        ],
+    }
+    routing_path.write_text(
+        json.dumps(legacy_routing, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    before_packet = packet_path.read_bytes()
+    before_routing = routing_path.read_bytes()
+
+    rerun_path = lw.setup_packet(
+        wave_repo,
+        make_config(routing_decision="ROUTE_PHASE_B"),
+    )
+
+    assert rerun_path == packet_path
+    assert packet_path.read_bytes() == before_packet
+    assert routing_path.read_bytes() == before_routing
+    assert lw.NATIVE_STUB_PACKET_CONTRACT_KEY not in json.loads(
+        routing_path.read_text(encoding="utf-8")
+    )
+
+
+def test_native_stub_packet_contract_rejects_changed_partial_packet_before_mutation(
+    wave_repo,
+):
+    """Step-1 packet truth prevents changed-config recovery before routing exists."""
+    config = make_config()
+    packet_path = lw.setup_packet(wave_repo, config)
+    lw.setup_tracker_note(wave_repo, config)
+    tasks_path = wave_repo / "TASKS.md"
+    routing_path = ec.routing_record_path(wave_repo)
+    assert not routing_path.exists()
+    before_packet = packet_path.read_bytes()
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
+    corrected_item = "Mutate the partial attempt's normative work item"
+    corrected = make_config(work_items=[corrected_item])
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(wave_repo, corrected)
+
+    assert packet_path.read_bytes() == before_packet
+    assert tasks_path.read_bytes() == before_tasks
+    assert not routing_path.exists()
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert _staged_paths(wave_repo) == before_staged
+    assert corrected_item not in packet_path.read_text(encoding="utf-8")
+
+
+def test_native_stub_packet_contract_allows_corrected_fresh_wave_id(wave_repo):
+    """An unrelated existing native route does not block the required fresh attempt."""
+    original = make_config()
+    lw.run_wave_setup(wave_repo, original)
+    corrected_item = "Use corrected normative work under a fresh attempt identity"
+    corrected = make_config(
+        wave_id="demo-launcher-wave-corrected-2026-06-19",
+        title="Demo Launcher Wave Corrected 2026-06-19",
+        work_items=[corrected_item],
+    )
+
+    result = lw.run_wave_setup(wave_repo, corrected)
+
+    corrected_packet = wave_repo / corrected.tracked_packet
+    assert result.wave_id == corrected.wave_id
+    assert corrected_packet.is_file()
+    assert corrected_item in corrected_packet.read_text(encoding="utf-8")
+    routing = json.loads(ec.routing_record_path(wave_repo).read_text(encoding="utf-8"))
+    assert routing["wave_name"] == corrected.wave_id
+    assert (
+        routing[lw.NATIVE_STUB_PACKET_CONTRACT_KEY]["contract"]["identity"]["wave_id"]
+        == corrected.wave_id
+    )
 
 
 def test_authority_config_writes_bus_local_spec(wave_repo):
@@ -1054,10 +2052,23 @@ def test_setup_tracker_note_restores_staged_phase_b_note_after_worktree_clobber(
     assert tasks_path.read_text(encoding="utf-8") == advanced
 
 
-def test_setup_tracker_note_restores_staged_phase_b_note_when_worktree_note_missing(wave_repo):
+def test_tracker_block_adjacency_restores_staged_phase_b_note_after_predecessor_child(
+    wave_repo,
+):
     config = make_config(wave_id="demo-wave-2026-06-27")
-    lw.setup_tracker_note(wave_repo, config)
     tasks_path = wave_repo / "TASKS.md"
+    seed_content = tasks_path.read_text(encoding="utf-8")
+    seed_note = _tracker_note_line(seed_content, "seed-wave")
+    seed_child = "  - Recovery evidence: this remains attached to seed-wave."
+    tasks_path.write_text(
+        seed_content.replace(
+            seed_note + "\n\n---\n",
+            seed_note + "\n\n" + seed_child + "\n\n---\n",
+        ),
+        encoding="utf-8",
+    )
+
+    lw.setup_tracker_note(wave_repo, config)
     initial = tasks_path.read_text(encoding="utf-8")
     initial_note = _tracker_note_line(initial, config.wave_id)
     advanced_note = _phase_b_tracker_note_line(initial_note)
@@ -1065,16 +2076,22 @@ def test_setup_tracker_note_restores_staged_phase_b_note_when_worktree_note_miss
     tasks_path.write_text(advanced, encoding="utf-8")
     _git(wave_repo, "add", "TASKS.md")
 
-    missing_note = initial.replace(initial_note + "\n", "")
+    missing_note = initial.replace(initial_note + "\n\n", "")
     tasks_path.write_text(missing_note, encoding="utf-8")
     assert f", {config.wave_id}):" not in tasks_path.read_text(encoding="utf-8")
 
     lw.setup_tracker_note(wave_repo, config)
 
     restored = tasks_path.read_text(encoding="utf-8")
+    assert restored == advanced
     assert _tracker_note_line(restored, config.wave_id) == advanced_note
     assert restored.count(f", {config.wave_id}):") == 1
     assert "scope_refs:" in restored
+    assert (
+        restored.index(seed_note)
+        < restored.index(seed_child)
+        < restored.index(advanced_note)
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1985,6 +3002,7 @@ def test_cli_main_runs_setup_from_json_config(wave_repo, capsys):
         "evidence_delta": config.evidence_delta,
         "progress_proof_before": config.progress_proof_before,
         "progress_proof_after": config.progress_proof_after,
+        "scope_items": config.scope_items,
         "work_items": config.work_items,
         "constraints": config.constraints,
         "stop_conditions": config.stop_conditions,
