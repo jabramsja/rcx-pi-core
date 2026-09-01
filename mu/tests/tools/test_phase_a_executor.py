@@ -63,7 +63,16 @@ def _write_phase_a_plan(repo: Path, *, plan_name: str = "pager_plan") -> Path:
 
 
 def _fake_bridge(repo: Path, *, decision: str, exit_code: int = 0):
-    def _run_bridge(repo_root, rel_plan_path, round_num, *, job_id, agent_review_context="", bus_dir=None):
+    def _run_bridge(
+        repo_root,
+        rel_plan_path,
+        round_num,
+        *,
+        job_id,
+        agent_review_context="",
+        bus_dir=None,
+        reader_agent=None,
+    ):
         rendered = phase_a_mod.agent_bus_path(repo_root, bus_dir, "rendered", f"{job_id}.md")
         rendered.parent.mkdir(parents=True, exist_ok=True)
         rendered.write_text(f"Decision: {decision}\n", encoding="utf-8")
@@ -82,6 +91,105 @@ def _write_blocking_reviewer_envelope(repo: Path, job_id: str, *, bus_dir: str) 
         "END_AGENT_ENVELOPE\n",
         encoding="utf-8",
     )
+
+
+def test_phase_a_bridge_review_renders_configured_reader_and_reviewer(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
+    monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
+    monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+    tools_agents = tmp_path / "tools" / "agents"
+    tools_agents.mkdir(parents=True)
+    (tools_agents / "bridge_supervisor.py").write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import pathlib\n"
+        "import sys\n"
+        "scratch = pathlib.Path.cwd() / '.scratch'\n"
+        "scratch.mkdir(exist_ok=True)\n"
+        "(scratch / 'phase_a_role_args.json').write_text(\n"
+        "    json.dumps(sys.argv[1:]), encoding='utf-8'\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    config_dir = tmp_path / "mu" / "tools" / "executors"
+    config_dir.mkdir(parents=True)
+    (config_dir / "executor_config.json").write_text(
+        json.dumps(
+            {
+                "role_agents": {
+                    "implementer": "alternate-reader",
+                    "reviewer": "alternate-reviewer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = phase_a_mod.run_bridge_design_review(
+        tmp_path,
+        "reports/control_plane/test_plan.md",
+        1,
+        job_id="phase-a-configured-roles",
+        reader_agent="alternate-reader",
+        timeout=30,
+    )
+
+    argv = json.loads(
+        (tmp_path / ".scratch" / "phase_a_role_args.json").read_text(encoding="utf-8")
+    )
+    assert argv[argv.index("--reader") + 1] == "alternate-reader"
+    assert argv[argv.index("--reviewer") + 1] == "alternate-reviewer"
+    assert result["exit_code"] == 0
+
+
+def test_run_phase_a_passes_configured_implementer_identity_to_bridge(
+    tmp_path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_phase_a_plan(repo)
+    config_dir = repo / "mu" / "tools" / "executors"
+    config_dir.mkdir(parents=True)
+    (config_dir / "executor_config.json").write_text(
+        json.dumps(
+            {
+                "role_agents": {
+                    "implementer": "alternate-reader",
+                    "reviewer": "alternate-reviewer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
+    monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
+    monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+
+    with patch.object(
+        phase_a_mod,
+        "load_routing_record",
+        return_value={"decision": "ROUTE_PHASE_A"},
+    ), patch.object(
+        phase_a_mod,
+        "emit_pipeline_agent_event",
+        return_value={},
+    ), patch.object(
+        phase_a_mod,
+        "run_sdk_agents",
+        return_value={"exit_code": 0},
+    ), patch.object(
+        phase_a_mod,
+        "run_bridge_design_review",
+        side_effect=_fake_bridge(repo, decision="GO"),
+    ) as bridge_mock:
+        result = phase_a_mod.run_phase_a(repo, "pager_plan", max_bridge_rounds=1)
+
+    assert result["status"] == "converged"
+    assert bridge_mock.call_args.kwargs["reader_agent"] == "alternate-reader"
 
 
 def test_create_plan_draft_writes_authoritative_routing_identity(tmp_path):
