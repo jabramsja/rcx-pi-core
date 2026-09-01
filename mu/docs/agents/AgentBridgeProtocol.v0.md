@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-03-07
+LAST_VERIFIED: 2026-09-01
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -17,7 +17,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 # Agent Bridge Protocol v0
 
-Purpose: define the minimal working protocol for automated Claude <-> Codex collaboration inside RCX.
+Purpose: define the minimal working protocol for configured reader/reviewer collaboration inside RCX.
 
 ## Why This Exists
 
@@ -43,6 +43,10 @@ It is not the runtime transcript ledger.
 - `reader`: primary task agent; may edit when the job allows edits
 - `reviewer`: read-only skeptic; reviews the live candidate state
 - `supervisor`: owns job state, prompts, validations, transcript rendering, and git-state truth
+
+Reader and reviewer identities are configured per job. Identity selects the
+recorded role context; reader execution mode is separate authority and is not
+inferred from a provider name for newly created hybrid jobs.
 
 ## Runtime Layout
 
@@ -75,6 +79,8 @@ Tables in v1:
 - `jobs`
 - `turns`
 - `validations`
+- `job_actions` (append-only job-level authority markers)
+- `schema_version`
 
 This is intentionally minimal.
 `findings` and `leases` stay out of v1.
@@ -106,17 +112,26 @@ The envelope JSON is stored on `turns` so the supervisor can render transcripts 
 - `--verbose` / `-v`: same streaming behavior as `run`
 
 5. `review`
-- hybrid mode: record a synthetic reader turn from the interactive Claude session, then run the reviewer
+- hybrid mode: record the configured reader's implementation context as a synthetic turn, then run the configured reviewer
 - combines `submit` + synthetic reader + validations + reviewer in one command
 - `--task` / `--task-file`: what the task was
 - `--summary` / `--summary-file`: what the reader (interactive session) did
+- `--reader`: which configured identity supplied the synthetic implementation context
 - `--reviewer`: which adapter reviews (default: `codex`)
 - `--wave-class`, `--check`, `--job-id`: same as `submit`
 - `--verbose` / `-v`: print structured envelope output inline (findings, decision, evidence)
 - `--no-diff`: omit git diff from reviewer prompt; use for design deliberation, questions, or non-code review where the diff would distract from the task content
-- reader agent is recorded as `claude-session`; touched files auto-detected from git
-- designed for the Option C workflow: Claude implements interactively, Codex reviews independently
+- the configured reader identity is recorded; touched files are auto-detected from git, and no reader adapter is invoked
+- designed for a configured implementer to supply context and a separately configured reviewer to review independently
 - also supports design deliberation: pass a proposal via `--task-file` with `--no-diff` for non-code dialectic
+
+Hybrid job creation writes the configured reader identity and a separate
+job-level synthetic-reader execution-mode marker in the same durable
+transaction. Normal execution and crash recovery consult that marker before
+reader-adapter lookup, so a hybrid job remains synthetic even if interrupted
+before its reader turn is materialized and regardless of the configured reader
+identity. For unmarked historical jobs only, the supervisor retains the legacy
+`claude-session` identity and completed-synthetic-turn fallbacks.
 
 6. `status` / `render`
 - inspect or regenerate the human-readable transcript
@@ -141,6 +156,11 @@ Required keys:
 - `findings`
 - `validations_claimed`
 - `request_for_next_agent`
+
+Candidate evidence authority is repo-tracked: governing task packets, live
+candidate files, tests, and documentation, together with supplied receipts and
+focused repo-local probes permitted by the active review contract. Provider-local
+memory is not candidate evidence authority.
 
 ## Decisions
 
@@ -181,6 +201,12 @@ If the supervisor is interrupted mid-turn, the next `run` invocation detects inc
 - `READER_RUNNING` with completed reader turn: reruns validations (may have been incomplete) and advances to reviewer
 - `REVIEWER_RUNNING` with completed reviewer turn: checks staleness (state_sha_start vs state_sha_end); if state changed during execution, marks turn stale and retries; otherwise applies the recorded decision without rerunning
 - `REVIEWER_RUNNING` with no completed reviewer turn: resumes at reviewer
+
+Before any recovered or normal reader dispatch, the supervisor checks the
+durable synthetic-reader execution-mode marker. A marked job fails closed
+before adapter lookup unless it can resume through its completed synthetic turn,
+validations, or reviewer phase. Historical unmarked jobs retain the legacy
+compatibility fallbacks described above.
 
 In all cases, recovery sets `AWAITING_REVIEWER_APPROVAL` before entering the reviewer phase, which is the same state used by explicit `--pause-after-reader`. The `continue` command accepts any job in `AWAITING_REVIEWER_APPROVAL` regardless of how it got there (pause or recovery). Use `run` to trigger crash detection and recovery from `READER_RUNNING` or `REVIEWER_RUNNING` states.
 
@@ -227,7 +253,13 @@ Plus any acceptance checks supplied at submission time.
 
 `.agent_bus/bridge_config.json` declares named adapters under `agents`.
 
-The `claude` adapter is verified for Claude Code CLI (`claude --print` with stdin piping). The `codex` adapter uses `codex exec - --sandbox danger-full-access` (full unrestricted sandbox — filesystem write, network, and process execution). This is the most permissive Codex sandbox mode; it is required for the reviewer to run tests, execute validation commands, and search the web for evidence. The reviewer role contract (read-only, no source edits) is enforced by the prompt, not by the sandbox. Claude is the sole implementer; Codex reviews unless Claude explicitly delegates implementation in the task.
+The shipped configuration includes a `claude` adapter verified for Claude Code
+CLI (`claude --print` with stdin piping) and a `codex` adapter using
+`codex exec - --sandbox danger-full-access`. These are adapter implementation
+examples, not role assignments: configured job context determines reader and
+reviewer identities. Synthetic reader execution mode suppresses reader-adapter
+lookup independently of that identity. The reviewer role contract (read-only,
+no source edits) is enforced by the prompt, not by adapter naming or sandbox.
 
 Each adapter defines:
 - `cmd`

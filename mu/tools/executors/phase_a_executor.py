@@ -1832,9 +1832,20 @@ def run_bridge_design_review(
     timeout: int = 1200,
     agent_review_context: str = "",
     bus_dir: str | Path | None = None,
+    reader_agent: str | None = None,
 ) -> dict[str, Any]:
     """Run bridge packet review (--no-diff, non-design) on a plan packet."""
     config = load_executor_config(repo_root)
+    reader = (
+        reader_agent
+        if reader_agent is not None
+        else config.get("backends", {}).get("phase_a_executor", "codex")
+    )
+    if not isinstance(reader, str) or not reader.strip():
+        raise PhaseAExecutorError(
+            f"Invalid bridge reader {reader!r} for phase_a; expected non-empty string"
+        )
+    reader = reader.strip()
     reviewer = resolve_bridge_reviewer(config, "phase_a")
     bridge_turn_timeout = resolve_bridge_turn_timeout(config, "phase_a", default=300.0)
     stale_timeout = min(timeout, max(PHASE_A_BRIDGE_STALE_TIMEOUT, bridge_turn_timeout))
@@ -1899,6 +1910,7 @@ def run_bridge_design_review(
         "review",
         "--task-file", str(task_path),
         "--summary", f"Phase A plan review R{round_num}",
+        "--reader", reader,
         "--reviewer", reviewer,
         "-v", "--no-diff",
     ])
@@ -3486,6 +3498,7 @@ def run_phase_a(
                 job_id=bridge_job_id,
                 agent_review_context=agent_review_context,
                 bus_dir=bus_dir,
+                reader_agent=implementer_backend,
             )
             log(f"Bridge exit code: {bridge_result['exit_code']}")
 

@@ -98,6 +98,8 @@ AUTHORIZED_DECISIONS = frozenset(
     {"GO", "NO_GO", "REQUEST_CHANGES", "QUESTION", "STALE", "ERROR", "SYNTHETIC"}
 )
 SYNTHETIC_READER_AGENT = "claude-session"
+READER_EXECUTION_MODE_ACTION = "reader_execution_mode"
+SYNTHETIC_READER_EXECUTION_MODE = "synthetic"
 # Fail closed on direct bridge calls before the full adapter timeout elapses.
 # This keeps reviewer/reader turns from sitting silently for 20 minutes when no
 # outer executor watchdog is present.
@@ -942,9 +944,34 @@ def latest_envelope(conn: sqlite3.Connection, job_id: str, *, role: str | None =
     return json.loads(turn["envelope_json"])
 
 
-def _is_hybrid_review_job(job: sqlite3.Row) -> bool:
-    """Return whether a job's reader is the non-executable hybrid identity."""
+def _is_legacy_hybrid_review_job(job: sqlite3.Row) -> bool:
+    """Return whether an unmarked historical job uses the legacy hybrid identity."""
     return job["reader_agent"] == SYNTHETIC_READER_AGENT
+
+
+def _reader_execution_mode(
+    conn: sqlite3.Connection,
+    job: sqlite3.Row,
+) -> str | None:
+    """Return the durable reader execution mode recorded when the job was created."""
+    marker = conn.execute(
+        """
+        SELECT metadata FROM job_actions
+        WHERE job_id = ? AND action = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (job["job_id"], READER_EXECUTION_MODE_ACTION),
+    ).fetchone()
+    if marker is None:
+        return None
+    mode = marker["metadata"]
+    if mode != SYNTHETIC_READER_EXECUTION_MODE:
+        raise BridgeError(
+            f"Bridge job '{job['job_id']}' has unsupported reader execution mode "
+            f"{mode!r}."
+        )
+    return mode
 
 
 def _latest_completed_synthetic_reader_turn(
@@ -971,8 +998,14 @@ def _has_synthetic_reader_lifecycle(
     job: sqlite3.Row,
 ) -> bool:
     """Return whether generic provider-backed reader execution is forbidden."""
+    execution_mode = _reader_execution_mode(conn, job)
+    if execution_mode is not None:
+        return execution_mode == SYNTHETIC_READER_EXECUTION_MODE
+
+    # Compatibility only for historical jobs created before execution mode was
+    # recorded independently of provider identity.
     return (
-        _is_hybrid_review_job(job)
+        _is_legacy_hybrid_review_job(job)
         or _latest_completed_synthetic_reader_turn(conn, job) is not None
     )
 
@@ -1144,6 +1177,8 @@ def build_reviewer_prompt(
         "task_text": job["task_text"],
         "wave_class": job["wave_class"] or "(unspecified)",
         "repo_root": str(paths.repo_root),
+        "reader_agent": job["reader_agent"],
+        "reviewer_agent": job["reviewer_agent"],
         "review_mode_instructions": review_mode_instructions,
         "disposition_contract": disposition_contract,
         "json_schema_stub": JSON_SCHEMA_STUB,
@@ -1366,6 +1401,7 @@ def submit_job(
     max_rounds: int,
     acceptance_checks: list[str],
     job_id: str | None,
+    reader_execution_mode: str | None = None,
 ) -> str:
     # Fail-closed: reject unknown acceptance checks at submit time
     unknown = [cmd for cmd in acceptance_checks if cmd not in VALIDATION_WHITELIST]
@@ -1374,6 +1410,10 @@ def submit_job(
             f"Unknown acceptance check(s) rejected at submit time: {unknown}\n"
             f"Add to VALIDATION_WHITELIST in bridge_supervisor.py to allow execution.\n"
             f"Known commands: {sorted(VALIDATION_WHITELIST.keys())}"
+        )
+    if reader_execution_mode not in (None, SYNTHETIC_READER_EXECUTION_MODE):
+        raise BridgeError(
+            f"Unsupported reader execution mode: {reader_execution_mode!r}"
         )
     init_db(paths)
     with open_db(paths) as conn:
@@ -1402,6 +1442,20 @@ def submit_job(
                 max_rounds,
             ),
         )
+        if reader_execution_mode is not None:
+            conn.execute(
+                """
+                INSERT INTO job_actions(job_id, action, actor, timestamp, metadata)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    final_job_id,
+                    READER_EXECUTION_MODE_ACTION,
+                    "bridge_supervisor",
+                    now,
+                    reader_execution_mode,
+                ),
+            )
         conn.commit()
         render_job(paths, conn, final_job_id)
         return final_job_id
@@ -1959,13 +2013,14 @@ def review_job(
     task_text: str,
     reader_summary: str,
     wave_class: str | None = None,
+    reader_agent: str = SYNTHETIC_READER_AGENT,
     reviewer_agent: str = "codex",
     acceptance_checks: list[str] | None = None,
     verbose: bool = False,
     job_id: str | None = None,
     include_diff: bool = True,
 ) -> str:
-    """Hybrid review: record synthetic reader turn from interactive session, then run reviewer."""
+    """Hybrid review: record configured reader context synthetically, then review."""
     init_db(paths)
     if acceptance_checks is None:
         acceptance_checks = []
@@ -1976,11 +2031,12 @@ def review_job(
         scope_hint=None,
         wave_class=wave_class,
         allow_edits=True,
-        reader_agent=SYNTHETIC_READER_AGENT,
+        reader_agent=reader_agent,
         reviewer_agent=reviewer_agent,
         max_rounds=2,
         acceptance_checks=acceptance_checks,
         job_id=job_id,
+        reader_execution_mode=SYNTHETIC_READER_EXECUTION_MODE,
     )
 
     with _BridgeLock(paths.bus_dir / "bridge.lock"):
@@ -2018,12 +2074,13 @@ def review_job(
             state = compute_repo_state(paths.repo_root)
             now = utc_now()
             prompt_text = (
-                f"[Synthetic reader turn — implementation done in interactive Claude session]\n\n"
+                f"[Synthetic reader turn — configured reader: {job['reader_agent']}]\n\n"
                 f"Task: {task_text}\n\nSummary: {reader_summary}"
             )
             prompt_path = write_prompt(paths, final_job_id, turn_id, prompt_text)
             raw_output = (
-                f"[Interactive session implementation]\n\n{reader_summary}\n\n"
+                f"[Configured reader implementation context: {job['reader_agent']}]\n\n"
+                f"{reader_summary}\n\n"
                 f"BEGIN_AGENT_ENVELOPE\n{json.dumps(envelope, indent=2)}\nEND_AGENT_ENVELOPE"
             )
             raw_path = write_raw_output(paths, final_job_id, turn_id, raw_output)
@@ -2046,7 +2103,7 @@ def review_job(
             )
 
             if verbose:
-                _print_envelope("reader", SYNTHETIC_READER_AGENT, envelope)
+                _print_envelope("reader", job["reader_agent"], envelope)
 
             # Run validations
             update_job_status(conn, final_job_id, "READER_RUNNING", current_round=round_no)
@@ -2754,7 +2811,7 @@ def read_task_text(task: str | None, task_file: str | None) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Turn-based bridge supervisor for Claude/Codex workflows")
+    parser = argparse.ArgumentParser(description="Turn-based bridge supervisor for configured agent workflows")
     parser.add_argument("--repo-root", default=os.getcwd(), help="Repo root (default: cwd)")
     parser.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2792,6 +2849,7 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--summary", help="Reader summary of implementation done in interactive session")
     review.add_argument("--summary-file", help="File containing reader summary")
     review.add_argument("--wave-class")
+    review.add_argument("--reader", default=SYNTHETIC_READER_AGENT)
     review.add_argument("--reviewer", default="codex")
     review.add_argument("--check", action="append", default=[])
     review.add_argument("--job-id")
@@ -2865,6 +2923,7 @@ def main(argv: list[str] | None = None) -> int:
                 task_text=task_text,
                 reader_summary=summary_text,
                 wave_class=args.wave_class,
+                reader_agent=args.reader,
                 reviewer_agent=args.reviewer,
                 acceptance_checks=args.check,
                 verbose=args.verbose,

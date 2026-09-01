@@ -3898,6 +3898,7 @@ def run_bridge_review(
     task_summary: str,
     *,
     job_id: str | None = None,
+    reader_agent: str | None = None,
     verbose: bool = False,
     timeout: int = 1200,
     on_started: Callable[[], None] | None = None,
@@ -3910,6 +3911,19 @@ def run_bridge_review(
     The decision is parsed from stdout (bridge_supervisor prints it).
     """
     config = load_executor_config(repo_root)
+    reader = (
+        reader_agent
+        if reader_agent is not None
+        else config.get("backends", {}).get(
+            "phase_b_executor",
+            DEFAULT_EXECUTOR_CONFIG["backends"]["phase_b_executor"],
+        )
+    )
+    if not isinstance(reader, str) or not reader.strip():
+        raise PhaseBExecutorError(
+            f"Invalid bridge reader {reader!r} for phase_b; expected non-empty string"
+        )
+    reader = reader.strip()
     reviewer = _resolve_bridge_reviewer(config, "phase_b")
     bridge_turn_timeout = _resolve_bridge_turn_timeout(config, "phase_b", default=300.0)
 
@@ -3928,6 +3942,7 @@ def run_bridge_review(
         "review",
         "--task-file", str(task_path),
         "--summary", "Phase B implementation review",
+        "--reader", reader,
         "--reviewer", reviewer,
     ])
     if job_id:
@@ -7841,6 +7856,7 @@ def run_phase_b(
                     + f" private-attr remediation review R{next_round} for {plan_path}"
                 ),
                 job_id=bridge_job_id,
+                reader_agent=backend,
                 verbose=verbose,
                 timeout=timeout,
                 on_started=lambda: _emit_phase_b_event(
@@ -8580,6 +8596,7 @@ def run_phase_b(
                 repo_root,
                 task_summary,
                 job_id=bridge_job_id,
+                reader_agent=backend,
                 verbose=verbose,
                 timeout=timeout,
                 on_started=lambda: _emit_phase_b_event(
@@ -9653,6 +9670,7 @@ def run_phase_b(
                     repo_root,
                     f"Phase B re-entry R{reentry_round} after NEEDS_PHASE_B for {plan_path}",
                     job_id=bridge_job_id,
+                    reader_agent=backend,
                     verbose=verbose,
                     timeout=timeout,
                     on_started=lambda: _emit_phase_b_event(

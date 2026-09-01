@@ -2274,6 +2274,10 @@ def test_reviewer_prompt_template_has_one_required_disposition_substitution() ->
     finding_schema = json.loads(bridge.JSON_SCHEMA_STUB)["findings"][0]
 
     assert template.count("$disposition_contract") == 1
+    assert template.count("$reader_agent") == 1
+    assert template.count("$reviewer_agent") == 1
+    assert "Candidate evidence authority is repo-tracked" in template
+    assert "Provider-local memory is not candidate evidence authority" in template
     assert "BLOCKING (must fix before merge):" not in template
     assert finding_schema["disposition"] == "blocking|non_blocking"
 
@@ -2308,6 +2312,9 @@ def test_reviewer_prompt_code_review_renders_candidate_criteria_and_required_sch
         f"- {criterion}" for criterion in acceptance_checks
     )
     assert '"disposition": "blocking|non_blocking"' in prompt
+    assert "- Reader/implementer: `claude`" in prompt
+    assert "- Reviewer: `codex`" in prompt
+    assert "Candidate evidence authority is repo-tracked" in prompt
     assert "- CHANGED_FILES_ACTUAL: README.md\n" in prompt
     assert "- STAGED_FILES: README.md\n" in prompt
     assert "- UNSTAGED_FILES: (out of scope — only staged files are under review)\n" in prompt
@@ -3223,6 +3230,7 @@ def test_review_job_synthetic_reader_then_reviewer(tmp_path: Path) -> None:
         task_text="test hybrid review",
         reader_summary="Implemented feature X. Changed foo.py and bar.py.",
         wave_class="MAINTENANCE",
+        reader_agent="codex",
         reviewer_agent="codex",
         acceptance_checks=[],
         verbose=True,
@@ -3236,7 +3244,18 @@ def test_review_job_synthetic_reader_then_reviewer(tmp_path: Path) -> None:
         job = jobs[0]
         assert job["status"] == "DONE"
         assert job["terminal_decision"] == "GO"
-        assert job["reader_agent"] == "claude-session"
+        assert job["reader_agent"] == "codex"
+        assert job["reviewer_agent"] == "codex"
+
+        execution_modes = conn.execute(
+            """
+            SELECT action, metadata FROM job_actions
+            WHERE job_id = ? AND action = ?
+            """,
+            (job["job_id"], bridge.READER_EXECUTION_MODE_ACTION),
+        ).fetchall()
+        assert len(execution_modes) == 1
+        assert execution_modes[0]["metadata"] == bridge.SYNTHETIC_READER_EXECUTION_MODE
 
         turns = conn.execute(
             "SELECT * FROM turns WHERE job_id = ? ORDER BY started_at", (job["job_id"],)
@@ -3275,6 +3294,7 @@ def test_hybrid_request_changes_is_terminal_and_recovers_without_reader_dispatch
         paths,
         task_text="hybrid request changes test",
         reader_summary="interactive implementation needs another correction pass",
+        reader_agent="codex",
         reviewer_agent="codex",
         acceptance_checks=[],
         job_id=job_id,
@@ -3292,6 +3312,17 @@ def test_hybrid_request_changes_is_terminal_and_recovers_without_reader_dispatch
         ).fetchone()["count"]
         assert job["status"] == "DONE"
         assert job["terminal_decision"] == "REQUEST_CHANGES"
+        assert conn.execute(
+            """
+            SELECT count(*) FROM job_actions
+            WHERE job_id = ? AND action = ? AND metadata = ?
+            """,
+            (
+                job_id,
+                bridge.READER_EXECUTION_MODE_ACTION,
+                bridge.SYNTHETIC_READER_EXECUTION_MODE,
+            ),
+        ).fetchone()[0] == 1
 
         # Reproduce the formerly persisted broken state so recovery proves it
         # cannot reinterpret READY_READER as permission to invoke claude-session.
@@ -3328,14 +3359,70 @@ def test_hybrid_request_changes_is_terminal_and_recovers_without_reader_dispatch
     assert recovered_turn_count == turn_count
 
 
-def test_unmaterialized_hybrid_reader_fails_closed_before_adapter_lookup(
+@pytest.mark.parametrize("interrupted_status", ["READY_READER", "READER_RUNNING"])
+def test_unmaterialized_configured_hybrid_reader_fails_closed_before_adapter_lookup(
+    tmp_path: Path,
+    interrupted_status: str,
+) -> None:
+    """A durable synthetic mode survives interruption before reader materialization."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = f"unmaterialized-configured-hybrid-{interrupted_status.lower()}-job"
+
+    with patch.object(bridge, "compute_repo_state", side_effect=RuntimeError("interrupted")):
+        with pytest.raises(RuntimeError, match="interrupted"):
+            bridge.review_job(
+                paths,
+                task_text="unmaterialized configured hybrid reader test",
+                reader_summary="configured reader context not yet materialized",
+                reader_agent="codex",
+                reviewer_agent="codex",
+                acceptance_checks=[],
+                job_id=job_id,
+            )
+
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        job = conn.execute(
+            "SELECT * FROM jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        assert job["reader_agent"] == "codex"
+        assert conn.execute(
+            "SELECT count(*) FROM turns WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            """
+            SELECT count(*) FROM job_actions
+            WHERE job_id = ? AND action = ? AND metadata = ?
+            """,
+            (
+                job_id,
+                bridge.READER_EXECUTION_MODE_ACTION,
+                bridge.SYNTHETIC_READER_EXECUTION_MODE,
+            ),
+        ).fetchone()[0] == 1
+        if interrupted_status == "READER_RUNNING":
+            conn.execute(
+                "UPDATE jobs SET status = ?, current_round = 1 WHERE job_id = ?",
+                (interrupted_status, job_id),
+            )
+            conn.commit()
+
+    with patch.object(bridge, "get_adapter") as get_adapter:
+        with pytest.raises(bridge.BridgeError, match="cannot dispatch synthetic reader"):
+            bridge.run_job(paths, job_id)
+    get_adapter.assert_not_called()
+
+
+def test_legacy_unmarked_claude_session_reader_fails_closed_before_adapter_lookup(
     tmp_path: Path,
 ) -> None:
-    """A synthetic identity without a durable turn is never provider-executable."""
+    """Unmarked historical claude-session jobs retain the identity fallback."""
     paths, _ = _setup_bridge_repo(tmp_path)
     job_id = bridge.submit_job(
         paths,
-        task_text="unmaterialized hybrid reader test",
+        task_text="legacy unmarked hybrid reader test",
         scope_hint=None,
         wave_class="MAINTENANCE",
         allow_edits=True,
@@ -3343,13 +3430,43 @@ def test_unmaterialized_hybrid_reader_fails_closed_before_adapter_lookup(
         reviewer_agent="codex",
         max_rounds=2,
         acceptance_checks=[],
-        job_id="unmaterialized-hybrid-reader-job",
+        job_id="legacy-unmarked-hybrid-reader-job",
     )
+
+    with sqlite3.connect(paths.db_path) as conn:
+        assert conn.execute(
+            "SELECT count(*) FROM job_actions WHERE job_id = ? AND action = ?",
+            (job_id, bridge.READER_EXECUTION_MODE_ACTION),
+        ).fetchone()[0] == 0
 
     with patch.object(bridge, "get_adapter") as get_adapter:
         with pytest.raises(bridge.BridgeError, match="cannot dispatch synthetic reader"):
             bridge.run_job(paths, job_id)
     get_adapter.assert_not_called()
+
+
+def test_hybrid_review_accepts_alternate_configured_reader_identity(
+    tmp_path: Path,
+) -> None:
+    """Synthetic execution mode is independent of the configured reader identity."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = "alternate-configured-reader-job"
+
+    with patch.object(bridge, "execute_agent_turn", wraps=bridge.execute_agent_turn) as execute_turn:
+        assert bridge.review_job(
+            paths,
+            task_text="alternate configured reader test",
+            reader_summary="alternate implementer completed the candidate",
+            reader_agent="alternate-implementer",
+            reviewer_agent="codex",
+            acceptance_checks=[],
+            job_id=job_id,
+        ) == "GO"
+
+    assert [call.kwargs["agent_role"] for call in execute_turn.call_args_list] == ["reviewer"]
+    rendered = (paths.rendered_dir / f"{job_id}.md").read_text(encoding="utf-8")
+    assert "- Reader: alternate-implementer" in rendered
+    assert "- Reviewer: codex" in rendered
 
 
 def test_interrupted_hybrid_completed_reader_resumes_validation_and_reviewer_only(
@@ -3362,6 +3479,7 @@ def test_interrupted_hybrid_completed_reader_resumes_validation_and_reviewer_onl
         paths,
         task_text="interrupted hybrid reader test",
         reader_summary="synthetic reader work completed before interruption",
+        reader_agent="codex",
         reviewer_agent="codex",
         acceptance_checks=[],
         job_id=job_id,

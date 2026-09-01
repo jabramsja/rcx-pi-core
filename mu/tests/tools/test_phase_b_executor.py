@@ -5448,7 +5448,7 @@ class TestPhaseBFailClosed:
              patch.object(pb_mod, "run_bridge_review", return_value={
                  "exit_code": 0, "stdout": "GO\n", "stderr": "",
                  "decision": "GO", "job_id": "j1",
-             }), \
+             }) as mock_bridge, \
              patch.object(pb_mod, "_stage_files", return_value=True), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0,
@@ -5461,6 +5461,7 @@ class TestPhaseBFailClosed:
         assert result["agent_exit_code"] == 2
         assert result["agent_review_warning_only"] is True
         assert result["agent_review_report_path"] == ".scratch/sdk_report.md"
+        assert mock_bridge.call_args.kwargs["reader_agent"] == "codex"
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -6209,8 +6210,8 @@ class TestBridgeRenderAssociation:
         assert call_args[2:5] == ["--bus-dir", ".agent_bus-test", "review"]
         assert result["exit_code"] == 0
 
-    def test_run_bridge_review_uses_configured_reviewer(self, tmp_path, monkeypatch):
-        """Phase B bridge review must honor executor-configured reviewer backend."""
+    def test_run_bridge_review_uses_configured_reader_and_reviewer(self, tmp_path, monkeypatch):
+        """Phase B bridge review must honor both configured role identities."""
         # Unset env override so the test exercises config-driven reviewer selection,
         # not the reviewer override environment vars.
         monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
@@ -6218,7 +6219,9 @@ class TestBridgeRenderAssociation:
         config_dir = tmp_path / "mu" / "tools" / "executors"
         config_dir.mkdir(parents=True)
         (config_dir / "executor_config.json").write_text(
-            json.dumps({"role_agents": {"reviewer": "claude"}}),
+            json.dumps(
+                {"role_agents": {"implementer": "codex", "reviewer": "claude"}}
+            ),
             encoding="utf-8",
         )
         with patch.object(pb_mod, "_run_bridge_review_subprocess") as mock_run:
@@ -6233,9 +6236,24 @@ class TestBridgeRenderAssociation:
             )
 
         call_args = mock_run.call_args[0][1]
+        assert "--reader" in call_args
+        assert call_args[call_args.index("--reader") + 1] == "codex"
         assert "--reviewer" in call_args
         idx = call_args.index("--reviewer")
         assert call_args[idx + 1] == "claude"
+
+    def test_reviewer_prompt_declares_repo_tracked_role_and_evidence_authority(self):
+        template = (
+            _EXECUTORS_DIR.parent
+            / "agents"
+            / "templates"
+            / "bridge_reviewer_prompt.txt"
+        ).read_text(encoding="utf-8")
+
+        assert "$reader_agent" in template
+        assert "$reviewer_agent" in template
+        assert "Candidate evidence authority is repo-tracked" in template
+        assert "Provider-local memory is not candidate evidence authority" in template
 
     def test_run_bridge_review_sets_inner_turn_timeout_to_outer_bridge_budget(self, tmp_path):
         """Inner bridge turn timeout must inherit the outer subprocess budget."""
