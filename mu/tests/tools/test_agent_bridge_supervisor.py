@@ -2753,6 +2753,40 @@ def _setup_bridge_repo(tmp_path: Path) -> tuple:
     return paths, fake_agent
 
 
+def _configure_reviewer_decision(paths, decision: str) -> None:
+    """Configure the fake reviewer to return one fixed authorized decision."""
+    reviewer = paths.repo_root / "fixed_decision_reviewer.py"
+    reviewer.write_text(
+        """\
+import json
+import re
+import sys
+
+decision = sys.argv[1]
+prompt = sys.stdin.read()
+job = re.search(r"JOB_ID: (.+)", prompt).group(1).strip()
+round_no = re.search(r"ROUND: (.+)", prompt).group(1).strip()
+print("BEGIN_AGENT_ENVELOPE")
+print(json.dumps({
+    "job_id": job,
+    "turn_id": f"r{round_no}-reviewer",
+    "agent_role": "reviewer",
+    "decision": decision,
+    "summary": f"reviewer returned {decision}",
+    "touched_files_claimed": [],
+    "findings": [],
+    "validations_claimed": [],
+    "request_for_next_agent": "return to the interactive implementer",
+}, indent=2))
+print("END_AGENT_ENVELOPE")
+""",
+        encoding="utf-8",
+    )
+    config = json.loads(paths.config_path.read_text(encoding="utf-8"))
+    config["agents"]["codex"]["cmd"] = [sys.executable, str(reviewer), decision]
+    paths.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
 def test_execute_agent_turn_recovers_from_malformed_frame_to_shared_valid_frame(
     tmp_path: Path,
 ) -> None:
@@ -3034,6 +3068,38 @@ def test_crash_recovery_reviewer_completed_no_rerun(tmp_path: Path) -> None:
     assert turns_after == turns_before, "recovery should not add new turns"
 
 
+def test_interrupted_normal_reader_still_dispatches_executable_reader(tmp_path: Path) -> None:
+    """A normal READER_RUNNING job without a completed turn restarts its reader."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = bridge.submit_job(
+        paths,
+        task_text="interrupted normal reader test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="interrupted-normal-reader-job",
+    )
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.execute(
+            "UPDATE jobs SET status = 'READER_RUNNING', current_round = 1 WHERE job_id = ?",
+            (job_id,),
+        )
+        conn.commit()
+
+    with patch.object(bridge, "execute_agent_turn", wraps=bridge.execute_agent_turn) as execute_turn:
+        assert bridge.run_job(paths, job_id) == "GO"
+
+    observed_calls = [
+        (call.kwargs["agent_role"], call.kwargs["adapter_name"])
+        for call in execute_turn.call_args_list
+    ]
+    assert observed_calls == [("reader", "claude"), ("reviewer", "codex")]
+
+
 def test_crash_recovery_reader_completed_reruns_validations(tmp_path: Path) -> None:
     """If reader completed but status stuck at READER_RUNNING, recovery reruns validations before advancing to reviewer."""
     paths, _ = _setup_bridge_repo(tmp_path)
@@ -3072,9 +3138,13 @@ def test_crash_recovery_reader_completed_reruns_validations(tmp_path: Path) -> N
         ).fetchone()["cnt"]
         assert val_count == 0, "setup: validations should be cleared"
 
-    # Recovery should rerun validations then run reviewer
-    decision = bridge.run_job(paths, job_id)
+    # Recovery should rerun validations then run only the reviewer. A normal
+    # executable reader remains recoverable without being re-dispatched after
+    # its completed turn was recorded.
+    with patch.object(bridge, "execute_agent_turn", wraps=bridge.execute_agent_turn) as execute_turn:
+        decision = bridge.run_job(paths, job_id)
     assert decision == "GO"
+    assert [call.kwargs["agent_role"] for call in execute_turn.call_args_list] == ["reviewer"]
 
     with sqlite3.connect(paths.db_path) as conn:
         conn.row_factory = sqlite3.Row
@@ -3088,6 +3158,7 @@ def test_crash_recovery_reader_completed_reruns_validations(tmp_path: Path) -> N
 
     assert job["status"] == "DONE"
     assert job["terminal_decision"] == "GO"
+    assert job["reader_agent"] == "claude"
     assert len(validations) > 0, "validations should have been rerun during recovery"
     assert any(t["agent_role"] == "reviewer" for t in turns), "reviewer should have run after recovery"
 
@@ -3190,6 +3261,214 @@ def test_review_job_synthetic_reader_then_reviewer(tmp_path: Path) -> None:
             "SELECT count(*) as cnt FROM validations WHERE job_id = ?", (job["job_id"],)
         ).fetchone()["cnt"]
         assert val_count > 0
+
+
+def test_hybrid_request_changes_is_terminal_and_recovers_without_reader_dispatch(
+    tmp_path: Path,
+) -> None:
+    """Hybrid REQUEST_CHANGES must never grant executable reader authority."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+    _configure_reviewer_decision(paths, "REQUEST_CHANGES")
+    job_id = "hybrid-request-changes-job"
+
+    assert bridge.review_job(
+        paths,
+        task_text="hybrid request changes test",
+        reader_summary="interactive implementation needs another correction pass",
+        reviewer_agent="codex",
+        acceptance_checks=[],
+        job_id=job_id,
+    ) == "REQUEST_CHANGES"
+
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        job = conn.execute(
+            "SELECT * FROM jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        turn_count = conn.execute(
+            "SELECT count(*) AS count FROM turns WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()["count"]
+        assert job["status"] == "DONE"
+        assert job["terminal_decision"] == "REQUEST_CHANGES"
+
+        # Reproduce the formerly persisted broken state so recovery proves it
+        # cannot reinterpret READY_READER as permission to invoke claude-session.
+        conn.execute(
+            """
+            UPDATE jobs
+            SET reader_agent = 'legacy-synthetic-session',
+                status = 'READY_READER',
+                current_round = 1,
+                terminal_decision = NULL
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        )
+        conn.commit()
+
+    with patch.object(bridge, "execute_agent_turn", wraps=bridge.execute_agent_turn) as execute_turn:
+        assert bridge.run_job(paths, job_id) == "REQUEST_CHANGES"
+    execute_turn.assert_not_called()
+
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        job = conn.execute(
+            "SELECT * FROM jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        recovered_turn_count = conn.execute(
+            "SELECT count(*) AS count FROM turns WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()["count"]
+
+    assert job["status"] == "DONE"
+    assert job["terminal_decision"] == "REQUEST_CHANGES"
+    assert recovered_turn_count == turn_count
+
+
+def test_unmaterialized_hybrid_reader_fails_closed_before_adapter_lookup(
+    tmp_path: Path,
+) -> None:
+    """A synthetic identity without a durable turn is never provider-executable."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = bridge.submit_job(
+        paths,
+        task_text="unmaterialized hybrid reader test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=True,
+        reader_agent=bridge.SYNTHETIC_READER_AGENT,
+        reviewer_agent="codex",
+        max_rounds=2,
+        acceptance_checks=[],
+        job_id="unmaterialized-hybrid-reader-job",
+    )
+
+    with patch.object(bridge, "get_adapter") as get_adapter:
+        with pytest.raises(bridge.BridgeError, match="cannot dispatch synthetic reader"):
+            bridge.run_job(paths, job_id)
+    get_adapter.assert_not_called()
+
+
+def test_interrupted_hybrid_completed_reader_resumes_validation_and_reviewer_only(
+    tmp_path: Path,
+) -> None:
+    """READY_READER with a completed synthetic turn resumes without an adapter reader."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = "interrupted-hybrid-reader-job"
+    assert bridge.review_job(
+        paths,
+        task_text="interrupted hybrid reader test",
+        reader_summary="synthetic reader work completed before interruption",
+        reviewer_agent="codex",
+        acceptance_checks=[],
+        job_id=job_id,
+    ) == "GO"
+
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        synthetic_reader = conn.execute(
+            """
+            SELECT * FROM turns
+            WHERE job_id = ? AND agent_role = 'reader' AND decision = 'SYNTHETIC'
+            """,
+            (job_id,),
+        ).fetchone()
+        assert synthetic_reader is not None
+        conn.execute("DELETE FROM validations WHERE job_id = ?", (job_id,))
+        conn.execute(
+            "DELETE FROM turns WHERE job_id = ? AND agent_role = 'reviewer'",
+            (job_id,),
+        )
+        conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'READY_READER', current_round = 0, terminal_decision = NULL
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        )
+        conn.commit()
+
+    with patch.object(bridge, "execute_agent_turn", wraps=bridge.execute_agent_turn) as execute_turn:
+        assert bridge.run_job(paths, job_id) == "GO"
+
+    assert [call.kwargs["agent_role"] for call in execute_turn.call_args_list] == ["reviewer"]
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        job = conn.execute(
+            "SELECT * FROM jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        roles = conn.execute(
+            "SELECT agent_role FROM turns WHERE job_id = ? ORDER BY started_at, rowid",
+            (job_id,),
+        ).fetchall()
+        validation_count = conn.execute(
+            "SELECT count(*) AS count FROM validations WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()["count"]
+
+    assert job["status"] == "DONE"
+    assert job["terminal_decision"] == "GO"
+    assert [row["agent_role"] for row in roles] == ["reader", "reviewer"]
+    assert validation_count > 0
+
+
+@pytest.mark.parametrize(
+    ("reviewer_decision", "expected_status"),
+    [
+        ("GO", "DONE"),
+        ("NO_GO", "DONE"),
+        ("QUESTION", "AWAITING_FOUNDER"),
+        ("ERROR", "DONE"),
+    ],
+)
+def test_hybrid_terminal_reviewer_decisions_are_durable_and_idempotent(
+    tmp_path: Path,
+    reviewer_decision: str,
+    expected_status: str,
+) -> None:
+    paths, _ = _setup_bridge_repo(tmp_path)
+    _configure_reviewer_decision(paths, reviewer_decision)
+    job_id = f"hybrid-terminal-{reviewer_decision.lower()}-job"
+
+    assert bridge.review_job(
+        paths,
+        task_text=f"hybrid terminal {reviewer_decision} test",
+        reader_summary="interactive implementation complete",
+        reviewer_agent="codex",
+        acceptance_checks=[],
+        job_id=job_id,
+    ) == reviewer_decision
+
+    with sqlite3.connect(paths.db_path) as conn:
+        turn_count = conn.execute(
+            "SELECT count(*) FROM turns WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()[0]
+
+    with patch.object(bridge, "execute_agent_turn", wraps=bridge.execute_agent_turn) as execute_turn:
+        assert bridge.run_job(paths, job_id) == reviewer_decision
+        assert bridge.run_job(paths, job_id) == reviewer_decision
+    execute_turn.assert_not_called()
+
+    with sqlite3.connect(paths.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        job = conn.execute(
+            "SELECT * FROM jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        final_turn_count = conn.execute(
+            "SELECT count(*) AS count FROM turns WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()["count"]
+
+    assert job["status"] == expected_status
+    assert job["terminal_decision"] == reviewer_decision
+    assert final_turn_count == turn_count
 
 
 def test_review_job_rendered_transcript_includes_findings(tmp_path: Path) -> None:

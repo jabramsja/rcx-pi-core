@@ -97,6 +97,7 @@ _STDERR_SENTINEL = "\n[stderr]\n"
 AUTHORIZED_DECISIONS = frozenset(
     {"GO", "NO_GO", "REQUEST_CHANGES", "QUESTION", "STALE", "ERROR", "SYNTHETIC"}
 )
+SYNTHETIC_READER_AGENT = "claude-session"
 # Fail closed on direct bridge calls before the full adapter timeout elapses.
 # This keeps reviewer/reader turns from sitting silently for 20 minutes when no
 # outer executor watchdog is present.
@@ -941,6 +942,41 @@ def latest_envelope(conn: sqlite3.Connection, job_id: str, *, role: str | None =
     return json.loads(turn["envelope_json"])
 
 
+def _is_hybrid_review_job(job: sqlite3.Row) -> bool:
+    """Return whether a job's reader is the non-executable hybrid identity."""
+    return job["reader_agent"] == SYNTHETIC_READER_AGENT
+
+
+def _latest_completed_synthetic_reader_turn(
+    conn: sqlite3.Connection,
+    job: sqlite3.Row,
+) -> sqlite3.Row | None:
+    """Return the durable synthetic reader turn for a job, if any."""
+    return conn.execute(
+        """
+        SELECT * FROM turns
+        WHERE job_id = ?
+          AND agent_role = 'reader'
+          AND status = 'completed'
+          AND decision = 'SYNTHETIC'
+        ORDER BY round_no DESC, started_at DESC, rowid DESC
+        LIMIT 1
+        """,
+        (job["job_id"],),
+    ).fetchone()
+
+
+def _has_synthetic_reader_lifecycle(
+    conn: sqlite3.Connection,
+    job: sqlite3.Row,
+) -> bool:
+    """Return whether generic provider-backed reader execution is forbidden."""
+    return (
+        _is_hybrid_review_job(job)
+        or _latest_completed_synthetic_reader_turn(conn, job) is not None
+    )
+
+
 def write_prompt(paths: BridgePaths, job_id: str, turn_id: str, content: str) -> Path:
     prompt_dir = paths.prompts_dir / job_id
     prompt_dir.mkdir(parents=True, exist_ok=True)
@@ -1530,6 +1566,37 @@ def run_job(paths: BridgePaths, job_id: str, *, verbose: bool = False, pause_aft
         return _run_job_locked(paths, job_id, verbose=verbose, pause_after_reader=pause_after_reader)
 
 
+def _apply_request_changes_transition(
+    conn: sqlite3.Connection,
+    job_id: str,
+    job: sqlite3.Row,
+    round_no: int,
+) -> str | None:
+    """Persist REQUEST_CHANGES without making a synthetic reader executable."""
+    if round_no >= job["max_rounds"]:
+        update_job_status(
+            conn,
+            job_id,
+            "DONE",
+            current_round=round_no,
+            terminal_decision="NO_GO",
+        )
+        return "NO_GO"
+    if _has_synthetic_reader_lifecycle(conn, job):
+        # Hybrid corrections happen in the interactive session and return via a
+        # new review_job call. There is no provider adapter for this reader.
+        update_job_status(
+            conn,
+            job_id,
+            "DONE",
+            current_round=round_no,
+            terminal_decision="REQUEST_CHANGES",
+        )
+        return "REQUEST_CHANGES"
+    update_job_status(conn, job_id, "READY_READER", current_round=round_no)
+    return None
+
+
 def _run_reviewer_phase(
     conn: sqlite3.Connection,
     paths: BridgePaths,
@@ -1613,13 +1680,14 @@ def _run_reviewer_phase(
         render_job(paths, conn, job_id)
         return "NO_GO"
     if decision == "REQUEST_CHANGES":
-        if round_no >= job["max_rounds"]:
-            update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision="NO_GO")
-            render_job(paths, conn, job_id)
-            return "NO_GO"
-        update_job_status(conn, job_id, "READY_READER", current_round=round_no)
+        result = _apply_request_changes_transition(
+            conn,
+            job_id,
+            job,
+            round_no,
+        )
         render_job(paths, conn, job_id)
-        return None  # continue to next round
+        return result
     update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision=decision or "ERROR")
     render_job(paths, conn, job_id)
     return decision or "ERROR"
@@ -1634,6 +1702,36 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
             return job["terminal_decision"]
 
         acceptance_checks = json.loads(job["acceptance_checks_json"])
+
+        # A hard interruption can leave review_job at READY_READER after its
+        # synthetic turn was durably recorded but before it advanced the job.
+        # Legacy hybrid REQUEST_CHANGES jobs can also be stranded there. Route
+        # both cases into the existing non-provider recovery paths.
+        if job["status"] == "READY_READER":
+            synthetic_reader_turn = _latest_completed_synthetic_reader_turn(conn, job)
+            if synthetic_reader_turn is not None:
+                synthetic_round = synthetic_reader_turn["round_no"]
+                completed_reviewer = conn.execute(
+                    """
+                    SELECT 1 FROM turns
+                    WHERE job_id = ?
+                      AND round_no = ?
+                      AND agent_role = 'reviewer'
+                      AND status = 'completed'
+                    LIMIT 1
+                    """,
+                    (job_id, synthetic_round),
+                ).fetchone()
+                recovery_status = (
+                    "REVIEWER_RUNNING" if completed_reviewer is not None else "READER_RUNNING"
+                )
+                update_job_status(
+                    conn,
+                    job_id,
+                    recovery_status,
+                    current_round=synthetic_round,
+                )
+                job = read_job(conn, job_id)
 
         # Recovery: if a previous run was interrupted mid-round, determine
         # the correct resume point based on what turns actually completed.
@@ -1682,10 +1780,12 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
                     elif decision == "QUESTION":
                         update_job_status(conn, job_id, "AWAITING_FOUNDER", current_round=job["current_round"], terminal_decision="QUESTION")
                     elif decision == "REQUEST_CHANGES":
-                        if job["current_round"] >= job["max_rounds"]:
-                            update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision="NO_GO")
-                        else:
-                            update_job_status(conn, job_id, "READY_READER", current_round=job["current_round"])
+                        _apply_request_changes_transition(
+                            conn,
+                            job_id,
+                            job,
+                            job["current_round"],
+                        )
                     else:
                         update_job_status(conn, job_id, "DONE", current_round=job["current_round"], terminal_decision=decision or "ERROR")
                     render_job(paths, conn, job_id)
@@ -1755,6 +1855,14 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
                 _log(verbose, f"Terminal decision: {result}")
                 return result
             # REQUEST_CHANGES — fall through to normal loop for remaining rounds
+
+        if _has_synthetic_reader_lifecycle(conn, job):
+            raise BridgeError(
+                f"Hybrid review job '{job_id}' cannot dispatch synthetic reader "
+                f"identity '{job['reader_agent']}' through a provider adapter. "
+                "Resume a completed synthetic turn through validation/reviewer "
+                "recovery, or start a new hybrid review."
+            )
 
         for round_no in range(job["current_round"] + 1, job["max_rounds"] + 1):
             try:
@@ -1868,7 +1976,7 @@ def review_job(
         scope_hint=None,
         wave_class=wave_class,
         allow_edits=True,
-        reader_agent="claude-session",
+        reader_agent=SYNTHETIC_READER_AGENT,
         reviewer_agent=reviewer_agent,
         max_rounds=2,
         acceptance_checks=acceptance_checks,
@@ -1938,7 +2046,7 @@ def review_job(
             )
 
             if verbose:
-                _print_envelope("reader", "claude-session", envelope)
+                _print_envelope("reader", SYNTHETIC_READER_AGENT, envelope)
 
             # Run validations
             update_job_status(conn, final_job_id, "READER_RUNNING", current_round=round_no)
