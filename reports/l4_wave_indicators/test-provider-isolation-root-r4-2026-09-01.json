@@ -1,0 +1,24 @@
+{
+  "wave_id": "test-provider-isolation-root-r4-2026-09-01",
+  "repeat_run_speedup_ratio": 1.662864,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.279982,
+  "repeat_run_raw_seconds": [
+    0.465572,
+    0.279982
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.465572
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.745554
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-01T14:46:25Z",
+  "collector_version": "2.2.0"
+}
