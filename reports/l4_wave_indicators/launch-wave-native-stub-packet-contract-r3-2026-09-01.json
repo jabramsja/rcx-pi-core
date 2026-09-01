@@ -1,0 +1,24 @@
+{
+  "wave_id": "launch-wave-native-stub-packet-contract-r3-2026-09-01",
+  "repeat_run_speedup_ratio": 1.017279,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.247987,
+  "repeat_run_raw_seconds": [
+    0.252272,
+    0.247987
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.252272
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.500259
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-01T13:06:20Z",
+  "collector_version": "2.2.0"
+}

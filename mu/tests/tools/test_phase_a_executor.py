@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import os
 import subprocess
@@ -530,6 +532,1038 @@ def test_run_phase_a_readable_unchanged_plan_preserves_existing_failure(tmp_path
     assert bridge_mock.call_count == 1
     assert implementer_mock.call_count == 1
     lock_mock.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Native launch-wave aggregate packet contract.  The top-level marker is the
+# applicability boundary: marked launch_wave.py packets are immutable while
+# unmarked legacy/direct Phase A packets retain their existing behavior.
+
+_NATIVE_CONTRACT_PLAN_NAME = "native-stub-packet-contract-2026-08-31"
+_NATIVE_CONTRACT_PLAN_PATH = (
+    "reports/control_plane/"
+    "native-stub-packet-contract-2026-08-31_2026-08-31.md"
+)
+_NATIVE_CONTRACT_EVIDENCE_COMMAND = (
+    "python3 -m pytest mu/tests/tools/test_phase_a_executor.py"
+)
+
+
+def _native_aggregate_contract() -> dict:
+    return {
+        "identity": {
+            "wave_id": "native-stub-packet-contract-2026-08-31",
+            "task_id": "[NATIVE-STUB-PACKET-CONTRACT]",
+            "title": "Native Stub Packet Contract",
+            "date": "2026-08-31",
+            "tracked_packet": _NATIVE_CONTRACT_PLAN_PATH,
+        },
+        "purpose": "Preserve launch-authored packet intent.",
+        "scope_summary": "Strengthen the native launch-to-Phase-A boundary.",
+        "scope_items": [
+            "mu/tools/executors/launch_wave.py -- bind native packet metadata.",
+            "mu/tools/executors/phase_a_executor.py -- validate the immutable packet.",
+        ],
+        "work_items": [
+            "Validate exact native marker applicability.",
+            "Preserve builder-owned item order.",
+        ],
+        "constraints": [
+            "Leave unmarked legacy routes unchanged.",
+            "Do not infer applicability from ROUTE_PHASE_A.",
+        ],
+        "stop_conditions": [
+            "Stop when marked metadata is malformed.",
+            "Stop when canonical packet content drifts.",
+        ],
+        "acceptance_criteria": [
+            "Every builder-owned item remains exact.",
+            "Clarification is allowed only outside canonical sections.",
+        ],
+        "evidence_command": _NATIVE_CONTRACT_EVIDENCE_COMMAND,
+        "slow_functions": [],
+    }
+
+
+def _native_aggregate_digest(contract: dict) -> str:
+    canonical = json.dumps(
+        contract,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _native_aggregate_routing(contract: dict | None = None) -> dict:
+    contract = contract or _native_aggregate_contract()
+    identity = contract["identity"]
+    return {
+        "decision": "ROUTE_PHASE_A",
+        "task_id": identity["task_id"],
+        "wave_name": identity["wave_id"],
+        "tracked_packet": identity["tracked_packet"],
+        "next_candidates": [
+            {
+                "candidate": identity["wave_id"],
+                "bounded": True,
+                "tracked_packet": identity["tracked_packet"],
+            }
+        ],
+        "native_stub_packet_contract": {
+            "required": True,
+            "producer": "launch_wave.py",
+            "version": 1,
+            "digest": _native_aggregate_digest(contract),
+            "contract": contract,
+        },
+    }
+
+
+def _native_aggregate_packet_text(contract: dict | None = None) -> str:
+    contract = contract or _native_aggregate_contract()
+    identity = contract["identity"]
+    wave_id = identity["wave_id"]
+    scope_items = [
+        *contract["scope_items"],
+        (
+            "TASKS.md -- tracker-sync authority. The "
+            f"{identity['date']} tracker sync note for wave `{wave_id}` is the "
+            "single source of truth for this packet's L4 fields; the packet derives from it."
+        ),
+    ]
+
+    def bullets(items):
+        return "\n".join(f"- {item}" for item in items)
+
+    def numbered(items):
+        return "\n".join(f"{index}. {item}" for index, item in enumerate(items, 1))
+
+    digest = _native_aggregate_digest(contract)
+    validation_body = "\n".join(
+        phase_a_mod.native_stub_validation_lines(
+            evidence_command=contract["evidence_command"],
+            slow_functions=contract["slow_functions"],
+        )
+    )
+
+    return f"""# {identity['title']}
+
+Date: {identity['date']}
+Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+Task: {identity['task_id']}
+Wave ID: {wave_id}
+Phase-A-Lock: UNLOCKED
+{phase_a_mod.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE}
+{phase_a_mod.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX}{digest}
+Purpose: {contract['purpose']}
+
+## Scope
+
+{contract['scope_summary']}
+
+Files and surfaces in scope:
+
+{bullets(scope_items)}
+
+## Work items
+
+{numbered(contract['work_items'])}
+
+## Constraints
+
+{bullets(contract['constraints'])}
+
+## Stop conditions
+
+{bullets(contract['stop_conditions'])}
+
+## Validation gates
+
+{validation_body}
+
+## Acceptance criteria
+
+{bullets(contract['acceptance_criteria'])}
+
+## Grounding / Authorization
+
+- Task: {identity['task_id']}; wave id `{wave_id}`.
+- Governing packet: this file, `{identity['tracked_packet']}`.
+- TASKS.md authority: the {identity['date']} tracker sync note for wave `{wave_id}` is canonical for this packet's L4 fields.
+
+FOUNDER_OVERRIDE:{wave_id}
+"""
+
+
+def _write_native_aggregate_packet(repo: Path, content: str | None = None) -> Path:
+    packet = repo / _NATIVE_CONTRACT_PLAN_PATH
+    packet.parent.mkdir(parents=True, exist_ok=True)
+    packet.write_text(content or _native_aggregate_packet_text(), encoding="utf-8")
+    return packet
+
+
+def test_aggregate_packet_contract_applies_to_exact_native_marker():
+    phase_a_mod.validate_native_stub_packet_contract(
+        _native_aggregate_routing(),
+        _NATIVE_CONTRACT_PLAN_PATH,
+        _native_aggregate_packet_text(),
+    )
+
+
+def test_native_stub_packet_contract_run_phase_a_rejects_wrong_tracked_packet_stem_before_side_effects(
+    tmp_path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_native_aggregate_packet(repo)
+    routing = _native_aggregate_routing()
+    wrong_plan_name = routing["native_stub_packet_contract"]["contract"][
+        "identity"
+    ]["wave_id"]
+    assert wrong_plan_name != Path(_NATIVE_CONTRACT_PLAN_PATH).stem
+
+    with patch.object(phase_a_mod, "create_plan_draft") as create_mock, \
+         patch.object(phase_a_mod, "emit_pipeline_agent_event") as event_mock:
+        result = phase_a_mod.run_phase_a(
+            repo,
+            wrong_plan_name,
+            routing_record_override=routing,
+        )
+
+    assert result["status"] == "error"
+    assert (
+        "plan_name does not match contract identity tracked_packet stem"
+        in result["error"]
+    )
+    assert not (repo / ".scratch").exists()
+    create_mock.assert_not_called()
+    event_mock.assert_not_called()
+
+
+def test_native_stub_packet_contract_run_phase_a_accepts_dated_tracked_packet_stem(
+    tmp_path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_native_aggregate_packet(repo)
+    routing = _native_aggregate_routing()
+
+    with patch.object(phase_a_mod, "load_routing_record", return_value=routing), \
+         patch.object(phase_a_mod, "emit_pipeline_agent_event", return_value={}), \
+         patch.object(phase_a_mod, "run_sdk_agents", return_value={"exit_code": 0}), \
+         patch.object(
+             phase_a_mod,
+             "run_bridge_design_review",
+             side_effect=_fake_bridge(repo, decision="GO"),
+         ), \
+         patch.object(
+             phase_a_mod,
+             "uuid",
+             SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="ddddeeeeffff0000")),
+         ):
+        result = phase_a_mod.run_phase_a(
+            repo,
+            Path(_NATIVE_CONTRACT_PLAN_PATH).stem,
+            max_bridge_rounds=1,
+        )
+
+    assert result["status"] == "converged"
+
+
+def test_aggregate_packet_contract_absent_marker_preserves_legacy_route():
+    # ROUTE_PHASE_A alone is deliberately insufficient to activate strict mode.
+    phase_a_mod.validate_native_stub_packet_contract(
+        {"decision": "ROUTE_PHASE_A"},
+        "reports/control_plane/legacy_direct_packet.md",
+        "# Legacy direct packet\n\n## Scope\n\nLegacy free-form scope.\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "not_mapping",
+        "missing_contract",
+        "extra_envelope_field",
+        "required_not_exact_bool",
+        "unknown_producer",
+        "unknown_version",
+        "malformed_contract",
+        "empty_contract_section",
+        "blank_contract_item",
+        "missing_evidence_command",
+        "blank_evidence_command",
+        "malformed_slow_functions",
+        "blank_slow_function",
+    ],
+)
+def test_aggregate_packet_contract_rejects_malformed_or_unknown_marker(case):
+    routing = _native_aggregate_routing()
+    envelope = routing["native_stub_packet_contract"]
+    if case == "not_mapping":
+        routing["native_stub_packet_contract"] = []
+    elif case == "missing_contract":
+        envelope.pop("contract")
+    elif case == "extra_envelope_field":
+        envelope["amendment"] = {"version": 2}
+    elif case == "required_not_exact_bool":
+        envelope["required"] = 1
+    elif case == "unknown_producer":
+        envelope["producer"] = "direct_phase_a.py"
+    elif case == "unknown_version":
+        envelope["version"] = 2
+    elif case == "malformed_contract":
+        envelope["contract"].pop("stop_conditions")
+        envelope["digest"] = _native_aggregate_digest(envelope["contract"])
+    elif case == "empty_contract_section":
+        envelope["contract"]["work_items"] = []
+        envelope["digest"] = _native_aggregate_digest(envelope["contract"])
+    elif case == "blank_contract_item":
+        envelope["contract"]["constraints"][0] = "   "
+        envelope["digest"] = _native_aggregate_digest(envelope["contract"])
+    elif case == "missing_evidence_command":
+        envelope["contract"].pop("evidence_command")
+        envelope["digest"] = _native_aggregate_digest(envelope["contract"])
+    elif case == "blank_evidence_command":
+        envelope["contract"]["evidence_command"] = "   "
+        envelope["digest"] = _native_aggregate_digest(envelope["contract"])
+    elif case == "malformed_slow_functions":
+        envelope["contract"]["slow_functions"] = "run_mu"
+        envelope["digest"] = _native_aggregate_digest(envelope["contract"])
+    elif case == "blank_slow_function":
+        envelope["contract"]["slow_functions"] = ["run_mu", "  "]
+        envelope["digest"] = _native_aggregate_digest(envelope["contract"])
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError):
+        phase_a_mod.validate_native_stub_packet_contract(
+            routing,
+            _NATIVE_CONTRACT_PLAN_PATH,
+            _native_aggregate_packet_text(),
+        )
+
+
+@pytest.mark.parametrize("case", ["digest", "wave_identity", "packet_identity"])
+def test_aggregate_packet_contract_rejects_digest_or_identity_tamper(case):
+    routing = _native_aggregate_routing()
+    envelope = routing["native_stub_packet_contract"]
+    if case == "digest":
+        envelope["contract"]["purpose"] = "Tampered purpose."
+    elif case == "wave_identity":
+        envelope["contract"]["identity"]["wave_id"] = "another-wave-2026-08-31"
+        envelope["digest"] = _native_aggregate_digest(envelope["contract"])
+    else:
+        envelope["contract"]["identity"]["tracked_packet"] = (
+            "reports/control_plane/another_packet.md"
+        )
+        envelope["digest"] = _native_aggregate_digest(envelope["contract"])
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError):
+        phase_a_mod.validate_native_stub_packet_contract(
+            routing,
+            _NATIVE_CONTRACT_PLAN_PATH,
+            _native_aggregate_packet_text(),
+        )
+
+
+@pytest.mark.parametrize("field_name", ["evidence_command", "slow_functions"])
+def test_aggregate_packet_contract_digest_binds_validation_payload(field_name):
+    routing = _native_aggregate_routing()
+    contract = routing["native_stub_packet_contract"]["contract"]
+    if field_name == "evidence_command":
+        contract[field_name] = "python3 -m pytest changed-validation.py"
+    else:
+        contract[field_name] = ["run_mu", "walk_mu"]
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="digest"):
+        phase_a_mod.validate_native_stub_packet_contract(
+            routing,
+            _NATIVE_CONTRACT_PLAN_PATH,
+            _native_aggregate_packet_text(),
+        )
+
+
+@pytest.mark.parametrize("case", ["evidence_command", "slow_function_order"])
+def test_aggregate_packet_contract_rejects_stale_rendered_validation_payload(case):
+    original_contract = _native_aggregate_contract()
+    if case == "slow_function_order":
+        original_contract["slow_functions"] = ["run_mu", "walk_mu"]
+    original_packet = _native_aggregate_packet_text(original_contract)
+    changed_contract = copy.deepcopy(original_contract)
+    if case == "evidence_command":
+        changed_contract["evidence_command"] = "python3 -m pytest changed.py"
+    else:
+        changed_contract["slow_functions"] = ["walk_mu", "run_mu"]
+    routing = _native_aggregate_routing(changed_contract)
+    old_digest = _native_aggregate_digest(original_contract)
+    new_digest = _native_aggregate_digest(changed_contract)
+    stale_validation_packet = original_packet.replace(old_digest, new_digest, 1)
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="validation gates"):
+        phase_a_mod.validate_native_stub_packet_contract(
+            routing,
+            _NATIVE_CONTRACT_PLAN_PATH,
+            stale_validation_packet,
+        )
+
+
+def test_aggregate_packet_contract_preserves_empty_and_ordered_slow_functions():
+    empty_contract = _native_aggregate_contract()
+    assert empty_contract["slow_functions"] == []
+    phase_a_mod.validate_native_stub_packet_contract(
+        _native_aggregate_routing(empty_contract),
+        _NATIVE_CONTRACT_PLAN_PATH,
+        _native_aggregate_packet_text(empty_contract),
+    )
+
+    ordered_contract = _native_aggregate_contract()
+    ordered_contract["slow_functions"] = ["run_mu", "walk_mu"]
+    ordered_packet = _native_aggregate_packet_text(ordered_contract)
+    assert "Slow-kernel guard-tests (`run_mu`, `walk_mu`)" in ordered_packet
+    phase_a_mod.validate_native_stub_packet_contract(
+        _native_aggregate_routing(ordered_contract),
+        _NATIVE_CONTRACT_PLAN_PATH,
+        ordered_packet,
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing_marker",
+        "duplicate_marker",
+        "duplicate_marker_in_clarification",
+        "indented_marker_in_clarification",
+        "malformed_marker",
+        "missing_digest",
+        "duplicate_digest",
+        "duplicate_digest_in_clarification",
+        "indented_digest_in_clarification",
+        "malformed_second_digest_in_clarification",
+        "missing_colon_second_digest_in_clarification",
+        "malformed_digest",
+        "mismatched_digest",
+    ],
+)
+def test_aggregate_packet_contract_rejects_packet_provenance_drift(case):
+    packet = _native_aggregate_packet_text()
+    marker = phase_a_mod.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE
+    digest_line = (
+        phase_a_mod.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX
+        + _native_aggregate_digest(_native_aggregate_contract())
+    )
+    if case == "missing_marker":
+        packet = packet.replace(marker + "\n", "", 1)
+    elif case == "duplicate_marker":
+        packet = packet.replace(marker, marker + "\n" + marker, 1)
+    elif case == "duplicate_marker_in_clarification":
+        packet += (
+            "\n## Non-normative review clarification\n\n"
+            f"{marker}\n"
+        )
+    elif case == "indented_marker_in_clarification":
+        packet += (
+            "\n## Non-normative review clarification\n\n"
+            f" {marker}\n"
+        )
+    elif case == "malformed_marker":
+        packet = packet.replace("producer=launch_wave.py", "producer=other.py", 1)
+    elif case == "missing_digest":
+        packet = packet.replace(digest_line + "\n", "", 1)
+    elif case == "duplicate_digest":
+        packet = packet.replace(digest_line, digest_line + "\n" + digest_line, 1)
+    elif case == "duplicate_digest_in_clarification":
+        packet += (
+            "\n## Non-normative review clarification\n\n"
+            f"{digest_line}\n"
+        )
+    elif case == "indented_digest_in_clarification":
+        packet += (
+            "\n## Non-normative review clarification\n\n"
+            f" {digest_line}\n"
+        )
+    elif case == "malformed_second_digest_in_clarification":
+        packet += (
+            "\n## Non-normative review clarification\n\n"
+            "Native-Stub-Packet-Contract-Digest:not-a-digest\n"
+        )
+    elif case == "missing_colon_second_digest_in_clarification":
+        packet += (
+            "\n## Non-normative review clarification\n\n"
+            "Native-Stub-Packet-Contract-Digest " + ("0" * 64) + "\n"
+        )
+    elif case == "malformed_digest":
+        packet = packet.replace(
+            digest_line,
+            phase_a_mod.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX
+            + "not-a-digest",
+            1,
+        )
+    else:
+        packet = packet.replace(digest_line, digest_line[:-64] + ("0" * 64), 1)
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="provenance"):
+        phase_a_mod.validate_native_stub_packet_contract(
+            _native_aggregate_routing(),
+            _NATIVE_CONTRACT_PLAN_PATH,
+            packet,
+        )
+
+
+def _drift_native_aggregate_packet(content: str, case: str) -> str:
+    if case == "purpose_changed":
+        return content.replace(
+            "Purpose: Preserve launch-authored packet intent.",
+            "Purpose: Replace launch-authored packet intent.",
+            1,
+        )
+    if case == "purpose_trailing_space":
+        return content.replace(
+            "Purpose: Preserve launch-authored packet intent.\n",
+            "Purpose: Preserve launch-authored packet intent. \n",
+            1,
+        )
+    if case == "scope_summary_changed":
+        return content.replace(
+            "Strengthen the native launch-to-Phase-A boundary.",
+            "Broaden the native launch-to-Phase-A boundary.",
+            1,
+        )
+    if case == "scope_item_omitted":
+        return content.replace(
+            "- mu/tools/executors/launch_wave.py -- bind native packet metadata.\n",
+            "",
+            1,
+        )
+    if case == "work_item_omitted":
+        return content.replace("2. Preserve builder-owned item order.\n", "", 1)
+    if case == "constraint_changed":
+        return content.replace(
+            "- Do not infer applicability from ROUTE_PHASE_A.",
+            "- Infer applicability from ROUTE_PHASE_A.",
+            1,
+        )
+    if case == "acceptance_reordered":
+        return content.replace(
+            "- Every builder-owned item remains exact.\n"
+            "- Clarification is allowed only outside canonical sections.",
+            "- Clarification is allowed only outside canonical sections.\n"
+            "- Every builder-owned item remains exact.",
+            1,
+        )
+    if case == "acceptance_item_trailing_space":
+        return content.replace(
+            "- Clarification is allowed only outside canonical sections.\n\n"
+            "## Grounding / Authorization",
+            "- Clarification is allowed only outside canonical sections. \n\n"
+            "## Grounding / Authorization",
+            1,
+        )
+    if case == "constraint_relocated":
+        without_constraint = content.replace(
+            "- Leave unmarked legacy routes unchanged.\n",
+            "",
+            1,
+        )
+        return without_constraint.replace(
+            "2. Preserve builder-owned item order.\n",
+            "2. Preserve builder-owned item order.\n"
+            "3. Leave unmarked legacy routes unchanged.\n",
+            1,
+        )
+    raise AssertionError(f"unknown drift case: {case}")
+
+
+def _append_native_normative_amendment(content: str) -> str:
+    return content + (
+        "\n## Normative amendment\n\n"
+        "The Acceptance criteria section above is superseded for this attempt.\n"
+    )
+
+
+def _append_native_unreserved_authority(content: str, case: str) -> str:
+    amendment = "The Acceptance criteria above are superseded for this attempt."
+    if case == "grounding_h3":
+        return content + f"\n### Normative amendment\n\n{amendment}\n"
+    if case == "grounding_plain":
+        return content + f"\n{amendment}\n"
+    if case == "validation_h3":
+        return content.replace(
+            "\n## Acceptance criteria",
+            f"\n### Normative amendment\n\n{amendment}\n\n## Acceptance criteria",
+            1,
+        )
+    if case == "header_plain":
+        return content.replace(
+            "\n## Scope",
+            f"\n{amendment}\n\n## Scope",
+            1,
+        )
+    if case == "authorization_line":
+        return content.replace(
+            "\n\nFOUNDER_OVERRIDE:",
+            f"\n- Authorization: {amendment}\n\nFOUNDER_OVERRIDE:",
+            1,
+        )
+    if case == "status_suffix":
+        return content.replace(
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged) "
+            + amendment,
+            1,
+        )
+    if case == "lock_suffix":
+        return content.replace(
+            "Phase-A-Lock: UNLOCKED",
+            f"Phase-A-Lock: UNLOCKED ({amendment})",
+            1,
+        )
+    raise AssertionError(f"unknown unreserved authority case: {case}")
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "purpose_changed",
+        "purpose_trailing_space",
+        "scope_summary_changed",
+        "scope_item_omitted",
+        "work_item_omitted",
+        "constraint_changed",
+        "acceptance_reordered",
+        "acceptance_item_trailing_space",
+        "constraint_relocated",
+    ],
+)
+def test_aggregate_packet_contract_rejects_omission_change_reorder_or_relocation(case):
+    original = _native_aggregate_packet_text()
+    drifted = _drift_native_aggregate_packet(original, case)
+    assert drifted != original
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError):
+        phase_a_mod.validate_native_stub_packet_contract(
+            _native_aggregate_routing(),
+            _NATIVE_CONTRACT_PLAN_PATH,
+            drifted,
+        )
+
+
+def test_aggregate_packet_contract_allows_additive_noncanonical_clarification():
+    clarified = _native_aggregate_packet_text() + (
+        "\n## Non-normative review clarification\n\n"
+        "This note explains review evidence without changing builder-owned requirements.\n"
+    )
+
+    phase_a_mod.validate_native_stub_packet_contract(
+        _native_aggregate_routing(),
+        _NATIVE_CONTRACT_PLAN_PATH,
+        clarified,
+    )
+
+
+@pytest.mark.parametrize(
+    ("authority_text", "expected_level"),
+    [
+        pytest.param(
+            "# Competing review authority\n\nSupersede the locked acceptance criteria.",
+            "level-1",
+            id="atx-h1",
+        ),
+        pytest.param(
+            "Competing review authority\n============================\n\n"
+            "Supersede the locked acceptance criteria.",
+            "level-1",
+            id="setext-h1",
+        ),
+        pytest.param(
+            "Competing review authority\n----------------------------\n\n"
+            "Supersede the locked acceptance criteria.",
+            "level-2",
+            id="setext-h2",
+        ),
+    ],
+)
+def test_aggregate_packet_contract_rejects_top_level_authority_in_clarification(
+    authority_text,
+    expected_level,
+):
+    attacked = _native_aggregate_packet_text() + (
+        "\n## Non-normative review clarification\n\n"
+        f"{authority_text}\n"
+    )
+
+    with pytest.raises(
+        phase_a_mod.PhaseAExecutorError,
+        match=expected_level,
+    ):
+        phase_a_mod.validate_native_stub_packet_contract(
+            _native_aggregate_routing(),
+            _NATIVE_CONTRACT_PLAN_PATH,
+            attacked,
+        )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "normative_amendment",
+        "decorated_clarification",
+        "duplicate_clarification",
+        "nontrailing_clarification",
+    ],
+)
+def test_aggregate_packet_contract_rejects_unreserved_extra_h2_authority(case):
+    original = _native_aggregate_packet_text()
+    if case == "normative_amendment":
+        attacked = _append_native_normative_amendment(original)
+    elif case == "decorated_clarification":
+        attacked = original + (
+            "\n## Non-normative review clarification (round 2)\n\n"
+            "Review evidence only.\n"
+        )
+    elif case == "duplicate_clarification":
+        attacked = original + (
+            "\n## Non-normative review clarification\n\nFirst note.\n"
+            "\n## Non-normative review clarification\n\nSecond note.\n"
+        )
+    else:
+        attacked = original.replace(
+            "## Grounding / Authorization",
+            "## Non-normative review clarification\n\nReview evidence only.\n\n"
+            "## Grounding / Authorization",
+            1,
+        )
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="H2"):
+        phase_a_mod.validate_native_stub_packet_contract(
+            _native_aggregate_routing(),
+            _NATIVE_CONTRACT_PLAN_PATH,
+            attacked,
+        )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "grounding_h3",
+        "grounding_plain",
+        "validation_h3",
+        "header_plain",
+        "authorization_line",
+        "status_suffix",
+        "lock_suffix",
+    ],
+)
+def test_aggregate_packet_contract_rejects_unreserved_h3_or_plain_authority(case):
+    original = _native_aggregate_packet_text()
+    attacked = _append_native_unreserved_authority(original, case)
+    assert attacked != original
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError):
+        phase_a_mod.validate_native_stub_packet_contract(
+            _native_aggregate_routing(),
+            _NATIVE_CONTRACT_PLAN_PATH,
+            attacked,
+        )
+
+
+def test_aggregate_packet_contract_requires_markers_for_post_lock_machine_sections():
+    advanced = _native_aggregate_packet_text().replace(
+        "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+        "Status: Phase B (pre-supervisor pending, bridge-converged)",
+        1,
+    ).replace("Phase-A-Lock: UNLOCKED", "Phase-A-Lock: LOCKED", 1)
+    unmarked = advanced + (
+        "\n## Phase B Indicator Scope Reconciliation\n\n"
+        "### Normative amendment\n\n"
+        "The Acceptance criteria above are superseded for this attempt.\n"
+    )
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="marker pair"):
+        phase_a_mod.validate_native_stub_packet_contract(
+            _native_aggregate_routing(),
+            _NATIVE_CONTRACT_PLAN_PATH,
+            unmarked,
+            allow_post_lock_machine_sections=True,
+        )
+
+
+def test_aggregate_packet_contract_allows_marked_post_lock_machine_section():
+    advanced = _native_aggregate_packet_text().replace(
+        "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+        "Status: Phase B (pre-supervisor pending, bridge-converged)",
+        1,
+    ).replace("Phase-A-Lock: UNLOCKED", "Phase-A-Lock: LOCKED", 1)
+    marked = advanced + (
+        "\n<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+        "## Phase B Indicator Scope Reconciliation\n\n"
+        "### Machine-owned evidence detail\n\n"
+        "- Reconciled by the Phase B producer.\n"
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+        f"\n{commit_mod.L4_FIELDS_FROM_TRACKER_START}\n"
+        "**L4 fields (auto-derived; do not hand-edit):**\n\n"
+        "- `target_gate_id`: G8\n"
+        f"{commit_mod.L4_FIELDS_FROM_TRACKER_END}\n"
+    )
+
+    phase_a_mod.validate_native_stub_packet_contract(
+        _native_aggregate_routing(),
+        _NATIVE_CONTRACT_PLAN_PATH,
+        marked,
+        allow_post_lock_machine_sections=True,
+    )
+
+
+def test_aggregate_packet_contract_rejects_text_after_post_lock_machine_marker():
+    advanced = _native_aggregate_packet_text().replace(
+        "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+        "Status: Phase B (pre-supervisor pending, bridge-converged)",
+        1,
+    ).replace("Phase-A-Lock: UNLOCKED", "Phase-A-Lock: LOCKED", 1)
+    attacked = advanced + (
+        "\n<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+        "## Phase B Indicator Scope Reconciliation\n\n"
+        "- Reconciled by the Phase B producer.\n"
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+        "\n### Normative amendment\n\n"
+        "The Acceptance criteria above are superseded for this attempt.\n"
+    )
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="outside the reserved"):
+        phase_a_mod.validate_native_stub_packet_contract(
+            _native_aggregate_routing(),
+            _NATIVE_CONTRACT_PLAN_PATH,
+            attacked,
+            allow_post_lock_machine_sections=True,
+        )
+
+
+def test_aggregate_packet_contract_allows_machine_owned_l4_block():
+    machine_block = (
+        f"\n{commit_mod.L4_FIELDS_FROM_TRACKER_START}\n"
+        "**L4 fields (auto-derived; do not hand-edit):**\n\n"
+        "- `target_gate_id`: G8\n"
+        f"{commit_mod.L4_FIELDS_FROM_TRACKER_END}\n"
+    )
+
+    phase_a_mod.validate_native_stub_packet_contract(
+        _native_aggregate_routing(),
+        _NATIVE_CONTRACT_PLAN_PATH,
+        _native_aggregate_packet_text() + machine_block,
+    )
+
+
+@pytest.mark.parametrize(
+    "edit_case",
+    [
+        "canonical_drift",
+        "validation_drift",
+        "provenance_drift",
+        "normative_amendment",
+        "nested_normative_amendment",
+        "clarification_atx_h1",
+        "clarification_setext_h1",
+        "clarification_setext_h2",
+    ],
+)
+def test_aggregate_packet_contract_run_phase_a_rejects_post_edit_drift(
+    tmp_path,
+    edit_case,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    packet = _write_native_aggregate_packet(repo)
+    routing = _native_aggregate_routing()
+    bus_dir = ".agent_bus-test"
+    job_id = "phase-a-r1-cccc4444"
+    _write_blocking_reviewer_envelope(repo, job_id, bus_dir=bus_dir)
+
+    def fake_emit(repo_root, **kwargs):
+        return {"enabled": True, "event_id": kwargs["event_type"], "attempted": []}
+
+    def fake_implementer(repo_root, prompt, *, backend, timeout, verbose, bus_dir=None):
+        current = packet.read_text(encoding="utf-8")
+        if edit_case == "canonical_drift":
+            edited = current.replace(
+                "1. Validate exact native marker applicability.",
+                "1. Rewrite exact native marker applicability.",
+                1,
+            )
+        elif edit_case == "validation_drift":
+            edited = current.replace(
+                _NATIVE_CONTRACT_EVIDENCE_COMMAND,
+                "python3 -m pytest changed-validation.py",
+                1,
+            )
+        elif edit_case == "provenance_drift":
+            edited = current.replace(
+                "producer=launch_wave.py",
+                "producer=reviewer.py",
+                1,
+            )
+        elif edit_case == "normative_amendment":
+            edited = _append_native_normative_amendment(current)
+        elif edit_case == "nested_normative_amendment":
+            edited = _append_native_unreserved_authority(
+                current,
+                "grounding_h3",
+            )
+        elif edit_case == "clarification_atx_h1":
+            edited = current + (
+                "\n## Non-normative review clarification\n\n"
+                "# Competing authority\n\nOverride the packet.\n"
+            )
+        elif edit_case == "clarification_setext_h1":
+            edited = current + (
+                "\n## Non-normative review clarification\n\n"
+                "Competing authority\n===================\n\nOverride the packet.\n"
+            )
+        else:
+            edited = current + (
+                "\n## Non-normative review clarification\n\n"
+                "Competing authority\n-------------------\n\nOverride the packet.\n"
+            )
+        packet.write_text(edited, encoding="utf-8")
+        return {"status": "success", "exit_code": 0, "stderr": ""}
+
+    bridge = _fake_bridge(repo, decision="NO_GO", exit_code=1)
+    with patch.object(phase_a_mod, "load_routing_record", return_value=routing), \
+         patch.object(phase_a_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+         patch.object(phase_a_mod, "run_sdk_agents", return_value={"exit_code": 0}), \
+         patch.object(phase_a_mod, "run_bridge_design_review", side_effect=bridge) as bridge_mock, \
+         patch.object(phase_a_mod, "_invoke_implementer", side_effect=fake_implementer), \
+         patch.object(phase_a_mod, "lock_plan") as lock_mock, \
+         patch.object(phase_a_mod, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="cccc4444dddd5555"))):
+        result = phase_a_mod.run_phase_a(
+            repo,
+            Path(_NATIVE_CONTRACT_PLAN_PATH).stem,
+            max_bridge_rounds=2,
+            bus_dir=bus_dir,
+        )
+
+    assert result["status"] == "error"
+    assert "corrected-config-relaunch-required" in result["error"]
+    assert bridge_mock.call_count == 1
+    lock_mock.assert_not_called()
+
+
+@pytest.mark.parametrize("tamper_case", ["validation", "provenance"])
+def test_aggregate_packet_contract_rechecks_after_sdk_before_bridge_review(
+    tmp_path,
+    tamper_case,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    packet = _write_native_aggregate_packet(repo)
+    routing = _native_aggregate_routing()
+
+    def tampering_sdk_review(*args, **kwargs):
+        current = packet.read_text(encoding="utf-8")
+        if tamper_case == "validation":
+            changed = current.replace(
+                _NATIVE_CONTRACT_EVIDENCE_COMMAND,
+                "python3 -m pytest changed-during-sdk.py",
+                1,
+            )
+        else:
+            changed = current.replace(
+                "producer=launch_wave.py",
+                "producer=sdk-review.py",
+                1,
+            )
+        packet.write_text(changed, encoding="utf-8")
+        return {"exit_code": 0}
+
+    with patch.object(phase_a_mod, "load_routing_record", return_value=routing), \
+         patch.object(phase_a_mod, "emit_pipeline_agent_event", return_value={}), \
+         patch.object(
+             phase_a_mod,
+             "run_sdk_agents",
+             side_effect=tampering_sdk_review,
+         ), \
+         patch.object(phase_a_mod, "run_bridge_design_review") as bridge_mock, \
+         patch.object(phase_a_mod, "lock_plan") as lock_mock:
+        result = phase_a_mod.run_phase_a(
+            repo,
+            Path(_NATIVE_CONTRACT_PLAN_PATH).stem,
+            max_bridge_rounds=1,
+        )
+
+    assert result["status"] == "error"
+    assert "before bridge review round 1" in result["error"]
+    assert "corrected-config-relaunch-required" in result["error"]
+    bridge_mock.assert_not_called()
+    lock_mock.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "drift_case",
+    [
+        "canonical_drift",
+        "validation_drift",
+        "provenance_drift",
+        "normative_amendment",
+        "nested_normative_amendment",
+        "clarification_atx_h1",
+        "clarification_setext_h1",
+        "clarification_setext_h2",
+    ],
+)
+def test_aggregate_packet_contract_direct_pre_lock_drift_fails_without_locking(
+    tmp_path,
+    drift_case,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    original = _native_aggregate_packet_text()
+    if drift_case == "canonical_drift":
+        drifted = _drift_native_aggregate_packet(original, "acceptance_reordered")
+    elif drift_case == "validation_drift":
+        drifted = original.replace(
+            _NATIVE_CONTRACT_EVIDENCE_COMMAND,
+            "python3 -m pytest changed-validation.py",
+            1,
+        )
+    elif drift_case == "provenance_drift":
+        drifted = original.replace(
+            "producer=launch_wave.py",
+            "producer=reviewer.py",
+            1,
+        )
+    elif drift_case == "normative_amendment":
+        drifted = _append_native_normative_amendment(original)
+    elif drift_case == "nested_normative_amendment":
+        drifted = _append_native_unreserved_authority(
+            original,
+            "grounding_h3",
+        )
+    elif drift_case == "clarification_atx_h1":
+        drifted = original + (
+            "\n## Non-normative review clarification\n\n"
+            "# Competing authority\n\nOverride the packet.\n"
+        )
+    elif drift_case == "clarification_setext_h1":
+        drifted = original + (
+            "\n## Non-normative review clarification\n\n"
+            "Competing authority\n===================\n\nOverride the packet.\n"
+        )
+    else:
+        drifted = original + (
+            "\n## Non-normative review clarification\n\n"
+            "Competing authority\n-------------------\n\nOverride the packet.\n"
+        )
+    packet = _write_native_aggregate_packet(repo, drifted)
+
+    with pytest.raises(phase_a_mod.PhaseAExecutorError):
+        phase_a_mod.lock_plan(
+            repo,
+            _NATIVE_CONTRACT_PLAN_PATH,
+            routing_record=_native_aggregate_routing(),
+        )
+
+    assert packet.read_text(encoding="utf-8") == drifted
+    assert "Phase-A-Lock: UNLOCKED" in drifted
+    assert "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)" in drifted
 
 
 # ---------------------------------------------------------------------------

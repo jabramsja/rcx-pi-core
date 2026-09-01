@@ -53,8 +53,10 @@ contract is:
     (d) bridge_config  -- a converging sync; a second run is a no-op-equivalent.
   The two verification steps and the optional launch persist no artifact, so they
   need no dedup and are safe to re-run. The contract covers exactly these steps
-  for the SAME wave-config; it makes NO claim about concurrent runs or a changed
-  config.
+  for the SAME wave-config; it makes NO claim about concurrent runs. A changed
+  config whose version-1 native packet contract differs may not reuse the same
+  wave id / tracked packet: the launcher rejects it before artifact mutation and
+  requires a corrected config under a fresh wave id.
 
 The builder reuses, rather than re-implements, every setup surface: the packet
 draft builder, the tracker-note builder, the routing-record builder, the
@@ -146,6 +148,72 @@ _DISPATCHER_OVERRIDE_TRIGGER_ENV_KEYS = (
     _DISPATCHER_OVERRIDE_ENV_KEYS - {_ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV}
 )
 _MAX_SAFE_MAX_TURNS = 1000
+
+# Re-export the Phase A consumer's exact native marker vocabulary.  launch_wave
+# is the sole producer, while phase_a_executor owns strict consumption; sharing
+# these constants mechanically prevents producer/consumer marker drift.
+NATIVE_STUB_PACKET_CONTRACT_KEY = _pa.NATIVE_STUB_PACKET_CONTRACT_KEY
+NATIVE_STUB_PACKET_CONTRACT_REQUIRED = _pa.NATIVE_STUB_PACKET_CONTRACT_REQUIRED
+NATIVE_STUB_PACKET_CONTRACT_PRODUCER = _pa.NATIVE_STUB_PACKET_CONTRACT_PRODUCER
+NATIVE_STUB_PACKET_CONTRACT_VERSION = _pa.NATIVE_STUB_PACKET_CONTRACT_VERSION
+NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE = (
+    _pa.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE
+)
+NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX = (
+    _pa.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX
+)
+
+_SAME_WAVE_DEFERRED_AUTH_START = (
+    "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->"
+)
+_SAME_WAVE_DEFERRED_AUTH_END = (
+    "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->"
+)
+_NATIVE_STUB_CANONICAL_SECTION_HEADINGS = {
+    "scope": "## Scope",
+    "work items": "## Work items",
+    "constraints": "## Constraints",
+    "stop conditions": "## Stop conditions",
+    "validation gates": "## Validation gates",
+    "acceptance criteria": "## Acceptance criteria",
+}
+_POST_LOCK_RECOVERY_STATUS_PROJECTION = {
+    "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT": (
+        "Status: Phase B (pre-supervisor pending, bridge-converged)"
+    ),
+    "Status: IMPLEMENTED / LOCAL EVIDENCE": (
+        "Status: Phase B (pre-supervisor pending, bridge-converged)"
+    ),
+}
+_POST_LOCK_RECOVERY_MACHINE_BLOCKS = (
+    (
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->",
+        "## Phase B Indicator Scope Reconciliation",
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->",
+    ),
+    (
+        "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:start -->",
+        "## Commit-Time Generated Governance Authorization",
+        "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:end -->",
+    ),
+    (
+        _SAME_WAVE_DEFERRED_AUTH_START,
+        "## Same-Wave Deferred Non-Blocking Authorization",
+        _SAME_WAVE_DEFERRED_AUTH_END,
+    ),
+    (
+        "<!-- COMMIT_PATH_TRUTH_REFRESH:start -->",
+        "## Commit Path Truth Refresh",
+        "<!-- COMMIT_PATH_TRUTH_REFRESH:end -->",
+    ),
+)
+_POST_LOCK_RECOVERY_PROGRESS_MARKERS = (
+    ("<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->", 4),
+    ("<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:start -->", 16),
+    (_SAME_WAVE_DEFERRED_AUTH_START, 32),
+    ("<!-- L4_FIELDS_FROM_TRACKER:start -->", 64),
+    ("<!-- COMMIT_PATH_TRUTH_REFRESH:start -->", 128),
+)
 
 
 def _git_probe_environment() -> dict[str, str]:
@@ -531,12 +599,175 @@ class WaveConfig:
                     )
                 except _ca.CandidateAuthorityError as exc:
                     errors.append(f"invalid indicator declaration: {exc}")
+        if self.routing_decision == "ROUTE_PHASE_A":
+            errors.extend(_native_phase_a_contract_input_errors(self))
         return errors
 
 
 # --------------------------------------------------------------------------- #
 # Packet rendering + fences                                                    #
 # --------------------------------------------------------------------------- #
+
+
+def _native_phase_a_contract_input_errors(config: WaveConfig) -> list[str]:
+    """Return complete native-input errors without touching repository state."""
+    errors: list[str] = []
+
+    tracked_packet_stem = Path(config.tracked_packet).stem
+    dispatcher_plan_name = _ed._normalize_phase_a_retry_plan_name(
+        tracked_packet_stem
+    )
+    if (
+        dispatcher_plan_name is not None
+        and dispatcher_plan_name != tracked_packet_stem
+    ):
+        errors.append(
+            "tracked_packet stem must remain exact through normal Phase A "
+            "dispatch plan-name normalization; use a shorter wave_id or "
+            "tracked_packet "
+            f"(stem {tracked_packet_stem!r} dispatches as "
+            f"{dispatcher_plan_name!r})"
+        )
+
+    scalar_lines = {
+        "title": config.title,
+        "task_id": config.task_id,
+        "purpose": config.purpose,
+        "date": config.date,
+    }
+    for field_name, value in scalar_lines.items():
+        if not isinstance(value, str) or not value.strip():
+            errors.append(
+                f"{field_name} must be a nonblank string for ROUTE_PHASE_A"
+            )
+        elif value != value.strip() or "\n" in value or "\r" in value:
+            errors.append(
+                f"{field_name} must be one canonical line for ROUTE_PHASE_A"
+            )
+
+    scope_summary = config.scope_summary
+    if not isinstance(scope_summary, str) or not scope_summary.strip():
+        errors.append("scope_summary must be nonblank for ROUTE_PHASE_A")
+    elif scope_summary != scope_summary.strip():
+        errors.append(
+            "scope_summary must not have outer whitespace for ROUTE_PHASE_A"
+        )
+
+    authorization_note = config.authorization_note
+    if not isinstance(authorization_note, str):
+        errors.append("authorization_note must be a string for ROUTE_PHASE_A")
+    elif authorization_note.strip():
+        errors.append(
+            "authorization_note must be empty for ROUTE_PHASE_A; place all "
+            "normative authorization in the immutable purpose, scope, "
+            "constraints, or stop conditions"
+        )
+
+    evidence_command = config.evidence_command
+    if not isinstance(evidence_command, str) or not evidence_command.strip():
+        errors.append(
+            "evidence_command must be a nonblank string for ROUTE_PHASE_A"
+        )
+    elif "\n" in evidence_command or "\r" in evidence_command:
+        errors.append("evidence_command must be one exact line for ROUTE_PHASE_A")
+
+    slow_functions = config.slow_functions
+    if not isinstance(slow_functions, list):
+        errors.append("slow_functions must be a list for ROUTE_PHASE_A")
+    else:
+        for index, item in enumerate(slow_functions):
+            if not isinstance(item, str):
+                errors.append(f"slow_functions[{index}] must be a string")
+            elif not item.strip():
+                errors.append(f"slow_functions[{index}] must not be blank")
+            elif "\n" in item or "\r" in item:
+                errors.append(f"slow_functions[{index}] must be one exact line")
+
+    for field_name in (
+        "scope_items",
+        "work_items",
+        "constraints",
+        "stop_conditions",
+        "acceptance_criteria",
+    ):
+        value = getattr(config, field_name)
+        if not isinstance(value, list):
+            errors.append(
+                f"{field_name} must be a nonempty list for ROUTE_PHASE_A"
+            )
+            continue
+        if not value:
+            errors.append(f"{field_name} must be nonempty for ROUTE_PHASE_A")
+            continue
+        for index, item in enumerate(value):
+            if not isinstance(item, str):
+                errors.append(f"{field_name}[{index}] must be a string")
+            elif not item.strip():
+                errors.append(f"{field_name}[{index}] must not be blank")
+            elif item != item.strip() or "\n" in item or "\r" in item:
+                errors.append(
+                    f"{field_name}[{index}] must be one canonical line"
+                )
+    return errors
+
+
+def _require_native_phase_a_contract_inputs(config: WaveConfig) -> None:
+    if config.routing_decision != "ROUTE_PHASE_A":
+        return
+    errors = _native_phase_a_contract_input_errors(config)
+    if errors:
+        raise LaunchWaveError(
+            "invalid native ROUTE_PHASE_A packet inputs: " + "; ".join(errors)
+        )
+
+
+def build_native_stub_packet_contract(config: WaveConfig) -> dict[str, Any]:
+    """Build the exact version-1 immutable contract envelope for Phase A."""
+    _require_native_phase_a_contract_inputs(config)
+    contract: dict[str, Any] = {
+        "identity": {
+            "wave_id": config.wave_id,
+            "task_id": config.task_id,
+            "title": config.title,
+            "date": config.date,
+            "tracked_packet": config.tracked_packet,
+        },
+        "purpose": config.purpose,
+        "scope_summary": config.scope_summary.strip(),
+        "scope_items": list(config.scope_items),
+        "work_items": list(config.work_items),
+        "constraints": list(config.constraints),
+        "stop_conditions": list(config.stop_conditions),
+        "acceptance_criteria": list(config.acceptance_criteria),
+        "evidence_command": config.evidence_command,
+        "slow_functions": list(config.slow_functions),
+    }
+    return {
+        "required": NATIVE_STUB_PACKET_CONTRACT_REQUIRED,
+        "producer": NATIVE_STUB_PACKET_CONTRACT_PRODUCER,
+        "version": NATIVE_STUB_PACKET_CONTRACT_VERSION,
+        "digest": _pa.native_stub_packet_contract_digest(contract),
+        "contract": contract,
+    }
+
+
+def _native_stub_packet_contract_routing_record(
+    config: WaveConfig,
+) -> dict[str, Any]:
+    """Build the minimum exact routing identity used for pre-write validation."""
+    return {
+        "decision": config.routing_decision,
+        "wave_name": config.wave_id,
+        "task_id": config.task_id,
+        "next_candidates": [
+            {
+                "candidate": config.wave_id,
+                "bounded": True,
+                "tracked_packet": config.tracked_packet,
+            }
+        ],
+        NATIVE_STUB_PACKET_CONTRACT_KEY: build_native_stub_packet_contract(config),
+    }
 
 
 def _bullets(items: list[str]) -> str:
@@ -567,24 +798,33 @@ def render_wave_packet(config: WaveConfig) -> str:
         draft documents the in-function ``# SPEED_OK`` annotation, so any run_mu
         mention in the packet is paired with the annotation.
     """
-    # Validation-gates section: only emit a run_mu reference when the wave actually
-    # touches a slow function, and always pair it with the # SPEED_OK annotation so
-    # the fence holds. Tooling-only waves emit no slow-function mention at all.
-    validation_lines = [f"- evidence_command: `{config.evidence_command}`"]
-    if config.slow_functions:
-        slow = ", ".join(f"`{name}`" for name in config.slow_functions)
-        validation_lines.append(
-            f"- Slow-kernel guard-tests ({slow}) carry an in-function "
-            "`# SPEED_OK: <reason>` annotation so they stay out of the green-gate "
-            "speed lane."
-        )
+    _require_native_phase_a_contract_inputs(config)
+
+    # The packet and routing envelope share one exact contract payload. Native
+    # packets carry the discriminator before routing exists; non-native renders
+    # remain unmarked for legacy/direct compatibility.
+    provenance_lines: list[str] = []
+    if config.routing_decision == "ROUTE_PHASE_A":
+        envelope = build_native_stub_packet_contract(config)
+        provenance_lines = [
+            NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE,
+            f"{NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX}{envelope['digest']}",
+        ]
+    provenance_block = "\n".join(provenance_lines)
+    if provenance_block:
+        provenance_block += "\n"
+    validation_lines = _pa.native_stub_validation_lines(
+        evidence_command=config.evidence_command,
+        slow_functions=config.slow_functions,
+    )
 
     scope_block = config.scope_summary.strip() or config.purpose
     scope_item_lines = list(config.scope_items)
     scope_item_lines.append(
-        f"TASKS.md -- tracker-sync authority. The {config.date} tracker sync note "
-        f"for wave `{config.wave_id}` is the single source of truth for this "
-        "packet's L4 fields; the packet derives from it."
+        _pa.native_stub_scope_authority_item(
+            date=config.date,
+            wave_id=config.wave_id,
+        )
     )
 
     grounding_lines = [
@@ -605,7 +845,7 @@ Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
 Task: {config.task_id}
 Wave ID: {config.wave_id}
 Phase-A-Lock: UNLOCKED
-Purpose: {config.purpose}
+{provenance_block}Purpose: {config.purpose}
 
 ## Scope
 
@@ -650,7 +890,325 @@ def _h1_title_line(content: str) -> str | None:
     return None
 
 
-def check_packet_fences(content: str, config: WaveConfig) -> list[str]:
+def _is_native_stub_h2_line(line: str) -> bool:
+    """Return whether *line* is an ATX H2 under the packet grammar."""
+    stripped = line.strip()
+    return (
+        stripped == "##"
+        or (
+            len(stripped) > 2
+            and stripped.startswith("##")
+            and not stripped.startswith("###")
+            and stripped[2] in " \t"
+        )
+    )
+
+
+def _native_stub_exact_section_bodies(content: str) -> dict[str, list[str]]:
+    """Extract exact canonical H2 bodies without weakening the strict validator."""
+    lines = content.split("\n")
+    sections: dict[str, list[str]] = {}
+    for section_title, heading in _NATIVE_STUB_CANONICAL_SECTION_HEADINGS.items():
+        bodies: list[str] = []
+        for heading_index, line in enumerate(lines):
+            if line != heading:
+                continue
+            section_end = next(
+                (
+                    index
+                    for index in range(heading_index + 1, len(lines))
+                    if _is_native_stub_h2_line(lines[index])
+                ),
+                len(lines),
+            )
+            body_start = heading_index + 1
+            while body_start < section_end and lines[body_start] == "":
+                body_start += 1
+            body_end = section_end
+            while body_end > body_start and lines[body_end - 1] == "":
+                body_end -= 1
+            bodies.append("\n".join(lines[body_start:body_end]))
+        sections[section_title] = bodies
+    return sections
+
+
+def _has_complete_post_lock_recovery_machine_block(content: str) -> bool:
+    """Require one balanced, ordered reserved H2 block for status projection."""
+    lines = content.splitlines()
+    for start_marker, heading, end_marker in _POST_LOCK_RECOVERY_MACHINE_BLOCKS:
+        if (
+            lines.count(start_marker) != 1
+            or lines.count(heading) != 1
+            or lines.count(end_marker) != 1
+        ):
+            continue
+        start_index = lines.index(start_marker)
+        heading_index = lines.index(heading)
+        end_index = lines.index(end_marker)
+        if start_index < heading_index < end_index:
+            return True
+    return False
+
+
+def _project_post_lock_recovery_status(content: str) -> str:
+    """Project exact downstream lifecycle status into Phase B for validation."""
+    if not _has_complete_post_lock_recovery_machine_block(content):
+        return content
+
+    lines = content.split("\n")
+    header_end = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if _is_native_stub_h2_line(line)
+        ),
+        len(lines),
+    )
+    header_lines = lines[:header_end]
+    if header_lines.count("Phase-A-Lock: LOCKED") != 1:
+        return content
+    status_positions = [
+        index for index, line in enumerate(header_lines) if line.startswith("Status:")
+    ]
+    if len(status_positions) != 1:
+        return content
+    status_index = status_positions[0]
+    projected = _POST_LOCK_RECOVERY_STATUS_PROJECTION.get(lines[status_index])
+    if projected is None:
+        return content
+    lines[status_index] = projected
+    return "\n".join(lines)
+
+
+def _same_wave_deferred_non_blocking_path(wave_id: str) -> str:
+    """Return commit_executor's one authorized same-wave deferred path."""
+    raw_wave = str(wave_id or "")
+    normalized_wave = _ec.normalize_wave_id(raw_wave)
+    if not normalized_wave or normalized_wave != raw_wave:
+        return ""
+    return (
+        "reports/deferred/non_blocking/"
+        f"{normalized_wave}_bridge_nonblockers.md"
+    )
+
+
+def _same_wave_deferred_authorization_block(
+    *,
+    wave_id: str,
+    deferred_path: str,
+) -> str:
+    """Return the exact commit-owned authorization needed for recovery leniency."""
+    return "\n".join(
+        [
+            _SAME_WAVE_DEFERRED_AUTH_START,
+            "## Same-Wave Deferred Non-Blocking Authorization",
+            "",
+            f"- Refresh wave: `{wave_id}`",
+            "- Purpose: Phase B and commit automation may stage the same-wave "
+            "non-blocking bridge findings packet as deferred follow-up instead of "
+            "blocking an otherwise commit-ready wave.",
+            "- Authorized deferred packet(s):",
+            f"  - `{deferred_path}`",
+            "- Scope binding: the packet(s) above are in scope only as generated "
+            "same-wave non-blocking bridge findings packets.",
+            "- Acceptance binding: the final touched-file set may include the packet(s) "
+            "above when they are also present in `deferred_items` or current staged files.",
+            _SAME_WAVE_DEFERRED_AUTH_END,
+        ]
+    )
+
+
+def _append_deferred_path_to_bounded_packet_line(
+    line: str,
+    deferred_path: str,
+) -> str:
+    """Mirror commit_executor's exact bounded-line augmentation."""
+    if f"`{deferred_path}`" in line:
+        return line
+    addition = f", `{deferred_path}`"
+    for anchor in (
+        ", or a canonical",
+        ", and the same-wave canonical",
+        ", or returns",
+        " or returns",
+    ):
+        if anchor in line:
+            return line.replace(anchor, addition + anchor, 1)
+    return line.rstrip(".") + addition + "."
+
+
+def _downstream_deferred_section_body(
+    section_title: str,
+    expected_body: str,
+    deferred_path: str,
+) -> str:
+    """Render the only canonical-section delta commit automation may own."""
+    lines = expected_body.splitlines()
+    if section_title == "scope" and f"`{deferred_path}`" not in expected_body:
+        scope_bullets = [
+            f"- `{deferred_path}`",
+            "  - Same-wave Phase B/commit generated deferred non-blocking "
+            "bridge findings packet only; no unrelated deferred report is "
+            "authorized by this wave.",
+        ]
+        insert_at = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if line.startswith("Only files under ")
+            ),
+            len(lines),
+        )
+        if insert_at > 0 and lines[insert_at - 1].strip():
+            scope_bullets.insert(0, "")
+        if insert_at < len(lines) and lines[insert_at].strip():
+            scope_bullets.append("")
+        lines[insert_at:insert_at] = scope_bullets
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("- The required fix resolves to files outside "):
+            lines[index] = _append_deferred_path_to_bounded_packet_line(
+                line,
+                deferred_path,
+            )
+        elif stripped.startswith("- The final touched-file set stays within "):
+            lines[index] = _append_deferred_path_to_bounded_packet_line(
+                line,
+                deferred_path,
+            )
+    return "\n".join(lines)
+
+
+def _replace_native_stub_section_body(
+    content: str,
+    *,
+    section_title: str,
+    old_body: str,
+    new_body: str,
+) -> str:
+    """Replace one recognized H2 body in a comparison-only packet copy."""
+    heading = _NATIVE_STUB_CANONICAL_SECTION_HEADINGS[section_title]
+    lines = content.split("\n")
+    heading_positions = [
+        index for index, line in enumerate(lines) if line == heading
+    ]
+    if len(heading_positions) != 1:
+        return content
+    heading_index = heading_positions[0]
+    section_end = next(
+        (
+            index
+            for index in range(heading_index + 1, len(lines))
+            if _is_native_stub_h2_line(lines[index])
+        ),
+        len(lines),
+    )
+    body_start = heading_index + 1
+    while body_start < section_end and lines[body_start] == "":
+        body_start += 1
+    body_end = section_end
+    while body_end > body_start and lines[body_end - 1] == "":
+        body_end -= 1
+    if "\n".join(lines[body_start:body_end]) != old_body:
+        return content
+    lines[body_start:body_end] = new_body.split("\n")
+    return "\n".join(lines)
+
+
+def _native_stub_recovery_validation_content(
+    content: str,
+    config: WaveConfig,
+) -> str:
+    """Return a strict-validation view of authorized downstream packet truth.
+
+    Phase B and commit automation own exact post-lock lifecycle status values,
+    machine sections, and one deterministic same-wave deferred Scope mutation.
+    Recovery validates an in-memory projection with those exact mutations folded
+    back to the routed version-1 contract. The real worktree/index bytes are never
+    rewritten. Missing, malformed, wrong-wave, or extra authority remains in the
+    view so the normal byte-exact validator rejects it.
+    """
+    validation_content = _project_post_lock_recovery_status(content)
+    deferred_path = _same_wave_deferred_non_blocking_path(config.wave_id)
+    if not deferred_path:
+        return validation_content
+    authorization_block = _same_wave_deferred_authorization_block(
+        wave_id=config.wave_id,
+        deferred_path=deferred_path,
+    )
+    content_lines = validation_content.splitlines()
+    if (
+        content_lines.count(_SAME_WAVE_DEFERRED_AUTH_START) != 1
+        or content_lines.count(_SAME_WAVE_DEFERRED_AUTH_END) != 1
+        or validation_content.count(authorization_block) != 1
+    ):
+        return validation_content
+
+    expected_sections = _native_stub_exact_section_bodies(
+        render_wave_packet(config)
+    )
+    actual_sections = _native_stub_exact_section_bodies(validation_content)
+    replacements: list[tuple[str, str, str]] = []
+    for section_title, expected_bodies in expected_sections.items():
+        if len(expected_bodies) != 1:
+            return validation_content
+        expected_body = expected_bodies[0]
+        actual_bodies = actual_sections.get(section_title, [])
+        if actual_bodies == [expected_body]:
+            continue
+        downstream_body = _downstream_deferred_section_body(
+            section_title,
+            expected_body,
+            deferred_path,
+        )
+        if downstream_body == expected_body or actual_bodies != [downstream_body]:
+            return validation_content
+        replacements.append((section_title, downstream_body, expected_body))
+
+    for section_title, downstream_body, expected_body in replacements:
+        replaced = _replace_native_stub_section_body(
+            validation_content,
+            section_title=section_title,
+            old_body=downstream_body,
+            new_body=expected_body,
+        )
+        if replaced == validation_content:
+            return _project_post_lock_recovery_status(content)
+        validation_content = replaced
+    return validation_content
+
+
+def _allow_completed_native_recovery_reroute(
+    repo_root: Path,
+    config: WaveConfig,
+) -> bool:
+    """Return whether the validated packet is in an exact commit-recovery state.
+
+    ``setup_routing_record`` calls the immutable-contract guard first. This helper
+    only selects the shared routing builder's explicit same-wave recovery mode for
+    a completed downstream lifecycle status; it does not independently authorize
+    packet content.
+    """
+    if config.routing_decision != "ROUTE_PHASE_A":
+        return False
+    status = _ec.read_control_plane_packet_status(repo_root, config.tracked_packet)
+    if not _ec.packet_status_is_completed(status):
+        return False
+    packet_path = Path(repo_root) / config.tracked_packet
+    try:
+        content = packet_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return _project_post_lock_recovery_status(content) != content
+
+
+def check_packet_fences(
+    content: str,
+    config: WaveConfig,
+    *,
+    allow_post_lock_machine_sections: bool = False,
+) -> list[str]:
     """Return fence violations for a rendered packet (empty = all fences pass).
 
     Public API: the standard packet fences this builder bakes in --
@@ -689,6 +1247,30 @@ def check_packet_fences(content: str, config: WaveConfig) -> list[str]:
             "run_mu # SPEED_OK: packet mentions run_mu without a # SPEED_OK annotation"
         )
 
+    # Fence 5: native packets must already be independently reviewable and
+    # byte-exact in every builder-owned canonical section before any write or
+    # dispatcher launch.  This is explicit-marker-only; non-Phase-A renders do
+    # not acquire a native contract through routing-decision inference.
+    if config.routing_decision == "ROUTE_PHASE_A":
+        try:
+            expected_routing = _native_stub_packet_contract_routing_record(config)
+            validation_content = content
+            if allow_post_lock_machine_sections:
+                validation_content = _native_stub_recovery_validation_content(
+                    content,
+                    config,
+                )
+            _pa.validate_native_stub_packet_contract(
+                expected_routing,
+                config.tracked_packet,
+                validation_content,
+                allow_post_lock_machine_sections=(
+                    allow_post_lock_machine_sections
+                ),
+            )
+        except (LaunchWaveError, _pa.PhaseAExecutorError) as exc:
+            errors.append(f"native stub packet contract: {exc}")
+
     return errors
 
 
@@ -709,18 +1291,300 @@ def _git_index_text(repo_root: Path, rel_path: str) -> str | None:
     return result.stdout
 
 
+def _native_wave_id_is_safe_for_packet_discovery(config: WaveConfig) -> bool:
+    wave_id = config.wave_id
+    if not isinstance(wave_id, str) or not wave_id:
+        return False
+    try:
+        return _ec.normalize_wave_id(wave_id) == wave_id
+    except (TypeError, ValueError):
+        return False
+
+
+def _native_tracked_packet_is_safe_for_packet_discovery(
+    config: WaveConfig,
+) -> bool:
+    tracked_packet = config.tracked_packet
+    if not isinstance(tracked_packet, str):
+        return False
+    packet_path = Path(tracked_packet)
+    return (
+        not packet_path.is_absolute()
+        and packet_path.parent.as_posix() == "reports/control_plane"
+        and packet_path.name.startswith(f"{config.wave_id}_")
+        and packet_path.suffix == ".md"
+    )
+
+
+def _same_wave_native_packet_sources(
+    repo_root: Path,
+    config: WaveConfig,
+) -> list[tuple[str, str, str]]:
+    """Read every worktree/index packet candidate for the proposed wave id."""
+    repo_root = Path(repo_root)
+    if not _native_wave_id_is_safe_for_packet_discovery(config):
+        return []
+    prefix = f"reports/control_plane/{config.wave_id}_"
+    candidate_paths: set[str] = set()
+    if _native_tracked_packet_is_safe_for_packet_discovery(config):
+        candidate_paths.add(config.tracked_packet)
+    control_plane = repo_root / "reports" / "control_plane"
+    if control_plane.is_dir():
+        try:
+            for candidate in control_plane.iterdir():
+                if not candidate.is_file():
+                    continue
+                rel_path = candidate.relative_to(repo_root).as_posix()
+                if rel_path.startswith(prefix) and rel_path.endswith(".md"):
+                    candidate_paths.add(rel_path)
+        except OSError as exc:
+            raise LaunchWaveError(
+                f"cannot inspect existing same-wave packet paths: {exc}"
+            ) from exc
+
+    try:
+        indexed = subprocess.run(
+            ["git", "ls-files", "--cached", "--", "reports/control_plane"],
+            cwd=str(repo_root),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        raise LaunchWaveError(
+            f"cannot inspect staged same-wave packet paths: {exc}"
+        ) from exc
+    if indexed.returncode != 0:
+        raise LaunchWaveError(
+            "cannot inspect staged same-wave packet paths: "
+            + (indexed.stderr or "git ls-files failed").strip()
+        )
+    indexed_paths = {
+        line
+        for line in indexed.stdout.splitlines()
+        if (line == config.tracked_packet or line.startswith(prefix))
+        and line.endswith(".md")
+    }
+    candidate_paths.update(indexed_paths)
+
+    sources: list[tuple[str, str, str]] = []
+    for rel_path in sorted(candidate_paths):
+        packet_path = repo_root / rel_path
+        if packet_path.is_file():
+            try:
+                sources.append(
+                    (
+                        "worktree",
+                        rel_path,
+                        packet_path.read_text(encoding="utf-8"),
+                    )
+                )
+            except (OSError, UnicodeDecodeError) as exc:
+                _raise_native_stub_contract_relaunch_required(
+                    f"existing worktree packet {rel_path!r} cannot be read: {exc}"
+                )
+        if rel_path in indexed_paths:
+            indexed_text = _git_index_text(repo_root, rel_path)
+            if indexed_text is None:
+                _raise_native_stub_contract_relaunch_required(
+                    f"existing index packet {rel_path!r} cannot be read"
+                )
+            sources.append(("index", rel_path, indexed_text))
+    return sources
+
+
+def _native_relaunch_guard_identity_is_safe(config: WaveConfig) -> bool:
+    """Return whether same-wave discovery can safely precede full validation."""
+    return _native_wave_id_is_safe_for_packet_discovery(config)
+
+
 def _packet_progress_score(content: str) -> int:
-    """Score packet progress beyond the launcher's initial Phase A render."""
+    """Score monotonic packet progress beyond the initial Phase A render.
+
+    Exact downstream lifecycle states and reserved machine markers outrank an
+    earlier Phase B blob. A malformed high-scoring candidate still fails the
+    strict fence check before it can replace worktree truth.
+    """
     score = 0
     if "Phase-A-Lock: LOCKED" in content:
         score += 1
     if any(line.startswith("Status: Phase B") for line in content.splitlines()):
         score += 2
-    if "PHASE_B_INDICATOR_SCOPE_REFRESH:start" in content:
-        score += 4
-    if "pre-supervisor" in content or "commit-ready" in content:
-        score += 1
+    if any(
+        line in _POST_LOCK_RECOVERY_STATUS_PROJECTION
+        for line in content.splitlines()
+    ):
+        score += 8
+    for marker, weight in _POST_LOCK_RECOVERY_PROGRESS_MARKERS:
+        if marker in content:
+            score += weight
     return score
+
+
+def _routing_record_targets_native_attempt(
+    record: Any,
+    config: WaveConfig,
+) -> bool:
+    """Return whether a routing object refers to this wave/packet attempt."""
+    if not isinstance(record, dict):
+        return False
+    if record.get("wave_name") == config.wave_id:
+        return True
+    if record.get("tracked_packet") == config.tracked_packet:
+        return True
+
+    candidates = record.get("next_candidates")
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            if (
+                candidate.get("candidate") == config.wave_id
+                or candidate.get("tracked_packet") == config.tracked_packet
+            ):
+                return True
+
+    envelope = record.get(NATIVE_STUB_PACKET_CONTRACT_KEY)
+    if isinstance(envelope, dict):
+        contract = envelope.get("contract")
+        if isinstance(contract, dict):
+            identity = contract.get("identity")
+            if isinstance(identity, dict) and (
+                identity.get("wave_id") == config.wave_id
+                or identity.get("tracked_packet") == config.tracked_packet
+            ):
+                return True
+    return False
+
+
+def _raise_native_stub_contract_relaunch_required(detail: str) -> None:
+    raise LaunchWaveError(
+        "refusing to replace an existing native stub packet contract for this "
+        f"attempt: {detail}. corrected-config-relaunch-required: builder-owned "
+        "normative content is immutable; use launch_wave.py with a fresh wave id "
+        "and corrected WaveConfig."
+    )
+
+
+def _require_native_stub_packet_contract_relaunch_safe(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None = None,
+) -> None:
+    """Reject a changed same-attempt native contract before artifact mutation.
+
+    The routing envelope is the immutable contract authority once written.  The
+    packet worktree/index blobs cover an interrupted setup that produced step 1
+    but never reached the routing step.  An unrelated global routing record is
+    deliberately ignored so a fresh wave can replace the single-candidate route.
+    A proposed non-native decision must still inspect a same-attempt marked route:
+    otherwise the rerun could erase the marker and replace the immutable packet.
+    """
+    repo_root = Path(repo_root)
+    proposed_native = config.routing_decision == "ROUTE_PHASE_A"
+    packet_sources = _same_wave_native_packet_sources(repo_root, config)
+    packet_provenance_sources = [
+        source
+        for source in packet_sources
+        if _pa.native_stub_packet_has_contract_provenance(source[2])
+    ]
+    if packet_provenance_sources and not proposed_native:
+        marked_locations = ", ".join(
+            f"{source}:{rel_path}"
+            for source, rel_path, _text in packet_provenance_sources
+        )
+        _raise_native_stub_contract_relaunch_required(
+            "same-wave packet-side native marker cannot be changed to "
+            f"{config.routing_decision!r} or have its native envelope removed "
+            f"({marked_locations})"
+        )
+
+    routed_native_attempt = False
+    routing_path = _ec.routing_record_path(repo_root, bus_dir)
+    if routing_path.exists():
+        try:
+            existing_record = json.loads(
+                routing_path.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            # A malformed unrelated singleton route may be replaced by a fresh
+            # wave.  Once this attempt's packet exists, however, losing the
+            # envelope cannot authorize an in-place contract replacement.
+            if packet_provenance_sources:
+                _raise_native_stub_contract_relaunch_required(
+                    f"existing routing record is unreadable or malformed: {exc}"
+                )
+        else:
+            if _routing_record_targets_native_attempt(existing_record, config):
+                routing_has_native_marker = (
+                    NATIVE_STUB_PACKET_CONTRACT_KEY in existing_record
+                )
+                if routing_has_native_marker and not proposed_native:
+                    _raise_native_stub_contract_relaunch_required(
+                        "same-wave marked native route cannot be changed to "
+                        f"{config.routing_decision!r} or have its required "
+                        "contract marker removed"
+                    )
+                if not routing_has_native_marker:
+                    if packet_provenance_sources and proposed_native:
+                        # setup_packet is step 1 and routing is step 3. Permit
+                        # only the exact packet-bound native config to complete
+                        # that transition; the validator below rejects any
+                        # changed identity, normative, validation, or digest data.
+                        pass
+                    else:
+                        # An unmarked legacy/direct route does not become strict
+                        # merely because another unmarked caller says Phase A.
+                        return
+                elif not proposed_native:
+                    return
+                if routing_has_native_marker:
+                    try:
+                        expected_envelope = build_native_stub_packet_contract(config)
+                    except LaunchWaveError as exc:
+                        _raise_native_stub_contract_relaunch_required(
+                            f"proposed native config is incomplete or differs ({exc})"
+                        )
+                    existing_envelope = existing_record.get(
+                        NATIVE_STUB_PACKET_CONTRACT_KEY
+                    )
+                    if existing_envelope != expected_envelope:
+                        _raise_native_stub_contract_relaunch_required(
+                            "same-wave routing envelope is absent, malformed, "
+                            "tampered, or differs from the proposed contract"
+                        )
+                    routed_native_attempt = True
+
+    if not proposed_native:
+        return
+
+    if not packet_provenance_sources and not routed_native_attempt:
+        return
+
+    try:
+        expected_routing = _native_stub_packet_contract_routing_record(config)
+    except LaunchWaveError as exc:
+        _raise_native_stub_contract_relaunch_required(
+            f"proposed native config is incomplete or differs ({exc})"
+        )
+    for source, rel_path, packet_text in packet_sources:
+        try:
+            validation_text = _native_stub_recovery_validation_content(
+                packet_text,
+                config,
+            )
+            _pa.validate_native_stub_packet_contract(
+                expected_routing,
+                rel_path,
+                validation_text,
+                allow_post_lock_machine_sections=True,
+            )
+        except _pa.PhaseAExecutorError as exc:
+            _raise_native_stub_contract_relaunch_required(
+                f"existing {source} packet {rel_path!r} does not preserve the proposed "
+                f"same-attempt contract ({exc})"
+            )
 
 
 def _preserve_advanced_packet_if_present(
@@ -756,7 +1620,11 @@ def _preserve_advanced_packet_if_present(
     if best_score <= 0:
         return False
 
-    fence_errors = check_packet_fences(best_text, config)
+    fence_errors = check_packet_fences(
+        best_text,
+        config,
+        allow_post_lock_machine_sections=True,
+    )
     if fence_errors:
         raise LaunchWaveError(
             f"refusing to preserve advanced packet from {best_source}; fence failure: "
@@ -834,9 +1702,11 @@ def _replace_or_insert_tracker_note_line(content: str, wave_id: str, note_line: 
             f"and wave_id {wave_id!r}"
         )
 
-    insert_at = last_note_idx + 1
-    while insert_at < search_end and lines[insert_at].strip() == "":
-        insert_at += 1
+    insert_at = _tsn.tracker_note_logical_block_end(
+        lines,
+        last_note_idx,
+        search_end,
+    )
     lines.insert(insert_at, "")
     lines.insert(insert_at, note_line)
     return "\n".join(lines)
@@ -927,6 +1797,14 @@ def setup_packet(repo_root: Path, config: WaveConfig) -> Path:
     canonical render, so a re-run with the same config is a no-op on an
     already-fenced packet.
     """
+    # A prior packet-side marker is same-attempt authority even when the proposed
+    # route is no longer Phase A. Inspect it before any route-specific render or
+    # fence exit can obscure the required corrected-config-relaunch result.
+    _require_native_stub_packet_contract_relaunch_safe(
+        repo_root,
+        config,
+    )
+
     # Fail closed BEFORE any disk write: validate the canonical content first.
     fenced = render_wave_packet(config)
     fence_errors = check_packet_fences(fenced, config)
@@ -955,6 +1833,8 @@ def setup_packet(repo_root: Path, config: WaveConfig) -> Path:
 
 def setup_tracker_note(repo_root: Path, config: WaveConfig) -> None:
     """Step 2: upsert the TASKS.md tracker-sync note (keyed by wave id)."""
+    _require_native_stub_packet_contract_relaunch_safe(repo_root, config)
+    _require_native_phase_a_contract_inputs(config)
     if _preserve_advanced_tracker_note_if_present(repo_root, config):
         return
     fields = build_tracker_fields(config)
@@ -973,6 +1853,14 @@ def setup_routing_record(
     bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Step 3: write the post-merge routing record (single next-candidate)."""
+    # The shared builder writes immediately.  Compare any same-attempt envelope
+    # first so direct helper use cannot replace the immutable contract in place.
+    _require_native_stub_packet_contract_relaunch_safe(
+        repo_root,
+        config,
+        bus_dir=bus_dir,
+    )
+    _require_native_phase_a_contract_inputs(config)
     record, errors = _ec.build_and_write_routing_record(
         wave_name=config.wave_id,
         task_id=config.task_id,
@@ -983,6 +1871,9 @@ def setup_routing_record(
         decision=config.routing_decision,
         repo_root=repo_root,
         bus_dir=bus_dir,
+        allow_completed_tracked_packet=(
+            _allow_completed_native_recovery_reroute(repo_root, config)
+        ),
         # Thread the wave's declared FOUNDER_OVERRIDE (defaults to wave_id) into
         # the routing record so it is durable from launch time. The commit-executor
         # growth-cap auto-bump reads it via _extract_founder_override_from_routing_record;
@@ -996,6 +1887,12 @@ def setup_routing_record(
         raise LaunchWaveError(
             "routing-record build failed: " + "; ".join(errors)
         )
+    record_changed = False
+    if config.routing_decision == "ROUTE_PHASE_A":
+        record[NATIVE_STUB_PACKET_CONTRACT_KEY] = (
+            build_native_stub_packet_contract(config)
+        )
+        record_changed = True
     if config.candidate_authority_enabled():
         spec = _ca.build_spec_from_wave_config(
             config,
@@ -1022,6 +1919,12 @@ def setup_routing_record(
             authority_metadata["target_branch_authority"] = target_branch_authority
         record["candidate_authority_required"] = bool(config.pre_review_authority)
         record["candidate_authority"] = authority_metadata
+        record_changed = True
+
+    # The shared routing builder writes the base record.  Persist all
+    # launcher-owned additions together before this function returns and before
+    # optional dispatcher launch can observe the record.
+    if record_changed:
         routing_path = _ec.routing_record_path(Path(repo_root), bus_dir)
         routing_path.write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n",
@@ -1708,9 +2611,31 @@ def run_wave_setup(
     repo_root = Path(repo_root)
     _verify_launcher_source_target_common_dir(repo_root)
 
+    # A safe same-wave identity is enough to inspect existing packet/routing
+    # authority before route-specific validation can return. This converts an
+    # incomplete or downgraded later config into the required fresh-attempt
+    # response while a brand-new invalid config still reaches normal validation.
+    relaunch_guard_ran = _native_relaunch_guard_identity_is_safe(config)
+    if relaunch_guard_ran:
+        _require_native_stub_packet_contract_relaunch_safe(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+        )
+
     config_errors = config.validate(repo_root, bus_dir=bus_dir)
     if config_errors:
         raise LaunchWaveError("invalid wave-config: " + "; ".join(config_errors))
+
+    # This is the full-chain pre-mutation boundary: reject a changed or tampered
+    # same-attempt contract before packet, TASKS, routing, authority, bridge,
+    # indicator, or dispatcher state can be touched.
+    if not relaunch_guard_ran:
+        _require_native_stub_packet_contract_relaunch_safe(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+        )
 
     # Steps 1-4: artifact-producing (each idempotent under the re-run contract).
     packet_path = setup_packet(repo_root, config)

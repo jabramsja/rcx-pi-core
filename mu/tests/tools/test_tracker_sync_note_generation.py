@@ -271,6 +271,44 @@ Items here are done.
         # Original note still present
         assert "existing-wave" in content
 
+    @pytest.mark.parametrize(
+        "blank_count",
+        [
+            pytest.param(0, id="zero-blank-lines"),
+            pytest.param(1, id="one-blank-line"),
+            pytest.param(3, id="multiple-blank-lines"),
+        ],
+    )
+    def test_tracker_block_adjacency_preserves_indented_evidence_children(
+        self,
+        tmp_path,
+        blank_count,
+    ):
+        tasks = tmp_path / "TASKS.md"
+        parent = (
+            "- Tracker sync note (2026-03-22, existing-wave): **EXISTING — test "
+            "note.** Class: MAINTENANCE. target_gate_id: G8."
+        )
+        child = "  - Recovery evidence: the prior wave retained this child."
+        prefix = (
+            "# RCX Task List\n\n"
+            "## Ra (Resolved / Merged)\n\n"
+            f"{parent}\n"
+            + ("\n" * blank_count)
+            + f"{child}\n\n"
+        )
+        suffix = "---\n\n## NEXT (short, bounded follow-ups)\n\n- Some NEXT item\n"
+        original = prefix + suffix
+        tasks.write_text(original, encoding="utf-8")
+        fields = _make_maintenance_fields(wave_id="new-wave")
+        rendered_note = render_tracker_sync_note(fields)
+
+        upsert_tracker_sync_note(tasks, fields)
+
+        content = tasks.read_text(encoding="utf-8")
+        assert content == prefix + rendered_note + "\n\n" + suffix
+        assert content.index(parent) < content.index(child) < content.index(rendered_note)
+
     def test_update_existing_note(self, tmp_path):
         tasks = tmp_path / "TASKS.md"
         tasks.write_text(self._TASKS_TEMPLATE)
