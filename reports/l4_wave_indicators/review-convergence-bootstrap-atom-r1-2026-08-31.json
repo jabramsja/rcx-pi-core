@@ -1,24 +1,24 @@
 {
   "wave_id": "review-convergence-bootstrap-atom-r1-2026-08-31",
-  "repeat_run_speedup_ratio": 1.315587,
+  "repeat_run_speedup_ratio": 1.212994,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.339114,
+  "step_growth_slope": 0.291853,
   "repeat_run_raw_seconds": [
-    0.446134,
-    0.339114
+    0.354016,
+    0.291853
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.446134
+      "elapsed_seconds": 0.354016
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.785248
+      "elapsed_seconds": 0.645869
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-09-01T00:49:38Z",
+  "collection_timestamp_utc": "2026-09-01T01:32:37Z",
   "collector_version": "2.2.0"
 }

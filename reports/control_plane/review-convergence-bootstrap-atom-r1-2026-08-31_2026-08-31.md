@@ -148,14 +148,6 @@ review-convergence-bootstrap-atom-r1-2026-08-31
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`
 - Current staged files:
-  - `TASKS.md`
-  - `mu/tests/tools/test_agent_bridge_supervisor.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/agents/bridge_supervisor.py`
-  - `mu/tools/agents/templates/bridge_reviewer_prompt.txt`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `mu/tools/executors/recovery_gate.py`
   - `reports/control_plane/review-convergence-bootstrap-atom-r1-2026-08-31_2026-08-31.md`
   - `reports/l4_wave_indicators/review-convergence-bootstrap-atom-r1-2026-08-31.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
