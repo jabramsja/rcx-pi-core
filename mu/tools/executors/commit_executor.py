@@ -6963,19 +6963,19 @@ def _discard_failed_adapter_partial_changes(
 
     The bot-remediation adapter can raise (e.g. a timeout) AFTER it has already
     staged or modified files. The shared auto-defer helper
-    (:func:`_classify_and_auto_defer_unremediated_bot_findings`) runs
-    ``git commit --amend`` + force-push in its deferrable branch, which would
-    silently fold any such partial edits into the commit. The no-change path
+    (:func:`_classify_and_auto_defer_unremediated_bot_findings`) stages its
+    report into a normal child commit, which would otherwise silently include
+    any such partial edits. The no-change path
     reaches that helper only after ``git status`` proves the worktree clean; this
     restores the SAME precondition on the adapter-error/timeout path.
 
-    The index is reset to HEAD so the helper's ``--amend`` folds in ONLY the
-    deferred report it stages itself, then non-transient worktree residue is
+    The index is reset to HEAD so the child commit includes ONLY the deferred
+    report the helper stages itself, then non-transient worktree residue is
     discarded (tracked files restored, untracked files removed). Transient bus
     runtime paths are left on disk so the pipeline's runtime state survives.
     Returns the discarded non-transient paths (for logging/tests).
     """
-    # Unstage everything: a staged partial edit would otherwise be amended.
+    # Unstage everything: a staged partial edit would otherwise enter the child commit.
     _run(["git", "reset", "-q", "HEAD"], cwd=repo_root, timeout=30, check=False)
     status_out = _run(
         ["git", "status", "--porcelain"],
@@ -10338,23 +10338,16 @@ def _wait_for_required_checks_to_pass(
         time.sleep(poll_interval)
 
 
-def _auto_defer_bot_findings(
+def _write_auto_deferred_bot_findings_report(
     repo_root: Path,
     findings: list[dict[str, Any]],
     wave_id: str,
     pr_number: str,
-    repo_owner: str,
-    repo_name: str,
     log: Any,
-) -> None:
-    """Auto-defer bot findings when the remediation adapter produces no changes.
-
-    Writes a deferred non-blocking report and resolves PR comment threads
-    so the merge can proceed without manual intervention.
-    """
+) -> Path:
+    """Write the local report for non-blocking auto-deferred bot findings."""
     from datetime import datetime, timezone
 
-    # 1. Write deferred report
     deferred_dir = repo_root / "reports" / "deferred" / "non_blocking"
     deferred_dir.mkdir(parents=True, exist_ok=True)
     report_name = f"pr{pr_number}_bot_auto_deferred_{wave_id}.md"
@@ -10372,8 +10365,17 @@ def _auto_defer_bot_findings(
         lines.append(f"{body[:500]}\n\n")
     report_path.write_text("".join(lines), encoding="utf-8")
     log(f"Step 15: deferred report written to {report_name}")
+    return report_path
 
-    # 2. Resolve PR comment threads so merge is not blocked
+
+def _resolve_auto_deferred_bot_threads(
+    *,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: str,
+    log: Any,
+) -> None:
+    """Resolve eligible bot-authored threads after the report commit is pushed."""
     try:
         query = (
             f'{{"query":"query{{repository(owner:\\"{repo_owner}\\",name:\\"{repo_name}\\")'
@@ -10418,6 +10420,194 @@ def _auto_defer_bot_findings(
         log(f"Step 15: failed to resolve comment threads (non-fatal): {exc}")
 
 
+def _auto_defer_bot_findings(
+    repo_root: Path,
+    findings: list[dict[str, Any]],
+    wave_id: str,
+    pr_number: str,
+    repo_owner: str,
+    repo_name: str,
+    log: Any,
+    *,
+    round_num: int,
+    target_branch: str,
+    continuation_path: Path,
+    result: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Record auto-deferred findings in a guarded child commit before resolution.
+
+    The report writer is intentionally local-only.  The eligible-thread resolver
+    remains non-fatal, but is unreachable until the child commit has passed the
+    explicit guard, the ordinary push has succeeded, and ``git_push`` has been
+    checkpointed for that exact continuation head.
+    """
+    try:
+        report_path = _write_auto_deferred_bot_findings_report(
+            repo_root,
+            findings,
+            wave_id,
+            pr_number,
+            log,
+        )
+        report_rel = str(report_path.relative_to(repo_root))
+        _run(
+            ["git", "add", "-f", "--", report_rel],
+            cwd=repo_root,
+            timeout=30,
+        )
+        bot_receipt = _mint_bot_remediation_receipt(
+            repo_root=repo_root,
+            findings_addressed=[
+                {"path": finding.get("path", ""), "body": finding.get("body", "")[:200]}
+                for finding in findings
+            ],
+            scoped_files=[report_rel],
+            round_num=round_num,
+            wave_id=wave_id,
+        )
+        log(f"Step 15: bot-remediation receipt minted for deferred report: {bot_receipt.name}")
+
+        msg = (
+            f"docs: record auto-deferred bot findings (round {round_num})\n\n"
+            "Co-Authored-By: Codex <noreply@openai.com>"
+        )
+        _run(
+            ["git", "commit", "-m", msg],
+            cwd=repo_root,
+            timeout=60,
+            env=_commit_subprocess_env(),
+        )
+        current_head = _run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            timeout=10,
+        ).stdout.strip()
+        if not current_head:
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": findings,
+                "pr_number": pr_number,
+                "steps_completed": result.get("steps_completed", []),
+                "remediation_rounds_attempted": round_num,
+                "errors": ["auto-defer child commit produced an empty HEAD"],
+            }
+
+        reset_steps = _continuation_steps_for_new_commit(result.get("steps_completed"))
+        if reset_steps is None:
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": findings,
+                "pr_number": pr_number,
+                "steps_completed": result.get("steps_completed", []),
+                "remediation_rounds_attempted": round_num,
+                "errors": [
+                    "auto-defer child commit could not reset continuation through git_commit"
+                ],
+            }
+
+        auto_defer_checkpoint = dict(result)
+        auto_defer_checkpoint["commit_sha"] = current_head
+        auto_defer_checkpoint["steps_completed"] = reset_steps
+        for stale_field in (
+            "bot_review_request_sha",
+            "pre_push_isolation",
+            "pre_push_restored_paths",
+        ):
+            auto_defer_checkpoint.pop(stale_field, None)
+        _checkpoint_post_commit_progress(
+            auto_defer_checkpoint,
+            continuation_path=continuation_path,
+            target_branch=target_branch,
+        )
+
+        result["commit_sha"] = current_head
+        result["steps_completed"] = list(reset_steps)
+        for stale_field in (
+            "bot_review_request_sha",
+            "pre_push_isolation",
+            "pre_push_restored_paths",
+        ):
+            result.pop(stale_field, None)
+
+        pre_push_guard = _run_bot_remediation_pre_push_guard(
+            repo_root,
+            log=log,
+        )
+        if not pre_push_guard["passed"]:
+            gate_errors = list(pre_push_guard.get("errors") or [])
+            log(
+                "Step 15: bot-remediation pre-push gate failed before "
+                f"auto-defer report push: {gate_errors}"
+            )
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+                "errors": gate_errors,
+                "bot_remediation_pre_push": pre_push_guard,
+            }
+
+        auto_defer_checkpoint["steps_completed"].append("run_pre_push_script")
+        _checkpoint_post_commit_progress(
+            auto_defer_checkpoint,
+            continuation_path=continuation_path,
+            target_branch=target_branch,
+        )
+        result["steps_completed"] = list(auto_defer_checkpoint["steps_completed"])
+
+        _run(
+            ["git", "push", "--no-verify", "origin", target_branch],
+            cwd=repo_root,
+            timeout=300,
+        )
+        auto_defer_checkpoint["steps_completed"].append("git_push")
+        _checkpoint_post_commit_progress(
+            auto_defer_checkpoint,
+            continuation_path=continuation_path,
+            target_branch=target_branch,
+        )
+        result["steps_completed"] = list(auto_defer_checkpoint["steps_completed"])
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        if isinstance(exc, subprocess.TimeoutExpired):
+            failure_detail = f"{exc.cmd!r} timed out"
+        else:
+            failure_detail = _tail_failure_excerpt(
+                "\n".join(
+                    str(part)
+                    for part in (exc.stderr, exc.stdout)
+                    if part
+                ),
+                limit=1200,
+            ) or str(exc)
+        log(
+            "Step 15: auto-defer report child-commit strand failed with "
+            f"{type(exc).__name__}: {failure_detail}"
+        )
+        return {
+            "status": "bot_findings_pending",
+            "bot_findings": findings,
+            "pr_number": pr_number,
+            "steps_completed": result.get("steps_completed", []),
+            "remediation_rounds_attempted": round_num,
+            "errors": [failure_detail],
+            "auto_defer_failure_class": type(exc).__name__,
+        }
+
+    _resolve_auto_deferred_bot_threads(
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        pr_number=pr_number,
+        log=log,
+    )
+    log(
+        f"Step 15: deferred report committed and pushed on {current_head[:8]} "
+        "before eligible bot-thread resolution"
+    )
+    return None
+
+
 def _classify_and_auto_defer_unremediated_bot_findings(
     current_findings: list[dict[str, Any]],
     *,
@@ -10427,6 +10617,8 @@ def _classify_and_auto_defer_unremediated_bot_findings(
     repo_name: str,
     pr_number: str,
     wave_id: str,
+    target_branch: str,
+    continuation_path: Path,
     result: dict[str, Any],
     log: Any,
 ) -> dict[str, Any] | None:
@@ -10443,8 +10635,8 @@ def _classify_and_auto_defer_unremediated_bot_findings(
     * Critical-path findings (hooks, executors, checks, preflight) -> route to
       recovery regardless of P-level; the badge measures code quality, not
       pipeline impact.
-    * Otherwise (all P2+/non-critical) -> auto-defer + stage/amend/re-mint the
-      deferred report, then return ``None`` so the caller proceeds to merge.
+    * Otherwise (all P2+/non-critical) -> auto-defer the report through a normal
+      guarded child commit, then return ``None`` so the caller proceeds to merge.
 
     Returns a ``bot_findings_pending`` response dict when any P0/P1 OR
     critical-path finding remains; ``None`` (auto-deferred) otherwise. This is
@@ -10498,44 +10690,14 @@ def _classify_and_auto_defer_unremediated_bot_findings(
             "remediation_rounds_attempted": round_num,
         }
     log(f"Step 15: adapter produced no changes in round {round_num} — auto-deferring {len(current_findings)} non-blocking finding(s)")
-    _auto_defer_bot_findings(
+    return _auto_defer_bot_findings(
         repo_root, current_findings, wave_id, pr_number,
         repo_owner, repo_name, log,
+        round_num=round_num,
+        target_branch=target_branch,
+        continuation_path=continuation_path,
+        result=result,
     )
-    # Stage + amend the deferred report into the commit so it's not
-    # lost on merge (PR #760 bot finding 5).
-    try:
-        deferred_dir = repo_root / "reports" / "deferred" / "non_blocking"
-        report_name = f"pr{pr_number}_bot_auto_deferred_{wave_id}.md"
-        report_path = deferred_dir / report_name
-        if report_path.exists():
-            _run(["git", "add", "-f", "--", str(report_path.relative_to(repo_root))],
-                 cwd=repo_root, timeout=30)
-            # Staging the deferred report changes the staged tree, which
-            # makes any prior receipt stale ("staged content changed since
-            # review"). Re-mint a fresh receipt for the now-staged report so
-            # the amend's pre-commit hook sees a matching staged_sha — the
-            # same mint-before-commit pattern the normal-remediation branch
-            # (and Step 9) use. Without this the amend's hook rejects the
-            # commit and the report is silently dropped (the failure below is
-            # caught non-fatally).
-            _mint_bot_remediation_receipt(
-                repo_root=repo_root,
-                findings_addressed=[
-                    {"path": f.get("path", ""), "body": f.get("body", "")[:200]}
-                    for f in current_findings
-                ],
-                scoped_files=[str(report_path.relative_to(repo_root))],
-                round_num=round_num,
-                wave_id=wave_id,
-            )
-            _run(["git", "commit", "--amend", "--no-edit"], cwd=repo_root,
-                 timeout=30, env=_commit_subprocess_env())
-            _run(["git", "push", "--force-with-lease"], cwd=repo_root, timeout=60)
-            log(f"Step 15: deferred report amended into commit and pushed")
-    except subprocess.CalledProcessError as exc:
-        log(f"Step 15: failed to amend deferred report (non-fatal): {exc}")
-    return None  # success — caller proceeds to merge
 
 
 def _attempt_bot_finding_remediation(
@@ -10663,10 +10825,11 @@ def _attempt_bot_finding_remediation(
             # The adapter may have raised AFTER staging or modifying files (a
             # timeout mid-edit). The no-change path below only reaches the
             # shared helper once `git status` proves the worktree clean; the
-            # helper's deferrable branch then runs `git commit --amend` +
-            # force-push. So FIRST discard the adapter's partial work, otherwise
-            # those unreviewed partial edits would be silently folded into the
-            # commit. This restores the helper's clean-worktree precondition.
+            # helper's deferrable branch then stages only its report into a
+            # guarded child commit. So FIRST discard the adapter's partial work,
+            # otherwise those unreviewed partial edits would be silently folded
+            # into that commit. This restores the helper's clean-worktree
+            # precondition.
             _discard_failed_adapter_partial_changes(repo_root, log=log)
             return _classify_and_auto_defer_unremediated_bot_findings(
                 current_findings,
@@ -10676,6 +10839,8 @@ def _attempt_bot_finding_remediation(
                 repo_name=repo_name,
                 pr_number=pr_number,
                 wave_id=wave_id,
+                target_branch=target_branch,
+                continuation_path=continuation_path,
                 result=result,
                 log=log,
             )
@@ -10699,6 +10864,8 @@ def _attempt_bot_finding_remediation(
                 repo_name=repo_name,
                 pr_number=pr_number,
                 wave_id=wave_id,
+                target_branch=target_branch,
+                continuation_path=continuation_path,
                 result=result,
                 log=log,
             )
@@ -11115,7 +11282,7 @@ def _attempt_bot_finding_remediation(
                 f"current-head findings"
             )
             try:
-                _auto_defer_bot_findings(
+                auto_defer_response = _auto_defer_bot_findings(
                     repo_root=repo_root,
                     findings=verified_findings,
                     wave_id=wave_id,
@@ -11123,6 +11290,10 @@ def _attempt_bot_finding_remediation(
                     repo_owner=repo_owner,
                     repo_name=repo_name,
                     log=log,
+                    round_num=round_num,
+                    target_branch=target_branch,
+                    continuation_path=continuation_path,
+                    result=result,
                 )
             except Exception as defer_exc:
                 log(
@@ -11137,10 +11308,13 @@ def _attempt_bot_finding_remediation(
                     "remediation_rounds_attempted": round_num,
                     "review_wait_timeout": True,
                 }
+            if auto_defer_response is not None:
+                auto_defer_response["review_wait_timeout"] = True
+                return auto_defer_response
             log(
                 f"Step 15: auto-defer succeeded after review-wait-timeout; "
-                f"verified current-head findings written to "
-                f"reports/deferred/non_blocking/ and bot threads resolved. "
+                f"verified current-head findings committed and pushed to "
+                f"reports/deferred/non_blocking/ before bot-thread resolution. "
                 f"Proceeding to merge."
             )
             return None

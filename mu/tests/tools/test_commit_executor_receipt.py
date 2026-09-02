@@ -7132,120 +7132,595 @@ class TestBotRemediationValidation:
         commit_env = self._capture_step15_commit_env(repo)
         assert commit_env is None
 
-    def _drive_step15_auto_defer_amend(self, repo, *, wave_id, pr_number="1036"):
-        """Drive Step-15 into the auto-defer branch (adapter makes NO changes, a
-        single non-blocking finding) up to the `git commit --amend`, and return a
-        dict with the amend `_run` env and the (passed, message) the amend's
-        pre-commit hook would compute by resolving the bus carried in that env.
-
-        The auto-defer branch is reached only when the worktree is clean after the
-        adapter, so the repo gitignores the bus dirs (as production does) and a
-        baseline commit lands first.
-        """
+    def _prepare_step15_auto_defer_repo(self, repo):
+        """Create the clean-tree premise used by the Step-15 auto-defer path."""
         import subprocess
 
         _write_bot_remediation_executor_config(repo)
-        # Mirror production .gitignore: bus dirs and the .scratch prompt dir are
-        # ignored, so neither minting a receipt into .agent_bus-laneN/meta nor the
-        # remediation prompt file dirties `git status --porcelain` (the clean-tree
-        # gate that selects the auto-defer branch).
+        # Production ignores the bus and scratch runtime surfaces.  Keep those
+        # transient files out of the no-change adapter's porcelain status, while
+        # tracking an explicit pre-push-fast stub so the guard is never skipped.
         (repo / ".gitignore").write_text(
             ".agent_bus/\n.agent_bus-*/\n.scratch/\n", encoding="utf-8"
         )
+        pre_push = repo / "mu" / "tools" / "hooks" / "pre-push-fast"
+        pre_push.parent.mkdir(parents=True, exist_ok=True)
+        pre_push.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
         subprocess.run(
-            ["git", "commit", "-m", "baseline"],
-            cwd=repo, check=True, capture_output=True,
+            ["git", "commit", "-m", "baseline auto-defer"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def _drive_step15_auto_defer_child(
+        self,
+        repo,
+        *,
+        fail_at=None,
+        failure_kind=None,
+        resolver_timeout=False,
+    ):
+        """Drive the no-change adapter through the report child-commit strand.
+
+        Git staging and commit are real local operations.  Only the remote push
+        and GraphQL calls are intercepted.  ``fail_at`` selects one controlled
+        subprocess boundary (stage, commit, guard, or push).
+        """
+        import subprocess
+
+        wave_id = "bot-remediation-auto-defer-child-test"
+        pr_number = "1036"
+        target_branch = "bot-remediation-test"
+        baseline_head = self._prepare_step15_auto_defer_repo(repo)
+        continuation_path = (
+            repo / ".agent_bus" / "meta" / "commit_continuation.json"
+        )
+        report_path = (
+            repo
+            / "reports"
+            / "deferred"
+            / "non_blocking"
+            / f"pr{pr_number}_bot_auto_deferred_{wave_id}.md"
+        )
+        findings = [{
+            "path": "docs/nit.md",
+            "body": "P2 minor doc nit",
+            "author": commit_mod.BOT_REVIEW_LOGIN,
+            "line": 1,
+        }]
+        result = self._base_result()
+        result.update({
+            "commit_sha": baseline_head,
+            "bot_review_request_sha": baseline_head,
+            "pre_push_isolation": {"marker": "stale-head-isolation"},
+            "pre_push_restored_paths": ["stale-head.py"],
+            "stable_auto_defer_marker": "preserve-me",
+        })
+        # Seed an old-head continuation, including every currently supported
+        # per-head field.  The child-head checkpoint must replace this payload.
+        commit_mod._checkpoint_post_commit_progress(  # ANTICHEAT_OK: seeds stale-head continuation state
+            result,
+            continuation_path=continuation_path,
+            target_branch=target_branch,
         )
 
-        # Reproduce the bridge finding: a prior receipt exists for the pre-report
-        # (empty) staged state, so WITHOUT a re-mint it is stale once the report is
-        # staged ("staged content changed since review").
-        commit_mod._mint_bot_remediation_receipt(  # ANTICHEAT_OK: seeds the stale prior receipt
-            repo_root=repo,
-            findings_addressed=[],
-            scoped_files=[],
-            round_num=0,
-            wave_id=wave_id,
-        )
+        events: list[str] = []
+        commands: list[dict[str, object]] = []
+        checkpoints: list[dict[str, object]] = []
+        checkpoint_inputs: list[dict[str, object]] = []
+        reset_step_inputs: list[list[str]] = []
+        guard_heads: list[str] = []
+        resolver_calls: list[dict[str, object]] = []
+        graphql_inputs: list[str] = []
+        report_paths: list[Path] = []
+        receipt_verifications: list[tuple[bool, str]] = []
+        logs: list[str] = []
 
-        def fake_auto_defer(repo_root, findings, wave_id_, pr_number_, repo_owner, repo_name, log):
-            # Mirror _auto_defer_bot_findings' on-disk side effect (the report)
-            # without its PR-thread/network calls; the unit under test is the
-            # mint-before-amend that follows, not thread resolution.
-            d = repo_root / "reports" / "deferred" / "non_blocking"
-            d.mkdir(parents=True, exist_ok=True)
-            (d / f"pr{pr_number_}_bot_auto_deferred_{wave_id_}.md").write_text(
-                "# deferred finding\n", encoding="utf-8")
+        real_run = commit_mod._run  # ANTICHEAT_OK: command/order observation wrapper
+        real_checkpoint = commit_mod._checkpoint_post_commit_progress  # ANTICHEAT_OK: ordinary checkpoint wrapper
+        real_reset_steps = commit_mod._continuation_steps_for_new_commit  # ANTICHEAT_OK: child-head step reset wrapper
+        real_write_report = commit_mod._write_auto_deferred_bot_findings_report  # ANTICHEAT_OK: local-report boundary wrapper
+        real_mint_receipt = commit_mod._mint_bot_remediation_receipt  # ANTICHEAT_OK: receipt-order wrapper
+        real_guard = commit_mod._run_bot_remediation_pre_push_guard  # ANTICHEAT_OK: exact-HEAD guard wrapper
+        real_resolver = commit_mod._resolve_auto_deferred_bot_threads  # ANTICHEAT_OK: post-push resolver wrapper
+        real_subprocess_run = subprocess.run
 
-        real_run = commit_mod._run  # ANTICHEAT_OK: intercepts the amend to verify the receipt the hook would resolve
-        captured = {}
-
-        def intercept_run(args, cwd, check=True, timeout=120, env=None):
-            command = list(args)
-            if command[:3] == ["git", "commit", "--amend"]:
-                captured["amend_env"] = env
-                bus_dir = (env or {}).get("RCX_AGENT_BUS_DIR")
-                # Simulate what the pre-commit hook does: resolve the bus from the
-                # commit env and verify the staged receipt for the staged content.
-                captured["verify"] = meta_bridge_mod.verify_pre_commit_receipt(
-                    Path(cwd), bus_dir=bus_dir,
+        def selected_failure(command, timeout):
+            if failure_kind == "called_process_error":
+                raise subprocess.CalledProcessError(
+                    23,
+                    command,
+                    output="controlled stdout",
+                    stderr="controlled stderr",
                 )
-                # Short-circuit before the real amend / force-push.
-                raise subprocess.CalledProcessError(1, command, output="", stderr="captured")
-            return real_run(args, cwd=cwd, check=check, timeout=timeout, env=env)
+            if failure_kind == "timeout_expired":
+                raise subprocess.TimeoutExpired(command, timeout=timeout)
+            raise AssertionError(f"unknown failure kind: {failure_kind!r}")
 
-        with patch.object(
-            commit_mod,
-            "_bridge_adapters",
-            self._fake_bridge_adapters(lambda _repo_root: None),  # adapter makes no changes
-        ), patch.object(
-            commit_mod, "_auto_defer_bot_findings", side_effect=fake_auto_defer,
-        ), patch.object(commit_mod, "_run", side_effect=intercept_run):
-            commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: direct auto-defer amend regression
-                [{
-                    "path": "docs/nit.md",
-                    "body": "P2 minor doc nit",
-                    "author": commit_mod.BOT_REVIEW_LOGIN,
-                    "line": 1,
-                }],
-                repo_root=repo,
-                repo_owner="owner",
-                repo_name="repo",
-                pr_number=pr_number,
-                target_branch="bot-remediation-test",
-                head_sha="old-head",
-                wave_id=wave_id,
-                continuation_path=repo / ".agent_bus" / "meta" / "commit_continuation.json",
-                result=self._base_result(),
-                log=lambda _msg: None,
+        def intercept_run(
+            args,
+            *,
+            cwd,
+            check=True,
+            timeout=120,
+            env=None,
+            input_text=None,
+        ):
+            command = list(args)
+            commands.append({"command": command, "timeout": timeout, "env": env})
+            is_stage = command[:4] == ["git", "add", "-f", "--"]
+            is_commit = command[:3] == ["git", "commit", "-m"]
+            is_guard = command == [
+                "bash",
+                str(repo / "mu" / "tools" / "hooks" / "pre-push-fast"),
+            ]
+            is_push = command[:2] == ["git", "push"]
+            is_head_read = command == ["git", "rev-parse", "HEAD"]
+            if is_stage:
+                assert report_path.exists(), "report must exist before it is staged"
+                events.append("stage_report")
+            elif is_commit:
+                events.append("commit_child")
+                receipt_verifications.append(
+                    meta_bridge_mod.verify_pre_commit_receipt(
+                        Path(cwd),
+                        bus_dir=(env or {}).get("RCX_AGENT_BUS_DIR"),
+                    )
+                )
+            elif is_guard:
+                events.append("guard_subprocess")
+            elif is_push:
+                events.append("push")
+            elif is_head_read:
+                events.append("read_child_head")
+
+            if (
+                (fail_at == "stage" and is_stage)
+                or (fail_at == "commit" and is_commit)
+                or (fail_at == "guard" and is_guard)
+                or (fail_at == "push" and is_push)
+            ):
+                selected_failure(command, timeout)
+            if is_push:
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            return real_run(
+                command,
+                cwd=Path(cwd),
+                check=check,
+                timeout=timeout,
+                env=env,
+                input_text=input_text,
             )
-        assert "verify" in captured, "Step 15 auto-defer never reached `git commit --amend`"
-        return captured
 
-    def test_auto_defer_amend_mints_fresh_receipt_for_staged_report(self, tmp_path):
-        # Regression (bridge round 1, finding 1): the Step-15 auto-defer branch
-        # stages the deferred report then `git commit --amend`. It MUST mint a
-        # fresh receipt for the newly staged report first; otherwise the amend's
-        # pre-commit hook resolves the prior receipt as stale ('staged content
-        # changed since review') and the report is silently dropped (the amend
-        # failure is caught non-fatally). On a lane bus the amend env must also
-        # carry RCX_AGENT_BUS_DIR so the hook resolves the SAME lane bus the
-        # receipt was minted to. Without the mint this returns passed=False.
-        repo = _setup_repo(tmp_path)
-        lane_bus = commit_mod.agent_bus_relpath(".agent_bus-lane1")
-        wave_id = "bot-remediation-amend-test"
-        token = commit_mod._ACTIVE_BUS_DIR.set(lane_bus)  # ANTICHEAT_OK: activates lane bus authority
+        def capture_report(*args, **kwargs):
+            events.append("write_report")
+            path = real_write_report(*args, **kwargs)
+            report_paths.append(path)
+            return path
+
+        def capture_receipt(*args, **kwargs):
+            staged = real_subprocess_run(
+                ["git", "diff", "--cached", "--name-only"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+            assert str(report_path.relative_to(repo)) in staged
+            events.append("mint_receipt")
+            return real_mint_receipt(*args, **kwargs)
+
+        def capture_checkpoint(
+            checkpoint_result,
+            *,
+            continuation_path,
+            target_branch,
+        ):
+            checkpoint_inputs.append(json.loads(json.dumps(checkpoint_result)))
+            real_checkpoint(
+                checkpoint_result,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
+            )
+            payload = json.loads(continuation_path.read_text(encoding="utf-8"))
+            checkpoints.append(payload)
+            events.append(f"checkpoint:{payload['steps_completed'][-1]}")
+
+        def capture_reset_steps(steps_completed):
+            reset_step_inputs.append(list(steps_completed))
+            return real_reset_steps(steps_completed)
+
+        def capture_guard(repo_root, *, log=None):
+            head = real_subprocess_run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            guard_heads.append(head)
+            events.append("guard_enter")
+            guard_result = real_guard(repo_root, log=log)
+            events.append(
+                "guard_passed" if guard_result["passed"] else "guard_failed"
+            )
+            return guard_result
+
+        def capture_resolver(**kwargs):
+            resolver_calls.append(dict(kwargs))
+            events.append("resolver")
+            return real_resolver(**kwargs)
+
+        def intercept_subprocess_run(args, *positional, **kwargs):
+            command = list(args)
+            if command == ["gh", "api", "graphql", "--input", "-"]:
+                graphql_input = str(kwargs.get("input") or "")
+                graphql_inputs.append(graphql_input)
+                if "mutation" in graphql_input:
+                    events.append("graphql_mutation")
+                    if resolver_timeout:
+                        raise subprocess.TimeoutExpired(command, timeout=30)
+                    stdout = json.dumps({
+                        "data": {"resolveReviewThread": {"thread": {"isResolved": True}}}
+                    })
+                else:
+                    events.append("graphql_query")
+                    stdout = json.dumps({
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewThreads": {
+                                        "nodes": [
+                                            {
+                                                "id": "human-thread",
+                                                "isResolved": False,
+                                                "comments": {"nodes": [{
+                                                    "author": {"login": "human-reviewer"}
+                                                }]},
+                                            },
+                                            {
+                                                "id": "resolved-bot-thread",
+                                                "isResolved": True,
+                                                "comments": {"nodes": [{
+                                                    "author": {"login": commit_mod.BOT_REVIEW_LOGIN}
+                                                }]},
+                                            },
+                                            {
+                                                "id": "eligible-bot-thread",
+                                                "isResolved": False,
+                                                "comments": {"nodes": [{
+                                                    "author": {"login": commit_mod.BOT_REVIEW_LOGIN}
+                                                }]},
+                                            },
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    })
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=stdout,
+                    stderr="",
+                )
+            return real_subprocess_run(args, *positional, **kwargs)
+
+        lane_bus = commit_mod.agent_bus_relpath(".agent_bus-auto-defer")
+        token = commit_mod._ACTIVE_BUS_DIR.set(lane_bus)  # ANTICHEAT_OK: active receipt/commit bus authority
         try:
-            captured = self._drive_step15_auto_defer_amend(repo, wave_id=wave_id)
-            expected_env = commit_mod._commit_subprocess_env()  # ANTICHEAT_OK: lane bus active here
+            expected_commit_env = commit_mod._commit_subprocess_env()  # ANTICHEAT_OK: exact existing commit env
+            with patch.object(
+                commit_mod,
+                "_bridge_adapters",
+                self._fake_bridge_adapters(lambda _repo_root: None),
+            ), patch.object(
+                commit_mod,
+                "_write_auto_deferred_bot_findings_report",
+                side_effect=capture_report,
+            ), patch.object(
+                commit_mod,
+                "_mint_bot_remediation_receipt",
+                side_effect=capture_receipt,
+            ), patch.object(
+                commit_mod,
+                "_checkpoint_post_commit_progress",
+                side_effect=capture_checkpoint,
+            ), patch.object(
+                commit_mod,
+                "_continuation_steps_for_new_commit",
+                side_effect=capture_reset_steps,
+            ), patch.object(
+                commit_mod,
+                "_run_bot_remediation_pre_push_guard",
+                side_effect=capture_guard,
+            ), patch.object(
+                commit_mod,
+                "_resolve_auto_deferred_bot_threads",
+                side_effect=capture_resolver,
+            ), patch.object(
+                commit_mod,
+                "_wait_for_pr_ci",
+            ) as wait_for_ci, patch.object(
+                commit_mod,
+                "_query_pr_review_state",
+            ) as query_pr_state, patch.object(
+                commit_mod,
+                "_maybe_request_current_head_bot_review",
+            ) as request_bot_review, patch.object(
+                commit_mod,
+                "_wait_for_bot_review_freshness",
+            ) as wait_review, patch.object(
+                commit_mod,
+                "_run",
+                side_effect=intercept_run,
+            ), patch.object(
+                commit_mod.subprocess,
+                "run",
+                side_effect=intercept_subprocess_run,
+            ):
+                response = commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: full no-change auto-defer path
+                    findings,
+                    repo_root=repo,
+                    repo_owner="owner",
+                    repo_name="repo",
+                    pr_number=pr_number,
+                    target_branch=target_branch,
+                    head_sha=baseline_head,
+                    wave_id=wave_id,
+                    continuation_path=continuation_path,
+                    result=result,
+                    log=logs.append,
+                )
         finally:
-            commit_mod._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: restores bus ContextVar
-        passed, message = captured["verify"]
-        assert passed, f"amend receipt must be valid for the staged report, got: {message}"
-        assert captured["amend_env"] == expected_env
-        assert captured["amend_env"] is not None
-        assert captured["amend_env"].get("RCX_AGENT_BUS_DIR") == str(lane_bus)
+            commit_mod._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: restore bus ContextVar
+
+        child_head = real_subprocess_run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return {
+            "response": response,
+            "baseline_head": baseline_head,
+            "child_head": child_head,
+            "expected_commit_env": expected_commit_env,
+            "events": events,
+            "commands": commands,
+            "checkpoints": checkpoints,
+            "checkpoint_inputs": checkpoint_inputs,
+            "reset_step_inputs": reset_step_inputs,
+            "guard_heads": guard_heads,
+            "resolver_calls": resolver_calls,
+            "graphql_inputs": graphql_inputs,
+            "report_paths": report_paths,
+            "report_path": report_path,
+            "receipt_verifications": receipt_verifications,
+            "logs": logs,
+            "downstream_calls": {
+                "wait_for_ci": wait_for_ci.call_count,
+                "query_pr_state": query_pr_state.call_count,
+                "request_bot_review": request_bot_review.call_count,
+                "wait_review": wait_review.call_count,
+            },
+        }
+
+    def test_auto_defer_report_writer_is_filesystem_only(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            side_effect=AssertionError("report creation must not spawn a subprocess"),
+        ):
+            report_path = commit_mod._write_auto_deferred_bot_findings_report(  # ANTICHEAT_OK: local-only report boundary
+                repo,
+                [{"path": "docs/nit.md", "body": "P2 local report"}],
+                "local-report-wave",
+                "1036",
+                lambda _msg: None,
+            )
+
+        assert report_path.exists()
+        report = report_path.read_text(encoding="utf-8")
+        assert "PR #1036 Bot Findings (Auto-Deferred)" in report
+        assert "`docs/nit.md`" in report
+        assert "P2 local report" in report
+
+    def test_auto_defer_uses_child_commit_checkpoint_guard_push_then_resolver(
+        self,
+        tmp_path,
+    ):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        captured = self._drive_step15_auto_defer_child(
+            repo,
+            resolver_timeout=True,
+        )
+
+        assert captured["response"] is None
+        assert captured["child_head"] != captured["baseline_head"]
+        parent_head = subprocess.run(
+            ["git", "rev-parse", f"{captured['child_head']}^"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert parent_head == captured["baseline_head"]
+        assert captured["report_paths"] == [captured["report_path"]]
+        committed_paths = subprocess.run(
+            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", captured["child_head"]],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        assert str(captured["report_path"].relative_to(repo)) in committed_paths
+
+        commands = captured["commands"]
+        command_lists = [entry["command"] for entry in commands]
+        assert command_lists.index([
+            "git", "add", "-f", "--", str(captured["report_path"].relative_to(repo)),
+        ]) < next(
+            index
+            for index, command in enumerate(command_lists)
+            if command[:3] == ["git", "commit", "-m"]
+        )
+        commit_commands = [
+            entry for entry in commands
+            if entry["command"][:3] == ["git", "commit", "-m"]
+        ]
+        assert len(commit_commands) == 1
+        assert commit_commands[0]["env"] == captured["expected_commit_env"]
+        assert captured["receipt_verifications"]
+        receipt_passed, receipt_message = captured["receipt_verifications"][0]
+        assert receipt_passed, receipt_message
+        assert not any("--amend" in command for command in command_lists)
+        assert not any(
+            any(arg.startswith("--force") for arg in command)
+            for command in command_lists
+        )
+
+        push_entries = [
+            entry for entry in commands if entry["command"][:2] == ["git", "push"]
+        ]
+        assert push_entries == [{
+            "command": [
+                "git", "push", "--no-verify", "origin", "bot-remediation-test",
+            ],
+            "timeout": 300,
+            "env": None,
+        }]
+
+        expected_reset_steps = self._base_result()["steps_completed"][:7]
+        assert captured["reset_step_inputs"] == [
+            self._base_result()["steps_completed"]
+        ]
+        first_checkpoint = captured["checkpoints"][0]
+        first_checkpoint_input = captured["checkpoint_inputs"][0]
+        assert first_checkpoint["commit_sha"] == captured["child_head"]
+        assert first_checkpoint["steps_completed"] == expected_reset_steps
+        assert first_checkpoint_input["stable_auto_defer_marker"] == "preserve-me"
+        for stale_key in (
+            "bot_review_request_sha",
+            "pre_push_isolation",
+            "pre_push_restored_paths",
+        ):
+            assert stale_key not in first_checkpoint
+            assert stale_key not in first_checkpoint_input
+
+        assert captured["guard_heads"]
+        assert all(
+            head == captured["child_head"] for head in captured["guard_heads"]
+        )
+        guard_checkpoints = [
+            payload for payload in captured["checkpoints"]
+            if payload["steps_completed"][-1] == "run_pre_push_script"
+        ]
+        push_checkpoints = [
+            payload for payload in captured["checkpoints"]
+            if payload["steps_completed"][-1] == "git_push"
+        ]
+        assert guard_checkpoints
+        assert push_checkpoints
+        assert all(
+            payload["commit_sha"] == captured["child_head"]
+            for payload in guard_checkpoints + push_checkpoints
+        )
+
+        events = captured["events"]
+        assert events.index("write_report") < events.index("stage_report")
+        assert events.index("stage_report") < events.index("mint_receipt")
+        assert events.index("mint_receipt") < events.index("commit_child")
+        assert events.index("commit_child") < events.index("read_child_head")
+        assert events.index("read_child_head") < events.index("checkpoint:git_commit")
+        assert events.index("checkpoint:git_commit") < events.index("guard_enter")
+        assert events.index("guard_passed") < events.index("checkpoint:run_pre_push_script")
+        assert events.index("checkpoint:run_pre_push_script") < events.index("push")
+        assert events.index("push") < events.index("checkpoint:git_push")
+        assert events.index("checkpoint:git_push") < events.index("resolver")
+        assert events.index("resolver") < events.index("graphql_query")
+        assert events.index("graphql_query") < events.index("graphql_mutation")
+
+        mutations = [value for value in captured["graphql_inputs"] if "mutation" in value]
+        assert len(mutations) == 1
+        assert "eligible-bot-thread" in mutations[0]
+        assert "human-thread" not in mutations[0]
+        assert "resolved-bot-thread" not in mutations[0]
+        assert any("failed to resolve comment threads (non-fatal)" in log for log in captured["logs"])
+        assert captured["downstream_calls"] == {
+            "wait_for_ci": 0,
+            "query_pr_state": 0,
+            "request_bot_review": 0,
+            "wait_review": 0,
+        }
+
+    @pytest.mark.parametrize("fail_at", ["stage", "commit", "guard", "push"])
+    @pytest.mark.parametrize(
+        "failure_kind",
+        ["called_process_error", "timeout_expired"],
+    )
+    def test_auto_defer_subprocess_failure_is_controlled_before_remote_followup(
+        self,
+        tmp_path,
+        fail_at,
+        failure_kind,
+    ):
+        repo = _setup_repo(tmp_path)
+        captured = self._drive_step15_auto_defer_child(
+            repo,
+            fail_at=fail_at,
+            failure_kind=failure_kind,
+        )
+
+        response = captured["response"]
+        assert response is not None
+        assert response["status"] == "bot_findings_pending"
+        assert captured["resolver_calls"] == []
+        assert captured["graphql_inputs"] == []
+        assert captured["downstream_calls"] == {
+            "wait_for_ci": 0,
+            "query_pr_state": 0,
+            "request_bot_review": 0,
+            "wait_review": 0,
+        }
+
+        command_lists = [entry["command"] for entry in captured["commands"]]
+        assert not any(
+            any(str(arg).endswith("merge_pr.sh") for arg in command)
+            for command in command_lists
+        )
+        assert not any(
+            payload["steps_completed"][-1] == "git_push"
+            for payload in captured["checkpoints"]
+        )
+        head_reads = [
+            command for command in command_lists
+            if command == ["git", "rev-parse", "HEAD"]
+        ]
+        assert len(head_reads) <= 1, "must not advance to the post-CI PR-head refresh"
+        push_commands = [
+            command for command in command_lists if command[:2] == ["git", "push"]
+        ]
+        if fail_at == "push":
+            assert push_commands == [[
+                "git", "push", "--no-verify", "origin", "bot-remediation-test",
+            ]]
+        else:
+            assert push_commands == []
 
     def _fake_bridge_adapters_timeout(self, message="Adapter 'claude' timed out after 600s"):
         """Fake bridge adapters whose ``run_adapter`` RAISES BridgeAdapterError.
@@ -7282,19 +7757,17 @@ class TestBotRemediationValidation:
         """Drive ``_attempt_bot_finding_remediation`` so the remediation adapter
         raises BridgeAdapterError (timeout). Returns ``(response, auto_defer)``.
 
-        ``_auto_defer_bot_findings`` is mocked so the auto-defer branch does NOT
-        write the deferred report; the stage/amend block then no-ops
-        (``report_path.exists()`` is False) and the shared helper returns
-        ``None`` with no git/network calls. The unit under test is the
-        TIMEOUT-path CLASSIFICATION (auto-defer vs route-to-recovery), not the
-        amend mechanics (covered by
-        ``test_auto_defer_amend_mints_fresh_receipt_for_staged_report``).
+        ``_auto_defer_bot_findings`` is mocked to return the successful
+        auto-defer sentinel without writing, committing, pushing, or resolving.
+        The unit under test is the timeout-path classification (auto-defer vs
+        route-to-recovery), while the child-commit mechanics are covered by
+        ``test_auto_defer_uses_child_commit_checkpoint_guard_push_then_resolver``.
         """
         _write_bot_remediation_executor_config(repo)
         with patch.object(
             commit_mod, "_bridge_adapters", self._fake_bridge_adapters_timeout(),
         ), patch.object(
-            commit_mod, "_auto_defer_bot_findings",
+            commit_mod, "_auto_defer_bot_findings", return_value=None,
         ) as auto_defer:
             response = commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: direct Step 15 timeout classification regression
                 findings,
