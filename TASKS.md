@@ -166,6 +166,7 @@ Wave: `pr1219-p0ibrrcp-provider-neutral-r4-2026-09-01`. Landed through PR #1255 
 27. **[pr1219-p0ibrrcp-provider-terminal-r4b-2026-08-25] NEXT**
 
    Task: `[ROLES-ALL-CODEX-PR1219-P0IBRRCP-PROVIDER-TERMINAL-R4B]`. Wave: `pr1219-p0ibrrcp-provider-terminal-r4b-2026-08-25`. Build and launch a fresh packet only after the exact merge of recovery-timeout containment, pin it to that actual merge SHA, and scope it only to provider-terminal authority. Root-exit R4C then remaining envelope-validation R3 stay serialized, nonnumbered, and nonlaunching until each exact predecessor lands. Never resume, copy, or mutate a preserved candidate.
+   Tracker sync: `mu/tools/agents/bridge_adapters.py` now requires both a complete agent envelope and its matching parsed provider terminal event before pre-EOF adapter termination succeeds; natural EOF remains a separate success path.
 
    Canonical broad-P0IB requirement mapping (preserved here but not numbered or launchable): together P0IB1 and P0IB2 extend the same candidate-authority builder through commit/recovery. P0IB1 must preserve or rebuild landed authority through recovery without importing untrusted candidate code. P0IB2 must rebuild and bind the exact-base inventory after every Step-5/5e mutation, before pre-commit supervision, then perform a nonmutating receipt/index recheck immediately before `git commit`. Stale receipts, outside-allowlist paths, missing same-wave generated artifacts, or index drift must fail closed.
 
