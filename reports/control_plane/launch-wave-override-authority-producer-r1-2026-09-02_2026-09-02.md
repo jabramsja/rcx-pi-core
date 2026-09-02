@@ -118,9 +118,6 @@ This enumeration only makes the existing allowlist mechanically explicit; it doe
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/launch-wave-override-authority-producer-r1-2026-09-02.json`
 - Current staged files:
-  - `TASKS.md`
-  - `mu/tests/tools/test_launch_wave.py`
-  - `mu/tools/executors/launch_wave.py`
   - `reports/control_plane/launch-wave-override-authority-producer-r1-2026-09-02_2026-09-02.md`
   - `reports/l4_wave_indicators/launch-wave-override-authority-producer-r1-2026-09-02.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
