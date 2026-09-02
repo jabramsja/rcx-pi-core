@@ -6458,6 +6458,281 @@ class TestBridgeReviewMonitoring:
                 except ProcessLookupError:
                     pass
 
+    def test_bridge_normal_exit_preserves_recorded_child_across_poll_snapshot_race(self, tmp_path):
+        child_pid_path = tmp_path / "child.pid"
+        child_ready_path = tmp_path / "child.ready"
+        child_term_handled_path = tmp_path / "child.term-handled"
+        release_path = tmp_path / "release-parent"
+        child_code = (
+            "import pathlib, signal, sys, time\n"
+            "term_handled = pathlib.Path(sys.argv[1])\n"
+            "def handle_term(_signum, _frame):\n"
+            "    print('child cleanup stdout', flush=True)\n"
+            "    print('child cleanup stderr', file=sys.stderr, flush=True)\n"
+            "    term_handled.write_text('handled\\n', encoding='utf-8')\n"
+            "    raise SystemExit(0)\n"
+            "signal.signal(signal.SIGTERM, handle_term)\n"
+            "pathlib.Path(sys.argv[2]).write_text('ready\\n', encoding='utf-8')\n"
+            "time.sleep(60)\n"
+        )
+        parent_code = (
+            "import pathlib, subprocess, sys, time\n"
+            "child = subprocess.Popen(\n"
+            "    [sys.executable, '-c', sys.argv[1], sys.argv[4], sys.argv[5]],\n"
+            "    start_new_session=True,\n"
+            ")\n"
+            "pathlib.Path(sys.argv[2]).write_text(str(child.pid), encoding='utf-8')\n"
+            "release = pathlib.Path(sys.argv[3])\n"
+            "while not release.exists():\n"
+            "    time.sleep(0.01)\n"
+            "print('normal bridge stdout', flush=True)\n"
+            "print('normal bridge stderr', file=sys.stderr, flush=True)\n"
+        )
+        child_pids: list[int] = []
+        recorded_child_pids: list[int] = []
+        nonterminal_poll_pids: list[int] = []
+        observed_child_snapshots: list[tuple[int, ...]] = []
+        root_procs: list[subprocess.Popen[str]] = []
+        real_popen = pb_mod.subprocess.Popen
+        real_progress_snapshot = pb_mod._bridge_progress_snapshot  # ANTICHEAT_OK: wraps real process discovery
+
+        def tracking_popen(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            if kwargs.get("start_new_session"):
+                real_poll = proc.poll
+
+                def tracking_poll():
+                    exit_code = real_poll()
+                    if exit_code is None:
+                        nonterminal_poll_pids.append(proc.pid)
+                    return exit_code
+
+                proc.poll = tracking_poll
+                root_procs.append(proc)
+            return proc
+
+        def on_started() -> None:
+            deadline = pb_mod.time.monotonic() + 5.0
+            while pb_mod.time.monotonic() < deadline:
+                try:
+                    child_pid = int(child_pid_path.read_text(encoding="utf-8").strip())
+                    child_ready = child_ready_path.read_text(encoding="utf-8")
+                except (FileNotFoundError, ValueError):
+                    pb_mod.time.sleep(0.01)
+                    continue
+                if child_ready != "ready\n":
+                    pb_mod.time.sleep(0.01)
+                    continue
+                child_pids.append(child_pid)
+                assert pb_mod._pid_is_live(child_pid)  # ANTICHEAT_OK: synchronized real-process precondition
+                return
+            raise AssertionError("detached child pid was not observed")
+
+        def release_between_nonterminal_poll_and_snapshot(*args, **kwargs):
+            # Exit after a real nonterminal root poll but before the next snapshot.
+            release_parent = bool(
+                observed_child_snapshots
+                and nonterminal_poll_pids
+                and not release_path.exists()
+            )
+            if release_parent:
+                assert root_procs
+                release_path.write_text("release\n", encoding="utf-8")
+                assert root_procs[0].wait(timeout=5) == 0
+
+            snapshot = real_progress_snapshot(*args, **kwargs)
+            snapshot_child_pids = tuple(snapshot["child_pids"])
+            observed_child_snapshots.append(snapshot_child_pids)
+            if len(observed_child_snapshots) == 1:
+                assert child_pids[0] in snapshot_child_pids
+                recorded_child_pids.append(child_pids[0])
+            if release_parent:
+                assert child_pids[0] not in snapshot_child_pids
+                assert pb_mod._pid_is_live(child_pids[0])  # ANTICHEAT_OK: prior recorded child survives root exit
+            return snapshot
+
+        try:
+            with patch.object(
+                pb_mod.subprocess,
+                "Popen",
+                side_effect=tracking_popen,
+            ), patch.object(
+                pb_mod,
+                "_bridge_progress_snapshot",
+                side_effect=release_between_nonterminal_poll_and_snapshot,
+            ):
+                result = pb_mod._run_bridge_review_subprocess(  # ANTICHEAT_OK: synchronized normal-exit cleanup regression
+                    tmp_path,
+                    [
+                        sys.executable,
+                        "-c",
+                        parent_code,
+                        child_code,
+                        str(child_pid_path),
+                        str(release_path),
+                        str(child_term_handled_path),
+                        str(child_ready_path),
+                    ],
+                    job_id="normal-exit-job",
+                    timeout=10,
+                    verbose=False,
+                    on_started=on_started,
+                    poll_interval=0.05,
+                    stale_timeout=5.0,
+                    aggregation_hang_timeout=5.0,
+                )
+
+            assert recorded_child_pids == child_pids
+            assert child_term_handled_path.read_text(encoding="utf-8") == "handled\n"
+            assert result["exit_code"] == 0
+            assert result["stdout"] == "normal bridge stdout\n"
+            assert result["stderr"] == "normal bridge stderr\n"
+            assert not pb_mod._pid_is_live(child_pids[0])  # ANTICHEAT_OK: cleanup completed before return
+        finally:
+            cleanup_child_pids = set(child_pids)
+            try:
+                cleanup_child_pids.add(
+                    int(child_pid_path.read_text(encoding="utf-8").strip())
+                )
+            except (FileNotFoundError, ValueError):
+                pass
+            for child_pid in cleanup_child_pids:
+                pb_mod._signal_process_group_or_pid(child_pid, pb_mod.signal.SIGKILL)  # ANTICHEAT_OK: test-only safety cleanup
+            for root_proc in root_procs:
+                if root_proc.poll() is None:
+                    root_proc.kill()
+                root_proc.wait(timeout=5)
+
+    def test_bridge_timeout_cleans_child_first_seen_on_returning_iteration(self, tmp_path):
+        spawn_child_path = tmp_path / "spawn-child"
+        child_pid_path = tmp_path / "child.pid"
+        child_ready_path = tmp_path / "child.ready"
+        child_term_handled_path = tmp_path / "child.term-handled"
+        child_code = (
+            "import pathlib, signal, sys, time\n"
+            "term_handled = pathlib.Path(sys.argv[1])\n"
+            "def handle_term(_signum, _frame):\n"
+            "    term_handled.write_text('handled\\n', encoding='utf-8')\n"
+            "    raise SystemExit(0)\n"
+            "signal.signal(signal.SIGTERM, handle_term)\n"
+            "pathlib.Path(sys.argv[2]).write_text('ready\\n', encoding='utf-8')\n"
+            "time.sleep(60)\n"
+        )
+        parent_code = (
+            "import pathlib, subprocess, sys, time\n"
+            "spawn_child = pathlib.Path(sys.argv[2])\n"
+            "while not spawn_child.exists():\n"
+            "    time.sleep(0.01)\n"
+            "child = subprocess.Popen(\n"
+            "    [sys.executable, '-c', sys.argv[1], sys.argv[4], sys.argv[5]],\n"
+            "    start_new_session=True,\n"
+            ")\n"
+            "pathlib.Path(sys.argv[3]).write_text(str(child.pid), encoding='utf-8')\n"
+            "time.sleep(60)\n"
+        )
+        child_pids: list[int] = []
+        observed_child_snapshots: list[tuple[int, ...]] = []
+        nonterminal_poll_snapshot_counts: list[int] = []
+        root_procs: list[subprocess.Popen[str]] = []
+        real_popen = pb_mod.subprocess.Popen
+        real_progress_snapshot = pb_mod._bridge_progress_snapshot  # ANTICHEAT_OK: wraps real process discovery
+
+        def tracking_popen(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            if kwargs.get("start_new_session"):
+                real_poll = proc.poll
+
+                def tracking_poll():
+                    exit_code = real_poll()
+                    if exit_code is None:
+                        nonterminal_poll_snapshot_counts.append(
+                            len(observed_child_snapshots)
+                        )
+                    return exit_code
+
+                proc.poll = tracking_poll
+                root_procs.append(proc)
+            return proc
+
+        def snapshot_then_spawn_child(*args, **kwargs):
+            snapshot = real_progress_snapshot(*args, **kwargs)
+            snapshot_child_pids = tuple(snapshot["child_pids"])
+            observed_child_snapshots.append(snapshot_child_pids)
+            if len(observed_child_snapshots) != 1:
+                return snapshot
+
+            assert snapshot_child_pids == ()
+            spawn_child_path.write_text("spawn\n", encoding="utf-8")
+            deadline = pb_mod.time.monotonic() + 5.0
+            while pb_mod.time.monotonic() < deadline:
+                try:
+                    child_pid = int(child_pid_path.read_text(encoding="utf-8").strip())
+                    child_ready = child_ready_path.read_text(encoding="utf-8")
+                except (FileNotFoundError, ValueError):
+                    pb_mod.time.sleep(0.01)
+                    continue
+                if child_ready != "ready\n":
+                    pb_mod.time.sleep(0.01)
+                    continue
+                child_pids.append(child_pid)
+                assert pb_mod._pid_is_live(child_pid)  # ANTICHEAT_OK: synchronized real-process precondition
+                return snapshot
+            raise AssertionError("detached child pid was not observed")
+
+        try:
+            with patch.object(
+                pb_mod.subprocess,
+                "Popen",
+                side_effect=tracking_popen,
+            ), patch.object(
+                pb_mod,
+                "_bridge_progress_snapshot",
+                side_effect=snapshot_then_spawn_child,
+            ):
+                result = pb_mod._run_bridge_review_subprocess(  # ANTICHEAT_OK: synchronized timeout cleanup regression
+                    tmp_path,
+                    [
+                        sys.executable,
+                        "-c",
+                        parent_code,
+                        child_code,
+                        str(spawn_child_path),
+                        str(child_pid_path),
+                        str(child_term_handled_path),
+                        str(child_ready_path),
+                    ],
+                    job_id="timeout-new-child-job",
+                    timeout=0,
+                    verbose=False,
+                    poll_interval=0.05,
+                    stale_timeout=5.0,
+                    aggregation_hang_timeout=5.0,
+                )
+
+            assert child_pids
+            assert len(observed_child_snapshots) >= 2
+            assert observed_child_snapshots[0] == ()
+            assert child_pids[0] in observed_child_snapshots[1]
+            assert 2 in nonterminal_poll_snapshot_counts
+            assert child_term_handled_path.read_text(encoding="utf-8") == "handled\n"
+            assert result["exit_code"] == -1
+            assert "Bridge review timed out" in result["stderr"]
+            assert not pb_mod._pid_is_live(child_pids[0])  # ANTICHEAT_OK: cleanup completed before return
+        finally:
+            cleanup_child_pids = set(child_pids)
+            try:
+                cleanup_child_pids.add(
+                    int(child_pid_path.read_text(encoding="utf-8").strip())
+                )
+            except (FileNotFoundError, ValueError):
+                pass
+            for child_pid in cleanup_child_pids:
+                pb_mod._signal_process_group_or_pid(child_pid, pb_mod.signal.SIGKILL)  # ANTICHEAT_OK: test-only safety cleanup
+            for root_proc in root_procs:
+                if root_proc.poll() is None:
+                    root_proc.kill()
+                root_proc.wait(timeout=5)
+
     def test_bridge_monitoring_exception_cleans_owned_process_tree(self, tmp_path):
         proc = MagicMock()
         proc.pid = 12345
