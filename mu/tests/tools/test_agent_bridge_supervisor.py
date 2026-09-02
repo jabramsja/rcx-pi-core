@@ -338,6 +338,31 @@ def test_each_missing_key_is_skipped_until_a_complete_candidate(missing_key: str
     assert bridge.parse_envelope(transcript)["summary"] == valid["summary"]
 
 
+def test_incomplete_candidate_is_skipped_before_findings_shape_validation() -> None:
+    incomplete = _complete_agent_envelope()
+    incomplete.pop("summary")
+    incomplete["findings"] = {}
+    incomplete_source, _ = _frame_agent_value(incomplete)
+    valid = _complete_agent_envelope(summary="valid after malformed draft findings")
+    valid_source, _ = _frame_agent_value(valid)
+
+    assert bridge.parse_envelope(f"{incomplete_source}\n{valid_source}") == valid
+
+
+@pytest.mark.parametrize(
+    "findings",
+    [pytest.param([], id="empty"), pytest.param([{}], id="object-member")],
+)
+def test_parse_envelope_accepts_valid_findings_container_shapes(
+    findings: list[object],
+) -> None:
+    envelope = _complete_agent_envelope()
+    envelope["findings"] = findings
+    source, _ = _frame_agent_value(envelope)
+
+    assert bridge.parse_envelope(source) == envelope
+
+
 @pytest.mark.parametrize(
     ("value", "case_name"),
     [
@@ -3147,6 +3172,63 @@ def _setup_bridge_repo(tmp_path: Path) -> tuple:
     return paths, fake_agent
 
 
+def _seed_persisted_reviewer_envelope(
+    paths,
+    *,
+    job_id: str,
+    envelope_value: object,
+) -> str:
+    bridge.submit_job(
+        paths,
+        task_text="persisted envelope shape test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id=job_id,
+    )
+    turn_id = f"{job_id}--r1-reviewer-persisted"
+    state = bridge.compute_repo_state(paths.repo_root)
+    now = bridge.utc_now()
+    valid_envelope = _complete_agent_envelope(summary="persisted envelope fixture")
+    valid_envelope["job_id"] = job_id
+    valid_envelope["turn_id"] = turn_id
+
+    with bridge.open_db(paths) as conn:
+        bridge.record_turn(
+            conn,
+            turn_id=turn_id,
+            job_id=job_id,
+            round_no=1,
+            agent_role="reviewer",
+            status="completed",
+            decision="GO",
+            state_sha_start=state.state_sha,
+            state_sha_end=state.state_sha,
+            prompt_path=paths.prompts_dir / f"{turn_id}.txt",
+            raw_output_path=paths.raw_dir / f"{turn_id}.txt",
+            envelope=valid_envelope,
+            started_at=now,
+            finished_at=now,
+        )
+        conn.execute(
+            "UPDATE turns SET envelope_json = ?, reviewer_input_validation_sha = ? "
+            "WHERE turn_id = ?",
+            (json.dumps(envelope_value), state.state_sha, turn_id),
+        )
+        conn.execute(
+            "UPDATE jobs SET status = 'DONE', current_round = 1, "
+            "terminal_decision = 'GO' WHERE job_id = ?",
+            (job_id,),
+        )
+        conn.commit()
+
+    return turn_id
+
+
 def _configure_reviewer_decision(paths, decision: str) -> None:
     """Configure the fake reviewer to return one fixed authorized decision."""
     reviewer = paths.repo_root / "fixed_decision_reviewer.py"
@@ -3252,6 +3334,62 @@ def test_execute_agent_turn_recovers_from_malformed_frame_to_shared_valid_frame(
     assert turn is not None
     assert turn["status"] == "completed"
     assert elapsed < 2.0
+
+
+@pytest.mark.parametrize(
+    ("findings", "error_pattern"),
+    [
+        pytest.param({}, "must be a list", id="non-list-findings"),
+        pytest.param([0], "finding at index 0 must be a JSON object", id="scalar-member"),
+        pytest.param([[]], "finding at index 0 must be a JSON object", id="list-member"),
+    ],
+)
+def test_execute_agent_turn_rejects_malformed_findings_without_persisting_envelope(
+    tmp_path: Path,
+    findings: object,
+    error_pattern: str,
+) -> None:
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = "malformed-live-envelope-job"
+    bridge.submit_job(
+        paths,
+        task_text="malformed live envelope test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id=job_id,
+    )
+    envelope = _complete_agent_envelope()
+    envelope["job_id"] = job_id
+    envelope["findings"] = findings
+    source, _ = _frame_agent_value(envelope)
+
+    with bridge.open_db(paths) as conn:
+        job = bridge.read_job(conn, job_id)
+        with patch.object(bridge, "run_adapter", return_value=source):
+            with pytest.raises(bridge.BridgeError, match=error_pattern):
+                bridge.execute_agent_turn(
+                    conn,
+                    paths,
+                    job,
+                    round_no=1,
+                    agent_role="reviewer",
+                    adapter_name="codex",
+                    prompt_text="review malformed envelope",
+                )
+        turns = conn.execute(
+            "SELECT status, decision, envelope_json FROM turns WHERE job_id = ?",
+            (job_id,),
+        ).fetchall()
+
+    assert len(turns) == 1
+    assert turns[0]["status"] == "FAILED"
+    assert turns[0]["decision"] == "ERROR"
+    assert turns[0]["envelope_json"] is None
 
 
 def test_pause_after_reader_stops_before_reviewer(tmp_path: Path) -> None:
@@ -3461,6 +3599,142 @@ def test_crash_recovery_reviewer_completed_no_rerun(tmp_path: Path) -> None:
     assert job["status"] == "DONE"
     assert job["terminal_decision"] == "GO"
     assert turns_after == turns_before, "recovery should not add new turns"
+
+
+@pytest.mark.parametrize(
+    ("envelope_value", "error_pattern"),
+    [
+        pytest.param(0, "must be a JSON object", id="non-object-envelope"),
+        pytest.param(
+            {"decision": "GO", "findings": {}},
+            "must be a list",
+            id="non-list-findings",
+        ),
+        pytest.param(
+            {"decision": "GO", "findings": [[]]},
+            "finding at index 0 must be a JSON object",
+            id="non-object-finding-member",
+        ),
+    ],
+)
+def test_render_job_rejects_malformed_persisted_envelope_before_writing(
+    tmp_path: Path,
+    envelope_value: object,
+    error_pattern: str,
+) -> None:
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = "malformed-persisted-render-job"
+    _seed_persisted_reviewer_envelope(
+        paths,
+        job_id=job_id,
+        envelope_value=envelope_value,
+    )
+    rendered_path = paths.rendered_dir / f"{job_id}.md"
+    rendered_path.write_text("existing render\n", encoding="utf-8")
+
+    with bridge.open_db(paths) as conn:
+        with pytest.raises(bridge.BridgeError, match=error_pattern):
+            bridge.render_job(paths, conn, job_id)
+
+    assert rendered_path.read_text(encoding="utf-8") == "existing render\n"
+
+
+@pytest.mark.parametrize(
+    "findings",
+    [pytest.param([], id="empty"), pytest.param([{}], id="object-member")],
+)
+def test_render_job_accepts_valid_persisted_findings_container_shapes(
+    tmp_path: Path,
+    findings: list[object],
+) -> None:
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = "valid-persisted-render-job"
+    _seed_persisted_reviewer_envelope(
+        paths,
+        job_id=job_id,
+        envelope_value={"decision": "GO", "findings": findings},
+    )
+
+    with bridge.open_db(paths) as conn:
+        rendered_path = bridge.render_job(paths, conn, job_id)
+
+    content = rendered_path.read_text(encoding="utf-8")
+    assert f"# Bridge Job {job_id}" in content
+    assert "- Decision: GO" in content
+
+
+@pytest.mark.parametrize(
+    ("envelope_value", "error_pattern"),
+    [
+        pytest.param([], "must be a JSON object", id="non-object-envelope"),
+        pytest.param(
+            {"decision": "GO", "findings": "not-a-list"},
+            "must be a list",
+            id="non-list-findings",
+        ),
+        pytest.param(
+            {"decision": "GO", "findings": [0]},
+            "finding at index 0 must be a JSON object",
+            id="non-object-finding-member",
+        ),
+    ],
+)
+def test_recovery_rejects_malformed_persisted_envelope_before_decision_application(
+    tmp_path: Path,
+    envelope_value: object,
+    error_pattern: str,
+) -> None:
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = "malformed-persisted-recovery-job"
+    _seed_persisted_reviewer_envelope(
+        paths,
+        job_id=job_id,
+        envelope_value=envelope_value,
+    )
+    with bridge.open_db(paths) as conn:
+        conn.execute(
+            "UPDATE jobs SET status = 'REVIEWER_RUNNING', terminal_decision = NULL "
+            "WHERE job_id = ?",
+            (job_id,),
+        )
+        conn.commit()
+
+    with patch.object(bridge, "render_job", wraps=bridge.render_job) as render:
+        with pytest.raises(bridge.BridgeError, match=error_pattern):
+            bridge.run_job(paths, job_id)
+    render.assert_not_called()
+
+    with bridge.open_db(paths) as conn:
+        job = bridge.read_job(conn, job_id)
+    assert job["status"] == "REVIEWER_RUNNING"
+    assert job["terminal_decision"] is None
+
+
+@pytest.mark.parametrize("consumer", ["latest", "status", "registry"])
+def test_persisted_envelope_consumers_share_nested_shape_validation(
+    tmp_path: Path,
+    consumer: str,
+) -> None:
+    paths, _ = _setup_bridge_repo(tmp_path)
+    job_id = "shared-persisted-validation-job"
+    _seed_persisted_reviewer_envelope(
+        paths,
+        job_id=job_id,
+        envelope_value={"decision": "GO", "findings": [0]},
+    )
+
+    with pytest.raises(
+        bridge.BridgeError,
+        match="finding at index 0 must be a JSON object",
+    ):
+        if consumer == "status":
+            bridge.print_status(paths, job_id)
+        else:
+            with bridge.open_db(paths) as conn:
+                if consumer == "latest":
+                    bridge.latest_envelope(conn, job_id, role="reviewer")
+                else:
+                    bridge.rebuild_finding_registry(conn, job_id)
 
 
 def test_interrupted_normal_reader_still_dispatches_executable_reader(tmp_path: Path) -> None:
