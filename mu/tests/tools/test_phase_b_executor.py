@@ -9835,52 +9835,218 @@ class TestDeferredPacketFiling:
 
 @pytest.mark.usefixtures("mock_routing_record")
 class TestOnlyBlockingToImplementer:
-    """Only blocking findings go to implementer; non-blocking deferred."""
+    """Only GO may defer non-blockers; non-GO decisions require correction."""
 
-    def test_all_non_blocking_converges_as_go(self, tmp_path):
-        """When all findings are non_blocking, bridge loop converges (GO equivalent)."""
+    @pytest.mark.parametrize(
+        "convergence_site",
+        ["initial", "private_attr", "reentry"],
+    )
+    @pytest.mark.parametrize(
+        "review_decision",
+        ["REQUEST_CHANGES", "NO_GO", "GO"],
+    )
+    def test_only_go_defers_non_blocking_findings_at_each_convergence_site(
+        self, tmp_path, convergence_site, review_decision
+    ):
+        """Only GO may defer explicit non-blockers and converge at any bridge site."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
         mock_impl = _make_mock_impl()
-
-        # Bridge returns REQUEST_CHANGES but all findings are non_blocking
+        finding_title = f"{convergence_site} explicit non-blocker"
         envelope = json.dumps({
             "job_id": "j1", "turn_id": "t1", "agent_role": "reviewer",
-            "decision": "REQUEST_CHANGES", "summary": "minor nits",
+            "decision": review_decision, "summary": "minor nits",
             "touched_files_claimed": [], "validations_claimed": [],
             "request_for_next_agent": "",
             "findings": [
-                {"title": "Style nit", "class": "DOC_ACCURACY", "severity": "medium",
+                {"title": finding_title, "class": "DOC_ACCURACY", "severity": "medium",
                  "file": "f.py", "disposition": "non_blocking", "status": "new"},
             ],
         })
         render_text = f"BEGIN_AGENT_ENVELOPE\n{envelope}\nEND_AGENT_ENVELOPE"
+        late_raw_text = "\n".join([
+            json.dumps({
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "aggregated_output": "command noise " * 400,
+                },
+            }),
+            json.dumps({
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": render_text},
+            }),
+        ])
+        assert finding_title not in late_raw_text[:4000]
+
+        if convergence_site == "initial":
+            bridge_decisions = [review_decision]
+            reviewed_index = 0
+        else:
+            # Reach the private-attr/re-entry mirror through an initial clean GO.
+            bridge_decisions = ["GO", review_decision]
+            reviewed_index = 1
+        if review_decision != "GO":
+            # The bounded correction path receives one clean follow-up review.
+            bridge_decisions.append("GO")
+
+        review_material: dict[str, tuple[str, list[str]]] = {}
+        bridge_call_count = [0]
+
+        def bridge_side_effect(*_args, **kwargs):
+            call_index = bridge_call_count[0]
+            bridge_call_count[0] += 1
+            decision = bridge_decisions[call_index]
+            job_id = kwargs["job_id"]
+            review_material[job_id] = (
+                (render_text, [late_raw_text])
+                if call_index == reviewed_index
+                else ("", [])
+            )
+            return {
+                "exit_code": 0 if decision == "GO" else 1,
+                "stdout": f"{decision}\n",
+                "stderr": "",
+                "decision": decision,
+                "job_id": job_id,
+            }
+
+        def read_review_material(_repo_root, job_id):
+            return review_material[job_id]
+
+        gate_fail = {
+            "passed": False,
+            "skipped": False,
+            "exit_code": 1,
+            "stdout": "ERROR: Found private attr access in tests/:",
+            "stderr": "",
+            "test_files": ["mu/tests/tools/test_foo.py"],
+        }
+        gate_pass = {
+            "passed": True,
+            "skipped": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": ["mu/tests/tools/test_foo.py"],
+        }
+        private_attr_gate_results = iter(
+            [gate_fail, gate_pass]
+            + ([gate_pass] if review_decision != "GO" else [])
+        )
+
+        def private_attr_gate_side_effect(*_args, **_kwargs):
+            if convergence_site == "private_attr":
+                return next(private_attr_gate_results)
+            return gate_pass
+
+        supervisor_call_count = [0]
+
+        def supervisor_side_effect(*_args, **_kwargs):
+            supervisor_call_count[0] += 1
+            if convergence_site == "reentry" and supervisor_call_count[0] == 1:
+                return {
+                    "exit_code": 0,
+                    "parsed": {
+                        "decision": "NEEDS_PHASE_B",
+                        "summary": "exercise re-entry bridge",
+                        "status": "success",
+                        "findings": [],
+                        "request_for_claude": "Exercise re-entry bridge.",
+                    },
+                    "receipt_path": "",
+                }
+            return {
+                "exit_code": 0,
+                "parsed": {
+                    "decision": "COMMIT_GO",
+                    "summary": "",
+                    "status": "success",
+                    "findings": [],
+                },
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
-             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
-             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
-             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
-             patch.object(pb_mod, "run_bridge_review", return_value={
-                 "exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
-                 "decision": "REQUEST_CHANGES", "job_id": "j1",
+             patch.object(pb_mod, "emit_pipeline_agent_event", return_value={
+                 "enabled": True, "event_id": "evt", "attempted": [], "budget_exhausted": False,
              }), \
-             patch.object(pb_mod, "_read_bridge_render", return_value=render_text), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side_effect), \
+             patch.object(pb_mod, "_read_bridge_review_material", side_effect=read_review_material), \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=private_attr_gate_side_effect), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
+             }), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
-             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
-                 "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
-                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
-             }):
-            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor_side_effect), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=3)
 
-        # Should converge — implementer NOT re-invoked for non-blocking findings
         assert result["status"] == "commit_ready"
-        # Implementer called only once (initial), not for non-blocking fix
-        assert mock_impl.invoke_implementer.call_count == 1
-        # Deferred packet should be filed
-        assert result.get("deferred_packet_path") is not None
+        assert bridge_call_count[0] == len(bridge_decisions)
+        packet_rel = "reports/deferred/non_blocking/plan_bridge_nonblockers.md"
+        packet = repo / packet_rel
+        base_implementer_calls = 1 if convergence_site == "initial" else 2
+
+        if review_decision == "GO":
+            assert mock_impl.invoke_implementer.call_count == base_implementer_calls
+            assert result.get("deferred_packet_path") == packet_rel
+            assert packet.exists()
+            assert finding_title in packet.read_text(encoding="utf-8")
+        else:
+            assert mock_impl.invoke_implementer.call_count == base_implementer_calls + 1
+            assert result.get("deferred_packet_path") is None
+            assert not packet.exists()
+            correction_prompts = [
+                call.args[0]
+                for call in mock_impl.build_implementation_prompt.call_args_list[
+                    base_implementer_calls:
+                ]
+            ]
+            assert any(finding_title in prompt for prompt in correction_prompts)
+            assert any(review_decision in prompt for prompt in correction_prompts)
+
+    def test_non_go_correction_context_prefers_agent_message_then_raw_fallback(self):
+        """Unstructured reviews prefer agent text but retain plain raw fallback."""
+        agent_message = "late unstructured reviewer finding"
+        noisy_raw = "\n".join([
+            json.dumps({
+                "item": {
+                    "type": "command_execution",
+                    "aggregated_output": "command noise " * 400,
+                },
+            }),
+            json.dumps({
+                "item": {"type": "agent_message", "text": agent_message},
+            }),
+        ])
+        raw_review = "unparseable reviewer finding without an envelope"
+
+        extracted_context = pb_mod._bridge_correction_context(  # ANTICHEAT_OK: shared correction selector
+            [],
+            "",
+            [noisy_raw],
+            "REQUEST_CHANGES\n",
+        )
+        fallback_context = pb_mod._bridge_correction_context(  # ANTICHEAT_OK: shared correction selector
+            [],
+            "",
+            [raw_review],
+            "REQUEST_CHANGES\n",
+        )
+
+        assert extracted_context == agent_message
+        assert fallback_context == raw_review
 
     def test_r5_bridge_go_all_explicit_non_blocking_including_high_converges(self, tmp_path):
         """The reproduced R5 GO shape converges and files its deferred findings."""
@@ -9987,8 +10153,8 @@ class TestOnlyBlockingToImplementer:
         assert result.get("deferred_packet_path") is None
         assert not (repo / "reports" / "deferred" / "non_blocking").exists()
 
-    def test_blocking_findings_sent_to_implementer(self, tmp_path):
-        """Blocking findings are sent to implementer; non-blocking deferred."""
+    def test_non_go_mixed_findings_preserve_full_context_without_deferral(self, tmp_path):
+        """A mixed non-GO review keeps every finding in correction context."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -10042,13 +10208,16 @@ class TestOnlyBlockingToImplementer:
              }):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        # Implementer re-invoked (only blocking findings sent)
+        # Implementer is re-invoked with the full non-GO review context.
         assert mock_impl.invoke_implementer.call_count >= 2
-        # Check that the fix prompt contained "BLOCKING" but not non-blocking title
         fix_call_prompt = mock_impl.build_implementation_prompt.call_args_list[-1]
         prompt_text = fix_call_prompt[0][0] if fix_call_prompt[0] else ""
-        # The blocking finding title should appear in prompt
-        assert "Real bug" in prompt_text or "BLOCKING" in prompt_text
+        assert "Real bug" in prompt_text
+        assert "Style nit" in prompt_text
+        assert result.get("deferred_packet_path") is None
+        assert not (
+            repo / "reports" / "deferred" / "non_blocking" / "plan_bridge_nonblockers.md"
+        ).exists()
 
     @pytest.mark.parametrize("review_decision", ["REQUEST_CHANGES", "NO_GO"])
     def test_non_go_raw_output_preserves_medium_blocker(
@@ -13317,7 +13486,7 @@ class TestResumeNeedsPhaseB:
                 "job_id": "j1",
                 "turn_id": "t1",
                 "agent_role": "reviewer",
-                "decision": "REQUEST_CHANGES",
+                "decision": "GO",
                 "summary": "minor nits",
                 "touched_files_claimed": [],
                 "validations_claimed": [],
@@ -13383,7 +13552,7 @@ class TestResumeNeedsPhaseB:
              ]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=[
-                 {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "", "decision": "REQUEST_CHANGES", "job_id": "j1"},
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1"},
                  {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j2"},
              ]), \
              patch.object(pb_mod, "_read_bridge_review_material", side_effect=[
@@ -13415,7 +13584,7 @@ class TestResumeNeedsPhaseB:
                 "job_id": "j1",
                 "turn_id": "t1",
                 "agent_role": "reviewer",
-                "decision": "REQUEST_CHANGES",
+                "decision": "GO",
                 "summary": "initial non-blocking packet",
                 "touched_files_claimed": [],
                 "validations_claimed": [],
@@ -13488,7 +13657,7 @@ class TestResumeNeedsPhaseB:
              ]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=[
-                 {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "", "decision": "REQUEST_CHANGES", "job_id": "j1"},
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1"},
                  {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j2"},
              ]), \
              patch.object(pb_mod, "_read_bridge_review_material", side_effect=[
