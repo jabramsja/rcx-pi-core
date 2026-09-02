@@ -7889,6 +7889,11 @@ class TestCommitValidationChildBusIsolation:
 
     _MALICIOUS_LANE = ".agent_bus-fix37"
     _PAGER_ENV = "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"
+    _BRIDGE_TURN_TIMEOUT_OVERRIDE_ENV = "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE"
+    _BRIDGE_TURN_TIMEOUT_KEY_ENV = "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY"
+    _BRIDGE_TURN_TIMEOUT_ENVS = frozenset(
+        {_BRIDGE_TURN_TIMEOUT_OVERRIDE_ENV, _BRIDGE_TURN_TIMEOUT_KEY_ENV}
+    )
     _PAGER_TEST = (
         "mu/tests/tools/test_agent_bus_namespacing.py::"
         "test_pager_persists_event_delivery_state_and_lock_in_namespaced_bus"
@@ -7986,6 +7991,53 @@ class TestCommitValidationChildBusIsolation:
         assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
         assert os.environ.get(self._PAGER_ENV) == "codex"
         assert os.environ.get("RCX_SKIP_RECEIPT_CHECK") == "1"
+
+    def test_commit_validation_env_strips_inherited_bridge_turn_timeout_state(
+        self, monkeypatch
+    ):
+        inherited = {
+            self._BRIDGE_TURN_TIMEOUT_OVERRIDE_ENV: "901",
+            self._BRIDGE_TURN_TIMEOUT_KEY_ENV: "phase_b",
+        }
+        for key, value in inherited.items():
+            monkeypatch.setenv(key, value)
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", "777")
+        monkeypatch.setenv("UNRELATED_VALIDATION_VAR", "keep-me")
+        parent_before = dict(os.environ)
+
+        hermetic = commit_mod._commit_validation_env()  # ANTICHEAT_OK: bridge-turn timeout containment regression
+
+        protected = commit_mod._commit_validation_protected_env_keys()  # ANTICHEAT_OK: exact protected-key set under test
+        assert self._BRIDGE_TURN_TIMEOUT_ENVS <= protected
+        for key in inherited:
+            assert key not in hermetic
+        assert hermetic.get("RCX_RECOVERY_TIMEOUT_OVERRIDE") == "777"
+        assert hermetic.get("UNRELATED_VALIDATION_VAR") == "keep-me"
+        assert dict(os.environ) == parent_before
+
+    def test_commit_validation_env_strips_bridge_turn_timeout_caller_overrides(
+        self, monkeypatch
+    ):
+        parent_values = {
+            self._BRIDGE_TURN_TIMEOUT_OVERRIDE_ENV: "901",
+            self._BRIDGE_TURN_TIMEOUT_KEY_ENV: "phase_b",
+        }
+        for key, value in parent_values.items():
+            monkeypatch.setenv(key, value)
+        parent_before = dict(os.environ)
+
+        hermetic = commit_mod._commit_validation_env(  # ANTICHEAT_OK: caller override containment regression
+            {
+                self._BRIDGE_TURN_TIMEOUT_OVERRIDE_ENV: "1200",
+                self._BRIDGE_TURN_TIMEOUT_KEY_ENV: "phase_a",
+                "BENIGN_OVERRIDE": "applied",
+            }
+        )
+
+        for key in self._BRIDGE_TURN_TIMEOUT_ENVS:
+            assert key not in hermetic
+        assert hermetic.get("BENIGN_OVERRIDE") == "applied"
+        assert dict(os.environ) == parent_before
 
     def test_commit_validation_env_pins_survive_but_overrides_cannot_reinject(self, monkeypatch):
         self._seed_live_overrides(monkeypatch)
@@ -8185,6 +8237,58 @@ class TestCommitValidationChildBusIsolation:
         assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
         assert os.environ.get(self._PAGER_ENV) == "codex"
         assert os.environ.get("RCX_SKIP_RECEIPT_CHECK") == "1"
+
+    def test_private_attr_gate_builds_hermetic_validation_env(self, tmp_path, monkeypatch):
+        # Production call sites #5/#6: the ordinary Step 8c and bot-remediation
+        # Step 15 anti-cheat gates both launch these two checker children through
+        # run_private_attr_test_gate. Lock both launches to the shared boundary.
+        repo = _setup_repo(tmp_path)
+        linters = repo / "mu" / "tools" / "checks" / "linters"
+        linters.mkdir(parents=True, exist_ok=True)
+        for checker_name in (
+            "check_private_attr_access.py",
+            "check_underscore_imports.py",
+        ):
+            (linters / checker_name).write_text("# checker\n", encoding="utf-8")
+        selected_test = repo / "mu" / "tests" / "tools" / "test_selected_clean.py"
+        selected_test.parent.mkdir(parents=True, exist_ok=True)
+        selected_test.write_text("def test_selected_clean(): pass\n", encoding="utf-8")
+
+        inherited = {
+            self._BRIDGE_TURN_TIMEOUT_OVERRIDE_ENV: "901",
+            self._BRIDGE_TURN_TIMEOUT_KEY_ENV: "phase_b",
+        }
+        for key, value in inherited.items():
+            monkeypatch.setenv(key, value)
+        monkeypatch.setenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", "1")
+        monkeypatch.setenv("UNRELATED_VALIDATION_VAR", "keep-me")
+        parent_before = dict(os.environ)
+        expected = commit_mod._commit_validation_env()  # ANTICHEAT_OK: Step 8c/15 validation-child containment regression
+
+        captured_envs: list[dict[str, str] | None] = []
+
+        def intercept(args, **kwargs):
+            captured_envs.append(kwargs.get("env"))
+            return commit_mod.subprocess.CompletedProcess(
+                list(args), 0, stdout="", stderr=""
+            )
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=intercept):
+            result = commit_mod.run_private_attr_test_gate(
+                repo,
+                ["mu/tests/tools/test_selected_clean.py"],
+            )
+
+        assert result["passed"] is True
+        assert result["skipped"] is False
+        assert len(captured_envs) == 2, "both anti-cheat checker children must run"
+        for env in captured_envs:
+            assert env == expected
+            for key in self._BRIDGE_TURN_TIMEOUT_ENVS:
+                assert key not in env
+            assert env.get("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY") == "1"
+            assert env.get("UNRELATED_VALIDATION_VAR") == "keep-me"
+        assert dict(os.environ) == parent_before
 
     def test_pager_receipt_test_passes_through_validation_child_under_live_pager_override(
         self, monkeypatch
