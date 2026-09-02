@@ -527,6 +527,37 @@ def _pid_is_live_non_zombie(pid: int) -> bool:
     return not stat.lstrip().startswith("Z")
 
 
+def _line_has_top_level_event_type(line: str, expected_type: str) -> bool:
+    """Return whether *line* is a JSON object with the exact top-level type."""
+    try:
+        payload = json.loads(line.strip())
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("type") == expected_type
+
+
+def _line_is_matching_provider_terminal_event(
+    spec: AdapterSpec,
+    cmd: list[str],
+    line: str,
+) -> bool:
+    """Recognize terminal authority only for a matching structured provider."""
+    expected_type: str | None = None
+    if (
+        spec.name == "claude"
+        and "--output-format" in cmd
+        and "stream-json" in cmd
+    ):
+        expected_type = "result"
+    elif spec.name == "codex" and "--json" in cmd:
+        expected_type = "turn.completed"
+
+    return (
+        expected_type is not None
+        and _line_has_top_level_event_type(line, expected_type)
+    )
+
+
 def _line_is_terminal_result_event(line: str) -> bool:
     """True if a stdout line is the claude stream-json terminal result event.
 
@@ -539,14 +570,7 @@ def _line_is_terminal_result_event(line: str) -> bool:
     false positive (consistent with
     phase_b_implementer._extract_adapter_result_envelope).
     """
-    stripped = line.strip()
-    if '"result"' not in stripped:
-        return False
-    try:
-        payload = json.loads(stripped)
-    except (json.JSONDecodeError, ValueError):
-        return False
-    return isinstance(payload, dict) and payload.get("type") == "result"
+    return _line_has_top_level_event_type(line, "result")
 
 
 def _contains_complete_adapter_envelope(text: str) -> bool:
@@ -844,6 +868,7 @@ def _run_adapter_buffered(
     stderr_buf = io.StringIO()
     stdout_progress = threading.Event()
     envelope_terminated = threading.Event()
+    matching_terminal_seen = threading.Event()
     post_result_killed = threading.Event()
     result_terminal_seen_at: list[float | None] = [None]
 
@@ -851,6 +876,7 @@ def _run_adapter_buffered(
         if (
             not stop_after_envelope
             or envelope_terminated.is_set()
+            or not matching_terminal_seen.is_set()
         ):
             return
         if (
@@ -867,6 +893,8 @@ def _run_adapter_buffered(
 
     def _record_stdout_progress(line: str, sink: io.StringIO) -> None:
         stdout_progress.set()
+        if _line_is_matching_provider_terminal_event(spec, cmd, line):
+            matching_terminal_seen.set()
         _stop_after_envelope(line, sink)
         if (
             post_result_exit_timeout_s is not None
@@ -944,10 +972,21 @@ def _run_adapter_buffered(
             except subprocess.TimeoutExpired:
                 if stop_after_envelope and (
                     envelope_terminated.is_set()
-                    or _contains_complete_adapter_envelope(
-                        _authoritative_output_so_far(spec, cmd, stdout_buf.getvalue())
+                    or (
+                        matching_terminal_seen.is_set()
+                        and (
+                            _contains_complete_adapter_envelope(
+                                _authoritative_output_so_far(
+                                    spec,
+                                    cmd,
+                                    stdout_buf.getvalue(),
+                                )
+                            )
+                            or _raw_transcript_contains_complete_adapter_envelope(
+                                raw_output_path
+                            )
+                        )
                     )
-                    or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
                 ):
                     envelope_terminated.set()
                     _kill_process_group(proc, wait_for_exit=True)
@@ -1111,6 +1150,7 @@ def _run_adapter_streaming(
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
     envelope_terminated = threading.Event()
+    matching_terminal_seen = threading.Event()
     stdout_progress = threading.Event()
     post_result_killed = threading.Event()
     result_terminal_seen_at: list[float | None] = [None]
@@ -1119,6 +1159,7 @@ def _run_adapter_streaming(
         if (
             not stop_after_envelope
             or envelope_terminated.is_set()
+            or not matching_terminal_seen.is_set()
         ):
             return
         if (
@@ -1135,6 +1176,8 @@ def _run_adapter_streaming(
 
     def _record_stdout_progress(line: str, sink: io.StringIO) -> None:
         stdout_progress.set()
+        if _line_is_matching_provider_terminal_event(spec, cmd, line):
+            matching_terminal_seen.set()
         _stop_after_envelope(line, sink)
         if (
             post_result_exit_timeout_s is not None
@@ -1202,10 +1245,21 @@ def _run_adapter_streaming(
             except subprocess.TimeoutExpired:
                 if stop_after_envelope and (
                     envelope_terminated.is_set()
-                    or _contains_complete_adapter_envelope(
-                        _authoritative_output_so_far(spec, cmd, stdout_buf.getvalue())
+                    or (
+                        matching_terminal_seen.is_set()
+                        and (
+                            _contains_complete_adapter_envelope(
+                                _authoritative_output_so_far(
+                                    spec,
+                                    cmd,
+                                    stdout_buf.getvalue(),
+                                )
+                            )
+                            or _raw_transcript_contains_complete_adapter_envelope(
+                                raw_output_path
+                            )
+                        )
                     )
-                    or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
                 ):
                     envelope_terminated.set()
                     _kill_process_group(proc, wait_for_exit=True)
