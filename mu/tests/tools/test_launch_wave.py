@@ -33,6 +33,9 @@ sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "executors"))
 import launch_wave as lw  # noqa: E402,I001  (path insert must precede import)
 import tracker_sync_note as tsn  # noqa: E402  (reuse proof for the note builder)
 import executor_common as ec  # noqa: E402  (public seam for the routing-record path)
+import executor_dispatch as ed  # noqa: E402  (public dispatcher seams)
+import commit_executor as ce  # noqa: E402  (authoritative continuation producer)
+from meta_bridge_supervisor import compute_repo_state  # noqa: E402  (public state seam)
 
 
 # --------------------------------------------------------------------------- #
@@ -276,6 +279,482 @@ def _authority_config_for_repo(repo):
         candidate_allowlist=_authority_allowlist(probe),
         pre_review_authority=True,
     )
+
+
+def _post_commit_authority_config_for_repo(repo):
+    """Build the exact candidate-authority config required for R4 re-entry."""
+    probe = make_config(
+        implementer_agent="codex",
+        reviewer_agent="codex",
+        pager_route="codex",
+        request_for_agent="Implement the bounded continuation consumer.",
+        request_for_claude=(
+            "Deprecated compatibility input must not become route authority."
+        ),
+    )
+    return dataclasses.replace(
+        probe,
+        indicator_artifact_ref=_authority_indicator_ref(probe),
+        indicator_collection_command=_authority_indicator_command(probe),
+        comparison_commit=_head_sha(repo),
+        candidate_allowlist=_authority_allowlist(probe),
+        pre_review_authority=True,
+    )
+
+
+def _expanded_post_commit_packet_content(config):
+    """Model the exact config-bound packet after Phase A locks it."""
+    return _phase_b_packet_content(config)
+
+
+def _prepare_post_commit_resume_state(
+    repo,
+    config,
+    *,
+    bus_dir=".agent_bus-post-commit",
+    detached_launch=False,
+):
+    """Produce an exact committed Phase B handoff + continuation fixture."""
+    target_branch = f"jabramsja/{config.wave_id}"
+    if detached_launch:
+        _git(repo, "checkout", "-q", "--detach", config.comparison_commit)
+    else:
+        _git(repo, "checkout", "-q", "-b", target_branch)
+
+    lw.run_wave_setup(repo, config, bus_dir=bus_dir)
+    routing_path = ec.routing_record_path(repo, bus_dir)
+    routing = json.loads(routing_path.read_text(encoding="utf-8"))
+    assert routing["head_sha"] == config.comparison_commit
+    assert routing["merge_sha"] == config.comparison_commit
+    assert routing["blocker_report_paths"] == []
+
+    target_authority = routing["candidate_authority"].get(
+        "target_branch_authority"
+    )
+    if detached_launch:
+        assert target_authority is None
+        _git(repo, "switch", "-q", "-c", target_branch)
+    else:
+        assert target_authority == {
+            "source": "launch_current_branch",
+            "branch_prefix": "jabramsja",
+            "target_branch": target_branch,
+        }
+
+    packet_path = repo / config.tracked_packet
+    packet_path.write_text(
+        _expanded_post_commit_packet_content(config),
+        encoding="utf-8",
+    )
+    _git(repo, "add", "--", "TASKS.md", config.tracked_packet)
+    _git(repo, "commit", "-q", "-m", "phase b candidate")
+    commit_sha = _head_sha(repo)
+
+    tracker_note = _tracker_note_line(
+        (repo / "TASKS.md").read_text(encoding="utf-8"),
+        config.wave_id,
+    )
+    handoff, errors = ce.build_commit_handoff(
+        wave_id=config.wave_id,
+        task_id=config.task_id,
+        files_to_stage=["TASKS.md", config.tracked_packet],
+        commit_message="Phase B continuation candidate",
+        fixes_implemented=["Implemented the bounded continuation candidate"],
+        wave_class=config.wave_class,
+        target_gate_id=config.target_gate_id,
+        caller="phase_b",
+        target_branch=target_branch,
+        tracker_note_text=tracker_note,
+        tracked_packet=config.tracked_packet,
+        pager_route=config.pager_route or None,
+        repo_root=repo,
+        bus_dir=bus_dir,
+    )
+    assert errors == []
+    assert handoff["target_branch"] == target_branch
+
+    handoff_path = ec.agent_bus_path(
+        repo,
+        bus_dir,
+        "executors",
+        "phase_b_handoff.json",
+    )
+    handoff_path.parent.mkdir(parents=True, exist_ok=True)
+    handoff_path.write_text(json.dumps(handoff, indent=2) + "\n", encoding="utf-8")
+    continuation_path = ec.agent_bus_path(
+        repo,
+        bus_dir,
+        "executors",
+        f"commit_executor_{config.wave_id}.json",
+    )
+    continuation_path.write_text(
+        json.dumps(
+            {
+                "version": ce.COMMIT_CONTINUATION_VERSION,
+                "status": ce.CONTINUATION_ACTIVE_STATUS,
+                "handoff_sha": ce._handoff_sha(handoff),  # ANTICHEAT_OK: fixture binds the exact producer digest without adding a test-only digest implementation
+                "target_branch": target_branch,
+                "commit_sha": commit_sha,
+                "receipt_decision": "COMMIT_GO",
+                "steps_completed": ["validate_inputs", "git_commit"],
+                "updated_at_unix": 1,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    sentinel_path = repo / bus_dir / "sentinel" / "preexisting.bin"
+    sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+    sentinel_path.write_bytes(b"pre-existing-bus-artifact\x00\xff")
+
+    fresh, freshness_detail = ed.validate_routing_record_freshness(routing, repo)
+    assert fresh is False
+    assert freshness_detail.startswith("Routing record is stale:")
+    return {
+        "target_branch": target_branch,
+        "routing_path": routing_path,
+        "handoff_path": handoff_path,
+        "continuation_path": continuation_path,
+        "candidate_spec_path": Path(routing["candidate_authority"]["spec_path"]),
+        "launch_target_authority_present": target_authority is not None,
+    }
+
+
+def _post_commit_resume_snapshot(repo, bus_dir):
+    """Capture every tracked byte and every pre-existing bus artifact."""
+    tracked_raw = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    ).stdout
+    tracked_paths = [
+        item.decode("utf-8", "surrogateescape")
+        for item in tracked_raw.split(b"\0")
+        if item
+    ]
+    tracked_files = {
+        rel_path: (repo / rel_path).read_bytes()
+        for rel_path in tracked_paths
+    }
+    bus_path = repo / bus_dir
+    bus_files = (
+        {
+            path.relative_to(repo).as_posix(): path.read_bytes()
+            for path in sorted(bus_path.rglob("*"))
+            if path.is_file()
+        }
+        if bus_path.exists()
+        else {}
+    )
+    return {
+        "tracked_files": tracked_files,
+        "bus_files": bus_files,
+        "index": subprocess.run(
+            ["git", "ls-files", "--stage", "-z"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        ).stdout,
+        "status": subprocess.run(
+            ["git", "status", "--porcelain=v1", "-z"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        ).stdout,
+        "head": _head_sha(repo),
+        "branch": subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip(),
+    }
+
+
+def _forbid_post_commit_resume_setup(monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("post-commit continuation must not invoke setup")
+
+    for name in (
+        "setup_packet",
+        "setup_tracker_note",
+        "setup_routing_record",
+        "setup_candidate_authority_spec",
+        "setup_bridge_config",
+        "setup_bridge_max_turns_override",
+        "_prestage_l4_indicator",
+    ):
+        monkeypatch.setattr(lw, name, forbidden)
+
+
+def _run_post_commit_resume(repo, config, state, monkeypatch, *, bus_dir):
+    """Run the public launcher and prove its unchanged command resumes commit-only."""
+    fake_executor_dir = repo.parent / f"{repo.name}-fake-commit-executor"
+    fake_executor_dir.mkdir(parents=True, exist_ok=True)
+    (fake_executor_dir / "commit_executor.py").write_text(
+        "import json\n"
+        "import sys\n"
+        'print(json.dumps({"status": "success", "argv": sys.argv[1:]}))\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ed, "SCRIPT_DIR", fake_executor_dir)
+
+    before = _post_commit_resume_snapshot(repo, bus_dir)
+    commit_only_dispatches = []
+    _forbid_post_commit_resume_setup(monkeypatch)
+
+    class Result:
+        returncode = 0
+
+    def runner(cmd, **kwargs):
+        assert _post_commit_resume_snapshot(repo, bus_dir) == before
+        assert kwargs["cwd"] == str(repo)
+        assert cmd == lw.build_dispatch_command(repo, config, bus_dir=bus_dir)
+        routing = json.loads(state["routing_path"].read_text(encoding="utf-8"))
+        dispatch_result = ed.dispatch(
+            routing,
+            config=ec.DEFAULT_EXECUTOR_CONFIG,
+            repo_root=repo,
+            routing_record_path=state["routing_path"],
+            bus_dir=bus_dir,
+        )
+        commit_payload = json.loads(dispatch_result["stdout"])
+        commit_only_dispatches.append(commit_payload)
+        assert dispatch_result["status"] == "success"
+        assert dispatch_result["executor"] == "commit_executor"
+        assert dispatch_result["chained_from"] == "retry_commit_only"
+        assert commit_payload["status"] == "success"
+        assert commit_payload["argv"] == [
+            "--json",
+            "--handoff",
+            str(state["handoff_path"]),
+            "--bus-dir",
+            bus_dir,
+        ]
+        return Result()
+
+    result = lw.run_wave_setup(
+        repo,
+        config,
+        launch=True,
+        runner=runner,
+        bus_dir=bus_dir,
+    )
+
+    assert len(commit_only_dispatches) == 1
+    assert result.launch["launched"] is True
+    assert result.tracker_note_written is False
+    assert result.routing_record_path == str(state["routing_path"])
+    assert result.candidate_authority_spec_path == str(
+        state["candidate_spec_path"]
+    )
+    assert _post_commit_resume_snapshot(repo, bus_dir) == before
+    return result
+
+
+def _rewrite_json(path, mutate):
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mutate(payload)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _sync_continuation_handoff_digest(state):
+    handoff = json.loads(state["handoff_path"].read_text(encoding="utf-8"))
+    digest = ce._handoff_sha(handoff)  # ANTICHEAT_OK: exact producer digest is the subject of the cross-bound regression
+    _rewrite_json(
+        state["continuation_path"],
+        lambda payload: payload.__setitem__("handoff_sha", digest),
+    )
+
+
+def _mutate_post_commit_resume_proof(
+    repo,
+    config,
+    state,
+    case,
+    *,
+    bus_dir,
+):
+    routing_path = state["routing_path"]
+    handoff_path = state["handoff_path"]
+    continuation_path = state["continuation_path"]
+    proposed = config
+
+    if case == "native_config_mismatch":
+        proposed = dataclasses.replace(
+            config,
+            work_items=["Changed same-wave native contract"],
+        )
+    elif case == "launch_override_version":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY].__setitem__(
+                "version", 2
+            ),
+        )
+    elif case == "route_head_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__("head_sha", "0" * 40),
+        )
+    elif case == "route_merge_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__("merge_sha", "0" * 40),
+        )
+    elif case == "route_blockers_nonempty":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__(
+                "blocker_report_paths",
+                ["reports/deferred/blocking/foreign.md"],
+            ),
+        )
+    elif case == "route_missing":
+        routing_path.unlink()
+    elif case == "candidate_identity_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload["candidate_authority"]["spec_identity"].__setitem__(
+                "spec_hash", "0" * 64
+            ),
+        )
+    elif case == "candidate_spec_mismatch":
+        _rewrite_json(
+            state["candidate_spec_path"],
+            lambda payload: payload.__setitem__("reviewer_agent", "claude"),
+        )
+    elif case == "candidate_spec_missing":
+        state["candidate_spec_path"].unlink()
+    elif case == "receipt_non_string":
+        _rewrite_json(
+            continuation_path,
+            lambda payload: payload.__setitem__(
+                "receipt_decision", ["COMMIT_GO"]
+            ),
+        )
+    elif case == "receipt_non_go":
+        _rewrite_json(
+            continuation_path,
+            lambda payload: payload.__setitem__("receipt_decision", "NO_GO"),
+        )
+    elif case == "handoff_digest_missing":
+        _rewrite_json(
+            continuation_path,
+            lambda payload: payload.pop("handoff_sha"),
+        )
+    elif case == "handoff_digest_mismatch":
+        _rewrite_json(
+            continuation_path,
+            lambda payload: payload.__setitem__("handoff_sha", "0" * 64),
+        )
+    elif case == "handoff_target_missing":
+        _rewrite_json(
+            handoff_path,
+            lambda payload: payload.pop("target_branch"),
+        )
+        _sync_continuation_handoff_digest(state)
+    elif case == "handoff_target_mismatch":
+        _rewrite_json(
+            handoff_path,
+            lambda payload: payload.__setitem__(
+                "target_branch", f"{state['target_branch']}-restart"
+            ),
+        )
+        _sync_continuation_handoff_digest(state)
+    elif case == "continuation_wave_mismatch":
+        foreign_path = ec.agent_bus_path(
+            repo,
+            bus_dir,
+            "executors",
+            "commit_executor_foreign-wave.json",
+        )
+        continuation_path.rename(foreign_path)
+    elif case == "continuation_commit_mismatch":
+        _rewrite_json(
+            continuation_path,
+            lambda payload: payload.__setitem__("commit_sha", "0" * 40),
+        )
+    elif case == "continuation_no_forward_commit":
+        _rewrite_json(
+            continuation_path,
+            lambda payload: payload.__setitem__("commit_sha", config.comparison_commit),
+        )
+    elif case == "continuation_branch_mismatch":
+        _rewrite_json(
+            continuation_path,
+            lambda payload: payload.__setitem__(
+                "target_branch", f"{state['target_branch']}-restart"
+            ),
+        )
+    elif case == "current_branch_mismatch":
+        _git(repo, "checkout", "-q", "-b", "jabramsja/foreign-current-branch")
+    elif case == "current_head_mismatch":
+        _git(repo, "commit", "--allow-empty", "-q", "-m", "later local commit")
+    elif case == "current_head_rewound_to_comparison":
+        _git(repo, "checkout", "-q", "--detach", config.comparison_commit)
+    elif case == "nonancestor_commit":
+        pass
+    elif case == "route_fresh":
+        current_state_sha = compute_repo_state(repo).state_sha
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__("state_sha", current_state_sha),
+        )
+    elif case == "route_indeterminate":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__("state_sha", ["stale-shaped"]),
+        )
+    elif case == "launch_target_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload["candidate_authority"][
+                "target_branch_authority"
+            ].__setitem__(
+                "target_branch", f"{state['target_branch']}-restart"
+            ),
+        )
+    elif case == "dispatcher_not_ready":
+        pass
+    else:
+        raise AssertionError(f"unknown post-commit proof mutation: {case}")
+    return proposed
+
+
+def _assert_post_commit_resume_refused(
+    repo,
+    config,
+    monkeypatch,
+    *,
+    bus_dir,
+):
+    """Require the existing immutable-contract refusal before every producer."""
+    before = _post_commit_resume_snapshot(repo, bus_dir)
+    dispatch_calls = []
+    _forbid_post_commit_resume_setup(monkeypatch)
+
+    def runner(*args, **kwargs):
+        dispatch_calls.append((args, kwargs))
+        raise AssertionError("invalid continuation proof must not dispatch")
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(
+            repo,
+            config,
+            launch=True,
+            runner=runner,
+            bus_dir=bus_dir,
+        )
+
+    assert dispatch_calls == []
+    assert _post_commit_resume_snapshot(repo, bus_dir) == before
 
 
 def _assert_no_setup_artifacts(repo, config, *, bus_dir=".agent_bus"):
@@ -908,6 +1387,331 @@ def test_native_launch_override_authority_rejects_pre_field_or_changed_route(
     assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
     assert not (wave_repo / config.indicator_artifact_ref).exists()
     assert dispatch_calls == []
+
+
+def test_native_locked_precommit_packet_for_historical_simple_config_still_dispatches(
+    wave_repo,
+):
+    config = make_config()
+    assert config.candidate_authority_enabled() is False
+    assert config.comparison_commit == ""
+
+    lw.run_wave_setup(wave_repo, config)
+    packet_path = wave_repo / config.tracked_packet
+    locked_packet = _phase_b_packet_content(config)
+    packet_path.write_text(locked_packet, encoding="utf-8")
+    dispatch_calls = []
+
+    class Result:
+        returncode = 0
+
+    def runner(cmd, **_kwargs):
+        dispatch_calls.append(cmd)
+        return Result()
+
+    result = lw.run_wave_setup(
+        wave_repo,
+        make_config(),
+        launch=True,
+        runner=runner,
+    )
+
+    assert dispatch_calls == [lw.build_dispatch_command(wave_repo, config)]
+    assert result.launch["launched"] is True
+    assert result.tracker_note_written is True
+    assert result.candidate_authority_spec_path is None
+    assert packet_path.read_text(encoding="utf-8") == locked_packet
+    assert _artifact_counts(wave_repo, config.wave_id) == (1, 1, 1)
+
+
+@pytest.mark.parametrize(
+    "detached_launch",
+    [False, True],
+    ids=["present-launch-target-authority", "detached-launch-no-target-authority"],
+)
+def test_native_post_commit_relaunch_dispatches_commit_only_before_setup_mutation(
+    wave_repo,
+    monkeypatch,
+    detached_launch,
+):
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = ".agent_bus-post-commit-positive"
+    state = _prepare_post_commit_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+        detached_launch=detached_launch,
+    )
+
+    result = _run_post_commit_resume(
+        wave_repo,
+        config,
+        state,
+        monkeypatch,
+        bus_dir=bus_dir,
+    )
+
+    assert state["launch_target_authority_present"] is (not detached_launch)
+    assert result.launch["launch_overrides"] == {
+        "implementer_agent": "codex",
+        "reviewer_agent": "codex",
+        "pager_route": "codex",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field_name", "mismatched_value"),
+    [
+        ("implementer_agent", "claude"),
+        ("reviewer_agent", "claude"),
+        ("pager_route", "claude"),
+        ("max_turns", 73),
+    ],
+)
+def test_native_post_commit_version_1_launch_override_value_mismatch_refuses_before_setup(
+    wave_repo,
+    monkeypatch,
+    field_name,
+    mismatched_value,
+):
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = f".agent_bus-post-commit-override-{field_name}"
+    state = _prepare_post_commit_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+    )
+    expected = lw.build_launch_wave_override_authority(config)
+    _rewrite_json(
+        state["routing_path"],
+        lambda payload: payload[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY].__setitem__(
+            field_name,
+            mismatched_value,
+        ),
+    )
+    actual = json.loads(state["routing_path"].read_text(encoding="utf-8"))[
+        lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY
+    ]
+
+    assert actual == {**expected, field_name: mismatched_value}
+    assert actual["version"] == lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_VERSION == 1
+    assert actual[field_name] != expected[field_name]
+    _assert_post_commit_resume_refused(
+        wave_repo,
+        config,
+        monkeypatch,
+        bus_dir=bus_dir,
+    )
+
+
+@pytest.mark.parametrize(
+    "proof_case",
+    [
+        "native_config_mismatch",
+        "launch_override_version",
+        "route_head_mismatch",
+        "route_merge_mismatch",
+        "route_blockers_nonempty",
+        "route_missing",
+        "candidate_identity_mismatch",
+        "candidate_spec_mismatch",
+        "candidate_spec_missing",
+        "receipt_non_string",
+        "receipt_non_go",
+        "handoff_digest_missing",
+        "handoff_digest_mismatch",
+        "handoff_target_missing",
+        "handoff_target_mismatch",
+        "continuation_wave_mismatch",
+        "continuation_commit_mismatch",
+        "continuation_no_forward_commit",
+        "continuation_branch_mismatch",
+        "current_branch_mismatch",
+        "current_head_mismatch",
+        "current_head_rewound_to_comparison",
+        "nonancestor_commit",
+        "route_fresh",
+        "route_indeterminate",
+        "launch_target_mismatch",
+        "dispatcher_not_ready",
+    ],
+)
+def test_native_post_commit_relaunch_required_authority_mismatch_refuses_before_setup(
+    wave_repo,
+    proof_case,
+    monkeypatch,
+):
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = ".agent_bus-post-commit-refusal"
+    state = _prepare_post_commit_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+    )
+    proposed = _mutate_post_commit_resume_proof(
+        wave_repo,
+        config,
+        state,
+        proof_case,
+        bus_dir=bus_dir,
+    )
+    if proof_case == "dispatcher_not_ready":
+        monkeypatch.setattr(
+            ed,
+            "_post_commit_continuation_ready_for_record",
+            lambda *_args, **_kwargs: (False, "dispatcher commit-only not ready"),
+        )
+    elif proof_case == "continuation_no_forward_commit":
+        monkeypatch.setattr(
+            lw,
+            "_post_commit_git_authority_matches",
+            lambda *_args, **_kwargs: True,
+        )
+    elif proof_case == "nonancestor_commit":
+        real_run = subprocess.run
+
+        class NonAncestorResult:
+            returncode = 1
+            stdout = ""
+            stderr = ""
+
+        def nonancestor_comparison(cmd, *args, **kwargs):
+            if list(cmd) == [
+                "git",
+                "merge-base",
+                "--is-ancestor",
+                config.comparison_commit,
+                "HEAD",
+            ]:
+                return NonAncestorResult()
+            return real_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(lw.subprocess, "run", nonancestor_comparison)
+
+    _assert_post_commit_resume_refused(
+        wave_repo,
+        proposed,
+        monkeypatch,
+        bus_dir=bus_dir,
+    )
+
+
+def test_native_post_commit_indeterminate_git_proof_refuses_before_setup_or_dispatch(
+    wave_repo,
+    monkeypatch,
+):
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = ".agent_bus-post-commit-git-indeterminate"
+    _prepare_post_commit_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+    )
+    real_run = subprocess.run
+    head_probe_attempts = []
+
+    def fail_head_probe(cmd, *args, **kwargs):
+        if (
+            list(cmd) == ["git", "rev-parse", "HEAD"]
+            and kwargs.get("capture_output") is True
+            and kwargs.get("timeout") == 30
+        ):
+            head_probe_attempts.append(list(cmd))
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(lw.subprocess, "run", fail_head_probe)
+
+    _assert_post_commit_resume_refused(
+        wave_repo,
+        config,
+        monkeypatch,
+        bus_dir=bus_dir,
+    )
+
+    assert head_probe_attempts
+
+
+def test_native_post_commit_timestamp_is_diagnostic_only_for_valid_resume(
+    wave_repo,
+    monkeypatch,
+):
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = ".agent_bus-post-commit-timestamp-valid"
+    state = _prepare_post_commit_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+        detached_launch=True,
+    )
+    _rewrite_json(
+        state["routing_path"],
+        lambda payload: payload.__setitem__(
+            "timestamp_utc", "untrusted diagnostic timestamp"
+        ),
+    )
+
+    _run_post_commit_resume(
+        wave_repo,
+        config,
+        state,
+        monkeypatch,
+        bus_dir=bus_dir,
+    )
+
+
+def test_native_post_commit_timestamp_cannot_grant_missing_continuation_authority(
+    wave_repo,
+    monkeypatch,
+):
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = ".agent_bus-post-commit-timestamp-refusal"
+    state = _prepare_post_commit_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+    )
+    _rewrite_json(
+        state["routing_path"],
+        lambda payload: payload.__setitem__(
+            "timestamp_utc", "2099-12-31T23:59:59+00:00"
+        ),
+    )
+    state["continuation_path"].unlink()
+
+    _assert_post_commit_resume_refused(
+        wave_repo,
+        config,
+        monkeypatch,
+        bus_dir=bus_dir,
+    )
+
+
+def test_native_post_commit_arbitrary_stale_state_sha_grants_nothing_alone(
+    wave_repo,
+    monkeypatch,
+):
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = ".agent_bus-post-commit-stale-only"
+    state = _prepare_post_commit_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+    )
+    _rewrite_json(
+        state["routing_path"],
+        lambda payload: payload.__setitem__("state_sha", "f" * 64),
+    )
+    state["candidate_spec_path"].unlink()
+    state["handoff_path"].unlink()
+    state["continuation_path"].unlink()
+
+    _assert_post_commit_resume_refused(
+        wave_repo,
+        config,
+        monkeypatch,
+        bus_dir=bus_dir,
+    )
 
 
 def test_native_stub_packet_contract_digest_binds_exact_validation_payload():

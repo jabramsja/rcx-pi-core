@@ -96,6 +96,7 @@ import tracker_sync_note as _tsn  # noqa: E402
 import phase_a_executor as _pa  # noqa: E402
 import executor_dispatch as _ed  # noqa: E402
 import candidate_authority as _ca  # noqa: E402
+import commit_executor as _ce  # noqa: E402
 
 
 _ACTIVE_BRIDGE_REVIEW_STATUSES = frozenset({"READER_RUNNING", "REVIEWER_RUNNING"})
@@ -1482,6 +1483,543 @@ def _routing_record_targets_native_attempt(
     return False
 
 
+def _exact_typed_mapping_matches(
+    actual: Any,
+    expected: dict[str, Any],
+) -> bool:
+    """Return whether a JSON object has the exact expected keys/types/values."""
+    return (
+        isinstance(actual, dict)
+        and actual.keys() == expected.keys()
+        and all(
+            type(actual[field_name]) is type(expected_value)
+            and actual[field_name] == expected_value
+            for field_name, expected_value in expected.items()
+        )
+    )
+
+
+def _is_lower_hex_id(value: Any, *lengths: int) -> bool:
+    """Return whether value is one canonical lowercase hexadecimal object id."""
+    return (
+        type(value) is str
+        and len(value) in lengths
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _native_post_commit_route_matches_config(
+    record: Any,
+    config: WaveConfig,
+) -> bool:
+    """Match the producer-era route authority to one exact post-commit config.
+
+    ``timestamp_utc`` is deliberately not inspected. ``state_sha`` is consumed
+    separately and only by the dispatcher's stale/fresh classifier; neither
+    diagnostic field is an identity or privilege grant here.
+    """
+    if (
+        not isinstance(record, dict)
+        or config.routing_decision != "ROUTE_PHASE_A"
+        or not config.candidate_authority_enabled()
+        or not _is_lower_hex_id(config.comparison_commit, 40, 64)
+    ):
+        return False
+    try:
+        expected = _native_stub_packet_contract_routing_record(config)
+    except LaunchWaveError:
+        return False
+
+    for field_name in ("decision", "wave_name", "task_id"):
+        expected_value = expected[field_name]
+        if (
+            type(record.get(field_name)) is not type(expected_value)
+            or record.get(field_name) != expected_value
+        ):
+            return False
+
+    # These three launch-time fields have independently checkable config
+    # authority. A post-commit candidate must not inherit a route for another
+    # comparison base or a route that launched with blockers already present.
+    if (
+        type(record.get("head_sha")) is not str
+        or record.get("head_sha") != config.comparison_commit
+        or type(record.get("merge_sha")) is not str
+        or record.get("merge_sha") != config.comparison_commit
+        or type(record.get("blocker_report_paths")) is not list
+        or record.get("blocker_report_paths") != []
+    ):
+        return False
+
+    candidates = record.get("next_candidates")
+    expected_candidate = expected["next_candidates"][0]
+    if (
+        type(candidates) is not list
+        or len(candidates) != 1
+        or not _exact_typed_mapping_matches(candidates[0], expected_candidate)
+    ):
+        return False
+
+    envelope = record.get(NATIVE_STUB_PACKET_CONTRACT_KEY)
+    expected_envelope = expected[NATIVE_STUB_PACKET_CONTRACT_KEY]
+    if (
+        not isinstance(envelope, dict)
+        or envelope.keys() != expected_envelope.keys()
+        or type(envelope.get("required")) is not bool
+        or type(envelope.get("version")) is not int
+        or type(envelope.get("producer")) is not str
+        or type(envelope.get("digest")) is not str
+        or type(envelope.get("contract")) is not dict
+        or envelope != expected_envelope
+    ):
+        return False
+
+    return _exact_typed_mapping_matches(
+        record.get(LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY),
+        expected[LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY],
+    )
+
+
+def _native_post_commit_packet_matches_config(
+    repo_root: Path,
+    config: WaveConfig,
+) -> bool:
+    """Validate the existing locked packet against config without rewriting it."""
+    packet_path = repo_root / config.tracked_packet
+    try:
+        packet_text = packet_path.read_text(encoding="utf-8")
+        expected_routing = _native_stub_packet_contract_routing_record(config)
+        validation_text = _native_stub_recovery_validation_content(
+            packet_text,
+            config,
+        )
+        _pa.validate_native_stub_packet_contract(
+            expected_routing,
+            config.tracked_packet,
+            validation_text,
+            allow_post_lock_machine_sections=True,
+        )
+    except (
+        OSError,
+        UnicodeDecodeError,
+        LaunchWaveError,
+        _pa.PhaseAExecutorError,
+    ):
+        return False
+    return True
+
+
+def _post_commit_candidate_authority_matches(
+    repo_root: Path,
+    record: dict[str, Any],
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+) -> tuple[bool, Path | None, str]:
+    """Validate the durable config-bound candidate spec without mutating it."""
+    if not config.candidate_authority_enabled():
+        return False, None, ""
+
+    required = record.get("candidate_authority_required")
+    if type(required) is not bool or required is not config.pre_review_authority:
+        return False, None, ""
+    metadata = record.get("candidate_authority")
+    if not isinstance(metadata, dict):
+        return False, None, ""
+    allowed_metadata_keys = {
+        "required",
+        "precommit_inventory",
+        "spec_path",
+        "spec_identity",
+    }
+    if "target_branch_authority" in metadata:
+        allowed_metadata_keys.add("target_branch_authority")
+    if set(metadata) != allowed_metadata_keys:
+        return False, None, ""
+    if (
+        type(metadata.get("required")) is not bool
+        or metadata.get("required") is not config.pre_review_authority
+        or type(metadata.get("precommit_inventory")) is not bool
+        or metadata.get("precommit_inventory") is not config.precommit_inventory
+    ):
+        return False, None, ""
+
+    try:
+        expected_spec = _ca.build_spec_from_wave_config(
+            config,
+            phase="phase_b",
+            review_round="prepare-review",
+        )
+        expected_spec_path = _ca.authority_spec_path(
+            repo_root,
+            bus_dir=bus_dir,
+            wave_id=config.wave_id,
+        )
+        expected_identity = _ca.authority_spec_identity(
+            repo_root,
+            expected_spec,
+            authority_required=bool(config.pre_review_authority),
+        )
+    except (_ca.CandidateAuthorityError, OSError, ValueError, TypeError):
+        return False, None, ""
+
+    if (
+        type(metadata.get("spec_path")) is not str
+        or metadata.get("spec_path") != str(expected_spec_path)
+        or not _exact_typed_mapping_matches(
+            metadata.get("spec_identity"),
+            expected_identity,
+        )
+    ):
+        return False, None, ""
+
+    try:
+        raw_spec = json.loads(expected_spec_path.read_text(encoding="utf-8"))
+        if not _exact_typed_mapping_matches(raw_spec, expected_spec.to_dict()):
+            return False, None, ""
+        loaded_spec = _ca.load_authority_spec(expected_spec_path)
+        _ca.verify_authority_spec_identity(
+            repo_root,
+            loaded_spec,
+            expected_identity,
+        )
+        _ca.guard_candidate_scope_before_mutation(repo_root, loaded_spec)
+    except (
+        _ca.CandidateAuthorityError,
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+        TypeError,
+    ):
+        return False, None, ""
+
+    launch_target_branch = ""
+    if "target_branch_authority" in metadata:
+        if not config.pre_review_authority:
+            return False, None, ""
+        target_authority = metadata["target_branch_authority"]
+        if (
+            not isinstance(target_authority, dict)
+            or set(target_authority)
+            != {"source", "branch_prefix", "target_branch"}
+            or any(
+                type(value) is not str or not value or value != value.strip()
+                for value in target_authority.values()
+            )
+            or target_authority["source"] != "launch_current_branch"
+        ):
+            return False, None, ""
+        launch_target_branch = _launch_wave_bound_target_branch(
+            target_authority["target_branch"],
+            wave_id=config.wave_id,
+            branch_prefix=target_authority["branch_prefix"],
+        )
+        if launch_target_branch != target_authority["target_branch"]:
+            return False, None, ""
+
+    return True, expected_spec_path, launch_target_branch
+
+
+def _post_commit_git_authority_matches(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    target_branch: str,
+    commit_sha: str,
+) -> bool:
+    """Check exact committed HEAD, branch, and base/commit ancestry read-only."""
+    try:
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        status_result = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{commit_sha}^{{commit}}"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        commit_ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", commit_sha, "HEAD"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        comparison_ancestor = subprocess.run(
+            [
+                "git",
+                "merge-base",
+                "--is-ancestor",
+                config.comparison_commit,
+                "HEAD",
+            ],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return False
+
+    current_branch = branch_result.stdout.strip()
+    current_head = head_result.stdout.strip()
+    return (
+        current_branch == target_branch
+        and _is_lower_hex_id(current_head, 40, 64)
+        and current_head == commit_sha
+        and not status_result.stdout
+        and commit_ancestor.returncode == 0
+        and comparison_ancestor.returncode == 0
+    )
+
+
+def _post_commit_resume_authority(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+) -> dict[str, Any] | None:
+    """Return complete read-only continuation authority, or ``None``.
+
+    Every conjunct is independently available across the launch, Phase B, and
+    commit boundaries. A route timestamp never participates; route state is
+    used only to prove that the unchanged dispatcher will enter its stale-route
+    commit-only selector.
+    """
+    routing_path = _ec.routing_record_path(repo_root, bus_dir)
+    try:
+        record = json.loads(routing_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not _native_post_commit_route_matches_config(record, config):
+        return None
+    if not _native_post_commit_packet_matches_config(repo_root, config):
+        return None
+
+    state_sha = record.get("state_sha")
+    if type(state_sha) is not str or not state_sha:
+        return None
+    try:
+        fresh, freshness_detail = _ed.validate_routing_record_freshness(
+            record,
+            repo_root,
+        )
+    except Exception:  # an unreadable diagnostic is indeterminate, never stale proof
+        return None
+    if fresh or not freshness_detail.startswith("Routing record is stale:"):
+        return None
+
+    candidate_ok, spec_path, launch_target_branch = (
+        _post_commit_candidate_authority_matches(
+            repo_root,
+            record,
+            config,
+            bus_dir=bus_dir,
+        )
+    )
+    if not candidate_ok or spec_path is None:
+        return None
+
+    handoff_path = _ec.agent_bus_path(
+        repo_root,
+        bus_dir,
+        "executors",
+        "phase_b_handoff.json",
+    )
+    try:
+        handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    try:
+        valid_handoff, _handoff_errors = _ce.validate_handoff(
+            handoff,
+            repo_root=repo_root,
+        )
+        handoff_matches, _handoff_detail = (
+            _ed._validate_phase_b_handoff_identity(
+                handoff_path,
+                record,
+            )
+        )
+    except (OSError, TypeError, ValueError):
+        return None
+    if (
+        not valid_handoff
+        or not handoff_matches
+        or handoff.get("caller") != "phase_b"
+    ):
+        return None
+    handoff_target_branch = handoff.get("target_branch")
+    if (
+        type(handoff_target_branch) is not str
+        or not handoff_target_branch
+        or handoff_target_branch != handoff_target_branch.strip()
+    ):
+        return None
+
+    continuation_path = _ec.agent_bus_path(
+        repo_root,
+        bus_dir,
+        "executors",
+        f"commit_executor_{config.wave_id}.json",
+    )
+    try:
+        continuation = json.loads(continuation_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(continuation, dict):
+        return None
+
+    receipt_decision = continuation.get("receipt_decision")
+    steps_completed = continuation.get("steps_completed")
+    continuation_target_branch = continuation.get("target_branch")
+    commit_sha = continuation.get("commit_sha")
+    handoff_sha = continuation.get("handoff_sha")
+    if (
+        type(continuation.get("version")) is not int
+        or continuation.get("version") != _ce.COMMIT_CONTINUATION_VERSION
+        or type(continuation.get("status")) is not str
+        or continuation.get("status") != _ce.CONTINUATION_ACTIVE_STATUS
+        or type(receipt_decision) is not str
+        or receipt_decision not in {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}
+        or type(steps_completed) is not list
+        or not all(type(step) is str for step in steps_completed)
+        or "git_commit" not in steps_completed
+        or not _is_lower_hex_id(handoff_sha, 64)
+        or type(continuation_target_branch) is not str
+        or not continuation_target_branch
+        or continuation_target_branch != continuation_target_branch.strip()
+        or not _is_lower_hex_id(commit_sha, 40, 64)
+        or commit_sha == config.comparison_commit
+    ):
+        return None
+
+    if (
+        handoff_sha != _ce._handoff_sha(handoff)
+        or continuation_target_branch != handoff_target_branch
+        or (
+            launch_target_branch
+            and continuation_target_branch != launch_target_branch
+        )
+    ):
+        return None
+    if not _post_commit_git_authority_matches(
+        repo_root,
+        config,
+        target_branch=continuation_target_branch,
+        commit_sha=commit_sha,
+    ):
+        return None
+
+    try:
+        dispatcher_ready, _dispatcher_detail = (
+            _ed._post_commit_continuation_ready_for_record(
+                repo_root,
+                record,
+                bus_dir=bus_dir,
+            )
+        )
+    except (OSError, TypeError, ValueError, subprocess.SubprocessError):
+        return None
+    if dispatcher_ready is not True:
+        return None
+
+    return {
+        "routing_path": routing_path,
+        "handoff_path": handoff_path,
+        "continuation_path": continuation_path,
+        "candidate_authority_spec_path": spec_path,
+    }
+
+
+def _post_commit_reentry_evidence_present(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+) -> bool:
+    """Detect a crossed commit boundary without treating it as authority."""
+    # The commit executor emits this record only after ``git commit``. Check
+    # for it before the fallible HEAD probe so indeterminate Git state cannot
+    # turn known same-wave post-commit evidence into a setup-chain fallthrough.
+    # Its presence is refusal evidence only; complete continuation authority is
+    # still required separately by ``_post_commit_resume_authority``.
+    continuation_path = _ec.agent_bus_path(
+        repo_root,
+        bus_dir,
+        "executors",
+        f"commit_executor_{config.wave_id}.json",
+    )
+    if continuation_path.exists():
+        return True
+
+    # Historical simple configs intentionally have no candidate authority or
+    # comparison commit.  For those configs, a locked Phase B packet (and its
+    # pre-commit handoff) cannot distinguish a normal partial run from a crossed
+    # commit boundary.  Preserve their established setup-chain re-entry unless
+    # the commit executor's explicit continuation artifact above proves that a
+    # commit actually occurred.
+    if not config.candidate_authority_enabled():
+        return False
+
+    try:
+        current_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return False
+
+    if current_head == config.comparison_commit:
+        return False
+
+    # A Phase B handoff is different: it exists pre-commit, so it must not
+    # change the established partial-run behavior at the comparison commit.
+    handoff_path = _ec.agent_bus_path(
+        repo_root,
+        bus_dir,
+        "executors",
+        "phase_b_handoff.json",
+    )
+    if handoff_path.exists():
+        return True
+    try:
+        packet_text = (repo_root / config.tracked_packet).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return "Phase-A-Lock: LOCKED" in packet_text
+
+
 def _raise_native_stub_contract_relaunch_required(detail: str) -> None:
     raise LaunchWaveError(
         "refusing to replace an existing native stub packet contract for this "
@@ -2676,6 +3214,54 @@ def run_wave_setup(
     # incomplete or downgraded later config into the required fresh-attempt
     # response while a brand-new invalid config still reaches normal validation.
     relaunch_guard_ran = _native_relaunch_guard_identity_is_safe(config)
+    config_errors = config.validate(repo_root, bus_dir=bus_dir)
+
+    # A fully proven, already committed continuation is the only setup-chain
+    # bypass. All reads happen before packet/tracker/route/candidate/bridge/
+    # indicator producers. The unchanged dispatcher then selects commit-only
+    # resume from the unchanged stale canonical route.
+    if launch and relaunch_guard_ran and not config_errors:
+        continuation_authority = _post_commit_resume_authority(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+        )
+        if continuation_authority is not None:
+            launch_result = maybe_launch_dispatcher(
+                repo_root,
+                config,
+                launch=True,
+                runner=runner,
+                bus_dir=bus_dir,
+            )
+            candidate_spec_path = continuation_authority[
+                "candidate_authority_spec_path"
+            ]
+            bridge_config_path = _ec.bridge_config_path(repo_root, bus_dir)
+            return WaveSetupResult(
+                wave_id=config.wave_id,
+                packet_path=str(repo_root / config.tracked_packet),
+                tracked_packet=config.tracked_packet,
+                tracker_note_written=False,
+                routing_record_path=str(continuation_authority["routing_path"]),
+                candidate_authority_spec_path=str(candidate_spec_path),
+                bridge_config_path=(
+                    str(bridge_config_path) if bridge_config_path.exists() else None
+                ),
+                precondition_ok=True,
+                guards_ok=True,
+                launch=launch_result,
+            )
+        if _post_commit_reentry_evidence_present(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+        ):
+            _raise_native_stub_contract_relaunch_required(
+                "same-wave post-commit continuation authority is incomplete, "
+                "mismatched, fresh, or indeterminate"
+            )
+
     if relaunch_guard_ran:
         _require_native_stub_packet_contract_relaunch_safe(
             repo_root,
@@ -2683,7 +3269,6 @@ def run_wave_setup(
             bus_dir=bus_dir,
         )
 
-    config_errors = config.validate(repo_root, bus_dir=bus_dir)
     if config_errors:
         raise LaunchWaveError("invalid wave-config: " + "; ".join(config_errors))
 
