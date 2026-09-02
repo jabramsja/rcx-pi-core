@@ -410,7 +410,25 @@ Bounded review scope:
 - Do not exhaustively enumerate crash timing, interruption, recovery, state-transition, compatibility,
   or hypothetical edge permutations. Follow a candidate-specific signal only within this bounded scope.
 - Classify each discovered finding as DEFECT, POLICY_BOUND, or DOC_ACCURACY, then apply the
-  authoritative current-impact disposition contract below.{cs_section}"""
+  authoritative current-impact disposition contract below.
+
+Independent finding classification (complete before emitting the original envelope):
+- For every finding, determine and record four facts independently in the finding's existing
+  `evidence_result` as labeled clauses: `CANDIDATE_RELATIONSHIP=...`,
+  `TECHNICAL_IMPACT_CLASS=...`, `LIFECYCLE_STATUS=...`, and
+  `MERGE_DISPOSITION=blocking|non_blocking`.
+- Keep `LIFECYCLE_STATUS` aligned with the existing `status` field and `MERGE_DISPOSITION` aligned
+  with the existing `disposition` field. Do not add fields, a sidecar, or a second envelope, and do
+  not rewrite or normalize the emitted envelope.
+- Candidate causality establishes accountability and relevance; technical impact establishes
+  behavioral consequence; lifecycle records new, persisting, addressed, or blocked state; merge
+  disposition follows only the authoritative current-impact contract below. None is a proxy for
+  another.
+- Candidate relationship alone never promotes or suppresses a finding. Outside every absolute
+  non_blocking category below, a candidate-introduced or candidate-worsened regression on the
+  CURRENT authorized execution path is blocking, and direct failure of an exact locked acceptance
+  criterion remains the other blocking branch. Every absolute non_blocking category below remains
+  non_blocking regardless of severity.{cs_section}"""
 
 
 def _build_design_deliberation_instructions(
