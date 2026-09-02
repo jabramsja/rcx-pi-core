@@ -115,9 +115,6 @@ FOUNDER_OVERRIDE:pr1219-p0ibrrcp-reviewer-candidate-causality-authority-r4-2026-
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/pr1219-p0ibrrcp-reviewer-candidate-causality-authority-r4-2026-08-25.json`
 - Current staged files:
-  - `TASKS.md`
-  - `mu/tests/tools/test_agent_bridge_supervisor.py`
-  - `mu/tools/agents/bridge_supervisor.py`
   - `reports/control_plane/pr1219-p0ibrrcp-reviewer-candidate-causality-authority-r4-2026-08-25_2026-09-02.md`
   - `reports/l4_wave_indicators/pr1219-p0ibrrcp-reviewer-candidate-causality-authority-r4-2026-08-25.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

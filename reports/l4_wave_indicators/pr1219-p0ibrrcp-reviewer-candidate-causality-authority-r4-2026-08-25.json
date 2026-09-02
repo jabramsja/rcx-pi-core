@@ -1,24 +1,24 @@
 {
   "wave_id": "pr1219-p0ibrrcp-reviewer-candidate-causality-authority-r4-2026-08-25",
-  "repeat_run_speedup_ratio": 1.28551,
+  "repeat_run_speedup_ratio": 0.956106,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.275486,
+  "step_growth_slope": 0.249008,
   "repeat_run_raw_seconds": [
-    0.35414,
-    0.275486
+    0.238078,
+    0.249008
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.35414
+      "elapsed_seconds": 0.238078
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.629626
+      "elapsed_seconds": 0.487086
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-09-02T23:02:03Z",
+  "collection_timestamp_utc": "2026-09-02T23:15:32Z",
   "collector_version": "2.2.0"
 }
