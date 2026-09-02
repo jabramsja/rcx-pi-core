@@ -3930,12 +3930,13 @@ _PAGER_ROUTE_OVERRIDE_ENV = "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"
 def _commit_validation_protected_env_keys() -> frozenset[str]:
     """Env keys a commit-owned validation child must never inherit or be handed.
 
-    These are the live pipeline lane bus plus every invocation-owned role/pager
-    routing override the dispatcher resolves from the environment. Validation
-    children run the repository's OWN test suite, which mints its own temporary
-    ``.agent_bus`` and asserts DEFAULT role/pager routing; inheriting any live
-    override makes those hermetic tests resolve the live lane or the live route
-    instead of their fixtures (reproduced by
+    These are the live pipeline lane bus, every invocation-owned role/pager
+    routing override, and the exact bridge-turn recovery-timeout override/key
+    pair the dispatcher resolves from the environment. Validation children run
+    the repository's OWN test suite, which mints its own temporary ``.agent_bus``
+    and asserts DEFAULT role/pager routing; inheriting live control state can
+    make those hermetic tests resolve pipeline-owned state instead of their
+    fixtures (reproduced by
     ``test_pager_persists_event_delivery_state_and_lock_in_namespaced_bus``, which
     fails when ``RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE=codex`` leaks in).
 
@@ -3948,6 +3949,8 @@ def _commit_validation_protected_env_keys() -> frozenset[str]:
     """
     keys = {
         "RCX_AGENT_BUS_DIR",
+        "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY",
+        "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE",
         ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV,
         _PAGER_ROUTE_OVERRIDE_ENV,
     }
@@ -3964,18 +3967,19 @@ def _commit_validation_env(
     Validation children run the repository's OWN test suite, and those tests
     create their own temporary ``.agent_bus`` authority and assert default role
     and pager routing. They MUST NOT inherit -- or be handed -- the live pipeline
-    lane (``RCX_AGENT_BUS_DIR``) or any invocation-owned role/pager override: a
-    namespaced live lane (e.g. ``.agent_bus-fix37``) would override the temporary
-    repository bus, and a live ``RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE`` would
-    override the temporary repository's pager config
+    lane (``RCX_AGENT_BUS_DIR``), any invocation-owned role/pager override, or
+    the bridge-turn recovery-timeout override/key pair: a namespaced live lane
+    (e.g. ``.agent_bus-fix37``) would override the temporary repository bus, and
+    a live ``RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE`` would override the
+    temporary repository's pager config
     (``test_pager_persists_event_delivery_state_and_lock_in_namespaced_bus`` --
     the pipeline-fix-37b Step 11 failure that pipeline-fix-37b's bus-only strip
     did not close).
 
     Every other parent variable (PATH, credentials, locale, pytest pins,
-    ``RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY``, and any unrelated var) is
-    preserved byte-for-byte. ``RCX_SKIP_*`` is stripped for parity with the
-    ``_run`` default env, and ``os.environ`` is never mutated.
+    unrelated recovery state such as ``RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY``,
+    and any unrelated var) is preserved byte-for-byte. ``RCX_SKIP_*`` is stripped
+    for parity with the ``_run`` default env, and ``os.environ`` is never mutated.
 
     Caller ``overrides`` (e.g. the pytest determinism pins) are applied BEFORE the
     protected keys are removed, so that neither a malicious parent env nor a
@@ -4307,6 +4311,9 @@ def run_private_attr_test_gate(
                 text=True,
                 check=False,
                 timeout=timeout,
+                # Commit-owned validation child: strip live invocation state
+                # through the same boundary used by the other validation gates.
+                env=_commit_validation_env(),
             )
             if completed.stdout:
                 stdout_parts.append(completed.stdout)
