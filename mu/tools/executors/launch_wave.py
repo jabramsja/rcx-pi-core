@@ -1998,7 +1998,10 @@ def _post_commit_reentry_evidence_present(
             check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-        return False
+        # Without a trustworthy HEAD, the commit boundary is indeterminate.
+        # Refuse through the caller's pre-producer guard instead of allowing
+        # setup artifacts to be rewritten on a possible post-commit re-entry.
+        return True
 
     if current_head == config.comparison_commit:
         return False
