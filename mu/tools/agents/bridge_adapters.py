@@ -1007,6 +1007,8 @@ def _run_adapter_buffered(
         stale_watchdog_stop.set()
         if stale_watchdog is not None:
             stale_watchdog.join(timeout=5)
+        if proc.returncode == 0:
+            _kill_process_group(proc, wait_for_exit=True)
     except subprocess.TimeoutExpired as exc:
         watchdog.cancel()
         if zero_output_watchdog is not None:
@@ -1279,6 +1281,8 @@ def _run_adapter_streaming(
         stale_watchdog_stop.set()
         if stale_watchdog is not None:
             stale_watchdog.join(timeout=5)
+        if proc.returncode == 0:
+            _kill_process_group(proc, wait_for_exit=True)
     except subprocess.TimeoutExpired as exc:
         if zero_output_watchdog is not None:
             zero_output_watchdog.cancel()
