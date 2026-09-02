@@ -718,6 +718,7 @@ def test_native_stub_packet_contract_routing_marker_and_digest_binding(wave_repo
 
     record = lw.setup_routing_record(wave_repo, config)
     envelope = record[lw.NATIVE_STUB_PACKET_CONTRACT_KEY]
+    launch_authority = record[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY]
     contract = envelope["contract"]
 
     assert lw.NATIVE_STUB_PACKET_CONTRACT_KEY == "native_stub_packet_contract"
@@ -751,11 +752,31 @@ def test_native_stub_packet_contract_routing_marker_and_digest_binding(wave_repo
     )
     assert envelope["digest"] == hashlib.sha256(canonical).hexdigest()
     assert envelope == lw.build_native_stub_packet_contract(config)
+    assert lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY == (
+        "launch_wave_override_authority"
+    )
+    assert set(launch_authority) == {
+        "version",
+        "implementer_agent",
+        "reviewer_agent",
+        "pager_route",
+        "max_turns",
+    }
+    assert launch_authority == {
+        "version": 1,
+        "implementer_agent": "",
+        "reviewer_agent": "",
+        "pager_route": "",
+        "max_turns": None,
+    }
+    assert type(launch_authority["version"]) is int
+    assert launch_authority == lw.build_launch_wave_override_authority(config)
 
     on_disk = json.loads(
         ec.routing_record_path(wave_repo).read_text(encoding="utf-8")
     )
     assert on_disk[lw.NATIVE_STUB_PACKET_CONTRACT_KEY] == envelope
+    assert on_disk[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY] == launch_authority
     assert on_disk["wave_name"] == contract["identity"]["wave_id"]
     assert on_disk["task_id"] == contract["identity"]["task_id"]
     assert on_disk["next_candidates"][0]["tracked_packet"] == contract["identity"][
@@ -770,6 +791,123 @@ def test_native_stub_packet_contract_routing_marker_and_digest_binding(wave_repo
     assert config.tracked_packet == (
         f"reports/control_plane/{config.wave_id}_{config.date}.md"
     )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "changed_value"),
+    [
+        ("implementer_agent", "codex"),
+        ("reviewer_agent", "codex"),
+        ("pager_route", "codex"),
+        ("max_turns", 73),
+    ],
+)
+def test_native_launch_override_authority_changes_deterministically_on_fresh_routes(
+    wave_repo,
+    field_name,
+    changed_value,
+):
+    config = make_config()
+    lw.setup_packet(wave_repo, config)
+    changed = dataclasses.replace(config, **{field_name: changed_value})
+    expected = lw.build_launch_wave_override_authority(changed)
+
+    first_bus = f".agent_bus-{field_name}-first"
+    second_bus = f".agent_bus-{field_name}-second"
+    first_record = lw.setup_routing_record(wave_repo, changed, bus_dir=first_bus)
+    second_record = lw.setup_routing_record(wave_repo, changed, bus_dir=second_bus)
+    first_authority = first_record[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY]
+    second_authority = second_record[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY]
+    expected_identity = lw._native_stub_packet_contract_routing_record(changed)  # ANTICHEAT_OK: directly proves the launcher's producer-only pre-write identity carries the same authority as each fresh persisted route
+
+    def canonical_bytes(value):
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+    assert canonical_bytes(first_authority) == canonical_bytes(expected)
+    assert canonical_bytes(second_authority) == canonical_bytes(expected)
+    assert canonical_bytes(
+        expected_identity[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY]
+    ) == canonical_bytes(expected)
+    assert canonical_bytes(first_authority) != canonical_bytes(
+        lw.build_launch_wave_override_authority(config)
+    )
+    assert json.loads(
+        ec.routing_record_path(wave_repo, first_bus).read_text(encoding="utf-8")
+    )[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY] == expected
+    assert json.loads(
+        ec.routing_record_path(wave_repo, second_bus).read_text(encoding="utf-8")
+    )[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY] == expected
+
+
+@pytest.mark.parametrize(
+    ("field_name", "changed_value"),
+    [
+        (None, None),
+        ("implementer_agent", "codex"),
+        ("reviewer_agent", "codex"),
+        ("pager_route", "codex"),
+        ("max_turns", 73),
+    ],
+)
+def test_native_launch_override_authority_rejects_pre_field_or_changed_route(
+    wave_repo,
+    field_name,
+    changed_value,
+):
+    config = make_config()
+    packet_path = lw.setup_packet(wave_repo, config)
+    lw.setup_tracker_note(wave_repo, config)
+    routing_path = ec.routing_record_path(wave_repo)
+    routing = lw.setup_routing_record(wave_repo, config)
+
+    proposed = config
+    if field_name is None:
+        assert routing.pop(lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY) == (
+            lw.build_launch_wave_override_authority(config)
+        )
+        routing_path.write_text(
+            json.dumps(routing, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    else:
+        proposed = dataclasses.replace(config, **{field_name: changed_value})
+
+    tasks_path = wave_repo / "TASKS.md"
+    before = {
+        "packet": packet_path.read_bytes(),
+        "tasks": tasks_path.read_bytes(),
+        "routing": routing_path.read_bytes(),
+        "staged": _staged_paths(wave_repo),
+    }
+    dispatch_calls = []
+
+    def runner(*args, **kwargs):
+        dispatch_calls.append((args, kwargs))
+        raise AssertionError("an existing same-attempt route must not dispatch")
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ) as excinfo:
+        lw.run_wave_setup(
+            wave_repo,
+            proposed,
+            launch=True,
+            runner=runner,
+        )
+
+    assert "same-wave launch override authority" in str(excinfo.value)
+    assert packet_path.read_bytes() == before["packet"]
+    assert tasks_path.read_bytes() == before["tasks"]
+    assert routing_path.read_bytes() == before["routing"]
+    assert _staged_paths(wave_repo) == before["staged"]
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert dispatch_calls == []
 
 
 def test_native_stub_packet_contract_digest_binds_exact_validation_payload():
@@ -1335,7 +1473,7 @@ def test_native_stub_packet_contract_rejects_routing_only_changed_direct_setup(
     assert _staged_paths(wave_repo) == before_staged
 
 
-def test_native_stub_packet_contract_does_not_infer_strictness_from_unmarked_phase_a_route(
+def test_native_launch_override_authority_rejects_unmarked_same_attempt_route(
     wave_repo,
 ):
     config = make_config()
@@ -1357,18 +1495,25 @@ def test_native_stub_packet_contract_does_not_infer_strictness_from_unmarked_pha
         json.dumps(legacy_routing, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    tasks_path = wave_repo / "TASKS.md"
     before_routing = routing_path.read_bytes()
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
 
-    packet_path = lw.setup_packet(wave_repo, config)
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ) as excinfo:
+        lw.setup_packet(wave_repo, config)
 
-    assert packet_path.is_file()
-    assert lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE in packet_path.read_text(
-        encoding="utf-8"
-    )
+    assert "same-wave launch override authority" in str(excinfo.value)
+    assert not (wave_repo / config.tracked_packet).exists()
+    assert tasks_path.read_bytes() == before_tasks
     assert routing_path.read_bytes() == before_routing
+    assert _staged_paths(wave_repo) == before_staged
 
 
-def test_native_stub_packet_contract_full_setup_completes_exact_unmarked_route_transition(
+def test_native_launch_override_authority_full_setup_does_not_retrofit_unmarked_route(
     wave_repo,
 ):
     config = make_config()
@@ -1390,18 +1535,35 @@ def test_native_stub_packet_contract_full_setup_completes_exact_unmarked_route_t
         json.dumps(legacy_routing, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    tasks_path = wave_repo / "TASKS.md"
+    before_routing = routing_path.read_bytes()
+    before_tasks = tasks_path.read_bytes()
+    before_staged = _staged_paths(wave_repo)
+    dispatch_calls = []
 
-    result = lw.run_wave_setup(wave_repo, config)
+    def runner(*args, **kwargs):
+        dispatch_calls.append((args, kwargs))
+        raise AssertionError("an existing unmarked route must not dispatch")
 
-    packet_text = (wave_repo / config.tracked_packet).read_text(encoding="utf-8")
-    routing = json.loads(routing_path.read_text(encoding="utf-8"))
-    tasks = (wave_repo / "TASKS.md").read_text(encoding="utf-8")
-    assert result.wave_id == config.wave_id
-    assert packet_text.count(lw.NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE) == 1
-    assert routing[lw.NATIVE_STUB_PACKET_CONTRACT_KEY] == (
-        lw.build_native_stub_packet_contract(config)
-    )
-    assert tasks.count(f", {config.wave_id}):") == 1
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ) as excinfo:
+        lw.run_wave_setup(
+            wave_repo,
+            config,
+            launch=True,
+            runner=runner,
+        )
+
+    assert "same-wave launch override authority" in str(excinfo.value)
+    assert not (wave_repo / config.tracked_packet).exists()
+    assert tasks_path.read_bytes() == before_tasks
+    assert routing_path.read_bytes() == before_routing
+    assert _staged_paths(wave_repo) == before_staged
+    assert not (wave_repo / ".agent_bus" / "bridge_config.json").exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert dispatch_calls == []
 
 
 def test_native_stub_packet_contract_direct_setup_preserves_unmarked_route_behavior(
@@ -2850,20 +3012,31 @@ def test_launch_off_by_default_runs_no_subprocess(wave_repo):
 
 def test_launch_invokes_runner_when_enabled(wave_repo):
     calls = []
+    observed_authorities = []
 
     class _R:
         returncode = 0
 
     def runner(cmd, **k):
         calls.append(cmd)
+        routing = json.loads(
+            ec.routing_record_path(wave_repo).read_text(encoding="utf-8")
+        )
+        observed_authorities.append(
+            routing[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY]
+        )
         return _R()
 
+    config = make_config()
     result = lw.run_wave_setup(
-        wave_repo, make_config(), launch=True, runner=runner
+        wave_repo, config, launch=True, runner=runner
     )
     assert len(calls) == 1
     assert "executor_dispatch.py" in calls[0][1]
     assert "--routing-record" in calls[0]
+    assert observed_authorities == [
+        lw.build_launch_wave_override_authority(config)
+    ]
     assert result.launch["launched"] is True
     assert result.launch["returncode"] == 0
 
