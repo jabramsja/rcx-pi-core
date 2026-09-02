@@ -85,6 +85,7 @@ def _seed_codex_runtime_home(runtime_home: Path) -> None:
 
 _AGENT_ENVELOPE_BEGIN = "BEGIN_AGENT_ENVELOPE"
 _AGENT_ENVELOPE_END = "END_AGENT_ENVELOPE"
+_CLAUDE_STREAM_JSON_ADAPTER_NAMES = frozenset({"claude", "fable"})
 _AGENT_ENVELOPE_BEGIN_RE = re.compile(
     rf"(?<![A-Za-z0-9_]){_AGENT_ENVELOPE_BEGIN}(?![A-Za-z0-9_])"
 )
@@ -334,7 +335,7 @@ def _normalize_stdout_for_adapter(
         return stdout_text
 
     uses_claude_stream_json = (
-        spec.name == "claude"
+        spec.name in _CLAUDE_STREAM_JSON_ADAPTER_NAMES
         and "--output-format" in cmd
         and "stream-json" in cmd
     )
@@ -544,7 +545,7 @@ def _line_is_matching_provider_terminal_event(
     """Recognize terminal authority only for a matching structured provider."""
     expected_type: str | None = None
     if (
-        spec.name == "claude"
+        spec.name in _CLAUDE_STREAM_JSON_ADAPTER_NAMES
         and "--output-format" in cmd
         and "stream-json" in cmd
     ):
