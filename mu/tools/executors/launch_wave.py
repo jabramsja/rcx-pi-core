@@ -163,6 +163,12 @@ NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX = (
     _pa.NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX
 )
 
+# Sibling route authority for launch-time values that are intentionally not
+# part of the locked version-1 native packet contract. Keep this separate from
+# ``native_stub_packet_contract`` so the packet contract and digest stay fixed.
+LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY = "launch_wave_override_authority"
+LAUNCH_WAVE_OVERRIDE_AUTHORITY_VERSION = 1
+
 _SAME_WAVE_DEFERRED_AUTH_START = (
     "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->"
 )
@@ -751,6 +757,22 @@ def build_native_stub_packet_contract(config: WaveConfig) -> dict[str, Any]:
     }
 
 
+def build_launch_wave_override_authority(config: WaveConfig) -> dict[str, Any]:
+    """Bind the exact launch-time role, pager, and turn-limit overrides.
+
+    Empty strings and ``None`` are deliberate authority values. Keeping every
+    key present distinguishes an explicit default launch from a pre-field
+    routing record without extending the locked native packet contract.
+    """
+    return {
+        "version": LAUNCH_WAVE_OVERRIDE_AUTHORITY_VERSION,
+        "implementer_agent": config.implementer_agent,
+        "reviewer_agent": config.reviewer_agent,
+        "pager_route": config.pager_route,
+        "max_turns": config.max_turns,
+    }
+
+
 def _native_stub_packet_contract_routing_record(
     config: WaveConfig,
 ) -> dict[str, Any]:
@@ -767,6 +789,9 @@ def _native_stub_packet_contract_routing_record(
             }
         ],
         NATIVE_STUB_PACKET_CONTRACT_KEY: build_native_stub_packet_contract(config),
+        LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY: (
+            build_launch_wave_override_authority(config)
+        ),
     }
 
 
@@ -1474,12 +1499,13 @@ def _require_native_stub_packet_contract_relaunch_safe(
 ) -> None:
     """Reject a changed same-attempt native contract before artifact mutation.
 
-    The routing envelope is the immutable contract authority once written.  The
-    packet worktree/index blobs cover an interrupted setup that produced step 1
-    but never reached the routing step.  An unrelated global routing record is
-    deliberately ignored so a fresh wave can replace the single-candidate route.
-    A proposed non-native decision must still inspect a same-attempt marked route:
-    otherwise the rerun could erase the marker and replace the immutable packet.
+    The routing envelope and its launch-override sibling are immutable once
+    written.  The packet worktree/index blobs cover an interrupted setup that
+    produced step 1 but never reached the routing step.  An unrelated global
+    routing record is deliberately ignored so a fresh wave can replace the
+    single-candidate route.  A proposed non-native decision must still inspect a
+    same-attempt marked route: otherwise the rerun could erase the marker and
+    replace the immutable packet.
     """
     repo_root = Path(repo_root)
     proposed_native = config.routing_decision == "ROUTE_PHASE_A"
@@ -1520,6 +1546,37 @@ def _require_native_stub_packet_contract_relaunch_safe(
                 routing_has_native_marker = (
                     NATIVE_STUB_PACKET_CONTRACT_KEY in existing_record
                 )
+                if proposed_native:
+                    expected_launch_authority = (
+                        build_launch_wave_override_authority(config)
+                    )
+                    existing_launch_authority = existing_record.get(
+                        LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY
+                    )
+                    launch_authority_matches = (
+                        isinstance(existing_launch_authority, dict)
+                        and existing_launch_authority.keys()
+                        == expected_launch_authority.keys()
+                        and all(
+                            type(existing_launch_authority[field_name])
+                            is type(expected_value)
+                            and existing_launch_authority[field_name]
+                            == expected_value
+                            for field_name, expected_value in (
+                                expected_launch_authority.items()
+                            )
+                        )
+                    )
+                    if not launch_authority_matches:
+                        # Producer-only relaunch fence: a pre-field or changed
+                        # same-attempt route must never be upgraded in place.
+                        # This does not admit or interpret continuation state.
+                        _raise_native_stub_contract_relaunch_required(
+                            "same-wave launch override authority is absent, "
+                            "malformed, tampered, or differs from the proposed "
+                            "implementer_agent, reviewer_agent, pager_route, or "
+                            "max_turns"
+                        )
                 if routing_has_native_marker and not proposed_native:
                     _raise_native_stub_contract_relaunch_required(
                         "same-wave marked native route cannot be changed to "
@@ -1891,6 +1948,9 @@ def setup_routing_record(
     if config.routing_decision == "ROUTE_PHASE_A":
         record[NATIVE_STUB_PACKET_CONTRACT_KEY] = (
             build_native_stub_packet_contract(config)
+        )
+        record[LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY] = (
+            build_launch_wave_override_authority(config)
         )
         record_changed = True
     if config.candidate_authority_enabled():
