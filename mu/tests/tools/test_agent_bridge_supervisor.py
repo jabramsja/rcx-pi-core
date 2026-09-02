@@ -2001,6 +2001,78 @@ time.sleep(10.0)
     assert "warming up" in raw_text
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["buffered", "streaming"])
+def test_run_adapter_normal_root_cleans_child_retaining_output_pipes(
+    tmp_path: Path,
+    stream: bool,
+) -> None:
+    child_pid_path = tmp_path / f"retained-pipe-child-{stream}.pid"
+    agent = tmp_path / f"retained-pipe-agent-{stream}.py"
+    agent.write_text(
+        """\
+import os
+import sys
+import time
+from pathlib import Path
+
+pid_path = Path(sys.argv[1])
+sys.stdin.read()
+ready_read, ready_write = os.pipe()
+child_pid = os.fork()
+if child_pid == 0:
+    os.close(ready_read)
+    pid_path.write_text(str(os.getpid()), encoding="utf-8")
+    os.write(ready_write, b"1")
+    os.close(ready_write)
+    time.sleep(10.0)
+    os._exit(0)
+
+os.close(ready_write)
+ready = os.read(ready_read, 1)
+os.close(ready_read)
+if ready != b"1":
+    raise RuntimeError("retained-pipe child did not become ready")
+print("normal-root-stdout", flush=True)
+print("normal-root-stderr", file=sys.stderr, flush=True)
+sys.exit(0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / f"retained-pipe-prompt-{stream}.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / f"retained-pipe-raw-{stream}.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(agent), str(child_pid_path)],
+        timeout_s=1,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="review prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="r1-reviewer",
+        agent_role="reviewer",
+        raw_output_path=raw_output_path,
+        stream=stream,
+    )
+    elapsed = time.monotonic() - start
+
+    child_pid = int(child_pid_path.read_text(encoding="utf-8").strip())
+    raw_text = raw_output_path.read_text(encoding="utf-8")
+    assert elapsed < spec.timeout_s
+    assert "normal-root-stdout" in output
+    assert "normal-root-stderr" in output
+    assert "normal-root-stdout" in raw_text
+    assert "normal-root-stderr" in raw_text
+    assert not adapters._pid_is_live_non_zombie(child_pid)  # ANTICHEAT_OK: real-process retained-pipe cleanup assertion
+
+
 def test_run_adapter_stale_timeout_kills_detached_descendants(tmp_path: Path) -> None:
     child_pid_path = tmp_path / "child.pid"
     detached_agent = tmp_path / "detached_agent.py"

@@ -1,0 +1,24 @@
+{
+  "wave_id": "pr1219-p0ibrrcp-adapter-root-exit-retained-pipe-r4c1-2026-09-02",
+  "repeat_run_speedup_ratio": 1.126118,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.272942,
+  "repeat_run_raw_seconds": [
+    0.307365,
+    0.272942
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.307365
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.580307
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-02T20:51:27Z",
+  "collector_version": "2.2.0"
+}
