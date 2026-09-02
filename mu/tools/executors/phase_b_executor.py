@@ -3637,6 +3637,19 @@ def _signal_process_group_or_pid(pid: int, sig: int) -> None:
 def _pid_is_live(pid: int) -> bool:
     if pid <= 0:
         return False
+    # ``kill(pid, 0)`` also succeeds for zombies.  Detached bridge children can
+    # be reparented to a PID 1 that does not reap promptly, so treat Linux's
+    # terminal process states as exited instead of waiting out cleanup timeouts.
+    try:
+        proc_stat = (Path("/proc") / str(pid) / "stat").read_bytes()
+    except OSError:
+        # /proc is not portable and may be hidden; retain the kill(0) fallback.
+        pass
+    else:
+        stat_tail = proc_stat.rpartition(b")")[2]
+        stat_fields = stat_tail.split()
+        if stat_fields and stat_fields[0] in {b"Z", b"X", b"x"}:
+            return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
