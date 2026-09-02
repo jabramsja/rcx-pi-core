@@ -135,6 +135,7 @@ class PhaseBExecutorError(RuntimeError):
 ALLOWED_FINDING_DISPOSITIONS = {"blocking", "non_blocking"}
 BRIDGE_JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 RECOGNIZED_BRIDGE_DECISIONS = {"GO", "REQUEST_CHANGES", "NO_GO", "QUESTION"}
+BRIDGE_CORRECTION_CONTEXT_LIMIT = 4000
 PHASE_B_BRIDGE_AUTHORITY_ROUND = "bridge_pre_review"
 ALLOWED_REVIEW_DEPTHS = {"quick", "full", "founder", "all"}
 BRIDGE_REVIEW_POLL_INTERVAL = 30.0
@@ -180,6 +181,11 @@ PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER = (
 # ---------------------------------------------------------------------------
 # Finding disposition helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_go_bridge_decision(bridge_decision: str) -> bool:
+    """Return whether a bridge decision authorizes deferral and convergence."""
+    return bridge_decision == "GO"
 
 
 def _shared_deferrable_on_go(finding: dict[str, Any]) -> bool:
@@ -1295,6 +1301,57 @@ def _parse_findings_from_render(
         if findings:
             return findings
     return _parse_findings_from_text(render_text)
+
+
+def _bounded_bridge_correction_context(text: str) -> str:
+    """Bound correction context without dropping all late reviewer content."""
+    content = text.strip()
+    if len(content) <= BRIDGE_CORRECTION_CONTEXT_LIMIT:
+        return content
+
+    omission = "\n\n...[middle omitted from bounded bridge correction context]...\n\n"
+    available = BRIDGE_CORRECTION_CONTEXT_LIMIT - len(omission)
+    head_limit = available // 2
+    tail_limit = available - head_limit
+    return content[:head_limit] + omission + content[-tail_limit:]
+
+
+def _bridge_correction_context(
+    parsed_findings: list[dict[str, Any]],
+    render_text: str,
+    raw_texts: list[str],
+    bridge_stdout: str,
+) -> str:
+    """Select bounded reviewer context for a non-GO implementer correction.
+
+    Structured findings are the narrowest authoritative correction input. If
+    the review was not structurally parseable, prefer the final reviewer agent
+    message over surrounding command-event noise, then retain the prior raw /
+    render / stdout fallback.
+    """
+    if parsed_findings:
+        context = json.dumps(parsed_findings, indent=2)
+    else:
+        agent_message = ""
+        for raw_text in raw_texts:
+            agent_messages = _iter_agent_message_texts(raw_text)
+            if agent_messages:
+                agent_message = agent_messages[-1]
+                break
+        if not agent_message:
+            render_messages = _iter_agent_message_texts(render_text)
+            if render_messages:
+                agent_message = render_messages[-1]
+        if not agent_message:
+            stdout_messages = _iter_agent_message_texts(bridge_stdout)
+            if stdout_messages:
+                agent_message = stdout_messages[-1]
+        context = (
+            agent_message
+            if agent_message
+            else "\n\n".join(raw_texts) or render_text or bridge_stdout
+        )
+    return _bounded_bridge_correction_context(context)
 
 
 def _run_pytest_on_files(
@@ -7939,7 +7996,10 @@ def run_phase_b(
                 ],
             }
 
-        if bridge_result["exit_code"] == 0 and bridge_decision == "GO":
+        if (
+            bridge_result["exit_code"] == 0
+            and _is_go_bridge_decision(bridge_decision)
+        ):
             render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
             parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
             blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
@@ -8063,7 +8123,6 @@ def run_phase_b(
                 }
 
             render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
-            findings_text = render if render else bridge_result.get("stdout", "")
             parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
             blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
 
@@ -8084,35 +8143,15 @@ def run_phase_b(
                         "unresolvable_findings": blocking_findings,
                     }
 
-            if render or raw_texts:
-                prior_deferred_packet_path = deferred_packet_path
-                all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
-                    repo_root,
-                    wave_id,
-                    all_non_blocking,
-                    non_blocking_findings,
-                    previous_packet_path=prior_deferred_packet_path,
-                    executor_created=executor_created,
-                    wave_class=wave_class,
-                    target_gate_id=target_gate_id,
-                )
-                if deferred_packet_path is not None:
-                    result["deferred_packet_path"] = deferred_packet_path
-                else:
-                    result.pop("deferred_packet_path", None)
-
-            if parsed_findings and not blocking_findings:
-                changed_files = current_files
-                return current_files, None
-
-            if blocking_findings:
-                blocking_text = json.dumps(blocking_findings, indent=2)
-                findings_for_impl = (
-                    f"## BLOCKING findings only (non-blocking deferred to {deferred_packet_path or 'N/A'})\n\n"
-                    + blocking_text
-                )
-            else:
-                findings_for_impl = findings_text[:4000]
+            # A non-GO decision requires correction even when every parsed
+            # finding is explicitly nonblocking. Preserve the review context;
+            # none of this round's findings have been deferred.
+            findings_for_impl = _bridge_correction_context(
+                parsed_findings,
+                render,
+                raw_texts,
+                bridge_result.get("stdout", ""),
+            )
 
             _checkpoint_bridge_fix_pending(
                 repo_root,
@@ -8519,7 +8558,8 @@ def run_phase_b(
     # Step 5: Bridge convergence loop (implementer-fix → bridge-review)
     # Each round: bridge reviews → if not GO, re-invoke implementer with findings → next round.
     # Decision parsed from stdout. Render read by exact job_id.
-    # Enhanced: classify findings by disposition, defer non-blockers, run pytest after fixes.
+    # Classify findings by disposition; only GO may defer non-blockers, while
+    # non-GO rounds retain the complete review context for bounded correction.
     bridge_converged = _skip_through_bridge and resume_after in (
         "bridge_converged",
         "needs_phase_b_reentry",
@@ -8669,7 +8709,10 @@ def run_phase_b(
             _clear_state(repo_root)
             return result
 
-        if bridge_result["exit_code"] == 0 and bridge_decision == "GO":
+        if (
+            bridge_result["exit_code"] == 0
+            and _is_go_bridge_decision(bridge_decision)
+        ):
             render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
             parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
             blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
@@ -8784,10 +8827,8 @@ def run_phase_b(
                 _clear_state(repo_root)
                 return result
 
-            # Read findings from the exact bridge render for this job
+            # Read findings from the exact bridge material for this job.
             render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
-            findings_text = render if render else bridge_result.get("stdout", "")
-
             # Parse and classify findings by disposition
             parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
             blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
@@ -8812,42 +8853,15 @@ def run_phase_b(
                     _clear_state(repo_root)
                     return result
 
-            if render or raw_texts:
-                prior_deferred_packet_path = deferred_packet_path
-                all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
-                    repo_root,
-                    wave_id,
-                    all_non_blocking,
-                    non_blocking_findings,
-                    previous_packet_path=prior_deferred_packet_path,
-                    executor_created=executor_created,
-                    wave_class=wave_class,
-                    target_gate_id=target_gate_id,
-                )
-                if deferred_packet_path is not None:
-                    result["deferred_packet_path"] = deferred_packet_path
-                    log(f"Filed {len(non_blocking_findings)} non-blocking finding(s) to {deferred_packet_path}")
-                else:
-                    result.pop("deferred_packet_path", None)
-                    if prior_deferred_packet_path:
-                        log("Cleared stale deferred non-blocking packet after latest bridge review")
-
-            # If ALL findings are non-blocking, treat as converged
-            if parsed_findings and not blocking_findings:
-                log(f"All {len(non_blocking_findings)} findings are non-blocking — treating as GO")
-                bridge_converged = True
-                break
-
-            # Only blocking findings (or raw text if unparseable) go to implementer
-            if blocking_findings:
-                blocking_text = json.dumps(blocking_findings, indent=2)
-                findings_for_impl = (
-                    f"## BLOCKING findings only (non-blocking deferred to {deferred_packet_path or 'N/A'})\n\n"
-                    + blocking_text
-                )
-            else:
-                # Couldn't parse structured findings — send raw text
-                findings_for_impl = findings_text[:4000]
+            # REQUEST_CHANGES/NO_GO is authoritative over disposition. Keep the
+            # complete review context in the bounded correction path; none of
+            # this round's findings are eligible for deferred state.
+            findings_for_impl = _bridge_correction_context(
+                parsed_findings,
+                render,
+                raw_texts,
+                bridge_result.get("stdout", ""),
+            )
 
             if round_num >= max_bridge_rounds:
                 log(
@@ -9739,7 +9753,10 @@ def run_phase_b(
                 _clear_state(repo_root)
                 return result
 
-            if bridge_result["exit_code"] == 0 and bridge_decision == "GO":
+            if (
+                bridge_result["exit_code"] == 0
+                and _is_go_bridge_decision(bridge_decision)
+            ):
                 render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
                 parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
                 blocking_findings, non_blocking_findings = _classify_findings(parsed_findings)
@@ -9860,10 +9877,8 @@ def run_phase_b(
                     _clear_state(repo_root)
                     return result
 
-                # Mirror initial loop: classify findings, defer non-blockers
+                # Mirror the initial loop's parsing and repeat-cap checks.
                 render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
-                findings_text = render if render else bridge_result.get("stdout", "")
-
                 parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
                 blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
 
@@ -9885,39 +9900,15 @@ def run_phase_b(
                         _clear_state(repo_root)
                         return result
 
-                if render or raw_texts:
-                    prior_deferred_packet_path = deferred_packet_path
-                    all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
-                        repo_root,
-                        wave_id,
-                        all_non_blocking,
-                        non_blocking_findings,
-                        previous_packet_path=prior_deferred_packet_path,
-                        executor_created=executor_created,
-                        wave_class=wave_class,
-                        target_gate_id=target_gate_id,
-                    )
-                    if deferred_packet_path is not None:
-                        result["deferred_packet_path"] = deferred_packet_path
-                        log(f"Re-entry: filed {len(non_blocking_findings)} non-blocking finding(s)")
-                    else:
-                        result.pop("deferred_packet_path", None)
-                        if prior_deferred_packet_path:
-                            log("Re-entry bridge cleared stale deferred non-blocking packet")
-
-                if parsed_findings and not blocking_findings:
-                    log(f"Re-entry: all {len(non_blocking_findings)} findings non-blocking — treating as GO")
-                    reentry_converged = True
-                    break
-
-                if blocking_findings:
-                    blocking_text = json.dumps(blocking_findings, indent=2)
-                    findings_for_impl = (
-                        f"## BLOCKING findings only (non-blocking deferred to {deferred_packet_path or 'N/A'})\n\n"
-                        + blocking_text
-                    )
-                else:
-                    findings_for_impl = findings_text[:4000]
+                # A non-GO re-entry round remains nonconverged regardless of
+                # finding dispositions. Preserve every finding for correction;
+                # none of this round's findings have been deferred.
+                findings_for_impl = _bridge_correction_context(
+                    parsed_findings,
+                    render,
+                    raw_texts,
+                    bridge_result.get("stdout", ""),
+                )
 
                 if reentry_round >= max_bridge_rounds:
                     log(
