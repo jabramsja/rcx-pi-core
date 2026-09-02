@@ -2733,9 +2733,33 @@ def test_reviewer_prompt_code_review_renders_candidate_criteria_and_required_sch
     assert "+staged candidate content" in prompt
 
 
-def test_reviewer_prompt_code_review_current_candidate_blocker_eligibility_and_exclusions(
+@pytest.mark.parametrize(
+    "required_current_impact_case",
+    (
+        (
+            "Outside every absolute non_blocking category below, a candidate-introduced or "
+            "candidate-worsened regression on the CURRENT authorized execution path is blocking"
+        ),
+        "A synthetic-only finding is always non_blocking.",
+        "A failure- or interruption-injected finding is always non_blocking.",
+        "A theoretical or not-occurring finding is always non_blocking.",
+        "A pre-existing-unworsened finding is always non_blocking.",
+        "An unrelated-adjacent finding is always non_blocking.",
+    ),
+    ids=(
+        "candidate-current-blocking",
+        "synthetic-only",
+        "interruption-injected",
+        "theoretical-not-occurring",
+        "pre-existing-unworsened",
+        "unrelated-adjacent",
+    ),
+)
+def test_reviewer_prompt_code_review_independent_classification_and_current_impact_contract(
     tmp_path: Path,
+    required_current_impact_case: str,
 ) -> None:
+    """This verifies prompt text only, not deterministic reviewer/model compliance."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _init_temp_repo(repo_root)
@@ -2745,22 +2769,38 @@ def test_reviewer_prompt_code_review_current_candidate_blocker_eligibility_and_e
     job_id = _submit_reviewer_prompt_job(paths, acceptance_checks=[])
 
     prompt = _render_reviewer_prompt(paths, job_id)
+    normalized_prompt = " ".join(prompt.split())
 
     assert _authoritative_criteria_block(prompt) == "(none)"
+    assert prompt.index("Independent finding classification") < prompt.index(
+        "Required JSON envelope:"
+    )
+    assert prompt.count("BEGIN_AGENT_ENVELOPE") == 1
+    assert prompt.count("END_AGENT_ENVELOPE") == 1
+    for label in (
+        "`CANDIDATE_RELATIONSHIP=...`",
+        "`TECHNICAL_IMPACT_CLASS=...`",
+        "`LIFECYCLE_STATUS=...`",
+        "`MERGE_DISPOSITION=blocking|non_blocking`",
+    ):
+        assert label in prompt
+    assert "four facts independently" in normalized_prompt
+    assert "Keep `LIFECYCLE_STATUS` aligned with the existing `status` field" in normalized_prompt
+    assert "`MERGE_DISPOSITION` aligned with the existing `disposition` field" in normalized_prompt
+    assert "Candidate causality establishes accountability and relevance" in normalized_prompt
+    assert "technical impact establishes behavioral consequence" in normalized_prompt
+    assert "lifecycle records new, persisting, addressed, or blocked state" in normalized_prompt
+    assert "None is a proxy for another" in normalized_prompt
+    assert "Candidate relationship alone never promotes or suppresses a finding" in normalized_prompt
+    assert required_current_impact_case in normalized_prompt
+    assert "Do not add fields, a sidecar, or a second envelope" in normalized_prompt
+    assert "do not rewrite or normalize the emitted envelope" in normalized_prompt
     assert "branch 2 is disabled and cannot\n  authorize a blocking finding" in prompt
     assert "reproduces a regression on the CURRENT authorized execution path" in prompt
     assert "introduced or worsened that regression" in prompt
     assert "directly demonstrates failure of an exact item" in prompt
     assert "sole authority for code-review disposition" in prompt
     assert "takes precedence over every\n  generic exhaustive-review instruction, control-surface instruction" in prompt
-    for category in (
-        "A synthetic-only finding is always non_blocking.",
-        "A failure- or interruption-injected finding is always non_blocking.",
-        "A theoretical or not-occurring finding is always non_blocking.",
-        "A pre-existing-unworsened finding is always non_blocking.",
-        "An unrelated-adjacent finding is always non_blocking.",
-    ):
-        assert category in prompt
     assert "no severity exception" in prompt
     assert "When every finding is non_blocking, MUST emit decision GO" in prompt
     assert "has high or critical severity" in prompt
@@ -2950,6 +2990,8 @@ def test_reviewer_prompt_code_review_design_mode_preserves_general_contract(
     assert "THIS IS A DESIGN DELIBERATION, NOT A CODE REVIEW." in prompt
     assert "BLOCKING (must fix before merge):" in prompt
     assert "CODE-REVIEW CURRENT-IMPACT DISPOSITION CONTRACT" not in prompt
+    assert "Independent finding classification" not in prompt
+    assert "CANDIDATE_RELATIONSHIP=" not in prompt
     assert "AUTHORITATIVE_LOCKED_ACCEPTANCE_CRITERIA" not in prompt
     assert "$disposition_contract" not in prompt
 
