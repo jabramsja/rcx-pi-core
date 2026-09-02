@@ -1038,6 +1038,315 @@ time.sleep(10.0)
     assert elapsed < 2.0
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["buffered", "streaming"])
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_run_adapter_stop_after_envelope_requires_matching_provider_terminal(
+    tmp_path: Path,
+    provider: str,
+    stream: bool,
+) -> None:
+    envelope, _ = _frame_agent_value(
+        _complete_agent_envelope(summary=f"{provider} terminal authority")
+    )
+    if provider == "claude":
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": envelope}],
+                },
+            },
+            {"type": "result", "subtype": "success", "result": ""},
+            {"type": "post-terminal-drain", "provider": provider},
+        ]
+        structured_args = ["--output-format", "stream-json"]
+    else:
+        events = [
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": envelope},
+            },
+            {"type": "turn.completed"},
+            {"type": "post-terminal-drain", "provider": provider},
+        ]
+        structured_args = ["--json"]
+
+    emitted = "".join(
+        f"{json.dumps(event, separators=(',', ':'))}\n" for event in events
+    )
+    post_linger_marker = tmp_path / f"{provider}-{stream}-post-linger.txt"
+    lingering_agent = tmp_path / f"{provider}-{stream}-terminal-agent.py"
+    lingering_agent.write_text(
+        "import sys\n"
+        "import time\n"
+        "from pathlib import Path\n"
+        "sys.stdin.read()\n"
+        f"sys.stdout.write({emitted!r})\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(10.0)\n"
+        f"Path({str(post_linger_marker)!r}).write_text('not-killed', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    prompt_path = tmp_path / f"{provider}-{stream}-prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / f"{provider}-{stream}-raw.txt"
+    spec = adapters.AdapterSpec(
+        name=provider,
+        cmd=[sys.executable, str(lingering_agent), *structured_args],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="review prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="r1-reviewer",
+        agent_role="reviewer",
+        raw_output_path=raw_output_path,
+        stop_after_envelope=True,
+        stream=stream,
+    )
+    elapsed = time.monotonic() - start
+
+    parsed = bridge.parse_envelope(output)
+    assert parsed["summary"] == f"{provider} terminal authority"
+    assert raw_output_path.read_bytes() == emitted.encode("utf-8")
+    assert not post_linger_marker.exists()
+    assert elapsed < 2.0
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["buffered", "streaming"])
+@pytest.mark.parametrize(
+    ("provider", "structured_mode", "lookalike"),
+    [
+        pytest.param(
+            "claude",
+            "claude",
+            {"type": "turn.completed"},
+            id="claude-cross-provider",
+        ),
+        pytest.param(
+            "codex",
+            "codex",
+            {"type": "result"},
+            id="codex-cross-provider",
+        ),
+        pytest.param(
+            "claude",
+            "claude",
+            {"type": "user", "payload": {"type": "result"}},
+            id="claude-nested",
+        ),
+        pytest.param(
+            "codex",
+            "codex",
+            {"type": "item.started", "item": {"type": "turn.completed"}},
+            id="codex-nested",
+        ),
+        pytest.param(
+            "claude",
+            "claude",
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {"type": "tool_result", "content": {"type": "result"}}
+                    ]
+                },
+            },
+            id="claude-tool-result",
+        ),
+        pytest.param(
+            "codex",
+            "codex",
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "aggregated_output": '{"type":"turn.completed"}',
+                },
+            },
+            id="codex-tool-result",
+        ),
+        pytest.param(
+            "claude",
+            "claude",
+            {"type": "log", "message": 'marker {"type":"result"}'},
+            id="claude-marker-string",
+        ),
+        pytest.param(
+            "codex",
+            "codex",
+            {"type": "log", "message": 'marker {"type":"turn.completed"}'},
+            id="codex-marker-string",
+        ),
+        pytest.param(
+            "claude",
+            None,
+            {"type": "result"},
+            id="plain-claude",
+        ),
+        pytest.param(
+            "codex",
+            None,
+            {"type": "turn.completed"},
+            id="plain-codex",
+        ),
+        pytest.param(
+            "unknown",
+            "codex",
+            {"type": "turn.completed"},
+            id="unknown-provider",
+        ),
+    ],
+)
+def test_run_adapter_stop_after_envelope_rejects_terminal_lookalikes_until_eof(
+    tmp_path: Path,
+    provider: str,
+    structured_mode: str | None,
+    lookalike: dict[str, object],
+    stream: bool,
+) -> None:
+    envelope_value = _complete_agent_envelope(
+        summary=f"natural EOF after {provider} lookalike"
+    )
+    envelope, _ = _frame_agent_value(envelope_value)
+    if structured_mode == "claude" and provider == "claude":
+        envelope_output = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": envelope}],
+                },
+            },
+            separators=(",", ":"),
+        ) + "\n"
+    elif structured_mode == "codex" and provider == "codex":
+        envelope_output = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": envelope},
+            },
+            separators=(",", ":"),
+        ) + "\n"
+    else:
+        envelope_output = f"{envelope}\n"
+
+    lookalike_output = json.dumps(lookalike, separators=(",", ":")) + "\n"
+    eof_output = json.dumps(
+        {"type": "after-lookalike-natural-eof", "provider": provider},
+        separators=(",", ":"),
+    ) + "\n"
+    emitted = envelope_output + lookalike_output + eof_output
+    agent = tmp_path / f"{provider}-{structured_mode}-{stream}-lookalike-agent.py"
+    agent.write_text(
+        "import sys\n"
+        "import time\n"
+        "sys.stdin.read()\n"
+        f"sys.stdout.write({(envelope_output + lookalike_output)!r})\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(0.2)\n"
+        f"sys.stdout.write({eof_output!r})\n"
+        "sys.stdout.flush()\n",
+        encoding="utf-8",
+    )
+    structured_args = (
+        ["--output-format", "stream-json"]
+        if structured_mode == "claude"
+        else ["--json"]
+        if structured_mode == "codex"
+        else []
+    )
+    prompt_path = tmp_path / f"{provider}-{structured_mode}-{stream}-prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / f"{provider}-{structured_mode}-{stream}-raw.txt"
+    spec = adapters.AdapterSpec(
+        name=provider,
+        cmd=[sys.executable, str(agent), *structured_args],
+        timeout_s=5,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="review prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="r1-reviewer",
+        agent_role="reviewer",
+        raw_output_path=raw_output_path,
+        stop_after_envelope=True,
+        stream=stream,
+    )
+    elapsed = time.monotonic() - start
+
+    assert bridge.parse_envelope(output) == envelope_value
+    assert raw_output_path.read_bytes() == emitted.encode("utf-8")
+    assert elapsed >= 0.15
+    assert elapsed < 2.0
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["buffered", "streaming"])
+def test_run_adapter_stop_after_envelope_without_terminal_uses_stale_watchdog(
+    tmp_path: Path,
+    stream: bool,
+) -> None:
+    envelope, _ = _frame_agent_value(
+        _complete_agent_envelope(summary="complete but not provider-terminal")
+    )
+    emitted = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": envelope},
+        },
+        separators=(",", ":"),
+    ) + "\n"
+    lingering_agent = tmp_path / f"{stream}-no-terminal-agent.py"
+    lingering_agent.write_text(
+        "import sys\n"
+        "import time\n"
+        "sys.stdin.read()\n"
+        f"sys.stdout.write({emitted!r})\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(10.0)\n",
+        encoding="utf-8",
+    )
+    prompt_path = tmp_path / f"{stream}-no-terminal-prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / f"{stream}-no-terminal-raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(lingering_agent), "--json"],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    with pytest.raises(adapters.BridgeAdapterError, match="stalled after"):
+        adapters.run_adapter(
+            spec,
+            prompt_text="review prompt",
+            prompt_path=prompt_path,
+            repo_root=tmp_path,
+            job_id="job-1",
+            turn_id="r1-reviewer",
+            agent_role="reviewer",
+            raw_output_path=raw_output_path,
+            stale_timeout_s=1.0,
+            stop_after_envelope=True,
+            stream=stream,
+        )
+
+    assert raw_output_path.read_bytes() == emitted.encode("utf-8")
+
+
 @pytest.mark.parametrize("fence", ["bare", "json"])
 def test_run_adapter_stop_after_envelope_uses_shared_fenced_framing(
     tmp_path: Path,
@@ -1059,6 +1368,7 @@ def test_run_adapter_stop_after_envelope_uses_shared_fenced_framing(
         "import time\n"
         "sys.stdin.read()\n"
         f"print({source!r}, flush=True)\n"
+        "print('{\"type\": \"turn.completed\"}', flush=True)\n"
         "time.sleep(10.0)\n",
         encoding="utf-8",
     )
@@ -1067,7 +1377,7 @@ def test_run_adapter_stop_after_envelope_uses_shared_fenced_framing(
     raw_output_path = tmp_path / "raw.txt"
     spec = adapters.AdapterSpec(
         name="codex",
-        cmd=[sys.executable, str(lingering_agent)],
+        cmd=[sys.executable, str(lingering_agent), "--json"],
         timeout_s=30,
         prompt_via_stdin=True,
     )
@@ -1186,6 +1496,7 @@ print('  "validations_claimed": [],', flush=True)
 print('  "request_for_next_agent": ""', flush=True)
 print("}", flush=True)
 print("END_AGENT_ENVELOPE", flush=True)
+print('{"type": "turn.completed"}', flush=True)
 time.sleep(10.0)
 """,
         encoding="utf-8",
@@ -1196,7 +1507,7 @@ time.sleep(10.0)
     raw_output_path = tmp_path / "raw.txt"
     spec = adapters.AdapterSpec(
         name="codex",
-        cmd=[sys.executable, str(lingering_agent)],
+        cmd=[sys.executable, str(lingering_agent), "--json"],
         timeout_s=30,
         prompt_via_stdin=True,
     )
@@ -1239,6 +1550,7 @@ print('  "findings": [],', flush=True)
 print('  "request_for_claude": "Continue"', flush=True)
 print("}", flush=True)
 print("END_META_ENVELOPE", flush=True)
+print('{"type": "turn.completed"}', flush=True)
 time.sleep(10.0)
 """,
         encoding="utf-8",
@@ -1249,7 +1561,7 @@ time.sleep(10.0)
     raw_output_path = tmp_path / "raw.txt"
     spec = adapters.AdapterSpec(
         name="codex",
-        cmd=[sys.executable, str(lingering_agent)],
+        cmd=[sys.executable, str(lingering_agent), "--json"],
         timeout_s=30,
         prompt_via_stdin=True,
     )
@@ -1299,6 +1611,7 @@ print('  "findings": [],', flush=True)
 print('  "request_for_claude": "Continue"', flush=True)
 print("}", flush=True)
 print("END_META_ENVELOPE", flush=True)
+print('{"type": "turn.completed"}', flush=True)
 time.sleep(10.0)
 """,
         encoding="utf-8",
@@ -1309,7 +1622,7 @@ time.sleep(10.0)
     raw_output_path = tmp_path / "raw.txt"
     spec = adapters.AdapterSpec(
         name="codex",
-        cmd=[sys.executable, str(zero_match_agent)],
+        cmd=[sys.executable, str(zero_match_agent), "--json"],
         timeout_s=30,
         prompt_via_stdin=True,
     )
@@ -1353,6 +1666,7 @@ sys.stderr.write('  "request_for_claude": "Continue"\\n')
 sys.stderr.write("}\\n")
 sys.stderr.write("END_META_ENVELOPE\\n")
 sys.stderr.flush()
+print('{"type": "turn.completed"}', flush=True)
 time.sleep(10.0)
 """,
         encoding="utf-8",
@@ -1363,7 +1677,7 @@ time.sleep(10.0)
     raw_output_path = tmp_path / "raw.txt"
     spec = adapters.AdapterSpec(
         name="codex",
-        cmd=[sys.executable, str(lingering_agent)],
+        cmd=[sys.executable, str(lingering_agent), "--json"],
         timeout_s=5,
         prompt_via_stdin=True,
     )
@@ -1410,6 +1724,7 @@ print('  "validations_claimed": [],', flush=True)
 print('  "request_for_next_agent": ""', flush=True)
 print("}", flush=True)
 print("END_AGENT_ENVELOPE", flush=True)
+print('{"type": "turn.completed"}', flush=True)
 time.sleep(10.0)
 """,
         encoding="utf-8",
@@ -1420,7 +1735,7 @@ time.sleep(10.0)
     raw_output_path = tmp_path / "raw.txt"
     spec = adapters.AdapterSpec(
         name="codex",
-        cmd=[sys.executable, str(lingering_agent)],
+        cmd=[sys.executable, str(lingering_agent), "--json"],
         timeout_s=30,
         prompt_via_stdin=True,
     )
@@ -2817,13 +3132,14 @@ def test_execute_agent_turn_recovers_from_malformed_frame_to_shared_valid_frame(
         "sys.stdin.read()\n"
         f"print({malformed_source!r}, flush=True)\n"
         f"print({valid_source!r}, flush=True)\n"
+        "print('{\"type\": \"turn.completed\"}', flush=True)\n"
         "time.sleep(10.0)\n",
         encoding="utf-8",
     )
     config = json.loads(paths.config_path.read_text(encoding="utf-8"))
     config["agents"]["codex"] = {
         "mode": "live",
-        "cmd": [sys.executable, str(agent)],
+        "cmd": [sys.executable, str(agent), "--json"],
         "prompt_via_stdin": True,
         "timeout_s": 30,
         "env": {},
