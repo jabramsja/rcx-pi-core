@@ -941,7 +941,9 @@ def latest_envelope(conn: sqlite3.Connection, job_id: str, *, role: str | None =
     turn = latest_turn(conn, job_id, role=role)
     if turn is None or not turn["envelope_json"]:
         return None
-    return json.loads(turn["envelope_json"])
+    envelope = json.loads(turn["envelope_json"])
+    _validate_envelope_container_shape(envelope)
+    return envelope
 
 
 def _is_legacy_hybrid_review_job(job: sqlite3.Row) -> bool:
@@ -1026,6 +1028,22 @@ def write_raw_output(paths: BridgePaths, job_id: str, turn_id: str, content: str
     return output_path
 
 
+def _validate_envelope_container_shape(envelope: object) -> None:
+    """Require the container shapes consumed by bridge envelope readers."""
+    if not isinstance(envelope, Mapping):
+        raise BridgeError("Agent envelope must be a JSON object")
+
+    findings = envelope.get("findings", [])
+    if not isinstance(findings, list):
+        raise BridgeError("Agent envelope 'findings' must be a list")
+
+    for index, finding in enumerate(findings):
+        if not isinstance(finding, Mapping):
+            raise BridgeError(
+                f"Agent envelope finding at index {index} must be a JSON object"
+            )
+
+
 def parse_envelope(output: str) -> dict[str, Any]:
     stdout_only = output
     stderr_only = ""
@@ -1079,6 +1097,7 @@ def parse_envelope(output: str) -> dict[str, Any]:
                 f"Agent envelope has invalid decision {decision!r}; "
                 f"authorized decisions: {sorted(AUTHORIZED_DECISIONS)}"
             )
+        _validate_envelope_container_shape(envelope)
         envelopes.append(envelope)
         canonical_payloads.add(json.dumps(envelope, sort_keys=True, separators=(",", ":")))
 
@@ -1349,6 +1368,8 @@ def render_job(paths: BridgePaths, conn: sqlite3.Connection, job_id: str) -> Pat
     ])
     for turn in turns:
         envelope = json.loads(turn["envelope_json"]) if turn["envelope_json"] else {}
+        if turn["envelope_json"]:
+            _validate_envelope_container_shape(envelope)
         decision_display = turn['decision'] or '(none)'
         if decision_display == "SYNTHETIC":
             decision_display = "SYNTHETIC (founder session, not a real review)"
@@ -1826,6 +1847,8 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
                 else:
                     # State was stable — apply the recorded outcome instead of rerunning.
                     envelope = json.loads(reviewer_turn["envelope_json"]) if reviewer_turn["envelope_json"] else {}
+                    if reviewer_turn["envelope_json"]:
+                        _validate_envelope_container_shape(envelope)
                     decision = envelope.get("decision", "ERROR")
                     _log(verbose, f"Recovering: reviewer already completed (round {job['current_round']}). Applying recorded decision: {decision}")
                     if decision in ("GO", "NO_GO", "ERROR"):
@@ -2206,6 +2229,8 @@ def print_status(paths: BridgePaths, job_id: str | None = None, *, show_latest: 
         ).fetchone()
         if last:
             envelope = json.loads(last["envelope_json"]) if last["envelope_json"] else {}
+            if last["envelope_json"]:
+                _validate_envelope_container_shape(envelope)
             info["last_completed"] = {
                 "turn_id": last["turn_id"],
                 "role": last["agent_role"],
@@ -2696,6 +2721,7 @@ def rebuild_finding_registry(conn: sqlite3.Connection, job_id: str) -> dict[str,
         if not turn["envelope_json"]:
             continue
         envelope = json.loads(turn["envelope_json"])
+        _validate_envelope_container_shape(envelope)
         findings = envelope.get("findings", [])
         round_no = turn["round_no"]
         seen_this_round: set[str] = set()
