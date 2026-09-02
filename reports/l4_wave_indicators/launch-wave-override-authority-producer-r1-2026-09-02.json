@@ -1,24 +1,24 @@
 {
   "wave_id": "launch-wave-override-authority-producer-r1-2026-09-02",
-  "repeat_run_speedup_ratio": 0.999991,
+  "repeat_run_speedup_ratio": 0.986592,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.232099,
+  "step_growth_slope": 0.264916,
   "repeat_run_raw_seconds": [
-    0.232097,
-    0.232099
+    0.261364,
+    0.264916
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.232097
+      "elapsed_seconds": 0.261364
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.464196
+      "elapsed_seconds": 0.52628
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-09-02T13:10:08Z",
+  "collection_timestamp_utc": "2026-09-02T13:51:45Z",
   "collector_version": "2.2.0"
 }

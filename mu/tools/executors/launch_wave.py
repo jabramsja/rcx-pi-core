@@ -2698,6 +2698,8 @@ def run_wave_setup(
         )
 
     # Steps 1-4: artifact-producing (each idempotent under the re-run contract).
+    # Persist the step-3 route before bridge setup so an interrupted run still
+    # leaves packet, tracker, and routing artifacts for same-config recovery.
     packet_path = setup_packet(repo_root, config)
     setup_tracker_note(repo_root, config)
     setup_routing_record(repo_root, config, bus_dir=bus_dir)
@@ -2728,6 +2730,12 @@ def run_wave_setup(
     # raises (Step 5 stays the commit-time authority); a no-op when the wave
     # declares no indicator.
     _prestage_l4_indicator(repo_root, config)
+
+    # Refresh the index-sensitive canonical record after pre-staging. Reusing
+    # setup_routing_record updates the shared builder's source-state metadata
+    # while reattaching the launcher-owned native producer envelope and launch
+    # override authority; a dispatcher-side generic refresh would drop them.
+    setup_routing_record(repo_root, config, bus_dir=bus_dir)
 
     # Steps 5-6: verification (persist nothing; fail-closed).
     verify_fail_closed_precondition(repo_root, config)
