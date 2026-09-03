@@ -2166,7 +2166,17 @@ def _packet_text_without_generated_evidence_blocks(packet_text: str) -> str:
 
     merged: list[tuple[int, int]] = []
     for start, end in sorted(ranges):
-        if merged and start <= merged[-1][1]:
+        if merged and start < merged[-1][1]:
+            # The checks above validate each marker family independently.  A
+            # block of one type can therefore still be nested in (or cross)
+            # a block of the other type.  Do not merge that malformed shape:
+            # reconciliation replaces the block types separately, so an outer
+            # replacement could otherwise erase the already-reconciled inner
+            # block after tracker state has been refreshed.
+            raise ValueError(
+                "existing generated evidence blocks overlap across block types"
+            )
+        if merged and start == merged[-1][1]:
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
         else:
             merged.append((start, end))
