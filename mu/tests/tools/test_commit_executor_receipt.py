@@ -1330,6 +1330,168 @@ def _stage_commit_refresh_inputs_for_test(
     return indicator_path
 
 
+_MATCHED_PRESERVATION_NONDEFAULT_COMMAND = (
+    "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+    "mu/tests/tools/test_commit_executor_receipt.py -k matched_preservation_nondefault"
+)
+_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND = (
+    "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+    "mu/tests/tools/test_commit_executor_receipt.py"
+)
+
+
+def _commit_refresh_tracker_note_for_test(
+    wave_id: str,
+    evidence_command: str,
+    *,
+    wave_class: str = "L4_ENABLER",
+) -> str:
+    note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    note = note.replace("Class: L4_ENABLER.", f"Class: {wave_class}.")
+    note = note.replace(
+        f"evidence_command: `{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND}`",
+        f"evidence_command: `{evidence_command}`",
+    )
+    return note.replace(
+        "(1) Receipt tests scope the commit handoff.",
+        "(1) Routed commit handoff scopes 99 wave-owned file(s).",
+    )
+
+
+def _setup_explicit_commit_refresh_fixture(
+    tmp_path,
+    *,
+    wave_id: str,
+    packet_body: str,
+    packet_wave_class: str = "L4_ENABLER",
+    handoff_wave_class: str = "L4_ENABLER",
+    tasks_command: str = _MATCHED_PRESERVATION_NONDEFAULT_COMMAND,
+    handoff_command: str = _MATCHED_PRESERVATION_NONDEFAULT_COMMAND,
+    include_test_path: bool = True,
+) -> tuple[Path, str, str, dict, Path]:
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    packet_path = f"reports/control_plane/{wave_id}.md"
+    packet_file = repo / packet_path
+    packet_file.parent.mkdir(parents=True, exist_ok=True)
+    packet_file.write_text(
+        f"# Explicit Evidence Refresh {wave_id}\n\n"
+        "Status: Phase B (locked, implementing)\n"
+        "Phase-A-Lock: LOCKED\n"
+        f"Wave ID: {wave_id}\n"
+        f"Wave class: {packet_wave_class}\n"
+        "Target gate: G8\n"
+        "Lane: control-surface\n\n"
+        f"{packet_body.rstrip()}\n",
+        encoding="utf-8",
+    )
+
+    test_path = "mu/tests/tools/test_commit_executor_receipt.py"
+    indicator_path = _stage_commit_refresh_inputs_for_test(repo, wave_id)
+    packet_stage_paths = [packet_path]
+    files_to_stage = ["file.py", packet_path]
+    if include_test_path:
+        test_file = repo / test_path
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text(
+            "def test_commit_refresh_fixture():\n    assert True\n",
+            encoding="utf-8",
+        )
+        packet_stage_paths.append(test_path)
+        files_to_stage.insert(1, test_path)
+    subprocess.run(
+        ["git", "add", "--", *packet_stage_paths],
+        cwd=repo,
+        check=True,
+    )
+
+    tasks_note = _commit_refresh_tracker_note_for_test(
+        wave_id,
+        tasks_command,
+        wave_class=handoff_wave_class,
+    )
+    (repo / "TASKS.md").write_text(
+        f"## Ra\n\n{tasks_note}\n\n---\n",
+        encoding="utf-8",
+    )
+    handoff_note = _commit_refresh_tracker_note_for_test(
+        wave_id,
+        handoff_command,
+        wave_class=handoff_wave_class,
+    )
+    handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        wave_class=handoff_wave_class,
+        files_to_stage=files_to_stage,
+        tracked_packet=packet_path,
+        scope_items=[packet_path],
+        tracker_note_text=handoff_note,
+    )
+
+    durable_handoff = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
+    durable_handoff.parent.mkdir(parents=True, exist_ok=True)
+    durable_handoff.write_bytes(b'{"sentinel":"before-refresh"}\n')
+    return repo, packet_path, indicator_path, handoff, durable_handoff
+
+
+def _commit_refresh_mutation_snapshot(
+    repo: Path,
+    packet_path: str,
+    durable_handoff: Path,
+) -> tuple[bytes, bytes, bytes, bytes]:
+    import subprocess
+
+    staged_diff = subprocess.run(
+        ["git", "diff", "--cached", "--binary"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    ).stdout
+    return (
+        (repo / "TASKS.md").read_bytes(),
+        (repo / packet_path).read_bytes(),
+        durable_handoff.read_bytes(),
+        staged_diff,
+    )
+
+
+def _assert_explicit_commit_refresh_failure_without_mutation(
+    *,
+    repo: Path,
+    packet_path: str,
+    indicator_path: str,
+    handoff: dict,
+    durable_handoff: Path,
+    expected_error: str,
+) -> None:
+    handoff_sha_before = _canonical_handoff_sha_for_test(handoff)
+    snapshot_before = _commit_refresh_mutation_snapshot(repo, packet_path, durable_handoff)
+
+    with patch.object(
+        commit_mod,
+        "_refresh_tracker_note_test_evidence",
+        side_effect=AssertionError("evidence refresh crossed the pre-mutation boundary"),
+    ) as evidence_refresh:
+        refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+    assert error == expected_error
+    evidence_refresh.assert_not_called()
+    assert refreshed is handoff
+    assert staged == []
+    assert _canonical_handoff_sha_for_test(handoff) == handoff_sha_before
+    assert _commit_refresh_mutation_snapshot(repo, packet_path, durable_handoff) == snapshot_before
+
+
+def _packet_refresh_block_for_test(packet_text: str, start: str, end: str) -> str:
+    return packet_text[packet_text.index(start):packet_text.index(end) + len(end)]
+
+
 class TestSkipSupervisorBypassClosure:
     def test_run_commit_pipeline_rejects_skip_supervisor_without_synthesized_receipt(
         self,
@@ -3705,6 +3867,706 @@ class TestReceiptChainEndToEnd:
         assert packet_file.read_text(encoding="utf-8") == first_text
         assert refreshed_again["tracked_packet"] == packet_path
         assert staged_again == staged
+
+    def test_commit_packet_truth_refresh_matched_preservation_nondefault(self, tmp_path):
+        wave_id = "matched-preservation-nondefault"
+        command = _MATCHED_PRESERVATION_NONDEFAULT_COMMAND
+        repo, packet_path, indicator_path, handoff, durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=(
+                    f"## Validation\n\n- evidence_command: `{command}`.\n\n"
+                    f"{commit_mod.L4_FIELDS_FROM_TRACKER_START}\n"
+                    "**L4 fields (stale generated replica):**\n\n"
+                    f"- `evidence_command`: `{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND}`.\n"
+                    f"{commit_mod.L4_FIELDS_FROM_TRACKER_END}\n\n"
+                    f"{commit_mod.COMMIT_PATH_REFRESH_START}\n"
+                    "## Commit Path Truth Refresh\n\n"
+                    f"- Evidence command: `{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND}`.\n"
+                    f"{commit_mod.COMMIT_PATH_REFRESH_END}"
+                ),
+            )
+        )
+        original_refresh = commit_mod._refresh_tracker_note_test_evidence  # ANTICHEAT_OK: observes both required refresh passes without replacing behavior
+        observed: list[tuple[tuple[str, ...], str | None, str]] = []
+
+        def observe_refresh(*args, **kwargs):
+            refreshed_note = original_refresh(*args, **kwargs)
+            observed.append(
+                (
+                    tuple(args[1]),
+                    kwargs.get("preserved_evidence_command"),
+                    commit_mod.tracker_evidence_command_value(refreshed_note),
+                )
+            )
+            return refreshed_note
+
+        def assert_serialized_truth(refreshed_handoff):
+            tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+            packet_text = (repo / packet_path).read_text(encoding="utf-8")
+            l4_block = _packet_refresh_block_for_test(
+                packet_text,
+                commit_mod.L4_FIELDS_FROM_TRACKER_START,
+                commit_mod.L4_FIELDS_FROM_TRACKER_END,
+            )
+            commit_block = _packet_refresh_block_for_test(
+                packet_text,
+                commit_mod.COMMIT_PATH_REFRESH_START,
+                commit_mod.COMMIT_PATH_REFRESH_END,
+            )
+            assert commit_mod.tracker_evidence_command_value(tasks_text) == command
+            assert commit_mod.tracker_evidence_command_value(
+                refreshed_handoff["tracker_note_text"]
+            ) == command
+            assert f"- evidence_command: `{command}`." in packet_text
+            assert f"- `evidence_command`: `{command}`." in l4_block
+            assert f"- Evidence command: `{command}`." in commit_block
+            selector_free_fields = (
+                f"evidence_command: `{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND}`",
+                f"`evidence_command`: `{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND}`",
+                f"Evidence command: `{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND}`",
+            )
+            for serialized in (tasks_text, packet_text, refreshed_handoff["tracker_note_text"]):
+                assert all(field not in serialized for field in selector_free_fields)
+
+        with patch.object(
+            commit_mod,
+            "_refresh_tracker_note_test_evidence",
+            side_effect=observe_refresh,
+        ):
+            refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+                repo_root=repo,
+                handoff=handoff,
+                indicator_path=indicator_path,
+                commit_status="pre_commit_supervisor_pending",
+            )
+            assert error is None
+            assert len(observed) == 2
+            assert "TASKS.md" not in observed[0][0]
+            assert "TASKS.md" in observed[1][0]
+            assert observed[0][1:] == (command, command)
+            assert observed[1][1:] == (command, command)
+            assert_serialized_truth(refreshed)
+            first_packet_text = (repo / packet_path).read_text(encoding="utf-8")
+            first_tasks_bytes = (repo / "TASKS.md").read_bytes()
+
+            persist_error = commit_mod._persist_phase_b_handoff_for_commit_path(  # ANTICHEAT_OK: exercises the real durable serialization called after refresh
+                repo,
+                refreshed,
+            )
+            assert persist_error is None
+            first_durable_bytes = durable_handoff.read_bytes()
+            persisted = json.loads(durable_handoff.read_text(encoding="utf-8"))
+            assert commit_mod.tracker_evidence_command_value(
+                persisted["tracker_note_text"]
+            ) == command
+            assert_serialized_truth(persisted)
+
+            refreshed_again, staged_again, error_again = (
+                commit_mod.refresh_commit_path_packet_truth(
+                    repo_root=repo,
+                    handoff=persisted,
+                    indicator_path=indicator_path,
+                    commit_status="pre_commit_supervisor_pending",
+                )
+            )
+            assert error_again is None
+            assert len(observed) == 4
+            assert observed[2][1:] == (command, command)
+            assert observed[3][1:] == (command, command)
+            assert staged_again == staged
+            assert (repo / packet_path).read_text(encoding="utf-8") == first_packet_text
+            assert (repo / "TASKS.md").read_bytes() == first_tasks_bytes
+            assert refreshed_again == persisted
+            assert_serialized_truth(refreshed_again)
+
+            persist_error = commit_mod._persist_phase_b_handoff_for_commit_path(  # ANTICHEAT_OK: repeated refresh must persist the same exact command
+                repo,
+                refreshed_again,
+            )
+            assert persist_error is None
+            persisted_again = json.loads(durable_handoff.read_text(encoding="utf-8"))
+            assert durable_handoff.read_bytes() == first_durable_bytes
+            assert persisted_again == persisted
+            assert commit_mod.tracker_evidence_command_value(
+                persisted_again["tracker_note_text"]
+            ) == command
+            assert_serialized_truth(persisted_again)
+
+    def test_commit_packet_truth_refresh_accepts_identical_authored_command_duplicates(
+        self,
+        tmp_path,
+    ):
+        wave_id = "identical-explicit-evidence-duplicates"
+        command = _MATCHED_PRESERVATION_NONDEFAULT_COMMAND
+        packet_body = (
+            "## Validation\n\n"
+            f"- evidence_command: `{command}`.\n"
+            f"- **evidence_command:** `{command}`.\n"
+            f"The inline declaration repeats `evidence_command: {command}`.\n"
+            f"Another inline declaration repeats `evidence_command`: `{command}`.\n"
+            f"- primary_blocker_class: INTEGRATION. evidence_command: `{command}`. "
+            "boot0_track_id: V1."
+        )
+        repo, packet_path, indicator_path, handoff, _durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=packet_body,
+            )
+        )
+
+        refreshed, _staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert commit_mod.tracker_evidence_command_value(
+            refreshed["tracker_note_text"]
+        ) == command
+        packet_text = (repo / packet_path).read_text(encoding="utf-8")
+        authored_text = packet_text[:packet_text.index(commit_mod.L4_FIELDS_FROM_TRACKER_START)]
+        assert authored_text.count(command) == 5
+        assert f"- evidence_command: `{command}`." in authored_text
+        assert f"- **evidence_command:** `{command}`." in authored_text
+        assert f"repeats `evidence_command: {command}`" in authored_text
+        assert f"repeats `evidence_command`: `{command}`" in authored_text
+
+    def test_commit_packet_truth_refresh_preserves_payload_final_period(self, tmp_path):
+        wave_id = "explicit-evidence-payload-final-period"
+        command = (
+            f"{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND} "
+            "-k matched_preservation_nondefault && printf '"
+            "Final pytest gate covered 99 test file(s); "
+            "Evidence gate exercises 99 wave-owned test module(s); "
+            ", 99 wave-owned test module(s),; "
+            "Routed commit handoff scopes 99 wave-owned file(s); "
+            "bridge rounds=99; commit-ready Phase B handoff; "
+            "Phase B emitted a commit-ready handoff for opaque-command with 99 "
+            "wave-owned file(s); explicit receipt authority, and an L4-compliant "
+            "tracker note.; (3) Commit handoff carries explicit receipt authority "
+            "at .agent_bus/meta/pre_commit_receipts/opaque.json.' && "
+            "printf FOUNDER_OVERRIDE:not-tracker-authority."
+        )
+        repo, packet_path, indicator_path, handoff, _durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=(
+                    f"- evidence_command: `{command}`.\n"
+                    f"FOUNDER_OVERRIDE:{wave_id}"
+                ),
+                tasks_command=command,
+                handoff_command=command,
+            )
+        )
+
+        refreshed, _staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert commit_mod.tracker_evidence_command_value(
+            refreshed["tracker_note_text"]
+        ) == command
+        assert commit_mod.tracker_evidence_command_value(
+            (repo / "TASKS.md").read_text(encoding="utf-8")
+        ) == command
+        packet_text = (repo / packet_path).read_text(encoding="utf-8")
+        assert f"- evidence_command: `{command}`." in packet_text
+        assert f"- `evidence_command`: `{command}`." in packet_text
+        assert f"- Evidence command: `{command}`." in packet_text
+
+    def test_commit_packet_truth_refresh_preserves_opaque_command_without_test_paths(
+        self,
+        tmp_path,
+    ):
+        wave_id = "explicit-evidence-without-test-paths"
+        command = (
+            "printf 'Routed commit handoff scopes 99 wave-owned file(s); "
+            "bridge rounds=99'"
+        )
+        repo, packet_path, indicator_path, handoff, _durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=f"- evidence_command: `{command}`.",
+                tasks_command=command,
+                handoff_command=command,
+                include_test_path=False,
+            )
+        )
+        original_refresh = commit_mod._refresh_tracker_note_test_evidence  # ANTICHEAT_OK: observes the no-test-files return from both required passes
+        observed_commands: list[str] = []
+
+        def observe_refresh(*args, **kwargs):
+            refreshed_note = original_refresh(*args, **kwargs)
+            observed_commands.append(
+                commit_mod.tracker_evidence_command_value(refreshed_note)
+            )
+            return refreshed_note
+
+        with patch.object(
+            commit_mod,
+            "_refresh_tracker_note_test_evidence",
+            side_effect=observe_refresh,
+        ):
+            refreshed, _staged, error = commit_mod.refresh_commit_path_packet_truth(
+                repo_root=repo,
+                handoff=handoff,
+                indicator_path=indicator_path,
+                commit_status="pre_commit_supervisor_pending",
+            )
+
+        assert error is None
+        assert observed_commands == [command, command]
+        assert commit_mod.tracker_evidence_command_value(
+            (repo / "TASKS.md").read_text(encoding="utf-8")
+        ) == command
+        assert commit_mod.tracker_evidence_command_value(
+            refreshed["tracker_note_text"]
+        ) == command
+        packet_text = (repo / packet_path).read_text(encoding="utf-8")
+        assert f"- evidence_command: `{command}`." in packet_text
+        assert f"- `evidence_command`: `{command}`." in packet_text
+        assert f"- Evidence command: `{command}`." in packet_text
+
+    def test_commit_packet_truth_refresh_without_authored_command_keeps_legacy_derivation(
+        self,
+        tmp_path,
+    ):
+        wave_id = "zero-authored-evidence-command"
+        stale_replica = _MATCHED_PRESERVATION_NONDEFAULT_COMMAND
+        generated_only_body = (
+            "This prose mentions evidence_command without declaration punctuation.\n\n"
+            f"{commit_mod.L4_FIELDS_FROM_TRACKER_START}\n"
+            "**L4 fields (generated test replica):**\n\n"
+            f"- `evidence_command`: `{stale_replica}`.\n"
+            f"{commit_mod.L4_FIELDS_FROM_TRACKER_END}\n\n"
+            f"{commit_mod.COMMIT_PATH_REFRESH_START}\n"
+            "## Commit Path Truth Refresh\n\n"
+            f"- Evidence command: `{stale_replica}`.\n"
+            f"{commit_mod.COMMIT_PATH_REFRESH_END}"
+        )
+        repo, packet_path, indicator_path, handoff, _durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=generated_only_body,
+            )
+        )
+
+        refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+        refreshed_again, staged_again, error_again = (
+            commit_mod.refresh_commit_path_packet_truth(
+                repo_root=repo,
+                handoff=refreshed,
+                indicator_path=indicator_path,
+                commit_status="pre_commit_supervisor_pending",
+            )
+        )
+
+        assert error is None
+        assert error_again is None
+        assert staged_again == staged
+        assert commit_mod.tracker_evidence_command_value(
+            refreshed["tracker_note_text"]
+        ) == _MATCHED_PRESERVATION_SYNTHESIZED_COMMAND
+        assert commit_mod.tracker_evidence_command_value(
+            refreshed_again["tracker_note_text"]
+        ) == _MATCHED_PRESERVATION_SYNTHESIZED_COMMAND
+        packet_text = (repo / packet_path).read_text(encoding="utf-8")
+        assert f"- `evidence_command`: `{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND}`." in packet_text
+        assert f"- Evidence command: `{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND}`." in packet_text
+        assert stale_replica not in packet_text
+
+    def test_commit_packet_truth_refresh_rejects_conflicting_authored_commands_before_mutation(
+        self,
+        tmp_path,
+    ):
+        wave_id = "conflicting-explicit-evidence"
+        packet_body = (
+            f"- evidence_command: `{_MATCHED_PRESERVATION_NONDEFAULT_COMMAND}`.\n"
+            f"- evidence_command: `{_MATCHED_PRESERVATION_NONDEFAULT_COMMAND} --maxfail=2`."
+        )
+        repo, packet_path, indicator_path, handoff, durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=packet_body,
+            )
+        )
+        _assert_explicit_commit_refresh_failure_without_mutation(
+            repo=repo,
+            packet_path=packet_path,
+            indicator_path=indicator_path,
+            handoff=handoff,
+            durable_handoff=durable_handoff,
+            expected_error=(
+                "active L4_ENABLER packet has conflicting authored evidence_command "
+                f"declarations before commit packet truth refresh: {packet_path}"
+            ),
+        )
+
+    @pytest.mark.parametrize(
+        ("case_name", "declaration"),
+        [
+            ("unwrapped", "- evidence_command: PYTHONHASHSEED=0 python3 -m pytest"),
+            ("empty", "- evidence_command: ``."),
+            ("unterminated", "- evidence_command: `unterminated"),
+            ("ambiguous", "- evidence_command: `canonical-looking` trailing ambiguity"),
+            (
+                "form-b-spaced-colon",
+                f"- `evidence_command` : `{_MATCHED_PRESERVATION_NONDEFAULT_COMMAND}`",
+            ),
+        ],
+    )
+    def test_commit_packet_truth_refresh_rejects_malformed_authored_command_before_mutation(
+        self,
+        tmp_path,
+        case_name,
+        declaration,
+    ):
+        wave_id = f"malformed-explicit-evidence-{case_name}"
+        repo, packet_path, indicator_path, handoff, durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=(
+                    f"- evidence_command: `{_MATCHED_PRESERVATION_NONDEFAULT_COMMAND}`.\n"
+                    f"{declaration}"
+                ),
+            )
+        )
+        _assert_explicit_commit_refresh_failure_without_mutation(
+            repo=repo,
+            packet_path=packet_path,
+            indicator_path=indicator_path,
+            handoff=handoff,
+            durable_handoff=durable_handoff,
+            expected_error=(
+                "active L4_ENABLER packet has a malformed authored evidence_command "
+                f"declaration before commit packet truth refresh: {packet_path}"
+            ),
+        )
+
+    @pytest.mark.parametrize("surface", ["tasks", "handoff"])
+    @pytest.mark.parametrize(
+        "authority_state",
+        [
+            "absent",
+            "malformed",
+            "conflicting",
+            "spaced_colon",
+            "punctuation_boundary",
+        ],
+    )
+    def test_commit_packet_truth_refresh_rejects_invalid_tracker_authority_before_mutation(
+        self,
+        tmp_path,
+        surface,
+        authority_state,
+    ):
+        wave_id = f"invalid-{surface}-{authority_state}-evidence-authority"
+        command = _MATCHED_PRESERVATION_NONDEFAULT_COMMAND
+        repo, packet_path, indicator_path, handoff, durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=f"- evidence_command: `{command}`.",
+            )
+        )
+        canonical = f"evidence_command: `{command}`"
+        if authority_state == "absent":
+            replacement = "validation command omitted"
+        elif authority_state == "malformed":
+            replacement = f"{canonical} trailing ambiguity"
+        elif authority_state == "conflicting":
+            replacement = (
+                f"{canonical}. evidence_command: `{command} --maxfail=3`"
+            )
+        elif authority_state == "spaced_colon":
+            replacement = f"evidence_command : `{command}`"
+        else:
+            replacement = f";evidence_command: `{command}`"
+        if surface == "tasks":
+            tasks_note = (repo / "TASKS.md").read_text(encoding="utf-8")
+            (repo / "TASKS.md").write_text(
+                tasks_note.replace(canonical, replacement),
+                encoding="utf-8",
+            )
+            authority_label = "current same-wave TASKS.md tracker note"
+        else:
+            handoff["tracker_note_text"] = handoff["tracker_note_text"].replace(
+                canonical,
+                replacement,
+            )
+            authority_label = "incoming same-wave handoff tracker note"
+
+        _assert_explicit_commit_refresh_failure_without_mutation(
+            repo=repo,
+            packet_path=packet_path,
+            indicator_path=indicator_path,
+            handoff=handoff,
+            durable_handoff=durable_handoff,
+            expected_error=(
+                f"{authority_label} has a missing, malformed, or conflicting "
+                f"evidence_command before explicit preservation: {wave_id}"
+            ),
+        )
+
+    @pytest.mark.parametrize(
+        ("marker", "expected_error"),
+        [
+            (
+                commit_mod.L4_FIELDS_FROM_TRACKER_START,
+                "existing L4_FIELDS_FROM_TRACKER markers are unbalanced",
+            ),
+            (
+                commit_mod.COMMIT_PATH_REFRESH_START,
+                "existing Commit Path Truth Refresh markers are unbalanced",
+            ),
+        ],
+    )
+    def test_commit_packet_truth_refresh_rejects_unbalanced_generated_replica_before_mutation(
+        self,
+        tmp_path,
+        marker,
+        expected_error,
+    ):
+        wave_id = f"unbalanced-generated-replica-{len(expected_error)}"
+        command = _MATCHED_PRESERVATION_NONDEFAULT_COMMAND
+        repo, packet_path, indicator_path, handoff, durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=(
+                    f"- evidence_command: `{command}`.\n\n"
+                    f"{marker}\n"
+                    f"- `evidence_command`: `{command} --generated-conflict`."
+                ),
+            )
+        )
+
+        _assert_explicit_commit_refresh_failure_without_mutation(
+            repo=repo,
+            packet_path=packet_path,
+            indicator_path=indicator_path,
+            handoff=handoff,
+            durable_handoff=durable_handoff,
+            expected_error=expected_error,
+        )
+
+    @pytest.mark.parametrize(
+        ("start_marker", "end_marker", "block_name"),
+        [
+            (
+                commit_mod.L4_FIELDS_FROM_TRACKER_START,
+                commit_mod.L4_FIELDS_FROM_TRACKER_END,
+                "L4_FIELDS_FROM_TRACKER",
+            ),
+            (
+                commit_mod.COMMIT_PATH_REFRESH_START,
+                commit_mod.COMMIT_PATH_REFRESH_END,
+                "Commit Path Truth Refresh",
+            ),
+        ],
+    )
+    def test_commit_packet_truth_refresh_rejects_duplicate_generated_blocks_before_mutation(
+        self,
+        tmp_path,
+        start_marker,
+        end_marker,
+        block_name,
+    ):
+        wave_id = f"duplicate-generated-block-{len(block_name)}"
+        command = _MATCHED_PRESERVATION_NONDEFAULT_COMMAND
+        generated_block = (
+            f"{start_marker}\n"
+            f"- `evidence_command`: `{_MATCHED_PRESERVATION_SYNTHESIZED_COMMAND}`.\n"
+            f"{end_marker}"
+        )
+        repo, packet_path, indicator_path, handoff, durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=(
+                    f"- evidence_command: `{command}`.\n\n"
+                    f"{generated_block}\n\n{generated_block}"
+                ),
+            )
+        )
+
+        _assert_explicit_commit_refresh_failure_without_mutation(
+            repo=repo,
+            packet_path=packet_path,
+            indicator_path=indicator_path,
+            handoff=handoff,
+            durable_handoff=durable_handoff,
+            expected_error=(
+                f"active L4_ENABLER packet has multiple {block_name} blocks "
+                f"before commit packet truth refresh: {packet_path}"
+            ),
+        )
+
+    def test_commit_packet_truth_refresh_rejects_tasks_handoff_command_disagreement_before_mutation(
+        self,
+        tmp_path,
+    ):
+        wave_id = "tasks-handoff-evidence-disagreement"
+        repo, packet_path, indicator_path, handoff, durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=(
+                    f"- evidence_command: `{_MATCHED_PRESERVATION_NONDEFAULT_COMMAND}`."
+                ),
+                handoff_command=(
+                    f"{_MATCHED_PRESERVATION_NONDEFAULT_COMMAND} --maxfail=1"
+                ),
+            )
+        )
+        _assert_explicit_commit_refresh_failure_without_mutation(
+            repo=repo,
+            packet_path=packet_path,
+            indicator_path=indicator_path,
+            handoff=handoff,
+            durable_handoff=durable_handoff,
+            expected_error=(
+                "explicit L4_ENABLER evidence_command mismatch before commit packet truth "
+                "refresh; packet, TASKS.md, and incoming handoff commands must be "
+                f"byte-identical: {wave_id}"
+            ),
+        )
+
+    def test_commit_packet_truth_refresh_rejects_packet_authority_command_mismatch_before_mutation(
+        self,
+        tmp_path,
+    ):
+        wave_id = "packet-authority-evidence-mismatch"
+        repo, packet_path, indicator_path, handoff, durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body=(
+                    f"- evidence_command: `{_MATCHED_PRESERVATION_NONDEFAULT_COMMAND} --maxfail=2`."
+                ),
+            )
+        )
+        _assert_explicit_commit_refresh_failure_without_mutation(
+            repo=repo,
+            packet_path=packet_path,
+            indicator_path=indicator_path,
+            handoff=handoff,
+            durable_handoff=durable_handoff,
+            expected_error=(
+                "explicit L4_ENABLER evidence_command mismatch before commit packet truth "
+                "refresh; packet, TASKS.md, and incoming handoff commands must be "
+                f"byte-identical: {wave_id}"
+            ),
+        )
+
+    def test_commit_packet_truth_refresh_packet_absent_keeps_legacy_noop(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "packet-absent-explicit-evidence"
+        test_path = "mu/tests/tools/test_commit_executor_receipt.py"
+        test_file = repo / test_path
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("def test_packet_absent():\n    assert True\n", encoding="utf-8")
+        indicator_path = _stage_commit_refresh_inputs_for_test(repo, wave_id)
+        subprocess.run(["git", "add", "--", test_path], cwd=repo, check=True)
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", test_path],
+            tracker_note_text=_commit_refresh_tracker_note_for_test(
+                wave_id,
+                _MATCHED_PRESERVATION_NONDEFAULT_COMMAND,
+            ),
+        )
+        tasks_before = (repo / "TASKS.md").read_bytes()
+        staged_before = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+
+        refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert refreshed is handoff
+        assert staged == staged_before
+        assert (repo / "TASKS.md").read_bytes() == tasks_before
+        assert commit_mod.tracker_evidence_command_value(
+            refreshed["tracker_note_text"]
+        ) == _MATCHED_PRESERVATION_NONDEFAULT_COMMAND
+
+    @pytest.mark.parametrize("wave_class", ["L4_STRUCTURAL", "MAINTENANCE"])
+    def test_commit_packet_truth_refresh_non_enabler_class_isolation(
+        self,
+        tmp_path,
+        wave_class,
+    ):
+        import subprocess
+
+        wave_id = f"explicit-evidence-isolation-{wave_class.lower()}"
+        repo, packet_path, indicator_path, handoff, durable_handoff = (
+            _setup_explicit_commit_refresh_fixture(
+                tmp_path,
+                wave_id=wave_id,
+                packet_body="- evidence_command: unwrapped-must-not-be-read",
+                packet_wave_class=wave_class,
+                handoff_wave_class=wave_class,
+            )
+        )
+        snapshot_before = _commit_refresh_mutation_snapshot(
+            repo,
+            packet_path,
+            durable_handoff,
+        )
+        staged_before = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+
+        refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert refreshed is handoff
+        assert staged == staged_before
+        assert _commit_refresh_mutation_snapshot(
+            repo,
+            packet_path,
+            durable_handoff,
+        ) == snapshot_before
 
     def test_same_wave_deferred_authorization_refresh_updates_scope_and_acceptance(self):
         wave_id = "deferred-auth-wave"

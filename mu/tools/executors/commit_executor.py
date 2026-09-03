@@ -1844,11 +1844,19 @@ def _pos_in_backtick_span(pos: int, spans: list[tuple[int, int]]) -> bool:
     return any(open_i < pos < close_i for open_i, close_i in spans)
 
 
-def _build_clean_l4_lookup(note_values: dict[str, str]) -> dict[str, str]:
+def _build_clean_l4_lookup(
+    note_values: dict[str, str],
+    *,
+    exact_evidence_command: str | None = None,
+) -> dict[str, str]:
     """Map every field token (label AND marker form) to its cleaned note value."""
     lookup: dict[str, str] = {}
     for label, marker in _L4_FIELDS_FROM_TRACKER:
-        clean = _clean_l4_body_value(note_values.get(label, ""))
+        clean = (
+            exact_evidence_command
+            if label == "evidence_command" and exact_evidence_command is not None
+            else _clean_l4_body_value(note_values.get(label, ""))
+        )
         lookup[label] = clean
         lookup[marker] = clean
     return lookup
@@ -1917,23 +1925,9 @@ def _conform_plain_l4_list_item_line(line: str, clean_lookup: dict[str, str]) ->
     (``FOUNDER_OVERRIDE:<wave_id>`` in :data:`_L4_AUTH_TOKEN_MARKERS`), which the note
     does not govern, is left exactly as authored either way.
     """
-    keys = list(_PLAIN_L4_KEY_RE.finditer(line))
-    if not keys:
+    accepted = _plain_l4_declaration_matches(line)
+    if not accepted:
         return line
-    spans = _backtick_spans(line)
-    first = keys[0]
-    if _pos_in_backtick_span(first.start(), spans):
-        return line
-    if not _PLAIN_L4_LEAD_PREFIX_RE.fullmatch(line[:first.start()]):
-        return line
-
-    accepted = [first]
-    for key in keys[1:]:
-        if _pos_in_backtick_span(key.start(), spans):
-            continue
-        before = line[:key.start()].rstrip(" \t")
-        if before[-1:] in _PLAIN_L4_GROUP_BOUNDARY_CHARS:
-            accepted.append(key)
 
     out = [line[:accepted[0].start()]]
     for i, key in enumerate(accepted):
@@ -1966,7 +1960,12 @@ def _conform_plain_l4_list_item_line(line: str, clean_lookup: dict[str, str]) ->
     return "".join(out)
 
 
-def _conform_out_of_block_l4_decls(packet_text: str, note_values: dict[str, str]) -> str:
+def _conform_out_of_block_l4_decls(
+    packet_text: str,
+    note_values: dict[str, str],
+    *,
+    exact_evidence_command: str | None = None,
+) -> str:
     """Conform out-of-block L4 declarations to the note (note wins).
 
     The marker block is the machine-owned single source; any OTHER packet declaration
@@ -1990,7 +1989,10 @@ def _conform_out_of_block_l4_decls(packet_text: str, note_values: dict[str, str]
     ``FOUNDER_OVERRIDE:<wave_id>`` (which the note does not govern) is preserved, not
     blanked, in either the plain or the inline-code authoring form.
     """
-    clean_lookup = _build_clean_l4_lookup(note_values)
+    clean_lookup = _build_clean_l4_lookup(
+        note_values,
+        exact_evidence_command=exact_evidence_command,
+    )
 
     def _rewrite(segment: str) -> str:
         # Plain / bold list-item declarations (the most common packet form), conformed
@@ -2044,7 +2046,12 @@ def _conform_out_of_block_l4_decls(packet_text: str, note_values: dict[str, str]
     return _rewrite(packet_text)
 
 
-def reconcile_packet_l4_fields_block(packet_text: str, tracker_note_text: str) -> str:
+def reconcile_packet_l4_fields_block(
+    packet_text: str,
+    tracker_note_text: str,
+    *,
+    exact_evidence_command: str | None = None,
+) -> str:
     """Reconcile a packet's L4-field block to the canonical tracker note (note wins).
 
     The machine-owned block is rendered solely from the note's marker values, and any
@@ -2057,7 +2064,11 @@ def reconcile_packet_l4_fields_block(packet_text: str, tracker_note_text: str) -
     note_values = derive_l4_fields_from_tracker_note(tracker_note_text)
     block = render_l4_fields_block_from_tracker_note(tracker_note_text)
     reconciled = _replace_l4_fields_block(packet_text, block)
-    return _conform_out_of_block_l4_decls(reconciled, note_values)
+    return _conform_out_of_block_l4_decls(
+        reconciled,
+        note_values,
+        exact_evidence_command=exact_evidence_command,
+    )
 
 
 def reconcile_packet_l4_fields_block_for_wave(
@@ -2078,6 +2089,283 @@ def reconcile_packet_l4_fields_block_for_wave(
     if not note.strip():
         return packet_text
     return reconcile_packet_l4_fields_block(packet_text, note)
+
+
+_PACKET_INLINE_EVIDENCE_COMMAND_FORM_A_RE = re.compile(
+    r"`evidence_command:(?P<spacing>[ \t]*)(?P<value>[^`\r\n]*)`"
+)
+_PACKET_INLINE_EVIDENCE_COMMAND_FORM_B_RE = re.compile(
+    r"`evidence_command`:[ \t]*`(?P<value>[^`\r\n]*)`"
+)
+_PACKET_INLINE_EVIDENCE_COMMAND_SHAPE_RE = re.compile(
+    r"`evidence_command(?:[ \t]*:|`[ \t]*:)"
+)
+_PACKET_PLAIN_EVIDENCE_COMMAND_VALUE_RE = re.compile(
+    r"^[ \t]*`(?P<value>[^`\r\n]*)`[ \t]*[.;,]?[ \t]*$"
+)
+_TRACKER_FIELD_MARKER_RE = re.compile(
+    r"(?<!\S)(?P<field>"
+    + "|".join(
+        re.escape(marker)
+        for marker in sorted(_BUILDER_TRACKER_MARKER_NAMES, key=len, reverse=True)
+    )
+    + r"):"
+)
+_TRACKER_CANONICAL_EVIDENCE_COMMAND_VALUE_RE = re.compile(
+    r"^[ \t]*`(?P<value>[^`\r\n]*)`(?:\.)?[ \t]*$"
+)
+
+
+def _own_line_marker_positions(text: str, marker: str) -> list[int]:
+    positions: list[int] = []
+    search_from = 0
+    while True:
+        position = _find_block_marker_line(text, marker, search_from=search_from)
+        if position == -1:
+            return positions
+        positions.append(position)
+        search_from = position + len(marker)
+
+
+def _packet_text_without_generated_evidence_blocks(packet_text: str) -> str:
+    """Return packet-authored text, excluding commit-generated evidence replicas."""
+    text = str(packet_text or "")
+    ranges: list[tuple[int, int]] = []
+    for start_marker, end_marker, unbalanced_error in (
+        (
+            L4_FIELDS_FROM_TRACKER_START,
+            L4_FIELDS_FROM_TRACKER_END,
+            "existing L4_FIELDS_FROM_TRACKER markers are unbalanced",
+        ),
+        (
+            COMMIT_PATH_REFRESH_START,
+            COMMIT_PATH_REFRESH_END,
+            "existing Commit Path Truth Refresh markers are unbalanced",
+        ),
+    ):
+        starts = _own_line_marker_positions(text, start_marker)
+        ends = _own_line_marker_positions(text, end_marker)
+        pairs = list(zip(starts, ends))
+        if (
+            len(starts) != len(ends)
+            or any(start >= end for start, end in pairs)
+            or any(
+                previous_end >= start
+                for (_previous_start, previous_end), (start, _end) in zip(
+                    pairs,
+                    pairs[1:],
+                )
+            )
+        ):
+            raise ValueError(unbalanced_error)
+        for start, end in pairs:
+            end += len(end_marker)
+            ranges.append((start, end))
+    if not ranges:
+        return text
+
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(ranges):
+        if merged and start < merged[-1][1]:
+            # The checks above validate each marker family independently.  A
+            # block of one type can therefore still be nested in (or cross)
+            # a block of the other type.  Do not merge that malformed shape:
+            # reconciliation replaces the block types separately, so an outer
+            # replacement could otherwise erase the already-reconciled inner
+            # block after tracker state has been refreshed.
+            raise ValueError(
+                "existing generated evidence blocks overlap across block types"
+            )
+        if merged and start == merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    authored: list[str] = []
+    cursor = 0
+    for start, end in merged:
+        authored.append(text[cursor:start])
+        authored.append("\n" * max(1, text[start:end].count("\n")))
+        cursor = end
+    authored.append(text[cursor:])
+    return "".join(authored)
+
+
+def _plain_l4_declaration_matches(line: str) -> list[re.Match[str]]:
+    """Return the plain/bold L4 keys that the packet conformer treats as declarations."""
+    keys = list(_PLAIN_L4_KEY_RE.finditer(line))
+    if not keys:
+        return []
+    spans = _backtick_spans(line)
+    first = keys[0]
+    if _pos_in_backtick_span(first.start(), spans):
+        return []
+    if not _PLAIN_L4_LEAD_PREFIX_RE.fullmatch(line[:first.start()]):
+        return []
+
+    accepted = [first]
+    for key in keys[1:]:
+        if _pos_in_backtick_span(key.start(), spans):
+            continue
+        before = line[:key.start()].rstrip(" \t")
+        if before[-1:] in _PLAIN_L4_GROUP_BOUNDARY_CHARS:
+            accepted.append(key)
+    return accepted
+
+
+def _packet_authored_evidence_command(
+    packet_text: str,
+    *,
+    active_packet_path: str,
+) -> tuple[str | None, str | None]:
+    """Resolve one exact authored packet command without consulting generated replicas."""
+    values: set[str] = set()
+    malformed = False
+    try:
+        authored_text = _packet_text_without_generated_evidence_blocks(packet_text)
+    except ValueError as exc:
+        return None, str(exc)
+    for line in authored_text.splitlines():
+        plain_keys = _plain_l4_declaration_matches(line)
+        for index, key in enumerate(plain_keys):
+            if key.group("field") != "evidence_command":
+                continue
+            value_end = plain_keys[index + 1].start() if index + 1 < len(plain_keys) else len(line)
+            match = _PACKET_PLAIN_EVIDENCE_COMMAND_VALUE_RE.fullmatch(
+                line[key.end():value_end]
+            )
+            if match is None or not match.group("value").strip():
+                malformed = True
+            else:
+                values.add(match.group("value"))
+
+        for shape in _PACKET_INLINE_EVIDENCE_COMMAND_SHAPE_RE.finditer(line):
+            match = _PACKET_INLINE_EVIDENCE_COMMAND_FORM_B_RE.match(line, shape.start())
+            if match is None:
+                match = _PACKET_INLINE_EVIDENCE_COMMAND_FORM_A_RE.match(line, shape.start())
+            if match is None or not match.group("value").strip():
+                malformed = True
+            else:
+                values.add(match.group("value"))
+
+    if malformed:
+        return None, (
+            "active L4_ENABLER packet has a malformed authored evidence_command "
+            f"declaration before commit packet truth refresh: {active_packet_path}"
+        )
+    if len(values) > 1:
+        return None, (
+            "active L4_ENABLER packet has conflicting authored evidence_command "
+            f"declarations before commit packet truth refresh: {active_packet_path}"
+        )
+    if values:
+        for start_marker, block_name in (
+            (L4_FIELDS_FROM_TRACKER_START, "L4_FIELDS_FROM_TRACKER"),
+            (COMMIT_PATH_REFRESH_START, "Commit Path Truth Refresh"),
+        ):
+            if len(_own_line_marker_positions(packet_text, start_marker)) > 1:
+                return None, (
+                    f"active L4_ENABLER packet has multiple {block_name} blocks "
+                    f"before commit packet truth refresh: {active_packet_path}"
+                )
+    return (next(iter(values)) if values else None), None
+
+
+def _tracker_field_matches_outside_inline_code(
+    note: str,
+) -> tuple[list[re.Match[str]], bool]:
+    text = str(note or "")
+    matches: list[re.Match[str]] = []
+    cursor = 0
+    while cursor < len(text):
+        marker = _TRACKER_FIELD_MARKER_RE.search(text, cursor)
+        tick = text.find("`", cursor)
+        if tick != -1 and (marker is None or tick < marker.start()):
+            close = text.find("`", tick + 1)
+            if close == -1:
+                return matches, True
+            cursor = close + 1
+            continue
+        if marker is None:
+            break
+        matches.append(marker)
+        cursor = marker.end()
+    return matches, False
+
+
+def _tracker_evidence_command_values_exact(note: str) -> tuple[set[str], bool]:
+    """Decode canonical tracker commands without normalizing any payload byte."""
+    text = str(note or "")
+    values: set[str] = set()
+    fields, malformed = _tracker_field_matches_outside_inline_code(text)
+    for index, field in enumerate(fields):
+        if field.group("field") != "evidence_command":
+            continue
+        value_end = fields[index + 1].start() if index + 1 < len(fields) else len(text)
+        match = _TRACKER_CANONICAL_EVIDENCE_COMMAND_VALUE_RE.fullmatch(
+            text[field.end():value_end]
+        )
+        if match is None or not match.group("value").strip():
+            malformed = True
+            continue
+        values.add(match.group("value"))
+    return values, malformed
+
+
+def _resolve_explicit_l4_enabler_evidence_command(
+    *,
+    repo_root: Path,
+    handoff: dict[str, Any],
+    packet_text: str,
+    active_packet_path: str,
+) -> tuple[str | None, str | None]:
+    """Bind packet intent to matching TASKS/handoff authority before any mutation."""
+    packet_command, packet_error = _packet_authored_evidence_command(
+        packet_text,
+        active_packet_path=active_packet_path,
+    )
+    if packet_error or packet_command is None:
+        return packet_command, packet_error
+
+    wave_id = str(handoff.get("wave_id") or "")
+    tasks_note = _extract_existing_canonical_tracker_note_from_tasks(repo_root, wave_id)
+    if not tasks_note:
+        return None, (
+            "explicit L4_ENABLER evidence_command preservation requires one canonical "
+            f"same-wave TASKS.md tracker note before commit packet truth refresh: {wave_id}"
+        )
+    handoff_note = str(handoff.get("tracker_note_text") or "")
+    if len(handoff_note.splitlines()) != 1 or not _is_canonical_tracker_note_line(
+        handoff_note,
+        wave_id,
+    ):
+        return None, (
+            "explicit L4_ENABLER evidence_command preservation requires a canonical "
+            f"same-wave incoming handoff tracker note before commit packet truth refresh: {wave_id}"
+        )
+
+    tasks_values, tasks_malformed = _tracker_evidence_command_values_exact(tasks_note)
+    handoff_values, handoff_malformed = _tracker_evidence_command_values_exact(handoff_note)
+    if tasks_malformed or len(tasks_values) != 1:
+        return None, (
+            "current same-wave TASKS.md tracker note has a missing, malformed, or "
+            f"conflicting evidence_command before explicit preservation: {wave_id}"
+        )
+    if handoff_malformed or len(handoff_values) != 1:
+        return None, (
+            "incoming same-wave handoff tracker note has a missing, malformed, or "
+            f"conflicting evidence_command before explicit preservation: {wave_id}"
+        )
+
+    tasks_command = next(iter(tasks_values))
+    handoff_command = next(iter(handoff_values))
+    if tasks_command != handoff_command or packet_command != tasks_command:
+        return None, (
+            "explicit L4_ENABLER evidence_command mismatch before commit packet truth "
+            "refresh; packet, TASKS.md, and incoming handoff commands must be "
+            f"byte-identical: {wave_id}"
+        )
+    return packet_command, None
 
 
 def _commit_supervisor_reentry_plan_path(handoff: dict[str, Any]) -> str:
@@ -2241,26 +2529,63 @@ def _test_files_cover_structural_tracker_evidence(note: str, test_files: list[st
     return True
 
 
-def _refresh_tracker_note_test_evidence(note: str, staged_paths: list[str]) -> str:
-    """Align generated tracker-note pytest evidence with the rebuilt staged scope."""
-    test_files = _collect_wave_test_files(staged_paths)
-    if not test_files:
-        return note
-    if (
-        _tracker_note_declares_l4_structural(note)
-        and not _test_files_cover_structural_tracker_evidence(note, test_files)
-    ):
-        return note
-    evidence_command = (
-        "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
-        + " ".join(test_files)
-        + "`"
-    )
-    refreshed = re.sub(
-        r"evidence_command:\s*`PYTHONHASHSEED=0 python3 -m pytest -x --tb=short [^`]+`",
-        evidence_command,
+_PRESERVED_EVIDENCE_COMMAND_PLACEHOLDER = "__RCX_PRESERVED_EVIDENCE_COMMAND__"
+_TRACKER_EVIDENCE_COMMAND_FIELD_RE = re.compile(
+    r"(?<!\S)evidence_command:[ \t]*`[^`\r\n]+`"
+)
+
+
+def _replace_tracker_note_evidence_command_exact(note: str, command: str) -> str:
+    """Replace only canonical tracker command fields without interpreting payload bytes."""
+    return _TRACKER_EVIDENCE_COMMAND_FIELD_RE.sub(
+        lambda _match: f"evidence_command: `{command}`",
         note,
     )
+
+
+def _refresh_tracker_note_test_evidence(
+    note: str,
+    staged_paths: list[str],
+    *,
+    preserved_evidence_command: str | None = None,
+) -> str:
+    """Align generated tracker evidence, or retain an authorized explicit command."""
+    test_files = _collect_wave_test_files(staged_paths)
+    if not test_files:
+        if preserved_evidence_command is not None:
+            return _replace_tracker_note_evidence_command_exact(
+                note,
+                preserved_evidence_command,
+            )
+        return note
+    refreshed = note
+    if preserved_evidence_command is not None:
+        # Keep the command opaque while the legacy global prose/count rewrites run.
+        refreshed = _replace_tracker_note_evidence_command_exact(
+            refreshed,
+            _PRESERVED_EVIDENCE_COMMAND_PLACEHOLDER,
+        )
+    if (
+        _tracker_note_declares_l4_structural(refreshed)
+        and not _test_files_cover_structural_tracker_evidence(refreshed, test_files)
+    ):
+        if preserved_evidence_command is not None:
+            return _replace_tracker_note_evidence_command_exact(
+                refreshed,
+                preserved_evidence_command,
+            )
+        return refreshed
+    if preserved_evidence_command is None:
+        evidence_command = (
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            + " ".join(test_files)
+            + "`"
+        )
+        refreshed = re.sub(
+            r"evidence_command:\s*`PYTHONHASHSEED=0 python3 -m pytest -x --tb=short [^`]+`",
+            evidence_command,
+            refreshed,
+        )
     refreshed = re.sub(
         r"Final pytest gate covered \d+ test file\(s\)",
         f"Final pytest gate covered {len(test_files)} test file(s)",
@@ -2276,6 +2601,11 @@ def _refresh_tracker_note_test_evidence(note: str, staged_paths: list[str]) -> s
         f", {len(test_files)} wave-owned test module(s),",
         refreshed,
     )
+    if preserved_evidence_command is not None:
+        refreshed = _replace_tracker_note_evidence_command_exact(
+            refreshed,
+            preserved_evidence_command,
+        )
     return refreshed
 
 
@@ -2914,6 +3244,7 @@ def _rebuild_handoff_after_packet_truth_refresh(
     staged_paths: list[str],
     evidence_handles: dict[str, str],
     commit_generated_governance_paths: list[str] | None = None,
+    preserved_evidence_command: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     scope_items = handoff.get("scope_items")
     generated_scope_paths = commit_generated_governance_paths or []
@@ -2927,7 +3258,20 @@ def _rebuild_handoff_after_packet_truth_refresh(
         handoff=handoff,
         active_packet_path=active_packet_path,
     )
-    return build_commit_handoff(
+    tracker_note_text = str(handoff.get("tracker_note_text") or "")
+    if preserved_evidence_command is not None:
+        # build_commit_handoff performs several global tracker-note repairs. Hide
+        # command payload bytes from those rewrites, then restore the authorized
+        # value after the rebuilt handoff has passed its existing validation.
+        tracker_note_text = _replace_tracker_note_evidence_command_exact(
+            tracker_note_text,
+            _PRESERVED_EVIDENCE_COMMAND_PLACEHOLDER,
+        )
+    tracker_note_text = _refresh_tracker_note_wave_file_count(
+        tracker_note_text,
+        len(staged_paths),
+    )
+    rebuilt, errors = build_commit_handoff(
         wave_id=str(handoff.get("wave_id") or ""),
         task_id=str(handoff.get("task_id") or ""),
         files_to_stage=staged_paths,
@@ -2942,10 +3286,7 @@ def _rebuild_handoff_after_packet_truth_refresh(
         force_add_files=[],
         pr_title=str(handoff.get("pr_title") or ""),
         pr_body=str(handoff.get("pr_body") or ""),
-        tracker_note_text=_refresh_tracker_note_wave_file_count(
-            str(handoff.get("tracker_note_text") or ""),
-            len(staged_paths),
-        ),
+        tracker_note_text=tracker_note_text,
         supervisor_lane=(
             str(handoff.get("supervisor_lane"))
             if isinstance(handoff.get("supervisor_lane"), str)
@@ -2967,6 +3308,18 @@ def _rebuild_handoff_after_packet_truth_refresh(
         repo_root=repo_root,
         tracked_packet=active_packet_path,
     )
+    if not errors and preserved_evidence_command is not None:
+        rebuilt = {
+            **rebuilt,
+            "tracker_note_text": _replace_tracker_note_evidence_command_exact(
+                str(rebuilt.get("tracker_note_text") or ""),
+                preserved_evidence_command,
+            ),
+        }
+        valid, restored_errors = validate_handoff(rebuilt, repo_root=repo_root)
+        if not valid:
+            return rebuilt, restored_errors
+    return rebuilt, errors
 
 
 def _bridge_status_round_value(raw_value: Any) -> int:
@@ -3496,6 +3849,19 @@ def refresh_commit_path_packet_truth(
             f"{active_packet_path} (wave_id={wave_id})"
         )
 
+    preserved_evidence_command: str | None = None
+    if handoff_wave_class == "L4_ENABLER":
+        preserved_evidence_command, explicit_evidence_error = (
+            _resolve_explicit_l4_enabler_evidence_command(
+                repo_root=repo_root,
+                handoff=handoff,
+                packet_text=packet_text,
+                active_packet_path=active_packet_path,
+            )
+        )
+        if explicit_evidence_error:
+            return handoff, [], explicit_evidence_error
+
     staged_paths_before = sorted(_current_staged_diff_paths(repo_root))
     if indicator_path not in staged_paths_before:
         return handoff, [], (
@@ -3519,12 +3885,23 @@ def refresh_commit_path_packet_truth(
     refreshed_tracker_note_text = _refresh_tracker_note_test_evidence(
         refreshed_tracker_note_text,
         staged_paths_for_block,
+        preserved_evidence_command=preserved_evidence_command,
     )
     pending_pre_commit_supervisor = commit_status == "pre_commit_supervisor_pending"
     if pending_pre_commit_supervisor:
+        if preserved_evidence_command is not None:
+            refreshed_tracker_note_text = _replace_tracker_note_evidence_command_exact(
+                refreshed_tracker_note_text,
+                _PRESERVED_EVIDENCE_COMMAND_PLACEHOLDER,
+            )
         refreshed_tracker_note_text = _mark_tracker_note_pre_commit_receipt_pending(
             refreshed_tracker_note_text
         )
+        if preserved_evidence_command is not None:
+            refreshed_tracker_note_text = _replace_tracker_note_evidence_command_exact(
+                refreshed_tracker_note_text,
+                preserved_evidence_command,
+            )
     tracker_refresh_error = _refresh_tasks_tracker_note_after_packet_truth(
         repo_root,
         wave_id=wave_id,
@@ -3547,7 +3924,13 @@ def refresh_commit_path_packet_truth(
     tracker_note_after_staging = _refresh_tracker_note_test_evidence(
         tracker_note_after_staging,
         staged_paths_for_block,
+        preserved_evidence_command=preserved_evidence_command,
     )
+    if preserved_evidence_command is not None:
+        tracker_note_after_staging = _replace_tracker_note_evidence_command_exact(
+            tracker_note_after_staging,
+            _PRESERVED_EVIDENCE_COMMAND_PLACEHOLDER,
+        )
     tracker_note_after_staging = _append_tracker_scope_refs(
         tracker_note_after_staging,
         settled_generated_paths,
@@ -3555,6 +3938,11 @@ def refresh_commit_path_packet_truth(
     if pending_pre_commit_supervisor:
         tracker_note_after_staging = _mark_tracker_note_pre_commit_receipt_pending(
             tracker_note_after_staging
+        )
+    if preserved_evidence_command is not None:
+        tracker_note_after_staging = _replace_tracker_note_evidence_command_exact(
+            tracker_note_after_staging,
+            preserved_evidence_command,
         )
     if tracker_note_after_staging != refreshed_tracker_note_text:
         refreshed_tracker_note_text = tracker_note_after_staging
@@ -3626,7 +4014,11 @@ def refresh_commit_path_packet_truth(
         # note (the #52 supervisor + bot read the note as truth). The settled
         # tracker_note_text wins on any divergence, establishing the invariant
         # "at supervisor time, packet L4-fields == tracker note L4-fields".
-        packet_text = reconcile_packet_l4_fields_block(packet_text, tracker_note_text)
+        packet_text = reconcile_packet_l4_fields_block(
+            packet_text,
+            tracker_note_text,
+            exact_evidence_command=preserved_evidence_command,
+        )
         refreshed_text = _replace_commit_path_truth_refresh_block(packet_text, block)
     except ValueError as exc:
         return handoff, [], str(exc)
@@ -3653,6 +4045,7 @@ def refresh_commit_path_packet_truth(
         staged_paths=final_staged_paths,
         evidence_handles=evidence_handles,
         commit_generated_governance_paths=settled_generated_paths,
+        preserved_evidence_command=preserved_evidence_command,
     )
     if errors:
         return handoff, [], "rebuilt commit handoff invalid after packet truth refresh: " + "; ".join(errors)
