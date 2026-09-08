@@ -500,6 +500,7 @@ def _write_launch_tracker_restore_fixture(
         "plan_path": plan_path,
         "packet": packet,
         "indicator_path": indicator_path,
+        "evidence_command": evidence_command,
         "tracker_note": tracker_note,
         "tasks_bytes": tasks_bytes,
         "base_commit": base_commit,
@@ -16652,6 +16653,109 @@ class TestLaunchTrackerRestoreCapability:
         sdk.assert_called_once()
         self._assert_tracker_restored(fixture)
 
+    def test_restored_authority_survives_reentry_finalizer_and_fails_closed_on_drift(
+        self,
+        tmp_path,
+    ):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        plan = self._loaded_plan(fixture)
+        with patch.object(
+            pb_mod,
+            "_launch_tracker_restore_source_repo_root",
+            return_value=fixture["repo"],
+        ):
+            session, _launch_route = pb_mod.prepare_launch_tracker_restore(
+                fixture["repo"],
+                plan=plan,
+                plan_path=fixture["plan_path"],
+                wave_id=fixture["wave_id"],
+                routing_record=fixture["phase_b_route"],
+            )
+        assert session is not None
+        pb_mod.remove_launch_tracker_note(fixture["repo"], session)
+        pb_mod.restore_launch_tracker_note(fixture["repo"], session)
+
+        changed_files = [
+            fixture["implementation_path"],
+            fixture["plan_path"],
+            fixture["indicator_path"],
+        ]
+        with patch.object(
+            pb_mod,
+            "_collect_commit_bound_files",
+            side_effect=lambda _repo, files, **_kwargs: sorted(set(files)),
+        ), patch.object(
+            pb_mod,
+            "build_phase_b_tracker_note",
+            side_effect=AssertionError("restored authority must not call the generic builder"),
+        ) as generic_builder, patch.object(
+            pb_mod,
+            "_sync_phase_b_tasks_tracker_note",
+            side_effect=AssertionError("restored authority must not sync-replace TASKS"),
+        ) as tracker_sync:
+            (
+                note,
+                raw_override,
+                package_override,
+                modified,
+                final_scope,
+                error,
+            ) = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: locks restored re-entry finalization
+                fixture["repo"],
+                wave_id=fixture["wave_id"],
+                task_id=fixture["task_id"],
+                wave_class="L4_ENABLER",
+                target_gate_id="G8",
+                plan_path=fixture["plan_path"],
+                plan_content=plan["content"],
+                changed_files=changed_files,
+                test_files=["mu/tests/tools/test_phase_b_executor.py"],
+                receipt_path=".scratch/phase_b_supervisor_package.json",
+                bridge_status={"rounds": 2},
+                reentry=True,
+                founder_override=fixture["wave_id"],
+                launch_tracker_restore_session=session,
+            )
+
+            expected_note = fixture["tracker_note"]
+            assert error is None
+            assert note == expected_note
+            assert raw_override == f"FOUNDER_OVERRIDE:{fixture['wave_id']}"
+            assert package_override == raw_override
+            assert modified is False
+            assert final_scope == sorted({*changed_files, "TASKS.md"})
+            self._assert_tracker_restored(fixture)
+
+            tasks_path = fixture["repo"] / "TASKS.md"
+            drifted_tasks = tasks_path.read_bytes().replace(
+                fixture["title"].encode("utf-8"),
+                b"Drifted launcher title",
+                1,
+            )
+            tasks_path.write_bytes(drifted_tasks)
+            *_, drift_error = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: locks restored-authority drift refusal
+                fixture["repo"],
+                wave_id=fixture["wave_id"],
+                task_id=fixture["task_id"],
+                wave_class="L4_ENABLER",
+                target_gate_id="G8",
+                plan_path=fixture["plan_path"],
+                plan_content=plan["content"],
+                changed_files=changed_files,
+                test_files=["mu/tests/tools/test_phase_b_executor.py"],
+                receipt_path=".scratch/phase_b_supervisor_package.json",
+                bridge_status={"rounds": 3},
+                reentry=True,
+                founder_override=fixture["wave_id"],
+                launch_tracker_restore_session=session,
+            )
+
+        assert drift_error is not None
+        assert "restored launch-tracker authority failed" in drift_error
+        assert tasks_path.read_bytes() == drifted_tasks
+        generic_builder.assert_not_called()
+        tracker_sync.assert_not_called()
+
     def test_restore_precedes_all_downstream_review_and_handoff_boundaries(
         self,
         tmp_path,
@@ -16666,6 +16770,8 @@ class TestLaunchTrackerRestoreCapability:
         ]
         mock_impl = _make_mock_impl()
         observations: list[str] = []
+        captured_package: dict[str, Any] = {}
+        captured_handoff: dict[str, Any] = {}
 
         def observe(name: str) -> None:
             self._assert_tracker_restored(fixture)
@@ -16721,19 +16827,11 @@ class TestLaunchTrackerRestoreCapability:
                 "job_id": "bridge-order",
             }
 
-        def finalize_tracker(*_args, **kwargs):
-            observe("staged_l4_tracker")
-            return (
-                fixture["tracker_note"].rstrip("\n"),
-                fixture["wave_id"],
-                fixture["wave_id"],
-                False,
-                list(kwargs["changed_files"]),
-                None,
-            )
-
-        def supervisor(*_args, **_kwargs):
+        def supervisor(_repo_root, package_path, **_kwargs):
             observe("supervisor")
+            captured_package.update(
+                json.loads(Path(package_path).read_text(encoding="utf-8"))
+            )
             return {
                 "exit_code": 0,
                 "parsed": {
@@ -16745,8 +16843,9 @@ class TestLaunchTrackerRestoreCapability:
                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/order.json",
             }
 
-        def handoff(*_args, **_kwargs):
+        def handoff(*_args, **kwargs):
             observe("commit_handoff")
+            captured_handoff.update(kwargs)
             return fixture["repo"] / ".agent_bus" / "handoff.json"
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
@@ -16768,7 +16867,11 @@ class TestLaunchTrackerRestoreCapability:
              patch.object(pb_mod, "run_sdk_agents", side_effect=sdk_review), \
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_review), \
              patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=True), \
-             patch.object(pb_mod, "_finalize_phase_b_pre_supervisor_tracker_note", side_effect=finalize_tracker), \
+             patch.object(
+                 pb_mod,
+                 "build_phase_b_tracker_note",
+                 side_effect=AssertionError("restored authority must not call the generic builder"),
+             ) as generic_builder, \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor), \
              patch.object(pb_mod, "prepare_commit_handoff", side_effect=handoff):
             result = pb_mod.run_phase_b(
@@ -16783,12 +16886,24 @@ class TestLaunchTrackerRestoreCapability:
             "candidate_authority",
             "indicator",
             "staged_l4",
-            "staged_l4_tracker",
             "bridge",
             "supervisor",
             "commit_handoff",
         ):
             assert boundary in observations
+        expected_note = fixture["tracker_note"]
+        assert "Phase B pre-commit supervisor package" not in expected_note
+        assert "commit-ready Phase B handoff" not in expected_note
+        assert captured_package["tracker_note_text"] == expected_note
+        assert captured_handoff["tracker_note_text"] == expected_note
+        assert captured_package["evidence_command"] == fixture["evidence_command"]
+        assert (
+            pb_mod._tracker_evidence_command_value(captured_handoff["tracker_note_text"])  # ANTICHEAT_OK: exact handoff evidence assertion
+            == fixture["evidence_command"]
+        )
+        assert fixture["evidence_command"] in fixture["packet"]
+        assert fixture["evidence_command"] in expected_note
+        generic_builder.assert_not_called()
         self._assert_tracker_restored(fixture)
 
     def test_restored_terminal_receipt_prevents_second_consumption(self, tmp_path):
