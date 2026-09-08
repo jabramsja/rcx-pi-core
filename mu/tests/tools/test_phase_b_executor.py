@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -96,8 +97,14 @@ def isolate_legacy_run_phase_b_pre_review_boundaries(request):
         step_prefix,
         context,
         candidate_authority_required=False,
+        candidate_authority_metadata=None,
     ):
-        del wave_id, wave_class, candidate_authority_required
+        del (
+            wave_id,
+            wave_class,
+            candidate_authority_required,
+            candidate_authority_metadata,
+        )
         prepared = list(dict.fromkeys(candidate_files))
         if plan_path and not plan_path.startswith("<") and plan_path not in prepared:
             prepared.append(plan_path)
@@ -293,6 +300,214 @@ def _make_successful_impl_with_edits(test_path: str) -> MagicMock:
 
     mock_impl.invoke_implementer.side_effect = invoke_side
     return mock_impl
+
+
+def _write_launch_tracker_restore_fixture(
+    root: Path,
+    *,
+    marker: bool = True,
+) -> dict[str, Any]:
+    """Create one native launch packet/route/spec bound to a dynamic Git base."""
+    repo = root / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    (repo / ".gitignore").write_text(".agent_bus/\n.agent_bus-*/\n", encoding="utf-8")
+    (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+    implementation_path = "mu/tools/executors/phase_b_executor.py"
+    implementation_file = repo / implementation_path
+    implementation_file.parent.mkdir(parents=True)
+    implementation_file.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "dynamic launch base"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    base_commit = _git_stdout(repo, "rev-parse", "HEAD")
+
+    wave_id = "phase-b-launch-tracker-restore-activation-r4b-2026-09-08"
+    task_id = "[PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B]"
+    title = "Phase B Launch Tracker Restore Activation R4B"
+    date = "2026-09-08"
+    plan_path = f"reports/control_plane/{wave_id}_{date}.md"
+    indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+    evidence_command = (
+        "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+        "mu/tests/tools/test_phase_b_executor.py"
+    )
+    indicator_command = (
+        "python3 mu/tools/metrics/collect_l4_wave_indicators.py "
+        f"--wave-id {wave_id} --output {indicator_path}"
+    )
+    work_items = [
+        "Exercise the already-landed generic restoration capability from this exact launch.",
+    ]
+    if marker:
+        work_items.append(pb_mod.LAUNCH_TRACKER_RESTORE_MARKER)
+    contract = {
+        "identity": {
+            "wave_id": wave_id,
+            "task_id": task_id,
+            "title": title,
+            "date": date,
+            "tracked_packet": plan_path,
+        },
+        "purpose": "Exercise launch-bound tracker restoration on a fresh exact-base launch.",
+        "scope_summary": "Bounded Phase B tracker restoration activation.",
+        "scope_items": [
+            "The same-wave launcher tracker note and existing Phase B capability.",
+            f"Implementation proof in `{implementation_path}`.",
+        ],
+        "work_items": work_items,
+        "constraints": ["Fail closed when launch authority is not exact."],
+        "stop_conditions": ["Stop before downstream review on authority failure."],
+        "acceptance_criteria": ["Restore launcher truth before downstream review."],
+        "evidence_command": evidence_command,
+        "slow_functions": [],
+    }
+    digest = pa_mod.native_stub_packet_contract_digest(contract)
+    expected_sections = pa_mod._native_stub_expected_section_bodies(contract)  # ANTICHEAT_OK: exact native fixture rendering
+    grounding = (
+        f"- Task: {task_id}; wave id `{wave_id}`.\n"
+        f"- Governing packet: this file, `{plan_path}`.\n"
+        f"- TASKS.md authority: the {date} tracker sync note for wave `{wave_id}` "
+        "is canonical for this packet's L4 fields.\n\n"
+        f"FOUNDER_OVERRIDE:{wave_id}"
+    )
+    packet = (
+        f"# {title}\n"
+        f"Date: {date}\n"
+        "Status: Phase B (locked, implementing)\n"
+        f"Task: {task_id}\n"
+        f"Wave ID: {wave_id}\n"
+        "Phase-A-Lock: LOCKED\n"
+        "Native-Stub-Packet-Contract: required=true; producer=launch_wave.py; version=1\n"
+        f"Native-Stub-Packet-Contract-Digest: {digest}\n"
+        f"Purpose: {contract['purpose']}\n\n"
+        f"## Scope\n\n{expected_sections['scope']}\n\n"
+        f"## Work items\n\n{expected_sections['work items']}\n\n"
+        f"## Constraints\n\n{expected_sections['constraints']}\n\n"
+        f"## Stop conditions\n\n{expected_sections['stop conditions']}\n\n"
+        f"## Validation gates\n\n{expected_sections['validation gates']}\n\n"
+        f"## Acceptance criteria\n\n{expected_sections['acceptance criteria']}\n\n"
+        f"## Grounding / Authorization\n\n{grounding}\n"
+    )
+    packet_file = repo / plan_path
+    packet_file.parent.mkdir(parents=True)
+    packet_file.write_text(packet, encoding="utf-8")
+
+    tracker_note = (
+        f"- Tracker sync note ({date}, {wave_id}): **{title}.**. "
+        "Class: L4_ENABLER. target_gate_id: G8. "
+        f"Packet: `{plan_path}`. evidence_command: `{evidence_command}`. "
+        f"FOUNDER_OVERRIDE:{wave_id}. indicator_artifact_ref: {indicator_path}. "
+        f"indicator_collection_command: {indicator_command}.\n"
+    )
+    tasks_bytes = (
+        "# Queue\n\n"
+        "## Ra\n\n"
+        "- Existing queue authority remains unchanged.\n"
+        f"{tracker_note}\n"
+        "---\n"
+        "## Later queue\n\n"
+        "- Preserve downstream work.\n"
+    ).encode("utf-8")
+    (repo / "TASKS.md").write_bytes(tasks_bytes)
+
+    branch = f"jabramsja/{wave_id}"
+    subprocess.run(
+        ["git", "checkout", "-b", branch],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    authority_spec = candidate_authority_mod.CandidateAuthoritySpec(
+        wave_id=wave_id,
+        comparison_commit=base_commit,
+        candidate_allowlist=(
+            "TASKS.md",
+            implementation_path,
+            plan_path,
+            indicator_path,
+        ),
+        plan_path=plan_path,
+        indicator_artifact_ref=indicator_path,
+        indicator_collection_command=indicator_command,
+        wave_class="L4_ENABLER",
+        require_l4_staged=True,
+        reviewer_agent="codex",
+    )
+    spec_path = candidate_authority_mod.write_authority_spec(
+        repo,
+        authority_spec,
+        bus_dir=None,
+    )
+    spec_identity = candidate_authority_mod.authority_spec_identity(
+        repo,
+        authority_spec,
+        authority_required=True,
+    )
+    launch_route = {
+        "decision": "ROUTE_PHASE_A",
+        "summary": "fresh marker-bearing activation",
+        "wave_name": wave_id,
+        "task_id": task_id,
+        "head_sha": base_commit,
+        "merge_sha": base_commit,
+        "founder_override": wave_id,
+        "next_candidates": [
+            {
+                "candidate": wave_id,
+                "bounded": True,
+                "tracked_packet": plan_path,
+            }
+        ],
+        "native_stub_packet_contract": {
+            "required": True,
+            "producer": "launch_wave.py",
+            "version": 1,
+            "digest": digest,
+            "contract": contract,
+        },
+        "candidate_authority_required": True,
+        "candidate_authority": {
+            "required": True,
+            "precommit_inventory": True,
+            "spec_path": str(spec_path),
+            "spec_identity": spec_identity,
+            "target_branch_authority": {
+                "source": "launch_current_branch",
+                "branch_prefix": "jabramsja",
+                "target_branch": branch,
+            },
+        },
+    }
+    route_path = repo / ".agent_bus" / "meta" / "post_merge_routing.json"
+    route_path.parent.mkdir(parents=True, exist_ok=True)
+    route_path.write_text(json.dumps(launch_route, indent=2) + "\n", encoding="utf-8")
+    phase_b_route = {
+        "decision": "ROUTE_PHASE_B",
+        "summary": "Phase A converged",
+        "wave_name": wave_id,
+        "task_id": task_id,
+    }
+    return {
+        "repo": repo,
+        "wave_id": wave_id,
+        "task_id": task_id,
+        "title": title,
+        "plan_path": plan_path,
+        "packet": packet,
+        "indicator_path": indicator_path,
+        "tracker_note": tracker_note,
+        "tasks_bytes": tasks_bytes,
+        "base_commit": base_commit,
+        "spec_path": spec_path,
+        "launch_route": launch_route,
+        "phase_b_route": phase_b_route,
+        "implementation_path": implementation_path,
+    }
 
 
 def _run_phase_b_public_target_gate_path(
@@ -16061,3 +16276,581 @@ class TestAgentReviewResume:
         sdk_mock.assert_called_once()
         assert result.get("resumed_from") == "agent_review"
         assert any(s.get("completed_step") == "agent_review" for s in saved_states)
+
+
+class TestLaunchTrackerRestoreCapability:
+    """Future native packets may opt into exact same-wave tracker restoration."""
+
+    @staticmethod
+    def _loaded_plan(fixture: dict[str, Any]) -> dict[str, Any]:
+        return pb_mod.load_plan_packet(fixture["repo"], fixture["plan_path"])
+
+    @staticmethod
+    def _assert_tracker_restored(fixture: dict[str, Any]) -> None:
+        observed = (fixture["repo"] / "TASKS.md").read_bytes()
+        assert observed == fixture.get("expected_tasks_bytes", fixture["tasks_bytes"])
+        assert observed.count(fixture["tracker_note"].encode("utf-8")) == 1
+        state = json.loads(
+            (
+                fixture["repo"]
+                / ".agent_bus"
+                / "executors"
+                / pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME
+            ).read_text(encoding="utf-8")
+        )
+        assert state["status"] == "restored"
+
+    def _assert_run_phase_b_authority_failure(
+        self,
+        fixture: dict[str, Any],
+        expected_error: str,
+    ) -> None:
+        downstream_names = (
+            "prepare_candidate_authority_if_configured",
+            "run_sdk_agents",
+            "_prepare_phase_b_pre_review_package",
+            "_collect_and_stage_l4_indicator_artifact",
+            "_stage_files_for_pipeline",
+            "_finalize_phase_b_pre_supervisor_tracker_note",
+            "run_pre_commit_supervisor",
+            "run_bridge_review",
+            "prepare_commit_handoff",
+        )
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(
+                    pb_mod,
+                    "_launch_tracker_restore_source_repo_root",
+                    return_value=fixture.get("source_repo", fixture["repo"]),
+                )
+            )
+            downstream = {
+                name: stack.enter_context(patch.object(pb_mod, name))
+                for name in downstream_names
+            }
+            result = pb_mod.run_phase_b(
+                fixture["repo"],
+                fixture["plan_path"],
+                routing_record_override=fixture["phase_b_route"],
+            )
+
+        assert result["status"] == "error"
+        assert result["step"] == "launch_tracker_restore_authority"
+        assert result["authority_error"] == expected_error
+        for mock in downstream.values():
+            mock.assert_not_called()
+
+    def test_dynamic_exact_base_capture_remove_restore_and_at_most_once(self, tmp_path):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        plan = self._loaded_plan(fixture)
+
+        with patch.object(
+            pb_mod,
+            "_launch_tracker_restore_source_repo_root",
+            return_value=fixture["repo"],
+        ):
+            session, launch_route = pb_mod.prepare_launch_tracker_restore(
+                fixture["repo"],
+                plan=plan,
+                plan_path=fixture["plan_path"],
+                wave_id=fixture["wave_id"],
+                routing_record=fixture["phase_b_route"],
+            )
+
+        assert session is not None
+        assert launch_route == fixture["launch_route"]
+        assert session["authority"]["comparison_commit"] == fixture["base_commit"]
+        assert session["authority"]["source_head"] == fixture["base_commit"]
+        assert session["authority"]["target_head"] == fixture["base_commit"]
+        assert "52874fd2e9234cb95d2a28f75765c2cea73451a5" not in (
+            Path(pb_mod.__file__).read_text(encoding="utf-8")
+        )
+
+        expected_removed = fixture["tasks_bytes"].replace(
+            fixture["tracker_note"].encode("utf-8"),
+            b"",
+            1,
+        )
+        pb_mod.remove_launch_tracker_note(fixture["repo"], session)
+        assert (fixture["repo"] / "TASKS.md").read_bytes() == expected_removed
+        assert session["state"]["status"] == "removed"
+
+        pb_mod.restore_launch_tracker_note(fixture["repo"], session)
+        self._assert_tracker_restored(fixture)
+        with patch.object(pb_mod, "_atomic_write_bytes") as rewrite:
+            pb_mod.restore_launch_tracker_note(fixture["repo"], session)
+        rewrite.assert_not_called()
+        self._assert_tracker_restored(fixture)
+
+    def test_dynamic_exact_base_accepts_absent_optional_target_branch_authority(
+        self,
+        tmp_path,
+    ):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        fixture["launch_route"]["candidate_authority"].pop("target_branch_authority")
+        route_path = fixture["repo"] / ".agent_bus" / "meta" / "post_merge_routing.json"
+        route_path.write_text(
+            json.dumps(fixture["launch_route"], indent=2) + "\n",
+            encoding="utf-8",
+        )
+        plan = self._loaded_plan(fixture)
+        with patch.object(
+            pb_mod,
+            "_launch_tracker_restore_source_repo_root",
+            return_value=fixture["repo"],
+        ):
+            session, _launch_route = pb_mod.prepare_launch_tracker_restore(
+                fixture["repo"],
+                plan=plan,
+                plan_path=fixture["plan_path"],
+                wave_id=fixture["wave_id"],
+                routing_record=fixture["phase_b_route"],
+            )
+        assert session is not None
+        assert session["authority"]["target_branch"] == ""
+        assert session["authority"]["target_head"] == fixture["base_commit"]
+
+    def test_resume_rejects_capture_payload_without_its_original_digest(self, tmp_path):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        plan = self._loaded_plan(fixture)
+        with patch.object(
+            pb_mod,
+            "_launch_tracker_restore_source_repo_root",
+            return_value=fixture["repo"],
+        ):
+            session, _launch_route = pb_mod.prepare_launch_tracker_restore(
+                fixture["repo"],
+                plan=plan,
+                plan_path=fixture["plan_path"],
+                wave_id=fixture["wave_id"],
+                routing_record=fixture["phase_b_route"],
+            )
+            assert session is not None
+            pb_mod.remove_launch_tracker_note(fixture["repo"], session)
+            state_path = (
+                fixture["repo"]
+                / ".agent_bus"
+                / "executors"
+                / pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME
+            )
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["note_b64"] = "QQ=="
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            with patch.object(pb_mod, "_atomic_write_bytes") as rewrite, \
+                 pytest.raises(pb_mod.LaunchTrackerRestoreError) as error:
+                pb_mod.prepare_launch_tracker_restore(
+                    fixture["repo"],
+                    plan=plan,
+                    plan_path=fixture["plan_path"],
+                    wave_id=fixture["wave_id"],
+                    routing_record=fixture["phase_b_route"],
+                )
+        assert error.value.authority_error == "malformed"
+        rewrite.assert_not_called()
+
+    def test_tracker_authority_requires_expected_values_in_bounded_fields(self, tmp_path):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        tasks_path = fixture["repo"] / "TASKS.md"
+        tasks_path.write_text(
+            tasks_path.read_text(encoding="utf-8").replace(
+                "Class: L4_ENABLER. target_gate_id:",
+                "Class: DRIFTED. evidence_delta: Class: L4_ENABLER. target_gate_id:",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        plan = self._loaded_plan(fixture)
+        with patch.object(
+            pb_mod,
+            "_launch_tracker_restore_source_repo_root",
+            return_value=fixture["repo"],
+        ), pytest.raises(pb_mod.LaunchTrackerRestoreError) as error:
+            pb_mod.prepare_launch_tracker_restore(
+                fixture["repo"],
+                plan=plan,
+                plan_path=fixture["plan_path"],
+                wave_id=fixture["wave_id"],
+                routing_record=fixture["phase_b_route"],
+            )
+        assert error.value.authority_error == "drifted"
+
+    def test_missing_authority_fails_before_every_downstream_boundary(self, tmp_path):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        fixture["launch_route"].pop("candidate_authority")
+        route_path = fixture["repo"] / ".agent_bus" / "meta" / "post_merge_routing.json"
+        route_path.write_text(
+            json.dumps(fixture["launch_route"], indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self._assert_run_phase_b_authority_failure(fixture, "missing")
+
+    def test_stale_authority_fails_before_every_downstream_boundary(self, tmp_path):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "advance target head"],
+            cwd=fixture["repo"],
+            check=True,
+            capture_output=True,
+        )
+        self._assert_run_phase_b_authority_failure(fixture, "stale")
+
+    def test_stale_loaded_executor_source_fails_with_target_still_at_exact_base(
+        self,
+        tmp_path,
+    ):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        source_repo = tmp_path / "loaded-executor-source"
+        subprocess.run(
+            ["git", "clone", str(fixture["repo"]), str(source_repo)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=source_repo,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=source_repo,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "stale executor source"],
+            cwd=source_repo,
+            check=True,
+            capture_output=True,
+        )
+        assert _git_stdout(fixture["repo"], "rev-parse", "HEAD") == fixture["base_commit"]
+        assert _git_stdout(source_repo, "rev-parse", "HEAD") != fixture["base_commit"]
+        fixture["source_repo"] = source_repo
+        self._assert_run_phase_b_authority_failure(fixture, "stale")
+
+    def test_malformed_authority_fails_before_every_downstream_boundary(self, tmp_path):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        fixture["spec_path"].write_text("{not-json\n", encoding="utf-8")
+        self._assert_run_phase_b_authority_failure(fixture, "malformed")
+
+    def test_drifted_authority_fails_before_every_downstream_boundary(self, tmp_path):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        fixture["launch_route"]["merge_sha"] = "0" * 40
+        route_path = fixture["repo"] / ".agent_bus" / "meta" / "post_merge_routing.json"
+        route_path.write_text(
+            json.dumps(fixture["launch_route"], indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self._assert_run_phase_b_authority_failure(fixture, "drifted")
+
+    def test_crash_resume_restores_before_candidate_authority_and_sdk(self, tmp_path):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        wave_files = [
+            fixture["implementation_path"],
+            "TASKS.md",
+            fixture["plan_path"],
+        ]
+        mock_impl = _make_mock_impl()
+        implementer_calls = 0
+
+        def invoke_with_removed_tracker(*_args, **_kwargs):
+            nonlocal implementer_calls
+            implementer_calls += 1
+            assert fixture["tracker_note"].encode("utf-8") not in (
+                fixture["repo"] / "TASKS.md"
+            ).read_bytes()
+            with (fixture["repo"] / fixture["implementation_path"]).open(
+                "a",
+                encoding="utf-8",
+            ) as handle:
+                handle.write("# activated implementation\n")
+            return {
+                "status": "success",
+                "output": "done",
+                "stderr": "",
+                "exit_code": 0,
+                "job_id": "impl-restore",
+                "model_override_applied": False,
+            }
+
+        mock_impl.invoke_implementer.side_effect = invoke_with_removed_tracker
+        real_atomic_write = pb_mod._atomic_write_bytes  # ANTICHEAT_OK: crash-window seam
+        atomic_writes = 0
+
+        def crash_before_restore_write(path, content, **kwargs):
+            nonlocal atomic_writes
+            atomic_writes += 1
+            if atomic_writes == 2:
+                raise KeyboardInterrupt("simulated process loss before restore write")
+            return real_atomic_write(path, content, **kwargs)
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(
+                 pb_mod,
+                 "_launch_tracker_restore_source_repo_root",
+                 return_value=fixture["repo"],
+             ), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=wave_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_files), \
+             patch.object(pb_mod, "_atomic_write_bytes", side_effect=crash_before_restore_write):
+            with pytest.raises(KeyboardInterrupt, match="simulated process loss"):
+                pb_mod.run_phase_b(
+                    fixture["repo"],
+                    fixture["plan_path"],
+                    routing_record_override=fixture["phase_b_route"],
+                )
+
+        assert implementer_calls == 1
+        assert fixture["tracker_note"].encode("utf-8") not in (
+            fixture["repo"] / "TASKS.md"
+        ).read_bytes()
+        restore_state = json.loads(
+            (
+                fixture["repo"]
+                / ".agent_bus"
+                / "executors"
+                / pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME
+            ).read_text(encoding="utf-8")
+        )
+        assert restore_state["status"] == "restore_started"
+
+        def observe_restored(*_args, **_kwargs):
+            self._assert_tracker_restored(fixture)
+            return None, None
+
+        def sdk_after_restore(*_args, **_kwargs):
+            self._assert_tracker_restored(fixture)
+            return {"exit_code": -1, "stdout": "", "stderr": "stop after ordering proof"}
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(
+                 pb_mod,
+                 "_launch_tracker_restore_source_repo_root",
+                 return_value=fixture["repo"],
+             ), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=wave_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_files), \
+             patch.object(
+                 pb_mod,
+                 "prepare_candidate_authority_if_configured",
+                 side_effect=observe_restored,
+             ) as candidate_prepare, \
+             patch.object(pb_mod, "run_sdk_agents", side_effect=sdk_after_restore) as sdk:
+            result = pb_mod.run_phase_b(
+                fixture["repo"],
+                fixture["plan_path"],
+                routing_record_override=fixture["phase_b_route"],
+            )
+
+        assert result["step"] == "agent_review"
+        assert implementer_calls == 1
+        candidate_prepare.assert_called_once()
+        sdk.assert_called_once()
+        self._assert_tracker_restored(fixture)
+
+    def test_restore_precedes_all_downstream_review_and_handoff_boundaries(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        wave_files = [
+            fixture["implementation_path"],
+            "TASKS.md",
+            fixture["plan_path"],
+            fixture["indicator_path"],
+        ]
+        mock_impl = _make_mock_impl()
+        observations: list[str] = []
+
+        def observe(name: str) -> None:
+            self._assert_tracker_restored(fixture)
+            observations.append(name)
+
+        def invoke_with_removed_tracker(*_args, **_kwargs):
+            assert fixture["tracker_note"].encode("utf-8") not in (
+                fixture["repo"] / "TASKS.md"
+            ).read_bytes()
+            tasks_path = fixture["repo"] / "TASKS.md"
+            queue_edit = b"<!-- implementer-preserved queue edit -->\n"
+            tasks_path.write_bytes(queue_edit + tasks_path.read_bytes())
+            fixture["expected_tasks_bytes"] = queue_edit + fixture["tasks_bytes"]
+            with (fixture["repo"] / fixture["implementation_path"]).open(
+                "a",
+                encoding="utf-8",
+            ) as handle:
+                handle.write("# activated implementation\n")
+            return {
+                "status": "success",
+                "output": "done",
+                "stderr": "",
+                "exit_code": 0,
+                "job_id": "impl-order",
+                "model_override_applied": False,
+            }
+
+        mock_impl.invoke_implementer.side_effect = invoke_with_removed_tracker
+
+        def candidate_prepare(*_args, **_kwargs):
+            observe("candidate_authority")
+            return None, None
+
+        def sdk_review(*_args, **_kwargs):
+            observe("sdk_review")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def stage_files(*_args, **_kwargs):
+            observe("staged_l4")
+            return True, ""
+
+        def collect_indicator(*_args, **_kwargs):
+            observe("indicator")
+            return fixture["indicator_path"], None
+
+        def bridge_review(*_args, **_kwargs):
+            observe("bridge")
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": "bridge-order",
+            }
+
+        def finalize_tracker(*_args, **kwargs):
+            observe("staged_l4_tracker")
+            return (
+                fixture["tracker_note"].rstrip("\n"),
+                fixture["wave_id"],
+                fixture["wave_id"],
+                False,
+                list(kwargs["changed_files"]),
+                None,
+            )
+
+        def supervisor(*_args, **_kwargs):
+            observe("supervisor")
+            return {
+                "exit_code": 0,
+                "parsed": {
+                    "decision": "COMMIT_GO",
+                    "summary": "",
+                    "status": "success",
+                    "findings": [],
+                },
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/order.json",
+            }
+
+        def handoff(*_args, **_kwargs):
+            observe("commit_handoff")
+            return fixture["repo"] / ".agent_bus" / "handoff.json"
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(
+                 pb_mod,
+                 "_launch_tracker_restore_source_repo_root",
+                 return_value=fixture["repo"],
+             ), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=wave_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_files), \
+             patch.object(pb_mod, "_collect_staged_files", return_value=[]), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _r, files, **_k: files), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", side_effect=stage_files), \
+             patch.object(pb_mod, "_unstage_out_of_exact_scope", return_value=(True, "")), \
+             patch.object(pb_mod, "_guard_candidate_authority_scope_if_configured", return_value=None), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", side_effect=collect_indicator), \
+             patch.object(pb_mod, "_refresh_phase_b_indicator_packet_scope", return_value=(False, None)), \
+             patch.object(pb_mod, "prepare_candidate_authority_if_configured", side_effect=candidate_prepare), \
+             patch.object(pb_mod, "run_sdk_agents", side_effect=sdk_review), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_review), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=True), \
+             patch.object(pb_mod, "_finalize_phase_b_pre_supervisor_tracker_note", side_effect=finalize_tracker), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor), \
+             patch.object(pb_mod, "prepare_commit_handoff", side_effect=handoff):
+            result = pb_mod.run_phase_b(
+                fixture["repo"],
+                fixture["plan_path"],
+                routing_record_override=fixture["phase_b_route"],
+            )
+
+        assert result["status"] == "commit_ready", result
+        for boundary in (
+            "sdk_review",
+            "candidate_authority",
+            "indicator",
+            "staged_l4",
+            "staged_l4_tracker",
+            "bridge",
+            "supervisor",
+            "commit_handoff",
+        ):
+            assert boundary in observations
+        self._assert_tracker_restored(fixture)
+
+    def test_restored_terminal_receipt_prevents_second_consumption(self, tmp_path):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path)
+        plan = self._loaded_plan(fixture)
+        with patch.object(
+            pb_mod,
+            "_launch_tracker_restore_source_repo_root",
+            return_value=fixture["repo"],
+        ):
+            session, _launch_route = pb_mod.prepare_launch_tracker_restore(
+                fixture["repo"],
+                plan=plan,
+                plan_path=fixture["plan_path"],
+                wave_id=fixture["wave_id"],
+                routing_record=fixture["phase_b_route"],
+            )
+            assert session is not None
+            pb_mod.remove_launch_tracker_note(fixture["repo"], session)
+            pb_mod.restore_launch_tracker_note(fixture["repo"], session)
+            with patch.object(pb_mod, "_atomic_write_bytes") as rewrite, \
+                 patch.object(pb_mod, "run_sdk_agents") as sdk:
+                result = pb_mod.run_phase_b(
+                    fixture["repo"],
+                    fixture["plan_path"],
+                    routing_record_override=fixture["phase_b_route"],
+                )
+        assert result["step"] == "launch_tracker_restore_consumed"
+        assert result["authority_error"] == "consumed"
+        rewrite.assert_not_called()
+        sdk.assert_not_called()
+        self._assert_tracker_restored(fixture)
+
+    def test_markerless_packet_keeps_legacy_path_and_never_reads_restore_authority(
+        self,
+        tmp_path,
+    ):
+        fixture = _write_launch_tracker_restore_fixture(tmp_path, marker=False)
+        original_tasks = (fixture["repo"] / "TASKS.md").read_bytes()
+        mock_impl = _make_mock_impl()
+        mock_impl.invoke_implementer.return_value = {
+            "status": "error",
+            "output": "",
+            "stderr": "legacy stop",
+            "exit_code": 2,
+            "job_id": "legacy",
+            "model_override_applied": False,
+        }
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(
+                 pb_mod,
+                 "load_routing_record",
+                 side_effect=AssertionError("markerless path read launch authority"),
+             ), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=[]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=[]):
+            result = pb_mod.run_phase_b(
+                fixture["repo"],
+                fixture["plan_path"],
+                routing_record_override=fixture["phase_b_route"],
+            )
+
+        assert result["step"] == "implementer"
+        assert result["implementer_status"] == "error"
+        assert (fixture["repo"] / "TASKS.md").read_bytes() == original_tasks
+        assert not (
+            fixture["repo"]
+            / ".agent_bus"
+            / "executors"
+            / pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME
+        ).exists()

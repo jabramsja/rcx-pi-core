@@ -28,6 +28,7 @@ See: reports/control_plane/executor_surfaces_plan_2026-03-22.md Section B.3
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import importlib.util
 import json
@@ -130,6 +131,14 @@ except ImportError:
 
 class PhaseBExecutorError(RuntimeError):
     """Raised when Phase B executor cannot proceed."""
+
+
+class LaunchTrackerRestoreError(PhaseBExecutorError):
+    """Raised when launch-bound tracker restoration cannot proceed safely."""
+
+    def __init__(self, authority_error: str, message: str):
+        super().__init__(message)
+        self.authority_error = authority_error
 
 
 ALLOWED_FINDING_DISPOSITIONS = {"blocking", "non_blocking"}
@@ -2018,6 +2027,19 @@ def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 100
 
 STATE_FILE_NAME = "phase_b_state.json"
 BRANCH_STASH_STATE_FILE_NAME = "phase_b_branch_stash.json"
+LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME = "phase_b_launch_tracker_restore_v1.json"
+LAUNCH_TRACKER_RESTORE_STATE_VERSION = 1
+LAUNCH_TRACKER_RESTORE_MARKER = (
+    "Phase-B-Launch-Tracker-Restore: "
+    "required=true; producer=launch_wave.py; version=1"
+)
+LAUNCH_TRACKER_RESTORE_STATUSES = {
+    "captured",
+    "removed",
+    "restore_started",
+    "restored",
+}
+LAUNCH_TRACKER_RESTORE_ANCHOR_BYTES = 256
 STATE_LOAD_ERROR_KEY = "__phase_b_state_load_error__"
 PRIVATE_ATTR_QUESTION_STEPS = {
     "private_attr_remediation_question_for_founder",
@@ -2041,6 +2063,64 @@ def _state_file_path(repo_root: Path) -> Path:
 
 def _branch_stash_state_file_path(repo_root: Path) -> Path:
     return agent_bus_path(repo_root, _active_bus_dir(), "executors", BRANCH_STASH_STATE_FILE_NAME)
+
+
+def _launch_tracker_restore_state_file_path(repo_root: Path) -> Path:
+    return agent_bus_path(
+        repo_root,
+        _active_bus_dir(),
+        "executors",
+        LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME,
+    )
+
+
+def _atomic_write_bytes(path: Path, content: bytes, *, default_mode: int = 0o644) -> None:
+    """Atomically replace *path* without changing its byte representation."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = default_mode
+    if path.exists():
+        try:
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        except OSError:
+            mode = default_mode
+
+    tmp_path: Path | None = None
+    fd: int | None = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        tmp_path = Path(tmp_name)
+        with os.fdopen(fd, "wb") as handle:
+            fd = None
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, path)
+        tmp_path = None
+        try:
+            dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except BaseException:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise
 
 
 def _atomic_write_text(path: Path, content: str, *, default_mode: int = 0o644) -> None:
@@ -6550,6 +6630,1029 @@ def _guard_candidate_authority_scope_if_configured(
     return None
 
 
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _canonical_json_sha256(value: Any) -> str:
+    return _sha256_bytes(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+
+
+def _launch_tracker_restore_marker_required(plan_content: str) -> bool:
+    """Recognize only the launcher's exact native work-item opt-in.
+
+    Merely discussing tracker restoration must never activate this path.  The
+    marker is therefore an exact numbered item in the canonical Work items H2,
+    which also lets the native packet contract bind it to launch-time truth.
+    """
+    in_work_items = False
+    exact_markers = 0
+    reserved_items = 0
+    for line in str(plan_content or "").splitlines():
+        stripped = line.strip()
+        if re.match(r"^##(?!#)(?:\s+|$)", stripped):
+            in_work_items = stripped == "## Work items"
+            continue
+        if not in_work_items:
+            continue
+        match = re.match(r"^\d+\.\s+(.+)$", line)
+        if match is None:
+            continue
+        item = match.group(1)
+        if item.startswith("Phase-B-Launch-Tracker-Restore:"):
+            reserved_items += 1
+            if item == LAUNCH_TRACKER_RESTORE_MARKER:
+                exact_markers += 1
+    if reserved_items == 0:
+        return False
+    if reserved_items != 1 or exact_markers != 1:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "launch-tracker restore opt-in must be exactly one canonical "
+            f"Work item: {LAUNCH_TRACKER_RESTORE_MARKER!r}",
+        )
+    return True
+
+
+def _load_phase_a_executor_for_launch_tracker_restore() -> Any:
+    try:
+        import phase_a_executor as phase_a_mod  # type: ignore[import-not-found]
+    except ImportError:
+        module_path = SCRIPT_DIR / "phase_a_executor.py"
+        spec = importlib.util.spec_from_file_location(
+            "phase_a_executor_launch_tracker_restore",
+            str(module_path),
+        )
+        if spec is None or spec.loader is None:
+            raise LaunchTrackerRestoreError(
+                "missing",
+                f"cannot load native packet validator from {module_path}",
+            )
+        phase_a_mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = phase_a_mod
+        spec.loader.exec_module(phase_a_mod)
+    return phase_a_mod
+
+
+def _launch_tracker_restore_source_repo_root() -> Path:
+    """Return the repository supplying this loaded Phase B implementation."""
+    return SCRIPT_DIR.parents[2]
+
+
+def _git_resolve_commit(repo_root: Path, revision: str) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", f"{revision}^{{commit}}"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise LaunchTrackerRestoreError(
+            "missing",
+            f"cannot resolve {revision!r} in {repo_root}: {detail}",
+        )
+    resolved = result.stdout.strip()
+    if not re.fullmatch(r"[0-9a-f]{40,64}", resolved):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"git resolved {revision!r} to a noncanonical object id: {resolved!r}",
+        )
+    return resolved
+
+
+def _resolve_launch_tracker_restore_authority(
+    repo_root: Path,
+    *,
+    plan: dict[str, Any],
+    plan_path: str,
+    wave_id: str,
+    routing_record: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], Any, dict[str, Any]]:
+    """Resolve one exact launch base from existing launch-owned authorities."""
+    try:
+        launch_route = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+    except (ExecutorCommonError, OSError, ValueError, TypeError) as exc:
+        raise LaunchTrackerRestoreError(
+            "missing",
+            f"launch-bound routing authority is unavailable: {exc}",
+        ) from exc
+    if not isinstance(launch_route, dict):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "launch-bound routing authority must be a JSON object",
+        )
+
+    phase_a_mod = _load_phase_a_executor_for_launch_tracker_restore()
+    try:
+        phase_a_mod.validate_native_stub_packet_contract(
+            launch_route,
+            plan_path,
+            str(plan.get("content") or ""),
+            allow_post_lock_machine_sections=True,
+        )
+        native_contract = phase_a_mod.native_stub_packet_contract_from_routing(
+            launch_route
+        )
+    except Exception as exc:
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            f"launch-bound native packet authority did not validate: {exc}",
+        ) from exc
+    if not isinstance(native_contract, dict):
+        raise LaunchTrackerRestoreError(
+            "missing",
+            "launch-bound native packet contract is required",
+        )
+    work_items = native_contract.get("work_items")
+    if (
+        not isinstance(work_items, list)
+        or work_items.count(LAUNCH_TRACKER_RESTORE_MARKER) != 1
+    ):
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "launch-bound native packet contract does not contain exactly one "
+            "tracker-restore opt-in",
+        )
+
+    contract_identity = native_contract.get("identity")
+    if not isinstance(contract_identity, dict):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "launch-bound native packet identity must be an object",
+        )
+    plan_task_id = str(plan.get("task_id") or "").strip()
+    if (
+        contract_identity.get("wave_id") != wave_id
+        or contract_identity.get("tracked_packet") != plan_path
+        or contract_identity.get("task_id") != plan_task_id
+    ):
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "launch-bound packet identity does not match the current Phase B invocation",
+        )
+    for key, expected in (("wave_name", wave_id), ("task_id", plan_task_id)):
+        observed = routing_record.get(key)
+        if observed not in (None, "") and observed != expected:
+            raise LaunchTrackerRestoreError(
+                "drifted",
+                f"Phase B routing {key} does not match launch-bound authority",
+            )
+
+    if launch_route.get("candidate_authority_required") is not True:
+        raise LaunchTrackerRestoreError(
+            "missing",
+            "launch-bound candidate authority is not required",
+        )
+    metadata = launch_route.get("candidate_authority")
+    if not isinstance(metadata, dict):
+        raise LaunchTrackerRestoreError(
+            "missing",
+            "launch-bound candidate authority metadata is missing",
+        )
+    if metadata.get("required") is not True:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "launch-bound candidate authority metadata must declare required=true",
+        )
+    raw_spec_path = metadata.get("spec_path")
+    trusted_identity = metadata.get("spec_identity")
+    if not isinstance(raw_spec_path, str) or not raw_spec_path.strip():
+        raise LaunchTrackerRestoreError(
+            "missing",
+            "launch-bound candidate authority spec_path is missing",
+        )
+    if not isinstance(trusted_identity, dict):
+        raise LaunchTrackerRestoreError(
+            "missing",
+            "launch-bound candidate authority spec_identity is missing",
+        )
+    spec_path = Path(raw_spec_path)
+    if not spec_path.is_absolute():
+        spec_path = repo_root / spec_path
+    expected_spec_path = _candidate_authority_spec_path(
+        repo_root,
+        wave_id=wave_id,
+    )
+    if spec_path.resolve(strict=False) != expected_spec_path.resolve(strict=False):
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "launch-bound candidate authority spec_path is outside the active wave bus",
+        )
+    if not expected_spec_path.exists():
+        raise LaunchTrackerRestoreError(
+            "missing",
+            f"launch-bound candidate authority spec is missing: {expected_spec_path}",
+        )
+    try:
+        authority_spec = _candidate_authority.load_authority_spec(expected_spec_path)
+        verified_identity = _candidate_authority.verify_authority_spec_identity(
+            repo_root,
+            authority_spec,
+            trusted_identity,
+        )
+        comparison_commit = _candidate_authority.validate_comparison_commit(
+            repo_root,
+            authority_spec.comparison_commit,
+        )
+    except _candidate_authority.CandidateAuthorityError as exc:
+        message = str(exc)
+        error_kind = "malformed" if (
+            "not JSON" in message
+            or "must be" in message
+            or "cannot read" in message
+        ) else "drifted"
+        raise LaunchTrackerRestoreError(
+            error_kind,
+            f"launch-bound candidate authority did not validate: {exc}",
+        ) from exc
+    expected_indicator = _phase_b_same_wave_indicator_path(wave_id)
+    required_allowlist = {"TASKS.md", plan_path, expected_indicator}
+    if (
+        authority_spec.wave_id != wave_id
+        or authority_spec.plan_path != plan_path
+        or authority_spec.require_l4_staged is not True
+        or not required_allowlist.issubset(set(authority_spec.candidate_allowlist))
+        or authority_spec.indicator_artifact_ref != expected_indicator
+    ):
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "candidate authority is not bound to the current packet, tracker, and "
+            "same-wave staged L4 artifact",
+        )
+
+    route_head = launch_route.get("head_sha")
+    route_merge = launch_route.get("merge_sha")
+    identity_comparison = trusted_identity.get("comparison_commit")
+    if not all(
+        isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40,64}", value)
+        for value in (route_head, route_merge, identity_comparison)
+    ):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "launch route and candidate identity must carry canonical exact-base commits",
+        )
+    if not (
+        route_head == route_merge == identity_comparison == comparison_commit
+    ):
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "launch route, merge, and candidate comparison authorities disagree",
+        )
+
+    source_root = _launch_tracker_restore_source_repo_root().resolve()
+    target_root = repo_root.resolve()
+    source_head = _git_resolve_commit(source_root, "HEAD")
+    target_head = _git_resolve_commit(target_root, "HEAD")
+    if source_head != comparison_commit or target_head != comparison_commit:
+        raise LaunchTrackerRestoreError(
+            "stale",
+            "loaded executor source HEAD, target HEAD, and launch comparison base "
+            "must be exactly equal",
+        )
+
+    branch_prefix, target_branch, branch_error = (
+        _launch_target_branch_authority_from_routing_record(
+            launch_route,
+            wave_id=wave_id,
+        )
+    )
+    if branch_error is not None:
+        raise LaunchTrackerRestoreError("malformed", branch_error)
+    if target_branch:
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(target_root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if branch_result.returncode != 0 or branch_result.stdout.strip() != target_branch:
+            raise LaunchTrackerRestoreError(
+                "stale",
+                "current target branch no longer matches launch-bound branch authority",
+            )
+
+    envelope = launch_route.get("native_stub_packet_contract")
+    native_digest = envelope.get("digest") if isinstance(envelope, dict) else None
+    spec_hash = verified_identity.get("spec_hash")
+    if not all(
+        isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+        for value in (native_digest, spec_hash)
+    ):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "launch-bound packet and candidate identities require canonical digests",
+        )
+    authority = {
+        "wave_id": wave_id,
+        "task_id": plan_task_id,
+        "plan_path": plan_path,
+        "source_head": source_head,
+        "target_head": target_head,
+        "route_head": route_head,
+        "route_merge": route_merge,
+        "comparison_commit": comparison_commit,
+        "native_contract_digest": native_digest,
+        "candidate_spec_hash": spec_hash,
+        "candidate_spec_path": str(expected_spec_path.resolve(strict=False)),
+        "branch_prefix": branch_prefix,
+        "target_branch": target_branch,
+    }
+    authority["authority_sha256"] = _canonical_json_sha256(authority)
+    return authority, launch_route, authority_spec, native_contract
+
+
+def _launch_tracker_note_lines(raw_tasks: bytes) -> list[str]:
+    try:
+        return [line.decode("utf-8") for line in raw_tasks.splitlines(keepends=True)]
+    except UnicodeDecodeError as exc:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"TASKS.md is not strict UTF-8: {exc}",
+        ) from exc
+
+
+def _same_wave_tracker_note_indices(raw_tasks: bytes, wave_id: str) -> list[int]:
+    lines = _launch_tracker_note_lines(raw_tasks)
+    commit_mod = _load_commit_executor_for_tracker_sync()
+    ra_idx, ra_end_idx = commit_mod._find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        raise LaunchTrackerRestoreError(
+            "missing",
+            "TASKS.md does not contain the active ## Ra tracker section",
+        )
+    return commit_mod._matching_tracker_note_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+
+
+def _validate_launch_tracker_note_authority(
+    note_text: str,
+    *,
+    authority: dict[str, Any],
+    authority_spec: Any,
+    native_contract: dict[str, Any],
+    launch_route: dict[str, Any],
+) -> None:
+    """Require launch values to occupy their canonical tracker fields."""
+    identity = native_contract["identity"]
+    wave_id = str(authority["wave_id"])
+    title = str(identity["title"]).rstrip(".")
+    expected_header = (
+        f"- Tracker sync note ({identity['date']}, {wave_id}): "
+        f"**{title}.**. "
+    )
+    if not note_text.startswith(expected_header) or not note_text.endswith("."):
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "same-wave tracker note header/date/wave/title is not launch-bound",
+        )
+    body = note_text[len(expected_header) :]
+    founder_override = str(launch_route.get("founder_override") or "").strip()
+    if not founder_override:
+        raise LaunchTrackerRestoreError(
+            "missing",
+            "launch route is missing founder_override tracker authority",
+        )
+
+    expected_fields = (
+        ("Class", f"Class: {authority_spec.wave_class}"),
+        ("Packet", f"Packet: `{authority['plan_path']}`"),
+        (
+            "evidence_command",
+            f"evidence_command: `{native_contract['evidence_command']}`",
+        ),
+        (
+            "FOUNDER_OVERRIDE",
+            f"FOUNDER_OVERRIDE:{founder_override}",
+        ),
+        (
+            "indicator_artifact_ref",
+            f"indicator_artifact_ref: {authority_spec.indicator_artifact_ref}",
+        ),
+        (
+            "indicator_collection_command",
+            "indicator_collection_command: "
+            f"{authority_spec.indicator_collection_command}",
+        ),
+    )
+    field_positions: dict[str, int] = {}
+    for label, rendered in expected_fields:
+        label_prefix = (
+            "FOUNDER_OVERRIDE:"
+            if label == "FOUNDER_OVERRIDE"
+            else f"{label}:"
+        )
+        label_matches = list(
+            re.finditer(
+                rf"(?:^|\. ){re.escape(label_prefix)}",
+                body,
+            )
+        )
+        expected_matches = list(
+            re.finditer(
+                rf"(?:^|\. ){re.escape(rendered)}"
+                r"(?=\. (?:[A-Za-z_][A-Za-z0-9_]*:|FOUNDER_OVERRIDE:)|\.$)",
+                body,
+            )
+        )
+        if len(label_matches) != 1 or len(expected_matches) != 1:
+            raise LaunchTrackerRestoreError(
+                "drifted",
+                f"same-wave tracker field {label} is missing, duplicated, or drifted",
+            )
+        field_positions[label] = expected_matches[0].start()
+
+    target_gate_matches = list(
+        re.finditer(
+            r"(?:^|\. )target_gate_id: ([A-Za-z0-9_-]+)(?=\. )",
+            body,
+        )
+    )
+    if len(target_gate_matches) != 1:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "same-wave tracker note must contain exactly one canonical target_gate_id field",
+        )
+    ordered_positions = [
+        field_positions["Class"],
+        target_gate_matches[0].start(),
+        field_positions["Packet"],
+        field_positions["evidence_command"],
+        field_positions["FOUNDER_OVERRIDE"],
+        field_positions["indicator_artifact_ref"],
+        field_positions["indicator_collection_command"],
+    ]
+    if ordered_positions != sorted(ordered_positions):
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "same-wave tracker authority fields are outside canonical launcher order",
+        )
+
+
+def _capture_launch_tracker_note(
+    repo_root: Path,
+    *,
+    authority: dict[str, Any],
+    authority_spec: Any,
+    native_contract: dict[str, Any],
+    launch_route: dict[str, Any],
+) -> dict[str, Any]:
+    tasks_path = repo_root / "TASKS.md"
+    try:
+        raw_tasks = tasks_path.read_bytes()
+    except OSError as exc:
+        raise LaunchTrackerRestoreError(
+            "missing",
+            f"launcher tracker authority is unavailable: {tasks_path}: {exc}",
+        ) from exc
+    lines = _launch_tracker_note_lines(raw_tasks)
+    wave_id = str(authority["wave_id"])
+    commit_mod = _load_commit_executor_for_tracker_sync()
+    ra_idx, ra_end_idx = commit_mod._find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        raise LaunchTrackerRestoreError(
+            "missing",
+            "TASKS.md does not contain the active ## Ra tracker section",
+        )
+    matching = commit_mod._matching_tracker_note_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    canonical = [
+        index
+        for index in matching
+        if commit_mod._is_canonical_tracker_note_line(
+            lines[index].rstrip("\r\n"),
+            wave_id,
+        )
+    ]
+    if len(matching) != 1 or len(canonical) != 1:
+        error_kind = "missing" if not matching else "malformed"
+        raise LaunchTrackerRestoreError(
+            error_kind,
+            "launcher truth must contain exactly one canonical same-wave tracker note",
+    )
+    note_index = canonical[0]
+    note_text = lines[note_index].rstrip("\r\n")
+    _validate_launch_tracker_note_authority(
+        note_text,
+        authority=authority,
+        authority_spec=authority_spec,
+        native_contract=native_contract,
+        launch_route=launch_route,
+    )
+
+    raw_lines = raw_tasks.splitlines(keepends=True)
+    note_bytes = raw_lines[note_index]
+    offset = sum(len(line) for line in raw_lines[:note_index])
+    end = offset + len(note_bytes)
+    removed_tasks = raw_tasks[:offset] + raw_tasks[end:]
+    anchor_size = LAUNCH_TRACKER_RESTORE_ANCHOR_BYTES
+    left_anchor = raw_tasks[max(0, offset - anchor_size) : offset]
+    right_anchor = raw_tasks[end : end + anchor_size]
+    state: dict[str, Any] = {
+        "version": LAUNCH_TRACKER_RESTORE_STATE_VERSION,
+        "status": "captured",
+        "wave_id": wave_id,
+        "task_id": authority["task_id"],
+        "plan_path": authority["plan_path"],
+        "base_commit": authority["comparison_commit"],
+        "tasks_path": "TASKS.md",
+        "note_b64": base64.b64encode(note_bytes).decode("ascii"),
+        "note_sha256": _sha256_bytes(note_bytes),
+        "note_offset": offset,
+        "left_anchor_b64": base64.b64encode(left_anchor).decode("ascii"),
+        "right_anchor_b64": base64.b64encode(right_anchor).decode("ascii"),
+        "original_tasks_sha256": _sha256_bytes(raw_tasks),
+        "removed_tasks_sha256": _sha256_bytes(removed_tasks),
+        "authority": authority,
+        "authority_sha256": authority["authority_sha256"],
+    }
+    state["capture_sha256"] = _launch_tracker_restore_capture_sha256(state)
+    _write_launch_tracker_restore_state(repo_root, state)
+    return state
+
+
+_LAUNCH_TRACKER_RESTORE_STATE_KEYS = {
+    "version",
+    "status",
+    "wave_id",
+    "task_id",
+    "plan_path",
+    "base_commit",
+    "tasks_path",
+    "note_b64",
+    "note_sha256",
+    "note_offset",
+    "left_anchor_b64",
+    "right_anchor_b64",
+    "original_tasks_sha256",
+    "removed_tasks_sha256",
+    "authority",
+    "authority_sha256",
+    "capture_sha256",
+}
+
+_LAUNCH_TRACKER_RESTORE_CAPTURE_KEYS = (
+    "version",
+    "wave_id",
+    "task_id",
+    "plan_path",
+    "base_commit",
+    "tasks_path",
+    "note_b64",
+    "note_sha256",
+    "note_offset",
+    "left_anchor_b64",
+    "right_anchor_b64",
+    "original_tasks_sha256",
+    "removed_tasks_sha256",
+    "authority_sha256",
+)
+
+
+def _launch_tracker_restore_capture_sha256(state: dict[str, Any]) -> str:
+    return _canonical_json_sha256(
+        {key: state.get(key) for key in _LAUNCH_TRACKER_RESTORE_CAPTURE_KEYS}
+    )
+
+
+def _write_launch_tracker_restore_state(
+    repo_root: Path,
+    state: dict[str, Any],
+) -> Path:
+    state_path = _launch_tracker_restore_state_file_path(repo_root)
+    try:
+        _atomic_write_text(
+            state_path,
+            json.dumps(state, indent=2, sort_keys=True) + "\n",
+        )
+    except OSError as exc:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"cannot persist tracker-restore checkpoint {state_path}: {exc}",
+        ) from exc
+    return state_path
+
+
+def _decode_launch_tracker_restore_state_bytes(
+    state: dict[str, Any],
+    field: str,
+) -> bytes:
+    value = state.get(field)
+    if not isinstance(value, str):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"tracker-restore checkpoint field {field} must be base64 text",
+        )
+    try:
+        return base64.b64decode(value.encode("ascii"), validate=True)
+    except (UnicodeEncodeError, ValueError) as exc:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"tracker-restore checkpoint field {field} is not canonical base64",
+        ) from exc
+
+
+def _load_launch_tracker_restore_state(
+    repo_root: Path,
+    *,
+    authority: dict[str, Any],
+    authority_spec: Any,
+    native_contract: dict[str, Any],
+    launch_route: dict[str, Any],
+) -> dict[str, Any] | None:
+    state_path = _launch_tracker_restore_state_file_path(repo_root)
+    try:
+        raw = state_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"tracker-restore checkpoint is unreadable: {state_path}: {exc}",
+        ) from exc
+    try:
+        state = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"tracker-restore checkpoint is not JSON: {state_path}: {exc}",
+        ) from exc
+    if not isinstance(state, dict) or set(state) != _LAUNCH_TRACKER_RESTORE_STATE_KEYS:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "tracker-restore checkpoint does not match the version-1 schema",
+        )
+    if (
+        state.get("version") != LAUNCH_TRACKER_RESTORE_STATE_VERSION
+        or state.get("status") not in LAUNCH_TRACKER_RESTORE_STATUSES
+        or state.get("tasks_path") != "TASKS.md"
+        or not isinstance(state.get("note_offset"), int)
+        or isinstance(state.get("note_offset"), bool)
+        or state.get("note_offset", -1) < 0
+    ):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "tracker-restore checkpoint carries an invalid version, status, path, or offset",
+        )
+    for field in (
+        "note_sha256",
+        "original_tasks_sha256",
+        "removed_tasks_sha256",
+        "authority_sha256",
+        "capture_sha256",
+    ):
+        if not isinstance(state.get(field), str) or not re.fullmatch(
+            r"[0-9a-f]{64}",
+            state[field],
+        ):
+            raise LaunchTrackerRestoreError(
+                "malformed",
+                f"tracker-restore checkpoint field {field} is not a SHA-256 digest",
+            )
+    note = _decode_launch_tracker_restore_state_bytes(state, "note_b64")
+    left = _decode_launch_tracker_restore_state_bytes(state, "left_anchor_b64")
+    right = _decode_launch_tracker_restore_state_bytes(state, "right_anchor_b64")
+    if (
+        not note
+        or _sha256_bytes(note) != state["note_sha256"]
+        or len(left) > LAUNCH_TRACKER_RESTORE_ANCHOR_BYTES
+        or len(right) > LAUNCH_TRACKER_RESTORE_ANCHOR_BYTES
+        or _launch_tracker_restore_capture_sha256(state) != state["capture_sha256"]
+    ):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "tracker-restore checkpoint byte payload does not match its digest/anchor bounds",
+        )
+    try:
+        decoded_note = note.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"tracker-restore checkpoint note is not strict UTF-8: {exc}",
+        ) from exc
+    note_text = decoded_note.rstrip("\r\n")
+    if "\n" in note_text or "\r" in note_text:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "tracker-restore checkpoint note must be exactly one physical line",
+        )
+    _validate_launch_tracker_note_authority(
+        note_text,
+        authority=authority,
+        authority_spec=authority_spec,
+        native_contract=native_contract,
+        launch_route=launch_route,
+    )
+    state_authority = state.get("authority")
+    if not isinstance(state_authority, dict):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "tracker-restore checkpoint authority must be an object",
+        )
+    authority_without_hash = {
+        key: value
+        for key, value in state_authority.items()
+        if key != "authority_sha256"
+    }
+    if (
+        state_authority.get("authority_sha256") != state["authority_sha256"]
+        or _canonical_json_sha256(authority_without_hash) != state["authority_sha256"]
+    ):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "tracker-restore checkpoint authority digest is invalid",
+        )
+    identity_fields = {
+        "wave_id": authority["wave_id"],
+        "task_id": authority["task_id"],
+        "plan_path": authority["plan_path"],
+        "base_commit": authority["comparison_commit"],
+    }
+    if any(state.get(key) != value for key, value in identity_fields.items()):
+        raise LaunchTrackerRestoreError(
+            "stale",
+            "tracker-restore checkpoint belongs to a different launch identity",
+        )
+    if state_authority != authority or state["authority_sha256"] != authority["authority_sha256"]:
+        raise LaunchTrackerRestoreError(
+            "stale",
+            "tracker-restore checkpoint authority no longer matches the current launch",
+        )
+    return state
+
+
+def _launch_tracker_restore_state_payload(
+    state: dict[str, Any],
+) -> tuple[bytes, bytes, bytes]:
+    return (
+        _decode_launch_tracker_restore_state_bytes(state, "note_b64"),
+        _decode_launch_tracker_restore_state_bytes(state, "left_anchor_b64"),
+        _decode_launch_tracker_restore_state_bytes(state, "right_anchor_b64"),
+    )
+
+
+def _unique_bytes_position(haystack: bytes, needle: bytes) -> int | None:
+    if not needle:
+        return None
+    first = haystack.find(needle)
+    if first < 0 or haystack.find(needle, first + 1) >= 0:
+        return None
+    return first
+
+
+def _removed_tracker_boundary(
+    raw_tasks: bytes,
+    state: dict[str, Any],
+) -> int | None:
+    _note, left, right = _launch_tracker_restore_state_payload(state)
+    boundary = left + right
+    position = _unique_bytes_position(raw_tasks, boundary)
+    if position is None:
+        return None
+    return position + len(left)
+
+
+def _launch_tracker_restore_update_status(
+    repo_root: Path,
+    state: dict[str, Any],
+    status: str,
+) -> dict[str, Any]:
+    updated = dict(state)
+    updated["status"] = status
+    _write_launch_tracker_restore_state(repo_root, updated)
+    return updated
+
+
+def prepare_launch_tracker_restore(
+    repo_root: Path,
+    *,
+    plan: dict[str, Any],
+    plan_path: str,
+    wave_id: str,
+    routing_record: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Prepare marker-gated authority without perturbing markerless execution."""
+    if not _launch_tracker_restore_marker_required(str(plan.get("content") or "")):
+        return None, None
+    authority, launch_route, authority_spec, native_contract = (
+        _resolve_launch_tracker_restore_authority(
+            repo_root,
+            plan=plan,
+            plan_path=plan_path,
+            wave_id=wave_id,
+            routing_record=routing_record,
+        )
+    )
+    state = _load_launch_tracker_restore_state(
+        repo_root,
+        authority=authority,
+        authority_spec=authority_spec,
+        native_contract=native_contract,
+        launch_route=launch_route,
+    )
+    if state is None:
+        state = _capture_launch_tracker_note(
+            repo_root,
+            authority=authority,
+            authority_spec=authority_spec,
+            native_contract=native_contract,
+            launch_route=launch_route,
+        )
+    return {
+        "state": state,
+        "authority": authority,
+        "state_path": str(_launch_tracker_restore_state_file_path(repo_root)),
+    }, launch_route
+
+
+def remove_launch_tracker_note(
+    repo_root: Path,
+    session: dict[str, Any],
+) -> dict[str, Any]:
+    """Remove exactly the captured physical tracker note and prove the splice."""
+    state = dict(session["state"])
+    if state["status"] in {"removed", "restore_started", "restored"}:
+        if state["status"] == "removed":
+            raw_tasks = (repo_root / "TASKS.md").read_bytes()
+            if _same_wave_tracker_note_indices(raw_tasks, state["wave_id"]):
+                raise LaunchTrackerRestoreError(
+                    "drifted",
+                    "same-wave tracker note reappeared while removal was checkpointed",
+                )
+            if _removed_tracker_boundary(raw_tasks, state) is None:
+                raise LaunchTrackerRestoreError(
+                    "drifted",
+                    "removed tracker boundary no longer matches TASKS.md",
+                )
+        session["state"] = state
+        return session
+    if state["status"] != "captured":
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"cannot remove tracker note from state {state['status']!r}",
+        )
+    tasks_path = repo_root / "TASKS.md"
+    raw_tasks = tasks_path.read_bytes()
+    note, _left, _right = _launch_tracker_restore_state_payload(state)
+    offset = state["note_offset"]
+    original_matches = (
+        _sha256_bytes(raw_tasks) == state["original_tasks_sha256"]
+        and raw_tasks[offset : offset + len(note)] == note
+    )
+    if not original_matches:
+        if (
+            _sha256_bytes(raw_tasks) == state["removed_tasks_sha256"]
+            and not _same_wave_tracker_note_indices(raw_tasks, state["wave_id"])
+            and _removed_tracker_boundary(raw_tasks, state) is not None
+        ):
+            state = _launch_tracker_restore_update_status(repo_root, state, "removed")
+            session["state"] = state
+            return session
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "TASKS.md changed after launch tracker capture and before exact removal",
+        )
+    expected_removed = raw_tasks[:offset] + raw_tasks[offset + len(note) :]
+    if _sha256_bytes(expected_removed) != state["removed_tasks_sha256"]:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "captured tracker removal digest does not match the exact byte splice",
+        )
+    _atomic_write_bytes(tasks_path, expected_removed)
+    observed = tasks_path.read_bytes()
+    if (
+        observed != expected_removed
+        or _sha256_bytes(observed) != state["removed_tasks_sha256"]
+        or note in observed
+        or _same_wave_tracker_note_indices(observed, state["wave_id"])
+    ):
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "exact whole-note removal proof failed after atomic TASKS.md replacement",
+        )
+    state = _launch_tracker_restore_update_status(repo_root, state, "removed")
+    session["state"] = state
+    return session
+
+
+def restore_launch_tracker_note(
+    repo_root: Path,
+    session: dict[str, Any],
+) -> dict[str, Any]:
+    """Restore captured launcher truth byte-exactly and at most once."""
+    state = dict(session["state"])
+    checkpoint_status = state["status"]
+    if checkpoint_status not in {"removed", "restore_started", "restored"}:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"cannot restore tracker note from state {checkpoint_status!r}",
+        )
+    if checkpoint_status == "removed":
+        state = _launch_tracker_restore_update_status(
+            repo_root,
+            state,
+            "restore_started",
+        )
+        session["state"] = state
+
+    tasks_path = repo_root / "TASKS.md"
+    raw_tasks = tasks_path.read_bytes()
+    note, left, right = _launch_tracker_restore_state_payload(state)
+    wave_id = state["wave_id"]
+    matching = _same_wave_tracker_note_indices(raw_tasks, wave_id)
+
+    original_offset = state["note_offset"]
+    already_original = (
+        _sha256_bytes(raw_tasks) == state["original_tasks_sha256"]
+        and raw_tasks[original_offset : original_offset + len(note)] == note
+    )
+    anchored_note = left + note + right
+    anchored_note_position = _unique_bytes_position(raw_tasks, anchored_note)
+    if already_original or (
+        len(matching) == 1
+        and anchored_note_position is not None
+        and raw_tasks[
+            anchored_note_position + len(left) :
+            anchored_note_position + len(left) + len(note)
+        ] == note
+    ):
+        if checkpoint_status != "restored":
+            state = _launch_tracker_restore_update_status(repo_root, state, "restored")
+            session["state"] = state
+        return session
+    if checkpoint_status == "restored":
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "checkpointed restored launcher tracker truth no longer matches TASKS.md",
+        )
+    if matching:
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "TASKS.md contains duplicate or changed same-wave tracker truth during restore",
+        )
+    insertion_offset = _removed_tracker_boundary(raw_tasks, state)
+    if insertion_offset is None:
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "captured tracker boundary is missing or ambiguous during restore",
+        )
+    restored_tasks = raw_tasks[:insertion_offset] + note + raw_tasks[insertion_offset:]
+    _atomic_write_bytes(tasks_path, restored_tasks)
+    observed = tasks_path.read_bytes()
+    if observed != restored_tasks:
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "byte-exact tracker restoration readback did not match the intended splice",
+        )
+    if observed[:insertion_offset] + observed[insertion_offset + len(note) :] != raw_tasks:
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "tracker restoration changed bytes outside the captured whole-note span",
+        )
+    if (
+        observed[insertion_offset : insertion_offset + len(note)] != note
+        or len(_same_wave_tracker_note_indices(observed, wave_id)) != 1
+    ):
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "restored launcher tracker truth is missing or not unique",
+        )
+    state = _launch_tracker_restore_update_status(repo_root, state, "restored")
+    session["state"] = state
+    return session
+
+
+def _launch_tracker_restore_error_result(
+    error: LaunchTrackerRestoreError,
+    *,
+    step: str = "launch_tracker_restore_authority",
+) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "step": step,
+        "authority_error": error.authority_error,
+        "errors": [str(error)],
+    }
+
+
 def _prepare_phase_b_pre_review_package(
     repo_root: Path,
     *,
@@ -7273,6 +8376,60 @@ def run_phase_b(
                 "plan_path": plan_path,
                 "errors": [str(exc)],
             }
+
+    raw_wave_id = (
+        plan.get("wave_id")
+        or plan_path.replace("reports/control_plane/", "").replace(".md", "")
+    )
+    wave_id = normalize_wave_id(raw_wave_id)
+    launch_tracker_restore_session: dict[str, Any] | None = None
+    launch_tracker_routing_record: dict[str, Any] | None = None
+    try:
+        (
+            launch_tracker_restore_session,
+            launch_tracker_routing_record,
+        ) = prepare_launch_tracker_restore(
+            repo_root,
+            plan=plan,
+            plan_path=plan_path,
+            wave_id=wave_id,
+            routing_record=routing_record,
+        )
+    except LaunchTrackerRestoreError as exc:
+        return _launch_tracker_restore_error_result(exc)
+
+    if launch_tracker_restore_session is not None:
+        restore_status = launch_tracker_restore_session["state"]["status"]
+        if restore_status == "restore_started" and not resume_after:
+            try:
+                restore_launch_tracker_note(repo_root, launch_tracker_restore_session)
+            except LaunchTrackerRestoreError as exc:
+                return _launch_tracker_restore_error_result(
+                    exc,
+                    step="launch_tracker_restore",
+                )
+            restore_status = "restored"
+        if restore_status == "restored" and not resume_after:
+            return {
+                "status": "error",
+                "step": "launch_tracker_restore_consumed",
+                "authority_error": "consumed",
+                "errors": [
+                    "launch-bound tracker note was already restored; terminal "
+                    "at-most-once authority forbids recapture"
+                ],
+            }
+        # The A->B dispatcher intentionally passes a reduced routing object.
+        # Rehydrate only the launch-owned authority fields needed by existing
+        # downstream candidate preparation and final branch handoff.
+        assert launch_tracker_routing_record is not None
+        routing_record = dict(routing_record)
+        routing_record["candidate_authority_required"] = (
+            launch_tracker_routing_record["candidate_authority_required"]
+        )
+        routing_record["candidate_authority"] = (
+            launch_tracker_routing_record["candidate_authority"]
+        )
 
     # Step 2: Load executor config for backend/model/timeout
     try:
@@ -8243,8 +9400,6 @@ def run_phase_b(
     _skip_through_implementer = resume_after in {"implementer", "agent_review"} or _skip_through_bridge
 
     # Step 2.5: Ensure we're on the feature branch (not dev)
-    raw_wave_id = plan.get("wave_id") or plan_path.replace("reports/control_plane/", "").replace(".md", "")
-    wave_id = normalize_wave_id(raw_wave_id)
     _branch_result = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=str(repo_root), capture_output=True, text=True,
@@ -8287,6 +9442,18 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        if (
+            launch_tracker_restore_session is not None
+            and launch_tracker_restore_session["state"]["status"] == "captured"
+        ):
+            return _launch_tracker_restore_error_result(
+                LaunchTrackerRestoreError(
+                    "stale",
+                    "Phase B resume checkpoint says the implementer completed, but "
+                    "launch-tracker removal was never established",
+                ),
+                step="launch_tracker_restore",
+            )
     else:
         # Snapshot dirty files before implementer runs
         pre_impl_files = set(_collect_changed_files(repo_root))
@@ -8308,6 +9475,19 @@ def run_phase_b(
             result["step"] = "phase_b_pager"
             result["errors"] = [f"Phase B pager emission failed before implementer: {exc}"]
             return result
+        if launch_tracker_restore_session is not None:
+            try:
+                remove_launch_tracker_note(repo_root, launch_tracker_restore_session)
+            except (LaunchTrackerRestoreError, OSError) as exc:
+                if not isinstance(exc, LaunchTrackerRestoreError):
+                    exc = LaunchTrackerRestoreError(
+                        "drifted",
+                        f"cannot remove launch tracker note: {exc}",
+                    )
+                return _launch_tracker_restore_error_result(
+                    exc,
+                    step="launch_tracker_restore",
+                )
         impl_prompt = build_implementation_prompt(
             plan.get("content", ""),
             repo_root=repo_root,
@@ -8326,26 +9506,43 @@ def run_phase_b(
         result["implementer_status"] = impl_result["status"]
         result["model_override_applied"] = impl_result.get("model_override_applied", False)
         log(f"Implementer: {impl_result['status']} (exit={impl_result['exit_code']})")
-        try:
-            _emit_phase_b_event(
-                repo_root,
-                routing_record=routing_record,
-                plan=plan,
-                plan_path=plan_path,
-                event_type="phase_b_implementer_completed",
-                state=str(impl_result.get("status") or "implementer_completed"),
-                transition_key=_phase_b_transition_key(wave_id, "implementer_completed"),
-                summary=f"Phase B implementer completed with {impl_result.get('status', 'unknown')}",
-                artifact_paths={"plan": plan_path},
-            )
-        except Exception as exc:
-            result["status"] = "error"
-            result["step"] = "phase_b_pager"
-            result["errors"] = [f"Phase B pager emission failed after implementer: {exc}"]
-            return result
+        if launch_tracker_restore_session is None:
+            try:
+                _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_implementer_completed",
+                    state=str(impl_result.get("status") or "implementer_completed"),
+                    transition_key=_phase_b_transition_key(wave_id, "implementer_completed"),
+                    summary=(
+                        "Phase B implementer completed with "
+                        f"{impl_result.get('status', 'unknown')}"
+                    ),
+                    artifact_paths={"plan": plan_path},
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["step"] = "phase_b_pager"
+                result["errors"] = [f"Phase B pager emission failed after implementer: {exc}"]
+                return result
 
         # FAIL CLOSED: any implementer failure is fatal, not just timeout
         if impl_result["status"] != "success":
+            if launch_tracker_restore_session is not None:
+                try:
+                    restore_launch_tracker_note(repo_root, launch_tracker_restore_session)
+                except (LaunchTrackerRestoreError, OSError) as exc:
+                    if not isinstance(exc, LaunchTrackerRestoreError):
+                        exc = LaunchTrackerRestoreError(
+                            "drifted",
+                            f"cannot restore launch tracker note: {exc}",
+                        )
+                    return _launch_tracker_restore_error_result(
+                        exc,
+                        step="launch_tracker_restore",
+                    )
             result.update(_implementer_failure_result(
                 step="implementer",
                 message=(
@@ -8356,6 +9553,26 @@ def run_phase_b(
             ))
             result["implementer_invoked"] = True
             result["implementer_status"] = impl_result["status"]
+            if launch_tracker_restore_session is not None:
+                try:
+                    _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_implementer_completed",
+                        state=str(impl_result.get("status") or "implementer_completed"),
+                        transition_key=_phase_b_transition_key(wave_id, "implementer_completed"),
+                        summary=(
+                            "Phase B implementer completed with "
+                            f"{impl_result.get('status', 'unknown')}"
+                        ),
+                        artifact_paths={"plan": plan_path},
+                    )
+                except Exception as exc:
+                    result["status"] = "error"
+                    result["step"] = "phase_b_pager"
+                    result["errors"] = [f"Phase B pager emission failed after implementer: {exc}"]
             return result
 
         # Collect changed files after implementer ran — track what implementer actually changed
@@ -8385,6 +9602,39 @@ def run_phase_b(
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
         })
+
+    if launch_tracker_restore_session is not None:
+        try:
+            restore_launch_tracker_note(repo_root, launch_tracker_restore_session)
+        except (LaunchTrackerRestoreError, OSError) as exc:
+            if not isinstance(exc, LaunchTrackerRestoreError):
+                exc = LaunchTrackerRestoreError(
+                    "drifted",
+                    f"cannot restore launch tracker note: {exc}",
+                )
+            return _launch_tracker_restore_error_result(
+                exc,
+                step="launch_tracker_restore",
+            )
+
+    if launch_tracker_restore_session is not None and not _skip_through_implementer:
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="phase_b_implementer_completed",
+                state=str(impl_result.get("status") or "implementer_completed"),
+                transition_key=_phase_b_transition_key(wave_id, "implementer_completed"),
+                summary=f"Phase B implementer completed with {impl_result.get('status', 'unknown')}",
+                artifact_paths={"plan": plan_path},
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"] = [f"Phase B pager emission failed after implementer: {exc}"]
+            return result
 
     bridge_scope_fingerprint = _bridge_scope_fingerprint(repo_root, changed_files)
     if (
