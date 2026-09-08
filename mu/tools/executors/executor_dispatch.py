@@ -11,6 +11,7 @@ See: reports/control_plane/executor_surfaces_plan_2026-03-22.md
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import re
@@ -18,6 +19,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -2617,6 +2619,27 @@ def _carry_forward_pager_route(record: dict[str, Any] | None) -> dict[str, str]:
     return {}
 
 
+def _carry_forward_candidate_authority(
+    record: dict[str, Any] | None,
+) -> tuple[dict[str, Any], str | None]:
+    """Copy launch-owned candidate authority without rebuilding its values."""
+    source = record or {}
+    authority = source.get("candidate_authority")
+    if source.get("candidate_authority_required") is True and not isinstance(
+        authority, dict
+    ):
+        return {}, (
+            "candidate_authority_required=true requires a paired "
+            "candidate_authority object; refusing routing-record rebuild"
+        )
+
+    carried: dict[str, Any] = {}
+    for key in ("candidate_authority_required", "candidate_authority"):
+        if key in source:
+            carried[key] = copy.deepcopy(source[key])
+    return carried, None
+
+
 def _continue_successful_executor_chain(
     executor_name: str,
     completed: subprocess.CompletedProcess[str],
@@ -2634,6 +2657,19 @@ def _continue_successful_executor_chain(
     """Continue the A→B→commit chain after a successful executor leg."""
     executor_script_dir = _script_dir_for_repo(script_repo_root)
     if executor_name == "phase_a_executor":
+        carried_candidate_authority, candidate_authority_error = (
+            _carry_forward_candidate_authority(record)
+        )
+        if candidate_authority_error is not None:
+            return {
+                "status": "error",
+                "decision": "ROUTE_PHASE_B",
+                "executor": "phase_b_executor",
+                "authority_error": "required_candidate_authority_missing",
+                "message": candidate_authority_error,
+                "chained_from": "phase_a_executor",
+            }
+
         plan_path = _extract_plan_path(completed.stdout, repo_root)
         if plan_path is None:
             return {
@@ -2753,6 +2789,10 @@ def _continue_successful_executor_chain(
             # this, Phase B and commit retries fall back to the committed/default
             # pager route instead of the orchestrator-selected route.
             **_carry_forward_pager_route(record),
+            # Candidate authority is minted by launch_wave and must remain the
+            # exact launch-owned object. Rebuilding it from mutable bus state
+            # here would make Phase B review authority caller-dependent.
+            **carried_candidate_authority,
         }
         phase_b_args = [
             sys.executable,
@@ -3672,6 +3712,24 @@ def _refresh_canonical_routing_record_state(
     bus_dir: str | Path | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Rebind the canonical packet-owned routing record to the current repo state."""
+    carried_candidate_authority, candidate_authority_error = (
+        _carry_forward_candidate_authority(record)
+    )
+    if candidate_authority_error is not None:
+        if verbose:
+            print(
+                "[dispatch] Canonical routing rebind failed: "
+                f"{candidate_authority_error}"
+            )
+        return False, {
+            "status": "error",
+            "decision": str(record.get("decision") or ""),
+            "executor": resolve_executor(str(record.get("decision") or ""))
+            or "executor_dispatch",
+            "authority_error": "required_candidate_authority_missing",
+            "message": candidate_authority_error,
+        }
+
     tracked_packet = _routing_record_tracked_packet(record)
     if not tracked_packet:
         if verbose:
@@ -3694,33 +3752,53 @@ def _refresh_canonical_routing_record_state(
         or carried_founder_override.get("founder_override")
         or ""
     )
-    refreshed, errors = _common_build_and_write_routing_record(
-        wave_name=str(record.get("wave_name") or record.get("wave_id") or ""),
-        task_id=str(record.get("task_id") or ""),
-        tracked_packet=tracked_packet,
-        request_for_claude=str(record.get("request_for_claude") or ""),
-        request_for_agent=str(record.get("request_for_agent") or ""),
-        summary=str(record.get("summary") or ""),
-        decision=str(record.get("decision") or ""),
-        merged_pr=record.get("merged_pr") if isinstance(record.get("merged_pr"), int) else None,
-        merge_sha=record.get("merge_sha") if isinstance(record.get("merge_sha"), str) else None,
-        repo_root=repo_root,
-        output_path=output_path or _canonical_routing_record_path(repo_root, bus_dir),
-        bus_dir=bus_dir,
-        allow_completed_tracked_packet=bool(record.get("allow_completed_tracked_packet")),
-        founder_override=founder_override_value,
-        pager_route=str(record.get("pager_route") or "").strip(),
-    )
-    if errors:
-        if verbose:
-            print("[dispatch] Canonical routing rebind failed: " + "; ".join(errors[:3]))
-        return False, None
+    target_path = output_path or _canonical_routing_record_path(repo_root, bus_dir)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".routing-rebind-",
+        dir=target_path.parent,
+    ) as temporary_dir:
+        staged_path = Path(temporary_dir) / target_path.name
+        refreshed, errors = _common_build_and_write_routing_record(
+            wave_name=str(record.get("wave_name") or record.get("wave_id") or ""),
+            task_id=str(record.get("task_id") or ""),
+            tracked_packet=tracked_packet,
+            request_for_claude=str(record.get("request_for_claude") or ""),
+            request_for_agent=str(record.get("request_for_agent") or ""),
+            summary=str(record.get("summary") or ""),
+            decision=str(record.get("decision") or ""),
+            merged_pr=record.get("merged_pr") if isinstance(record.get("merged_pr"), int) else None,
+            merge_sha=record.get("merge_sha") if isinstance(record.get("merge_sha"), str) else None,
+            repo_root=repo_root,
+            output_path=staged_path,
+            bus_dir=bus_dir,
+            allow_completed_tracked_packet=bool(record.get("allow_completed_tracked_packet")),
+            founder_override=founder_override_value,
+            pager_route=str(record.get("pager_route") or "").strip(),
+        )
+        if errors:
+            if verbose:
+                print(
+                    "[dispatch] Canonical routing rebind failed: "
+                    + "; ".join(errors[:3])
+                )
+            return False, None
 
-    fresh, msg = validate_routing_record_freshness(refreshed, repo_root)
-    if not fresh:
-        if verbose:
-            print(f"[dispatch] Canonical routing rebind still stale: {msg}")
-        return False, None
+        refreshed.update(carried_candidate_authority)
+        fresh, msg = validate_routing_record_freshness(refreshed, repo_root)
+        if not fresh:
+            if verbose:
+                print(f"[dispatch] Canonical routing rebind still stale: {msg}")
+            return False, None
+
+        # The shared builder cannot yet accept launch-owned candidate authority.
+        # Build off-path, add the captured fields, and atomically replace the
+        # canonical record so no reader can observe a downgraded intermediate.
+        staged_path.write_text(
+            json.dumps(refreshed, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(staged_path, target_path)
 
     if verbose:
         print(f"[dispatch] Canonical routing rebind succeeded: decision={refreshed.get('decision')}")
@@ -3911,6 +3989,13 @@ def dispatch(
                     verbose=verbose,
                     bus_dir=bus_dir,
                 )
+                if (
+                    not refreshed
+                    and isinstance(refresh_record, dict)
+                    and refresh_record.get("authority_error")
+                    == "required_candidate_authority_missing"
+                ):
+                    return refresh_record
                 if not refreshed or refresh_record is None:
                     if verbose:
                         print(
