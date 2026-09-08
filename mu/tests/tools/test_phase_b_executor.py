@@ -15889,6 +15889,12 @@ class TestSdkReviewDepthContract:
             repo,
         ) == []
 
+    def test_select_pytest_gate_files_whole_file_dominates_same_file_selectors(self):
+        assert pb_mod.select_pytest_gate_files([
+            "mu/tests/tools/test_phase_b_executor.py",
+            "mu/tools/executors/phase_b_executor.py",
+        ]) == ["mu/tests/tools/test_phase_b_executor.py"]
+
     def test_bridge_process_snapshot_fail_open_on_permission_error(self, tmp_path, monkeypatch):
         monkeypatch.setattr(pb_mod.os, "kill", lambda pid, sig: None)
 
