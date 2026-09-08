@@ -16859,3 +16859,279 @@ class TestChainFounderOverrideCarryForward:
         phase_b_routing = json.loads(args[args.index("--routing-record") + 1])
         assert phase_b_routing["pager_route"] == "codex"
         assert phase_b_routing["founder_override"] == "route-wave"
+
+
+class TestCandidateAuthorityCarryForward:
+    """Launch-owned candidate authority survives both dispatcher rebuild seams."""
+
+    @staticmethod
+    def _authority(*, required: bool) -> dict:
+        return {
+            "required": required,
+            "precommit_inventory": True,
+            "spec_path": (
+                ".agent_bus-route/meta/candidate_authority/"
+                "candidate-authority-wave.spec.json"
+            ),
+            "spec_identity": {
+                "version": 1,
+                "spec_hash": "authority-spec-hash",
+                "candidate": {
+                    "comparison_commit": "a" * 40,
+                    "allowlist": ["mu/tools/executors/executor_dispatch.py"],
+                },
+            },
+            "target_branch_authority": {
+                "target_branch": "jabramsja/candidate-authority-wave",
+                "target_initial_head": "b" * 40,
+                "nested": {
+                    "source": {"detached": True, "clean": True},
+                    "labels": ["launch-owned", {"depth": 2}],
+                },
+            },
+        }
+
+    def test_canonical_refresh_preserves_exact_candidate_authority(
+        self, tmp_path, monkeypatch,
+    ):
+        canonical = tmp_path / ".agent_bus-route" / "meta" / "post_merge_routing.json"
+        canonical.parent.mkdir(parents=True)
+        canonical.write_text('{"sentinel":"old"}\n', encoding="utf-8")
+        authority = self._authority(required=False)
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "candidate authority refresh",
+            "request_for_agent": "refresh the canonical route",
+            "request_for_claude": "refresh the canonical route",
+            "wave_name": "candidate-authority-wave",
+            "task_id": "[CANDIDATE-AUTHORITY]",
+            "candidate_authority_required": False,
+            "candidate_authority": authority,
+            "next_candidates": [
+                {
+                    "candidate": "candidate-authority-wave",
+                    "bounded": True,
+                    "tracked_packet": "reports/control_plane/candidate-authority-wave.md",
+                }
+            ],
+        }
+        builder_paths: list[Path] = []
+
+        def fake_builder(**kwargs):
+            builder_path = kwargs["output_path"]
+            builder_paths.append(builder_path)
+            assert builder_path != canonical
+            rebuilt = {
+                "decision": kwargs["decision"],
+                "summary": kwargs["summary"],
+                "request_for_agent": kwargs["request_for_agent"],
+                "request_for_claude": kwargs["request_for_claude"],
+                "wave_name": kwargs["wave_name"],
+                "task_id": kwargs["task_id"],
+                "state_sha": "fresh-state",
+                "next_candidates": [
+                    {
+                        "candidate": kwargs["wave_name"],
+                        "bounded": True,
+                        "tracked_packet": kwargs["tracked_packet"],
+                    }
+                ],
+            }
+            builder_path.write_text(json.dumps(rebuilt), encoding="utf-8")
+            return rebuilt, []
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_common_build_and_write_routing_record",
+            fake_builder,
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "validate_routing_record_freshness",
+            lambda *_args, **_kwargs: (True, "fresh"),
+        )
+
+        success, refreshed = dispatch_mod._refresh_canonical_routing_record_state(  # ANTICHEAT_OK: direct canonical rebuild authority regression
+            tmp_path,
+            record,
+            output_path=canonical,
+            bus_dir=".agent_bus-route",
+        )
+
+        assert success is True
+        assert refreshed is not None
+        assert builder_paths and builder_paths[0] != canonical
+        assert refreshed["candidate_authority_required"] is False
+        assert refreshed["candidate_authority"] == authority
+        assert refreshed["candidate_authority"] is not authority
+        assert refreshed["candidate_authority"]["spec_identity"] is not authority["spec_identity"]
+        persisted = json.loads(canonical.read_text(encoding="utf-8"))
+        assert persisted["candidate_authority_required"] is False
+        assert persisted["candidate_authority"] == authority
+        assert record["candidate_authority"] == authority
+
+    def test_canonical_refresh_missing_required_authority_preserves_sentinel(
+        self, tmp_path, monkeypatch,
+    ):
+        canonical = tmp_path / ".agent_bus-route" / "meta" / "post_merge_routing.json"
+        canonical.parent.mkdir(parents=True)
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "wave_name": "candidate-authority-wave",
+            "task_id": "[CANDIDATE-AUTHORITY]",
+            "state_sha": "stale-state",
+            "candidate_authority_required": True,
+            "next_candidates": [
+                {
+                    "candidate": "candidate-authority-wave",
+                    "bounded": True,
+                    "tracked_packet": (
+                        "reports/control_plane/candidate-authority-wave.md"
+                    ),
+                }
+            ],
+        }
+        sentinel = json.dumps(record, separators=(",", ":")) + "\n"
+        canonical.write_text(sentinel, encoding="utf-8")
+        builder = MagicMock(side_effect=AssertionError("builder must not run"))
+        auto_refresh = MagicMock(
+            side_effect=AssertionError("post-merge fallback must not run")
+        )
+        runner = MagicMock(side_effect=AssertionError("executor must not run"))
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_common_build_and_write_routing_record",
+            builder,
+        )
+        monkeypatch.setattr(dispatch_mod, "_auto_refresh_routing", auto_refresh)
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", runner)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_post_commit_continuation_ready_for_record",
+            lambda *args, **kwargs: (False, "not applicable"),
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "validate_routing_record_freshness",
+            lambda *args, **kwargs: (False, "stale for authority regression"),
+        )
+
+        failure = dispatch_mod.dispatch(
+            record,
+            repo_root=tmp_path,
+            routing_record_path=canonical,
+            bus_dir=".agent_bus-route",
+        )
+
+        assert failure["status"] == "error"
+        assert failure["authority_error"] == "required_candidate_authority_missing"
+        assert "requires a paired candidate_authority object" in failure["message"]
+        builder.assert_not_called()
+        auto_refresh.assert_not_called()
+        runner.assert_not_called()
+        assert canonical.read_text(encoding="utf-8") == sentinel
+
+    def test_phase_a_chain_preserves_exact_candidate_authority(
+        self, tmp_path, monkeypatch,
+    ):
+        packet_rel = "reports/control_plane/candidate-authority-wave.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            "# Candidate Authority Wave\n\nStatus: Phase B\n"
+            "Wave ID: candidate-authority-wave\n",
+            encoding="utf-8",
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"],
+            0,
+            stdout=json.dumps({"plan_path": packet_rel}),
+            stderr="",
+        )
+        authority = self._authority(required=True)
+        captured: dict[str, object] = {}
+
+        def fake_phase_b(args, *, cwd, timeout):
+            captured["args"] = list(args)
+            return subprocess.CompletedProcess(
+                args,
+                2,
+                stdout="",
+                stderr="forced stop",
+            )
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_phase_b_tracker_gate_result",
+            lambda *args, **kwargs: None,
+        )
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_phase_b)
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "wave_name": "candidate-authority-wave",
+            "task_id": "[CANDIDATE-AUTHORITY]",
+            "candidate_authority_required": True,
+            "candidate_authority": authority,
+            "next_candidates": [
+                {
+                    "candidate": "candidate-authority-wave",
+                    "bounded": True,
+                    "tracked_packet": packet_rel,
+                }
+            ],
+        }
+
+        result = dispatch_mod._continue_successful_executor_chain(  # ANTICHEAT_OK: direct Phase A-to-B authority regression
+            "phase_a_executor",
+            phase_a_ok,
+            repo_root=tmp_path,
+            config={
+                "timeouts": {"phase_b_executor": 10},
+                "bridge_loop_limits": {"phase_b": 1},
+            },
+            record=record,
+        )
+
+        assert result["status"] == "failed"
+        args = captured["args"]
+        assert isinstance(args, list)
+        phase_b_routing = json.loads(args[args.index("--routing-record") + 1])
+        assert phase_b_routing["candidate_authority_required"] is True
+        assert phase_b_routing["candidate_authority"] == authority
+        assert record["candidate_authority"] == authority
+
+    def test_phase_a_chain_missing_required_authority_does_not_launch_phase_b(
+        self, tmp_path, monkeypatch,
+    ):
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"],
+            0,
+            stdout=json.dumps(
+                {"plan_path": "reports/control_plane/candidate-authority-wave.md"}
+            ),
+            stderr="",
+        )
+        runner = MagicMock(side_effect=AssertionError("Phase B must not run"))
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", runner)
+
+        result = dispatch_mod._continue_successful_executor_chain(  # ANTICHEAT_OK: direct fail-closed Phase A-to-B authority regression
+            "phase_a_executor",
+            phase_a_ok,
+            repo_root=tmp_path,
+            config={
+                "timeouts": {"phase_b_executor": 10},
+                "bridge_loop_limits": {"phase_b": 1},
+            },
+            record={
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": "candidate-authority-wave",
+                "task_id": "[CANDIDATE-AUTHORITY]",
+                "candidate_authority_required": True,
+            },
+        )
+
+        assert result["status"] == "error"
+        assert result["executor"] == "phase_b_executor"
+        assert result["authority_error"] == "required_candidate_authority_missing"
+        assert "requires a paired candidate_authority object" in result["message"]
+        runner.assert_not_called()
