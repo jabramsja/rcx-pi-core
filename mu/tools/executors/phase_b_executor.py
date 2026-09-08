@@ -7559,14 +7559,13 @@ def restore_launch_tracker_note(
 ) -> dict[str, Any]:
     """Restore captured launcher truth byte-exactly and at most once."""
     state = dict(session["state"])
-    if state["status"] == "restored":
-        return session
-    if state["status"] not in {"removed", "restore_started"}:
+    checkpoint_status = state["status"]
+    if checkpoint_status not in {"removed", "restore_started", "restored"}:
         raise LaunchTrackerRestoreError(
             "malformed",
-            f"cannot restore tracker note from state {state['status']!r}",
+            f"cannot restore tracker note from state {checkpoint_status!r}",
         )
-    if state["status"] == "removed":
+    if checkpoint_status == "removed":
         state = _launch_tracker_restore_update_status(
             repo_root,
             state,
@@ -7595,9 +7594,15 @@ def restore_launch_tracker_note(
             anchored_note_position + len(left) + len(note)
         ] == note
     ):
-        state = _launch_tracker_restore_update_status(repo_root, state, "restored")
-        session["state"] = state
+        if checkpoint_status != "restored":
+            state = _launch_tracker_restore_update_status(repo_root, state, "restored")
+            session["state"] = state
         return session
+    if checkpoint_status == "restored":
+        raise LaunchTrackerRestoreError(
+            "drifted",
+            "checkpointed restored launcher tracker truth no longer matches TASKS.md",
+        )
     if matching:
         raise LaunchTrackerRestoreError(
             "drifted",
