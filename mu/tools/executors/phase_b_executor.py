@@ -3129,7 +3129,10 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
 
 
 _LOCKED_PACKET_EVIDENCE_COMMAND_RE = re.compile(
-    r"^[ \t]*-[ \t]+evidence_command:[ \t]*`(?P<value>[^`\r\n]+)`[ \t]*$"
+    # The validated Phase A value may itself contain shell command-substitution
+    # backticks.  Keep this capture greedy so the final backtick is treated as
+    # the renderer's closing delimiter and any interior backticks are preserved.
+    r"^[ \t]*-[ \t]+evidence_command:[ \t]*`(?P<value>[^\r\n]+)`[ \t]*$"
 )
 
 
