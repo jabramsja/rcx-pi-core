@@ -1,0 +1,25 @@
+{
+  "wave_id": "pr1219-p0ibrrco-l4-indicator-comparison-provenance-r1-2026-09-08",
+  "repeat_run_speedup_ratio": 1.561828,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.259188,
+  "repeat_run_raw_seconds": [
+    0.404807,
+    0.259188
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.404807
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.663995
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-08T23:45:24Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "cbb8faf298a787376fb81a311ef4cdaf2e3b2420"
+}
