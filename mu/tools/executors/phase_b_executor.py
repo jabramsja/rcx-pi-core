@@ -1975,6 +1975,7 @@ def build_phase_b_tracker_note(
     unblocks_wave_id: str = "",
     unblocks_runtime_blocker: str = "",
     pre_supervisor: bool = False,
+    packet_evidence_command: str | None = None,
 ) -> str:
     """Render a Phase B tracker note through the public package-class seam."""
     effective_wave_class = _effective_phase_b_tracker_wave_class(
@@ -1999,6 +2000,7 @@ def build_phase_b_tracker_note(
         unblocks_wave_id=unblocks_wave_id,
         unblocks_runtime_blocker=unblocks_runtime_blocker,
         pre_supervisor=pre_supervisor,
+        packet_evidence_command=packet_evidence_command,
     )
 
 
@@ -3124,6 +3126,51 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
         result["wave_id"] = canonical_wave_values[0]
 
     return result
+
+
+_LOCKED_PACKET_EVIDENCE_COMMAND_RE = re.compile(
+    # The validated Phase A value may itself contain shell command-substitution
+    # backticks.  Keep this capture greedy so the final backtick is treated as
+    # the renderer's closing delimiter and any interior backticks are preserved.
+    r"^[ \t]*-[ \t]+evidence_command:[ \t]*`(?P<value>[^\r\n]+)`[ \t]*$"
+)
+
+
+def _resolve_locked_l4_enabler_packet_evidence_command(
+    plan: dict[str, Any],
+    *,
+    wave_id: str,
+    wave_class: str,
+) -> str | None:
+    """Return one exact builder-authored command from an eligible locked packet.
+
+    The native packet renderer emits the command as one canonical Validation
+    gates list item. Only a locked, same-wave L4_ENABLER packet may override
+    Phase B's legacy changed-test inference. Multiple distinct authored values
+    are conflicting authority and fail closed before implementation begins.
+    """
+    if wave_class != "L4_ENABLER" or plan.get("phase_a_lock") != "LOCKED":
+        return None
+
+    content = str(plan.get("content") or "")
+    canonical_identity = _extract_unique_canonical_plan_identity(content)
+    if canonical_identity is None:
+        return None
+    _task_id, packet_wave_id = canonical_identity
+    if normalize_wave_id(packet_wave_id) != normalize_wave_id(wave_id):
+        return None
+
+    commands = {
+        match.group("value")
+        for line in content.splitlines()
+        if (match := _LOCKED_PACKET_EVIDENCE_COMMAND_RE.fullmatch(line)) is not None
+    }
+    if len(commands) > 1:
+        raise PhaseBExecutorError(
+            "Locked same-wave L4_ENABLER packet has conflicting explicit "
+            f"evidence_command values: {plan.get('path') or wave_id}"
+        )
+    return next(iter(commands)) if commands else None
 
 
 def _matches_explicit_same_wave_task_id_exception(
@@ -5588,6 +5635,14 @@ def prepare_dispatcher_commit_handoff_from_routing_record(
         resolved_plan_path,
         routing_record,
     )
+    try:
+        packet_evidence_command = _resolve_locked_l4_enabler_packet_evidence_command(
+            plan,
+            wave_id=wave_id,
+            wave_class=wave_class,
+        )
+    except PhaseBExecutorError as exc:
+        return None, [str(exc)]
     fenced_out_files = set(_parse_fenced_out_files(plan_content))
     exact_stage_scope_files = _expand_exact_stage_scope_files_for_git(
         repo_root,
@@ -5661,6 +5716,7 @@ def prepare_dispatcher_commit_handoff_from_routing_record(
         founder_override=str(plan.get("founder_override") or ""),
         unblocks_wave_id=str(plan.get("unblocks_wave_id") or ""),
         unblocks_runtime_blocker=str(plan.get("unblocks_runtime_blocker") or ""),
+        packet_evidence_command=packet_evidence_command,
     )
     handoff_scope_items = list(dict.fromkeys([resolved_plan_path, *handoff_staged_deletions]))
     handoff_path = prepare_commit_handoff(
@@ -5827,6 +5883,7 @@ def _build_phase_b_tracker_note(
     unblocks_wave_id: str = "",
     unblocks_runtime_blocker: str = "",
     pre_supervisor: bool = False,
+    packet_evidence_command: str | None = None,
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
     display_task = (task_id or "").strip() or wave_id
@@ -5904,6 +5961,9 @@ def _build_phase_b_tracker_note(
                 "(3) No test files were present in the wave-owned diff, so indicator collection is the "
                 "mechanical evidence surface."
             )
+
+    if wave_class == "L4_ENABLER" and packet_evidence_command is not None:
+        evidence_command = packet_evidence_command
 
     scope_refs = _phase_b_tracker_scope_refs(changed_files, indicator_path)
     non_scope_note = _phase_b_tracker_non_scope_note(plan_content, changed_files)
@@ -8043,6 +8103,7 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
     unblocks_runtime_blocker: str = "",
     allowed_files: set[str] | None = None,
     launch_tracker_restore_session: dict[str, Any] | None = None,
+    packet_evidence_command: str | None = None,
 ) -> tuple[str, str, str, bool, list[str], str | None]:
     """Finalize the pre-supervisor note from generic or restored launch authority."""
     final_scope = _phase_b_pre_supervisor_note_scope(changed_files)
@@ -8093,6 +8154,7 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
                 unblocks_wave_id=unblocks_wave_id,
                 unblocks_runtime_blocker=unblocks_runtime_blocker,
                 pre_supervisor=True,
+                packet_evidence_command=packet_evidence_command,
             )
         raw_founder_override = _extract_founder_override_from_tracker_note(tracker_note)
         package_founder_override = _supervisor_package_founder_override_token(
@@ -8585,6 +8647,20 @@ def run_phase_b(
         plan_path,
         routing_record,
     )
+    packet_evidence_command: str | None = None
+    if launch_tracker_restore_session is None:
+        try:
+            packet_evidence_command = _resolve_locked_l4_enabler_packet_evidence_command(
+                plan,
+                wave_id=wave_id,
+                wave_class=wave_class,
+            )
+        except PhaseBExecutorError as exc:
+            return {
+                "status": "error",
+                "step": "locked_packet_evidence_command",
+                "errors": [str(exc)],
+            }
 
     # Parse plan-declared files from markdown/body content.
     fenced_out_files = set(_parse_fenced_out_files(plan_content))
@@ -10780,6 +10856,7 @@ def run_phase_b(
             unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
             allowed_files=exact_stage_scope_files or None,
             launch_tracker_restore_session=launch_tracker_restore_session,
+            packet_evidence_command=packet_evidence_command,
         )
         if tracker_sync_error is not None:
             _clear_state(repo_root)
@@ -11735,6 +11812,7 @@ def run_phase_b(
             unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
             allowed_files=exact_stage_scope_files or None,
             launch_tracker_restore_session=launch_tracker_restore_session,
+            packet_evidence_command=packet_evidence_command,
         )
         if reentry_tracker_sync_error is not None:
             _clear_state(repo_root)
@@ -12276,6 +12354,7 @@ def run_phase_b(
             founder_override=plan.get("founder_override", ""),
             unblocks_wave_id=plan.get("unblocks_wave_id", ""),
             unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
+            packet_evidence_command=packet_evidence_command,
         )
     handoff_scope_items = list(dict.fromkeys([plan_path, *handoff_staged_deletions]))
     log(
