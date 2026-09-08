@@ -1593,7 +1593,17 @@ def _select_pytest_gate_files(changed_files: list[str], repo_root: Path | None =
             if candidate not in seen:
                 selected.append(candidate)
                 seen.add(candidate)
-    return selected
+    whole_file_candidates = {
+        candidate
+        for candidate in selected
+        if candidate == _pytest_selector_path(candidate)
+    }
+    return [
+        candidate
+        for candidate in selected
+        if candidate in whole_file_candidates
+        or _pytest_selector_path(candidate) not in whole_file_candidates
+    ]
 
 
 def select_pytest_gate_files(changed_files: list[str], repo_root: Path | None = None) -> list[str]:
