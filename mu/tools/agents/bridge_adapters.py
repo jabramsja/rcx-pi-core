@@ -884,6 +884,7 @@ def _run_adapter_buffered(
             _contains_complete_adapter_envelope(
                 _authoritative_output_so_far(spec, cmd, sink.getvalue())
             )
+            or _contains_complete_adapter_envelope(stderr_buf.getvalue())
             or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
         ):
             envelope_terminated.set()
@@ -982,6 +983,9 @@ def _run_adapter_buffered(
                                     cmd,
                                     stdout_buf.getvalue(),
                                 )
+                            )
+                            or _contains_complete_adapter_envelope(
+                                stderr_buf.getvalue()
                             )
                             or _raw_transcript_contains_complete_adapter_envelope(
                                 raw_output_path

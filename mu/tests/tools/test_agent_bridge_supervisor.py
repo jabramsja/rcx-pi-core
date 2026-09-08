@@ -1063,6 +1063,139 @@ time.sleep(10.0)
     assert elapsed < 2.0
 
 
+def test_run_adapter_buffered_stop_after_envelope_uses_intact_stderr_when_raw_interleaves(
+    tmp_path: Path,
+) -> None:
+    framed_envelope, _ = _frame_agent_value(
+        _complete_agent_envelope(summary="intact stderr authority")
+    )
+    stderr_envelope = f"{framed_envelope}\n"
+    suffix_marker = '  "summary": "intact stderr authority",\n'
+    split_at = stderr_envelope.index(suffix_marker)
+    stderr_prefix = stderr_envelope[:split_at]
+    stderr_suffix = stderr_envelope[split_at:]
+    terminal = json.dumps({"type": "turn.completed"}, separators=(",", ":")) + "\n"
+    raw_after_prefix = f"[stderr]\n{stderr_prefix}".encode("utf-8")
+    raw_after_terminal = raw_after_prefix + terminal.encode("utf-8")
+    expected_raw = raw_after_terminal + stderr_suffix.encode("utf-8")
+
+    lingering_agent = tmp_path / "buffered_interleaved_stderr_agent.py"
+    raw_output_path = tmp_path / "raw.txt"
+    lingering_agent.write_text(
+        "import sys\n"
+        "import time\n"
+        "from pathlib import Path\n"
+        "sys.stdin.read()\n"
+        "raw_output_path = Path(sys.argv[1])\n"
+        "def await_raw(expected):\n"
+        "    deadline = time.monotonic() + 2.0\n"
+        "    while True:\n"
+        "        try:\n"
+        "            actual = raw_output_path.read_bytes()\n"
+        "        except FileNotFoundError:\n"
+        "            actual = b''\n"
+        "        if actual == expected:\n"
+        "            return\n"
+        "        if time.monotonic() >= deadline:\n"
+        "            raise RuntimeError(f'raw transcript ordering failed: {actual!r}')\n"
+        "        time.sleep(0.005)\n"
+        f"sys.stderr.write({stderr_prefix!r})\n"
+        "sys.stderr.flush()\n"
+        f"await_raw({raw_after_prefix!r})\n"
+        f"sys.stdout.write({terminal!r})\n"
+        "sys.stdout.flush()\n"
+        f"await_raw({raw_after_terminal!r})\n"
+        f"sys.stderr.write({stderr_suffix!r})\n"
+        "sys.stderr.flush()\n"
+        f"await_raw({expected_raw!r})\n"
+        "time.sleep(10.0)\n",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(lingering_agent), str(raw_output_path), "--json"],
+        timeout_s=5,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="review prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="r1-reviewer",
+        agent_role="reviewer",
+        raw_output_path=raw_output_path,
+        stop_after_envelope=True,
+    )
+    elapsed = time.monotonic() - start
+
+    raw_bytes = raw_output_path.read_bytes()
+    assert raw_bytes == expected_raw
+    assert stderr_envelope.encode("utf-8") not in raw_bytes
+    assert stderr_envelope.rstrip("\n") in output
+    assert terminal.strip() in output
+    assert elapsed < 2.0
+
+
+def test_run_adapter_buffered_stderr_envelope_requires_matching_provider_terminal(
+    tmp_path: Path,
+) -> None:
+    framed_envelope, _ = _frame_agent_value(
+        _complete_agent_envelope(summary="stderr without provider terminal")
+    )
+    stderr_envelope = f"{framed_envelope}\n"
+    natural_eof_marker = "natural EOF after stderr envelope\n"
+    emitted = stderr_envelope + natural_eof_marker
+    agent = tmp_path / "buffered_stderr_without_terminal_agent.py"
+    agent.write_text(
+        "import sys\n"
+        "import time\n"
+        "sys.stdin.read()\n"
+        f"sys.stderr.write({stderr_envelope!r})\n"
+        "sys.stderr.flush()\n"
+        "time.sleep(0.2)\n"
+        f"sys.stderr.write({natural_eof_marker!r})\n"
+        "sys.stderr.flush()\n",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(agent), "--json"],
+        timeout_s=5,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="review prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="r1-reviewer",
+        agent_role="reviewer",
+        raw_output_path=raw_output_path,
+        stop_after_envelope=True,
+    )
+    elapsed = time.monotonic() - start
+
+    assert raw_output_path.read_bytes() == f"[stderr]\n{emitted}".encode("utf-8")
+    assert stderr_envelope in output
+    assert natural_eof_marker.strip() in output
+    assert elapsed >= 0.15
+    assert elapsed < 2.0
+
+
 @pytest.mark.parametrize("stream", [False, True], ids=["buffered", "streaming"])
 @pytest.mark.parametrize("provider", ["claude", "codex"])
 def test_run_adapter_stop_after_envelope_requires_matching_provider_terminal(
