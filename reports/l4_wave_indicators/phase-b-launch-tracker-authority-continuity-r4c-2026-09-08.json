@@ -1,0 +1,24 @@
+{
+  "wave_id": "phase-b-launch-tracker-authority-continuity-r4c-2026-09-08",
+  "repeat_run_speedup_ratio": 1.37199,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.271725,
+  "repeat_run_raw_seconds": [
+    0.372804,
+    0.271725
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.372804
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.644529
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-08T08:44:37Z",
+  "collector_version": "2.2.0"
+}

@@ -7650,6 +7650,67 @@ def restore_launch_tracker_note(
     return session
 
 
+def _restored_launch_tracker_note_text(
+    repo_root: Path,
+    session: dict[str, Any],
+    *,
+    wave_id: str,
+) -> str:
+    """Return text only from a validated, restored launch-tracker session."""
+    state = session.get("state")
+    authority = session.get("authority")
+    if not isinstance(state, dict) or set(state) != _LAUNCH_TRACKER_RESTORE_STATE_KEYS:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "validated launch-tracker session has no canonical restore checkpoint",
+        )
+    if not isinstance(authority, dict) or state.get("authority") != authority:
+        raise LaunchTrackerRestoreError(
+            "stale",
+            "validated launch-tracker session authority no longer matches its checkpoint",
+        )
+    if (
+        state.get("status") != "restored"
+        or state.get("wave_id") != wave_id
+        or authority.get("wave_id") != wave_id
+        or state.get("authority_sha256") != authority.get("authority_sha256")
+    ):
+        raise LaunchTrackerRestoreError(
+            "stale",
+            "launch-tracker authority is not a restored checkpoint for the active wave",
+        )
+    if _launch_tracker_restore_capture_sha256(state) != state.get("capture_sha256"):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "restored launch-tracker checkpoint no longer matches its capture digest",
+        )
+
+    # This restored-state call is read-only on the success path and re-proves
+    # the captured raw bytes, anchors, and same-wave uniqueness in TASKS.md.
+    restore_launch_tracker_note(repo_root, session)
+
+    note, _left, _right = _launch_tracker_restore_state_payload(state)
+    if not note or _sha256_bytes(note) != state.get("note_sha256"):
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "restored launch-tracker note no longer matches its captured digest",
+        )
+    try:
+        decoded_note = note.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            f"restored launch-tracker note is not strict UTF-8: {exc}",
+        ) from exc
+    note_text = decoded_note.rstrip("\r\n")
+    if not note_text or "\n" in note_text or "\r" in note_text:
+        raise LaunchTrackerRestoreError(
+            "malformed",
+            "restored launch-tracker note must be exactly one non-empty physical line",
+        )
+    return decoded_note
+
+
 def _launch_tracker_restore_error_result(
     error: LaunchTrackerRestoreError,
     *,
@@ -7981,13 +8042,31 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
     unblocks_wave_id: str = "",
     unblocks_runtime_blocker: str = "",
     allowed_files: set[str] | None = None,
+    launch_tracker_restore_session: dict[str, Any] | None = None,
 ) -> tuple[str, str, str, bool, list[str], str | None]:
-    """Render/stage the final pre-supervisor tracker note after scope refresh."""
+    """Finalize the pre-supervisor note from generic or restored launch authority."""
     final_scope = _phase_b_pre_supervisor_note_scope(changed_files)
     modified_any = False
     tracker_note = ""
     raw_founder_override = ""
     package_founder_override = ""
+    preserved_tracker_note: str | None = None
+    if launch_tracker_restore_session is not None:
+        try:
+            preserved_tracker_note = _restored_launch_tracker_note_text(
+                repo_root,
+                launch_tracker_restore_session,
+                wave_id=wave_id,
+            )
+        except LaunchTrackerRestoreError as exc:
+            return (
+                tracker_note,
+                raw_founder_override,
+                package_founder_override,
+                modified_any,
+                final_scope,
+                f"pre-supervisor restored launch-tracker authority failed: {exc}",
+            )
 
     for _attempt in range(2):
         note_wave_class = _effective_phase_b_tracker_wave_class(
@@ -7995,47 +8074,51 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
             plan_content=plan_content,
             changed_files=final_scope,
         )
-        tracker_note = build_phase_b_tracker_note(
-            wave_id=wave_id,
-            task_id=task_id,
-            wave_class=note_wave_class,
-            target_gate_id=target_gate_id,
-            plan_path=plan_path,
-            plan_content=plan_content,
-            changed_files=final_scope,
-            test_files=test_files,
-            receipt_path=receipt_path,
-            bridge_rounds=_bridge_rounds_for_tracker_note(bridge_status),
-            reentry=reentry,
-            founder_override=founder_override,
-            unblocks_wave_id=unblocks_wave_id,
-            unblocks_runtime_blocker=unblocks_runtime_blocker,
-            pre_supervisor=True,
-        )
+        if preserved_tracker_note is not None:
+            tracker_note = preserved_tracker_note
+        else:
+            tracker_note = build_phase_b_tracker_note(
+                wave_id=wave_id,
+                task_id=task_id,
+                wave_class=note_wave_class,
+                target_gate_id=target_gate_id,
+                plan_path=plan_path,
+                plan_content=plan_content,
+                changed_files=final_scope,
+                test_files=test_files,
+                receipt_path=receipt_path,
+                bridge_rounds=_bridge_rounds_for_tracker_note(bridge_status),
+                reentry=reentry,
+                founder_override=founder_override,
+                unblocks_wave_id=unblocks_wave_id,
+                unblocks_runtime_blocker=unblocks_runtime_blocker,
+                pre_supervisor=True,
+            )
         raw_founder_override = _extract_founder_override_from_tracker_note(tracker_note)
         package_founder_override = _supervisor_package_founder_override_token(
             raw_founder_override,
             wave_class=note_wave_class,
         )
-        tracker_sync_error, tracker_note_modified = _sync_phase_b_tasks_tracker_note(
-            repo_root,
-            wave_id=wave_id,
-            tracker_note_text=tracker_note,
-        )
-        if tracker_sync_error is not None:
-            return tracker_note, raw_founder_override, package_founder_override, modified_any, final_scope, tracker_sync_error
-        if tracker_note_modified:
-            modified_any = True
-            ok, detail = _stage_files_for_pipeline(repo_root, ["TASKS.md"])
-            if not ok:
-                return (
-                    tracker_note,
-                    raw_founder_override,
-                    package_founder_override,
-                    modified_any,
-                    final_scope,
-                    f"git add failed for final Phase B tracker note: {detail}",
-                )
+        if preserved_tracker_note is None:
+            tracker_sync_error, tracker_note_modified = _sync_phase_b_tasks_tracker_note(
+                repo_root,
+                wave_id=wave_id,
+                tracker_note_text=tracker_note,
+            )
+            if tracker_sync_error is not None:
+                return tracker_note, raw_founder_override, package_founder_override, modified_any, final_scope, tracker_sync_error
+            if tracker_note_modified:
+                modified_any = True
+                ok, detail = _stage_files_for_pipeline(repo_root, ["TASKS.md"])
+                if not ok:
+                    return (
+                        tracker_note,
+                        raw_founder_override,
+                        package_founder_override,
+                        modified_any,
+                        final_scope,
+                        f"git add failed for final Phase B tracker note: {detail}",
+                    )
 
         refreshed_scope = _phase_b_pre_supervisor_note_scope(
             _collect_commit_bound_files(
@@ -10262,6 +10345,8 @@ def run_phase_b(
     refresh_reentry_findings = False
     skip_reentry_implementer_once = False
     pending_reentry_bridge_round = 0
+    finalized_tracker_note_text = ""
+    finalized_tracker_note_scope: list[str] = []
     if _skip_to_reentry:
         log("Resuming into NEEDS_PHASE_B re-entry (skipping supervisor)")
         changed_files = _collect_wave_owned_files(
@@ -10694,6 +10779,7 @@ def run_phase_b(
             unblocks_wave_id=plan.get("unblocks_wave_id", ""),
             unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
             allowed_files=exact_stage_scope_files or None,
+            launch_tracker_restore_session=launch_tracker_restore_session,
         )
         if tracker_sync_error is not None:
             _clear_state(repo_root)
@@ -10702,6 +10788,8 @@ def run_phase_b(
                 "step": "pre_supervisor_tracker_note",
                 "errors": [tracker_sync_error],
             }
+        finalized_tracker_note_text = pre_supervisor_tracker_note
+        finalized_tracker_note_scope = list(changed_files)
 
         # Step 7: Build and run pre-commit supervisor via structured client
         log("Building supervisor package...")
@@ -11646,6 +11734,7 @@ def run_phase_b(
             unblocks_wave_id=plan.get("unblocks_wave_id", ""),
             unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
             allowed_files=exact_stage_scope_files or None,
+            launch_tracker_restore_session=launch_tracker_restore_session,
         )
         if reentry_tracker_sync_error is not None:
             _clear_state(repo_root)
@@ -11654,6 +11743,8 @@ def run_phase_b(
                 "step": "reentry_pre_supervisor_tracker_note",
                 "errors": [reentry_tracker_sync_error],
             }
+        finalized_tracker_note_text = reentry_pre_supervisor_tracker_note
+        finalized_tracker_note_scope = list(changed_files)
 
         # Refresh ALL supervisor package truth for re-entry
         supervisor_package["wave_class"] = wave_class
@@ -12114,22 +12205,78 @@ def run_phase_b(
         reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
     )
     handoff_test_files = locals().get("reentry_test_files") or locals().get("final_test_files") or []
-    tracker_note_text = build_phase_b_tracker_note(
-        wave_id=wave_id,
-        task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
-        wave_class=wave_class,
-        target_gate_id=target_gate_id,
-        plan_path=plan_path,
-        plan_content=plan.get("content", ""),
-        changed_files=wave_owned_files,
-        test_files=handoff_test_files,
-        receipt_path=receipt_path,
-        bridge_rounds=_bridge_rounds_for_tracker_note(handoff_bridge_status),
-        reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
-        founder_override=plan.get("founder_override", ""),
-        unblocks_wave_id=plan.get("unblocks_wave_id", ""),
-        unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
-    )
+    if launch_tracker_restore_session is not None:
+        try:
+            authoritative_tracker_note_text = _restored_launch_tracker_note_text(
+                repo_root,
+                launch_tracker_restore_session,
+                wave_id=wave_id,
+            )
+        except LaunchTrackerRestoreError as exc:
+            result["status"] = "error"
+            result["step"] = "commit_handoff_tracker_note"
+            result["authority_error"] = exc.authority_error
+            result["errors"] = [str(exc)]
+            _clear_state(repo_root)
+            return result
+        if finalized_tracker_note_text != authoritative_tracker_note_text:
+            result["status"] = "error"
+            result["step"] = "commit_handoff_tracker_note"
+            result["authority_error"] = "drifted"
+            result["errors"] = [
+                "finalized tracker note no longer matches restored launcher authority"
+            ]
+            _clear_state(repo_root)
+            return result
+        if supervisor_package.get("tracker_note_text") != authoritative_tracker_note_text:
+            result["status"] = "error"
+            result["step"] = "commit_handoff_tracker_note"
+            result["authority_error"] = "drifted"
+            result["errors"] = [
+                "supervisor package tracker note no longer matches restored launcher authority"
+            ]
+            _clear_state(repo_root)
+            return result
+        if finalized_tracker_note_scope != wave_owned_files:
+            result["status"] = "error"
+            result["step"] = "commit_handoff_tracker_note_scope"
+            result["authority_error"] = "drifted"
+            result["errors"] = [
+                "final commit handoff scope drifted after restored launcher tracker verification"
+            ]
+            _clear_state(repo_root)
+            return result
+        handoff_tracker_verify_error = _verify_phase_b_pre_supervisor_tracker_note(
+            repo_root,
+            wave_id=wave_id,
+            expected_note_text=authoritative_tracker_note_text,
+            changed_files=wave_owned_files,
+        )
+        if handoff_tracker_verify_error is not None:
+            result["status"] = "error"
+            result["step"] = "commit_handoff_tracker_note"
+            result["authority_error"] = "drifted"
+            result["errors"] = [handoff_tracker_verify_error]
+            _clear_state(repo_root)
+            return result
+        tracker_note_text = authoritative_tracker_note_text
+    else:
+        tracker_note_text = build_phase_b_tracker_note(
+            wave_id=wave_id,
+            task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            plan_path=plan_path,
+            plan_content=plan.get("content", ""),
+            changed_files=wave_owned_files,
+            test_files=handoff_test_files,
+            receipt_path=receipt_path,
+            bridge_rounds=_bridge_rounds_for_tracker_note(handoff_bridge_status),
+            reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
+            founder_override=plan.get("founder_override", ""),
+            unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+            unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
+        )
     handoff_scope_items = list(dict.fromkeys([plan_path, *handoff_staged_deletions]))
     log(
         "Preparing commit handoff "
