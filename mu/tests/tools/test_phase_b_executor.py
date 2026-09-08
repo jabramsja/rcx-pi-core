@@ -1521,13 +1521,17 @@ class TestPrepareCommitHandoff:
         wave_id = "builder-refresh-2026-05-25"
         plan_rel = f"reports/control_plane/{wave_id}.md"
         receipt_rel = ".agent_bus/meta/pre_commit_receipts/r.json"
+        evidence_command = (
+            "PYTHONHASHSEED=0  python3 -m pytest -x --tb=short "
+            "mu/tests/tools/test_phase_b_executor.py"
+        )
         (repo / "reports" / "control_plane").mkdir(parents=True, exist_ok=True)
         (repo / ".agent_bus" / "meta" / "pre_commit_receipts").mkdir(parents=True, exist_ok=True)
         (repo / plan_rel).write_text(
             "\n".join([
                 "Task: [NEXT-CODEX-POST-REDTEAM]",
                 f"Wave ID: {wave_id}",
-                "Wave Class: MAINTENANCE",
+                "Wave Class: L4_ENABLER",
                 "Target Gate: G8",
                 "Phase-A-Lock: LOCKED",
                 "Status: ACTIVE",
@@ -1535,6 +1539,10 @@ class TestPrepareCommitHandoff:
                 "May stage exactly:",
                 "- `TASKS.md`",
                 f"- `{plan_rel}`",
+                "",
+                "## Validation gates",
+                "",
+                f"- evidence_command: `{evidence_command}`",
                 "",
             ]),
             encoding="utf-8",
@@ -1630,6 +1638,10 @@ class TestPrepareCommitHandoff:
         assert "TASKS.md" in handoff["files_to_stage"]
         assert "UNRELATED.md" not in handoff["files_to_stage"]
         assert "UNRELATED.md" not in handoff["tracker_note_text"]
+        assert (
+            pb_mod._tracker_evidence_command_value(handoff["tracker_note_text"])  # ANTICHEAT_OK: exact receipt-backed reconstruction evidence assertion
+            == evidence_command
+        )
 
     def test_tracker_note_text_in_handoff(self, tmp_path):
         tracker_note_text = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
@@ -1803,6 +1815,140 @@ class TestPrepareCommitHandoff:
         assert "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short" in note
         assert "indicator_artifact_ref: reports/l4_wave_indicators/pipeline-test-run-2026-03-25.json" in note
         assert "progress_proof_after: Phase B emitted a commit-ready handoff for pipeline-test-run-2026-03-25" in note
+
+    def test_locked_l4_enabler_packet_command_overrides_changed_test_inference(self):
+        wave_id = "phase-b-explicit-evidence-command-2026-09-08"
+        evidence_command = (
+            "PYTHONHASHSEED=0  python3 -m pytest -x --tb=short "
+            "mu/tests/tools/test_phase_b_executor.py"
+        )
+        plan = {
+            "path": f"reports/control_plane/{wave_id}.md",
+            "phase_a_lock": "LOCKED",
+            "content": (
+                "# Plan\n"
+                "Task: [PIPELINE-RECOVERY]\n"
+                f"Wave ID: {wave_id}\n"
+                "Phase-A-Lock: LOCKED\n\n"
+                "## Validation gates\n\n"
+                f"- evidence_command: `{evidence_command}`\n"
+            ),
+        }
+
+        resolved = pb_mod._resolve_locked_l4_enabler_packet_evidence_command(  # ANTICHEAT_OK: exact locked-packet evidence authority
+            plan,
+            wave_id=wave_id,
+            wave_class="L4_ENABLER",
+        )
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id=wave_id,
+            task_id="[PIPELINE-RECOVERY]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path=plan["path"],
+            plan_content=plan["content"],
+            changed_files=["mu/tests/tools/test_other.py"],
+            test_files=["mu/tests/tools/test_other.py"],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            packet_evidence_command=resolved,
+        )
+
+        assert resolved == evidence_command
+        assert pb_mod._tracker_evidence_command_value(note) == evidence_command  # ANTICHEAT_OK: exact tracker evidence assertion
+
+    def test_locked_l4_enabler_packet_command_conflict_fails_closed(self):
+        wave_id = "phase-b-ambiguous-evidence-command-2026-09-08"
+        plan = {
+            "path": f"reports/control_plane/{wave_id}.md",
+            "phase_a_lock": "LOCKED",
+            "content": (
+                "# Plan\n"
+                "Task: [PIPELINE-RECOVERY]\n"
+                f"Wave ID: {wave_id}\n"
+                "Phase-A-Lock: LOCKED\n\n"
+                "## Validation gates\n\n"
+                "- evidence_command: `python3 -m pytest mu/tests/tools/test_one.py`\n"
+                "- evidence_command: `python3 -m pytest mu/tests/tools/test_two.py`\n"
+            ),
+        }
+
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="conflicting explicit evidence_command"):
+            pb_mod._resolve_locked_l4_enabler_packet_evidence_command(  # ANTICHEAT_OK: ambiguity must fail at the packet authority seam
+                plan,
+                wave_id=wave_id,
+                wave_class="L4_ENABLER",
+            )
+
+    def test_packet_absent_and_command_absent_keep_changed_test_inference(self):
+        wave_id = "phase-b-legacy-evidence-inference-2026-09-08"
+        planless = {"phase_a_lock": "ROUTING_RECORD_AUTHORITY", "content": ""}
+        locked_without_command = {
+            "phase_a_lock": "LOCKED",
+            "content": (
+                "# Plan\n"
+                "Task: [PIPELINE-RECOVERY]\n"
+                f"Wave ID: {wave_id}\n"
+                "Phase-A-Lock: LOCKED\n"
+            ),
+        }
+
+        for plan in (planless, locked_without_command):
+            assert pb_mod._resolve_locked_l4_enabler_packet_evidence_command(  # ANTICHEAT_OK: legacy packet fallback authority
+                plan,
+                wave_id=wave_id,
+                wave_class="L4_ENABLER",
+            ) is None
+
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id=wave_id,
+            task_id="[PIPELINE-RECOVERY]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path="<routing-record>",
+            changed_files=["mu/tests/tools/test_legacy.py"],
+            test_files=["mu/tests/tools/test_legacy.py"],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=0,
+            reentry=False,
+        )
+
+        assert pb_mod._tracker_evidence_command_value(note) == (  # ANTICHEAT_OK: legacy inferred tracker evidence assertion
+            "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            "mu/tests/tools/test_legacy.py"
+        )
+
+    @pytest.mark.parametrize(
+        ("wave_class", "changed_files"),
+        [
+            ("MAINTENANCE", ["mu/tools/executors/phase_b_executor.py"]),
+            ("L4_STRUCTURAL", ["mu/host/kernel.py"]),
+        ],
+    )
+    def test_packet_command_does_not_override_non_l4_enabler_classes(
+        self,
+        wave_class,
+        changed_files,
+    ):
+        explicit_command = "python3 -m pytest mu/tests/tools/test_explicit.py"
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="phase-b-class-isolation-2026-09-08",
+            task_id="[PIPELINE-RECOVERY]",
+            wave_class=wave_class,
+            target_gate_id="G8",
+            plan_path="reports/control_plane/plan.md",
+            changed_files=changed_files,
+            test_files=["mu/tests/tools/test_inferred.py"],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            packet_evidence_command=explicit_command,
+        )
+
+        actual_command = pb_mod._tracker_evidence_command_value(note)  # ANTICHEAT_OK: class-isolated tracker evidence assertion
+        assert actual_command != explicit_command
+        assert "mu/tests/tools/test_inferred.py" in actual_command
 
     def test_build_phase_b_tracker_note_threads_scope_refs_and_non_scope_boundary(self):
         wave_id = "fixpoint-meta-circular-evaluator-as-structure-the-meta-circularity-payoff"
@@ -3059,6 +3205,10 @@ class TestMaintenanceTrackerMetadataPropagation:
         wave_id = "phase-b-reentry-indicator-scope-2026-05-03"
         plan_path = "reports/control_plane/plan.md"
         plan = repo / plan_path
+        evidence_command = (
+            "PYTHONHASHSEED=0  python3 -m pytest -x --tb=short "
+            "mu/tests/tools/test_phase_b_executor.py"
+        )
         plan.write_text(
             "# Plan\n"
             f"Wave ID: {wave_id}\n"
@@ -3070,7 +3220,9 @@ class TestMaintenanceTrackerMetadataPropagation:
             "Manual repair grounding: dispatcher previously exited after six Phase B bridge rounds.\n\n"
             "## Scope\n\n"
             "No indicator file is in scope for this Phase A packet because the reviewer evidence "
-            "does not name one.\n",
+            "does not name one.\n\n"
+            "## Validation gates\n\n"
+            f"- evidence_command: `{evidence_command}`\n",
             encoding="utf-8",
         )
 
@@ -3151,6 +3303,12 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert result["status"] == "commit_ready", result
         assert mock_indicator.call_count == 1
         assert len(captured_packages) == 3
+        for package in captured_packages:
+            assert package["evidence_command"] == evidence_command
+            assert (
+                pb_mod._tracker_evidence_command_value(package["tracker_note_text"])  # ANTICHEAT_OK: normal/re-entry package evidence identity
+                == evidence_command
+            )
         reentry_package = captured_packages[-1]
         assert indicator_path in reentry_package["changed_files"]
         assert indicator_path in reentry_package["scope_items"]
@@ -3160,6 +3318,7 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert "bridge rounds=6" in tasks_text
         tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
         assert "bridge rounds=6" in tracker_note_text
+        assert pb_mod._tracker_evidence_command_value(tracker_note_text) == evidence_command  # ANTICHEAT_OK: final serialized handoff evidence identity
         packet_text = plan.read_text(encoding="utf-8")
         assert "Phase B Indicator Scope Reconciliation" in packet_text
         assert indicator_path in packet_text
@@ -16872,6 +17031,11 @@ class TestLaunchTrackerRestoreCapability:
                  "build_phase_b_tracker_note",
                  side_effect=AssertionError("restored authority must not call the generic builder"),
              ) as generic_builder, \
+             patch.object(
+                 pb_mod,
+                 "_resolve_locked_l4_enabler_packet_evidence_command",
+                 side_effect=AssertionError("restored authority must not call the generic packet resolver"),
+             ) as generic_resolver, \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor), \
              patch.object(pb_mod, "prepare_commit_handoff", side_effect=handoff):
             result = pb_mod.run_phase_b(
@@ -16904,6 +17068,7 @@ class TestLaunchTrackerRestoreCapability:
         assert fixture["evidence_command"] in fixture["packet"]
         assert fixture["evidence_command"] in expected_note
         generic_builder.assert_not_called()
+        generic_resolver.assert_not_called()
         self._assert_tracker_restored(fixture)
 
     def test_restored_terminal_receipt_prevents_second_consumption(self, tmp_path):
