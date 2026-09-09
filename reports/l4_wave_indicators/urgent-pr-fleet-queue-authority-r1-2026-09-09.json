@@ -1,0 +1,25 @@
+{
+  "wave_id": "urgent-pr-fleet-queue-authority-r1-2026-09-09",
+  "repeat_run_speedup_ratio": 2.028603,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.251999,
+  "repeat_run_raw_seconds": [
+    0.511206,
+    0.251999
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.511206
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.763205
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-09T19:31:22Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "be56521bde9a6453a14399d0f46f0c74d12bf043"
+}
