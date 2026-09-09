@@ -13,6 +13,7 @@ Covers:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -10899,7 +10900,8 @@ class TestValidationRunsMechanically:
 
         def wave_owned_side(*_a, **_kw):
             wave_owned_calls[0] += 1
-            if wave_owned_calls[0] <= 2:
+            # Calls 3-4 are the two mandatory pre-actor authority checks.
+            if wave_owned_calls[0] <= 4:
                 return ["mu/tests/tools/test_baseline.py"]
             return ["mu/tools/observability/_pane_prci.sh"]
 
@@ -10958,7 +10960,8 @@ class TestValidationRunsMechanically:
 
         def wave_owned_side(*_a, **_kw):
             wave_owned_calls[0] += 1
-            if wave_owned_calls[0] <= 2:
+            # Calls 3-4 are the two mandatory pre-actor authority checks.
+            if wave_owned_calls[0] <= 4:
                 return ["mu/tests/tools/test_baseline.py"]
             return ["mu/tools/observability/_pane_prci.sh"]
 
@@ -11031,9 +11034,10 @@ class TestValidationRunsMechanically:
 
         def wave_owned_side(*_a, **_kw):
             wave_owned_calls[0] += 1
-            if wave_owned_calls[0] <= 2:
+            # Calls 3-4 are the two mandatory pre-actor authority checks.
+            if wave_owned_calls[0] <= 4:
                 return ["mu/tests/tools/test_existing.py"]
-            if wave_owned_calls[0] == 3:
+            if wave_owned_calls[0] == 5:
                 return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
             return ["mu/tools/observability/_pane_prci.sh"]
 
@@ -11315,55 +11319,224 @@ class TestStatePersistence:
 class TestBridgeFixPendingResume:
     """Initial bridge-fix checkpoints must survive crashes between review and fix."""
 
-    def test_request_changes_checkpoints_before_fix_implementer(self, tmp_path):
+    @staticmethod
+    def _write_repo(tmp_path: Path) -> tuple[Path, str]:
         repo = tmp_path / "repo"
         repo.mkdir()
+        plan_path = "reports/control_plane/plan.md"
         (repo / "reports" / "control_plane").mkdir(parents=True)
-        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        (repo / plan_path).write_text(
+            "# Plan\nPhase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        (repo / "f.py").write_text("VALUE = 1\n", encoding="utf-8")
+        return repo, plan_path
 
+    @staticmethod
+    def _state_path(repo: Path) -> Path:
+        return repo / ".agent_bus" / "executors" / "phase_b_state.json"
+
+    def _produce_pending(
+        self,
+        repo: Path,
+        plan_path: str,
+        *,
+        learning_context: str = "ORIGINAL LEARNING",
+    ) -> tuple[dict[str, Any], MagicMock]:
         mock_impl = _make_mock_impl()
         impl_success = dict(mock_impl.invoke_implementer.return_value)
         mock_impl.invoke_implementer.side_effect = [
             impl_success,
             RuntimeError("Simulated crash before bridge fix implementer completes"),
         ]
+        mock_impl.build_implementation_prompt.side_effect = (
+            lambda source, **kwargs: (
+                f"PROMPT\nLEARNING={kwargs['learning_context']}\nSOURCE={source}"
+            )
+        )
+        learning_loader = MagicMock(return_value=learning_context)
 
-        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
-             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+        with patch.dict(
+            sys.modules,
+            {
+                "phase_b_implementer": mock_impl,
+                "recovery_gate": SimpleNamespace(
+                    load_relevant_learnings=learning_loader,
+                ),
+            },
+        ), patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", return_value={
-                 "exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "",
-                 "decision": "REQUEST_CHANGES", "job_id": "phase-b-r1-test",
+                 "exit_code": 1,
+                 "stdout": "REQUEST_CHANGES\nFix the blocker from round 1\n",
+                 "stderr": "",
+                 "decision": "REQUEST_CHANGES",
+                 "job_id": "phase-b-r1-test",
              }), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
              patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
             with pytest.raises(RuntimeError, match="Simulated crash"):
-                pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+                pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
 
-        state = pb_mod._load_state(repo)  # ANTICHEAT_OK: testing internal executor functions
-        assert state is not None
+        state = json.loads(self._state_path(repo).read_text(encoding="utf-8"))
+        return state, mock_impl
+
+    @staticmethod
+    def _rehash_authority(state: dict[str, Any]) -> None:
+        authority = state["bridge_fix_plan_authority"]
+        authority_without_digest = {
+            key: value
+            for key, value in authority.items()
+            if key != "authority_sha256"
+        }
+        authority["authority_sha256"] = hashlib.sha256(
+            json.dumps(
+                authority_without_digest,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        state["bridge_fix_expected_authority_sha256"] = authority["authority_sha256"]
+
+    def test_request_changes_checkpoints_before_fix_implementer(self, tmp_path):
+        repo, plan_path = self._write_repo(tmp_path)
+        state, mock_impl = self._produce_pending(repo, plan_path)
+
         assert state["completed_step"] == "bridge_fix_pending"
         assert state["current_bridge_round"] == 1
         assert state["bridge_decision"] == "REQUEST_CHANGES"
         assert state["bridge_fix_findings"]
+        authority = state["bridge_fix_plan_authority"]
+        assert authority["version"] == 1
+        assert authority["prompt"] == mock_impl.invoke_implementer.call_args_list[1].args[1]
+        assert authority["prompt_sha256"] == hashlib.sha256(
+            authority["prompt"].encode("utf-8")
+        ).hexdigest()
+        assert state["bridge_fix_expected_authority_sha256"] == authority["authority_sha256"]
+        assert state["bridge_fix_checkpoint_id"] == authority["checkpoint_id"]
+        assert state["bridge_fix_pre_actor_scope_files"] == authority["pre_actor_scope_files"]
 
-    def test_resume_from_bridge_fix_pending_invokes_fix_then_resumes_next_round(self, tmp_path):
+    def test_real_pre_review_packet_refresh_seals_live_plan_and_resumes_once(
+        self,
+        tmp_path,
+        real_pre_review_package,
+    ):
         repo = tmp_path / "repo"
         repo.mkdir()
-        (repo / "reports" / "control_plane").mkdir(parents=True)
-        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        wave_id = "phase-b-live-packet-bridge-fix-authority-2026-09-08"
+        plan_path, indicator_path = _write_pre_review_plan(repo, wave_id)
+        _write_canonical_tasks(repo, wave_id)
+        (repo / "f.py").write_text("VALUE = 1\n", encoding="utf-8")
+        indicator = repo / indicator_path
+        indicator.parent.mkdir(parents=True)
+        indicator.write_text('{"wave_id":"seed"}\n', encoding="utf-8")
+        initial_plan = (repo / plan_path).read_text(encoding="utf-8")
+        _init_git_repo(repo)
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "base"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "-b", f"jabramsja/{wave_id}"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        (repo / "f.py").write_text("VALUE = 2\n", encoding="utf-8")
 
-        pb_mod._save_state(repo, {  # ANTICHEAT_OK: testing internal executor functions
-            "plan_path": "reports/control_plane/plan.md",
-            "completed_step": "bridge_fix_pending",
-            "wave_id": "plan",
-            "bridge_rounds": 1,
-            "current_bridge_round": 1,
-            "bridge_decision": "REQUEST_CHANGES",
-            "bridge_fix_findings": "Fix the blocker from round 1",
-            "deferred_packet_path": "reports/deferred/non_blocking/plan_bridge_nonblockers.md",
-        })
+        scope_files = ["TASKS.md", "f.py", plan_path, indicator_path]
+        first_impl = _make_mock_impl()
+        impl_success = dict(first_impl.invoke_implementer.return_value)
+        first_impl.invoke_implementer.side_effect = [
+            impl_success,
+            RuntimeError("Simulated crash after live packet refresh"),
+        ]
+        first_impl.build_implementation_prompt.side_effect = (
+            lambda source, **_kwargs: source
+        )
+        learning_loader = MagicMock(return_value="CURRENT LEARNING")
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": first_impl,
+                 "recovery_gate": SimpleNamespace(
+                     load_relevant_learnings=learning_loader,
+                 ),
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=scope_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=scope_files), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={
+                 "exit_code": 0,
+                 "stdout": "",
+                 "stderr": "",
+             }), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", return_value=(
+                 indicator_path,
+                 None,
+             )), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 1,
+                 "stdout": "REQUEST_CHANGES\nFix the reviewed blocker\n",
+                 "stderr": "",
+                 "decision": "REQUEST_CHANGES",
+                 "job_id": "phase-b-r1-live-packet",
+             }), \
+             patch.object(pb_mod, "load_routing_record", return_value={
+                 **_VALID_ROUTING_RECORD,
+                 "task_id": "[PIPELINE-RECOVERY]",
+             }):
+            with pytest.raises(RuntimeError, match="after live packet refresh"):
+                pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        state_path = self._state_path(repo)
+        pending_state = json.loads(state_path.read_text(encoding="utf-8"))
+        authority = pending_state["bridge_fix_plan_authority"]
+        live_plan = (repo / plan_path).read_text(encoding="utf-8")
+        assert live_plan != initial_plan
+        assert pb_mod.PHASE_B_INDICATOR_SCOPE_REFRESH_START in live_plan
+        assert authority["identity"]["plan_sha256"] == hashlib.sha256(
+            live_plan.encode("utf-8")
+        ).hexdigest()
+        assert live_plan in authority["prompt"]
+        assert first_impl.invoke_implementer.call_args_list[1].args[1] == authority["prompt"]
+
+        resumed_impl = _make_mock_impl()
+        resumed_learning = MagicMock(return_value="DRIFTED LEARNING")
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": resumed_impl,
+                 "recovery_gate": SimpleNamespace(
+                     load_relevant_learnings=resumed_learning,
+                 ),
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=scope_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=scope_files), \
+             patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact", return_value=(
+                 indicator_path,
+                 None,
+             )), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=KeyboardInterrupt), \
+             patch.object(pb_mod, "load_routing_record", return_value={
+                 **_VALID_ROUTING_RECORD,
+                 "task_id": "[PIPELINE-RECOVERY]",
+             }):
+            with pytest.raises(KeyboardInterrupt):
+                pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        resumed_impl.invoke_implementer.assert_called_once()
+        assert resumed_impl.invoke_implementer.call_args.args[1] == authority["prompt"]
+        resumed_impl.build_implementation_prompt.assert_not_called()
+        resumed_learning.assert_not_called()
+        resumed_state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert resumed_state["completed_step"] == "bridge_round_1"
+
+    def test_resume_from_bridge_fix_pending_invokes_fix_then_resumes_next_round(self, tmp_path):
+        repo, plan_path = self._write_repo(tmp_path)
+        pending_state, _ = self._produce_pending(repo, plan_path)
+        sealed_prompt = pending_state["bridge_fix_plan_authority"]["prompt"]
 
         mock_impl = _make_mock_impl()
         bridge_calls: list[str] = []
@@ -11378,7 +11551,11 @@ class TestBridgeFixPendingResume:
                 "job_id": kwargs.get("job_id", "phase-b-r2-test"),
             }
 
-        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+        recovery_learning = MagicMock(return_value="DRIFTED RECOVERY LEARNING")
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": mock_impl,
+                 "recovery_gate": SimpleNamespace(load_relevant_learnings=recovery_learning),
+             }), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
@@ -11390,12 +11567,320 @@ class TestBridgeFixPendingResume:
                  "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
              }), \
              patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
-            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
 
         assert result.get("resumed_from") == "bridge_fix_pending"
         assert result["status"] == "commit_ready"
         assert mock_impl.invoke_implementer.call_count == 1
+        assert mock_impl.invoke_implementer.call_args.args[1] == sealed_prompt
+        mock_impl.build_implementation_prompt.assert_not_called()
+        recovery_learning.assert_not_called()
         assert bridge_calls and any("phase-b-r2-" in job_id for job_id in bridge_calls)
+
+    def test_pending_scope_drift_is_actor_free_and_preserves_checkpoint(self, tmp_path):
+        repo, plan_path = self._write_repo(tmp_path)
+        self._produce_pending(repo, plan_path)
+        state_path = self._state_path(repo)
+        pending_bytes = state_path.read_bytes()
+        (repo / "f.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+        mock_impl = _make_mock_impl()
+        bridge_mock = MagicMock()
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": mock_impl,
+                 "recovery_gate": SimpleNamespace(load_relevant_learnings=MagicMock()),
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_bridge_review", bridge_mock), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "bridge_fix_authority"
+        assert result["authority_error"] == "scope_drift"
+        mock_impl.invoke_implementer.assert_not_called()
+        bridge_mock.assert_not_called()
+        assert state_path.read_bytes() == pending_bytes
+
+    @pytest.mark.parametrize(
+        ("field", "malformed_value"),
+        [
+            ("version", True),
+            ("identity", []),
+            ("bridge_decision", {}),
+            ("bridge_findings", []),
+            ("prompt_sha256", "not-a-digest"),
+            ("authority_sha256", ["not", "a", "digest"]),
+        ],
+    )
+    def test_malformed_pending_authority_types_are_actor_free(
+        self,
+        tmp_path,
+        field,
+        malformed_value,
+    ):
+        repo, plan_path = self._write_repo(tmp_path)
+        state, _ = self._produce_pending(repo, plan_path)
+        state["bridge_fix_plan_authority"][field] = malformed_value
+        state_path = self._state_path(repo)
+        state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        malformed_bytes = state_path.read_bytes()
+
+        mock_impl = _make_mock_impl()
+        bridge_mock = MagicMock()
+        routing_mock = MagicMock(return_value=_VALID_ROUTING_RECORD.copy())
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", routing_mock), \
+             patch.object(pb_mod, "run_bridge_review", bridge_mock):
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "load_state"
+        assert result["state_error"] == "bridge_fix_authority"
+        routing_mock.assert_not_called()
+        mock_impl.invoke_implementer.assert_not_called()
+        bridge_mock.assert_not_called()
+        assert state_path.read_bytes() == malformed_bytes
+
+    @pytest.mark.parametrize("substitution", ["foreign_wave", "foreign_round", "foreign_checkpoint"])
+    def test_self_consistent_foreign_authority_is_rejected_against_independent_context(
+        self,
+        tmp_path,
+        substitution,
+    ):
+        repo, plan_path = self._write_repo(tmp_path)
+        state, _ = self._produce_pending(repo, plan_path)
+        authority = state["bridge_fix_plan_authority"]
+        if substitution == "foreign_wave":
+            authority["identity"]["wave_id"] = "foreign-wave"
+        elif substitution == "foreign_round":
+            authority["round"] += 1
+        else:
+            authority["checkpoint_id"] = "f" * 32
+            authority["checkpoint_transition_identity"] = (
+                "bridge_fix_pending:" + authority["checkpoint_id"]
+            )
+        self._rehash_authority(state)
+        state_path = self._state_path(repo)
+        state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        substituted_bytes = state_path.read_bytes()
+
+        mock_impl = _make_mock_impl()
+        bridge_mock = MagicMock()
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()), \
+             patch.object(pb_mod, "run_bridge_review", bridge_mock):
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "load_state"
+        assert result["state_error"] == "bridge_fix_authority"
+        mock_impl.invoke_implementer.assert_not_called()
+        bridge_mock.assert_not_called()
+        assert state_path.read_bytes() == substituted_bytes
+
+    def test_new_round_after_pending_recovery_loads_current_learning(self, tmp_path):
+        repo, plan_path = self._write_repo(tmp_path)
+        pending_state, _ = self._produce_pending(
+            repo,
+            plan_path,
+            learning_context="ORIGINAL LEARNING",
+        )
+        sealed_prompt = pending_state["bridge_fix_plan_authority"]["prompt"]
+
+        mock_impl = _make_mock_impl()
+        mock_impl.build_implementation_prompt.side_effect = (
+            lambda source, **kwargs: (
+                f"NEW PROMPT\nLEARNING={kwargs['learning_context']}\nSOURCE={source}"
+            )
+        )
+        current_learning = MagicMock(return_value="CURRENT LEARNING")
+        bridge_results = [
+            {
+                "exit_code": 1,
+                "stdout": "REQUEST_CHANGES\nFix the new round blocker\n",
+                "stderr": "",
+                "decision": "REQUEST_CHANGES",
+                "job_id": "phase-b-r2-test",
+            },
+            {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": "phase-b-r3-test",
+            },
+        ]
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": mock_impl,
+                 "recovery_gate": SimpleNamespace(load_relevant_learnings=current_learning),
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_results), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert mock_impl.invoke_implementer.call_count == 2
+        assert mock_impl.invoke_implementer.call_args_list[0].args[1] == sealed_prompt
+        new_prompt = mock_impl.invoke_implementer.call_args_list[1].args[1]
+        assert "CURRENT LEARNING" in new_prompt
+        assert "Bridge Round 2 Findings (REQUEST_CHANGES)" in new_prompt
+        current_learning.assert_called_once()
+        assert mock_impl.build_implementation_prompt.call_count == 1
+
+    def test_sealed_authority_is_identical_in_downstream_resumable_checkpoints(self, tmp_path):
+        repo, plan_path = self._write_repo(tmp_path)
+        pending_state, _ = self._produce_pending(repo, plan_path)
+        sealed_authority = pending_state["bridge_fix_plan_authority"]
+        state_path = self._state_path(repo)
+
+        bridge_round_impl = _make_mock_impl()
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": bridge_round_impl,
+                 "recovery_gate": SimpleNamespace(load_relevant_learnings=MagicMock()),
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=KeyboardInterrupt), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            with pytest.raises(KeyboardInterrupt):
+                pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+        bridge_round_state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert bridge_round_state["completed_step"] == "bridge_round_1"
+        assert bridge_round_state["bridge_fix_plan_authority"] == sealed_authority
+
+        converged_impl = _make_mock_impl()
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": converged_impl,
+                 "recovery_gate": SimpleNamespace(load_relevant_learnings=MagicMock(return_value="later")),
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0,
+                 "stdout": "GO\n",
+                 "stderr": "",
+                 "decision": "GO",
+                 "job_id": "phase-b-r2-test",
+             }), \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=KeyboardInterrupt), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            with pytest.raises(KeyboardInterrupt):
+                pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+        converged_state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert converged_state["completed_step"] == "bridge_converged"
+        assert converged_state["bridge_fix_plan_authority"] == sealed_authority
+
+        reentry_impl = _make_mock_impl()
+        reentry_impl.invoke_implementer.side_effect = KeyboardInterrupt
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": reentry_impl,
+                 "recovery_gate": SimpleNamespace(load_relevant_learnings=MagicMock(return_value="reentry")),
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py", plan_path]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py", plan_path]), \
+             patch.object(pb_mod, "run_bridge_review") as bridge_mock, \
+             patch.object(pb_mod, "run_private_attr_gate", return_value={
+                 "passed": True,
+                 "skipped": True,
+                 "exit_code": 0,
+                 "stdout": "",
+                 "stderr": "",
+                 "test_files": [],
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 1,
+                 "parsed": {
+                     "decision": "NEEDS_PHASE_B",
+                     "summary": "Fix supervisor finding",
+                     "status": "success",
+                     "findings": [],
+                 },
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            with pytest.raises(KeyboardInterrupt):
+                pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+        bridge_mock.assert_not_called()
+        reentry_state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert reentry_state["completed_step"] == "needs_phase_b_reentry"
+        assert reentry_state["bridge_fix_plan_authority"] == sealed_authority
+
+    def test_post_fix_scope_drift_preserves_authority_in_sdk_review_checkpoint(
+        self,
+        tmp_path,
+    ):
+        repo, plan_path = self._write_repo(tmp_path)
+        pending_state, _ = self._produce_pending(repo, plan_path)
+        sealed_authority_fields = {
+            field: pending_state[field]
+            for field in pb_mod.BRIDGE_FIX_AUTHORITY_CARRY_FIELDS
+        }
+        state_path = self._state_path(repo)
+
+        bridge_round_impl = _make_mock_impl()
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": bridge_round_impl,
+                 "recovery_gate": SimpleNamespace(load_relevant_learnings=MagicMock()),
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=KeyboardInterrupt), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            with pytest.raises(KeyboardInterrupt):
+                pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        bridge_round_state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert bridge_round_state["completed_step"] == "bridge_round_1"
+        (repo / "f.py").write_text("VALUE = 2\n", encoding="utf-8")
+        (repo / "mu" / "tools").mkdir(parents=True)
+        (repo / "mu" / "tools" / "drift.py").write_text(
+            "DRIFTED = True\n",
+            encoding="utf-8",
+        )
+        drifted_scope = ["f.py", "mu/tools/drift.py"]
+
+        resumed_impl = _make_mock_impl()
+        sdk_review = MagicMock(return_value={
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+        })
+        with patch.dict(sys.modules, {
+                 "phase_b_implementer": resumed_impl,
+                 "recovery_gate": SimpleNamespace(load_relevant_learnings=MagicMock()),
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=drifted_scope), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=drifted_scope), \
+             patch.object(pb_mod, "run_sdk_agents", sdk_review), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=KeyboardInterrupt), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            with pytest.raises(KeyboardInterrupt):
+                pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        sdk_review.assert_called_once()
+        resumed_impl.invoke_implementer.assert_not_called()
+        sdk_checkpoint = json.loads(state_path.read_text(encoding="utf-8"))
+        assert sdk_checkpoint["completed_step"] == "agent_review"
+        assert {
+            field: sdk_checkpoint[field]
+            for field in pb_mod.BRIDGE_FIX_AUTHORITY_CARRY_FIELDS
+        } == sealed_authority_fields
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -12831,9 +13316,10 @@ class TestPytestFixTracksChangedFiles:
 
         def tracking_collect(*a, **kw):
             wave_owned_calls[0] += 1
-            if wave_owned_calls[0] <= 2:
+            # Calls 3-4 are the two mandatory pre-actor authority checks.
+            if wave_owned_calls[0] <= 4:
                 result = ["mu/tests/tools/test_existing.py"]
-            elif wave_owned_calls[0] == 3:
+            elif wave_owned_calls[0] == 5:
                 result = ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
             else:
                 result = ["mu/tools/executors/new_helper.py"]

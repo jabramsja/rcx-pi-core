@@ -1,0 +1,25 @@
+{
+  "wave_id": "pr1219-p0ibrrco-bridge-fix-replay-r3c5-r2-2026-09-08",
+  "repeat_run_speedup_ratio": 1.194736,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.250893,
+  "repeat_run_raw_seconds": [
+    0.299751,
+    0.250893
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.299751
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.550644
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-09T03:30:48Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "f3adf70019a780f2819addd5b4e1e986ea29fced"
+}

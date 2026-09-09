@@ -863,9 +863,10 @@ def _checkpoint_bridge_fix_pending(
     baseline_wave_files: set[str],
     all_non_blocking: list[dict[str, Any]],
     finding_history: dict[str, int],
+    bridge_fix_authority_fields: dict[str, Any],
 ) -> None:
     """Persist the exact pre-fix bridge state so crash-resume can continue honestly."""
-    _save_state(repo_root, {
+    checkpoint = {
         "plan_path": plan_path,
         "completed_step": "bridge_fix_pending",
         "wave_id": wave_id,
@@ -880,7 +881,9 @@ def _checkpoint_bridge_fix_pending(
         "baseline_wave_files": sorted(baseline_wave_files),
         "all_non_blocking": all_non_blocking,
         "finding_history": finding_history,
-    })
+    }
+    checkpoint.update(bridge_fix_authority_fields)
+    _save_state(repo_root, checkpoint)
 
 
 def _supervisor_reason_text(parsed: dict[str, Any]) -> str:
@@ -2040,6 +2043,48 @@ def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 100
 STATE_FILE_NAME = "phase_b_state.json"
 BRANCH_STASH_STATE_FILE_NAME = "phase_b_branch_stash.json"
 LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME = "phase_b_launch_tracker_restore_v1.json"
+BRIDGE_FIX_PLAN_AUTHORITY_VERSION = 1
+BRIDGE_FIX_PLAN_AUTHORITY_KIND = "ordinary_bridge_fix"
+BRIDGE_FIX_UNAVAILABLE_COMMIT = "0" * 64
+BRIDGE_FIX_PLAN_AUTHORITY_FIELDS = frozenset({
+    "version",
+    "kind",
+    "identity",
+    "round",
+    "bridge_decision",
+    "bridge_findings",
+    "bridge_findings_sha256",
+    "review_transition_identity",
+    "checkpoint_id",
+    "checkpoint_transition_identity",
+    "prompt",
+    "prompt_sha256",
+    "pre_actor_scope_files",
+    "pre_actor_scope_fingerprint",
+    "authority_sha256",
+})
+BRIDGE_FIX_PLAN_IDENTITY_FIELDS = frozenset({
+    "wave_id",
+    "task_id",
+    "base_commit",
+    "comparison_commit",
+    "plan_path",
+    "plan_sha256",
+})
+BRIDGE_FIX_AUTHORITY_CARRY_FIELDS = (
+    "bridge_fix_plan_authority",
+    "bridge_fix_checkpoint_id",
+    "bridge_fix_checkpoint_transition_identity",
+    "bridge_fix_review_transition_identity",
+    "bridge_fix_expected_authority_sha256",
+    "bridge_fix_task_id",
+    "bridge_fix_base_commit",
+    "bridge_fix_comparison_commit",
+    "bridge_fix_plan_sha256",
+    "bridge_fix_findings_sha256",
+    "bridge_fix_pre_actor_scope_files",
+    "bridge_fix_pre_actor_scope_fingerprint",
+)
 LAUNCH_TRACKER_RESTORE_STATE_VERSION = 1
 LAUNCH_TRACKER_RESTORE_MARKER = (
     "Phase-B-Launch-Tracker-Restore: "
@@ -2734,6 +2779,209 @@ def _valid_state_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _valid_sha256(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _valid_commit_id(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40,64}", value) is not None
+
+
+def _bridge_fix_authority_issue(state: dict[str, Any]) -> tuple[str, str] | None:
+    """Strictly validate a sealed bridge-fix authority and checkpoint anchors."""
+    authority = state.get("bridge_fix_plan_authority")
+    if not isinstance(authority, dict):
+        return "malformed", "bridge_fix_plan_authority must be an object"
+    if set(authority) != BRIDGE_FIX_PLAN_AUTHORITY_FIELDS:
+        return (
+            "malformed",
+            "bridge_fix_plan_authority does not match the version-1 field set",
+        )
+    version = authority.get("version")
+    if not _valid_state_int(version) or version != BRIDGE_FIX_PLAN_AUTHORITY_VERSION:
+        return (
+            "malformed",
+            "bridge_fix_plan_authority version must be integer 1 (boolean is invalid)",
+        )
+    if authority.get("kind") != BRIDGE_FIX_PLAN_AUTHORITY_KIND:
+        return "malformed", "bridge_fix_plan_authority kind is invalid"
+
+    identity = authority.get("identity")
+    if not isinstance(identity, dict):
+        return "malformed", "bridge_fix_plan_authority identity must be an object"
+    if set(identity) != BRIDGE_FIX_PLAN_IDENTITY_FIELDS:
+        return (
+            "malformed",
+            "bridge_fix_plan_authority identity does not match the version-1 field set",
+        )
+    for field in ("wave_id", "task_id", "plan_path"):
+        if not _valid_state_string(identity.get(field)):
+            return "malformed", f"bridge_fix_plan_authority identity.{field} must be non-empty text"
+    for field in ("base_commit", "comparison_commit"):
+        if not _valid_commit_id(identity.get(field)):
+            return "malformed", f"bridge_fix_plan_authority identity.{field} must be a commit id"
+    if not _valid_sha256(identity.get("plan_sha256")):
+        return "malformed", "bridge_fix_plan_authority identity.plan_sha256 must be a SHA-256 digest"
+
+    round_num = authority.get("round")
+    if not _valid_state_int(round_num) or round_num <= 0:
+        return "malformed", "bridge_fix_plan_authority round must be a positive integer"
+    decision = authority.get("bridge_decision")
+    if not isinstance(decision, str) or decision not in {"REQUEST_CHANGES", "NO_GO"}:
+        return (
+            "malformed",
+            "bridge_fix_plan_authority bridge_decision must be REQUEST_CHANGES or NO_GO text",
+        )
+    findings = authority.get("bridge_findings")
+    if not _valid_state_string(findings):
+        return "malformed", "bridge_fix_plan_authority bridge_findings must be non-empty text"
+    prompt = authority.get("prompt")
+    if not _valid_state_string(prompt):
+        return "malformed", "bridge_fix_plan_authority prompt must be non-empty text"
+
+    for field in (
+        "bridge_findings_sha256",
+        "prompt_sha256",
+        "pre_actor_scope_fingerprint",
+        "authority_sha256",
+    ):
+        if not _valid_sha256(authority.get(field)):
+            return "malformed", f"bridge_fix_plan_authority {field} must be a SHA-256 digest"
+    checkpoint_id = authority.get("checkpoint_id")
+    if not isinstance(checkpoint_id, str) or re.fullmatch(r"[0-9a-f]{32}", checkpoint_id) is None:
+        return "malformed", "bridge_fix_plan_authority checkpoint_id must be 32 lowercase hex characters"
+    review_transition = authority.get("review_transition_identity")
+    if not _valid_state_string(review_transition):
+        return "malformed", "bridge_fix_plan_authority review_transition_identity must be non-empty text"
+    checkpoint_transition = authority.get("checkpoint_transition_identity")
+    expected_transition = f"bridge_fix_pending:{checkpoint_id}"
+    if not isinstance(checkpoint_transition, str) or checkpoint_transition != expected_transition:
+        return "malformed", "bridge_fix_plan_authority checkpoint transition identity is invalid"
+
+    scope_files = authority.get("pre_actor_scope_files")
+    if (
+        not isinstance(scope_files, list)
+        or not scope_files
+        or any(not _valid_state_string(path) for path in scope_files)
+        or scope_files != sorted(set(scope_files))
+    ):
+        return (
+            "malformed",
+            "bridge_fix_plan_authority pre_actor_scope_files must be a non-empty sorted unique text list",
+        )
+
+    try:
+        findings_sha256 = _sha256_bytes(findings.encode("utf-8"))
+        prompt_sha256 = _sha256_bytes(prompt.encode("utf-8"))
+        authority_without_digest = {
+            key: value for key, value in authority.items()
+            if key != "authority_sha256"
+        }
+        authority_sha256 = _canonical_json_sha256(authority_without_digest)
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        return "malformed", f"bridge_fix_plan_authority cannot be canonically hashed: {exc}"
+    if authority.get("bridge_findings_sha256") != findings_sha256:
+        return "digest_mismatch", "bridge_fix_plan_authority findings digest is invalid"
+    if authority.get("prompt_sha256") != prompt_sha256:
+        return "digest_mismatch", "bridge_fix_plan_authority prompt digest is invalid"
+    if authority.get("authority_sha256") != authority_sha256:
+        return "digest_mismatch", "bridge_fix_plan_authority self-digest is invalid"
+
+    anchor_types = {
+        "bridge_fix_checkpoint_id": lambda value: (
+            isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value) is not None
+        ),
+        "bridge_fix_checkpoint_transition_identity": _valid_state_string,
+        "bridge_fix_review_transition_identity": _valid_state_string,
+        "bridge_fix_expected_authority_sha256": _valid_sha256,
+        "bridge_fix_task_id": _valid_state_string,
+        "bridge_fix_base_commit": _valid_commit_id,
+        "bridge_fix_comparison_commit": _valid_commit_id,
+        "bridge_fix_plan_sha256": _valid_sha256,
+        "bridge_fix_findings_sha256": _valid_sha256,
+        "bridge_fix_pre_actor_scope_fingerprint": _valid_sha256,
+    }
+    for field, validator in anchor_types.items():
+        if not validator(state.get(field)):
+            return "malformed", f"Phase B checkpoint {field} has an invalid type or value"
+    checkpoint_scope_files = state.get("bridge_fix_pre_actor_scope_files")
+    if (
+        not isinstance(checkpoint_scope_files, list)
+        or any(not _valid_state_string(path) for path in checkpoint_scope_files)
+        or checkpoint_scope_files != sorted(set(checkpoint_scope_files))
+    ):
+        return (
+            "malformed",
+            "Phase B checkpoint bridge_fix_pre_actor_scope_files must be a sorted unique text list",
+        )
+
+    anchor_pairs = (
+        ("bridge_fix_checkpoint_id", checkpoint_id),
+        ("bridge_fix_checkpoint_transition_identity", checkpoint_transition),
+        ("bridge_fix_review_transition_identity", review_transition),
+        ("bridge_fix_expected_authority_sha256", authority.get("authority_sha256")),
+        ("bridge_fix_task_id", identity.get("task_id")),
+        ("bridge_fix_base_commit", identity.get("base_commit")),
+        ("bridge_fix_comparison_commit", identity.get("comparison_commit")),
+        ("bridge_fix_plan_sha256", identity.get("plan_sha256")),
+        ("bridge_fix_findings_sha256", authority.get("bridge_findings_sha256")),
+        ("bridge_fix_pre_actor_scope_files", scope_files),
+        (
+            "bridge_fix_pre_actor_scope_fingerprint",
+            authority.get("pre_actor_scope_fingerprint"),
+        ),
+    )
+    for field, expected in anchor_pairs:
+        if state.get(field) != expected:
+            return (
+                "checkpoint_mismatch",
+                f"bridge_fix_plan_authority does not match independent checkpoint anchor {field}",
+            )
+    return None
+
+
+def _bridge_fix_pending_authority_issue(
+    state: dict[str, Any],
+) -> tuple[str, str] | None:
+    issue = _bridge_fix_authority_issue(state)
+    if issue is not None:
+        return issue
+    authority = state["bridge_fix_plan_authority"]
+    round_num = authority["round"]
+    if state.get("completed_step") != "bridge_fix_pending":
+        return "checkpoint_mismatch", "bridge-fix actor authority requires a PENDING checkpoint"
+    if state.get("bridge_rounds") != round_num or state.get("current_bridge_round") != round_num:
+        return "checkpoint_mismatch", "bridge-fix authority round does not match its enclosing checkpoint"
+    if state.get("bridge_decision") != authority["bridge_decision"]:
+        return "checkpoint_mismatch", "bridge-fix authority decision does not match its enclosing checkpoint"
+    if state.get("bridge_fix_findings") != authority["bridge_findings"]:
+        return "checkpoint_mismatch", "bridge-fix authority findings do not match its enclosing checkpoint"
+    if state.get("bridge_scope_fingerprint") != authority["pre_actor_scope_fingerprint"]:
+        return "checkpoint_mismatch", "bridge-fix authority scope does not match its enclosing checkpoint"
+    return None
+
+
+def _bridge_fix_authority_load_error(
+    state_path: Path,
+    issue: tuple[str, str],
+) -> dict[str, Any]:
+    error_type, detail = issue
+    return _state_load_error(
+        "bridge_fix_authority",
+        "Phase B bridge-fix checkpoint authority is invalid "
+        f"({error_type}): {detail}. Refusing mutable replay from {state_path}.",
+    )
+
+
+def _bridge_fix_authority_carry_fields(state: dict[str, Any]) -> dict[str, Any]:
+    """Return the exact sealed authority and independent anchors for propagation."""
+    return {
+        field: state[field]
+        for field in BRIDGE_FIX_AUTHORITY_CARRY_FIELDS
+        if field in state
+    }
+
+
 def _validate_loaded_state_container(state_path: Path, state: dict[str, Any]) -> dict[str, Any] | None:
     missing: list[str] = []
     if not _valid_state_string(state.get("plan_path")):
@@ -2786,6 +3034,13 @@ def _validate_resumable_state_shape(state_path: Path, state: dict[str, Any]) -> 
                 fields=step_missing,
                 completed_step=completed_step,
             )
+        authority_issue = _bridge_fix_pending_authority_issue(state)
+        if authority_issue is not None:
+            return _bridge_fix_authority_load_error(state_path, authority_issue)
+    elif any(field in state for field in BRIDGE_FIX_AUTHORITY_CARRY_FIELDS):
+        authority_issue = _bridge_fix_authority_issue(state)
+        if authority_issue is not None:
+            return _bridge_fix_authority_load_error(state_path, authority_issue)
     if completed_step in PRIVATE_ATTR_QUESTION_STEPS:
         terminal_result = state.get("terminal_result")
         if not isinstance(terminal_result, dict) or terminal_result.get("status") != "question_for_founder":
@@ -6716,6 +6971,213 @@ def _canonical_json_sha256(value: Any) -> str:
     )
 
 
+def _git_head_commit_or_none(repo_root: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD^{commit}"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    candidate = result.stdout.strip() if result.returncode == 0 else ""
+    return candidate if _valid_commit_id(candidate) else None
+
+
+def _bridge_fix_active_identity(
+    repo_root: Path,
+    *,
+    routing_record: dict[str, Any],
+    plan: dict[str, Any],
+    plan_path: str,
+    wave_id: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve bridge-fix identity from live invocation authority, not checkpoint data."""
+    candidate_required = _candidate_authority_required_from_routing_record(routing_record)
+    metadata = routing_record.get("candidate_authority")
+    spec_identity: dict[str, Any] | None = None
+    if metadata is not None:
+        if not isinstance(metadata, dict):
+            return None, "active-run candidate_authority must be an object"
+        raw_spec_identity = metadata.get("spec_identity")
+        if raw_spec_identity is not None:
+            if not isinstance(raw_spec_identity, dict):
+                return None, "active-run candidate_authority.spec_identity must be an object"
+            spec_identity = raw_spec_identity
+        elif candidate_required:
+            return None, "active-run candidate authority is missing spec_identity"
+    elif candidate_required:
+        return None, "active-run candidate authority metadata is missing"
+
+    def _commit_value(label: str, value: Any) -> tuple[str | None, str | None]:
+        if value is None or value == "":
+            return None, None
+        if not _valid_commit_id(value):
+            return None, f"active-run {label} must be a canonical commit id"
+        return value, None
+
+    comparison_commit: str | None = None
+    comparison_sources = (
+        (
+            "candidate_authority.spec_identity.comparison_commit",
+            spec_identity.get("comparison_commit") if spec_identity is not None else None,
+        ),
+        ("comparison_commit", routing_record.get("comparison_commit")),
+        ("merge_sha", routing_record.get("merge_sha")),
+        ("head_sha", routing_record.get("head_sha")),
+    )
+    for label, raw_value in comparison_sources:
+        candidate, error = _commit_value(label, raw_value)
+        if error is not None:
+            return None, error
+        if candidate is not None:
+            comparison_commit = candidate
+            break
+
+    base_commit: str | None = None
+    for label, raw_value in (
+        ("head_sha", routing_record.get("head_sha")),
+        ("merge_sha", routing_record.get("merge_sha")),
+    ):
+        candidate, error = _commit_value(label, raw_value)
+        if error is not None:
+            return None, error
+        if candidate is not None:
+            base_commit = candidate
+            break
+
+    live_head = _git_head_commit_or_none(repo_root)
+    comparison_commit = comparison_commit or live_head or BRIDGE_FIX_UNAVAILABLE_COMMIT
+    base_commit = base_commit or comparison_commit
+    if candidate_required and comparison_commit == BRIDGE_FIX_UNAVAILABLE_COMMIT:
+        return None, "active-run candidate authority has no comparison commit"
+
+    # Pre-review package preparation may atomically refresh the governing
+    # packet (for example, to reconcile the same-wave L4 indicator scope).
+    # The plan was initially loaded before that boundary, so re-read it for
+    # every bridge-fix identity check.  Updating the shared plan object keeps a
+    # newly constructed prompt and its identity digest bound to the same live
+    # packet bytes.  Re-reading again during _apply_bridge_fix also closes the
+    # interval between sealing and actor invocation instead of trusting this
+    # cache on the validation pass.
+    if plan_path and not plan_path.startswith("<"):
+        try:
+            live_plan = load_plan_packet(repo_root, plan_path)
+        except (PhaseBExecutorError, OSError, RuntimeError, UnicodeError, ValueError) as exc:
+            return None, f"active-run governing plan refresh failed: {exc}"
+        plan_content = live_plan.get("content")
+        plan["content"] = plan_content
+    else:
+        plan_content = plan.get("content")
+    if not isinstance(plan_content, str):
+        return None, "active-run governing plan content must be text"
+    try:
+        plan_sha256 = _sha256_bytes(plan_content.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        return None, f"active-run governing plan cannot be hashed as UTF-8: {exc}"
+    task_id = _phase_b_task_id(routing_record, plan)
+    if not task_id:
+        return None, "active-run task_id must be non-empty text"
+    return {
+        "wave_id": wave_id,
+        "task_id": task_id,
+        "base_commit": base_commit,
+        "comparison_commit": comparison_commit,
+        "plan_path": plan_path,
+        "plan_sha256": plan_sha256,
+    }, None
+
+
+def _build_bridge_fix_authority_fields(
+    repo_root: Path,
+    *,
+    active_identity: dict[str, Any],
+    round_num: int,
+    bridge_decision: str,
+    bridge_findings: str,
+    review_transition_identity: str,
+    prompt: str,
+    scope_files: list[str],
+) -> dict[str, Any]:
+    """Seal exact ordinary bridge-fix input plus independent checkpoint anchors."""
+    if not _valid_state_int(round_num) or round_num <= 0:
+        raise PhaseBExecutorError("bridge-fix authority round must be a positive integer")
+    if bridge_decision not in {"REQUEST_CHANGES", "NO_GO"}:
+        raise PhaseBExecutorError("bridge-fix authority decision must be REQUEST_CHANGES or NO_GO")
+    if not _valid_state_string(bridge_findings):
+        raise PhaseBExecutorError("bridge-fix authority findings must be non-empty text")
+    if not _valid_state_string(review_transition_identity):
+        raise PhaseBExecutorError("bridge-fix review transition identity must be non-empty text")
+    if not _valid_state_string(prompt):
+        raise PhaseBExecutorError("bridge-fix prompt builder must return non-empty text")
+    if set(active_identity) != BRIDGE_FIX_PLAN_IDENTITY_FIELDS:
+        raise PhaseBExecutorError("bridge-fix active identity is incomplete")
+
+    normalized_scope_files = sorted(set(scope_files))
+    if not normalized_scope_files or any(
+        not _valid_state_string(path) for path in normalized_scope_files
+    ):
+        raise PhaseBExecutorError("bridge-fix pre-actor scope must contain canonical text paths")
+    checkpoint_id = uuid.uuid4().hex
+    checkpoint_transition_identity = f"bridge_fix_pending:{checkpoint_id}"
+    findings_sha256 = _sha256_bytes(bridge_findings.encode("utf-8"))
+    prompt_sha256 = _sha256_bytes(prompt.encode("utf-8"))
+    scope_fingerprint = _bridge_scope_fingerprint(repo_root, normalized_scope_files)
+    authority: dict[str, Any] = {
+        "version": BRIDGE_FIX_PLAN_AUTHORITY_VERSION,
+        "kind": BRIDGE_FIX_PLAN_AUTHORITY_KIND,
+        "identity": dict(active_identity),
+        "round": round_num,
+        "bridge_decision": bridge_decision,
+        "bridge_findings": bridge_findings,
+        "bridge_findings_sha256": findings_sha256,
+        "review_transition_identity": review_transition_identity,
+        "checkpoint_id": checkpoint_id,
+        "checkpoint_transition_identity": checkpoint_transition_identity,
+        "prompt": prompt,
+        "prompt_sha256": prompt_sha256,
+        "pre_actor_scope_files": normalized_scope_files,
+        "pre_actor_scope_fingerprint": scope_fingerprint,
+    }
+    authority["authority_sha256"] = _canonical_json_sha256(authority)
+    return {
+        "bridge_fix_plan_authority": authority,
+        "bridge_fix_checkpoint_id": checkpoint_id,
+        "bridge_fix_checkpoint_transition_identity": checkpoint_transition_identity,
+        "bridge_fix_review_transition_identity": review_transition_identity,
+        "bridge_fix_expected_authority_sha256": authority["authority_sha256"],
+        "bridge_fix_task_id": active_identity["task_id"],
+        "bridge_fix_base_commit": active_identity["base_commit"],
+        "bridge_fix_comparison_commit": active_identity["comparison_commit"],
+        "bridge_fix_plan_sha256": active_identity["plan_sha256"],
+        "bridge_fix_findings_sha256": findings_sha256,
+        "bridge_fix_pre_actor_scope_files": normalized_scope_files,
+        "bridge_fix_pre_actor_scope_fingerprint": scope_fingerprint,
+    }
+
+
+def _bridge_fix_active_context_issue(
+    state: dict[str, Any],
+    active_identity: dict[str, Any],
+) -> tuple[str, str] | None:
+    """Bind sealed self-authentication back to independently loaded run truth."""
+    authority = state.get("bridge_fix_plan_authority")
+    if not isinstance(authority, dict) or not isinstance(authority.get("identity"), dict):
+        return "malformed", "bridge-fix authority identity is unavailable"
+    if authority["identity"] != active_identity:
+        return "active_context_mismatch", "bridge-fix authority identity does not match the active run"
+    if state.get("wave_id") != active_identity["wave_id"]:
+        return "active_context_mismatch", "checkpoint wave_id does not match the active run"
+    if state.get("plan_path") != active_identity["plan_path"]:
+        return "active_context_mismatch", "checkpoint plan_path does not match the active run"
+    if state.get("bridge_fix_task_id") != active_identity["task_id"]:
+        return "active_context_mismatch", "checkpoint task_id does not match the active run"
+    if state.get("bridge_fix_base_commit") != active_identity["base_commit"]:
+        return "active_context_mismatch", "checkpoint base commit does not match the active run"
+    if state.get("bridge_fix_comparison_commit") != active_identity["comparison_commit"]:
+        return "active_context_mismatch", "checkpoint comparison commit does not match the active run"
+    return None
+
+
 def _launch_tracker_restore_marker_required(plan_content: str) -> bool:
     """Recognize only the launcher's exact native work-item opt-in.
 
@@ -8537,6 +8999,34 @@ def run_phase_b(
         or plan_path.replace("reports/control_plane/", "").replace(".md", "")
     )
     wave_id = normalize_wave_id(raw_wave_id)
+    if resume_after == "bridge_fix_pending":
+        assert saved_state is not None
+        active_identity, active_identity_error = _bridge_fix_active_identity(
+            repo_root,
+            routing_record=routing_record,
+            plan=plan,
+            plan_path=plan_path,
+            wave_id=wave_id,
+        )
+        if active_identity_error is not None or active_identity is None:
+            issue = (
+                "active_context_mismatch",
+                active_identity_error or "active bridge-fix identity is unavailable",
+            )
+            return _state_load_error_result(
+                _bridge_fix_authority_load_error(_state_file_path(repo_root), issue)
+            )
+        active_context_issue = _bridge_fix_active_context_issue(
+            saved_state,
+            active_identity,
+        )
+        if active_context_issue is not None:
+            return _state_load_error_result(
+                _bridge_fix_authority_load_error(
+                    _state_file_path(repo_root),
+                    active_context_issue,
+                )
+            )
     launch_tracker_restore_session: dict[str, Any] | None = None
     launch_tracker_routing_record: dict[str, Any] | None = None
     try:
@@ -8688,12 +9178,22 @@ def run_phase_b(
             "from this wave-owned scope"
         )
 
-    # Compute learning context once for all implementer invocations
-    learning_context = load_relevant_learnings(
-        "implementer", plan_declared_files or [], repo_root,
-    )
-    if learning_context:
-        log(f"Learning context loaded ({len(learning_context)} chars)")
+    # A recovered PENDING bridge fix must consume only its sealed prompt. Delay
+    # volatile learning reads until a genuinely new prompt is constructed.
+    learning_context: str | None = None
+
+    def _learning_context_for_new_prompt() -> str:
+        nonlocal learning_context
+        if learning_context is None:
+            learning_context = load_relevant_learnings(
+                "implementer", plan_declared_files or [], repo_root,
+            )
+            if learning_context:
+                log(f"Learning context loaded ({len(learning_context)} chars)")
+        return learning_context
+
+    if resume_after != "bridge_fix_pending":
+        _learning_context_for_new_prompt()
 
     # Track implementer-changed files: snapshot before, diff after
     implementer_changed: set[str] = set()
@@ -8720,6 +9220,17 @@ def run_phase_b(
             all_non_blocking = list(saved_state["all_non_blocking"])
         if saved_state.get("finding_history"):
             finding_history = dict(saved_state["finding_history"])
+
+    bridge_fix_authority_fields: dict[str, Any] = {}
+    if saved_state and any(
+        field in saved_state for field in BRIDGE_FIX_AUTHORITY_CARRY_FIELDS
+    ):
+        bridge_fix_authority_fields = _bridge_fix_authority_carry_fields(saved_state)
+
+    def _carry_bridge_fix_authority(state: dict[str, Any]) -> dict[str, Any]:
+        if bridge_fix_authority_fields:
+            state.update(bridge_fix_authority_fields)
+        return state
     # Merge persisted dirty-wave scope with the current repo dirty baseline so
     # late follow-up fixes made after a saved checkpoint are not silently dropped
     # from supervisor packaging on resume.
@@ -8741,7 +9252,7 @@ def run_phase_b(
             repo_root=repo_root,
             wave_id=wave_id,
             scope_hint=f"Fix {bridge_decision} findings from bridge round {round_num}",
-            learning_context=learning_context,
+            learning_context=_learning_context_for_new_prompt(),
         )
 
     def _build_reentry_fix_prompt(bridge_decision: str, findings_for_impl: str) -> str:
@@ -8758,7 +9269,7 @@ def run_phase_b(
             repo_root=repo_root,
             wave_id=wave_id,
             scope_hint="Fix findings from bridge/supervisor review",
-            learning_context=learning_context,
+            learning_context=_learning_context_for_new_prompt(),
         )
 
     def _complete_bridge_fix(
@@ -8831,7 +9342,7 @@ def run_phase_b(
                     repo_root=repo_root,
                     wave_id=wave_id,
                     scope_hint=f"Fix pytest failures from bridge round {round_num}",
-                    learning_context=learning_context,
+                    learning_context=_learning_context_for_new_prompt(),
                 )
                 pre_pytest_fix_files = set(_collect_changed_files(repo_root))
                 pytest_fix_transition = f"round-{round_num}:pytest_fix"
@@ -8918,7 +9429,7 @@ def run_phase_b(
                     baseline_wave_files or None,
                 )
 
-        _save_state(repo_root, {
+        _save_state(repo_root, _carry_bridge_fix_authority({
             "plan_path": plan_path,
             "completed_step": f"bridge_round_{round_num}",
             "wave_id": wave_id,
@@ -8932,13 +9443,111 @@ def run_phase_b(
             "baseline_wave_files": sorted(baseline_wave_files),
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
-        })
+        }))
         return None
 
     def _apply_bridge_fix(round_num: int, bridge_decision: str, findings_for_impl: str) -> dict[str, Any] | None:
-        """Run the post-bridge implementer fix and persist the completed round."""
-        pre_fix_files = set(_collect_changed_files(repo_root))
-        fix_prompt = _build_bridge_fix_prompt(round_num, bridge_decision, findings_for_impl)
+        """Consume only a validated durable PENDING prompt, then persist completion."""
+        nonlocal bridge_fix_authority_fields
+
+        def _authority_failure(issue: tuple[str, str]) -> dict[str, Any]:
+            error_type, detail = issue
+            return {
+                "status": "error",
+                "step": "bridge_fix_authority",
+                "authority_error": error_type,
+                "errors": [
+                    "Phase B bridge-fix actor authority rejected before invocation "
+                    f"({error_type}): {detail}. Durable PENDING checkpoint preserved."
+                ],
+            }
+
+        def _validated_prompt() -> tuple[str | None, dict[str, Any] | None]:
+            nonlocal bridge_fix_authority_fields
+            durable_state = _load_state(repo_root)
+            if durable_state is None:
+                return None, _authority_failure(
+                    ("missing", "durable bridge_fix_pending checkpoint is missing")
+                )
+            if _is_state_load_error(durable_state):
+                return None, _state_load_error_result(durable_state)
+            shape_error = _validate_resumable_state_shape(
+                _state_file_path(repo_root),
+                durable_state,
+            )
+            if shape_error is not None:
+                return None, _state_load_error_result(shape_error)
+            if durable_state.get("completed_step") != "bridge_fix_pending":
+                return None, _authority_failure(
+                    ("checkpoint_mismatch", "durable checkpoint is not bridge_fix_pending")
+                )
+            if (
+                durable_state.get("current_bridge_round") != round_num
+                or durable_state.get("bridge_decision") != bridge_decision
+                or durable_state.get("bridge_fix_findings") != findings_for_impl
+            ):
+                return None, _authority_failure(
+                    (
+                        "checkpoint_mismatch",
+                        "invocation round, decision, or findings do not match the enclosing checkpoint",
+                    )
+                )
+            active_identity, identity_error = _bridge_fix_active_identity(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                wave_id=wave_id,
+            )
+            if identity_error is not None or active_identity is None:
+                return None, _authority_failure(
+                    (
+                        "active_context_mismatch",
+                        identity_error or "active bridge-fix identity is unavailable",
+                    )
+                )
+            context_issue = _bridge_fix_active_context_issue(
+                durable_state,
+                active_identity,
+            )
+            if context_issue is not None:
+                return None, _authority_failure(context_issue)
+
+            live_scope_files = _collect_wave_owned_files(
+                repo_root,
+                plan_path,
+                plan_declared_files,
+                implementer_changed or None,
+                executor_created or None,
+                baseline_wave_files or None,
+            )
+            live_scope_files = sorted(set(_bridge_review_scope_files(live_scope_files)))
+            authority = durable_state["bridge_fix_plan_authority"]
+            sealed_scope_files = authority["pre_actor_scope_files"]
+            if live_scope_files != sealed_scope_files:
+                return None, _authority_failure(
+                    (
+                        "scope_drift",
+                        "live bridge-fix candidate file set differs from the sealed pre-actor set",
+                    )
+                )
+            live_scope_fingerprint = _bridge_scope_fingerprint(repo_root, live_scope_files)
+            if live_scope_fingerprint != authority["pre_actor_scope_fingerprint"]:
+                return None, _authority_failure(
+                    (
+                        "scope_drift",
+                        "live bridge-fix candidate bytes differ from the sealed pre-actor fingerprint",
+                    )
+                )
+            bridge_fix_authority_fields = _bridge_fix_authority_carry_fields(durable_state)
+            return authority["prompt"], None
+
+        # Validate once before emitting actor intent and once immediately before
+        # the call, so neither recovery drift nor pager-side work can interpose
+        # unreviewed candidate bytes.
+        fix_prompt, authority_error = _validated_prompt()
+        if authority_error is not None:
+            return authority_error
         try:
             _emit_phase_b_event(
                 repo_root,
@@ -8957,6 +9566,11 @@ def run_phase_b(
                 "step": "phase_b_pager",
                 "errors": [f"Phase B pager emission failed before bridge-fix implementer: {exc}"],
             }
+        fix_prompt, authority_error = _validated_prompt()
+        if authority_error is not None:
+            return authority_error
+        assert fix_prompt is not None
+        pre_fix_files = set(_collect_changed_files(repo_root))
         fix_result = invoke_implementer(
             repo_root, fix_prompt,
             backend=backend, model_override=model,
@@ -8990,6 +9604,75 @@ def run_phase_b(
             pre_fix_files,
             bridge_decision=bridge_decision,
         )
+
+    def _start_bridge_fix(
+        round_num: int,
+        bridge_decision: str,
+        findings_for_impl: str,
+        scope_files: list[str],
+        *,
+        review_transition_identity: str,
+    ) -> dict[str, Any] | None:
+        """Build one new prompt, seal it in PENDING, then consume that checkpoint."""
+        nonlocal bridge_fix_authority_fields
+        active_identity, identity_error = _bridge_fix_active_identity(
+            repo_root,
+            routing_record=routing_record,
+            plan=plan,
+            plan_path=plan_path,
+            wave_id=wave_id,
+        )
+        if identity_error is not None or active_identity is None:
+            return {
+                "status": "error",
+                "step": "bridge_fix_authority",
+                "authority_error": "active_context_mismatch",
+                "errors": [
+                    "Cannot seal Phase B bridge-fix authority: "
+                    + (identity_error or "active bridge-fix identity is unavailable")
+                ],
+            }
+        sealed_scope_files = sorted(set(_bridge_review_scope_files(scope_files)))
+        fix_prompt = _build_bridge_fix_prompt(
+            round_num,
+            bridge_decision,
+            findings_for_impl,
+        )
+        try:
+            bridge_fix_authority_fields = _build_bridge_fix_authority_fields(
+                repo_root,
+                active_identity=active_identity,
+                round_num=round_num,
+                bridge_decision=bridge_decision,
+                bridge_findings=findings_for_impl,
+                review_transition_identity=review_transition_identity,
+                prompt=fix_prompt,
+                scope_files=sealed_scope_files,
+            )
+        except (PhaseBExecutorError, TypeError, ValueError, UnicodeEncodeError) as exc:
+            return {
+                "status": "error",
+                "step": "bridge_fix_authority",
+                "authority_error": "malformed",
+                "errors": [f"Cannot seal Phase B bridge-fix authority: {exc}"],
+            }
+        _checkpoint_bridge_fix_pending(
+            repo_root,
+            plan_path=plan_path,
+            wave_id=wave_id,
+            round_num=round_num,
+            bridge_decision=bridge_decision,
+            bridge_fix_findings=findings_for_impl,
+            changed_files=sealed_scope_files,
+            deferred_packet_path=deferred_packet_path,
+            implementer_changed=implementer_changed,
+            executor_created=executor_created,
+            baseline_wave_files=baseline_wave_files,
+            all_non_blocking=all_non_blocking,
+            finding_history=finding_history,
+            bridge_fix_authority_fields=bridge_fix_authority_fields,
+        )
+        return _apply_bridge_fix(round_num, bridge_decision, findings_for_impl)
 
     def _complete_reentry_fix(
         impl_result: dict[str, Any],
@@ -9026,7 +9709,7 @@ def run_phase_b(
             f"Re-entry changed files: {len(changed_files)} "
             f"(implementer touched {len(post_reentry_files - pre_reentry_files)})"
         )
-        _save_state(repo_root, {
+        _save_state(repo_root, _carry_bridge_fix_authority({
             "plan_path": plan_path,
             "completed_step": "needs_phase_b_reentry",
             "wave_id": wave_id,
@@ -9042,7 +9725,7 @@ def run_phase_b(
             "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
             "skip_reentry_implementer_once": True,
             "pending_reentry_bridge_round": pending_bridge_round,
-        })
+        }))
         log("Re-entry: checkpointed implemented fixes before bridge review")
         return None
 
@@ -9076,7 +9759,7 @@ def run_phase_b(
     ) -> list[str]:
         """Checkpoint private-attr remediation before the required fresh review."""
         scoped_files = _bridge_review_scope_files(candidate_files)
-        _save_state(repo_root, {
+        _save_state(repo_root, _carry_bridge_fix_authority({
             "plan_path": plan_path,
             "completed_step": _private_attr_pending_review_step(reentry=reentry),
             "wave_id": wave_id,
@@ -9089,7 +9772,7 @@ def run_phase_b(
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
             "private_attr_gate_test_files": result.get("private_attr_gate_test_files", []),
-        })
+        }))
         return scoped_files
 
     def _run_private_attr_gate_with_remediation(
@@ -9147,7 +9830,7 @@ def run_phase_b(
                 repo_root=repo_root,
                 wave_id=wave_id,
                 scope_hint="Fix private-attribute access in wave-owned Python tests",
-                learning_context=learning_context,
+                learning_context=_learning_context_for_new_prompt(),
             )
             fix_result = invoke_implementer(
                 repo_root,
@@ -9402,7 +10085,7 @@ def run_phase_b(
             render = _read_bridge_render(repo_root, bridge_job_id)
             if render:
                 question_result["bridge_render"] = render[:2000]
-            _save_state(repo_root, {
+            _save_state(repo_root, _carry_bridge_fix_authority({
                 "plan_path": plan_path,
                 "completed_step": _private_attr_question_step(reentry=reentry),
                 "wave_id": wave_id,
@@ -9422,7 +10105,7 @@ def run_phase_b(
                 "all_non_blocking": all_non_blocking,
                 "finding_history": finding_history,
                 "private_attr_gate_test_files": result.get("private_attr_gate_test_files", []),
-            })
+            }))
             return current_files, question_result
 
         if bridge_result["exit_code"] == 0 and bridge_decision not in RECOGNIZED_BRIDGE_DECISIONS:
@@ -9479,28 +10162,19 @@ def run_phase_b(
                 bridge_result.get("stdout", ""),
             )
 
-            _checkpoint_bridge_fix_pending(
-                repo_root,
-                plan_path=plan_path,
-                wave_id=wave_id,
-                round_num=next_round,
-                bridge_decision=bridge_decision,
-                bridge_fix_findings=findings_for_impl,
-                changed_files=current_files,
-                deferred_packet_path=deferred_packet_path,
-                implementer_changed=implementer_changed,
-                executor_created=executor_created,
-                baseline_wave_files=baseline_wave_files,
-                all_non_blocking=all_non_blocking,
-                finding_history=finding_history,
-            )
             log(
                 ("Re-entry " if reentry else "")
                 + "private-attr remediation bridge returned "
                 f"{bridge_decision} — {len(blocking_findings)} blocking, "
                 f"{len(non_blocking_findings)} non-blocking — re-invoking implementer"
             )
-            bridge_fix_error = _apply_bridge_fix(next_round, bridge_decision, findings_for_impl)
+            bridge_fix_error = _start_bridge_fix(
+                next_round,
+                bridge_decision,
+                findings_for_impl,
+                current_files,
+                review_transition_identity=transition_key,
+            )
             if bridge_fix_error is not None:
                 return current_files, bridge_fix_error
 
@@ -9661,7 +10335,7 @@ def run_phase_b(
             plan.get("content", ""),
             repo_root=repo_root,
             wave_id=wave_id,
-            learning_context=learning_context,
+            learning_context=_learning_context_for_new_prompt(),
         )
         impl_result = invoke_implementer(
             repo_root, impl_prompt,
@@ -9940,7 +10614,7 @@ def run_phase_b(
                         "treating as warning (findings forwarded to bridge review)"
                     )
 
-                _save_state(repo_root, {
+                _save_state(repo_root, _carry_bridge_fix_authority({
                     "plan_path": plan_path,
                     "completed_step": "agent_review",
                     "wave_id": wave_id,
@@ -9957,7 +10631,7 @@ def run_phase_b(
                     "agent_review_status_path": agent_result.get("status_path"),
                     "agent_review_stdout_path": agent_result.get("stdout_path"),
                     "agent_review_stderr_path": agent_result.get("stderr_path"),
-                })
+                }))
 
             if result["agent_exit_code"] != 0:
                 if result["agent_exit_code"] == 1:
@@ -9994,21 +10668,20 @@ def run_phase_b(
         log(f"Resuming bridge loop from round {_resume_bridge_round + 1}")
     if _resume_bridge_fix_pending:
         pending_round = saved_state.get("current_bridge_round", 0) if saved_state else 0
-        pending_decision = str(saved_state.get("bridge_decision", "") or "") if saved_state else ""
-        pending_findings = str(saved_state.get("bridge_fix_findings", "") or "") if saved_state else ""
+        pending_decision = saved_state.get("bridge_decision", "") if saved_state else ""
+        pending_findings = saved_state.get("bridge_fix_findings", "") if saved_state else ""
         if pending_round <= 0 or not pending_findings:
             result["status"] = "error"
             result["step"] = "bridge_fix_resume"
             result["errors"] = [
                 "Saved bridge-fix checkpoint was incomplete; missing round number or findings payload."
             ]
-            _clear_state(repo_root)
             return result
-        log(f"Resuming pending bridge fix from round {pending_round} ({pending_decision or 'REQUEST_CHANGES'})")
+        log(f"Resuming pending bridge fix from round {pending_round} ({pending_decision})")
         result["bridge_rounds"] = pending_round
         bridge_fix_error = _apply_bridge_fix(
             pending_round,
-            pending_decision or "REQUEST_CHANGES",
+            pending_decision,
             pending_findings,
         )
         if bridge_fix_error is not None:
@@ -10289,24 +10962,15 @@ def run_phase_b(
                 )
                 break
 
-            _checkpoint_bridge_fix_pending(
-                repo_root,
-                plan_path=plan_path,
-                wave_id=wave_id,
-                round_num=round_num,
-                bridge_decision=bridge_decision,
-                bridge_fix_findings=findings_for_impl,
-                changed_files=changed_files,
-                deferred_packet_path=deferred_packet_path,
-                implementer_changed=implementer_changed,
-                executor_created=executor_created,
-                baseline_wave_files=baseline_wave_files,
-                all_non_blocking=all_non_blocking,
-                finding_history=finding_history,
-            )
             log(f"Bridge: {bridge_decision} — {len(blocking_findings)} blocking, "
                 f"{len(non_blocking_findings)} non-blocking — re-invoking implementer")
-            bridge_fix_error = _apply_bridge_fix(round_num, bridge_decision, findings_for_impl)
+            bridge_fix_error = _start_bridge_fix(
+                round_num,
+                bridge_decision,
+                findings_for_impl,
+                changed_files,
+                review_transition_identity=transition_key,
+            )
             if bridge_fix_error is not None:
                 return bridge_fix_error
             continue
@@ -10401,7 +11065,7 @@ def run_phase_b(
         or _resume_reentry_private_attr_review
         or _skip_to_reentry
     ):
-        _save_state(repo_root, {
+        _save_state(repo_root, _carry_bridge_fix_authority({
             "plan_path": plan_path,
             "completed_step": "bridge_converged",
             "wave_id": wave_id,
@@ -10413,7 +11077,7 @@ def run_phase_b(
             "baseline_wave_files": sorted(baseline_wave_files),
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
-        })
+        }))
 
     # Resume from NEEDS_PHASE_B re-entry: skip pytest gate + staging + supervisor,
     # jump directly into the re-entry loop below.
@@ -10991,7 +11655,7 @@ def run_phase_b(
             _resume_reentry_private_attr_review
             or (_skip_to_reentry and skip_reentry_implementer_once)
         ):
-            _save_state(repo_root, {
+            _save_state(repo_root, _carry_bridge_fix_authority({
                 "plan_path": plan_path,
                 "completed_step": "needs_phase_b_reentry",
                 "wave_id": wave_id,
@@ -11007,7 +11671,7 @@ def run_phase_b(
                 "last_reentry_bridge_decision": bridge_decision,
                 "refresh_reentry_findings": refresh_reentry_findings,
                 "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
-            })
+            }))
 
         reentry_start_round = result["bridge_rounds"] + 1
         if skip_reentry_implementer_once:
@@ -11355,7 +12019,7 @@ def run_phase_b(
                 changed_files = _bridge_review_scope_files(changed_files)
 
                 # Checkpoint re-entry state so crash-resume picks up new findings and round
-                _save_state(repo_root, {
+                _save_state(repo_root, _carry_bridge_fix_authority({
                     "plan_path": plan_path,
                     "completed_step": "needs_phase_b_reentry",
                     "wave_id": wave_id,
@@ -11370,7 +12034,7 @@ def run_phase_b(
                     "reentry_findings": findings_for_impl,
                     "last_reentry_bridge_decision": bridge_decision,
                     "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
-                })
+                }))
                 log("Re-entry: checkpointed bridge findings; re-invoking implementer in-branch")
                 pre_reentry_files = set(_collect_changed_files(repo_root))
                 reentry_prompt = _build_reentry_fix_prompt(
