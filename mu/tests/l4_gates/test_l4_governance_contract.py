@@ -1457,6 +1457,72 @@ def _import_collector():
     return mod
 
 
+def _init_staged_collector_repo(repo, *, with_head=True):
+    """Create a real staged Git repository, optionally with an unborn HEAD."""
+    import subprocess
+
+    repo.mkdir()
+    subprocess.run(
+        ["git", "init", "-q"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    tracked = repo / "candidate.txt"
+    tracked.write_text("initial\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "candidate.txt"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if not with_head:
+        return None
+
+    subprocess.run(
+        [
+            "git",
+            "-c", "user.name=L4 Collector Test",
+            "-c", "user.email=l4-collector@example.invalid",
+            "commit", "-qm", "initial",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    tracked.write_text("staged candidate\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "candidate.txt"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return head
+
+
+def _configure_fast_collector_run(mod, monkeypatch, output, raw_seconds):
+    """Keep integration regressions focused on staged Git provenance."""
+    monkeypatch.setattr(sys, "argv", [
+        "collect_l4_wave_indicators.py",
+        "--wave-id", "test-staged-wave",
+        "--output", str(output),
+    ])
+    monkeypatch.setattr(mod, "compute_ratchet_net_delta", lambda: 0)
+    monkeypatch.setattr(mod, "count_parity_diffs", lambda: 0)
+    monkeypatch.setattr(mod, "collect_repeat_run_raw", raw_seconds)
+
+
 class TestCollectorFailClosed:
     """Collector must exit non-zero on probe/debt failures, not silently coerce."""
 
@@ -1530,10 +1596,74 @@ class TestCollectorFailClosed:
         monkeypatch.setattr(sp, "run", fake_run)
         assert mod.count_parity_diffs() == 21
 
-    def test_collector_version_is_2_2_0(self):
-        """Collector version must be 2.2.0 after executable-delta upgrade."""
+    def test_collector_version_is_2_3_0(self):
+        """Collector version must be 2.3.0 after comparison provenance."""
         mod = _import_collector()
-        assert mod.COLLECTOR_VERSION == "2.2.0"
+        assert mod.COLLECTOR_VERSION == "2.3.0"
+
+    def test_staged_collection_emits_exact_head_comparison_commit(
+        self, tmp_path, monkeypatch,
+    ):
+        """A real staged collection replaces stale provenance with exact HEAD."""
+        import json
+
+        repo = tmp_path / "repo"
+        head = _init_staged_collector_repo(repo)
+        output = repo / "indicators.json"
+        output.write_text(
+            json.dumps({"comparison_commit": "0" * 40}) + "\n",
+            encoding="utf-8",
+        )
+        mod = _import_collector()
+        monkeypatch.chdir(repo)
+        _configure_fast_collector_run(mod, monkeypatch, output, lambda: [2.0, 1.0])
+
+        assert mod.main() == 0
+        artifact = json.loads(output.read_text(encoding="utf-8"))
+        assert artifact["comparison_commit"] == head
+
+    def test_repeat_staged_collection_keeps_exact_comparison_commit(
+        self, tmp_path, monkeypatch,
+    ):
+        """Repeated full rewrites at unchanged HEAD retain Git provenance."""
+        import json
+
+        repo = tmp_path / "repo"
+        head = _init_staged_collector_repo(repo)
+        output = repo / "indicators.json"
+        raw_runs = iter(([2.0, 1.0], [3.0, 1.0]))
+        mod = _import_collector()
+        monkeypatch.chdir(repo)
+        _configure_fast_collector_run(mod, monkeypatch, output, lambda: next(raw_runs))
+
+        assert mod.main() == 0
+        first = json.loads(output.read_text(encoding="utf-8"))
+        assert mod.main() == 0
+        second = json.loads(output.read_text(encoding="utf-8"))
+
+        assert first["comparison_commit"] == head
+        assert second["comparison_commit"] == head
+        assert first["comparison_commit"] == second["comparison_commit"]
+        assert first["repeat_run_raw_seconds"] != second["repeat_run_raw_seconds"]
+
+    def test_staged_collection_fails_without_commit_authority(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """An actor-free unborn repository fails before writing an artifact."""
+        repo = tmp_path / "repo"
+        _init_staged_collector_repo(repo, with_head=False)
+        output = repo / "indicators.json"
+        mod = _import_collector()
+        monkeypatch.chdir(repo)
+        monkeypatch.setattr(sys, "argv", [
+            "collect_l4_wave_indicators.py",
+            "--wave-id", "test-staged-wave",
+            "--output", str(output),
+        ])
+
+        assert mod.main() == 1
+        assert "Unable to resolve staged comparison commit" in capsys.readouterr().err
+        assert not output.exists()
 
     def test_main_fails_closed_when_scope_empty(self, monkeypatch):
         """Collector exits 1 when range/staged scope has no changed files."""

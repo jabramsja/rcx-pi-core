@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Collect L4 wave indicator metrics (v2.2.0).
+Collect L4 wave indicator metrics (v2.3.0).
 
 Generates a JSON artifact with required indicator and provenance fields for
 L4 contract enforcement.  Repo-state metrics (parity_diff_count,
@@ -32,7 +32,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-COLLECTOR_VERSION = "2.2.0"
+COLLECTOR_VERSION = "2.3.0"
+
+_CANONICAL_GIT_OBJECT_ID_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
 
 class CollectorError(RuntimeError):
@@ -70,6 +72,45 @@ def get_changed_files(git_range: str | None) -> list[str]:
             f"git diff failed (exit {result.returncode}): {snippet}"
         )
     return [f for f in result.stdout.strip().split("\n") if f]
+
+
+def resolve_staged_comparison_commit() -> str:
+    """Resolve staged collection provenance from canonical Git HEAD authority.
+
+    ``HEAD^{commit}`` both peels annotated tags and rejects any resolution that
+    is not a commit.  Only Git's full lowercase SHA-1 or SHA-256 object identity
+    is accepted; collection fails closed for every other result.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CollectorError(
+            f"Unable to resolve staged comparison commit from HEAD: {exc}"
+        ) from exc
+
+    if result.returncode != 0:
+        snippet = (result.stderr or result.stdout or "")[:200]
+        raise CollectorError(
+            "Unable to resolve staged comparison commit from HEAD "
+            f"(git exit {result.returncode}): {snippet}"
+        )
+
+    comparison_commit = result.stdout.strip()
+    if not comparison_commit:
+        raise CollectorError(
+            "Unable to resolve staged comparison commit from HEAD: empty output"
+        )
+    if _CANONICAL_GIT_OBJECT_ID_RE.fullmatch(comparison_commit) is None:
+        raise CollectorError(
+            "Unable to resolve staged comparison commit from HEAD: "
+            f"malformed object identity {comparison_commit!r}"
+        )
+    return comparison_commit
 
 
 def compute_ratchet_net_delta() -> int:
@@ -209,6 +250,14 @@ def main() -> int:
     parser.add_argument("--range", type=str, help="Git range for diff analysis")
     args = parser.parse_args()
 
+    comparison_commit = None
+    if args.range is None:
+        try:
+            comparison_commit = resolve_staged_comparison_commit()
+        except CollectorError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+
     try:
         scoped_files = get_changed_files(args.range)
     except CollectorError as exc:
@@ -268,6 +317,8 @@ def main() -> int:
         "collection_timestamp_utc": timestamp,
         "collector_version": COLLECTOR_VERSION,
     }
+    if comparison_commit is not None:
+        indicators["comparison_commit"] = comparison_commit
 
     # Validate core metric types
     for key, types in METRIC_KEYS.items():
