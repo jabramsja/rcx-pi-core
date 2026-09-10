@@ -1,0 +1,25 @@
+{
+  "wave_id": "never-behind-fleet-authority-r4-2026-09-09",
+  "repeat_run_speedup_ratio": 1.156665,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.228386,
+  "repeat_run_raw_seconds": [
+    0.264166,
+    0.228386
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.264166
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.492552
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-10T02:27:36Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "ea690246e953b71236329f6b01c3bc8999477c7f"
+}

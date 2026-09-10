@@ -16,11 +16,13 @@ Covers:
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -1780,6 +1782,26 @@ def _advance_origin_dev_add_file(
     return _git(["rev-parse", "HEAD"], cwd=upstream, env=env).stdout.strip()
 
 
+def _primary_sync_transaction_manifests(primary: Path) -> list[Path]:
+    raw_common = _git(["rev-parse", "--git-common-dir"], cwd=primary).stdout.strip()
+    common_dir = Path(raw_common)
+    if not common_dir.is_absolute():
+        common_dir = primary / common_dir
+    return sorted(
+        common_dir.resolve().glob(
+            "rcx_primary_worktree_sync_transactions/*/manifest.json"
+        )
+    )
+
+
+def _primary_sync_transaction_root(primary: Path) -> Path:
+    raw_common = _git(["rev-parse", "--git-common-dir"], cwd=primary).stdout.strip()
+    common_dir = Path(raw_common)
+    if not common_dir.is_absolute():
+        common_dir = primary / common_dir
+    return common_dir.resolve() / "rcx_primary_worktree_sync_transactions"
+
+
 def test_sync_primary_ffs_feature_branch_behind_base(tmp_path):
     """(a) A PRIMARY on a feature branch behind origin/dev is ff'd to origin/dev,
     even when the helper is invoked from a DISTINCT linked worktree (repo_root).
@@ -1865,7 +1887,7 @@ def test_sync_primary_ffs_and_restores_staged_and_unstaged_tracked_wip(tmp_path)
     assert (primary / "scratch.txt").read_text() == "untracked scratch\n"
     assert "?? scratch.txt" in status_lines, status_lines
     # The executor-owned tracked-WIP stash was popped, not left dangling.
-    assert "commit_executor:primary_ffsync_tracked_wip" not in _git(
+    assert "commit_executor:primary_ffsync_transaction" not in _git(
         ["stash", "list"], cwd=primary
     ).stdout
     assert c1_sha != c0_sha
@@ -1926,7 +1948,7 @@ def test_sync_primary_stash_preserves_tracked_wip_and_clears_behind_dev(tmp_path
     assert (primary / "HANDOFF_FOR_CODEX.md").read_text() == "handoff untracked\n"
     assert "?? HANDOFF_FOR_CODEX.md" in status_lines, status_lines
     assert (primary / "ignored_wip.txt").read_text() == "local ignored WIP\n"
-    assert "commit_executor:primary_ffsync_tracked_wip" not in _git(
+    assert "commit_executor:primary_ffsync_transaction" not in _git(
         ["stash", "list"], cwd=primary
     ).stdout
     # behind_dev signal CLEARED (primary is current after the ff).
@@ -1935,8 +1957,8 @@ def test_sync_primary_stash_preserves_tracked_wip_and_clears_behind_dev(tmp_path
     assert c1_sha != c0_sha
 
 
-def test_sync_primary_dirty_overlap_does_not_stash_or_overwrite(tmp_path):
-    """Even when origin/dev touches the dirty path, behind+dirty skips safely."""
+def test_sync_primary_dirty_overlap_fast_forwards_and_durably_holds_wip(tmp_path):
+    """Staged/unstaged overlap is isolated before ff and retained in HELD."""
     upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "jabramsja/feat-overlap"], cwd=primary, env=env)
     (primary / "seed.txt").write_text("staged founder WIP\n")
@@ -1949,31 +1971,89 @@ def test_sync_primary_dirty_overlap_does_not_stash_or_overwrite(tmp_path):
         repo_root=primary, base_branch="dev", log=_noop_log,
     )
 
-    assert outcome["synced"] is False, outcome
-    assert outcome["skipped"] is True, outcome
-    assert "dirty WIP" in (outcome["reason"] or ""), outcome
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert outcome["reason"] is None, outcome
     assert outcome["dirty_paths"] == ["scratch.txt", "seed.txt"], outcome
-    assert outcome["behind_count"] == 1, outcome
-    assert outcome["ahead_count"] == 0, outcome
-    assert outcome["behind_dev_signal_written"] is True, outcome
     assert outcome["tracked_wip_paths"] == ["seed.txt"], outcome
     assert outcome["tracked_wip_overlap_paths"] == ["seed.txt"], outcome
-    assert outcome["tracked_wip_stash_marker"] is None, outcome
-    assert outcome["tracked_wip_stash_ref"] is None, outcome
-    assert outcome["tracked_wip_stash_oid"] is None, outcome
+    assert outcome["tracked_wip_held_paths"] == ["seed.txt"], outcome
+    assert outcome["tracked_wip_stash_marker"], outcome
+    assert outcome["tracked_wip_stash_ref"], outcome
+    assert outcome["tracked_wip_stash_oid"], outcome
     assert outcome["tracked_wip_restored"] is False, outcome
-    assert outcome["tracked_wip_left_stashed"] is False, outcome
+    assert outcome["tracked_wip_left_stashed"] is True, outcome
     assert outcome["tracked_wip_restore_error"] is None, outcome
-    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
-    assert _git(["show", ":seed.txt"], cwd=primary).stdout == "staged founder WIP\n"
-    assert (primary / "seed.txt").read_text() == "unstaged founder WIP\n"
+    assert outcome["primary_sync_transaction_state"] == "HELD", outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    # Changed base content occupies the path; overlap is never auto-applied.
+    assert _git(["show", ":seed.txt"], cwd=primary).stdout == "origin seed c1\n"
+    assert (primary / "seed.txt").read_text() == "origin seed c1\n"
     assert (primary / "scratch.txt").read_text() == "untracked scratch\n"
     status_lines = set(_git(["status", "--short"], cwd=primary).stdout.splitlines())
-    assert "MM seed.txt" in status_lines
+    assert not any(line.endswith(" seed.txt") for line in status_lines)
     assert "?? scratch.txt" in status_lines
     assert c1_sha != c0_sha
-    assert _git(["stash", "list"], cwd=primary).stdout.strip() == ""
-    assert (primary / ".agent_bus" / "behind_dev.json").exists()
+    # The exact staged and unstaged states remain independently readable from
+    # the predeclared stash object, and the common-dir journal is HELD.
+    stash_oid = outcome["tracked_wip_stash_oid"]
+    assert _git(["show", f"{stash_oid}^2:seed.txt"], cwd=primary).stdout == (
+        "staged founder WIP\n"
+    )
+    assert _git(["show", f"{stash_oid}:seed.txt"], cwd=primary).stdout == (
+        "unstaged founder WIP\n"
+    )
+    manifest_path = Path(outcome["primary_sync_transaction_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["state"] == "HELD", manifest
+    assert manifest["held_tracked_paths"] == ["seed.txt"], manifest
+    assert [entry["state"] for entry in manifest["state_history"]] == [
+        "PREPARED",
+        "STASHED",
+        "ISOLATED",
+        "FF_APPLIED",
+        "HELD",
+    ]
+    assert manifest["worktree_identity"]["path"] == str(primary.resolve())
+    assert manifest_path in _primary_sync_transaction_manifests(primary)
+    assert not (primary / ".agent_bus" / "behind_dev.json").exists()
+
+
+def test_sync_primary_restores_nonoverlap_while_overlap_remains_held(tmp_path):
+    """One stash may retain overlap while exact non-overlap state is restored."""
+    upstream, primary, _c0_sha, env = _init_origin_and_primary(tmp_path)
+    (upstream / "other.txt").write_text("base other\n")
+    _git(["add", "other.txt"], cwd=upstream, env=env)
+    _git(["commit", "-m", "base adds other"], cwd=upstream, env=env)
+    _git(["fetch", "origin", "dev"], cwd=primary)
+    _git(["merge", "--ff-only", "origin/dev"], cwd=primary)
+    _git(["checkout", "-b", "jabramsja/overlap-plus-restore"], cwd=primary)
+
+    (primary / "seed.txt").write_text("staged overlap\n")
+    (primary / "other.txt").write_text("staged nonoverlap\n")
+    _git(["add", "seed.txt", "other.txt"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("unstaged overlap\n")
+    (primary / "other.txt").write_text("unstaged nonoverlap\n")
+    c1_sha = _advance_origin_dev(upstream, env, content="origin overlap\n")
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is True, outcome
+    assert outcome["new_sha"] == c1_sha, outcome
+    assert outcome["tracked_wip_overlap_paths"] == ["seed.txt"], outcome
+    assert outcome["tracked_wip_held_paths"] == ["seed.txt"], outcome
+    assert outcome["tracked_wip_restored"] is True, outcome
+    assert (primary / "seed.txt").read_text() == "origin overlap\n"
+    assert _git(["show", ":other.txt"], cwd=primary).stdout == "staged nonoverlap\n"
+    assert (primary / "other.txt").read_text() == "unstaged nonoverlap\n"
+    manifest = json.loads(
+        Path(outcome["primary_sync_transaction_path"]).read_text(encoding="utf-8")
+    )
+    assert manifest["state"] == "HELD", manifest
+    assert manifest["restored_tracked_paths"] == ["other.txt"], manifest
+    assert manifest["held_tracked_paths"] == ["seed.txt"], manifest
 
 
 def test_sync_primary_skips_already_current_before_stashing_tracked_wip(tmp_path):
@@ -2051,18 +2131,13 @@ def test_sync_primary_ffs_over_noncolliding_untracked_files(tmp_path):
     assert not (primary / ".agent_bus" / "behind_dev.json").exists(), outcome
 
 
-def test_sync_primary_untracked_collision_skips_and_preserves_founder_wip(tmp_path):
-    """FIX-NEVERBEHIND-FF-UNTRACKED (never-clobber): when the ff range would
-    OVERWRITE an untracked founder file (origin/dev force-adds a TRACKED file at
-    the same path), `git merge --ff-only --no-overwrite-ignore` ABORTS. The new
-    untracked-only branch then falls back to the SAFE behind_dev skip -- HEAD is
-    left at C0 and the founder's untracked WIP is preserved byte-identical, never
-    clobbered by origin content. This exercises the untracked-only ff FAILURE
-    branch (the collision-abort fallback), complementing the ff-SUCCESS case."""
+def test_sync_primary_moves_nonignored_collision_and_holds_exact_backup(tmp_path):
+    """An exact non-ignored collision moves to its predeclared durable backup."""
     upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "jabramsja/feat-untracked-collide"], cwd=primary, env=env)
     # Untracked founder WIP at a path origin/dev is about to ADD as a tracked file.
-    (primary / "collide.txt").write_text("local untracked WIP")
+    (primary / "founder-bytes.txt").write_text("local untracked WIP")
+    (primary / "collide.txt").symlink_to("founder-bytes.txt")
     # A second, non-colliding untracked file must ALSO survive the safe skip.
     (primary / "keep.txt").write_text("keep me")
     # origin/dev advances by ADDING collide.txt as a TRACKED file -> real collision.
@@ -2075,20 +2150,117 @@ def test_sync_primary_untracked_collision_skips_and_preserves_founder_wip(tmp_pa
         repo_root=primary, base_branch="dev", log=_noop_log,
     )
 
-    # The ff ABORTED on the collision -> safe SKIP, never synced.
+    assert outcome["synced"] is True, outcome
+    assert outcome["skipped"] is False, outcome
+    assert outcome["primary_sync_transaction_state"] == "HELD", outcome
+    assert outcome["untracked_collision_paths"] == ["collide.txt"], outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha, outcome
+    # Origin's tracked bytes now occupy the source path; founder bytes are held
+    # byte-identically at the exact backup declared before the move.
+    assert (primary / "collide.txt").read_text() == "origin tracked content\n"
+    backup = Path(outcome["untracked_wip_backup_paths"][0])
+    assert backup.is_symlink()
+    assert os.readlink(backup) == "founder-bytes.txt"
+    assert (primary / "founder-bytes.txt").read_text() == "local untracked WIP"
+    assert (primary / "keep.txt").read_text() == "keep me", outcome
+    manifest = json.loads(
+        Path(outcome["primary_sync_transaction_path"]).read_text(encoding="utf-8")
+    )
+    assert manifest["state"] == "HELD", manifest
+    assert manifest["held_untracked_paths"] == ["collide.txt"], manifest
+    assert manifest["backups"][0]["backup_path"] == str(backup)
+    assert outcome["behind_dev_signal_written"] is False, outcome
+    assert not (primary / ".agent_bus" / "behind_dev.json").exists()
+
+
+def test_sync_primary_dual_classified_path_skips_before_transaction_and_retries(
+    tmp_path,
+):
+    """A staged deletion plus recreated file is preserved without a journal."""
+    upstream, primary, _c0_sha, env = _init_origin_and_primary(tmp_path)
+    (upstream / "victim.txt").write_text("base victim\n", encoding="utf-8")
+    _git(["add", "victim.txt"], cwd=upstream, env=env)
+    _git(["commit", "-m", "add victim"], cwd=upstream, env=env)
+    _git(["fetch", "origin", "dev"], cwd=primary, env=env)
+    _git(["merge", "--ff-only", "origin/dev"], cwd=primary, env=env)
+    _git(["checkout", "-b", "jabramsja/dual-classified"], cwd=primary, env=env)
+
+    old_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    _git(["rm", "victim.txt"], cwd=primary, env=env)
+    founder_bytes = b"recreated founder bytes\x00\n"
+    (primary / "victim.txt").write_bytes(founder_bytes)
+    (upstream / "victim.txt").write_text("origin changed victim\n", encoding="utf-8")
+    _git(["add", "victim.txt"], cwd=upstream, env=env)
+    _git(["commit", "-m", "change victim"], cwd=upstream, env=env)
+    target_head = _git(["rev-parse", "HEAD"], cwd=upstream).stdout.strip()
+
+    path_status_before = _git(
+        ["status", "--short", "--", "victim.txt"], cwd=primary
+    ).stdout
+    index_delta_before = _git(
+        ["diff", "--cached", "--binary", "--", "victim.txt"], cwd=primary
+    ).stdout
+    stash_before = _git(["stash", "list"], cwd=primary).stdout
+    transaction_root = _primary_sync_transaction_root(primary)
+    assert path_status_before.splitlines() == ["D  victim.txt", "?? victim.txt"]
+    assert not transaction_root.exists()
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
     assert outcome["synced"] is False, outcome
     assert outcome["skipped"] is True, outcome
-    # HEAD unchanged at C0 -- no fast-forward applied.
-    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha, outcome
-    # Founder's untracked WIP is PRESERVED, not clobbered by origin's content.
-    assert (primary / "collide.txt").read_text() == "local untracked WIP", outcome
-    assert (primary / "keep.txt").read_text() == "keep me", outcome
-    # Fell back to the durable behind_dev skip signal (reason: the ff aborted).
+    assert outcome["dual_classified_wip_paths"] == ["victim.txt"], outcome
+    assert "dual-classified" in (outcome["reason"] or ""), outcome
+    assert "victim.txt" in (outcome["reason"] or ""), outcome
+    assert outcome["primary_sync_transaction_path"] is None, outcome
+    assert outcome["primary_sync_transaction_state"] is None, outcome
+    assert outcome["recovery_hold"] is None, outcome
     assert outcome["behind_dev_signal_written"] is True, outcome
     signal = json.loads(
         (primary / ".agent_bus" / "behind_dev.json").read_text(encoding="utf-8")
     )
-    assert signal["reason"] == "ff_only_merge_failed", signal
+    assert signal["reason"] == "dual_classified_primary_wip", signal
+    assert signal["dirty_paths"] == ["victim.txt"], signal
+
+    # No transaction boundary was crossed: the exact HEAD, recreated bytes,
+    # staged deletion, stash inventory, and journal-directory absence survive.
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == old_head
+    assert (primary / "victim.txt").read_bytes() == founder_bytes
+    assert _git(
+        ["status", "--short", "--", "victim.txt"], cwd=primary
+    ).stdout == path_status_before
+    assert _git(
+        ["diff", "--cached", "--binary", "--", "victim.txt"], cwd=primary
+    ).stdout == index_delta_before
+    assert _git(["stash", "list"], cwd=primary).stdout == stash_before
+    assert not transaction_root.exists()
+
+    # Once the user resolves the unsupported index/worktree combination, the
+    # same path is retryable through the normal clean fast-forward path.
+    _git(
+        [
+            "restore",
+            "--source=HEAD",
+            "--staged",
+            "--worktree",
+            "--",
+            "victim.txt",
+        ],
+        cwd=primary,
+    )
+    retry = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+    assert retry["synced"] is True, retry
+    assert retry["primary_sync_transaction_path"] is None, retry
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == target_head
+    assert (primary / "victim.txt").read_text(encoding="utf-8") == (
+        "origin changed victim\n"
+    )
+    assert not (primary / ".agent_bus" / "behind_dev.json").exists()
+    assert not transaction_root.exists()
 
 
 def test_sync_primary_skips_divergent_local_commit(tmp_path):
@@ -2363,7 +2535,9 @@ def test_sync_primary_skips_when_ff_would_overwrite_ignored_founder_wip(tmp_path
     # The ff ABORTED (it would overwrite ignored WIP) → clean SKIP, never synced.
     assert outcome["synced"] is False, outcome
     assert outcome["skipped"] is True, outcome
-    assert "overwritten" in (outcome["reason"] or ""), outcome
+    assert "locally ignored collision refused" in (outcome["reason"] or ""), outcome
+    assert outcome["ignored_collision_paths"] == ["ignored.txt"], outcome
+    assert outcome["primary_sync_transaction_path"] is None, outcome
     # Founder's ignored WIP is PRESERVED, not clobbered by origin's content.
     assert (primary / "ignored.txt").read_text() == "local ignored WIP", outcome
     # HEAD unchanged — still at C0 on the feature branch (no fast-forward applied).
@@ -2371,6 +2545,421 @@ def test_sync_primary_skips_when_ff_would_overwrite_ignored_founder_wip(tmp_path
     assert _git(
         ["rev-parse", "--abbrev-ref", "HEAD"], cwd=primary
     ).stdout.strip() == "jabramsja/feat-ign"
+
+
+def test_sync_primary_ff_failure_restores_tracked_and_moved_collision(
+    tmp_path, monkeypatch
+):
+    """A failed ff restores exact index/worktree and collision source state."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/feat-failure-restore"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("staged failure WIP\n")
+    os.chmod(primary / "seed.txt", 0o755)
+    _git(["add", "seed.txt"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("unstaged failure WIP\n")
+    (primary / "collide.txt").write_bytes(b"founder\x00collision\n")
+    _advance_origin_dev_add_file(
+        upstream, env, path="collide.txt", content="origin collision\n"
+    )
+
+    real_run = subprocess.run
+
+    def _fail_only_ff(cmd, *args, **kwargs):
+        if list(cmd[:2]) == ["git", "merge"]:
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="", stderr="simulated ff failure"
+            )
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _fail_only_ff)
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+
+    assert outcome["synced"] is False, outcome
+    assert outcome["skipped"] is True, outcome
+    assert outcome["primary_sync_transaction_state"] == "RECOVERED", outcome
+    assert outcome["tracked_wip_restored"] is True, outcome
+    assert outcome["tracked_wip_left_stashed"] is False, outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0_sha
+    assert _git(["show", ":seed.txt"], cwd=primary).stdout == "staged failure WIP\n"
+    assert (primary / "seed.txt").read_text() == "unstaged failure WIP\n"
+    assert stat.S_IMODE((primary / "seed.txt").stat().st_mode) == 0o755
+    assert (primary / "collide.txt").read_bytes() == b"founder\x00collision\n"
+    assert not Path(outcome["untracked_wip_backup_paths"][0]).exists()
+    assert "commit_executor:primary_ffsync_transaction" not in _git(
+        ["stash", "list"], cwd=primary
+    ).stdout
+    manifest = json.loads(
+        Path(outcome["primary_sync_transaction_path"]).read_text(encoding="utf-8")
+    )
+    assert manifest["state"] == "RECOVERED", manifest
+    assert manifest["restored_tracked_paths"] == ["seed.txt"], manifest
+    assert manifest["restored_untracked_paths"] == ["collide.txt"], manifest
+
+
+class _SimulatedPrimarySyncCrash(BaseException):
+    pass
+
+
+@pytest.mark.parametrize(
+    "checkpoint_name",
+    ["after_prepared", "after_stash_before_publish"],
+)
+def test_sync_primary_restart_recovers_pre_ff_tracked_checkpoints_idempotently(
+    tmp_path, checkpoint_name
+):
+    """PREPARED and stash-before-publication crashes remain discoverable."""
+    upstream, primary, _c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", f"jabramsja/restart-{checkpoint_name}"], cwd=primary)
+    (primary / "seed.txt").write_text("staged restart WIP\n")
+    _git(["add", "seed.txt"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("unstaged restart WIP\n")
+    c1_sha = _advance_origin_dev(upstream, env, content="origin changed seed\n")
+
+    def _crash(name, _manifest):
+        if name == checkpoint_name:
+            raise _SimulatedPrimarySyncCrash(name)
+
+    with pytest.raises(_SimulatedPrimarySyncCrash):
+        commit_mod.sync_primary_worktree_to_base(
+            repo_root=primary,
+            base_branch="dev",
+            log=_noop_log,
+            checkpoint=_crash,
+        )
+    first_manifest = _primary_sync_transaction_manifests(primary)[0]
+    first_state = json.loads(first_manifest.read_text(encoding="utf-8"))["state"]
+    assert first_state == "PREPARED", first_state
+
+    restarted = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+    assert restarted["synced"] is True, restarted
+    assert restarted["primary_sync_transaction_state"] == "HELD", restarted
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    first_after = json.loads(first_manifest.read_text(encoding="utf-8"))
+    assert first_after["state"] == "RECOVERED", first_after
+    assert any(
+        item["manifest_path"] == str(first_manifest)
+        and item["state"] == "RECOVERED"
+        for item in restarted["recovered_transactions"]
+    )
+
+    manifest_count = len(_primary_sync_transaction_manifests(primary))
+    retry = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+    assert retry["skipped"] is True and "already current" in retry["reason"], retry
+    assert len(_primary_sync_transaction_manifests(primary)) == manifest_count
+
+
+def test_sync_primary_restart_recovers_move_before_publication(tmp_path):
+    """A moved collision is restored from its PREPARED journal before retry."""
+    upstream, primary, _c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/restart-move"], cwd=primary)
+    (primary / "collide.txt").write_bytes(b"move-window\x00bytes")
+    c1_sha = _advance_origin_dev_add_file(
+        upstream, env, path="collide.txt", content="origin after move\n"
+    )
+
+    def _crash(name, _manifest):
+        if name == "after_move_before_publish":
+            raise _SimulatedPrimarySyncCrash(name)
+
+    with pytest.raises(_SimulatedPrimarySyncCrash):
+        commit_mod.sync_primary_worktree_to_base(
+            repo_root=primary,
+            base_branch="dev",
+            log=_noop_log,
+            checkpoint=_crash,
+        )
+    first_manifest = _primary_sync_transaction_manifests(primary)[0]
+    prepared = json.loads(first_manifest.read_text(encoding="utf-8"))
+    assert prepared["state"] == "PREPARED", prepared
+    assert not (primary / "collide.txt").exists()
+    assert Path(prepared["backups"][0]["backup_path"]).read_bytes() == (
+        b"move-window\x00bytes"
+    )
+
+    restarted = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+    assert restarted["synced"] is True, restarted
+    assert restarted["primary_sync_transaction_state"] == "HELD", restarted
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+    assert json.loads(first_manifest.read_text(encoding="utf-8"))["state"] == (
+        "RECOVERED"
+    )
+    held_backup = Path(restarted["untracked_wip_backup_paths"][0])
+    assert held_backup.read_bytes() == b"move-window\x00bytes"
+
+
+def test_sync_primary_restart_finalizes_after_ff_before_publication(tmp_path):
+    """ISOLATED plus target HEAD is enough to publish the intended HELD state."""
+    upstream, primary, _c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/restart-after-ff"], cwd=primary)
+    (primary / "seed.txt").write_text("staged after-ff WIP\n")
+    _git(["add", "seed.txt"], cwd=primary, env=env)
+    (primary / "seed.txt").write_text("unstaged after-ff WIP\n")
+    c1_sha = _advance_origin_dev(upstream, env, content="origin after ff\n")
+
+    def _crash(name, _manifest):
+        if name == "after_fast_forward_before_publish":
+            raise _SimulatedPrimarySyncCrash(name)
+
+    with pytest.raises(_SimulatedPrimarySyncCrash):
+        commit_mod.sync_primary_worktree_to_base(
+            repo_root=primary,
+            base_branch="dev",
+            log=_noop_log,
+            checkpoint=_crash,
+        )
+    manifest_path = _primary_sync_transaction_manifests(primary)[0]
+    interrupted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert interrupted["state"] == "ISOLATED", interrupted
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c1_sha
+
+    restarted = commit_mod.sync_primary_worktree_to_base(
+        repo_root=primary, base_branch="dev", log=_noop_log,
+    )
+    assert restarted["skipped"] is True, restarted
+    assert "already current" in restarted["reason"], restarted
+    finalized = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert finalized["state"] == "HELD", finalized
+    assert finalized["held_tracked_paths"] == ["seed.txt"], finalized
+    assert restarted["recovered_transactions"] == [
+        {
+            "manifest_path": str(manifest_path),
+            "state": "HELD",
+            "tracked_restored_paths": [],
+            "tracked_held_paths": ["seed.txt"],
+            "untracked_held_paths": [],
+            "stash_ref": "stash@{0}",
+            "stash_oid": finalized["stash_oid"],
+        }
+    ]
+
+
+def test_primary_sync_journal_survives_candidate_worktree_removal(tmp_path):
+    """The sole recovery authority lives in common-dir, never the caller lane."""
+    upstream, primary, _c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/journal-survival"], cwd=primary)
+    linked = tmp_path / "candidate_lane"
+    _git(["worktree", "add", "-b", "candidate", str(linked), "HEAD"], cwd=primary)
+    (primary / "seed.txt").write_text("held after candidate removal\n")
+    _advance_origin_dev(upstream, env, content="origin journal survival\n")
+
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        repo_root=linked, base_branch="dev", log=_noop_log,
+    )
+    manifest_path = Path(outcome["primary_sync_transaction_path"])
+    assert outcome["primary_sync_transaction_state"] == "HELD", outcome
+    assert manifest_path.is_file()
+    assert linked.resolve() not in manifest_path.parents
+
+    _git(["worktree", "remove", "--force", str(linked)], cwd=primary)
+    assert not linked.exists()
+    assert manifest_path.is_file()
+    assert json.loads(manifest_path.read_text(encoding="utf-8"))["state"] == "HELD"
+
+
+def test_terminal_action_refetches_after_diagnostic_and_rejects_dev_advance(
+    tmp_path,
+):
+    """A diagnostic observation cannot authorize action after dev advances."""
+    upstream, primary, c0_sha, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/terminal-target"], cwd=primary)
+    identity = commit_mod.bind_terminal_target_identity(primary, base_branch="dev")
+    assert identity["bound"] is True, identity
+    assert identity["expected_head"] == c0_sha
+
+    routing_observation = commit_mod.observe_terminal_mutation_readiness(
+        primary, identity, log=_noop_log,
+    )
+    assert routing_observation["decision"] == "OBSERVED_READY", routing_observation
+    assert routing_observation["authority"] == (
+        "diagnostic_only_not_terminal_authority"
+    ), routing_observation
+    assert routing_observation["mutation_authorized"] is False, routing_observation
+    assert routing_observation["reusable"] is False, routing_observation
+    assert routing_observation["fresh_fetch"] is True, routing_observation
+    assert routing_observation["behind_count"] == 0, routing_observation
+
+    c1_sha = _advance_origin_dev_add_file(upstream, env)
+    callback_calls: list[str] = []
+
+    def _terminal_action():
+        callback_calls.append("called")
+        return {"status": "done"}
+
+    execution_boundary = commit_mod.execute_terminal_mutation_once(
+        primary,
+        identity,
+        terminal_action=_terminal_action,
+        log=_noop_log,
+    )
+    assert execution_boundary["decision"] == "HOLD", execution_boundary
+    assert execution_boundary["fresh_fetch"] is True, execution_boundary
+    assert execution_boundary["behind_count"] == 1, execution_boundary
+    assert execution_boundary["fetched_base_sha"] == c1_sha, execution_boundary
+    assert "behind origin/dev by 1" in execution_boundary["reason"]
+    assert execution_boundary["action_invoked"] is False, execution_boundary
+    assert callback_calls == []
+
+    # Retry after resolving the behind state uses a fresh identity and invokes
+    # the callback once total; the earlier diagnostic/HOLD results authorize
+    # nothing and cannot be replayed.
+    _git(["merge", "--ff-only", "origin/dev"], cwd=primary)
+    refreshed_identity = commit_mod.bind_terminal_target_identity(
+        primary, base_branch="dev"
+    )
+    refreshed = commit_mod.execute_terminal_mutation_once(
+        primary,
+        refreshed_identity,
+        terminal_action=_terminal_action,
+        log=_noop_log,
+    )
+    assert refreshed["decision"] == "ACTION_COMPLETED", refreshed
+    assert refreshed["behind_count"] == 0, refreshed
+    assert refreshed["action_invoked"] is True, refreshed
+    assert refreshed["action_succeeded"] is True, refreshed
+    assert refreshed["action_outcome"] == {"status": "done"}, refreshed
+    assert refreshed["authority"] == (
+        "action_outcome_only_not_terminal_authority"
+    ), refreshed
+    assert refreshed["mutation_authorized"] is False, refreshed
+    assert refreshed["reusable"] is False, refreshed
+    assert callback_calls == ["called"]
+
+
+def test_terminal_action_holds_common_dir_lock_through_callback(tmp_path):
+    """The lock covers callback entry and consumed authority cannot replay."""
+    _upstream, primary, _c0_sha, _env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/terminal-lock"], cwd=primary)
+    identity = commit_mod.bind_terminal_target_identity(primary, base_branch="dev")
+    replay_identity = json.loads(json.dumps(identity))
+    common_dir = Path(identity["common_dir_identity"]["path"])
+    lock_path = common_dir / "rcx_primary_worktree_sync.lock"
+    callback_calls: list[str] = []
+
+    def _terminal_action():
+        callback_calls.append("called")
+        with open(lock_path, "a", encoding="utf-8") as competitor:
+            with pytest.raises(OSError):
+                fcntl.flock(
+                    competitor.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB
+                )
+        return "locked-action-result"
+
+    outcome = commit_mod.execute_terminal_mutation_once(
+        primary,
+        identity,
+        terminal_action=_terminal_action,
+        log=_noop_log,
+    )
+
+    assert outcome["decision"] == "ACTION_COMPLETED", outcome
+    assert outcome["action_outcome"] == "locked-action-result", outcome
+    assert outcome["authority_consumed"] is True, outcome
+    assert callback_calls == ["called"]
+    attempt_path = Path(outcome["authority_record_path"])
+    assert attempt_path.parent.parent == common_dir
+    attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert attempt_record["operation_id"] == identity["operation_id"]
+    assert attempt_record["state"] == "AUTHORITY_CONSUMED_OUTCOME_UNKNOWN"
+    # The public result is returned only after the boundary releases the lock.
+    with open(lock_path, "a", encoding="utf-8") as after_return:
+        fcntl.flock(after_return.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(after_return.fileno(), fcntl.LOCK_UN)
+
+    replayed = commit_mod.execute_terminal_mutation_once(
+        primary,
+        replay_identity,
+        terminal_action=_terminal_action,
+        log=_noop_log,
+    )
+    assert replayed["decision"] == "HOLD", replayed
+    assert replayed["action_invoked"] is False, replayed
+    assert replayed["action_succeeded"] is None, replayed
+    assert replayed["action_outcome"] is None, replayed
+    assert replayed["action_error"] is None, replayed
+    assert replayed["authority_consumed"] is False, replayed
+    assert "already attempted" in replayed["reason"], replayed
+    assert callback_calls == ["called"]
+
+
+def test_terminal_action_stale_identity_and_callback_failure_do_not_invoke_twice(
+    tmp_path,
+):
+    """Stale identity invokes zero times; callback failure is never retried."""
+    _upstream, primary, _c0_sha, _env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "jabramsja/terminal-once"], cwd=primary)
+    stale_identity = commit_mod.bind_terminal_target_identity(
+        primary, base_branch="dev"
+    )
+    _git(["checkout", "-b", "jabramsja/terminal-once-drift"], cwd=primary)
+
+    callback_calls: list[str] = []
+
+    def _failing_action():
+        callback_calls.append("called")
+        raise RuntimeError("terminal action failed")
+
+    stale = commit_mod.execute_terminal_mutation_once(
+        primary,
+        stale_identity,
+        terminal_action=_failing_action,
+        log=_noop_log,
+    )
+    assert stale["decision"] == "HOLD", stale
+    assert "branch mismatch" in stale["reason"], stale
+    assert stale["action_invoked"] is False, stale
+    assert callback_calls == []
+
+    refreshed_identity = commit_mod.bind_terminal_target_identity(
+        primary, base_branch="dev"
+    )
+    retry_identity = json.loads(json.dumps(refreshed_identity))
+    failed = commit_mod.execute_terminal_mutation_once(
+        primary,
+        refreshed_identity,
+        terminal_action=_failing_action,
+        log=_noop_log,
+    )
+    assert failed["decision"] == "ACTION_FAILED", failed
+    assert failed["action_invoked"] is True, failed
+    assert failed["action_succeeded"] is False, failed
+    assert failed["action_outcome"] is None, failed
+    assert failed["action_error"] == "RuntimeError: terminal action failed", failed
+    assert failed["authority_consumed"] is True, failed
+    assert callback_calls == ["called"]
+    attempt_path = Path(failed["authority_record_path"])
+    attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert attempt_record["operation_id"] == refreshed_identity["operation_id"]
+    assert attempt_record["state"] == "AUTHORITY_CONSUMED_OUTCOME_UNKNOWN"
+
+    retried = commit_mod.execute_terminal_mutation_once(
+        primary,
+        retry_identity,
+        terminal_action=_failing_action,
+        log=_noop_log,
+    )
+    assert retried["decision"] == "HOLD", retried
+    assert retried["action_invoked"] is False, retried
+    assert retried["action_succeeded"] is None, retried
+    assert retried["action_outcome"] is None, retried
+    assert retried["action_error"] is None, retried
+    assert retried["authority_consumed"] is False, retried
+    assert "already attempted" in retried["reason"], retried
+    assert callback_calls == ["called"]
+    lock_path = (
+        Path(refreshed_identity["common_dir_identity"]["path"])
+        / "rcx_primary_worktree_sync.lock"
+    )
+    with open(lock_path, "a", encoding="utf-8") as after_failure:
+        fcntl.flock(after_failure.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(after_failure.fileno(), fcntl.LOCK_UN)
 
 
 # ─────────────────────────────────────────────────────────────────────────
