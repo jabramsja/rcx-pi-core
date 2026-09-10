@@ -1,0 +1,331 @@
+{
+  "after": {
+    "node": {
+      "headRef": {
+        "name": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+        "prefix": "refs/heads/",
+        "target": {
+          "oid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+          "type": "Commit"
+        }
+      },
+      "pullRequest": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+        "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "nameWithOwner": "jabramsja/rcx-pi-core",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs7wx1P-",
+        "mergedAt": null,
+        "number": 1213,
+        "state": "CLOSED"
+      },
+      "repository": {
+        "id": "R_kgDOQvy8bg",
+        "nameWithOwner": "jabramsja/rcx-pi-core",
+        "url": "https://github.com/jabramsja/rcx-pi-core"
+      },
+      "type": "PullRequest"
+    },
+    "pr": {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+      "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "nameWithOwner": "",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7wx1P-",
+      "mergedAt": null,
+      "number": 1213,
+      "state": "CLOSED"
+    },
+    "repository": {
+      "id": "R_kgDOQvy8bg",
+      "nameWithOwner": "jabramsja/rcx-pi-core",
+      "url": "https://github.com/jabramsja/rcx-pi-core"
+    }
+  },
+  "before": {
+    "node": {
+      "headRef": {
+        "name": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+        "prefix": "refs/heads/",
+        "target": {
+          "oid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+          "type": "Commit"
+        }
+      },
+      "pullRequest": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+        "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "nameWithOwner": "jabramsja/rcx-pi-core",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs7wx1P-",
+        "mergedAt": null,
+        "number": 1213,
+        "state": "OPEN"
+      },
+      "repository": {
+        "id": "R_kgDOQvy8bg",
+        "nameWithOwner": "jabramsja/rcx-pi-core",
+        "url": "https://github.com/jabramsja/rcx-pi-core"
+      },
+      "type": "PullRequest"
+    },
+    "pr": {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+      "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "nameWithOwner": "",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7wx1P-",
+      "mergedAt": null,
+      "number": 1213,
+      "state": "OPEN"
+    },
+    "repository": {
+      "id": "R_kgDOQvy8bg",
+      "nameWithOwner": "jabramsja/rcx-pi-core",
+      "url": "https://github.com/jabramsja/rcx-pi-core"
+    }
+  },
+  "comparison_commit": "2b4218dc7c3e6f3e3d688dc6773d1777071529ee",
+  "intent": {
+    "callback_snapshot": {
+      "node": {
+        "headRef": {
+          "name": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+          "prefix": "refs/heads/",
+          "target": {
+            "oid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+            "type": "Commit"
+          }
+        },
+        "pullRequest": {
+          "baseRefName": "dev",
+          "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+          "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+          "headRepository": {
+            "id": "R_kgDOQvy8bg",
+            "nameWithOwner": "jabramsja/rcx-pi-core",
+            "owner": {
+              "id": "MDQ6VXNlcjI3MjU3NDg3",
+              "login": "jabramsja"
+            }
+          },
+          "id": "PR_kwDOQvy8bs7wx1P-",
+          "mergedAt": null,
+          "number": 1213,
+          "state": "OPEN"
+        },
+        "repository": {
+          "id": "R_kgDOQvy8bg",
+          "nameWithOwner": "jabramsja/rcx-pi-core",
+          "url": "https://github.com/jabramsja/rcx-pi-core"
+        },
+        "type": "PullRequest"
+      },
+      "pr": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+        "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "nameWithOwner": "",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs7wx1P-",
+        "mergedAt": null,
+        "number": 1213,
+        "state": "OPEN"
+      },
+      "repository": {
+        "id": "R_kgDOQvy8bg",
+        "nameWithOwner": "jabramsja/rcx-pi-core",
+        "url": "https://github.com/jabramsja/rcx-pi-core"
+      }
+    },
+    "close_response": {
+      "headRef": {
+        "name": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+        "prefix": "refs/heads/",
+        "target": {
+          "oid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+          "type": "Commit"
+        }
+      },
+      "pullRequest": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+        "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "nameWithOwner": "jabramsja/rcx-pi-core",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs7wx1P-",
+        "mergedAt": null,
+        "number": 1213,
+        "state": "CLOSED"
+      },
+      "repository": {
+        "id": "R_kgDOQvy8bg",
+        "nameWithOwner": "jabramsja/rcx-pi-core",
+        "url": "https://github.com/jabramsja/rcx-pi-core"
+      },
+      "type": "PullRequest"
+    },
+    "comparison_commit": "2b4218dc7c3e6f3e3d688dc6773d1777071529ee",
+    "manifest_sha256": "e5034bfaac99d315b22bba52122d80f91fc0b68eba24e9f6708eb9815c2c83f9",
+    "operation_id": "bd013328be6d410f89579a01ff8d93dc",
+    "repository": {
+      "id": "R_kgDOQvy8bg",
+      "nameWithOwner": "jabramsja/rcx-pi-core",
+      "url": "https://github.com/jabramsja/rcx-pi-core"
+    },
+    "schema_version": 1,
+    "state": "CLOSE_RESPONSE_OBSERVED",
+    "target": {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+      "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7wx1P-",
+      "mergedAt": null,
+      "number": 1213,
+      "state": "OPEN"
+    },
+    "terminal_target_identity": {
+      "authority": "identity_only_not_terminal_authority",
+      "base_branch": "dev",
+      "base_ref": "origin/dev",
+      "bound": true,
+      "common_dir_identity": {
+        "device": 16777229,
+        "inode": 11381607,
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git"
+      },
+      "expected_branch": "jabramsja/pr-disposition-apply-r2-2026-09-10",
+      "expected_head": "2b4218dc7c3e6f3e3d688dc6773d1777071529ee",
+      "operation_id": "bd013328be6d410f89579a01ff8d93dc",
+      "reason": null,
+      "version": 2,
+      "worktree_identity": {
+        "device": 16777229,
+        "inode": 284898464,
+        "path": "/private/tmp/WorkingRCX-pr-disposition-apply-r2-Codex0910"
+      }
+    },
+    "wave_id": "pr-disposition-executor-enabler-r1-2026-09-09"
+  },
+  "intent_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09/pr-1213.json",
+  "manifest_sha256": "e5034bfaac99d315b22bba52122d80f91fc0b68eba24e9f6708eb9815c2c83f9",
+  "operation_id": "bd013328be6d410f89579a01ff8d93dc",
+  "reason": null,
+  "receipt_sha256": "23d29c8814454c5cccbcce8d57bcb50debfce0d5474a24e975b97507fa78880b",
+  "repository": {
+    "id": "R_kgDOQvy8bg",
+    "nameWithOwner": "jabramsja/rcx-pi-core",
+    "url": "https://github.com/jabramsja/rcx-pi-core"
+  },
+  "schema_version": 1,
+  "status": "CLOSED",
+  "target": {
+    "baseRefName": "dev",
+    "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+    "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+    "headRepository": {
+      "id": "R_kgDOQvy8bg",
+      "owner": {
+        "id": "MDQ6VXNlcjI3MjU3NDg3",
+        "login": "jabramsja"
+      }
+    },
+    "id": "PR_kwDOQvy8bs7wx1P-",
+    "mergedAt": null,
+    "number": 1213,
+    "state": "OPEN"
+  },
+  "terminal": {
+    "boundary": {
+      "action_error": null,
+      "action_invoked": true,
+      "action_succeeded": true,
+      "authority_consumed": true,
+      "decision": "ACTION_COMPLETED",
+      "operation_id": "bd013328be6d410f89579a01ff8d93dc",
+      "reason": null
+    },
+    "close_response": {
+      "headRef": {
+        "name": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+        "prefix": "refs/heads/",
+        "target": {
+          "oid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+          "type": "Commit"
+        }
+      },
+      "pullRequest": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+        "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "nameWithOwner": "jabramsja/rcx-pi-core",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs7wx1P-",
+        "mergedAt": null,
+        "number": 1213,
+        "state": "CLOSED"
+      },
+      "repository": {
+        "id": "R_kgDOQvy8bg",
+        "nameWithOwner": "jabramsja/rcx-pi-core",
+        "url": "https://github.com/jabramsja/rcx-pi-core"
+      },
+      "type": "PullRequest"
+    },
+    "kind": "CLOSE_CONFIRMED"
+  },
+  "wave_id": "pr-disposition-executor-enabler-r1-2026-09-09"
+}

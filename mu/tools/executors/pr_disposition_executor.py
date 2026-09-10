@@ -38,13 +38,20 @@ RECEIPT_ROOT_NAME = "rcx_pr_disposition_receipts"
 INTENT_SCHEMA_VERSION = 1
 RECEIPT_SCHEMA_VERSION = 1
 
-# Apply R2 completed the fixed-set provider mutations but could not land because
-# the providerless commit pipeline had no post-cleanup terminal transition.  The
-# transition below is intentionally specific to that consumed wave: it verifies
-# and preserves its evidence without ever making ``apply`` launchable again.
-TERMINAL_SWEEP_WAVE_ID = "pr-disposition-apply-r2-2026-09-10"
+# Apply R2 completed the fixed-set provider mutations but could not land.  Its
+# immutable evidence is the source for one fresh, exact-wave no-replay carrier.
+# Keep the source identity separate from the carrier identity: the historical
+# staged digest must never be mistaken for the independently reviewed current
+# candidate digest supplied by the Phase-B/pre-commit/commit receipt chain.
+TERMINAL_SWEEP_SOURCE_WAVE_ID = "pr-disposition-apply-r2-2026-09-10"
+TERMINAL_SWEEP_WAVE_ID = (
+    "pr-disposition-r2-no-replay-finalization-r1-2026-09-10"
+)
 TERMINAL_SWEEP_COMPARISON_COMMIT = (
     "2b4218dc7c3e6f3e3d688dc6773d1777071529ee"
+)
+TERMINAL_SWEEP_FINALIZATION_BASE_COMMIT = (
+    "1ec8c093b7e93d8b2ee65f4d40a373dc46f06add"
 )
 TERMINAL_SWEEP_PACKET_RELATIVE_PATH = Path(
     "reports/control_plane/pr-disposition-apply-r2-2026-09-10_2026-09-10.md"
@@ -55,8 +62,84 @@ TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH = Path(
 TERMINAL_SWEEP_PACKET_SHA256 = (
     "b85adda0f1e66c3b4bccff86f84f8cb835464ce31252d926d3de364e1872c444"
 )
-TERMINAL_SWEEP_CANDIDATE_SHA256 = (
+TERMINAL_SWEEP_SOURCE_CANDIDATE_SHA256 = (
     "36677e05e5fa5f865442e341ff1c64c60a9ef821d4d84fddfd56f5bd3e4df102"
+)
+TERMINAL_SWEEP_SOURCE_PRESERVATION_ROOT = Path(
+    "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/"
+    "WorkingRCX-preservation/"
+    "pr-disposition-apply-r2-terminal-transition-blocked-20260910"
+)
+TERMINAL_SWEEP_AUTHORITY_RELATIVE_PATH = Path(
+    "reports/control_plane/"
+    "pr-disposition-r2-no-replay-finalization-authority-r1-2026-09-10.json"
+)
+TERMINAL_SWEEP_FINALIZATION_PACKET_RELATIVE_PATH = Path(
+    "reports/control_plane/"
+    "pr-disposition-r2-no-replay-finalization-r1-2026-09-10_2026-09-10.md"
+)
+TERMINAL_SWEEP_FINALIZATION_PACKET_CONTRACT_DIGEST = (
+    "450c469cabd93e4ae5f69e2e691a8903fc611d451de1eed4acfcd860f81b00b2"
+)
+TERMINAL_SWEEP_SOURCE_INDICATOR_RELATIVE_PATH = Path(
+    "reports/l4_wave_indicators/pr-disposition-apply-r2-2026-09-10.json"
+)
+TERMINAL_SWEEP_SOURCE_BRANCH = "jabramsja/pr-disposition-apply-r2-2026-09-10"
+TERMINAL_SWEEP_TARGET_MANIFEST_SHA256 = (
+    "e5034bfaac99d315b22bba52122d80f91fc0b68eba24e9f6708eb9815c2c83f9"
+)
+TERMINAL_SWEEP_AUTHORITY_SCHEMA_VERSION = 1
+TERMINAL_SWEEP_COPIED_ARTIFACTS: tuple[tuple[str, Path, str], ...] = (
+    (
+        "packet",
+        TERMINAL_SWEEP_PACKET_RELATIVE_PATH,
+        TERMINAL_SWEEP_PACKET_SHA256,
+    ),
+    (
+        "receipt",
+        TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH / "pr-1196.json",
+        "3de546e193692612e71b9fb04dac9c02ececec379ca9779f7c28d770c2696296",
+    ),
+    (
+        "receipt",
+        TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH / "pr-1197.json",
+        "de28bc1f80a6c5460fd5728cdf40fdee019ec2fdc33917268a5e57015259a96e",
+    ),
+    (
+        "receipt",
+        TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH / "pr-1203.json",
+        "c5b2fc165fd731c7f9cefcafd48033962a705d3e2fe9b52201c0b79d2c58943d",
+    ),
+    (
+        "receipt",
+        TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH / "pr-1210.json",
+        "b5c224d4fa4d4faa1ff2c80f6c1991bb49f5217b2ab8fab35652478d1375550f",
+    ),
+    (
+        "receipt",
+        TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH / "pr-1211.json",
+        "b3a0681674f832cacf7b27b6840ca3292e6da48d39765e50b028a22a92e23859",
+    ),
+    (
+        "receipt",
+        TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH / "pr-1212.json",
+        "5bdb4124773bdd100dbf674c0e7e2eb5f423e9910bcf9eb287b00c9c2df93675",
+    ),
+    (
+        "receipt",
+        TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH / "pr-1213.json",
+        "7cc9e5c550c042c142ff8e7c8f3aa925fc4ec53d08b34fd727c76ca65ad8d362",
+    ),
+    (
+        "receipt",
+        TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH / "pr-1219.json",
+        "7db1dfcca73fbed77c3304cd2de24710d3a0942e4daf740d68cf4066ef469f19",
+    ),
+    (
+        "indicator",
+        TERMINAL_SWEEP_SOURCE_INDICATOR_RELATIVE_PATH,
+        "6652024612c750df4886d75707f2ecb5121230d14a1ba6d0b87455d7315af16b",
+    ),
 )
 TERMINAL_RECEIPT_ROOT_NAME = "rcx_post_merge_terminal_receipts"
 TERMINAL_RECEIPT_SCHEMA_VERSION = 1
@@ -149,6 +232,16 @@ EXPECTED_TARGETS: tuple[dict[str, Any], ...] = (
 TARGET_BY_NUMBER = {target["number"]: target for target in EXPECTED_TARGETS}
 TARGET_BY_NODE = {target["id"]: target for target in EXPECTED_TARGETS}
 EXPECTED_NUMBERS = tuple(target["number"] for target in EXPECTED_TARGETS)
+TERMINAL_SWEEP_OPERATION_IDS: dict[int, str] = {
+    1196: "87a360fd4c15411e8d87f092ae2e1fa9",
+    1197: "04afa53b63bf434e8347bcc920bd1b2d",
+    1203: "567e87ebba7d4809ae85a0a39d8fa676",
+    1210: "e3b26658170d456890b83eb0dc703b12",
+    1211: "640bed01d9674f96b0799ee8ad48b5ed",
+    1212: "32d302133381451e9df053224e113494",
+    1213: "bd013328be6d410f89579a01ff8d93dc",
+    1219: "4315ac5f7d5d407da739a1dc1bd18e1e",
+}
 
 COMPLETE_STATUSES = frozenset({"CLOSED", "CLOSED_RECONCILED"})
 HOLD_STATUSES = frozenset(
@@ -1913,12 +2006,233 @@ def verify_receipts(
 
 
 def requires_terminal_sweep(wave_id: str) -> bool:
-    """Return whether *wave_id* is the consumed Apply-R2 landing carrier."""
+    """Return whether *wave_id* is the exact no-replay finalization carrier."""
     return str(wave_id or "").strip() == TERMINAL_SWEEP_WAVE_ID
 
 
 def _sha256_bytes(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def _expected_finalization_authority_payload() -> dict[str, Any]:
+    copied_artifacts = [
+        {"kind": kind, "path": str(path), "sha256": digest}
+        for kind, path, digest in TERMINAL_SWEEP_COPIED_ARTIFACTS
+    ]
+    targets = []
+    for target in sorted(EXPECTED_TARGETS, key=lambda item: item["number"]):
+        number = target["number"]
+        targets.append(
+            {
+                "head_ref_name": target["headRefName"],
+                "head_sha": target["headRefOid"],
+                "intent_path": str(
+                    Path(INTENT_ROOT_NAME, WAVE_ID, f"pr-{number}.json")
+                ),
+                "node_id": target["id"],
+                "number": number,
+                "operation_id": TERMINAL_SWEEP_OPERATION_IDS[number],
+                "receipt_path": str(
+                    TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH / f"pr-{number}.json"
+                ),
+            }
+        )
+    return {
+        "copied_artifacts": copied_artifacts,
+        "finalization": {
+            "authority_manifest_path": str(
+                TERMINAL_SWEEP_AUTHORITY_RELATIVE_PATH
+            ),
+            "base_merge_commit": TERMINAL_SWEEP_FINALIZATION_BASE_COMMIT,
+            "base_pr_number": 1281,
+            "candidate_digest_authority": (
+                "phase_b_pre_commit_commit_receipt_chain"
+            ),
+            "packet_native_contract_digest": (
+                TERMINAL_SWEEP_FINALIZATION_PACKET_CONTRACT_DIGEST
+            ),
+            "packet_path": str(
+                TERMINAL_SWEEP_FINALIZATION_PACKET_RELATIVE_PATH
+            ),
+            "wave_id": TERMINAL_SWEEP_WAVE_ID,
+        },
+        "schema_version": TERMINAL_SWEEP_AUTHORITY_SCHEMA_VERSION,
+        "source": {
+            "branch": TERMINAL_SWEEP_SOURCE_BRANCH,
+            "comparison_commit": TERMINAL_SWEEP_COMPARISON_COMMIT,
+            "excluded_staged_paths": ["TASKS.md"],
+            "intent_namespace": str(Path(INTENT_ROOT_NAME, WAVE_ID)),
+            "packet_path": str(TERMINAL_SWEEP_PACKET_RELATIVE_PATH),
+            "packet_sha256": TERMINAL_SWEEP_PACKET_SHA256,
+            "preservation_root": str(TERMINAL_SWEEP_SOURCE_PRESERVATION_ROOT),
+            "staged_candidate_path_count": 11,
+            "staged_candidate_sha256": (
+                TERMINAL_SWEEP_SOURCE_CANDIDATE_SHA256
+            ),
+            "target_manifest_path": str(MANIFEST_RELATIVE_PATH),
+            "target_manifest_sha256": TERMINAL_SWEEP_TARGET_MANIFEST_SHA256,
+            "wave_id": TERMINAL_SWEEP_SOURCE_WAVE_ID,
+        },
+        "targets": targets,
+    }
+
+
+def validate_no_replay_finalization_candidate(
+    repo_root: Path | str,
+    *,
+    wave_id: str,
+    candidate_sha256: str,
+    authority_manifest_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Validate the fresh carrier's immutable source evidence without Apply.
+
+    The current candidate digest is deliberately caller-supplied by the
+    reviewed Phase-B/pre-commit/commit chain.  The authority manifest binds the
+    distinct historical Apply-R2 digest and exact copied bytes; it never claims
+    that the fresh candidate has the historical digest.
+    """
+    errors: list[str] = []
+    normalized_wave = str(wave_id or "").strip()
+    reviewed_candidate_sha256 = str(candidate_sha256 or "")
+    if not requires_terminal_sweep(normalized_wave):
+        errors.append("no-replay finalization wave identity mismatch")
+    if _DIGEST_RE.fullmatch(reviewed_candidate_sha256) is None:
+        errors.append("reviewed finalization candidate SHA-256 is missing or invalid")
+    elif reviewed_candidate_sha256 == TERMINAL_SWEEP_SOURCE_CANDIDATE_SHA256:
+        errors.append(
+            "reviewed finalization candidate SHA-256 reuses historical "
+            "Apply-R2 staged-candidate SHA-256"
+        )
+
+    try:
+        root = Path(repo_root).resolve(strict=True)
+    except OSError as exc:
+        return {
+            "authority_manifest": None,
+            "candidate_sha256": reviewed_candidate_sha256,
+            "decision": "HOLD",
+            "errors": [*errors, f"finalization repository root is unavailable: {exc}"],
+            "source_candidate_sha256": TERMINAL_SWEEP_SOURCE_CANDIDATE_SHA256,
+            "wave_id": normalized_wave,
+        }
+
+    manifest_path = (
+        Path(authority_manifest_path)
+        if authority_manifest_path is not None
+        else root / TERMINAL_SWEEP_AUTHORITY_RELATIVE_PATH
+    )
+    if not manifest_path.is_absolute():
+        manifest_path = root / manifest_path
+    manifest_record: dict[str, Any] | None = None
+    try:
+        manifest, manifest_raw = _read_canonical_json(
+            manifest_path,
+            label="no-replay finalization authority manifest",
+        )
+        manifest_record = {
+            "path": str(manifest_path),
+            "raw_sha256": _sha256_bytes(manifest_raw),
+            "self_sha256": manifest.get("manifest_sha256"),
+        }
+        expected_keys = {
+            "copied_artifacts",
+            "finalization",
+            "manifest_sha256",
+            "schema_version",
+            "source",
+            "targets",
+        }
+        if set(manifest) != expected_keys:
+            errors.append("finalization authority manifest schema mismatch")
+        claimed_manifest_sha = manifest.get("manifest_sha256")
+        unhashed_manifest = dict(manifest)
+        unhashed_manifest.pop("manifest_sha256", None)
+        if (
+            not isinstance(claimed_manifest_sha, str)
+            or _DIGEST_RE.fullmatch(claimed_manifest_sha) is None
+        ):
+            errors.append("finalization authority manifest self-hash is invalid")
+        elif claimed_manifest_sha != _canonical_sha256(unhashed_manifest):
+            errors.append("finalization authority manifest self-hash mismatch")
+        if not _json_exact_equal(
+            unhashed_manifest,
+            _expected_finalization_authority_payload(),
+        ):
+            errors.append("finalization authority manifest contract mismatch")
+    except ContractError as exc:
+        errors.append(f"finalization authority manifest failed: {exc}")
+        manifest = None
+
+    for kind, relative_path, expected_sha in TERMINAL_SWEEP_COPIED_ARTIFACTS:
+        try:
+            raw = _read_regular_bytes(
+                root / relative_path,
+                label=f"copied Apply-R2 {kind}",
+            )
+            if _sha256_bytes(raw) != expected_sha:
+                errors.append(f"copied artifact SHA-256 mismatch: {relative_path}")
+        except ContractError as exc:
+            errors.append(f"copied artifact failed: {exc}")
+
+    try:
+        finalization_packet = _read_regular_bytes(
+            root / TERMINAL_SWEEP_FINALIZATION_PACKET_RELATIVE_PATH,
+            label="no-replay finalization packet",
+        ).decode("utf-8")
+        required_packet_lines = (
+            f"Wave ID: {TERMINAL_SWEEP_WAVE_ID}",
+            "Phase-A-Lock: LOCKED",
+            "Native-Stub-Packet-Contract: required=true; producer=launch_wave.py; version=1",
+            "Native-Stub-Packet-Contract-Digest: "
+            + TERMINAL_SWEEP_FINALIZATION_PACKET_CONTRACT_DIGEST,
+        )
+        for required in required_packet_lines:
+            if required not in finalization_packet.splitlines():
+                errors.append(
+                    "finalization packet identity/lock mismatch: " + required
+                )
+    except (ContractError, UnicodeError) as exc:
+        errors.append(f"finalization packet failed: {exc}")
+
+    try:
+        target_manifest = validate_manifest_contract(root / MANIFEST_RELATIVE_PATH)
+        if target_manifest.get("manifest_sha256") != TERMINAL_SWEEP_TARGET_MANIFEST_SHA256:
+            errors.append("source target manifest SHA-256 mismatch")
+        verified = verify_receipts(
+            root / MANIFEST_RELATIVE_PATH,
+            comparison_commit=TERMINAL_SWEEP_COMPARISON_COMMIT,
+            receipts_dir=root / TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH,
+        )
+        if verified.get("has_hold") is not False:
+            errors.append("copied Apply-R2 receipt batch contains a HOLD")
+        if verified.get("receipt_count") != len(EXPECTED_TARGETS):
+            errors.append("copied Apply-R2 receipt batch count mismatch")
+    except (ContractError, OSError) as exc:
+        errors.append(f"copied Apply-R2 semantic evidence failed: {exc}")
+
+    try:
+        indicator_raw = _read_regular_bytes(
+            root / TERMINAL_SWEEP_SOURCE_INDICATOR_RELATIVE_PATH,
+            label="copied Apply-R2 indicator",
+        )
+        indicator = _decode_json(indicator_raw, label="copied Apply-R2 indicator")
+        if not isinstance(indicator, dict):
+            raise ContractError("copied Apply-R2 indicator must be a JSON object")
+        if indicator.get("wave_id") != TERMINAL_SWEEP_SOURCE_WAVE_ID:
+            errors.append("copied Apply-R2 indicator wave mismatch")
+        if indicator.get("comparison_commit") != TERMINAL_SWEEP_COMPARISON_COMMIT:
+            errors.append("copied Apply-R2 indicator comparison commit mismatch")
+    except ContractError as exc:
+        errors.append(f"copied Apply-R2 indicator failed: {exc}")
+
+    return {
+        "authority_manifest": manifest_record,
+        "candidate_sha256": reviewed_candidate_sha256,
+        "decision": "PASS" if not errors else "HOLD",
+        "errors": errors,
+        "source_candidate_sha256": TERMINAL_SWEEP_SOURCE_CANDIDATE_SHA256,
+        "wave_id": normalized_wave,
+    }
 
 
 def _path_identity(path: Path) -> dict[str, Any]:
@@ -1993,21 +2307,33 @@ def _terminal_cleanup_snapshot(
 
 def _terminal_evidence_contract(
     *,
+    authority_manifest_path: Path | None,
     comparison_commit: str,
+    finalization_wave_id: str,
     manifest_path: Path,
     packet_path: Path,
     receipts_dir: Path,
+    source_candidate_sha256: str,
     expected_packet_sha256: str,
-    expected_candidate_sha256: str,
+    expected_finalization_candidate_sha256: str,
 ) -> dict[str, Any]:
     return {
+        "authority_manifest_path": (
+            str(authority_manifest_path)
+            if authority_manifest_path is not None
+            else None
+        ),
         "comparison_commit": comparison_commit,
-        "expected_candidate_sha256": expected_candidate_sha256,
+        "expected_finalization_candidate_sha256": (
+            expected_finalization_candidate_sha256
+        ),
         "expected_packet_sha256": expected_packet_sha256,
+        "finalization_wave_id": finalization_wave_id,
         "manifest_path": str(manifest_path),
         "packet_path": str(packet_path),
         "receipts_dir": str(receipts_dir),
-        "source_wave_id": TERMINAL_SWEEP_WAVE_ID,
+        "source_candidate_sha256": source_candidate_sha256,
+        "source_wave_id": TERMINAL_SWEEP_SOURCE_WAVE_ID,
     }
 
 
@@ -2022,30 +2348,62 @@ def _collect_terminal_evidence(
 ) -> tuple[dict[str, Any], list[str]]:
     """Collect fixed R2 artifacts/intents and optional fresh provider proof."""
     errors: list[str] = []
+    authority_manifest_value = contract.get("authority_manifest_path")
     comparison_commit = str(contract.get("comparison_commit") or "")
+    finalization_wave_id = str(contract.get("finalization_wave_id") or "")
     manifest_path = Path(str(contract.get("manifest_path") or ""))
     packet_path = Path(str(contract.get("packet_path") or ""))
     receipts_dir = Path(str(contract.get("receipts_dir") or ""))
     expected_packet_sha256 = str(contract.get("expected_packet_sha256") or "")
-    expected_candidate_sha256 = str(
-        contract.get("expected_candidate_sha256") or ""
+    expected_finalization_candidate_sha256 = str(
+        contract.get("expected_finalization_candidate_sha256") or ""
     )
+    source_candidate_sha256 = str(contract.get("source_candidate_sha256") or "")
     evidence: dict[str, Any] = {
+        "authority_manifest": None,
         "candidate_sha256": candidate_sha256,
         "comparison_commit": comparison_commit,
+        "finalization_wave_id": finalization_wave_id,
         "intents": [],
         "manifest": None,
         "packet": None,
         "receipts": [],
         "remote_observations": [],
         "result": "HOLD",
+        "source_candidate_sha256": source_candidate_sha256,
+        "source_wave_id": str(contract.get("source_wave_id") or ""),
         "target_numbers": list(EXPECTED_NUMBERS),
     }
 
     if _DIGEST_RE.fullmatch(candidate_sha256) is None:
-        errors.append("R2 staged-candidate SHA-256 is missing or invalid")
-    elif candidate_sha256 != expected_candidate_sha256:
-        errors.append("R2 staged-candidate SHA-256 mismatch")
+        errors.append("finalization candidate SHA-256 is missing or invalid")
+    elif candidate_sha256 != expected_finalization_candidate_sha256:
+        errors.append("finalization candidate SHA-256 mismatch")
+    if source_candidate_sha256 != TERMINAL_SWEEP_SOURCE_CANDIDATE_SHA256:
+        errors.append("historical Apply-R2 staged-candidate SHA-256 mismatch")
+    if contract.get("source_wave_id") != TERMINAL_SWEEP_SOURCE_WAVE_ID:
+        errors.append("historical Apply-R2 source wave mismatch")
+    if finalization_wave_id != TERMINAL_SWEEP_WAVE_ID:
+        errors.append("no-replay finalization wave mismatch")
+
+    if isinstance(authority_manifest_value, str) and authority_manifest_value:
+        authority = validate_no_replay_finalization_candidate(
+            repo_root,
+            wave_id=finalization_wave_id,
+            candidate_sha256=candidate_sha256,
+            authority_manifest_path=Path(authority_manifest_value),
+        )
+        evidence["authority_manifest"] = authority.get("authority_manifest")
+        if authority.get("decision") != "PASS":
+            authority_errors = authority.get("errors")
+            if isinstance(authority_errors, list):
+                errors.extend(
+                    f"finalization authority: {item}"
+                    for item in authority_errors
+                    if isinstance(item, str) and item
+                )
+            else:
+                errors.append("finalization authority validation failed")
 
     manifest_sha256 = ""
     try:
@@ -2316,9 +2674,10 @@ def prepare_terminal_sweep_receipt(
     manifest_path: Path | str | None = None,
     packet_path: Path | str | None = None,
     receipts_dir: Path | str | None = None,
+    authority_manifest_path: Path | str | None = None,
     comparison_commit: str = TERMINAL_SWEEP_COMPARISON_COMMIT,
     expected_packet_sha256: str = TERMINAL_SWEEP_PACKET_SHA256,
-    expected_candidate_sha256: str = TERMINAL_SWEEP_CANDIDATE_SHA256,
+    expected_candidate_sha256: str | None = None,
     git_run: Callable[..., subprocess.CompletedProcess[Any]] = _default_git_run,
     gh_runner: GhRunner | None = None,
 ) -> dict[str, Any]:
@@ -2338,13 +2697,37 @@ def prepare_terminal_sweep_receipt(
     manifest = Path(manifest_path) if manifest_path is not None else survivor / MANIFEST_RELATIVE_PATH
     packet = Path(packet_path) if packet_path is not None else survivor / TERMINAL_SWEEP_PACKET_RELATIVE_PATH
     receipt_root = Path(receipts_dir) if receipts_dir is not None else survivor / TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH
+    # The established terminal-sweep tests provide all evidence paths from one
+    # hermetic repository.  Preserve that closed, explicit seam; every normal
+    # or partially overridden finalization path still requires the canonical
+    # reviewed authority manifest before and after cleanup.
+    explicit_evidence_paths = all(
+        value is not None for value in (manifest_path, packet_path, receipts_dir)
+    )
+    authority_manifest = None
+    if authority_manifest_path is not None:
+        authority_manifest = Path(authority_manifest_path)
+    elif not explicit_evidence_paths:
+        authority_manifest = survivor / TERMINAL_SWEEP_AUTHORITY_RELATIVE_PATH
+    reviewed_candidate_sha256 = (
+        candidate_sha256
+        if expected_candidate_sha256 is None
+        else expected_candidate_sha256
+    )
     contract = _terminal_evidence_contract(
+        authority_manifest_path=(
+            authority_manifest.resolve(strict=False)
+            if authority_manifest is not None
+            else None
+        ),
         comparison_commit=comparison_commit,
+        finalization_wave_id=wave_id,
         manifest_path=manifest.resolve(strict=False),
         packet_path=packet.resolve(strict=False),
         receipts_dir=receipt_root.resolve(strict=False),
+        source_candidate_sha256=TERMINAL_SWEEP_SOURCE_CANDIDATE_SHA256,
         expected_packet_sha256=expected_packet_sha256,
-        expected_candidate_sha256=expected_candidate_sha256,
+        expected_finalization_candidate_sha256=reviewed_candidate_sha256,
     )
     errors: list[str] = []
     try:
@@ -2493,12 +2876,16 @@ def finalize_terminal_sweep_receipt(
         pre_evidence = current.get("pre_cleanup_evidence")
         if isinstance(pre_evidence, dict):
             for key in (
+                "authority_manifest",
                 "candidate_sha256",
                 "comparison_commit",
+                "finalization_wave_id",
                 "intents",
                 "manifest",
                 "packet",
                 "receipts",
+                "source_candidate_sha256",
+                "source_wave_id",
                 "target_numbers",
             ):
                 if not _json_exact_equal(pre_evidence.get(key), post_evidence.get(key)):
@@ -2655,12 +3042,20 @@ def _terminal_receipt_semantic_errors(receipt: Any) -> list[str]:
     elif isinstance(pre_evidence, dict):
         if decision == "PASS" and pre_evidence.get(
             "candidate_sha256"
-        ) != contract.get("expected_candidate_sha256"):
+        ) != contract.get("expected_finalization_candidate_sha256"):
             errors.append("terminal candidate digest binding mismatch")
         if pre_evidence.get("comparison_commit") != contract.get(
             "comparison_commit"
         ):
             errors.append("terminal comparison commit binding mismatch")
+        if pre_evidence.get("source_candidate_sha256") != contract.get(
+            "source_candidate_sha256"
+        ):
+            errors.append("historical source candidate digest binding mismatch")
+        if pre_evidence.get("source_wave_id") != TERMINAL_SWEEP_SOURCE_WAVE_ID:
+            errors.append("historical source wave binding mismatch")
+        if pre_evidence.get("finalization_wave_id") != receipt.get("wave_id"):
+            errors.append("finalization carrier wave binding mismatch")
     return errors
 
 

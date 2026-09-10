@@ -1,0 +1,25 @@
+{
+  "wave_id": "pr-disposition-r2-no-replay-finalization-r1-2026-09-10",
+  "repeat_run_speedup_ratio": 1.178453,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.288434,
+  "repeat_run_raw_seconds": [
+    0.339906,
+    0.288434
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.339906
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.62834
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-10T19:05:24Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "1ec8c093b7e93d8b2ee65f4d40a373dc46f06add"
+}
