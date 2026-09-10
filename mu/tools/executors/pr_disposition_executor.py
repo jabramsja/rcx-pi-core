@@ -22,6 +22,7 @@ import subprocess
 import sys
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Sequence
 
@@ -36,6 +37,31 @@ INTENT_ROOT_NAME = "rcx_pr_disposition_operations"
 RECEIPT_ROOT_NAME = "rcx_pr_disposition_receipts"
 INTENT_SCHEMA_VERSION = 1
 RECEIPT_SCHEMA_VERSION = 1
+
+# Apply R2 completed the fixed-set provider mutations but could not land because
+# the providerless commit pipeline had no post-cleanup terminal transition.  The
+# transition below is intentionally specific to that consumed wave: it verifies
+# and preserves its evidence without ever making ``apply`` launchable again.
+TERMINAL_SWEEP_WAVE_ID = "pr-disposition-apply-r2-2026-09-10"
+TERMINAL_SWEEP_COMPARISON_COMMIT = (
+    "2b4218dc7c3e6f3e3d688dc6773d1777071529ee"
+)
+TERMINAL_SWEEP_PACKET_RELATIVE_PATH = Path(
+    "reports/control_plane/pr-disposition-apply-r2-2026-09-10_2026-09-10.md"
+)
+TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH = Path(
+    "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts"
+)
+TERMINAL_SWEEP_PACKET_SHA256 = (
+    "b85adda0f1e66c3b4bccff86f84f8cb835464ce31252d926d3de364e1872c444"
+)
+TERMINAL_SWEEP_CANDIDATE_SHA256 = (
+    "36677e05e5fa5f865442e341ff1c64c60a9ef821d4d84fddfd56f5bd3e4df102"
+)
+TERMINAL_RECEIPT_ROOT_NAME = "rcx_post_merge_terminal_receipts"
+TERMINAL_RECEIPT_SCHEMA_VERSION = 1
+TERMINAL_FLEET_CANDIDATE = "fleet-cleanup-builder"
+TERMINAL_RECONCILIATION_CANDIDATE = "pr-disposition-reconciliation"
 
 EXPECTED_REPOSITORY: dict[str, Any] = {
     "id": "R_kgDOQvy8bg",
@@ -1883,6 +1909,834 @@ def verify_receipts(
             for receipt in receipts
         },
         "wave_id": WAVE_ID,
+    }
+
+
+def requires_terminal_sweep(wave_id: str) -> bool:
+    """Return whether *wave_id* is the consumed Apply-R2 landing carrier."""
+    return str(wave_id or "").strip() == TERMINAL_SWEEP_WAVE_ID
+
+
+def _sha256_bytes(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _path_identity(path: Path) -> dict[str, Any]:
+    resolved = path.resolve(strict=True)
+    info = resolved.stat()
+    return {
+        "device": int(info.st_dev),
+        "inode": int(info.st_ino),
+        "path": str(resolved),
+    }
+
+
+def _parse_worktree_porcelain(raw: str) -> list[dict[str, Any]]:
+    worktrees: list[dict[str, Any]] = []
+    current: dict[str, Any] = {}
+    for line in [*raw.splitlines(), ""]:
+        if not line:
+            if current:
+                worktrees.append(current)
+                current = {}
+            continue
+        key, _, value = line.partition(" ")
+        current[key] = value if value else True
+    return sorted(worktrees, key=lambda item: str(item.get("worktree") or ""))
+
+
+def _terminal_cleanup_snapshot(
+    repo_root: Path,
+    *,
+    git_run: Callable[..., subprocess.CompletedProcess[Any]] = _default_git_run,
+) -> dict[str, Any]:
+    """Capture exact local refs/worktrees/stashes surrounding carrier cleanup."""
+    branch_output = _git_stdout(
+        [
+            "git",
+            "for-each-ref",
+            "--format=%(refname)%00%(objectname)",
+            "refs/heads",
+        ],
+        cwd=repo_root,
+        git_run=git_run,
+    )
+    branches: dict[str, str] = {}
+    for row in branch_output.splitlines():
+        ref, separator, oid = row.partition("\0")
+        if not separator or not ref or _SHA_RE.fullmatch(oid) is None:
+            raise ContractError("local branch snapshot contains an invalid ref row")
+        branches[ref] = oid
+
+    worktree_output = _git_stdout(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo_root,
+        git_run=git_run,
+    )
+    stash_output = _git_stdout(
+        ["git", "stash", "list", "--format=%H%x00%gs"],
+        cwd=repo_root,
+        git_run=git_run,
+    )
+    stashes: list[dict[str, str]] = []
+    for row in stash_output.splitlines():
+        oid, separator, subject = row.partition("\0")
+        if not separator or _SHA_RE.fullmatch(oid) is None:
+            raise ContractError("stash snapshot contains an invalid row")
+        stashes.append({"oid": oid, "subject": subject})
+    return {
+        "branches": dict(sorted(branches.items())),
+        "stashes": stashes,
+        "worktrees": _parse_worktree_porcelain(worktree_output),
+    }
+
+
+def _terminal_evidence_contract(
+    *,
+    comparison_commit: str,
+    manifest_path: Path,
+    packet_path: Path,
+    receipts_dir: Path,
+    expected_packet_sha256: str,
+    expected_candidate_sha256: str,
+) -> dict[str, Any]:
+    return {
+        "comparison_commit": comparison_commit,
+        "expected_candidate_sha256": expected_candidate_sha256,
+        "expected_packet_sha256": expected_packet_sha256,
+        "manifest_path": str(manifest_path),
+        "packet_path": str(packet_path),
+        "receipts_dir": str(receipts_dir),
+        "source_wave_id": TERMINAL_SWEEP_WAVE_ID,
+    }
+
+
+def _collect_terminal_evidence(
+    repo_root: Path,
+    common_dir: Path,
+    *,
+    contract: dict[str, Any],
+    candidate_sha256: str,
+    include_remote: bool,
+    gh_runner: GhRunner,
+) -> tuple[dict[str, Any], list[str]]:
+    """Collect fixed R2 artifacts/intents and optional fresh provider proof."""
+    errors: list[str] = []
+    comparison_commit = str(contract.get("comparison_commit") or "")
+    manifest_path = Path(str(contract.get("manifest_path") or ""))
+    packet_path = Path(str(contract.get("packet_path") or ""))
+    receipts_dir = Path(str(contract.get("receipts_dir") or ""))
+    expected_packet_sha256 = str(contract.get("expected_packet_sha256") or "")
+    expected_candidate_sha256 = str(
+        contract.get("expected_candidate_sha256") or ""
+    )
+    evidence: dict[str, Any] = {
+        "candidate_sha256": candidate_sha256,
+        "comparison_commit": comparison_commit,
+        "intents": [],
+        "manifest": None,
+        "packet": None,
+        "receipts": [],
+        "remote_observations": [],
+        "result": "HOLD",
+        "target_numbers": list(EXPECTED_NUMBERS),
+    }
+
+    if _DIGEST_RE.fullmatch(candidate_sha256) is None:
+        errors.append("R2 staged-candidate SHA-256 is missing or invalid")
+    elif candidate_sha256 != expected_candidate_sha256:
+        errors.append("R2 staged-candidate SHA-256 mismatch")
+
+    manifest_sha256 = ""
+    try:
+        validated = validate_manifest_contract(manifest_path)
+        manifest_sha256 = str(validated["manifest_sha256"])
+        evidence["manifest"] = {
+            "path": str(manifest_path),
+            "raw_sha256": _sha256_bytes(validated["raw_bytes"]),
+            "self_sha256": manifest_sha256,
+        }
+    except (ContractError, OSError) as exc:
+        errors.append(f"manifest evidence failed: {exc}")
+
+    try:
+        packet_raw = _read_regular_bytes(packet_path, label="Apply R2 packet")
+        packet_sha256 = _sha256_bytes(packet_raw)
+        evidence["packet"] = {
+            "path": str(packet_path),
+            "sha256": packet_sha256,
+        }
+        if packet_sha256 != expected_packet_sha256:
+            errors.append("Apply R2 packet SHA-256 mismatch")
+    except ContractError as exc:
+        errors.append(f"packet evidence failed: {exc}")
+
+    if manifest_sha256:
+        try:
+            verified = verify_receipts(
+                manifest_path,
+                comparison_commit=comparison_commit,
+                receipts_dir=receipts_dir,
+            )
+            if verified.get("has_hold") is not False:
+                errors.append("Apply R2 receipt batch contains a HOLD")
+            if verified.get("receipt_count") != len(EXPECTED_TARGETS):
+                errors.append("Apply R2 receipt batch count mismatch")
+        except ContractError as exc:
+            errors.append(f"receipt batch verification failed: {exc}")
+
+        for target in EXPECTED_TARGETS:
+            number = target["number"]
+            receipt_path = _receipt_path(receipts_dir, number)
+            intent_path = _intent_path(common_dir, number)
+            receipt: dict[str, Any] | None = None
+            intent: dict[str, Any] | None = None
+            binding_equivalent = False
+            try:
+                receipt_raw = _read_regular_bytes(
+                    receipt_path, label=f"Apply R2 receipt PR #{number}"
+                )
+                receipt = _validate_receipt_for_target(
+                    receipt_path,
+                    target=target,
+                    comparison_commit=comparison_commit,
+                    manifest_sha256=manifest_sha256,
+                    repo_root=None,
+                    common_dir=common_dir,
+                )
+                if receipt.get("status") not in COMPLETE_STATUSES:
+                    errors.append(f"PR #{number} receipt is not complete")
+                evidence["receipts"].append(
+                    {
+                        "number": number,
+                        "operation_id": receipt.get("operation_id"),
+                        "path": str(receipt_path),
+                        "receipt_sha256": receipt.get("receipt_sha256"),
+                        "raw_sha256": _sha256_bytes(receipt_raw),
+                        "status": receipt.get("status"),
+                    }
+                )
+            except ContractError as exc:
+                errors.append(f"PR #{number} receipt evidence failed: {exc}")
+
+            try:
+                intent, intent_raw = _read_canonical_json(
+                    intent_path, label=f"Apply R2 intent PR #{number}"
+                )
+                intent_errors = _intent_errors(
+                    intent,
+                    target=target,
+                    comparison_commit=comparison_commit,
+                    manifest_sha256=manifest_sha256,
+                    repo_root=None,
+                    common_dir=common_dir,
+                )
+                if intent_errors:
+                    raise ContractError("; ".join(intent_errors))
+                binding_equivalent = bool(
+                    receipt is not None
+                    and receipt.get("intent_path") == str(intent_path)
+                    and _json_exact_equal(receipt.get("intent"), intent)
+                    and receipt.get("operation_id") == intent.get("operation_id")
+                )
+                if not binding_equivalent:
+                    errors.append(
+                        f"PR #{number} receipt/intent binding is not equivalent"
+                    )
+                evidence["intents"].append(
+                    {
+                        "binding_equivalent": binding_equivalent,
+                        "number": number,
+                        "operation_id": intent.get("operation_id"),
+                        "path": str(intent_path),
+                        "raw_sha256": _sha256_bytes(intent_raw),
+                        "state": intent.get("state"),
+                    }
+                )
+            except ContractError as exc:
+                errors.append(f"PR #{number} intent evidence failed: {exc}")
+
+            if include_remote:
+                try:
+                    snapshot = _read_remote_snapshot(
+                        target, repo_root=repo_root, gh_runner=gh_runner
+                    )
+                    snapshot_errors = _snapshot_errors(
+                        snapshot, target, state="CLOSED"
+                    )
+                    if snapshot_errors:
+                        errors.extend(
+                            f"PR #{number} terminal observation: {item}"
+                            for item in snapshot_errors
+                        )
+                    evidence["remote_observations"].append(
+                        {
+                            "errors": snapshot_errors,
+                            "number": number,
+                            "snapshot": snapshot,
+                        }
+                    )
+                except ContractError as exc:
+                    errors.append(f"PR #{number} terminal observation failed: {exc}")
+
+    if len(evidence["receipts"]) != len(EXPECTED_TARGETS):
+        errors.append("terminal evidence does not contain exactly eight receipts")
+    if len(evidence["intents"]) != len(EXPECTED_TARGETS):
+        errors.append("terminal evidence does not contain exactly eight intents")
+    if include_remote and len(evidence["remote_observations"]) != len(EXPECTED_TARGETS):
+        errors.append("terminal evidence does not contain exactly eight fresh observations")
+    if not errors:
+        evidence["result"] = "PASS"
+    return evidence, errors
+
+
+def _terminal_receipt_path(common_dir: Path, wave_id: str, merge_sha: str) -> Path:
+    return common_dir / TERMINAL_RECEIPT_ROOT_NAME / wave_id / f"{merge_sha}.json"
+
+
+def _seal_terminal_receipt(payload: dict[str, Any]) -> dict[str, Any]:
+    sealed = copy.deepcopy(payload)
+    sealed.pop("receipt_sha256", None)
+    sealed["receipt_sha256"] = _canonical_sha256(sealed)
+    return sealed
+
+
+def _write_new_terminal_receipt(path: Path, payload: dict[str, Any]) -> None:
+    try:
+        _write_json_exclusive(path, payload)
+    except FileExistsError as exc:
+        raise ContractError(
+            f"terminal receipt already exists and was not overwritten: {path}"
+        ) from exc
+
+
+def _owned_cleanup_stash(
+    stash: dict[str, Any], *, wave_id: str, target_branch: str
+) -> bool:
+    subject = str(stash.get("subject") or "")
+    return any(
+        marker in subject
+        for marker in (f"phase_b:{target_branch}:", f"phase_b:{wave_id}:")
+    )
+
+
+def _terminal_cleanup_errors(
+    *,
+    receipt: dict[str, Any],
+    cleanup_result: Any,
+    post_snapshot: Any,
+) -> list[str]:
+    errors: list[str] = []
+    authority = receipt.get("cleanup_authority")
+    if not isinstance(authority, dict):
+        return ["cleanup authority is absent"]
+    pre_snapshot = authority.get("pre_snapshot")
+    if not isinstance(pre_snapshot, dict) or not isinstance(post_snapshot, dict):
+        return ["cleanup snapshots are incomplete"]
+    if not isinstance(cleanup_result, dict):
+        return ["cleanup result is absent"]
+    required_result_keys = {
+        "branch_deleted",
+        "stashes_dropped",
+        "warnings",
+        "worktree_removed",
+    }
+    if set(cleanup_result) != required_result_keys:
+        errors.append("cleanup result schema mismatch")
+    if cleanup_result.get("branch_deleted") is not True:
+        errors.append("authorized carrier branch was not deleted")
+    expected_worktree_remove = authority.get("remove_carrier_worktree") is True
+    if cleanup_result.get("worktree_removed") is not expected_worktree_remove:
+        errors.append("carrier worktree cleanup result mismatch")
+    warnings = cleanup_result.get("warnings")
+    if not isinstance(warnings, list) or warnings:
+        errors.append("carrier cleanup reported warnings")
+
+    target_ref = str(authority.get("target_ref") or "")
+    pre_branches = pre_snapshot.get("branches")
+    post_branches = post_snapshot.get("branches")
+    if not isinstance(pre_branches, dict) or not isinstance(post_branches, dict):
+        errors.append("branch cleanup snapshots are invalid")
+    else:
+        expected_branches = dict(pre_branches)
+        expected_branches.pop(target_ref, None)
+        if not _json_exact_equal(post_branches, expected_branches):
+            errors.append("cleanup changed refs outside the authorized carrier ref")
+
+    pre_worktrees = pre_snapshot.get("worktrees")
+    post_worktrees = post_snapshot.get("worktrees")
+    if not isinstance(pre_worktrees, list) or not isinstance(post_worktrees, list):
+        errors.append("worktree cleanup snapshots are invalid")
+    else:
+        carrier_path = str(authority.get("carrier_root") or "")
+        expected_worktrees = [
+            item
+            for item in pre_worktrees
+            if not (
+                expected_worktree_remove
+                and isinstance(item, dict)
+                and item.get("worktree") == carrier_path
+            )
+        ]
+        if not _json_exact_equal(post_worktrees, expected_worktrees):
+            errors.append("cleanup changed worktrees outside the authorized carrier")
+
+    pre_stashes = pre_snapshot.get("stashes")
+    post_stashes = post_snapshot.get("stashes")
+    if not isinstance(pre_stashes, list) or not isinstance(post_stashes, list):
+        errors.append("stash cleanup snapshots are invalid")
+    else:
+        expected_stashes = [
+            stash
+            for stash in pre_stashes
+            if not _owned_cleanup_stash(
+                stash,
+                wave_id=str(receipt.get("wave_id") or ""),
+                target_branch=str(authority.get("target_branch") or ""),
+            )
+        ]
+        removed_count = len(pre_stashes) - len(expected_stashes)
+        if cleanup_result.get("stashes_dropped") != removed_count:
+            errors.append("wave-owned stash cleanup count mismatch")
+        if not _json_exact_equal(post_stashes, expected_stashes):
+            errors.append("cleanup changed stashes outside the wave-owned set")
+    return errors
+
+
+def prepare_terminal_sweep_receipt(
+    repo_root: Path | str,
+    *,
+    carrier_root: Path | str,
+    wave_id: str,
+    merge_sha: str,
+    carrier_commit_sha: str,
+    target_branch: str,
+    base_branch: str,
+    candidate_sha256: str,
+    manifest_path: Path | str | None = None,
+    packet_path: Path | str | None = None,
+    receipts_dir: Path | str | None = None,
+    comparison_commit: str = TERMINAL_SWEEP_COMPARISON_COMMIT,
+    expected_packet_sha256: str = TERMINAL_SWEEP_PACKET_SHA256,
+    expected_candidate_sha256: str = TERMINAL_SWEEP_CANDIDATE_SHA256,
+    git_run: Callable[..., subprocess.CompletedProcess[Any]] = _default_git_run,
+    gh_runner: GhRunner | None = None,
+) -> dict[str, Any]:
+    """Persist PREPARED evidence before the Apply-R2 carrier is cleaned."""
+    if not requires_terminal_sweep(wave_id):
+        raise ContractError(f"terminal sweep is not authorized for wave {wave_id!r}")
+    if _SHA_RE.fullmatch(merge_sha) is None:
+        raise ContractError("terminal sweep merge SHA must be exact lowercase 40-hex")
+    if _SHA_RE.fullmatch(carrier_commit_sha) is None:
+        raise ContractError("terminal sweep carrier commit must be exact lowercase 40-hex")
+    survivor = Path(repo_root).resolve(strict=True)
+    carrier = Path(carrier_root).resolve(strict=True)
+    common_dir = _resolve_common_git_dir(survivor, git_run=git_run)
+    if _resolve_common_git_dir(carrier, git_run=git_run) != common_dir:
+        raise ContractError("cleanup carrier and surviving root have different common Git dirs")
+
+    manifest = Path(manifest_path) if manifest_path is not None else survivor / MANIFEST_RELATIVE_PATH
+    packet = Path(packet_path) if packet_path is not None else survivor / TERMINAL_SWEEP_PACKET_RELATIVE_PATH
+    receipt_root = Path(receipts_dir) if receipts_dir is not None else survivor / TERMINAL_SWEEP_RECEIPTS_RELATIVE_PATH
+    contract = _terminal_evidence_contract(
+        comparison_commit=comparison_commit,
+        manifest_path=manifest.resolve(strict=False),
+        packet_path=packet.resolve(strict=False),
+        receipts_dir=receipt_root.resolve(strict=False),
+        expected_packet_sha256=expected_packet_sha256,
+        expected_candidate_sha256=expected_candidate_sha256,
+    )
+    errors: list[str] = []
+    try:
+        snapshot = _terminal_cleanup_snapshot(survivor, git_run=git_run)
+    except ContractError as exc:
+        snapshot = None
+        errors.append(f"pre-cleanup snapshot failed: {exc}")
+
+    target_ref = f"refs/heads/{target_branch}"
+    branch_sha = (
+        snapshot.get("branches", {}).get(target_ref)
+        if isinstance(snapshot, dict)
+        else None
+    )
+    if branch_sha != carrier_commit_sha:
+        errors.append("authorized carrier ref does not match its exact commit")
+    carrier_is_linked = (
+        carrier != survivor and (carrier / ".git").is_file()
+    )
+    if carrier_is_linked and isinstance(snapshot, dict):
+        matches = [
+            entry
+            for entry in snapshot.get("worktrees", [])
+            if isinstance(entry, dict)
+            and entry.get("worktree") == str(carrier)
+            and entry.get("branch") == target_ref
+            and entry.get("HEAD") == carrier_commit_sha
+        ]
+        if len(matches) != 1:
+            errors.append("authorized linked carrier registration mismatch")
+
+    evidence, evidence_errors = _collect_terminal_evidence(
+        survivor,
+        common_dir,
+        contract=contract,
+        candidate_sha256=candidate_sha256,
+        include_remote=False,
+        gh_runner=gh_runner or _default_gh_runner,
+    )
+    errors.extend(evidence_errors)
+    now = datetime.now(timezone.utc).isoformat()
+    payload = _seal_terminal_receipt(
+        {
+            "cleanup_authority": {
+                "base_branch": base_branch,
+                "carrier_commit_sha": carrier_commit_sha,
+                "carrier_identity": _path_identity(carrier),
+                "carrier_root": str(carrier),
+                "pre_snapshot": snapshot,
+                "remove_carrier_worktree": carrier_is_linked,
+                "target_branch": target_branch,
+                "target_ref": target_ref,
+            },
+            "cleanup_result": None,
+            "cleanup_validation": {"errors": [], "result": "PENDING"},
+            "common_git_dir_identity": _path_identity(common_dir),
+            "completed_at_utc": None,
+            "created_at_utc": now,
+            "decision": "PREPARED",
+            "errors": errors,
+            "evidence_contract": contract,
+            "merge_sha": merge_sha,
+            "post_cleanup_evidence": None,
+            "pre_cleanup_evidence": evidence,
+            "route_candidate": None,
+            "schema_version": TERMINAL_RECEIPT_SCHEMA_VERSION,
+            "surviving_repo_root_identity": _path_identity(survivor),
+            "wave_id": wave_id,
+        }
+    )
+    path = _terminal_receipt_path(common_dir, wave_id, merge_sha)
+    _write_new_terminal_receipt(path, payload)
+    return {"receipt": payload, "receipt_path": str(path)}
+
+
+def finalize_terminal_sweep_receipt(
+    repo_root: Path | str,
+    prepared: dict[str, Any],
+    *,
+    cleanup_result: dict[str, Any],
+    git_run: Callable[..., subprocess.CompletedProcess[Any]] = _default_git_run,
+    gh_runner: GhRunner | None = None,
+) -> dict[str, Any]:
+    """Run landed post-cleanup proof and atomically finalize PASS or HOLD."""
+    survivor = Path(repo_root).resolve(strict=True)
+    common_dir = _resolve_common_git_dir(survivor, git_run=git_run)
+    path_value = prepared.get("receipt_path") if isinstance(prepared, dict) else None
+    if not isinstance(path_value, str) or not path_value:
+        raise ContractError("prepared terminal receipt path is absent")
+    path = Path(path_value)
+    expected_path = _terminal_receipt_path(
+        common_dir,
+        str(prepared.get("receipt", {}).get("wave_id") or ""),
+        str(prepared.get("receipt", {}).get("merge_sha") or ""),
+    )
+    if path != expected_path:
+        raise ContractError("prepared terminal receipt path/common-dir binding mismatch")
+    current, _ = _read_canonical_json(path, label="prepared terminal receipt")
+    if not _json_exact_equal(current, prepared.get("receipt")):
+        raise ContractError("prepared terminal receipt changed before finalization")
+    if current.get("decision") != "PREPARED":
+        raise ContractError("terminal receipt is not PREPARED")
+
+    errors = list(current.get("errors") or [])
+    try:
+        post_snapshot = _terminal_cleanup_snapshot(survivor, git_run=git_run)
+    except ContractError as exc:
+        post_snapshot = None
+        errors.append(f"post-cleanup snapshot failed: {exc}")
+    cleanup_errors = _terminal_cleanup_errors(
+        receipt=current,
+        cleanup_result=cleanup_result,
+        post_snapshot=post_snapshot,
+    )
+    errors.extend(cleanup_errors)
+
+    common_identity = current.get("common_git_dir_identity")
+    if not isinstance(common_identity, dict) or not _json_exact_equal(
+        common_identity, _path_identity(common_dir)
+    ):
+        errors.append("common Git directory identity changed across cleanup")
+    survivor_identity = current.get("surviving_repo_root_identity")
+    if not isinstance(survivor_identity, dict) or not _json_exact_equal(
+        survivor_identity, _path_identity(survivor)
+    ):
+        errors.append("surviving landed repository identity changed across cleanup")
+
+    contract = current.get("evidence_contract")
+    if not isinstance(contract, dict):
+        post_evidence = None
+        errors.append("terminal evidence contract is absent")
+    else:
+        post_evidence, post_errors = _collect_terminal_evidence(
+            survivor,
+            common_dir,
+            contract=contract,
+            candidate_sha256=str(
+                current.get("pre_cleanup_evidence", {}).get("candidate_sha256")
+                if isinstance(current.get("pre_cleanup_evidence"), dict)
+                else ""
+            ),
+            include_remote=True,
+            gh_runner=gh_runner or _default_gh_runner,
+        )
+        errors.extend(post_errors)
+        pre_evidence = current.get("pre_cleanup_evidence")
+        if isinstance(pre_evidence, dict):
+            for key in (
+                "candidate_sha256",
+                "comparison_commit",
+                "intents",
+                "manifest",
+                "packet",
+                "receipts",
+                "target_numbers",
+            ):
+                if not _json_exact_equal(pre_evidence.get(key), post_evidence.get(key)):
+                    errors.append(f"pre/post terminal evidence mismatch: {key}")
+        else:
+            errors.append("pre-cleanup terminal evidence is absent")
+
+    decision = "PASS" if not errors else "HOLD"
+    route_candidate = (
+        TERMINAL_FLEET_CANDIDATE
+        if decision == "PASS"
+        else TERMINAL_RECONCILIATION_CANDIDATE
+    )
+    finalized = copy.deepcopy(current)
+    finalized.update(
+        {
+            "cleanup_result": copy.deepcopy(cleanup_result),
+            "cleanup_validation": {
+                "errors": cleanup_errors,
+                "post_snapshot": post_snapshot,
+                "result": "PASS" if not cleanup_errors else "HOLD",
+            },
+            "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+            "decision": decision,
+            "errors": errors,
+            "post_cleanup_evidence": post_evidence,
+            "route_candidate": route_candidate,
+        }
+    )
+    finalized = _seal_terminal_receipt(finalized)
+    _atomic_replace_json(path, finalized)
+    raw = _read_regular_bytes(path, label="final terminal receipt")
+    binding = {
+        "decision": decision,
+        "merge_sha": finalized["merge_sha"],
+        "path": str(path.relative_to(common_dir)),
+        "sha256": _sha256_bytes(raw),
+        "wave_id": finalized["wave_id"],
+    }
+    return {"binding": binding, "receipt": finalized, "receipt_path": str(path)}
+
+
+_TERMINAL_RECEIPT_KEYS = {
+    "cleanup_authority",
+    "cleanup_result",
+    "cleanup_validation",
+    "common_git_dir_identity",
+    "completed_at_utc",
+    "created_at_utc",
+    "decision",
+    "errors",
+    "evidence_contract",
+    "merge_sha",
+    "post_cleanup_evidence",
+    "pre_cleanup_evidence",
+    "receipt_sha256",
+    "route_candidate",
+    "schema_version",
+    "surviving_repo_root_identity",
+    "wave_id",
+}
+_TERMINAL_BINDING_KEYS = {"decision", "merge_sha", "path", "sha256", "wave_id"}
+
+
+def _terminal_receipt_semantic_errors(receipt: Any) -> list[str]:
+    if not isinstance(receipt, dict):
+        return ["terminal receipt is not an object"]
+    errors: list[str] = []
+    if set(receipt) != _TERMINAL_RECEIPT_KEYS:
+        errors.append("terminal receipt schema mismatch")
+    claimed = receipt.get("receipt_sha256")
+    unhashed = dict(receipt)
+    unhashed.pop("receipt_sha256", None)
+    if not isinstance(claimed, str) or _DIGEST_RE.fullmatch(claimed) is None:
+        errors.append("terminal receipt self-hash is invalid")
+    elif claimed != _canonical_sha256(unhashed):
+        errors.append("terminal receipt self-hash mismatch")
+    if receipt.get("schema_version") != TERMINAL_RECEIPT_SCHEMA_VERSION:
+        errors.append("terminal receipt schema version mismatch")
+    if receipt.get("wave_id") != TERMINAL_SWEEP_WAVE_ID:
+        errors.append("terminal receipt wave mismatch")
+    if not isinstance(receipt.get("merge_sha"), str) or _SHA_RE.fullmatch(
+        receipt.get("merge_sha", "")
+    ) is None:
+        errors.append("terminal receipt merge SHA is invalid")
+    decision = receipt.get("decision")
+    if decision not in {"PASS", "HOLD"}:
+        errors.append("terminal receipt is not final")
+    error_rows = receipt.get("errors")
+    if not isinstance(error_rows, list) or not all(
+        isinstance(item, str) and item for item in error_rows
+    ):
+        errors.append("terminal receipt errors field is invalid")
+    elif decision == "PASS" and error_rows:
+        errors.append("PASS terminal receipt contains errors")
+    elif decision == "HOLD" and not error_rows:
+        errors.append("HOLD terminal receipt lacks a reason")
+    expected_route = (
+        TERMINAL_FLEET_CANDIDATE
+        if decision == "PASS"
+        else TERMINAL_RECONCILIATION_CANDIDATE
+    )
+    if receipt.get("route_candidate") != expected_route:
+        errors.append("terminal receipt route candidate contradicts its decision")
+    for label, evidence in (
+        ("pre", receipt.get("pre_cleanup_evidence")),
+        ("post", receipt.get("post_cleanup_evidence")),
+    ):
+        if not isinstance(evidence, dict):
+            errors.append(f"{label}-cleanup evidence is absent")
+            continue
+        if evidence.get("target_numbers") != list(EXPECTED_NUMBERS):
+            errors.append(f"{label}-cleanup fixed target set mismatch")
+        if decision == "PASS":
+            if len(evidence.get("receipts") or []) != len(EXPECTED_TARGETS):
+                errors.append(f"{label}-cleanup receipt count mismatch")
+            intent_rows = evidence.get("intents")
+            if not isinstance(intent_rows, list) or len(intent_rows) != len(
+                EXPECTED_TARGETS
+            ):
+                errors.append(f"{label}-cleanup intent count mismatch")
+            else:
+                intent_numbers: list[Any] = []
+                for intent_row in intent_rows:
+                    if not isinstance(intent_row, dict):
+                        errors.append(
+                            f"{label}-cleanup intent binding evidence is invalid"
+                        )
+                        continue
+                    number = intent_row.get("number")
+                    intent_numbers.append(number)
+                    if intent_row.get("binding_equivalent") is not True:
+                        errors.append(
+                            f"{label}-cleanup PR #{number} intent is not "
+                            "binding-equivalent"
+                        )
+                if intent_numbers != list(EXPECTED_NUMBERS):
+                    errors.append(f"{label}-cleanup intent target set mismatch")
+            if label == "post" and len(
+                evidence.get("remote_observations") or []
+            ) != len(EXPECTED_TARGETS):
+                errors.append("post-cleanup provider observation count mismatch")
+            if evidence.get("result") != "PASS":
+                errors.append(f"PASS receipt has nonpassing {label}-cleanup evidence")
+    cleanup_validation = receipt.get("cleanup_validation")
+    if not isinstance(cleanup_validation, dict):
+        errors.append("cleanup validation is absent")
+    elif decision == "PASS" and cleanup_validation.get("result") != "PASS":
+        errors.append("PASS receipt has nonpassing cleanup validation")
+    contract = receipt.get("evidence_contract")
+    pre_evidence = receipt.get("pre_cleanup_evidence")
+    if not isinstance(contract, dict):
+        errors.append("terminal evidence contract is absent")
+    elif isinstance(pre_evidence, dict):
+        if decision == "PASS" and pre_evidence.get(
+            "candidate_sha256"
+        ) != contract.get("expected_candidate_sha256"):
+            errors.append("terminal candidate digest binding mismatch")
+        if pre_evidence.get("comparison_commit") != contract.get(
+            "comparison_commit"
+        ):
+            errors.append("terminal comparison commit binding mismatch")
+    return errors
+
+
+def validate_terminal_receipt_authority(
+    repo_root: Path | str,
+    binding: Any,
+    *,
+    expected_merge_sha: str = "",
+    expected_candidate: str = "",
+) -> dict[str, Any]:
+    """Validate a dispatcher binding without invoking GitHub or any mutation."""
+    invalid = {"decision": "", "error": "", "receipt_path": "", "valid": False}
+    if not isinstance(binding, dict) or set(binding) != _TERMINAL_BINDING_KEYS:
+        return {**invalid, "error": "terminal receipt binding schema mismatch"}
+    if binding.get("wave_id") != TERMINAL_SWEEP_WAVE_ID:
+        return {**invalid, "error": "terminal receipt binding wave mismatch"}
+    merge_sha = binding.get("merge_sha")
+    if not isinstance(merge_sha, str) or _SHA_RE.fullmatch(merge_sha) is None:
+        return {**invalid, "error": "terminal receipt binding merge SHA is invalid"}
+    if expected_merge_sha and merge_sha != expected_merge_sha:
+        return {**invalid, "error": "terminal receipt binding merge SHA mismatch"}
+    decision = binding.get("decision")
+    if decision not in {"PASS", "HOLD"}:
+        return {**invalid, "error": "terminal receipt binding is not final"}
+    expected_route = (
+        TERMINAL_FLEET_CANDIDATE
+        if decision == "PASS"
+        else TERMINAL_RECONCILIATION_CANDIDATE
+    )
+    normalized_candidate = str(expected_candidate or "").strip().lower().replace("_", "-")
+    if normalized_candidate and not (
+        normalized_candidate == expected_route
+        or normalized_candidate.startswith(f"{expected_route}-")
+    ):
+        return {**invalid, "error": "terminal receipt decision/candidate mismatch"}
+    relative = binding.get("path")
+    expected_relative = Path(
+        TERMINAL_RECEIPT_ROOT_NAME, TERMINAL_SWEEP_WAVE_ID, f"{merge_sha}.json"
+    )
+    if not isinstance(relative, str) or Path(relative) != expected_relative:
+        return {**invalid, "error": "terminal receipt binding path mismatch"}
+    claimed_raw_sha = binding.get("sha256")
+    if not isinstance(claimed_raw_sha, str) or _DIGEST_RE.fullmatch(claimed_raw_sha) is None:
+        return {**invalid, "error": "terminal receipt binding SHA-256 is invalid"}
+    try:
+        root = Path(repo_root).resolve(strict=True)
+        common_dir = _resolve_common_git_dir(root)
+        path = common_dir / expected_relative
+        receipt, raw = _read_canonical_json(path, label="terminal receipt authority")
+    except (ContractError, OSError) as exc:
+        return {**invalid, "error": f"terminal receipt is unavailable: {exc}"}
+    if _sha256_bytes(raw) != claimed_raw_sha:
+        return {
+            **invalid,
+            "error": "terminal receipt binding SHA-256 mismatch",
+            "receipt_path": str(path),
+        }
+    semantic_errors = _terminal_receipt_semantic_errors(receipt)
+    if semantic_errors:
+        return {
+            **invalid,
+            "error": "; ".join(semantic_errors),
+            "receipt_path": str(path),
+        }
+    for key in ("decision", "merge_sha", "wave_id"):
+        if not _json_exact_equal(receipt.get(key), binding.get(key)):
+            return {
+                **invalid,
+                "error": f"terminal receipt/binding {key} mismatch",
+                "receipt_path": str(path),
+            }
+    return {
+        "decision": decision,
+        "error": "",
+        "receipt_path": str(path),
+        "valid": True,
     }
 
 
