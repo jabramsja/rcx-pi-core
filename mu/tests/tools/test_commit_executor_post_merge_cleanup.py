@@ -1286,6 +1286,315 @@ def test_exact_commit_queue_read_failure_preserves_existing_package(tmp_path):
     assert result == original_result
 
 
+def test_post_merge_terminal_sweep_precedes_successor_package_authority():
+    """A successor package cannot exist until cleanup and sweep both finish."""
+    source = commit_mod.post_commit_pipeline_source()
+    prepare_idx = source.find("prepare_terminal_sweep_receipt(")
+    cleanup_idx = source.find("_post_merge_cleanup(")
+    finalize_idx = source.find("finalize_terminal_sweep_receipt(")
+    package_idx = source.find("_refresh_post_merge_package_for_next_open_queue(")
+
+    assert prepare_idx != -1, "pre-cleanup terminal receipt capture not found"
+    assert cleanup_idx != -1, "post-merge carrier cleanup not found"
+    assert finalize_idx != -1, "post-cleanup terminal receipt finalization not found"
+    assert package_idx != -1, "successor package publication not found"
+    assert prepare_idx < cleanup_idx < finalize_idx < package_idx, (
+        "terminal evidence must be captured before cleanup, then cleanup and "
+        "terminal receipt finalization must both precede successor package "
+        "authority"
+    )
+
+
+def test_step14_behind_refresh_rebinds_terminal_carrier_commit(
+    tmp_path,
+    monkeypatch,
+):
+    """Terminal preparation receives the carrier HEAD advanced by Step 14."""
+    carrier = tmp_path / "carrier"
+    carrier.mkdir()
+    survivor = tmp_path / "survivor"
+    survivor.mkdir()
+    merge_script = carrier / "mu" / "tools" / "hooks" / "merge_pr.sh"
+    merge_script.parent.mkdir(parents=True)
+    merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    wave_id = "pr-disposition-apply-r2-2026-09-10"
+    target_branch = f"jabramsja/{wave_id}"
+    old_sha = "1" * 40
+    refreshed_sha = "2" * 40
+    merge_sha = "3" * 40
+    candidate_sha = "4" * 64
+    handoff = {
+        "wave_id": wave_id,
+        "branch_prefix": "jabramsja",
+        "target_branch": target_branch,
+        "base_branch": "dev",
+    }
+    continuation = {
+        "commit_sha": old_sha,
+        "pr_number": "1281",
+        "receipt_decision": "COMMIT_GO",
+        "staged_candidate_sha256": candidate_sha,
+        "steps_completed": [
+            "validate_inputs",
+            "ensure_feature_branch",
+            "validate_scope",
+            "stage_files",
+            "validate_tests",
+            "pre_commit_supervisor",
+            "validate_receipt",
+            "run_pre_commit_script",
+            "git_commit",
+            "hold_check",
+            "git_push",
+            "ensure_pr",
+        ],
+    }
+    carrier_state = {"head": old_sha}
+    events: list[str] = []
+    terminal_args: dict[str, str] = {}
+    published: dict[str, object] = {}
+
+    def auto_resolve(*args, **kwargs):
+        assert carrier_state["head"] == old_sha
+        carrier_state["head"] = refreshed_sha
+        events.append("behind_refresh")
+        return {
+            "resolved": True,
+            "action": "clean_merge",
+            "detail": "merged origin/dev cleanly and pushed",
+        }
+
+    def wait_for_ci(*args, **kwargs):
+        result = kwargs["result"]
+        if "wait_ci" not in result["steps_completed"]:
+            result["steps_completed"].append("wait_ci")
+        return None
+
+    def run_command(cmd, cwd=None, timeout=None, check=True, env=None):
+        if cmd == ["git", "rev-parse", "HEAD"]:
+            head = carrier_state["head"] if Path(cwd) == carrier else merge_sha
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{head}\n", stderr="")
+        if cmd[:1] == ["bash"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd == ["git", "fetch", "origin", "dev"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd == ["git", "status", "--short"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd == ["git", "merge", "--ff-only", "origin/dev"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command {cmd!r} in {cwd}")
+
+    class FakeTerminalAuthority:
+        @staticmethod
+        def requires_terminal_sweep(candidate_wave_id):
+            return candidate_wave_id == wave_id
+
+        @staticmethod
+        def prepare_terminal_sweep_receipt(repo_root, **kwargs):
+            events.append("prepare")
+            terminal_args.update(kwargs)
+            assert Path(repo_root) == survivor
+            assert kwargs["carrier_root"] == carrier
+            assert kwargs["carrier_commit_sha"] == refreshed_sha
+            assert kwargs["candidate_sha256"] == candidate_sha
+            return {
+                "receipt": {"wave_id": wave_id, "merge_sha": merge_sha},
+                "receipt_path": str(tmp_path / "terminal-receipt.json"),
+            }
+
+        @staticmethod
+        def finalize_terminal_sweep_receipt(repo_root, prepared, **kwargs):
+            events.append("finalize")
+            assert Path(repo_root) == survivor
+            return {
+                "binding": {
+                    "decision": "PASS",
+                    "merge_sha": merge_sha,
+                    "path": "terminal-receipt.json",
+                    "sha256": "5" * 64,
+                    "wave_id": wave_id,
+                }
+            }
+
+        @staticmethod
+        def validate_terminal_receipt_authority(
+            repo_root,
+            binding,
+            *,
+            expected_merge_sha,
+        ):
+            assert Path(repo_root) == survivor
+            assert binding["merge_sha"] == expected_merge_sha == merge_sha
+            return {"valid": True, "decision": "PASS", "error": ""}
+
+    def cleanup(**kwargs):
+        events.append("cleanup")
+        return {
+            "branch_deleted": True,
+            "status": "success",
+            "stashes_dropped": 0,
+            "warnings": [],
+            "worktree_removed": True,
+        }
+
+    def publish(**kwargs):
+        events.append("publish")
+        published.update(kwargs)
+        return {"next_candidates": [{"candidate": "fleet-cleanup-builder"}]}
+
+    monkeypatch.setattr(commit_mod, "validate_handoff", lambda *args, **kwargs: (True, []))
+    monkeypatch.setattr(
+        commit_mod,
+        "_resolve_control_surface_founder_override_token",
+        lambda *args, **kwargs: "",
+    )
+    monkeypatch.setattr(
+        commit_mod,
+        "_load_post_commit_continuation",
+        lambda *args, **kwargs: dict(continuation),
+    )
+    monkeypatch.setattr(commit_mod, "_commit_lifecycle_pager_enabled", lambda *args: False)
+    monkeypatch.setattr(commit_mod, "ensure_not_agent_review_mode", lambda *args: None)
+    monkeypatch.setattr(
+        commit_mod,
+        "_maybe_demote_completed_handoff_state_for_commit_retry",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(commit_mod, "_try_auto_resolve_pr_conflict", auto_resolve)
+    monkeypatch.setattr(commit_mod, "_wait_for_pr_ci", wait_for_ci)
+    monkeypatch.setattr(commit_mod, "_parse_origin_owner_repo", lambda *args: ("o", "r"))
+    monkeypatch.setattr(
+        commit_mod,
+        "_query_pr_review_state",
+        lambda *args, **kwargs: {"headRefOid": refreshed_sha},
+    )
+    monkeypatch.setattr(commit_mod, "_has_fresh_connector_review", lambda *args: True)
+    monkeypatch.setattr(
+        commit_mod,
+        "_extract_review_findings",
+        lambda *args, **kwargs: {"outcome": "clear", "bot_findings": []},
+    )
+    monkeypatch.setattr(
+        commit_mod,
+        "_ensure_current_draft_pr_ready_for_review",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        commit_mod,
+        "_resolve_post_merge_verify_root",
+        lambda *args, **kwargs: survivor,
+    )
+    monkeypatch.setattr(
+        commit_mod,
+        "_sync_primary_worktree_to_base",
+        lambda *args, **kwargs: {"status": "skipped"},
+    )
+    monkeypatch.setattr(
+        commit_mod,
+        "_load_pr_disposition_executor_module",
+        lambda: FakeTerminalAuthority(),
+    )
+    monkeypatch.setattr(commit_mod, "_post_merge_cleanup", cleanup)
+    monkeypatch.setattr(
+        commit_mod,
+        "_refresh_post_merge_package_for_next_open_queue",
+        publish,
+    )
+    monkeypatch.setattr(commit_mod, "_clear_continuation_record", lambda *args: None)
+    monkeypatch.setattr(commit_mod, "_run", run_command)
+
+    result = commit_mod.run_commit_pipeline(handoff, repo_root=carrier)
+
+    assert old_sha != refreshed_sha
+    assert result["status"] == "success"
+    assert result["commit_sha"] == refreshed_sha
+    assert terminal_args["carrier_commit_sha"] == refreshed_sha
+    assert published["terminal_receipt"]["decision"] == "PASS"
+    assert events == ["behind_refresh", "prepare", "cleanup", "finalize", "publish"]
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected_candidate"),
+    [
+        ("PASS", "fleet-cleanup-builder"),
+        ("HOLD", "pr-disposition-reconciliation"),
+    ],
+)
+def test_terminal_receipt_package_routes_one_non_apply_candidate(
+    tmp_path,
+    monkeypatch,
+    decision,
+    expected_candidate,
+):
+    """PASS routes Fleet and HOLD routes reconciliation; Apply stays consumed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    merge_sha = "a" * 40
+    binding = {
+        "decision": decision,
+        "merge_sha": merge_sha,
+        "receipt_path": "/surviving/common-dir/terminal-receipt.json",
+        "wave_id": "pr-disposition-terminal-sweep-enabler-r1-2026-09-10",
+    }
+
+    class FakeTerminalAuthority:
+        TERMINAL_FLEET_CANDIDATE = "fleet-cleanup-builder"
+        TERMINAL_RECONCILIATION_CANDIDATE = "pr-disposition-reconciliation"
+
+        def validate_terminal_receipt_authority(
+            self,
+            repo_root,
+            terminal_receipt,
+            *,
+            expected_merge_sha,
+        ):
+            assert repo_root == repo
+            assert terminal_receipt == binding
+            assert expected_merge_sha == merge_sha
+            return {"valid": True, "decision": decision}
+
+    monkeypatch.setattr(
+        commit_mod,
+        "_load_pr_disposition_executor_module",
+        lambda: FakeTerminalAuthority(),
+    )
+    monkeypatch.setattr(
+        commit_mod,
+        "_next_open_founder_ordered_queue_entry",
+        lambda _repo_root, *, queue_commit_sha="": {
+            "wave_id": "fleet-cleanup-builder-r1-2026-09-10"
+        },
+    )
+    monkeypatch.setattr(
+        commit_mod,
+        "_post_merge_blocker_report_paths",
+        lambda _repo_root, *, queue_commit_sha="": [],
+    )
+
+    result = {"pr_number": "1219"}
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: receipt-bound terminal routing regression
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result=result,
+        merge_sha=merge_sha,
+        log=_noop_log,
+        terminal_receipt=binding,
+    )
+
+    candidates = package["next_candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["candidate"] == expected_candidate
+    assert candidates[0]["terminal_receipt"] == binding
+    assert all("apply" not in item["candidate"].lower() for item in candidates)
+    assert package["wave_name"] == expected_candidate
+    assert package["terminal_receipt"] == binding
+    assert result["post_merge_next_wave"] == expected_candidate
+    assert json.loads(
+        (repo / result["post_merge_package_path"]).read_text(encoding="utf-8")
+    ) == package
+
+
 def test_skips_when_cleanup_root_not_on_base_branch(tmp_path):
     repo = _init_repo(tmp_path)
     wave_id = "test-wave-wrong-branch-2026-04-17"

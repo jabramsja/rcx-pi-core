@@ -8831,6 +8831,7 @@ def _write_continuation_record(
     bot_review_request_sha: str | None = None,
     pre_push_isolation: dict[str, Any] | None = None,
     pre_push_restored_paths: list[str] | None = None,
+    staged_candidate_sha256: str | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_payload = _read_continuation_record(path) or {}
@@ -8860,6 +8861,14 @@ def _write_continuation_record(
         and preserved_bot_review_request_sha
     ):
         payload["bot_review_request_sha"] = preserved_bot_review_request_sha
+    preserved_candidate_sha = existing_payload.get("staged_candidate_sha256")
+    candidate_sha = staged_candidate_sha256 or (
+        preserved_candidate_sha
+        if preserved_commit_sha == commit_sha
+        else None
+    )
+    if isinstance(candidate_sha, str) and re.fullmatch(r"[0-9a-f]{64}", candidate_sha):
+        payload["staged_candidate_sha256"] = candidate_sha
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
@@ -9100,6 +9109,7 @@ def _checkpoint_post_commit_progress(
         if isinstance(pre_push_restored_paths_raw, list)
         else None
     )
+    staged_candidate_sha256 = result.get("staged_candidate_sha256")
     _write_continuation_record(
         continuation_path,
         handoff_sha=handoff_sha,
@@ -9111,6 +9121,11 @@ def _checkpoint_post_commit_progress(
         bot_review_request_sha=bot_review_request_sha if isinstance(bot_review_request_sha, str) else None,
         pre_push_isolation=pre_push_isolation,
         pre_push_restored_paths=pre_push_restored_paths,
+        staged_candidate_sha256=(
+            staged_candidate_sha256
+            if isinstance(staged_candidate_sha256, str)
+            else None
+        ),
     )
 
 
@@ -15707,6 +15722,77 @@ def _post_merge_tracker_summary_for_queue_entry(entry: dict[str, Any]) -> str:
     )
 
 
+def _load_pr_disposition_executor_module() -> Any:
+    """Load the fixed-set evidence authority without creating a new pipeline."""
+    try:
+        import pr_disposition_executor as disposition_mod
+
+        return disposition_mod
+    except ImportError:
+        import importlib.util as _ilu
+
+        module_path = SCRIPT_DIR / "pr_disposition_executor.py"
+        spec = _ilu.spec_from_file_location("pr_disposition_executor", str(module_path))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load PR disposition executor from {module_path}")
+        disposition_mod = _ilu.module_from_spec(spec)
+        sys.modules["pr_disposition_executor"] = disposition_mod
+        spec.loader.exec_module(disposition_mod)
+        return disposition_mod
+
+
+def _is_pr_disposition_terminal_sweep_wave(wave_id: str) -> bool:
+    try:
+        disposition_mod = _load_pr_disposition_executor_module()
+        return bool(disposition_mod.requires_terminal_sweep(wave_id))
+    except (ImportError, AttributeError):
+        return False
+
+
+def _committed_candidate_sha256(repo_root: Path, commit_sha: str) -> str:
+    """Hash the exact binary parent-to-commit diff used by staged-candidate proof."""
+    if not _FULL_QUEUE_COMMIT_SHA_RE.fullmatch(str(commit_sha or "")):
+        return ""
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "--binary", f"{commit_sha}^", commit_sha],
+            cwd=repo_root,
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return hashlib.sha256(proc.stdout).hexdigest()
+
+
+def _terminal_route_entry(decision: str, binding: dict[str, Any]) -> dict[str, Any]:
+    disposition_mod = _load_pr_disposition_executor_module()
+    if decision == "PASS":
+        candidate = disposition_mod.TERMINAL_FLEET_CANDIDATE
+        summary = (
+            "Launch Fleet Cleanup Builder from the complete passing Apply-R2 "
+            "post-cleanup terminal receipt."
+        )
+    elif decision == "HOLD":
+        candidate = disposition_mod.TERMINAL_RECONCILIATION_CANDIDATE
+        summary = (
+            "Reconcile the consumed Apply-R2 evidence named by the durable HOLD; "
+            "never replay Apply."
+        )
+    else:
+        raise QueueCommitAuthorityError(
+            f"terminal receipt decision is not final: {decision!r}"
+        )
+    return {
+        "bounded": True,
+        "candidate": candidate,
+        "request_for_claude": summary,
+        "summary": summary,
+        "terminal_receipt": copy.deepcopy(binding),
+        "tracked_packet": None,
+    }
+
+
 def _refresh_post_merge_package_for_next_open_queue(
     *,
     repo_root: Path,
@@ -15715,6 +15801,7 @@ def _refresh_post_merge_package_for_next_open_queue(
     merge_sha: str,
     log: Any,
     queue_commit_sha: str = "",
+    terminal_receipt: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write a fresh package, optionally sourcing queue truth from one commit."""
     exact_queue_commit = _validate_queue_commit_sha(repo_root, queue_commit_sha)
@@ -15744,7 +15831,34 @@ def _refresh_post_merge_package_for_next_open_queue(
         "post_merge_package.json",
     )
 
-    if entry is None:
+    terminal_entry: dict[str, Any] | None = None
+    terminal_decision = ""
+    if terminal_receipt is not None:
+        disposition_mod = _load_pr_disposition_executor_module()
+        authority = disposition_mod.validate_terminal_receipt_authority(
+            repo_root,
+            terminal_receipt,
+            expected_merge_sha=merge_sha,
+        )
+        if not authority.get("valid"):
+            raise QueueCommitAuthorityError(
+                "terminal receipt cannot authorize a successor package: "
+                + str(authority.get("error") or "invalid authority")
+            )
+        terminal_decision = str(authority.get("decision") or "")
+        terminal_entry = _terminal_route_entry(terminal_decision, terminal_receipt)
+        if terminal_decision == "PASS":
+            entry_wave = normalize_wave_id(str((entry or {}).get("wave_id") or ""))
+            fleet_wave = normalize_wave_id(disposition_mod.TERMINAL_FLEET_CANDIDATE)
+            if not entry_wave or not (
+                entry_wave == fleet_wave or entry_wave.startswith(f"{fleet_wave}-")
+            ):
+                raise QueueCommitAuthorityError(
+                    "passing terminal receipt is not followed by Fleet Cleanup "
+                    "Builder in exact landed TASKS queue authority"
+                )
+
+    if entry is None and terminal_entry is None:
         package = {
             "task_id": queue_task_id,
             "merged_pr": merged_pr,
@@ -15775,6 +15889,42 @@ def _refresh_post_merge_package_for_next_open_queue(
         )
         return package
 
+    if terminal_entry is not None:
+        next_candidates = [terminal_entry]
+        terminal_wave = str(terminal_entry["candidate"])
+        package = {
+            "task_id": queue_task_id,
+            "merged_pr": merged_pr,
+            "merge_sha": merge_sha,
+            "wave_name": terminal_wave,
+            "lane": "PR disposition terminal transition",
+            "rollout_packet_path": "reports/control_plane/post_redteam_structural_queue_2026-03-20.md",
+            "deferred_items": [],
+            "tracker_state_summary": (
+                "Apply R2 cleanup and terminal sweep completed with "
+                f"{terminal_decision}; successor authority is receipt-bound and "
+                "Apply cannot be replayed."
+            ),
+            "next_candidates": next_candidates,
+            "blocker_report_paths": _post_merge_blocker_report_paths(
+                repo_root,
+                queue_commit_sha=exact_queue_commit,
+            ),
+            "terminal_receipt": copy.deepcopy(terminal_receipt),
+        }
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+        result["post_merge_package_path"] = str(package_path.relative_to(repo_root))
+        result["post_merge_next_wave"] = terminal_wave
+        result["post_merge_next_hard_stop"] = False
+        result["post_merge_queue_empty"] = False
+        log(
+            "Step 16c: published receipt-bound terminal successor package for "
+            f"{terminal_wave} ({terminal_decision})"
+        )
+        return package
+
+    assert entry is not None
     deferred_items = [
         p
         for p in (entry.get("source_packet"), entry.get("packet"))
@@ -16180,6 +16330,12 @@ def _run_post_commit_pipeline(
             pr_number=pr_number,
         )
         _assert_expected_pr_head(pr_data, head_sha_before_merge)
+        # Step 14 can merge a newly advanced base into this carrier (including
+        # during a mid-poll BEHIND refresh) and push a new HEAD.  Once that HEAD
+        # is also proven to be the PR head, make it the exact carrier authority
+        # used by terminal preparation below; the original staged-candidate
+        # digest remains bound separately and must not be recomputed here.
+        result["commit_sha"] = head_sha_before_merge
         existing_issue_comment_outcome = None
         if _has_recorded_current_head_bot_request(continuation_path, head_sha_before_merge):
             existing_issue_comment_outcome = _current_head_connector_issue_comment_outcome(
@@ -16439,6 +16595,7 @@ def _run_post_commit_pipeline(
             head_sha = _run(["git", "rev-parse", "HEAD"], cwd=verify_root).stdout.strip()
             status_output = _run(["git", "status", "--short"], cwd=verify_root).stdout.strip()
             result["merge_sha"] = head_sha
+            queue_commit_sha = head_sha
             if "ensure_review_clear_and_merge" not in result["steps_completed"]:
                 result["steps_completed"].append("ensure_review_clear_and_merge")
             _clear_continuation_record(continuation_path)
@@ -16481,31 +16638,45 @@ def _run_post_commit_pipeline(
         repo_root, base_branch, log=log,
     )
 
+    terminal_prepared: dict[str, Any] | None = None
+    terminal_binding: dict[str, Any] | None = None
     queue_authority_error: str | None = None
-    if queue_commit_sha:
+    terminal_required = _is_pr_disposition_terminal_sweep_wave(
+        str(handoff.get("wave_id") or "")
+    )
+    if terminal_required:
         try:
-            _refresh_post_merge_package_for_next_open_queue(
-                repo_root=verify_root,
-                handoff=handoff,
-                result=result,
+            disposition_mod = _load_pr_disposition_executor_module()
+            candidate_sha = str(result.get("staged_candidate_sha256") or "")
+            if not candidate_sha:
+                candidate_sha = _committed_candidate_sha256(
+                    verify_root, str(result.get("commit_sha") or "")
+                )
+                if candidate_sha:
+                    result["staged_candidate_sha256"] = candidate_sha
+            terminal_prepared = disposition_mod.prepare_terminal_sweep_receipt(
+                verify_root,
+                carrier_root=repo_root,
+                wave_id=str(handoff.get("wave_id") or ""),
                 merge_sha=str(result.get("merge_sha") or ""),
-                log=log,
-                queue_commit_sha=queue_commit_sha,
+                carrier_commit_sha=str(result.get("commit_sha") or ""),
+                target_branch=target_branch,
+                base_branch=base_branch,
+                candidate_sha256=candidate_sha,
             )
-        except QueueCommitAuthorityError as exc:
-            queue_authority_error = str(exc)
+            result["post_merge_terminal_receipt_path"] = terminal_prepared[
+                "receipt_path"
+            ]
             log(
-                "Step 15b: exact post-merge queue refresh failed closed; "
-                f"continuing to step 16 cleanup: {queue_authority_error}"
+                "Step 15c: durably captured Apply-R2 carrier and evidence "
+                "before cleanup"
             )
-    else:
-        _refresh_post_merge_package_for_next_open_queue(
-            repo_root=verify_root,
-            handoff=handoff,
-            result=result,
-            merge_sha=str(result.get("merge_sha") or ""),
-            log=log,
-        )
+        except Exception as exc:  # noqa: BLE001 - fail closed after a landed merge
+            queue_authority_error = f"terminal receipt preparation failed: {exc}"
+            log(
+                "Step 15c: terminal preparation failed closed; cleanup will still "
+                f"run but no successor authority will publish: {exc}"
+            )
 
     # ── Step 16: post_merge_cleanup ────────────────────────────────────
     # Best-effort cleanup of wave-local state that would otherwise
@@ -16523,11 +16694,65 @@ def _run_post_commit_pipeline(
     result["post_merge_cleanup"] = cleanup_outcome
     result["steps_completed"].append("post_merge_cleanup")
 
+    # Apply R2 is a consumed mutation wave.  Its second verifier runs only now,
+    # from the landed/surviving root, and finalizes the common-dir receipt before
+    # any package can expose Fleet Builder or reconciliation.
+    if terminal_required and terminal_prepared is not None:
+        try:
+            disposition_mod = _load_pr_disposition_executor_module()
+            terminal_final = disposition_mod.finalize_terminal_sweep_receipt(
+                verify_root,
+                terminal_prepared,
+                cleanup_result=cleanup_outcome,
+            )
+            terminal_binding = terminal_final["binding"]
+            terminal_authority = disposition_mod.validate_terminal_receipt_authority(
+                verify_root,
+                terminal_binding,
+                expected_merge_sha=str(result.get("merge_sha") or ""),
+            )
+            if not terminal_authority.get("valid"):
+                raise QueueCommitAuthorityError(
+                    str(terminal_authority.get("error") or "terminal receipt invalid")
+                )
+            result["post_merge_terminal_receipt"] = terminal_binding
+            result["post_merge_terminal_decision"] = terminal_authority["decision"]
+            result["steps_completed"].append("post_merge_terminal_sweep")
+            log(
+                "Step 16b: finalized durable post-cleanup terminal receipt "
+                f"{terminal_authority['decision']}"
+            )
+        except Exception as exc:  # noqa: BLE001 - no package on invalid authority
+            queue_authority_error = f"terminal sweep finalization failed: {exc}"
+            log(
+                "Step 16b: terminal sweep failed closed; no successor package "
+                f"will publish: {exc}"
+            )
+
+    # ── Step 16c: publish successor authority after cleanup/sweep only ─
+    if queue_authority_error is None:
+        try:
+            _refresh_post_merge_package_for_next_open_queue(
+                repo_root=verify_root,
+                handoff=handoff,
+                result=result,
+                merge_sha=str(result.get("merge_sha") or ""),
+                log=log,
+                queue_commit_sha=queue_commit_sha,
+                terminal_receipt=terminal_binding,
+            )
+        except QueueCommitAuthorityError as exc:
+            queue_authority_error = str(exc)
+            log(
+                "Step 16c: exact post-cleanup queue refresh failed closed: "
+                f"{queue_authority_error}"
+            )
+
     if queue_authority_error is not None:
         result["status"] = "error"
         result["step"] = "refresh_post_merge_package"
         result["errors"] = [
-            "Exact post-merge queue refresh failed at "
+            "Exact post-cleanup queue/terminal refresh failed at "
             f"{queue_commit_sha}: {queue_authority_error}"
         ]
 
@@ -17474,6 +17699,11 @@ def commit_pipeline_impl_source() -> str:
     return inspect.getsource(_run_commit_pipeline_impl)
 
 
+def post_commit_pipeline_source() -> str:
+    """Return post-merge source so regressions can pin cleanup/sweep ordering."""
+    return inspect.getsource(_run_post_commit_pipeline)
+
+
 def _run_commit_pipeline_impl(
     handoff: dict[str, Any],
     *,
@@ -17591,6 +17821,10 @@ def _run_commit_pipeline_impl(
         result["steps_completed"] = list(continuation.get("steps_completed", []))
         result["commit_sha"] = continuation["commit_sha"]
         result["pr_number"] = continuation.get("pr_number")
+        if isinstance(continuation.get("staged_candidate_sha256"), str):
+            result["staged_candidate_sha256"] = continuation[
+                "staged_candidate_sha256"
+            ]
         if isinstance(continuation.get("pre_push_isolation"), dict):
             result["pre_push_isolation"] = dict(continuation["pre_push_isolation"])
         if isinstance(continuation.get("pre_push_restored_paths"), list):
@@ -18689,6 +18923,16 @@ def _run_commit_pipeline_impl(
     # ── Step 9: git_commit ────────────────────────────────────────────
     step9_env = _commit_subprocess_env(skip_receipt_check=False)
     try:
+        if _is_pr_disposition_terminal_sweep_wave(wave_id):
+            staged_candidate = subprocess.run(
+                ["git", "diff", "--cached", "--binary"],
+                cwd=repo_root,
+                capture_output=True,
+                check=True,
+            ).stdout
+            result["staged_candidate_sha256"] = hashlib.sha256(
+                staged_candidate
+            ).hexdigest()
         _commit_out, retry_detail = _run_git_commit_with_self_cleared_index_lock_retry(
             repo_root,
             handoff["commit_message"],
@@ -18709,6 +18953,7 @@ def _run_commit_pipeline_impl(
             commit_sha=commit_sha,
             receipt_decision=receipt_decision,
             steps_completed=result["steps_completed"],
+            staged_candidate_sha256=result.get("staged_candidate_sha256"),
         )
         log(f"Step 9: committed")
     except subprocess.CalledProcessError as exc:

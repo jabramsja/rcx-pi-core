@@ -1056,3 +1056,189 @@ def test_contract_check_and_verify_never_invoke_subprocess_or_gh(tmp_path, monke
     )
     assert verified["decision"] == "VERIFIED"
     assert verified["receipt_count"] == 8
+
+
+def _terminal_sweep_fixture(tmp_path: Path):
+    fixture = _apply_fixture(tmp_path)
+    result = _run_apply(fixture)
+    assert result["has_hold"] is False
+    repo, manifest, comparison, common, receipts, _events, _binder, _boundary, gh = fixture
+    _git(["branch", "apply-r2-carrier", comparison], cwd=repo)
+    packet = repo / "reports" / "control_plane" / "apply-r2-packet.md"
+    packet.parent.mkdir(parents=True, exist_ok=True)
+    packet.write_text("# exact Apply R2 packet\n", encoding="utf-8")
+    packet_sha = hashlib.sha256(packet.read_bytes()).hexdigest()
+    candidate_sha = "a" * 64
+    prepared = disposition.prepare_terminal_sweep_receipt(
+        repo,
+        carrier_root=repo,
+        wave_id=disposition.TERMINAL_SWEEP_WAVE_ID,
+        merge_sha=comparison,
+        carrier_commit_sha=comparison,
+        target_branch="apply-r2-carrier",
+        base_branch="master",
+        candidate_sha256=candidate_sha,
+        manifest_path=manifest,
+        packet_path=packet,
+        receipts_dir=receipts,
+        comparison_commit=comparison,
+        expected_packet_sha256=packet_sha,
+        expected_candidate_sha256=candidate_sha,
+        gh_runner=gh,
+    )
+    return fixture, prepared
+
+
+def test_terminal_sweep_pass_survives_carrier_cleanup_and_binds_exact_evidence(
+    tmp_path,
+):
+    fixture, prepared = _terminal_sweep_fixture(tmp_path)
+    repo, _manifest, comparison, common, _receipts, _events, _binder, _boundary, gh = fixture
+    _git(["branch", "-D", "apply-r2-carrier"], cwd=repo)
+    finalized = disposition.finalize_terminal_sweep_receipt(
+        repo,
+        prepared,
+        cleanup_result={
+            "branch_deleted": True,
+            "worktree_removed": False,
+            "stashes_dropped": 0,
+            "warnings": [],
+        },
+        gh_runner=gh,
+    )
+
+    assert finalized["receipt"]["decision"] == "PASS"
+    assert finalized["receipt"]["route_candidate"] == "fleet-cleanup-builder"
+    assert finalized["receipt"]["merge_sha"] == comparison
+    assert len(finalized["receipt"]["post_cleanup_evidence"]["intents"]) == 8
+    assert len(finalized["receipt"]["post_cleanup_evidence"]["receipts"]) == 8
+    assert len(finalized["receipt"]["post_cleanup_evidence"]["remote_observations"]) == 8
+    receipt_path = Path(finalized["receipt_path"])
+    assert receipt_path.is_relative_to(common)
+    assert receipt_path.exists()
+    authority = disposition.validate_terminal_receipt_authority(
+        repo,
+        finalized["binding"],
+        expected_merge_sha=comparison,
+        expected_candidate="fleet-cleanup-builder",
+    )
+    assert authority["valid"] is True, authority
+    assert authority["decision"] == "PASS"
+
+
+@pytest.mark.parametrize(
+    "evidence_key", ("pre_cleanup_evidence", "post_cleanup_evidence")
+)
+def test_terminal_receipt_authority_rejects_resealed_non_equivalent_intent(
+    tmp_path,
+    evidence_key,
+):
+    fixture, prepared = _terminal_sweep_fixture(tmp_path)
+    (
+        repo,
+        _manifest,
+        comparison,
+        _common,
+        _receipts,
+        _events,
+        _binder,
+        _boundary,
+        gh,
+    ) = fixture
+    _git(["branch", "-D", "apply-r2-carrier"], cwd=repo)
+    finalized = disposition.finalize_terminal_sweep_receipt(
+        repo,
+        prepared,
+        cleanup_result={
+            "branch_deleted": True,
+            "worktree_removed": False,
+            "stashes_dropped": 0,
+            "warnings": [],
+        },
+        gh_runner=gh,
+    )
+
+    contradictory = copy.deepcopy(finalized["receipt"])
+    assert contradictory["decision"] == "PASS"
+    contradictory[evidence_key]["intents"][0]["binding_equivalent"] = False
+    contradictory = _seal(contradictory, "receipt_sha256")
+    receipt_path = Path(finalized["receipt_path"])
+    _write_canonical(receipt_path, contradictory)
+    resealed_binding = {
+        **finalized["binding"],
+        "sha256": hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+    }
+
+    authority = disposition.validate_terminal_receipt_authority(
+        repo,
+        resealed_binding,
+        expected_merge_sha=comparison,
+        expected_candidate="fleet-cleanup-builder",
+    )
+    assert authority["valid"] is False
+    assert authority["decision"] == ""
+    assert "intent" in authority["error"]
+    assert "binding" in authority["error"]
+
+
+def test_terminal_sweep_cleanup_mismatch_persists_actual_hold_for_reconciliation(
+    tmp_path,
+):
+    fixture, prepared = _terminal_sweep_fixture(tmp_path)
+    repo, _manifest, comparison, _common, _receipts, _events, _binder, _boundary, gh = fixture
+    finalized = disposition.finalize_terminal_sweep_receipt(
+        repo,
+        prepared,
+        cleanup_result={
+            "branch_deleted": False,
+            "worktree_removed": False,
+            "stashes_dropped": 0,
+            "warnings": ["branch remained"],
+        },
+        gh_runner=gh,
+    )
+
+    assert finalized["receipt"]["decision"] == "HOLD"
+    assert finalized["receipt"]["route_candidate"] == "pr-disposition-reconciliation"
+    assert any("branch" in error for error in finalized["receipt"]["errors"])
+    authority = disposition.validate_terminal_receipt_authority(
+        repo,
+        finalized["binding"],
+        expected_merge_sha=comparison,
+        expected_candidate="pr-disposition-reconciliation",
+    )
+    assert authority["valid"] is True, authority
+    assert authority["decision"] == "HOLD"
+
+
+def test_terminal_receipt_authority_rejects_missing_receipt_and_binding_mismatch(
+    tmp_path,
+):
+    fixture, prepared = _terminal_sweep_fixture(tmp_path)
+    repo, _manifest, comparison, _common, _receipts, _events, _binder, _boundary, _gh = fixture
+    path = Path(prepared["receipt_path"])
+    path.unlink()
+    missing_binding = {
+        "decision": "PASS",
+        "merge_sha": comparison,
+        "path": str(
+            Path(disposition.TERMINAL_RECEIPT_ROOT_NAME)
+            / disposition.TERMINAL_SWEEP_WAVE_ID
+            / f"{comparison}.json"
+        ),
+        "sha256": "b" * 64,
+        "wave_id": disposition.TERMINAL_SWEEP_WAVE_ID,
+    }
+    missing = disposition.validate_terminal_receipt_authority(
+        repo, missing_binding, expected_merge_sha=comparison
+    )
+    assert missing["valid"] is False
+    assert "unavailable" in missing["error"]
+
+    mismatched = dict(missing_binding)
+    mismatched["merge_sha"] = "c" * 40
+    mismatch = disposition.validate_terminal_receipt_authority(
+        repo, mismatched, expected_merge_sha=comparison
+    )
+    assert mismatch["valid"] is False
+    assert "merge SHA mismatch" in mismatch["error"]

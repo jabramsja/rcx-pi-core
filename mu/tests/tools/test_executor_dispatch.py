@@ -6,6 +6,7 @@ and the 15-step state machine (commit pipeline automation plan).
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import signal
@@ -9437,6 +9438,7 @@ class TestCommitContinuationAndBotFreshness:
         repo.mkdir()
         dev_worktree = tmp_path / "dev-worktree"
         dev_worktree.mkdir()
+        merged_sha = "4" * 40
         handoff = _make_new_handoff()
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
         continuation_path.parent.mkdir(parents=True, exist_ok=True)
@@ -9462,6 +9464,7 @@ class TestCommitContinuationAndBotFreshness:
         merge_cwds = []
         fetch_cwds = []
         merge_cmds = []
+        package_refresh_calls = []
 
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
@@ -9471,7 +9474,7 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 if cwd == dev_worktree:
-                    return completed(cmd, stdout="merge456\n")
+                    return completed(cmd, stdout=f"{merged_sha}\n")
                 return completed(cmd, stdout="abc123\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 # The linked dev worktree is on 'dev'; the feature worktree
@@ -9492,7 +9495,7 @@ class TestCommitContinuationAndBotFreshness:
                     "HEAD abc123\n"
                     "branch refs/heads/jabramsja/test-wave-id\n\n"
                     f"worktree {dev_worktree}\n"
-                    "HEAD merge456\n"
+                    f"HEAD {merged_sha}\n"
                     "branch refs/heads/dev\n\n"
                 )
                 return completed(cmd, stdout=stdout)
@@ -9553,6 +9556,11 @@ class TestCommitContinuationAndBotFreshness:
             raise AssertionError(f"unexpected command: {cmd} cwd={cwd}")
 
         monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(
+            commit_mod,
+            "_refresh_post_merge_package_for_next_open_queue",
+            lambda **kwargs: package_refresh_calls.append(kwargs),
+        )
 
         post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising linked-worktree merge verification path
             repo_root=repo,
@@ -9565,11 +9573,13 @@ class TestCommitContinuationAndBotFreshness:
         )
 
         assert "step" not in post_commit
-        assert post_commit["merge_sha"] == "merge456"
+        assert post_commit["merge_sha"] == merged_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert merge_cwds == [repo.parent]
         assert fetch_cwds == [dev_worktree]
         assert merge_cmds == [["git", "merge", "--ff-only", "origin/dev"]]
+        assert len(package_refresh_calls) == 1
+        assert package_refresh_calls[0]["queue_commit_sha"] == merged_sha
 
     def test_post_commit_warns_when_linked_base_worktree_is_already_dirty(self, tmp_path, monkeypatch):
         repo = tmp_path / "feature-worktree"
@@ -17135,3 +17145,598 @@ class TestCandidateAuthorityCarryForward:
         assert result["authority_error"] == "required_candidate_authority_missing"
         assert "requires a paired candidate_authority object" in result["message"]
         runner.assert_not_called()
+
+
+class TestPrDispositionTerminalReceiptRouting:
+    """Terminal receipt authority is required before the successor can launch."""
+
+    MERGE_SHA = "a" * 40
+
+    @pytest.fixture(autouse=True)
+    def _current_terminal_head(self, monkeypatch):
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_compute_repo_state",
+            lambda _repo: SimpleNamespace(head_sha=self.MERGE_SHA),
+        )
+
+    @classmethod
+    def binding(cls, decision: str) -> dict:
+        return {
+            "path": (
+                "rcx_post_merge_terminal_receipts/"
+                "pr-disposition-apply-r2-2026-09-10/"
+                f"{cls.MERGE_SHA}.json"
+            ),
+            "sha256": "b" * 64,
+            "wave_id": "pr-disposition-apply-r2-2026-09-10",
+            "merge_sha": cls.MERGE_SHA,
+            "decision": decision,
+        }
+
+    @classmethod
+    def record(cls, candidate: str, decision: str) -> dict:
+        binding = cls.binding(decision)
+        return {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "post-cleanup terminal route",
+            "wave_name": candidate,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "merge_sha": cls.MERGE_SHA,
+            "terminal_receipt": binding,
+            "next_candidates": [
+                {
+                    "candidate": candidate,
+                    "bounded": True,
+                    "terminal_receipt": dict(binding),
+                }
+            ],
+        }
+
+    @pytest.mark.parametrize(
+        ("candidate", "receipt_decision", "expected_candidate"),
+        [
+            ("fleet-cleanup-builder-r1-2026-09-10", "PASS", "fleet-cleanup-builder"),
+            (
+                "pr-disposition-reconciliation-r1-2026-09-10",
+                "HOLD",
+                "pr-disposition-reconciliation",
+            ),
+        ],
+    )
+    def test_only_receipt_matching_terminal_candidate_dispatches(
+        self,
+        tmp_path,
+        monkeypatch,
+        candidate,
+        receipt_decision,
+        expected_candidate,
+    ):
+        validations: list[dict] = []
+
+        def validate(_repo, _binding, **kwargs):
+            validations.append(kwargs)
+            return {
+                "valid": True,
+                "decision": receipt_decision,
+                "error": "",
+                "receipt_path": "durable-receipt.json",
+            }
+
+        runner = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                ["phase-a"],
+                0,
+                stdout='{"status":"success"}',
+                stderr="",
+            )
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_validate_terminal_receipt_binding",
+            validate,
+        )
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", runner)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda *args, **kwargs: {
+                "status": "success",
+                "decision": "ROUTE_PHASE_A",
+                "executor": "phase_a_executor",
+            },
+        )
+
+        result = dispatch_mod.dispatch(
+            self.record(candidate, receipt_decision),
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+
+        assert result["status"] == "success"
+        runner.assert_called_once()
+        assert validations == [
+            {
+                "expected_merge_sha": self.MERGE_SHA,
+                "expected_candidate": expected_candidate,
+            },
+            {
+                "expected_merge_sha": self.MERGE_SHA,
+                "expected_candidate": expected_candidate,
+            },
+        ]
+        executor_args = runner.call_args.args[0]
+        routed = json.loads(
+            executor_args[executor_args.index("--routing-record") + 1]
+        )
+        assert len(routed["next_candidates"]) == 1
+        assert routed["next_candidates"][0]["candidate"] == candidate
+        assert "pr-disposition-apply" not in candidate
+
+    def test_missing_or_mismatched_receipt_binding_holds_before_executor(
+        self, tmp_path, monkeypatch,
+    ):
+        missing = self.record("fleet-cleanup-builder", "PASS")
+        missing.pop("terminal_receipt")
+        mismatch = self.record("fleet-cleanup-builder", "PASS")
+        mismatch["next_candidates"][0]["terminal_receipt"]["sha256"] = "c" * 64
+        validator = MagicMock(
+            side_effect=AssertionError("structurally invalid binding must not validate")
+        )
+        runner = MagicMock(side_effect=AssertionError("executor must not run"))
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_validate_terminal_receipt_binding",
+            validator,
+        )
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", runner)
+
+        for record in (missing, mismatch):
+            result = dispatch_mod.dispatch(
+                record,
+                repo_root=tmp_path,
+                skip_freshness=True,
+            )
+            assert result["status"] == "held"
+            assert result["authority_error"] == "terminal_receipt_invalid"
+
+        validator.assert_not_called()
+        runner.assert_not_called()
+
+    def test_invalid_receipt_or_decision_route_mismatch_holds(
+        self, tmp_path, monkeypatch,
+    ):
+        runner = MagicMock(side_effect=AssertionError("executor must not run"))
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", runner)
+        record = self.record("fleet-cleanup-builder", "PASS")
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_validate_terminal_receipt_binding",
+            lambda *args, **kwargs: {
+                "valid": False,
+                "decision": "",
+                "error": "digest mismatch",
+                "receipt_path": "",
+            },
+        )
+        invalid = dispatch_mod.dispatch(
+            record,
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+        assert invalid["status"] == "held"
+        assert "digest mismatch" in invalid["message"]
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_validate_terminal_receipt_binding",
+            lambda *args, **kwargs: {
+                "valid": True,
+                "decision": "HOLD",
+                "error": "",
+                "receipt_path": "durable-receipt.json",
+            },
+        )
+        wrong_route = dispatch_mod.dispatch(
+            record,
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+        assert wrong_route["status"] == "held"
+        assert "expected PASS" in wrong_route["message"]
+        runner.assert_not_called()
+
+    def test_apply_and_multiple_terminal_candidates_are_never_dispatched(
+        self, tmp_path, monkeypatch,
+    ):
+        runner = MagicMock(side_effect=AssertionError("executor must not run"))
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", runner)
+        apply_record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "consumed mutation",
+            "wave_name": "pr-disposition-apply-r2-2026-09-10",
+            "next_candidates": [
+                {
+                    "candidate": "pr-disposition-apply-r2-2026-09-10",
+                    "bounded": True,
+                }
+            ],
+        }
+        multiple = self.record("fleet-cleanup-builder", "PASS")
+        multiple["next_candidates"].append(
+            {
+                "candidate": "pr-disposition-reconciliation",
+                "bounded": True,
+                "terminal_receipt": dict(multiple["terminal_receipt"]),
+            }
+        )
+
+        apply_result = dispatch_mod.dispatch(
+            apply_record,
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+        multiple_result = dispatch_mod.dispatch(
+            multiple,
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+
+        assert apply_result["status"] == "held"
+        assert "consumed" in apply_result["message"]
+        assert multiple_result["status"] == "held"
+        assert "exactly one bounded candidate" in multiple_result["message"]
+        runner.assert_not_called()
+
+    def test_old_terminal_receipt_cannot_bypass_head_gate_with_skip_freshness(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_compute_repo_state",
+            lambda _repo: SimpleNamespace(head_sha="d" * 40),
+        )
+        validator = MagicMock(
+            side_effect=AssertionError("stale authority must not reach receipt read")
+        )
+        runner = MagicMock(side_effect=AssertionError("executor must not run"))
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_validate_terminal_receipt_binding",
+            validator,
+        )
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", runner)
+
+        result = dispatch_mod.dispatch(
+            self.record("fleet-cleanup-builder", "PASS"),
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+
+        assert result["status"] == "held"
+        assert "old terminal authority" in result["message"]
+        validator.assert_not_called()
+        runner.assert_not_called()
+
+    def test_terminal_package_never_uses_stale_manual_repair(
+        self, tmp_path, monkeypatch,
+    ):
+        package_dir = tmp_path / ".agent_bus" / "meta"
+        package_dir.mkdir(parents=True)
+        package = self.record("fleet-cleanup-builder", "PASS")
+        (package_dir / "post_merge_package.json").write_text(
+            json.dumps(package),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_validate_terminal_receipt_binding",
+            lambda *args, **kwargs: {
+                "valid": True,
+                "decision": "PASS",
+                "error": "",
+                "receipt_path": "durable-receipt.json",
+            },
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_compute_repo_state",
+            lambda _repo: SimpleNamespace(head_sha="d" * 40),
+        )
+        repair = MagicMock(side_effect=AssertionError("repair must not run"))
+        supervisor = MagicMock(side_effect=AssertionError("supervisor must not run"))
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_refresh_stale_post_merge_package_after_manual_merge",
+            repair,
+        )
+        monkeypatch.setattr(dispatch_mod.subprocess, "run", supervisor)
+
+        success, result = dispatch_mod._auto_refresh_routing(tmp_path)  # ANTICHEAT_OK: proves the terminal package is gated before stale repair/supervisor
+
+        assert success is False
+        assert result is not None
+        assert result["status"] == "held"
+        assert "does not match current repository HEAD" in result["message"]
+        repair.assert_not_called()
+        supervisor.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("candidate", "receipt_decision", "expected_candidate"),
+        [
+            ("fleet-cleanup-builder-r1-2026-09-10", "PASS", "fleet-cleanup-builder"),
+            (
+                "pr-disposition-reconciliation-r1-2026-09-10",
+                "HOLD",
+                "pr-disposition-reconciliation",
+            ),
+        ],
+    )
+    def test_real_supervisor_record_restores_package_binding_before_dispatch(
+        self,
+        tmp_path,
+        monkeypatch,
+        candidate,
+        receipt_decision,
+        expected_candidate,
+    ):
+        """The supported supervisor writer can feed public dispatch directly."""
+        repo, _env = _init_builder_repo(tmp_path)
+        merge_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        binding = {
+            "path": (
+                "rcx_post_merge_terminal_receipts/"
+                "pr-disposition-apply-r2-2026-09-10/"
+                f"{merge_sha}.json"
+            ),
+            "sha256": "b" * 64,
+            "wave_id": "pr-disposition-apply-r2-2026-09-10",
+            "merge_sha": merge_sha,
+            "decision": receipt_decision,
+        }
+        package = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "post-cleanup terminal route",
+            "wave_name": candidate,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "merged_pr": 1280,
+            "merge_sha": merge_sha,
+            "terminal_receipt": binding,
+            "next_candidates": [
+                {
+                    "candidate": candidate,
+                    "bounded": True,
+                    "terminal_receipt": dict(binding),
+                }
+            ],
+        }
+        package_dir = repo / ".agent_bus" / "meta"
+        package_dir.mkdir(parents=True)
+        (package_dir / "post_merge_package.json").write_text(
+            json.dumps(package),
+            encoding="utf-8",
+        )
+
+        meta_mod = load_module(
+            "meta_bridge_supervisor",
+            REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
+        )
+        response = meta_mod.MetaBridgeResponse(
+            status="success",
+            decision="ROUTE_PHASE_A",
+            summary=package["summary"],
+        )
+        routing_path = meta_mod.write_post_merge_routing_record(
+            response,
+            package,
+            repo,
+        )
+        supervisor_record = json.loads(routing_path.read_text(encoding="utf-8"))
+
+        # This is the exact supported writer shape that Bridge Round 3 caught:
+        # the candidate copy survives, while the package-owned top-level copy
+        # is intentionally absent from the generic supervisor schema.
+        assert "terminal_receipt" not in supervisor_record
+        assert supervisor_record["next_candidates"][0]["terminal_receipt"] == binding
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_compute_repo_state",
+            lambda _repo: SimpleNamespace(
+                head_sha=merge_sha,
+                state_sha=supervisor_record["state_sha"],
+            ),
+        )
+        validations: list[dict] = []
+
+        def validate(_repo, candidate_binding, **kwargs):
+            assert candidate_binding == binding
+            validations.append(kwargs)
+            return {
+                "valid": True,
+                "decision": receipt_decision,
+                "error": "",
+                "receipt_path": "durable-receipt.json",
+            }
+
+        captured: dict[str, object] = {}
+
+        def run_phase_a(args, *, cwd, timeout):
+            captured["args"] = list(args)
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout='{"status":"success"}',
+                stderr="",
+            )
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_validate_terminal_receipt_binding",
+            validate,
+        )
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", run_phase_a)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda *args, **kwargs: {
+                "status": "success",
+                "decision": "ROUTE_PHASE_A",
+                "executor": "phase_a_executor",
+            },
+        )
+
+        result = dispatch_mod.dispatch(supervisor_record, repo_root=repo)
+
+        assert result["status"] == "success"
+        args = captured["args"]
+        assert isinstance(args, list)
+        routed = json.loads(args[args.index("--routing-record") + 1])
+        assert routed["terminal_receipt"] == binding
+        assert routed["next_candidates"][0]["terminal_receipt"] == binding
+        assert validations == [
+            {
+                "expected_merge_sha": merge_sha,
+                "expected_candidate": expected_candidate,
+            },
+            {
+                "expected_merge_sha": merge_sha,
+                "expected_candidate": expected_candidate,
+            },
+        ]
+
+    def test_terminal_binding_survives_canonical_rebind(self, tmp_path, monkeypatch):
+        canonical = tmp_path / ".agent_bus" / "meta" / "post_merge_routing.json"
+        canonical.parent.mkdir(parents=True)
+        record = self.record("fleet-cleanup-builder-r1-2026-09-10", "PASS")
+        record["next_candidates"][0]["tracked_packet"] = (
+            "reports/control_plane/fleet-cleanup-builder-r1-2026-09-10.md"
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_validate_terminal_receipt_binding",
+            lambda *args, **kwargs: {
+                "valid": True,
+                "decision": "PASS",
+                "error": "",
+                "receipt_path": "durable-receipt.json",
+            },
+        )
+
+        def builder(**kwargs):
+            return {
+                "decision": kwargs["decision"],
+                "summary": kwargs["summary"],
+                "wave_name": kwargs["wave_name"],
+                "task_id": kwargs["task_id"],
+                "merge_sha": kwargs["merge_sha"],
+                "next_candidates": [
+                    {
+                        "candidate": kwargs["wave_name"],
+                        "bounded": True,
+                        "tracked_packet": kwargs["tracked_packet"],
+                    }
+                ],
+            }, []
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_common_build_and_write_routing_record",
+            builder,
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "validate_routing_record_freshness",
+            lambda *args, **kwargs: (True, "fresh"),
+        )
+
+        success, refreshed = dispatch_mod._refresh_canonical_routing_record_state(  # ANTICHEAT_OK: direct canonical terminal-authority rebuild regression
+            tmp_path,
+            record,
+            output_path=canonical,
+        )
+
+        assert success is True
+        assert refreshed is not None
+        assert refreshed["terminal_receipt"] == record["terminal_receipt"]
+        assert (
+            refreshed["next_candidates"][0]["terminal_receipt"]
+            == record["terminal_receipt"]
+        )
+        assert json.loads(canonical.read_text(encoding="utf-8")) == refreshed
+
+    def test_terminal_binding_survives_phase_a_to_phase_b_rebuild(
+        self, tmp_path, monkeypatch,
+    ):
+        wave_id = "fleet-cleanup-builder-r1-2026-09-10"
+        packet_rel = f"reports/control_plane/{wave_id}.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            f"# Fleet Cleanup Builder\n\nStatus: Phase B\nWave ID: {wave_id}\n",
+            encoding="utf-8",
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"],
+            0,
+            stdout=json.dumps({"plan_path": packet_rel}),
+            stderr="",
+        )
+        record = self.record(wave_id, "PASS")
+        record["next_candidates"][0]["tracked_packet"] = packet_rel
+        captured: dict[str, object] = {}
+
+        def run_phase_b(args, *, cwd, timeout):
+            captured["args"] = list(args)
+            return subprocess.CompletedProcess(
+                args,
+                2,
+                stdout="",
+                stderr="forced stop",
+            )
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_validate_terminal_receipt_binding",
+            lambda *args, **kwargs: {
+                "valid": True,
+                "decision": "PASS",
+                "error": "",
+                "receipt_path": "durable-receipt.json",
+            },
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_phase_b_tracker_gate_result",
+            lambda *args, **kwargs: None,
+        )
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", run_phase_b)
+
+        result = dispatch_mod._continue_successful_executor_chain(  # ANTICHEAT_OK: direct A-to-B terminal-authority rebuild regression
+            "phase_a_executor",
+            phase_a_ok,
+            repo_root=tmp_path,
+            config={
+                "timeouts": {"phase_b_executor": 10},
+                "bridge_loop_limits": {"phase_b": 1},
+            },
+            record=record,
+        )
+
+        assert result["status"] == "failed"
+        args = captured["args"]
+        assert isinstance(args, list)
+        phase_b_routing = json.loads(args[args.index("--routing-record") + 1])
+        assert phase_b_routing["terminal_receipt"] == record["terminal_receipt"]
+        assert phase_b_routing["merge_sha"] == self.MERGE_SHA
+        assert (
+            phase_b_routing["next_candidates"][0]["terminal_receipt"]
+            == record["terminal_receipt"]
+        )

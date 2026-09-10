@@ -185,6 +185,13 @@ SURFACE_COMMANDS = {
     "post-merge-supervisor",
 }
 
+# Post-cleanup PR-disposition terminal routes.  These candidates are not
+# ordinary queue entries: their sole launch authority is the durable terminal
+# receipt written after the consumed Apply carrier has been cleaned up.
+_TERMINAL_FLEET_CANDIDATE = "fleet-cleanup-builder"
+_TERMINAL_RECONCILIATION_CANDIDATE = "pr-disposition-reconciliation"
+_TERMINAL_RECEIPT_AUTHORITY_ERROR = "terminal_receipt_invalid"
+
 
 def _emit_executor_hard_fail_event(
     repo_root: Path,
@@ -438,6 +445,329 @@ def _selected_routing_candidate_dicts(record: dict[str, Any]) -> list[dict[str, 
         if candidate.get("bounded") is True
     ]
     return bounded or candidates
+
+
+def _terminal_candidate_slug(value: Any) -> str:
+    """Normalize a queue candidate label without widening its authority."""
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+
+
+def _terminal_candidate_matches(value: Any, canonical: str) -> bool:
+    slug = _terminal_candidate_slug(value)
+    return slug == canonical or slug.startswith(f"{canonical}-")
+
+
+def _terminal_candidate_kind(candidate: dict[str, Any]) -> str:
+    """Classify only explicit candidate identity fields used by queue records."""
+    identities = (
+        candidate.get("candidate"),
+        candidate.get("wave_name"),
+        candidate.get("wave_id"),
+        candidate.get("task_id"),
+    )
+    for identity in identities:
+        if _terminal_candidate_matches(identity, "pr-disposition-apply"):
+            return "apply"
+    for identity in identities:
+        if _terminal_candidate_matches(identity, _TERMINAL_FLEET_CANDIDATE):
+            return "fleet"
+    for identity in identities:
+        if _terminal_candidate_matches(
+            identity,
+            _TERMINAL_RECONCILIATION_CANDIDATE,
+        ):
+            return "reconciliation"
+    return ""
+
+
+def _terminal_receipt_hold_result(
+    payload: dict[str, Any],
+    message: str,
+) -> dict[str, Any]:
+    return {
+        "status": "held",
+        "decision": str(payload.get("decision") or ""),
+        "executor": "executor_dispatch",
+        "summary": str(payload.get("summary") or ""),
+        "authority_error": _TERMINAL_RECEIPT_AUTHORITY_ERROR,
+        "message": message,
+    }
+
+
+def _is_terminal_receipt_hold_result(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("status") == "held"
+        and value.get("authority_error") == _TERMINAL_RECEIPT_AUTHORITY_ERROR
+    )
+
+
+def _load_pr_disposition_executor_module() -> Any:
+    try:
+        import pr_disposition_executor as pr_disposition_executor_mod
+
+        return pr_disposition_executor_mod
+    except ImportError:
+        import importlib.util as _ilu
+
+        executor_path = SCRIPT_DIR / "pr_disposition_executor.py"
+        spec = _ilu.spec_from_file_location(
+            "pr_disposition_executor",
+            str(executor_path),
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(
+                f"cannot load PR disposition executor from {executor_path}"
+            )
+        pr_disposition_executor_mod = _ilu.module_from_spec(spec)
+        sys.modules["pr_disposition_executor"] = pr_disposition_executor_mod
+        spec.loader.exec_module(pr_disposition_executor_mod)
+        return pr_disposition_executor_mod
+
+
+def _validate_terminal_receipt_binding(
+    repo_root: Path,
+    binding: Any,
+    *,
+    expected_merge_sha: str,
+    expected_candidate: str,
+) -> dict[str, Any]:
+    """Delegate terminal receipt schema and durable-evidence checks."""
+    try:
+        executor_mod = _load_pr_disposition_executor_module()
+        validator = getattr(executor_mod, "validate_terminal_receipt_authority")
+        result = validator(
+            repo_root,
+            binding,
+            expected_merge_sha=expected_merge_sha,
+            expected_candidate=expected_candidate,
+        )
+    except Exception as exc:  # Fail closed on import/read/validation failures.
+        return {
+            "valid": False,
+            "decision": "",
+            "error": f"terminal receipt validation failed: {exc}",
+            "receipt_path": "",
+        }
+    if not isinstance(result, dict):
+        return {
+            "valid": False,
+            "decision": "",
+            "error": "terminal receipt validator returned a non-object result",
+            "receipt_path": "",
+        }
+    return result
+
+
+def _terminal_payload_is_protected(payload: dict[str, Any]) -> bool:
+    raw_candidates = payload.get("next_candidates")
+    candidate_values = raw_candidates if isinstance(raw_candidates, list) else []
+    candidate_dicts = [
+        candidate for candidate in candidate_values if isinstance(candidate, dict)
+    ]
+    if "terminal_receipt" in payload or any(
+        "terminal_receipt" in candidate for candidate in candidate_dicts
+    ):
+        return True
+    if any(_terminal_candidate_kind(candidate) for candidate in candidate_dicts):
+        return True
+    return not candidate_dicts and bool(_terminal_candidate_kind(payload))
+
+
+_TERMINAL_SUPERVISOR_PACKAGE_PROJECTION_FIELDS = (
+    "merged_pr",
+    "merge_sha",
+    "wave_name",
+    "task_id",
+    "next_candidates",
+)
+
+
+def _restore_canonical_supervisor_terminal_receipt(
+    repo_root: Path,
+    record: dict[str, Any],
+    *,
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Restore package-owned authority omitted by the generic supervisor writer.
+
+    ``meta_bridge_supervisor.write_post_merge_routing_record`` preserves the
+    candidate object but does not own the terminal receipt's top-level binding.
+    Restore that binding only for the exact canonical record written from the
+    exact surviving post-merge package.  Caller-owned, stale, or projection-
+    mismatched records remain unchanged and therefore fail closed in the normal
+    terminal gate; a candidate binding alone is never promoted to authority.
+    """
+    if "terminal_receipt" in record or not _terminal_payload_is_protected(record):
+        return record
+    if not _matches_canonical_routing_record(record, repo_root, bus_dir):
+        return record
+
+    package_path = agent_bus_path(
+        repo_root,
+        bus_dir,
+        "meta",
+        POST_MERGE_PACKAGE_NAME,
+    )
+    package = _load_routing_record_json(package_path)
+    if package is None or not isinstance(package.get("terminal_receipt"), dict):
+        return record
+    if any(
+        record.get(field) != package.get(field)
+        for field in _TERMINAL_SUPERVISOR_PACKAGE_PROJECTION_FIELDS
+    ):
+        return record
+
+    restored = copy.deepcopy(record)
+    restored["terminal_receipt"] = copy.deepcopy(package["terminal_receipt"])
+    return restored
+
+
+def _terminal_receipt_gate_result(
+    repo_root: Path,
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Fail closed for the two terminal routes and the consumed Apply route.
+
+    Legacy routing records remain unchanged unless they name a protected
+    candidate or carry a terminal-receipt marker.  Protected records require
+    exactly one bounded candidate and identical top-level/candidate bindings.
+    """
+    raw_candidates = payload.get("next_candidates")
+    candidate_values = raw_candidates if isinstance(raw_candidates, list) else []
+    candidate_dicts = [
+        candidate for candidate in candidate_values if isinstance(candidate, dict)
+    ]
+    kinds = [_terminal_candidate_kind(candidate) for candidate in candidate_dicts]
+    # A candidate-less replay record can still expose the consumed Apply name
+    # at top level.  Do not inspect top-level source-wave identity when a real
+    # successor candidate exists: post-merge packages legitimately identify
+    # their completed predecessor there.
+    top_level_kind = ""
+    if not candidate_dicts:
+        top_level_kind = _terminal_candidate_kind(payload)
+    if not _terminal_payload_is_protected(payload):
+        return None
+
+    if "apply" in kinds or top_level_kind == "apply":
+        return _terminal_receipt_hold_result(
+            payload,
+            "PR Disposition Apply is consumed and cannot be routed or replayed.",
+        )
+
+    if (
+        not isinstance(raw_candidates, list)
+        or len(raw_candidates) != 1
+        or len(candidate_dicts) != 1
+        or candidate_dicts[0].get("bounded") is not True
+    ):
+        return _terminal_receipt_hold_result(
+            payload,
+            "Terminal routing requires exactly one bounded candidate.",
+        )
+
+    candidate = candidate_dicts[0]
+    route_kind = kinds[0]
+    if route_kind not in {"fleet", "reconciliation"}:
+        return _terminal_receipt_hold_result(
+            payload,
+            "Terminal receipt authority cannot route an unrecognized candidate.",
+        )
+
+    top_level_binding = payload.get("terminal_receipt")
+    candidate_binding = candidate.get("terminal_receipt")
+    if not isinstance(top_level_binding, dict) or not isinstance(
+        candidate_binding,
+        dict,
+    ):
+        return _terminal_receipt_hold_result(
+            payload,
+            "Terminal routing requires both top-level and candidate receipt bindings.",
+        )
+    if top_level_binding != candidate_binding:
+        return _terminal_receipt_hold_result(
+            payload,
+            "Top-level and candidate terminal receipt bindings do not match.",
+        )
+
+    merge_sha = payload.get("merge_sha")
+    if not isinstance(merge_sha, str) or not merge_sha.strip():
+        return _terminal_receipt_hold_result(
+            payload,
+            "Terminal routing record is missing its exact merge_sha binding.",
+        )
+    try:
+        current_head = _compute_repo_state(repo_root).head_sha
+    except Exception as exc:  # Fail closed when landed-revision identity is unavailable.
+        return _terminal_receipt_hold_result(
+            payload,
+            f"Terminal routing could not resolve current repository HEAD: {exc}",
+        )
+    if not isinstance(current_head, str) or merge_sha.strip() != current_head:
+        return _terminal_receipt_hold_result(
+            payload,
+            "Terminal routing merge_sha does not match current repository HEAD; "
+            "old terminal authority cannot be rebound or replayed.",
+        )
+    expected_candidate = (
+        _TERMINAL_FLEET_CANDIDATE
+        if route_kind == "fleet"
+        else _TERMINAL_RECONCILIATION_CANDIDATE
+    )
+    validation = _validate_terminal_receipt_binding(
+        repo_root,
+        top_level_binding,
+        expected_merge_sha=merge_sha.strip(),
+        expected_candidate=expected_candidate,
+    )
+    receipt_decision = str(validation.get("decision") or "").strip().upper()
+    if validation.get("valid") is not True:
+        detail = str(validation.get("error") or "unknown receipt validation error")
+        return _terminal_receipt_hold_result(
+            payload,
+            f"Terminal receipt authority is invalid: {detail}",
+        )
+    expected_decision = "PASS" if route_kind == "fleet" else "HOLD"
+    if receipt_decision != expected_decision:
+        return _terminal_receipt_hold_result(
+            payload,
+            f"Terminal receipt decision {receipt_decision or '<missing>'} cannot "
+            f"route {expected_candidate}; expected {expected_decision}.",
+        )
+    return None
+
+
+def _carry_forward_terminal_receipt(
+    record: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Copy durable terminal authority across fixed-field routing rebuilds."""
+    source = record or {}
+    binding = source.get("terminal_receipt")
+    if not isinstance(binding, dict):
+        return {}
+    carried: dict[str, Any] = {"terminal_receipt": copy.deepcopy(binding)}
+    merge_sha = source.get("merge_sha")
+    if isinstance(merge_sha, str) and merge_sha.strip():
+        carried["merge_sha"] = merge_sha.strip()
+    return carried
+
+
+def _attach_terminal_receipt_to_single_candidate(
+    candidates: list[Any],
+    carried: dict[str, Any],
+) -> list[Any]:
+    """Preserve the candidate copy paired with a carried top-level binding."""
+    binding = carried.get("terminal_receipt")
+    if not isinstance(binding, dict) or len(candidates) != 1:
+        return candidates
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        return candidates
+    rebound = dict(candidate)
+    rebound["terminal_receipt"] = copy.deepcopy(binding)
+    return [rebound]
 
 
 def _surface_phase_b_plan_from_routing_payload(routing_payload: str | None) -> str | None:
@@ -2656,7 +2986,12 @@ def _continue_successful_executor_chain(
 ) -> dict[str, Any]:
     """Continue the A→B→commit chain after a successful executor leg."""
     executor_script_dir = _script_dir_for_repo(script_repo_root)
+    if executor_name in {"phase_a_executor", "phase_b_executor"}:
+        terminal_hold = _terminal_receipt_gate_result(repo_root, record or {})
+        if terminal_hold is not None:
+            return terminal_hold
     if executor_name == "phase_a_executor":
+        carried_terminal_receipt = _carry_forward_terminal_receipt(record)
         carried_candidate_authority, candidate_authority_error = (
             _carry_forward_candidate_authority(record)
         )
@@ -2762,6 +3097,11 @@ def _continue_successful_executor_chain(
                 _routing_record_tracked_packet({"next_candidates": phase_b_candidates})
                 or phase_b_tracked_packet
             )
+        if carried_terminal_receipt:
+            phase_b_candidates = _attach_terminal_receipt_to_single_candidate(
+                phase_b_candidates,
+                carried_terminal_receipt,
+            )
         tracker_gate = _phase_b_tracker_gate_result(
             repo_root,
             plan_path=phase_b_plan_path,
@@ -2793,7 +3133,14 @@ def _continue_successful_executor_chain(
             # exact launch-owned object. Rebuilding it from mutable bus state
             # here would make Phase B review authority caller-dependent.
             **carried_candidate_authority,
+            # The terminal receipt lives outside the cleaned carrier and is the
+            # sole authority for this protected candidate. Keep both its
+            # top-level binding and the paired candidate copy across A -> B.
+            **carried_terminal_receipt,
         }
+        terminal_hold = _terminal_receipt_gate_result(repo_root, phase_b_routing)
+        if terminal_hold is not None:
+            return terminal_hold
         phase_b_args = [
             sys.executable,
             str(executor_script_dir / "phase_b_executor.py"),
@@ -3485,6 +3832,18 @@ def _auto_refresh_routing(
         if verbose:
             print(f"[dispatch] Cannot read post-merge package at {package_path}: {exc}")
         return False, None
+    if not isinstance(package, dict):
+        if verbose:
+            print("[dispatch] Post-merge package must be a JSON object")
+        return False, None
+
+    terminal_package = _terminal_payload_is_protected(package)
+    terminal_hold = _terminal_receipt_gate_result(repo_root, package)
+    if terminal_hold is not None:
+        if verbose:
+            print(f"[dispatch] {terminal_hold['message']}")
+        return False, terminal_hold
+
     package_merge_sha = package.get("merge_sha")
     current_head = _compute_repo_state(repo_root).head_sha
     if not isinstance(package_merge_sha, str) or not package_merge_sha.strip():
@@ -3496,6 +3855,12 @@ def _auto_refresh_routing(
     # auto-refresh implicitly reuses the canonical on-disk package, so an
     # ancestor merge_sha can replay an obsolete bounded next candidate.
     if package_merge_sha != current_head:
+        if terminal_package:
+            return False, _terminal_receipt_hold_result(
+                package,
+                "Terminal post-merge package merge_sha does not match current "
+                "HEAD; stale package repair is not authorized.",
+            )
         repaired = _refresh_stale_post_merge_package_after_manual_merge(
             repo_root,
             package,
@@ -3570,12 +3935,47 @@ def _auto_refresh_routing(
             print(f"[dispatch] Failed to reload routing record after refresh: {exc}")
         return False, None
 
+    # The post-merge supervisor copies the bounded candidate object but does
+    # not own the package's top-level terminal authority.  Restore that exact
+    # package binding before validating the routing record it produced.
+    if terminal_package and "terminal_receipt" not in refreshed:
+        refreshed["terminal_receipt"] = copy.deepcopy(package["terminal_receipt"])
+    terminal_hold = _terminal_receipt_gate_result(repo_root, refreshed)
+    if terminal_hold is not None:
+        if verbose:
+            print(f"[dispatch] {terminal_hold['message']}")
+        return False, terminal_hold
+
     # Verify freshness of the refreshed record
     fresh, msg = validate_routing_record_freshness(refreshed, repo_root)
     if not fresh:
         if verbose:
             print(f"[dispatch] Refreshed record still stale: {msg}")
         return False, None
+
+    if terminal_package:
+        # Persist the package-owned top-level binding that the generic
+        # supervisor schema does not copy.  Otherwise a later dispatcher
+        # process would reload a candidate-only record and correctly hold it as
+        # incomplete even though this refresh had validated the full pair.
+        routing_path = _canonical_routing_record_path(repo_root, bus_dir)
+        try:
+            routing_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(
+                prefix=".terminal-routing-refresh-",
+                dir=routing_path.parent,
+            ) as temporary_dir:
+                staged_path = Path(temporary_dir) / routing_path.name
+                staged_path.write_text(
+                    json.dumps(refreshed, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                os.replace(staged_path, routing_path)
+        except OSError as exc:
+            return False, _terminal_receipt_hold_result(
+                package,
+                f"Validated terminal routing record could not be persisted: {exc}",
+            )
 
     if verbose:
         print(f"[dispatch] Auto-refresh succeeded: decision={refreshed.get('decision')}")
@@ -3712,6 +4112,10 @@ def _refresh_canonical_routing_record_state(
     bus_dir: str | Path | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Rebind the canonical packet-owned routing record to the current repo state."""
+    terminal_hold = _terminal_receipt_gate_result(repo_root, record)
+    if terminal_hold is not None:
+        return False, terminal_hold
+    carried_terminal_receipt = _carry_forward_terminal_receipt(record)
     carried_candidate_authority, candidate_authority_error = (
         _carry_forward_candidate_authority(record)
     )
@@ -3785,6 +4189,19 @@ def _refresh_canonical_routing_record_state(
             return False, None
 
         refreshed.update(carried_candidate_authority)
+        refreshed.update(carried_terminal_receipt)
+        if carried_terminal_receipt:
+            candidates = refreshed.get("next_candidates")
+            if isinstance(candidates, list):
+                refreshed["next_candidates"] = (
+                    _attach_terminal_receipt_to_single_candidate(
+                        candidates,
+                        carried_terminal_receipt,
+                    )
+                )
+            terminal_hold = _terminal_receipt_gate_result(repo_root, refreshed)
+            if terminal_hold is not None:
+                return False, terminal_hold
         fresh, msg = validate_routing_record_freshness(refreshed, repo_root)
         if not fresh:
             if verbose:
@@ -3874,8 +4291,17 @@ def dispatch(
     cfg = config or load_config()
     # Preserve caller/canonical identity before TASKS.md tracked_packet backfill.
     identity_record = record
+    record = _restore_canonical_supervisor_terminal_receipt(
+        repo,
+        record,
+        bus_dir=bus_dir,
+    )
     record = _enrich_founder_ordered_tracked_packets(repo, record)
     decision = record.get("decision", "")
+
+    terminal_hold = _terminal_receipt_gate_result(repo, record)
+    if terminal_hold is not None:
+        return terminal_hold
 
     # Stop tokens — require human intervention
     if decision in STOP_TOKENS:
@@ -3996,6 +4422,8 @@ def dispatch(
                     == "required_candidate_authority_missing"
                 ):
                     return refresh_record
+                if not refreshed and _is_terminal_receipt_hold_result(refresh_record):
+                    return refresh_record
                 if not refreshed or refresh_record is None:
                     if verbose:
                         print(
@@ -4010,6 +4438,8 @@ def dispatch(
             else:
                 refreshed, refresh_record = _auto_refresh_routing(repo, verbose=verbose, bus_dir=bus_dir)
             if not refreshed or refresh_record is None:
+                if _is_terminal_receipt_hold_result(refresh_record):
+                    return refresh_record
                 continuation_ready, continuation_detail = _post_commit_continuation_ready_for_record(
                     repo,
                     record,
@@ -4044,6 +4474,9 @@ def dispatch(
             record = refresh_record
             record = _enrich_founder_ordered_tracked_packets(repo, record)
             decision = record.get("decision", "")
+            terminal_hold = _terminal_receipt_gate_result(repo, record)
+            if terminal_hold is not None:
+                return terminal_hold
             # Re-check stop tokens after refresh
             if decision in STOP_TOKENS:
                 request_text = record.get("request_for_agent") or record.get("request_for_claude", "")
@@ -4304,6 +4737,13 @@ def dispatch(
             executor_args.append("--json")
         if bus_dir is not None:
             executor_args.extend(["--bus-dir", str(bus_dir)])
+
+        # Executor-specific argument construction may rebind candidate identity
+        # to a locked packet. Revalidate protected authority after that mutation
+        # and immediately before crossing the executor boundary.
+        terminal_hold = _terminal_receipt_gate_result(repo, record)
+        if terminal_hold is not None:
+            return terminal_hold
 
         result = _run_executor_in_group(
             executor_args, cwd=repo, timeout=timeout,
