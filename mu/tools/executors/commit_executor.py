@@ -36,6 +36,7 @@ import inspect
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -44,7 +45,7 @@ import unicodedata
 import uuid
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import unquote
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -5280,17 +5281,260 @@ def _dirty_worktree_paths(repo_root: Path) -> set[str]:
     }
 
 
-def _primary_sync_changed_paths_in_range(
+_PRIMARY_SYNC_TRANSACTION_OWNER = "commit_executor:primary_worktree_sync"
+_PRIMARY_SYNC_TRANSACTION_VERSION = 1
+_PRIMARY_SYNC_TRANSACTION_DIRNAME = "rcx_primary_worktree_sync_transactions"
+_PRIMARY_SYNC_TRANSACTION_TERMINAL_STATES = frozenset({"HELD", "RECOVERED"})
+
+
+def _fsync_directory(path: Path) -> None:
+    """Durably publish directory-entry changes made below *path*."""
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    fd = os.open(path, flags)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _mkdir_durable(path: Path) -> None:
+    """Create a directory chain and fsync each newly published entry."""
+    missing: list[Path] = []
+    cursor = path
+    while not cursor.exists():
+        missing.append(cursor)
+        if cursor.parent == cursor:
+            break
+        cursor = cursor.parent
+    for directory in reversed(missing):
+        directory.mkdir()
+        _fsync_directory(directory)
+        _fsync_directory(directory.parent)
+    if not path.is_dir():
+        raise RuntimeError(f"primary-sync transaction path is not a directory: {path}")
+
+
+def _atomic_write_fsynced_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write JSON through fsync + atomic replace + parent-directory fsync."""
+    _mkdir_durable(path.parent)
+    serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(serialized)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+        os.replace(tmp_name, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _safe_primary_sync_relpath(path: str) -> bool:
+    candidate = Path(path)
+    return bool(path) and not candidate.is_absolute() and ".." not in candidate.parts
+
+
+def _filesystem_identity(path: Path) -> dict[str, Any]:
+    resolved = path.resolve(strict=True)
+    info = resolved.stat()
+    return {
+        "path": str(resolved),
+        "device": int(info.st_dev),
+        "inode": int(info.st_ino),
+    }
+
+
+def _filesystem_identity_matches(path: Path, expected: Any) -> bool:
+    if not isinstance(expected, dict):
+        return False
+    try:
+        actual = _filesystem_identity(path)
+    except OSError:
+        return False
+    return actual == {
+        "path": str(expected.get("path") or ""),
+        "device": expected.get("device"),
+        "inode": expected.get("inode"),
+    }
+
+
+def _filesystem_path_snapshot(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Capture bytes/type/mode without following a final symlink."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return {"kind": "absent"}, None
+    except OSError as exc:
+        return None, f"could not stat {path}: {exc}"
+
+    mode = stat.S_IMODE(info.st_mode)
+    if stat.S_ISREG(info.st_mode):
+        digest = hashlib.sha256()
+        try:
+            with open(path, "rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError as exc:
+            return None, f"could not read {path}: {exc}"
+        return {
+            "kind": "file",
+            "mode": mode,
+            "size": int(info.st_size),
+            "sha256": digest.hexdigest(),
+        }, None
+    if stat.S_ISLNK(info.st_mode):
+        try:
+            target = os.readlink(path)
+        except OSError as exc:
+            return None, f"could not read symlink {path}: {exc}"
+        return {
+            "kind": "symlink",
+            "mode": mode,
+            "target": target,
+            "sha256": hashlib.sha256(os.fsencode(target)).hexdigest(),
+        }, None
+    return None, (
+        "primary-sync relocation supports only regular files and symlinks; "
+        f"refusing {path} with mode {oct(info.st_mode)}"
+    )
+
+
+def _primary_sync_path_snapshot(
+    repo_root: Path,
+    relpath: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    if not _safe_primary_sync_relpath(relpath):
+        return None, f"unsafe primary-sync path: {relpath!r}"
+    worktree, worktree_error = _filesystem_path_snapshot(repo_root / relpath)
+    if worktree_error:
+        return None, worktree_error
+    index = _run(
+        ["git", "ls-files", "--stage", "--", relpath],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if index.returncode != 0:
+        detail = (index.stderr or index.stdout or "").strip()
+        return None, (
+            f"could not snapshot index state for {relpath}: "
+            f"{detail[:200] or index.returncode}"
+        )
+    return {"index": index.stdout, "worktree": worktree}, None
+
+
+def _primary_sync_path_snapshots(
+    repo_root: Path,
+    paths: list[str],
+) -> tuple[dict[str, dict[str, Any]] | None, str | None]:
+    snapshots: dict[str, dict[str, Any]] = {}
+    for relpath in sorted(dict.fromkeys(paths)):
+        snapshot, error = _primary_sync_path_snapshot(repo_root, relpath)
+        if error or snapshot is None:
+            return None, error or f"could not snapshot {relpath}"
+        snapshots[relpath] = snapshot
+    return snapshots, None
+
+
+def _primary_sync_snapshots_match(
+    repo_root: Path,
+    expected: Any,
+    paths: list[str],
+    *,
+    component: str | None = None,
+) -> tuple[bool, str | None]:
+    if not isinstance(expected, dict):
+        return False, "primary-sync transaction snapshots are missing"
+    for relpath in sorted(dict.fromkeys(paths)):
+        wanted = expected.get(relpath)
+        if not isinstance(wanted, dict):
+            return False, f"primary-sync snapshot missing for {relpath}"
+        actual, error = _primary_sync_path_snapshot(repo_root, relpath)
+        if error or actual is None:
+            return False, error or f"could not resnapshot {relpath}"
+        if component is None:
+            matches = actual == wanted
+        else:
+            matches = actual.get(component) == wanted.get(component)
+        if not matches:
+            return False, f"primary-sync {component or 'full'} state drift for {relpath}"
+    return True, None
+
+
+def _primary_sync_diff_fingerprint(
+    repo_root: Path,
+    before_ref: str | None,
+    after_ref: str | None,
+    paths: list[str],
+    *,
+    cached: bool = False,
+) -> tuple[str | None, str | None]:
+    cmd = ["git", "diff", "--binary", "--full-index", "--no-ext-diff"]
+    if cached:
+        cmd.append("--cached")
+    if before_ref:
+        cmd.append(before_ref)
+    if after_ref:
+        cmd.append(after_ref)
+    cmd.extend(["--", *paths])
+    proc = _run(cmd, cwd=repo_root, check=False, timeout=60)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        return None, f"could not fingerprint tracked WIP: {detail[:200] or proc.returncode}"
+    return hashlib.sha256(proc.stdout.encode("utf-8")).hexdigest(), None
+
+
+def _primary_sync_live_tracked_fingerprints(
+    repo_root: Path,
+    paths: list[str],
+) -> tuple[dict[str, str] | None, str | None]:
+    staged, error = _primary_sync_diff_fingerprint(
+        repo_root, "HEAD", None, paths, cached=True
+    )
+    if error:
+        return None, error
+    unstaged, error = _primary_sync_diff_fingerprint(
+        repo_root, None, None, paths
+    )
+    if error:
+        return None, error
+    return {"staged": staged or "", "unstaged": unstaged or ""}, None
+
+
+def _primary_sync_stash_fingerprints(
+    repo_root: Path,
+    stash_oid: str,
+    paths: list[str],
+) -> tuple[dict[str, str] | None, str | None]:
+    staged, error = _primary_sync_diff_fingerprint(
+        repo_root, f"{stash_oid}^1", f"{stash_oid}^2", paths
+    )
+    if error:
+        return None, error
+    unstaged, error = _primary_sync_diff_fingerprint(
+        repo_root, f"{stash_oid}^2", stash_oid, paths
+    )
+    if error:
+        return None, error
+    return {"staged": staged or "", "unstaged": unstaged or ""}, None
+
+
+def _primary_sync_changed_paths(
     repo_root: Path,
     old_sha: str,
     new_sha: str,
-    paths: list[str],
 ) -> tuple[set[str], str | None]:
-    """Return stashed paths touched by the pending ff range."""
-    if not paths:
-        return set(), None
     proc = _run(
-        ["git", "diff", "--name-only", old_sha, new_sha, "--", *paths],
+        ["git", "diff", "--name-only", "--no-renames", old_sha, new_sha],
         cwd=repo_root,
         check=False,
         timeout=30,
@@ -5298,24 +5542,292 @@ def _primary_sync_changed_paths_in_range(
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
         return set(), (
-            "could not compare primary sync range against tracked WIP paths: "
+            "could not enumerate primary sync range: "
             f"{detail[:200] or proc.returncode}"
         )
-    changed = {
-        path.strip()
-        for path in proc.stdout.splitlines()
-        if path.strip()
+    paths = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+    unsafe = sorted(path for path in paths if not _safe_primary_sync_relpath(path))
+    if unsafe:
+        return set(), f"primary sync range contains unsafe path(s): {', '.join(unsafe)}"
+    return paths, None
+
+
+def _primary_sync_locally_ignored_collisions(
+    repo_root: Path,
+    changed_paths: set[str],
+    tracked_wip_paths: set[str],
+) -> tuple[list[str], str | None]:
+    ignored: list[str] = []
+    for relpath in sorted(changed_paths - tracked_wip_paths):
+        if not os.path.lexists(repo_root / relpath):
+            continue
+        tracked = _run(
+            ["git", "ls-files", "--error-unmatch", "--", relpath],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+        if tracked.returncode == 0:
+            continue
+        check_ignore = _run(
+            ["git", "check-ignore", "--no-index", "--", relpath],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+        if check_ignore.returncode == 0:
+            ignored.append(relpath)
+        elif check_ignore.returncode != 1:
+            detail = (check_ignore.stderr or check_ignore.stdout or "").strip()
+            return [], (
+                f"could not classify local ignore status for {relpath}: "
+                f"{detail[:200] or check_ignore.returncode}"
+            )
+    return ignored, None
+
+
+def _primary_sync_transaction_root(common_dir: Path) -> Path:
+    return common_dir / _PRIMARY_SYNC_TRANSACTION_DIRNAME
+
+
+def _publish_primary_sync_transaction(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    state: str,
+    **updates: Any,
+) -> dict[str, Any]:
+    published = copy.deepcopy(manifest)
+    published.update(updates)
+    published["state"] = state
+    published["updated_at"] = datetime.now(timezone.utc).isoformat()
+    history = list(published.get("state_history") or [])
+    history.append({"state": state, "timestamp": published["updated_at"]})
+    published["state_history"] = history
+    _atomic_write_fsynced_json(manifest_path, published)
+    return published
+
+
+def _prepare_primary_sync_transaction(
+    *,
+    primary: Path,
+    common_dir: Path,
+    branch: str,
+    old_sha: str,
+    target_ref: str,
+    target_sha: str,
+    tracked_paths: list[str],
+    overlap_paths: list[str],
+    collision_paths: list[str],
+) -> tuple[dict[str, Any] | None, Path | None, str | None]:
+    tracked_snapshots, error = _primary_sync_path_snapshots(primary, tracked_paths)
+    if error or tracked_snapshots is None:
+        return None, None, error or "could not snapshot tracked WIP"
+    untracked_snapshots, error = _primary_sync_path_snapshots(primary, collision_paths)
+    if error or untracked_snapshots is None:
+        return None, None, error or "could not snapshot untracked WIP"
+    tracked_fingerprints: dict[str, str] = {}
+    if tracked_paths:
+        captured, error = _primary_sync_live_tracked_fingerprints(primary, tracked_paths)
+        if error or captured is None:
+            return None, None, error or "could not fingerprint tracked WIP"
+        tracked_fingerprints = captured
+
+    transaction_id = uuid.uuid4().hex
+    transaction_dir = _primary_sync_transaction_root(common_dir) / transaction_id
+    backup_root = transaction_dir / "backup"
+    restore_root = transaction_dir / "restore"
+    manifest_path = transaction_dir / "manifest.json"
+    try:
+        _mkdir_durable(backup_root)
+        _mkdir_durable(restore_root)
+        worktree_identity = _filesystem_identity(primary)
+        common_identity = _filesystem_identity(common_dir)
+    except (OSError, RuntimeError) as exc:
+        return None, None, f"could not allocate durable primary-sync transaction: {exc}"
+
+    backups = [
+        {
+            "path": relpath,
+            "backup_path": str(backup_root / relpath),
+            "restore_temp_path": str(restore_root / relpath),
+        }
+        for relpath in collision_paths
+    ]
+    manifest: dict[str, Any] = {
+        "version": _PRIMARY_SYNC_TRANSACTION_VERSION,
+        "owner": _PRIMARY_SYNC_TRANSACTION_OWNER,
+        "transaction_id": transaction_id,
+        "manifest_path": str(manifest_path),
+        "worktree_identity": worktree_identity,
+        "common_dir_identity": common_identity,
+        "branch": branch,
+        "old_head": old_sha,
+        "target_ref": target_ref,
+        "target_sha": target_sha,
+        "affected_paths": sorted(set(tracked_paths) | set(collision_paths)),
+        "tracked_paths": list(tracked_paths),
+        "tracked_overlap_paths": list(overlap_paths),
+        "tracked_restore_paths": sorted(set(tracked_paths) - set(overlap_paths)),
+        "untracked_collision_paths": list(collision_paths),
+        "stash_marker": (
+            f"commit_executor:primary_ffsync_transaction:{transaction_id}"
+        ),
+        "stash_oid": None,
+        "backup_root": str(backup_root),
+        "restore_root": str(restore_root),
+        "backups": backups,
+        "tracked_snapshots": tracked_snapshots,
+        "untracked_snapshots": untracked_snapshots,
+        "tracked_patch_fingerprints": tracked_fingerprints,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "recovery_instructions": {
+            "automatic": (
+                "Re-enter sync_primary_worktree_to_base for idempotent recovery "
+                "under the shared common-dir lock."
+            ),
+            "warning": (
+                "Do not drop the declared stash or delete transaction backups; "
+                "overlapping WIP must never be auto-applied onto changed base content."
+            ),
+        },
+        "state_history": [],
     }
-    return changed & set(paths), None
+    try:
+        manifest = _publish_primary_sync_transaction(
+            manifest_path, manifest, "PREPARED"
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return None, manifest_path, (
+            f"could not publish PREPARED primary-sync transaction: {exc}"
+        )
+    return manifest, manifest_path, None
+
+
+def _validate_primary_sync_transaction(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    *,
+    common_dir: Path,
+    primary: Path,
+) -> str | None:
+    transaction_id = str(manifest.get("transaction_id") or "")
+    expected_dir = _primary_sync_transaction_root(common_dir) / transaction_id
+    if manifest.get("owner") != _PRIMARY_SYNC_TRANSACTION_OWNER:
+        return "transaction owner mismatch"
+    if manifest.get("version") != _PRIMARY_SYNC_TRANSACTION_VERSION:
+        return "transaction version mismatch"
+    if not transaction_id or manifest_path.parent != expected_dir:
+        return "transaction id/path mismatch"
+    if Path(str(manifest.get("manifest_path") or "")) != manifest_path:
+        return "transaction manifest path mismatch"
+    if not _filesystem_identity_matches(common_dir, manifest.get("common_dir_identity")):
+        return "transaction common-dir identity mismatch"
+    if not _filesystem_identity_matches(primary, manifest.get("worktree_identity")):
+        return "transaction worktree identity mismatch"
+    expected_marker = f"commit_executor:primary_ffsync_transaction:{transaction_id}"
+    if manifest.get("stash_marker") != expected_marker:
+        return "transaction stash marker mismatch"
+    backup_root = manifest_path.parent / "backup"
+    restore_root = manifest_path.parent / "restore"
+    if Path(str(manifest.get("backup_root") or "")) != backup_root:
+        return "transaction backup root mismatch"
+    if Path(str(manifest.get("restore_root") or "")) != restore_root:
+        return "transaction restore root mismatch"
+    for key in (
+        "affected_paths",
+        "tracked_paths",
+        "tracked_overlap_paths",
+        "tracked_restore_paths",
+        "untracked_collision_paths",
+    ):
+        value = manifest.get(key)
+        if not isinstance(value, list) or any(
+            not isinstance(path, str) or not _safe_primary_sync_relpath(path)
+            for path in value
+        ):
+            return f"transaction {key} is invalid"
+        if len(value) != len(set(value)):
+            return f"transaction {key} contains duplicate paths"
+    tracked = set(manifest["tracked_paths"])
+    overlap = set(manifest["tracked_overlap_paths"])
+    restore = set(manifest["tracked_restore_paths"])
+    collisions = set(manifest["untracked_collision_paths"])
+    affected = set(manifest["affected_paths"])
+    if overlap - tracked or restore != tracked - overlap:
+        return "transaction tracked overlap/restore partition mismatch"
+    if tracked & collisions or affected != tracked | collisions:
+        return "transaction affected-path inventory mismatch"
+    if not isinstance(manifest.get("branch"), str) or not manifest["branch"]:
+        return "transaction branch is invalid"
+    for key in ("old_head", "target_sha"):
+        value = str(manifest.get(key) or "")
+        if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", value) is None:
+            return f"transaction {key} is invalid"
+    target_ref = str(manifest.get("target_ref") or "")
+    if not target_ref.startswith("origin/") or target_ref == "origin/":
+        return "transaction target ref is invalid"
+    tracked_snapshots = manifest.get("tracked_snapshots")
+    untracked_snapshots = manifest.get("untracked_snapshots")
+    if not isinstance(tracked_snapshots, dict) or set(tracked_snapshots) != tracked:
+        return "transaction tracked snapshot inventory mismatch"
+    if not isinstance(untracked_snapshots, dict) or set(untracked_snapshots) != collisions:
+        return "transaction untracked snapshot inventory mismatch"
+    backups = manifest.get("backups")
+    if not isinstance(backups, list):
+        return "transaction backups are invalid"
+    expected_backups = {
+        relpath: backup_root / relpath
+        for relpath in manifest["untracked_collision_paths"]
+    }
+    for entry in backups:
+        if not isinstance(entry, dict):
+            return "transaction backup entry is invalid"
+        relpath = str(entry.get("path") or "")
+        if relpath not in expected_backups:
+            return f"transaction backup path is undeclared: {relpath}"
+        if Path(str(entry.get("backup_path") or "")) != expected_backups[relpath]:
+            return f"transaction backup destination mismatch for {relpath}"
+        if Path(str(entry.get("restore_temp_path") or "")) != restore_root / relpath:
+            return f"transaction restore-temp destination mismatch for {relpath}"
+    if {str(entry.get("path") or "") for entry in backups} != set(expected_backups):
+        return "transaction backup inventory mismatch"
+    return None
+
+
+def _durable_primary_sync_hold(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    reason: str,
+) -> tuple[dict[str, Any], str]:
+    try:
+        held = _publish_primary_sync_transaction(
+            manifest_path,
+            manifest,
+            "HOLD",
+            hold_reason=reason,
+            recovery_instructions={
+                **dict(manifest.get("recovery_instructions") or {}),
+                "hold_reason": reason,
+                "manifest": str(manifest_path),
+            },
+        )
+        return held, reason
+    except Exception as exc:  # noqa: BLE001 - preserve older durable state
+        return manifest, (
+            f"{reason}; HOLD publication failed, preserved prior manifest "
+            f"{manifest_path}: {exc}"
+        )
 
 
 def _stash_primary_sync_tracked_wip(
     repo_root: Path,
     paths: list[str],
     *,
+    marker: str,
+    expected_fingerprints: dict[str, str],
     log: Any,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """Isolate exact tracked dirty paths before primary ff-sync."""
+    """Isolate exact tracked dirty paths under a predeclared marker."""
     if not paths:
         return None, None
     # `paths` may carry BOTH sides of a tracked rename (deleted source + added
@@ -5331,36 +5843,44 @@ def _stash_primary_sync_tracked_wip(
             + ", ".join(missing_paths)
         )
 
-    marker = f"commit_executor:primary_ffsync_tracked_wip:{uuid.uuid4().hex}"
     result = _run(
         ["git", "stash", "push", "-m", marker, "--", *paths],
         cwd=repo_root,
         check=False,
         timeout=120,
     )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        return None, (
-            "git stash push failed before primary ff-sync: "
-            f"{detail[:200] or result.returncode}"
-        )
     stash_ref = _find_stash_ref_by_marker(repo_root, marker)
     if stash_ref is None:
+        detail = (result.stderr or result.stdout or "").strip()
+        if result.returncode != 0:
+            return None, (
+                "git stash push failed before primary ff-sync: "
+                f"{detail[:200] or result.returncode}"
+            )
         return None, (
             "git stash push reported saved changes before primary ff-sync, "
             "but the created stash ref could not be found"
         )
     ref, oid = stash_ref
-    log(
-        "Step 15b: isolated tracked primary WIP in "
-        f"{ref} ({oid}) for path(s): {', '.join(paths)}"
+    actual_fingerprints, fingerprint_error = _primary_sync_stash_fingerprints(
+        repo_root, oid, paths
     )
-    return {
+    record = {
         "marker": marker,
         "stash_ref": ref,
         "stash_oid": oid,
         "paths": list(paths),
-    }, None
+    }
+    if fingerprint_error or actual_fingerprints != expected_fingerprints:
+        return record, (
+            fingerprint_error
+            or "executor-owned stash does not preserve the declared staged/unstaged WIP"
+        )
+    log(
+        "Step 15b: isolated tracked primary WIP in "
+        f"{ref} ({oid}) for path(s): {', '.join(paths)}"
+    )
+    return record, None
 
 
 def _resolve_primary_sync_stash_record(
@@ -5384,114 +5904,633 @@ def _resolve_primary_sync_stash_record(
     return (stash_ref, stash_oid), None
 
 
-def _restore_primary_sync_tracked_wip(
+def _verify_primary_sync_transaction_stash(
     repo_root: Path,
-    stash_record: dict[str, Any] | None,
-    *,
-    log: Any,
-) -> str | None:
-    """Restore executor-owned primary-sync WIP and fail closed on stash drift."""
-    resolved, resolve_error = _resolve_primary_sync_stash_record(
-        repo_root,
-        stash_record,
-    )
-    if resolve_error:
-        return resolve_error
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str | None]:
+    marker = str(manifest.get("stash_marker") or "")
+    resolved = _find_stash_ref_by_marker(repo_root, marker)
     if resolved is None:
+        return None, f"primary-sync transaction stash missing for marker {marker}"
+    stash_ref, stash_oid = resolved
+    expected_oid = str(manifest.get("stash_oid") or "")
+    if expected_oid and stash_oid != expected_oid:
+        return None, (
+            "primary-sync transaction stash object id mismatch: "
+            f"expected {expected_oid}, found {stash_oid}"
+        )
+    actual, error = _primary_sync_stash_fingerprints(
+        repo_root, stash_oid, list(manifest.get("tracked_paths") or [])
+    )
+    if error:
+        return None, error
+    if actual != manifest.get("tracked_patch_fingerprints"):
+        return None, "primary-sync transaction stash patch fingerprint mismatch"
+    return {
+        "marker": marker,
+        "stash_ref": stash_ref,
+        "stash_oid": stash_oid,
+        "paths": list(manifest.get("tracked_paths") or []),
+    }, None
+
+
+def _primary_sync_restore_patch(
+    repo_root: Path,
+    *,
+    before_ref: str,
+    after_ref: str,
+    paths: list[str],
+    apply_args: list[str],
+    label: str,
+) -> str | None:
+    diff = _run(
+        [
+            "git",
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            before_ref,
+            after_ref,
+            "--",
+            *paths,
+        ],
+        cwd=repo_root,
+        check=False,
+        timeout=60,
+    )
+    if diff.returncode != 0:
+        detail = (diff.stderr or diff.stdout or "").strip()
+        return f"git diff for {label} WIP recovery failed: {detail[:200] or diff.returncode}"
+    if not diff.stdout:
         return None
-    stash_ref, _stash_oid = resolved
-    pop = _run(
-        ["git", "stash", "pop", "--index", stash_ref],
+    applied = _run(
+        ["git", "apply", *apply_args],
         cwd=repo_root,
         check=False,
         timeout=120,
+        input_text=diff.stdout,
     )
-    if pop.returncode != 0:
-        detail = (pop.stderr or pop.stdout or "").strip()
-        return (
-            f"git stash pop --index {stash_ref} failed after primary ff-sync: "
-            f"{detail[:200] or pop.returncode}"
-        )
-    log(f"Step 15b: restored tracked primary WIP from {stash_ref}")
+    if applied.returncode != 0:
+        detail = (applied.stderr or applied.stdout or "").strip()
+        return f"git apply for {label} WIP recovery failed: {detail[:200] or applied.returncode}"
     return None
 
 
-def _restore_primary_sync_tracked_wip_paths(
+def _restore_primary_sync_tracked_paths_idempotently(
     repo_root: Path,
-    stash_record: dict[str, Any] | None,
+    manifest: dict[str, Any],
+    stash_record: dict[str, Any],
     paths: list[str],
     *,
     log: Any,
 ) -> str | None:
-    """Restore selected tracked WIP paths from an executor-owned stash."""
-    restore_paths = sorted(path for path in dict.fromkeys(paths) if path)
+    """Restore selected stash paths and verify exact index/worktree state.
+
+    A restart can observe either side of each git-apply boundary.  Exact
+    snapshots let it skip a component already restored, while an unexpected
+    partial state becomes a durable HOLD instead of a second blind apply.
+    """
+    restore_paths = sorted(dict.fromkeys(path for path in paths if path))
     if not restore_paths:
         return None
-    resolved, resolve_error = _resolve_primary_sync_stash_record(repo_root, stash_record)
-    if resolve_error:
-        return resolve_error
-    if resolved is None:
+    expected = manifest.get("tracked_snapshots")
+    exact, error = _primary_sync_snapshots_match(
+        repo_root, expected, restore_paths
+    )
+    if exact:
         return None
-    stash_ref, stash_oid = resolved
-    # Stash commits keep HEAD at ^1, the saved index at ^2, and the saved
-    # worktree as the stash tree. Applying both deltas mirrors `stash pop
-    # --index` for only these paths.
-    patch_steps = [
-        (
-            f"{stash_oid}^1",
-            f"{stash_oid}^2",
-            ["--index", "--binary"],
-            "staged",
-        ),
-        (
-            f"{stash_oid}^2",
-            stash_oid,
-            ["--binary"],
-            "unstaged",
-        ),
-    ]
-    for before_ref, after_ref, apply_args, label in patch_steps:
-        diff = _run(
-            [
-                "git",
-                "diff",
-                "--binary",
-                "--no-ext-diff",
-                before_ref,
-                after_ref,
-                "--",
-                *restore_paths,
-            ],
-            cwd=repo_root,
-            check=False,
-            timeout=60,
+    if error and "state drift" not in error:
+        return error
+
+    stash_oid = str(stash_record.get("stash_oid") or "")
+    index_exact, index_error = _primary_sync_snapshots_match(
+        repo_root, expected, restore_paths, component="index"
+    )
+    if index_error and "state drift" not in index_error:
+        return index_error
+    if not index_exact:
+        restore_error = _primary_sync_restore_patch(
+            repo_root,
+            before_ref=f"{stash_oid}^1",
+            after_ref=f"{stash_oid}^2",
+            paths=restore_paths,
+            apply_args=["--index", "--binary"],
+            label="staged tracked",
         )
-        if diff.returncode != 0:
-            detail = (diff.stderr or diff.stdout or "").strip()
-            return (
-                f"git diff for {label} tracked-WIP restore failed: "
-                f"{detail[:200] or diff.returncode}"
-            )
-        if not diff.stdout:
-            continue
-        apply = _run(
-            ["git", "apply", *apply_args],
-            cwd=repo_root,
-            check=False,
-            timeout=120,
-            input_text=diff.stdout,
+        if restore_error:
+            return restore_error
+        index_exact, index_error = _primary_sync_snapshots_match(
+            repo_root, expected, restore_paths, component="index"
         )
-        if apply.returncode != 0:
-            detail = (apply.stderr or apply.stdout or "").strip()
-            return (
-                f"git apply for {label} tracked-WIP restore failed: "
-                f"{detail[:200] or apply.returncode}"
-            )
+        if not index_exact:
+            return index_error or "staged tracked WIP did not verify after recovery"
+
+    exact, error = _primary_sync_snapshots_match(repo_root, expected, restore_paths)
+    if exact:
+        log(
+            "Step 15b: restored tracked primary WIP from "
+            f"{stash_record['stash_ref']} for path(s): {', '.join(restore_paths)}"
+        )
+        return None
+    if error and "state drift" not in error:
+        return error
+
+    clean_against_index = _run(
+        ["git", "diff", "--quiet", "--", *restore_paths],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if clean_against_index.returncode != 0:
+        return (
+            "tracked WIP recovery found worktree drift that is neither the "
+            "saved final state nor the saved index state"
+        )
+    restore_error = _primary_sync_restore_patch(
+        repo_root,
+        before_ref=f"{stash_oid}^2",
+        after_ref=stash_oid,
+        paths=restore_paths,
+        apply_args=["--binary"],
+        label="unstaged tracked",
+    )
+    if restore_error:
+        return restore_error
+    exact, error = _primary_sync_snapshots_match(repo_root, expected, restore_paths)
+    if not exact:
+        return error or "tracked WIP bytes/index did not verify after recovery"
     log(
-        "Step 15b: restored non-overlapping tracked primary WIP from "
-        f"{stash_ref} for path(s): {', '.join(restore_paths)}"
+        "Step 15b: restored tracked primary WIP from "
+        f"{stash_record['stash_ref']} for path(s): {', '.join(restore_paths)}"
     )
     return None
+
+
+def _drop_primary_sync_stash_after_verification(
+    repo_root: Path,
+    stash_record: dict[str, Any],
+) -> str | None:
+    resolved, error = _resolve_primary_sync_stash_record(repo_root, stash_record)
+    if error or resolved is None:
+        return error or "primary-sync stash disappeared before verified drop"
+    stash_ref, _stash_oid = resolved
+    dropped = _run(
+        ["git", "stash", "drop", stash_ref],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if dropped.returncode != 0:
+        detail = (dropped.stderr or dropped.stdout or "").strip()
+        return f"verified primary-sync stash drop failed: {detail[:200] or dropped.returncode}"
+    if _find_stash_ref_by_marker(repo_root, str(stash_record.get("marker") or "")):
+        return "verified primary-sync stash still resolves after drop"
+    return None
+
+
+def _move_primary_sync_collisions(
+    repo_root: Path,
+    manifest: dict[str, Any],
+) -> str | None:
+    snapshots = manifest.get("untracked_snapshots")
+    for entry in manifest.get("backups") or []:
+        relpath = str(entry["path"])
+        source = repo_root / relpath
+        backup = Path(str(entry["backup_path"]))
+        exact, error = _primary_sync_snapshots_match(
+            repo_root, snapshots, [relpath]
+        )
+        if not exact:
+            return error or f"untracked collision changed before relocation: {relpath}"
+        if os.path.lexists(backup):
+            return f"predetermined primary-sync backup already exists: {backup}"
+        try:
+            _mkdir_durable(backup.parent)
+            os.replace(source, backup)
+            backup_info = os.lstat(backup)
+            if stat.S_ISREG(backup_info.st_mode):
+                with open(backup, "rb") as held_file:
+                    os.fsync(held_file.fileno())
+            _fsync_directory(source.parent)
+            _fsync_directory(backup.parent)
+        except OSError as exc:
+            return f"could not relocate untracked collision {relpath}: {exc}"
+        backup_snapshot, snapshot_error = _filesystem_path_snapshot(backup)
+        wanted = snapshots.get(relpath, {}).get("worktree") if isinstance(snapshots, dict) else None
+        if snapshot_error or backup_snapshot != wanted or os.path.lexists(source):
+            return snapshot_error or f"relocated collision did not verify: {relpath}"
+    return None
+
+
+def _copy_primary_sync_backup_for_verified_restore(
+    backup: Path,
+    restore_temp: Path,
+    expected: dict[str, Any],
+) -> str | None:
+    """Copy a backup to a predetermined temp while retaining the authority copy."""
+    if os.path.lexists(restore_temp):
+        actual, error = _filesystem_path_snapshot(restore_temp)
+        if error:
+            return error
+        if actual != expected:
+            try:
+                restore_temp.unlink()
+                _fsync_directory(restore_temp.parent)
+            except OSError as exc:
+                return f"could not clear partial restore temp {restore_temp}: {exc}"
+    if not os.path.lexists(restore_temp):
+        try:
+            _mkdir_durable(restore_temp.parent)
+            if expected.get("kind") == "file":
+                with open(backup, "rb") as source, open(restore_temp, "xb") as target:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        target.write(chunk)
+                    os.fchmod(target.fileno(), int(expected.get("mode", 0o600)))
+                    target.flush()
+                    os.fsync(target.fileno())
+            elif expected.get("kind") == "symlink":
+                os.symlink(os.readlink(backup), restore_temp)
+            else:
+                return f"unsupported primary-sync backup kind at {backup}"
+            _fsync_directory(restore_temp.parent)
+        except OSError as exc:
+            return f"could not copy primary-sync backup {backup}: {exc}"
+    copied, error = _filesystem_path_snapshot(restore_temp)
+    if error or copied != expected:
+        return error or f"primary-sync restore temp did not verify: {restore_temp}"
+    return None
+
+
+def _restore_primary_sync_backups_idempotently(
+    repo_root: Path,
+    manifest: dict[str, Any],
+) -> str | None:
+    snapshots = manifest.get("untracked_snapshots")
+    if not isinstance(snapshots, dict):
+        return "primary-sync untracked snapshots are missing"
+    for entry in manifest.get("backups") or []:
+        relpath = str(entry["path"])
+        source = repo_root / relpath
+        backup = Path(str(entry["backup_path"]))
+        restore_temp = Path(str(entry["restore_temp_path"]))
+        source_exists = os.path.lexists(source)
+        backup_exists = os.path.lexists(backup)
+        if backup_exists:
+            backup_snapshot, error = _filesystem_path_snapshot(backup)
+            if error or backup_snapshot != snapshots[relpath].get("worktree"):
+                return error or f"primary-sync backup bytes/mode drifted for {relpath}"
+            if source_exists:
+                exact, source_error = _primary_sync_snapshots_match(
+                    repo_root, snapshots, [relpath]
+                )
+                if not exact:
+                    return source_error or f"source and backup both exist for {relpath}"
+                try:
+                    backup.unlink()
+                    _fsync_directory(backup.parent)
+                    if os.path.lexists(restore_temp):
+                        restore_temp.unlink()
+                        _fsync_directory(restore_temp.parent)
+                except OSError as exc:
+                    return f"verified primary-sync backup cleanup failed for {relpath}: {exc}"
+                continue
+            wanted = snapshots[relpath].get("worktree")
+            if not isinstance(wanted, dict):
+                return f"primary-sync backup snapshot missing for {relpath}"
+            copy_error = _copy_primary_sync_backup_for_verified_restore(
+                backup, restore_temp, wanted
+            )
+            if copy_error:
+                return copy_error
+            try:
+                _mkdir_durable(source.parent)
+                os.replace(restore_temp, source)
+                _fsync_directory(source.parent)
+                _fsync_directory(restore_temp.parent)
+            except OSError as exc:
+                return f"could not restore primary-sync backup {relpath}: {exc}"
+        exact, error = _primary_sync_snapshots_match(repo_root, snapshots, [relpath])
+        if not exact:
+            return error or f"restored collision did not verify: {relpath}"
+        if os.path.lexists(backup):
+            try:
+                backup.unlink()
+                _fsync_directory(backup.parent)
+            except OSError as exc:
+                return f"verified primary-sync backup cleanup failed for {relpath}: {exc}"
+        if os.path.lexists(restore_temp):
+            try:
+                restore_temp.unlink()
+                _fsync_directory(restore_temp.parent)
+            except OSError as exc:
+                return f"verified primary-sync restore-temp cleanup failed for {relpath}: {exc}"
+    return None
+
+
+def _verify_primary_sync_held_backups(
+    manifest: dict[str, Any],
+) -> str | None:
+    snapshots = manifest.get("untracked_snapshots")
+    if not isinstance(snapshots, dict):
+        return "primary-sync untracked snapshots are missing"
+    for entry in manifest.get("backups") or []:
+        relpath = str(entry["path"])
+        backup = Path(str(entry["backup_path"]))
+        if not os.path.lexists(backup):
+            return f"held primary-sync backup is missing for {relpath}: {backup}"
+        actual, error = _filesystem_path_snapshot(backup)
+        if error or actual != snapshots[relpath].get("worktree"):
+            return error or f"held primary-sync backup bytes/mode drifted for {relpath}"
+    return None
+
+
+def _reconcile_primary_sync_transaction(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    *,
+    common_dir: Path,
+    primary: Path,
+    log: Any,
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    summary: dict[str, Any] = {
+        "manifest_path": str(manifest_path),
+        "state": str(manifest.get("state") or ""),
+        "tracked_restored_paths": [],
+        "tracked_held_paths": [],
+        "untracked_held_paths": [],
+        "stash_ref": None,
+        "stash_oid": None,
+    }
+
+    validation_error = _validate_primary_sync_transaction(
+        manifest_path, manifest, common_dir=common_dir, primary=primary
+    )
+    if validation_error:
+        held, error = _durable_primary_sync_hold(
+            manifest_path, manifest, validation_error
+        )
+        summary["state"] = held.get("state")
+        return held, summary, error
+
+    branch = _worktree_head_branch(primary)
+    if branch != manifest.get("branch"):
+        reason = (
+            "primary-sync transaction branch identity mismatch: "
+            f"expected {manifest.get('branch')}, found {branch or 'detached/unresolved'}"
+        )
+        held, error = _durable_primary_sync_hold(manifest_path, manifest, reason)
+        summary["state"] = held.get("state")
+        return held, summary, error
+    head_proc = _run(
+        ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30
+    )
+    current_head = (head_proc.stdout or "").strip() if head_proc.returncode == 0 else ""
+    if current_head not in {manifest.get("old_head"), manifest.get("target_sha")}:
+        reason = (
+            "primary-sync transaction HEAD is neither declared old nor target: "
+            f"found {current_head or 'unresolved'}"
+        )
+        held, error = _durable_primary_sync_hold(manifest_path, manifest, reason)
+        summary["state"] = held.get("state")
+        return held, summary, error
+
+    tracked_paths = list(manifest.get("tracked_paths") or [])
+    overlap_paths = list(manifest.get("tracked_overlap_paths") or [])
+    restore_paths = list(manifest.get("tracked_restore_paths") or [])
+    collision_paths = list(manifest.get("untracked_collision_paths") or [])
+    marker = str(manifest.get("stash_marker") or "")
+    stash_exists = _find_stash_ref_by_marker(primary, marker) is not None
+    stash_record: dict[str, Any] | None = None
+    if stash_exists:
+        stash_record, stash_error = _verify_primary_sync_transaction_stash(
+            primary, manifest
+        )
+        if stash_error or stash_record is None:
+            held, error = _durable_primary_sync_hold(
+                manifest_path,
+                manifest,
+                stash_error or "primary-sync transaction stash could not be verified",
+            )
+            summary["state"] = held.get("state")
+            return held, summary, error
+        manifest = {**manifest, "stash_oid": stash_record["stash_oid"]}
+        summary["stash_ref"] = stash_record["stash_ref"]
+        summary["stash_oid"] = stash_record["stash_oid"]
+
+    if current_head == manifest.get("old_head"):
+        backup_error = _restore_primary_sync_backups_idempotently(primary, manifest)
+        if backup_error:
+            held, error = _durable_primary_sync_hold(
+                manifest_path, manifest, backup_error
+            )
+            summary["state"] = held.get("state")
+            return held, summary, error
+        if tracked_paths:
+            if stash_record is not None:
+                restore_error = _restore_primary_sync_tracked_paths_idempotently(
+                    primary, manifest, stash_record, tracked_paths, log=log
+                )
+                if restore_error:
+                    held, error = _durable_primary_sync_hold(
+                        manifest_path, manifest, restore_error
+                    )
+                    summary["state"] = held.get("state")
+                    return held, summary, error
+            else:
+                exact, snapshot_error = _primary_sync_snapshots_match(
+                    primary,
+                    manifest.get("tracked_snapshots"),
+                    tracked_paths,
+                )
+                if not exact:
+                    held, error = _durable_primary_sync_hold(
+                        manifest_path,
+                        manifest,
+                        snapshot_error
+                        or "tracked WIP is neither in place nor in the declared stash",
+                    )
+                    summary["state"] = held.get("state")
+                    return held, summary, error
+        if stash_record is not None:
+            drop_error = _drop_primary_sync_stash_after_verification(primary, stash_record)
+            if drop_error:
+                held, error = _durable_primary_sync_hold(
+                    manifest_path, manifest, drop_error
+                )
+                summary["state"] = held.get("state")
+                return held, summary, error
+        try:
+            recovered = _publish_primary_sync_transaction(
+                manifest_path,
+                manifest,
+                "RECOVERED",
+                completion="wip_restored_before_fast_forward",
+                restored_tracked_paths=tracked_paths,
+                restored_untracked_paths=collision_paths,
+                hold_reason=None,
+            )
+        except Exception as exc:  # noqa: BLE001 - prior journal remains authority
+            held, error = _durable_primary_sync_hold(
+                manifest_path,
+                manifest,
+                f"RECOVERED publication failed after exact restoration: {exc}",
+            )
+            summary["state"] = held.get("state")
+            return held, summary, error
+        summary["state"] = "RECOVERED"
+        summary["tracked_restored_paths"] = tracked_paths
+        log(f"Step 15b: recovered primary-sync transaction {manifest_path}")
+        return recovered, summary, None
+
+    backup_error = _verify_primary_sync_held_backups(manifest)
+    if backup_error:
+        held, error = _durable_primary_sync_hold(
+            manifest_path, manifest, backup_error
+        )
+        summary["state"] = held.get("state")
+        return held, summary, error
+    if tracked_paths:
+        if stash_record is None:
+            if overlap_paths:
+                reason = (
+                    "fast-forward reached target but the declared overlap stash "
+                    f"is missing for marker {marker}"
+                )
+                held, error = _durable_primary_sync_hold(
+                    manifest_path, manifest, reason
+                )
+                summary["state"] = held.get("state")
+                return held, summary, error
+            exact, snapshot_error = _primary_sync_snapshots_match(
+                primary, manifest.get("tracked_snapshots"), restore_paths
+            )
+            if not exact:
+                held, error = _durable_primary_sync_hold(
+                    manifest_path,
+                    manifest,
+                    snapshot_error or "restored tracked WIP cannot be verified",
+                )
+                summary["state"] = held.get("state")
+                return held, summary, error
+        else:
+            restore_error = _restore_primary_sync_tracked_paths_idempotently(
+                primary, manifest, stash_record, restore_paths, log=log
+            )
+            if restore_error:
+                held, error = _durable_primary_sync_hold(
+                    manifest_path, manifest, restore_error
+                )
+                summary["state"] = held.get("state")
+                return held, summary, error
+            if not overlap_paths:
+                exact, snapshot_error = _primary_sync_snapshots_match(
+                    primary, manifest.get("tracked_snapshots"), tracked_paths
+                )
+                if not exact:
+                    held, error = _durable_primary_sync_hold(
+                        manifest_path,
+                        manifest,
+                        snapshot_error or "restored tracked WIP cannot be verified",
+                    )
+                    summary["state"] = held.get("state")
+                    return held, summary, error
+                drop_error = _drop_primary_sync_stash_after_verification(
+                    primary, stash_record
+                )
+                if drop_error:
+                    held, error = _durable_primary_sync_hold(
+                        manifest_path, manifest, drop_error
+                    )
+                    summary["state"] = held.get("state")
+                    return held, summary, error
+
+    held_paths = sorted(set(overlap_paths) | set(collision_paths))
+    terminal_state = "HELD" if held_paths else "RECOVERED"
+    completion = (
+        "fast_forward_succeeded_wip_held"
+        if terminal_state == "HELD"
+        else "fast_forward_succeeded_wip_restored"
+    )
+    recovery_instructions = {
+        **dict(manifest.get("recovery_instructions") or {}),
+        "manifest": str(manifest_path),
+        "target_head": str(manifest.get("target_sha") or ""),
+        "held_tracked_paths": overlap_paths,
+        "held_untracked_paths": collision_paths,
+        "stash_marker": marker if overlap_paths else None,
+        "backup_paths": [
+            str(entry.get("backup_path") or "")
+            for entry in manifest.get("backups") or []
+        ],
+    }
+    try:
+        terminal = _publish_primary_sync_transaction(
+            manifest_path,
+            manifest,
+            terminal_state,
+            completion=completion,
+            restored_tracked_paths=restore_paths,
+            held_tracked_paths=overlap_paths,
+            held_untracked_paths=collision_paths,
+            hold_reason=None,
+            recovery_instructions=recovery_instructions,
+        )
+    except Exception as exc:  # noqa: BLE001 - earlier journal remains discoverable
+        held, error = _durable_primary_sync_hold(
+            manifest_path,
+            manifest,
+            f"{terminal_state} publication failed with recovery objects intact: {exc}",
+        )
+        summary["state"] = held.get("state")
+        return held, summary, error
+    summary["state"] = terminal_state
+    summary["tracked_restored_paths"] = restore_paths
+    summary["tracked_held_paths"] = overlap_paths
+    summary["untracked_held_paths"] = collision_paths
+    if terminal_state == "HELD":
+        log(
+            "Step 15b: durable HELD primary-sync transaction at "
+            f"{manifest_path} for path(s): {', '.join(held_paths)}"
+        )
+    return terminal, summary, None
+
+
+def _discover_and_recover_primary_sync_transactions(
+    *,
+    common_dir: Path,
+    primary: Path,
+    log: Any,
+) -> tuple[list[dict[str, Any]], str | None]:
+    root = _primary_sync_transaction_root(common_dir)
+    if not root.exists():
+        return [], None
+    recovered: list[dict[str, Any]] = []
+    for manifest_path in sorted(root.glob("*/manifest.json")):
+        try:
+            raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            return recovered, (
+                f"incomplete primary-sync journal is unreadable at {manifest_path}: {exc}"
+            )
+        if not isinstance(raw, dict):
+            return recovered, f"primary-sync journal is not an object: {manifest_path}"
+        if raw.get("state") in _PRIMARY_SYNC_TRANSACTION_TERMINAL_STATES:
+            continue
+        terminal, summary, error = _reconcile_primary_sync_transaction(
+            manifest_path,
+            raw,
+            common_dir=common_dir,
+            primary=primary,
+            log=log,
+        )
+        recovered.append(summary)
+        if error or terminal.get("state") not in _PRIMARY_SYNC_TRANSACTION_TERMINAL_STATES:
+            return recovered, error or (
+                f"primary-sync transaction remains in {terminal.get('state')} at "
+                f"{manifest_path}"
+            )
+    return recovered, None
 
 
 def _sync_primary_worktree_to_base(
@@ -5499,10 +6538,12 @@ def _sync_primary_worktree_to_base(
     base_branch: str,
     *,
     log: Any,
+    checkpoint: Any | None = None,
 ) -> dict[str, Any]:
     """Fast-forward a clean founder PRIMARY working copy up to origin/base_branch.
 
-    PULL-ONLY and fully fail-open. The existing post-merge verify-root ff
+    PULL-ONLY, pipeline-nonfatal, and preservation-fail-closed. The existing
+    post-merge verify-root ff
     (`_resolve_post_merge_verify_root` + `git merge --ff-only`) only ever
     advances a worktree that is ALREADY on base_branch; the founder's primary
     checkout normally rests on a FEATURE branch, so it is never that target and
@@ -5515,20 +6556,19 @@ def _sync_primary_worktree_to_base(
 
     Every unmet guard or error is a clean SKIP (logged), never an exception out
     of `_run_post_commit_pipeline`: the PR has already merged and this sync must
-    never regress the pipeline or change the wave Status.
+    never regress the pipeline or change the wave Status.  The optional
+    ``checkpoint`` callback is a focused crash-test seam; production callers
+    leave it unset.
 
     Guards (any miss -> SKIP):
       GUARD-A primary is on a FEATURE branch (not base_branch/main/master).
       GUARD-B visible dirty founder WIP is preserved, never clobbered. TRACKED
-              dirty WIP is stash-isolated across the ff and restored in place;
-              UNTRACKED-only dirty WIP attempts the ff directly (non-colliding
-              founder scratch rides through byte-identical on disk). Either path
-              falls back to durable behind_dev observability on the
-              primary-worktree bus -- a clean SKIP instead of fast-forwarding --
-              when the ff cannot proceed safely (a tracked-WIP overlap with the
-              ff range, or a real untracked/ignored collision that git aborts on).
-              The ff merge additionally runs `--no-overwrite-ignore` to ABORT
-              rather than silently overwrite locally-ignored founder WIP.
+              dirty WIP is transactionally stash-isolated. Non-overlap is
+              restored after the ff; overlap remains in a durable HELD journal.
+              Exact non-ignored untracked collisions move only to predeclared
+              transaction backups and remain HELD after success. Locally ignored
+              collisions are never relocated. Non-colliding untracked/ignored
+              founder scratch rides through byte-identical on disk.
       GUARD-C primary HEAD is an ANCESTOR of origin/{base_branch} (a real
               fast-forward; divergent local commits are landed via a PR).
       GUARD-D a NON-BLOCKING file lock under the common git dir is acquired
@@ -5550,6 +6590,7 @@ def _sync_primary_worktree_to_base(
         "behind_dev_signal_written": False,
         "behind_dev_signal_cleared": False,
         "tracked_wip_paths": [],
+        "dual_classified_wip_paths": [],
         "tracked_wip_stash_marker": None,
         "tracked_wip_stash_ref": None,
         "tracked_wip_stash_oid": None,
@@ -5557,6 +6598,15 @@ def _sync_primary_worktree_to_base(
         "tracked_wip_restored": False,
         "tracked_wip_left_stashed": False,
         "tracked_wip_restore_error": None,
+        "tracked_wip_held_paths": [],
+        "untracked_collision_paths": [],
+        "untracked_wip_backup_paths": [],
+        "primary_sync_transaction_id": None,
+        "primary_sync_transaction_path": None,
+        "primary_sync_transaction_state": None,
+        "recovered_transactions": [],
+        "recovery_hold": None,
+        "ignored_collision_paths": [],
     }
 
     def _skip(reason: str) -> dict[str, Any]:
@@ -5703,49 +6753,6 @@ def _sync_primary_worktree_to_base(
 
         # Read the primary's ON-DISK HEAD branch (not just git's metadata).
         primary_branch = _worktree_head_branch(primary)
-        if primary_branch is None:
-            return _skip("primary worktree HEAD branch unresolved (detached?)")
-
-        # GUARD-A: never sync a base-branch checkout.  When Step 15 used this
-        # same primary as the verify root, it may already have fast-forwarded
-        # the base branch; clear any stale primary-bus behind_dev signal only
-        # after proving the local base checkout is current with origin/base.
-        if primary_branch in {base_branch, "main", "master"}:
-            remote_ref = f"origin/{base_branch}"
-            old_sha = ""
-            new_sha = ""
-            try:
-                old_sha = _run(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=primary,
-                    check=False,
-                    timeout=30,
-                ).stdout.strip()
-                new_sha = _run(
-                    ["git", "rev-parse", remote_ref],
-                    cwd=primary,
-                    check=False,
-                    timeout=30,
-                ).stdout.strip()
-            except Exception:  # noqa: BLE001 - stale-signal clear is best-effort
-                old_sha = ""
-                new_sha = ""
-            if old_sha:
-                outcome["old_sha"] = old_sha
-            if new_sha:
-                outcome["new_sha"] = new_sha
-            if old_sha and new_sha and old_sha == new_sha:
-                outcome["primary"] = str(primary)
-                _clear_behind_dev_signal(primary)
-                return _skip(
-                    f"primary worktree on base branch '{primary_branch}' "
-                    f"already current at {new_sha[:8]}; "
-                    "PULL-ONLY helper never syncs a base-branch checkout"
-                )
-            return _skip(
-                f"primary worktree on base branch '{primary_branch}'; "
-                "PULL-ONLY helper never syncs a base-branch checkout"
-            )
 
         # GUARD-D: parallel-lane safety. Take a NON-BLOCKING exclusive lock on a
         # lockfile under the shared common git dir so concurrent lane waves do
@@ -5766,6 +6773,62 @@ def _sync_primary_worktree_to_base(
                     "primary worktree sync lock held (another lane is syncing)"
                 )
 
+            # A transaction is durable before its first destructive operation.
+            # Reconcile EVERY nonterminal journal under the shared common dir
+            # before fetching or allocating a new transaction.  This covers a
+            # restart after PREPARED, stash/move-before-publication, and
+            # fast-forward-before-publication without relying on a candidate
+            # worktree that Step 16 may remove.
+            recovered_transactions, recovery_error = (
+                _discover_and_recover_primary_sync_transactions(
+                    common_dir=common_dir,
+                    primary=primary,
+                    log=log,
+                )
+            )
+            outcome["recovered_transactions"] = recovered_transactions
+            if recovery_error:
+                outcome["recovery_hold"] = recovery_error
+                return _skip(
+                    "durable primary-sync recovery HOLD: " + recovery_error
+                )
+
+            # Recovery can legitimately restore index/worktree state but never
+            # branch identity. Re-read the branch under lock, then apply GUARD-A.
+            primary_branch = _worktree_head_branch(primary)
+            if primary_branch is None:
+                return _skip("primary worktree HEAD branch unresolved (detached?)")
+            if primary_branch in {base_branch, "main", "master"}:
+                remote_ref = f"origin/{base_branch}"
+                old_sha = _run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=primary,
+                    check=False,
+                    timeout=30,
+                ).stdout.strip()
+                new_sha = _run(
+                    ["git", "rev-parse", remote_ref],
+                    cwd=primary,
+                    check=False,
+                    timeout=30,
+                ).stdout.strip()
+                if old_sha:
+                    outcome["old_sha"] = old_sha
+                if new_sha:
+                    outcome["new_sha"] = new_sha
+                if old_sha and new_sha and old_sha == new_sha:
+                    outcome["primary"] = str(primary)
+                    _clear_behind_dev_signal(primary)
+                    return _skip(
+                        f"primary worktree on base branch '{primary_branch}' "
+                        f"already current at {new_sha[:8]}; "
+                        "PULL-ONLY helper never syncs a base-branch checkout"
+                    )
+                return _skip(
+                    f"primary worktree on base branch '{primary_branch}'; "
+                    "PULL-ONLY helper never syncs a base-branch checkout"
+                )
+
             # PULL-ONLY: fetch origin/{base_branch} so GUARD-C and the ff see the
             # just-merged PR. fetch only updates the remote-tracking ref; it
             # never touches the primary's branch or working tree.
@@ -5780,12 +6843,24 @@ def _sync_primary_worktree_to_base(
                 return _skip(f"fetch origin {base_branch} failed: {detail[:200]}")
 
             remote_ref = f"origin/{base_branch}"
-            old_sha = _run(
+            old_head_proc = _run(
                 ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
-            ).stdout.strip()
-            new_sha = _run(
+            )
+            target_head_proc = _run(
                 ["git", "rev-parse", remote_ref], cwd=primary, check=False, timeout=30,
-            ).stdout.strip()
+            )
+            old_sha = old_head_proc.stdout.strip()
+            new_sha = target_head_proc.stdout.strip()
+            canonical_oid = r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
+            if (
+                old_head_proc.returncode != 0
+                or target_head_proc.returncode != 0
+                or re.fullmatch(canonical_oid, old_sha) is None
+                or re.fullmatch(canonical_oid, new_sha) is None
+            ):
+                return _skip(
+                    "primary or freshly fetched target commit identity is unresolved"
+                )
 
             # GUARD-C: primary HEAD must be an ANCESTOR of origin/{base_branch}
             # (a real fast-forward, no divergent local commits). Else SKIP --
@@ -5814,200 +6889,356 @@ def _sync_primary_worktree_to_base(
                 _clear_behind_dev_signal(primary)
                 return _skip(f"primary worktree already current at {new_sha[:8]}")
 
-            dirty_paths = sorted(_dirty_worktree_paths(primary))
-            if dirty_paths:
-                outcome["primary"] = str(primary)
-                outcome["old_sha"] = old_sha
-                outcome["new_sha"] = new_sha
-                outcome["dirty_paths"] = list(dirty_paths)
+            changed_paths, changed_error = _primary_sync_changed_paths(
+                primary, old_sha, new_sha
+            )
+            if changed_error:
+                _write_behind_dev_signal(
+                    primary, base_ref=remote_ref, reason="range_classification_failed"
+                )
+                return _skip(changed_error)
 
-                def _behind_dev_dirty_skip(
-                    reason_text: str,
-                    *,
-                    signal_reason: str = "dirty_primary_worktree",
-                ) -> dict[str, Any]:
-                    _write_behind_dev_signal(
+            tracked_wip_paths = sorted(
+                path
+                for path in _tracked_dirty_paths(primary, no_renames=True)
+                if not _is_transient_status_path(path)
+            )
+            untracked_proc = _run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                cwd=primary,
+                check=False,
+                timeout=30,
+            )
+            if untracked_proc.returncode != 0:
+                detail = (untracked_proc.stderr or untracked_proc.stdout or "").strip()
+                _write_behind_dev_signal(
+                    primary, base_ref=remote_ref, reason="wip_classification_failed"
+                )
+                return _skip(
+                    "could not classify primary untracked WIP: "
+                    f"{detail[:200] or untracked_proc.returncode}"
+                )
+            untracked_paths = {
+                path.strip()
+                for path in untracked_proc.stdout.splitlines()
+                if path.strip() and not _is_transient_status_path(path.strip())
+            }
+            dual_classified_paths = sorted(
+                set(tracked_wip_paths) & untracked_paths
+            )
+            overlap_paths = sorted(set(tracked_wip_paths) & changed_paths)
+            collision_paths = sorted(untracked_paths & changed_paths)
+            ignored_collisions, ignored_error = (
+                _primary_sync_locally_ignored_collisions(
+                    primary, changed_paths, set(tracked_wip_paths)
+                )
+            )
+            dirty_paths = sorted(
+                set(tracked_wip_paths) | untracked_paths | set(ignored_collisions)
+            )
+            outcome["primary"] = str(primary)
+            outcome["old_sha"] = old_sha
+            outcome["new_sha"] = new_sha
+            outcome["dirty_paths"] = list(dirty_paths)
+            outcome["tracked_wip_paths"] = list(tracked_wip_paths)
+            outcome["dual_classified_wip_paths"] = list(dual_classified_paths)
+            outcome["tracked_wip_overlap_paths"] = list(overlap_paths)
+            outcome["untracked_collision_paths"] = list(collision_paths)
+            outcome["ignored_collision_paths"] = list(ignored_collisions)
+
+            def _behind_dev_dirty_skip(
+                reason_text: str,
+                *,
+                signal_reason: str = "dirty_primary_worktree",
+            ) -> dict[str, Any]:
+                _write_behind_dev_signal(
+                    primary,
+                    base_ref=remote_ref,
+                    reason=signal_reason,
+                    dirty_paths=dirty_paths,
+                )
+                return _skip(reason_text)
+
+            if dual_classified_paths:
+                # A staged deletion followed by a recreated worktree file can
+                # make Git report one path as both tracked-dirty and untracked.
+                # The transaction model intentionally does not support that
+                # synthetic dual ownership: stashing and moving the same path
+                # would destroy the exact index/worktree intent and strand a
+                # PREPARED journal.  Fail before transaction allocation so the
+                # founder can resolve the index state and retry normally.
+                return _behind_dev_dirty_skip(
+                    "unsupported dual-classified primary WIP path(s); no "
+                    "transaction, stash, move, or fast-forward was attempted: "
+                    + ", ".join(dual_classified_paths),
+                    signal_reason="dual_classified_primary_wip",
+                )
+
+            if ignored_error:
+                return _behind_dev_dirty_skip(
+                    "primary worktree local-ignore classification is uncertain: "
+                    + ignored_error,
+                    signal_reason="ignore_classification_failed",
+                )
+            if ignored_collisions:
+                # The #1211 fence is load-bearing: ignored files may be local
+                # secrets or founder-only state.  They are never relocated, even
+                # though --no-overwrite-ignore would also make git abort.
+                return _behind_dev_dirty_skip(
+                    "locally ignored collision refused; no stash, move, or "
+                    "fast-forward was attempted: " + ", ".join(ignored_collisions),
+                    signal_reason="locally_ignored_collision",
+                )
+
+            transaction_needed = bool(tracked_wip_paths or collision_paths)
+            if transaction_needed:
+                manifest, manifest_path, prepare_error = (
+                    _prepare_primary_sync_transaction(
+                        primary=primary,
+                        common_dir=common_dir,
+                        branch=primary_branch,
+                        old_sha=old_sha,
+                        target_ref=remote_ref,
+                        target_sha=new_sha,
+                        tracked_paths=tracked_wip_paths,
+                        overlap_paths=overlap_paths,
+                        collision_paths=collision_paths,
+                    )
+                )
+                if prepare_error or manifest is None or manifest_path is None:
+                    return _behind_dev_dirty_skip(
+                        "primary WIP transaction PREPARED publication failed; "
+                        "no destructive operation attempted: "
+                        + (prepare_error or "unknown preparation failure"),
+                        signal_reason="transaction_prepare_failed",
+                    )
+                outcome["primary_sync_transaction_id"] = manifest["transaction_id"]
+                outcome["primary_sync_transaction_path"] = str(manifest_path)
+                outcome["primary_sync_transaction_state"] = "PREPARED"
+                outcome["tracked_wip_stash_marker"] = manifest["stash_marker"]
+                outcome["untracked_wip_backup_paths"] = [
+                    str(entry["backup_path"]) for entry in manifest["backups"]
+                ]
+                if checkpoint is not None:
+                    checkpoint("after_prepared", copy.deepcopy(manifest))
+
+                stash_record: dict[str, Any] | None = None
+                stash_error: str | None = None
+                if tracked_wip_paths:
+                    stash_record, stash_error = _stash_primary_sync_tracked_wip(
                         primary,
-                        base_ref=remote_ref,
-                        reason=signal_reason,
-                        dirty_paths=dirty_paths,
+                        tracked_wip_paths,
+                        marker=str(manifest["stash_marker"]),
+                        expected_fingerprints=dict(
+                            manifest["tracked_patch_fingerprints"]
+                        ),
+                        log=log,
                     )
-                    return _skip(reason_text)
+                    if stash_record is not None:
+                        outcome["tracked_wip_stash_ref"] = stash_record["stash_ref"]
+                        outcome["tracked_wip_stash_oid"] = stash_record["stash_oid"]
+                        manifest = {**manifest, "stash_oid": stash_record["stash_oid"]}
+                        if checkpoint is not None:
+                            checkpoint("after_stash_before_publish", copy.deepcopy(manifest))
+                        try:
+                            manifest = _publish_primary_sync_transaction(
+                                manifest_path,
+                                manifest,
+                                "STASHED",
+                                stash_oid=stash_record["stash_oid"],
+                            )
+                        except Exception as exc:  # noqa: BLE001 - PREPARED remains durable
+                            hold_reason = (
+                                "stash exists under the predeclared marker but "
+                                f"STASHED publication failed: {exc}"
+                            )
+                            held, hold_error = _durable_primary_sync_hold(
+                                manifest_path, manifest, hold_reason
+                            )
+                            outcome["primary_sync_transaction_state"] = held.get("state")
+                            outcome["recovery_hold"] = hold_error
+                            outcome["tracked_wip_left_stashed"] = True
+                            return _behind_dev_dirty_skip(
+                                "durable primary-sync recovery HOLD: "
+                                + outcome["recovery_hold"],
+                                signal_reason="transaction_publication_failed",
+                            )
+                        outcome["primary_sync_transaction_state"] = "STASHED"
 
-                # Only TRACKED dirty WIP blocks a fast-forward: git refuses to ff
-                # over locally-modified tracked files. Untracked/ignored founder
-                # WIP is NEVER stashed -- `_dirty_worktree_paths` already excludes
-                # ignored (`ls-files --others --exclude-standard`), the ff runs
-                # `--no-overwrite-ignore` (aborts rather than clobber ignored WIP),
-                # and non-colliding untracked files ride through the ff untouched
-                # (a colliding one aborts the ff, handled below). Isolate ONLY the
-                # tracked-dirty subset.
-                # `dirty_paths` (via `_dirty_worktree_paths`) uses git's DEFAULT
-                # rename detection: a tracked rename (`git mv a b`) collapses
-                # into the destination `b` alone, hiding the deleted source `a`.
-                # A path-limited stash built from that set would leave the
-                # staged source-deletion behind, so it rides through the ff and
-                # breaks the post-ff `stash pop --index` restore -- and the
-                # source is invisible to the overlap check below. Recompute the
-                # tracked-WIP set with rename detection OFF so BOTH sides of
-                # every rename are isolated together; drop transient executor
-                # state to mirror `_dirty_worktree_paths`' filtering (the old
-                # `& dirty_paths` intersection did that double duty).
-                tracked_wip_paths = sorted(
-                    path
-                    for path in _tracked_dirty_paths(primary, no_renames=True)
-                    if not _is_transient_status_path(path)
-                )
-                outcome["tracked_wip_paths"] = list(tracked_wip_paths)
-
-                if not tracked_wip_paths:
-                    # FIX-NEVERBEHIND-FF-UNTRACKED: untracked-only dirty WIP no
-                    # longer forces a behind_dev skip. Skipping on the mere
-                    # PRESENCE of untracked founder scratch (reports/handoffs)
-                    # was TOO CONSERVATIVE: `git merge --ff-only
-                    # --no-overwrite-ignore` does NOT clobber untracked files --
-                    # git ABORTS the ff ONLY when an untracked/ignored path would
-                    # be OVERWRITTEN (a real collision). Non-colliding untracked
-                    # scratch rides through the ff byte-identical on disk. So
-                    # ATTEMPT the ff to stay never-behind while git's own
-                    # collision-abort (plus --no-overwrite-ignore) preserves
-                    # never-clobber. A real collision returns non-zero and falls
-                    # back to the existing safe behind_dev skip.
-                    merge_proc = _run(
-                        ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
-                        cwd=primary,
-                        check=False,
-                        timeout=60,
-                    )
-                    if merge_proc.returncode != 0:
-                        # Real untracked/ignored collision: git aborted rather
-                        # than overwrite founder WIP. Fall back to the existing
-                        # safe skip + behind_dev signal -- never clobber.
-                        detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
-                        return _behind_dev_dirty_skip(
-                            f"ff-only merge of {remote_ref} into '{primary_branch}' "
-                            "aborted on an untracked/ignored collision; wrote "
-                            "behind_dev signal instead of clobbering founder WIP: "
-                            f"{detail[:200]}",
-                            signal_reason="ff_only_merge_failed",
+                if stash_error:
+                    terminal, summary, recovery_error = (
+                        _reconcile_primary_sync_transaction(
+                            manifest_path,
+                            manifest,
+                            common_dir=common_dir,
+                            primary=primary,
+                            log=log,
                         )
-
-                    synced_sha = _run(
-                        ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
-                    ).stdout.strip()
-                    outcome["synced"] = True
-                    outcome["skipped"] = False
-                    outcome["reason"] = None
-                    outcome["new_sha"] = synced_sha
-                    _clear_behind_dev_signal(primary)
-                    log(
-                        f"Step 15b: synced primary worktree {primary} on "
-                        f"'{primary_branch}' {(old_sha or '?')[:8]} -> "
-                        f"{(synced_sha or '?')[:8]} (ff-only {remote_ref}; left "
-                        f"{len(dirty_paths)} non-colliding untracked founder "
-                        "path(s) in place)"
                     )
-                    return outcome
-
-                # A fast-forward whose range TOUCHES a tracked-WIP path would turn
-                # the post-ff `stash pop --index` restore into a conflicting 3-way
-                # merge (founder WIP vs origin content). Detect that overlap BEFORE
-                # stashing or fast-forwarding and skip -- never risk corrupting
-                # founder WIP with conflict markers.
-                overlap_paths, overlap_error = _primary_sync_changed_paths_in_range(
-                    primary, old_sha, new_sha, tracked_wip_paths,
-                )
-                if overlap_error:
+                    outcome["primary_sync_transaction_state"] = terminal.get("state")
+                    outcome["tracked_wip_restored"] = bool(
+                        summary.get("tracked_restored_paths")
+                    )
+                    outcome["tracked_wip_left_stashed"] = bool(
+                        _find_stash_ref_by_marker(
+                            primary, str(manifest["stash_marker"])
+                        )
+                    )
+                    outcome["tracked_wip_restore_error"] = recovery_error
+                    if recovery_error:
+                        outcome["recovery_hold"] = recovery_error
                     return _behind_dev_dirty_skip(
-                        "primary worktree is behind base with tracked dirty WIP "
-                        f"but the ff range could not be compared safely: "
-                        f"{overlap_error}"
-                    )
-                if overlap_paths:
-                    outcome["tracked_wip_overlap_paths"] = sorted(overlap_paths)
-                    return _behind_dev_dirty_skip(
-                        "primary worktree is behind base with tracked dirty WIP "
-                        "overlapping the fast-forward range; wrote behind_dev "
-                        "signal instead of risking a conflicting restore"
+                        "tracked WIP isolation failed; "
+                        + (
+                            "durable HOLD retained: " + recovery_error
+                            if recovery_error
+                            else "exact WIP restored before fast-forward"
+                        )
+                        + f"; isolation error: {stash_error}",
+                        signal_reason="tracked_wip_isolation_failed",
                     )
 
-                # Non-overlapping tracked WIP: isolate it, fast-forward, restore.
-                stash_record, stash_error = _stash_primary_sync_tracked_wip(
-                    primary, tracked_wip_paths, log=log,
-                )
-                if stash_error or stash_record is None:
-                    # Stash creation failed -> DO NOT fast-forward; keep the WIP in
-                    # place and fall back to the behind_dev skip.
-                    return _behind_dev_dirty_skip(
-                        "primary worktree is behind base with tracked dirty WIP "
-                        "that could not be isolated for a safe fast-forward"
-                        + (f": {stash_error}" if stash_error else "")
+                move_error = _move_primary_sync_collisions(primary, manifest)
+                if move_error is None and collision_paths and checkpoint is not None:
+                    checkpoint("after_move_before_publish", copy.deepcopy(manifest))
+                if move_error:
+                    terminal, summary, recovery_error = (
+                        _reconcile_primary_sync_transaction(
+                            manifest_path,
+                            manifest,
+                            common_dir=common_dir,
+                            primary=primary,
+                            log=log,
+                        )
                     )
-                outcome["tracked_wip_stash_marker"] = stash_record.get("marker")
-                outcome["tracked_wip_stash_ref"] = stash_record.get("stash_ref")
-                outcome["tracked_wip_stash_oid"] = stash_record.get("stash_oid")
+                    outcome["primary_sync_transaction_state"] = terminal.get("state")
+                    outcome["tracked_wip_restored"] = bool(
+                        summary.get("tracked_restored_paths")
+                    )
+                    outcome["tracked_wip_restore_error"] = recovery_error
+                    if recovery_error:
+                        outcome["recovery_hold"] = recovery_error
+                    return _behind_dev_dirty_skip(
+                        "untracked collision isolation failed; "
+                        + (
+                            "durable HOLD retained: " + recovery_error
+                            if recovery_error
+                            else "exact WIP restored before fast-forward"
+                        )
+                        + f"; isolation error: {move_error}",
+                        signal_reason="untracked_wip_isolation_failed",
+                    )
+                try:
+                    manifest = _publish_primary_sync_transaction(
+                        manifest_path, manifest, "ISOLATED"
+                    )
+                except Exception as exc:  # noqa: BLE001 - prior state is discoverable
+                    hold_reason = (
+                        "WIP is isolated at predeclared recovery locations but "
+                        f"ISOLATED publication failed: {exc}"
+                    )
+                    held, hold_error = _durable_primary_sync_hold(
+                        manifest_path, manifest, hold_reason
+                    )
+                    outcome["primary_sync_transaction_state"] = held.get("state")
+                    outcome["recovery_hold"] = hold_error
+                    outcome["tracked_wip_left_stashed"] = bool(tracked_wip_paths)
+                    return _behind_dev_dirty_skip(
+                        "durable primary-sync recovery HOLD: "
+                        + outcome["recovery_hold"],
+                        signal_reason="transaction_publication_failed",
+                    )
+                outcome["primary_sync_transaction_state"] = "ISOLATED"
 
-                # PULL-ONLY ff with the tracked WIP isolated. --ff-only refuses any
-                # non-fast-forward; --no-overwrite-ignore aborts rather than clobber
-                # locally-ignored founder WIP. We never push, checkout base, force,
-                # or reset.
                 merge_proc = _run(
                     ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
                     cwd=primary,
                     check=False,
                     timeout=60,
                 )
-                if merge_proc.returncode != 0:
-                    # ff failed after stashing -> restore WIP before returning so
-                    # founder WIP is never left only in the stash on a skip path.
-                    detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
-                    restore_error = _restore_primary_sync_tracked_wip(
-                        primary, stash_record, log=log,
-                    )
-                    if restore_error:
-                        outcome["tracked_wip_left_stashed"] = True
-                        outcome["tracked_wip_restore_error"] = restore_error
-                    else:
-                        outcome["tracked_wip_restored"] = True
-                    return _behind_dev_dirty_skip(
-                        f"ff-only merge of {remote_ref} into '{primary_branch}' "
-                        f"failed after isolating tracked dirty WIP: {detail[:200]}",
-                        signal_reason="ff_only_merge_failed",
-                    )
-
-                # ff succeeded -> restore the isolated tracked WIP in place.
-                restore_error = _restore_primary_sync_tracked_wip(
-                    primary, stash_record, log=log,
-                )
-                synced_sha = _run(
-                    ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30,
+                current_head = _run(
+                    ["git", "rev-parse", "HEAD"], cwd=primary, check=False, timeout=30
                 ).stdout.strip()
-                if restore_error:
-                    # HEAD advanced but the WIP restore drifted. The WIP is safe in
-                    # the executor-owned stash; surface the drift and skip so the
-                    # founder recovers it -- never silently drop or overwrite it.
-                    outcome["tracked_wip_left_stashed"] = True
-                    outcome["tracked_wip_restore_error"] = restore_error
-                    outcome["new_sha"] = synced_sha
-                    _clear_behind_dev_signal(primary)
-                    return _skip(
-                        "primary worktree fast-forwarded but tracked dirty WIP "
-                        f"restore drifted; WIP preserved in stash: {restore_error}"
-                    )
+                if merge_proc.returncode == 0:
+                    if checkpoint is not None:
+                        checkpoint(
+                            "after_fast_forward_before_publish", copy.deepcopy(manifest)
+                        )
+                    try:
+                        manifest = _publish_primary_sync_transaction(
+                            manifest_path,
+                            manifest,
+                            "FF_APPLIED",
+                            observed_head=current_head,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - ISOLATED + HEAD recover
+                        outcome["new_sha"] = current_head
+                        hold_reason = (
+                            "fast-forward completed but FF_APPLIED publication "
+                            f"failed; restart discovery will reconcile: {exc}"
+                        )
+                        held, hold_error = _durable_primary_sync_hold(
+                            manifest_path, manifest, hold_reason
+                        )
+                        outcome["primary_sync_transaction_state"] = held.get("state")
+                        outcome["recovery_hold"] = hold_error
+                        _clear_behind_dev_signal(primary)
+                        return _skip(
+                            "durable primary-sync recovery HOLD: "
+                            + outcome["recovery_hold"]
+                        )
 
-                outcome["tracked_wip_restored"] = True
-                outcome["synced"] = True
-                outcome["skipped"] = False
-                outcome["reason"] = None
-                outcome["new_sha"] = synced_sha
-                _clear_behind_dev_signal(primary)
-                log(
-                    f"Step 15b: synced primary worktree {primary} on "
-                    f"'{primary_branch}' {(old_sha or '?')[:8]} -> "
-                    f"{(synced_sha or '?')[:8]} (ff-only {remote_ref}; preserved "
-                    f"tracked WIP: {', '.join(tracked_wip_paths)})"
+                terminal, summary, recovery_error = _reconcile_primary_sync_transaction(
+                    manifest_path,
+                    manifest,
+                    common_dir=common_dir,
+                    primary=primary,
+                    log=log,
                 )
-                return outcome
+                outcome["primary_sync_transaction_state"] = terminal.get("state")
+                outcome["tracked_wip_restored"] = bool(
+                    summary.get("tracked_restored_paths")
+                )
+                outcome["tracked_wip_held_paths"] = list(
+                    summary.get("tracked_held_paths") or []
+                )
+                outcome["tracked_wip_left_stashed"] = bool(
+                    summary.get("tracked_held_paths")
+                )
+                outcome["untracked_collision_paths"] = list(
+                    summary.get("untracked_held_paths") or collision_paths
+                )
+                outcome["tracked_wip_restore_error"] = recovery_error
+                if recovery_error:
+                    outcome["recovery_hold"] = recovery_error
+
+                if current_head == new_sha and recovery_error is None:
+                    outcome["synced"] = True
+                    outcome["skipped"] = False
+                    outcome["reason"] = None
+                    outcome["new_sha"] = current_head
+                    _clear_behind_dev_signal(primary)
+                    log(
+                        f"Step 15b: synced primary worktree {primary} on "
+                        f"'{primary_branch}' {(old_sha or '?')[:8]} -> "
+                        f"{(current_head or '?')[:8]} (ff-only {remote_ref}; "
+                        f"transaction {terminal.get('state')})"
+                    )
+                    return outcome
+
+                detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
+                if recovery_error:
+                    return _behind_dev_dirty_skip(
+                        "ff-only primary sync retained a durable HOLD: "
+                        + recovery_error,
+                        signal_reason="primary_sync_recovery_hold",
+                    )
+                return _behind_dev_dirty_skip(
+                    f"ff-only merge of {remote_ref} into '{primary_branch}' "
+                    "failed after isolation; exact WIP restored and transaction "
+                    f"marked RECOVERED: {detail[:200]}",
+                    signal_reason="ff_only_merge_failed",
+                )
 
             # PULL-ONLY ff: bring origin/{base_branch} DOWN into the primary's
             # CURRENT feature branch. --ff-only is the backstop that refuses any
@@ -6083,6 +7314,169 @@ def _sync_primary_worktree_to_base(
 sync_primary_worktree_to_base = _sync_primary_worktree_to_base
 
 
+_TERMINAL_TARGET_IDENTITY_VERSION = 2
+_TERMINAL_MUTATION_ATTEMPT_VERSION = 1
+_TERMINAL_MUTATION_ATTEMPT_OWNER = "commit_executor:terminal_mutation_attempt"
+_TERMINAL_MUTATION_ATTEMPT_DIRNAME = "rcx_terminal_mutation_attempts"
+_TERMINAL_MUTATION_OPERATION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _terminal_mutation_binding_digest(
+    target_identity: dict[str, Any],
+) -> str:
+    """Return a stable digest binding one operation id to its target."""
+    binding = {
+        key: target_identity.get(key)
+        for key in (
+            "version",
+            "operation_id",
+            "worktree_identity",
+            "common_dir_identity",
+            "expected_branch",
+            "expected_head",
+            "base_branch",
+            "base_ref",
+        )
+    }
+    serialized = json.dumps(
+        binding,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _terminal_mutation_attempt_path(
+    common_dir: Path,
+    operation_id: str,
+) -> Path:
+    return (
+        common_dir
+        / _TERMINAL_MUTATION_ATTEMPT_DIRNAME
+        / f"{operation_id}.json"
+    )
+
+
+def _existing_terminal_mutation_attempt_reason(
+    attempt_path: Path,
+    *,
+    operation_id: str,
+    binding_digest: str,
+) -> str | None:
+    """Classify a durable attempt record, failing closed on ambiguity."""
+    try:
+        info = attempt_path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return (
+            "terminal operation outcome is ambiguous: could not inspect "
+            f"durable attempt record {attempt_path}: {exc}"
+        )
+    if not stat.S_ISREG(info.st_mode):
+        return (
+            "terminal operation outcome is ambiguous: durable attempt record "
+            f"is not a regular file: {attempt_path}"
+        )
+    try:
+        record = json.loads(attempt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return (
+            "terminal operation outcome is ambiguous: durable attempt record "
+            f"is unreadable at {attempt_path}: {exc}"
+        )
+    if not isinstance(record, dict):
+        return (
+            "terminal operation outcome is ambiguous: durable attempt record "
+            f"is not an object at {attempt_path}"
+        )
+    expected = {
+        "version": _TERMINAL_MUTATION_ATTEMPT_VERSION,
+        "owner": _TERMINAL_MUTATION_ATTEMPT_OWNER,
+        "operation_id": operation_id,
+        "state": "AUTHORITY_CONSUMED_OUTCOME_UNKNOWN",
+        "target_identity_sha256": binding_digest,
+    }
+    if any(record.get(key) != value for key, value in expected.items()):
+        return (
+            "terminal operation outcome is ambiguous: durable attempt record "
+            f"does not match the bound operation at {attempt_path}"
+        )
+    return (
+        f"terminal operation {operation_id} was already attempted; "
+        "single-use authority cannot be replayed"
+    )
+
+
+def _write_terminal_mutation_attempt_exclusive(
+    attempt_path: Path,
+    record: dict[str, Any],
+) -> None:
+    """Publish an immutable, durable no-clobber attempt record."""
+    _mkdir_durable(attempt_path.parent)
+    serialized = json.dumps(record, indent=2, sort_keys=True) + "\n"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    fd: int | None = None
+    try:
+        fd = os.open(attempt_path, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as attempt_file:
+            fd = None
+            attempt_file.write(serialized)
+            attempt_file.flush()
+            os.fsync(attempt_file.fileno())
+        _fsync_directory(attempt_path.parent)
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _consume_terminal_mutation_authority(
+    common_dir: Path,
+    target_identity: dict[str, Any],
+) -> tuple[Path, str | None]:
+    """Durably consume one operation's authority before callback entry."""
+    operation_id = str(target_identity["operation_id"])
+    binding_digest = _terminal_mutation_binding_digest(target_identity)
+    attempt_root = common_dir / _TERMINAL_MUTATION_ATTEMPT_DIRNAME
+    attempt_path = _terminal_mutation_attempt_path(common_dir, operation_id)
+    try:
+        if os.path.lexists(attempt_root):
+            root_info = attempt_root.lstat()
+            if not stat.S_ISDIR(root_info.st_mode):
+                return attempt_path, (
+                    "terminal operation outcome is ambiguous: durable attempt "
+                    f"root is not a directory: {attempt_root}"
+                )
+        existing_reason = _existing_terminal_mutation_attempt_reason(
+            attempt_path,
+            operation_id=operation_id,
+            binding_digest=binding_digest,
+        )
+        if existing_reason is not None:
+            return attempt_path, existing_reason
+        record = {
+            "version": _TERMINAL_MUTATION_ATTEMPT_VERSION,
+            "owner": _TERMINAL_MUTATION_ATTEMPT_OWNER,
+            "operation_id": operation_id,
+            "state": "AUTHORITY_CONSUMED_OUTCOME_UNKNOWN",
+            "target_identity_sha256": binding_digest,
+            "consumed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _write_terminal_mutation_attempt_exclusive(attempt_path, record)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        # Never remove a possibly published record.  If publication reached the
+        # filesystem but its durability could not be proven, every later call
+        # must see either that record or another fail-closed ambiguity.
+        return attempt_path, (
+            "terminal operation outcome is ambiguous: single-use authority "
+            f"could not be durably consumed at {attempt_path}: {exc}"
+        )
+    return attempt_path, None
+
+
 def _find_stash_ref_by_marker(
     repo_root: Path,
     marker: str,
@@ -6104,6 +7498,420 @@ def _find_stash_ref_by_marker(
         if subject.strip().endswith(marker):
             return ref, oid
     return None
+
+
+def bind_terminal_target_identity(
+    worktree_path: Path,
+    *,
+    base_branch: str,
+) -> dict[str, Any]:
+    """Capture identity expectations, never terminal-mutation authority.
+
+    The returned record is suitable input to
+    :func:`execute_terminal_mutation_once`.  It deliberately represents
+    routing/planning evidence plus an opaque operation identity only: every
+    eventual PR-disposition or fleet mutation must pass its action callback to
+    that one-shot execution boundary, where its single-use authority is durably
+    consumed.
+    """
+    result: dict[str, Any] = {
+        "version": _TERMINAL_TARGET_IDENTITY_VERSION,
+        "bound": False,
+        "authority": "identity_only_not_terminal_authority",
+        "operation_id": None,
+        "worktree_identity": None,
+        "common_dir_identity": None,
+        "expected_branch": None,
+        "expected_head": None,
+        "base_branch": base_branch,
+        "base_ref": f"origin/{base_branch}",
+        "reason": None,
+    }
+    if (
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", base_branch) is None
+        or ".." in base_branch
+        or base_branch.endswith("/")
+    ):
+        result["reason"] = "terminal target base branch is invalid"
+        return result
+    try:
+        common_dir = _git_common_dir(worktree_path)
+        branch = _worktree_head_branch(worktree_path)
+        head = _run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree_path,
+            check=False,
+            timeout=30,
+        )
+        if common_dir is None:
+            result["reason"] = "worktree common dir is unresolved"
+            return result
+        if branch is None:
+            result["reason"] = "worktree branch is detached or unresolved"
+            return result
+        if head.returncode != 0 or not head.stdout.strip():
+            result["reason"] = "worktree HEAD is unresolved"
+            return result
+        result.update(
+            {
+                "bound": True,
+                "operation_id": uuid.uuid4().hex,
+                "worktree_identity": _filesystem_identity(worktree_path),
+                "common_dir_identity": _filesystem_identity(common_dir),
+                "expected_branch": branch,
+                "expected_head": head.stdout.strip(),
+                "reason": None,
+            }
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        result["reason"] = f"terminal target identity capture failed: {exc}"
+    return result
+
+
+def _run_terminal_mutation_boundary(
+    repo_root: Path,
+    target_identity: dict[str, Any],
+    *,
+    terminal_action: Callable[[], Any] | None,
+    diagnostic_only: bool,
+    log: Any,
+) -> dict[str, Any]:
+    """Run one terminal boundary, optionally as a non-authoritative observation.
+
+    The action-bearing mode never returns a reusable readiness grant.  It
+    validates and invokes the supplied callback at most once while the common-
+    dir lock remains continuously held, then releases the lock before its
+    outcome reaches the caller.  Diagnostic mode performs the same fresh
+    checks but cannot invoke a terminal action and explicitly returns no
+    mutation authority.
+    """
+    outcome: dict[str, Any] = {
+        "decision": "HOLD",
+        "authority": (
+            "diagnostic_only_not_terminal_authority"
+            if diagnostic_only
+            else "action_outcome_only_not_terminal_authority"
+        ),
+        "execution_boundary": (
+            "diagnostic_observation_under_lock"
+            if diagnostic_only
+            else "one_shot_mutation_under_lock"
+        ),
+        "mutation_authorized": False,
+        "reusable": False,
+        "fresh_fetch": False,
+        "behind_count": None,
+        "target_head": None,
+        "fetched_base_sha": None,
+        "checked_at": None,
+        "reason": None,
+    }
+    if diagnostic_only:
+        outcome["observation"] = None
+    else:
+        outcome.update(
+            {
+                "action_invoked": False,
+                "action_succeeded": None,
+                "action_outcome": None,
+                "action_error": None,
+                "operation_id": None,
+                "authority_consumed": False,
+                "authority_record_path": None,
+            }
+        )
+
+    def _hold(reason: str) -> dict[str, Any]:
+        outcome["reason"] = reason
+        try:
+            log(f"Terminal mutation boundary HOLD: {reason}")
+        except Exception:
+            pass
+        return outcome
+
+    if diagnostic_only:
+        if terminal_action is not None:
+            return _hold("diagnostic boundary cannot receive a terminal action")
+    elif not callable(terminal_action):
+        return _hold("terminal action callback is not callable")
+
+    if not isinstance(target_identity, dict) or target_identity.get("bound") is not True:
+        return _hold("terminal target identity is not bound")
+    if target_identity.get("version") != _TERMINAL_TARGET_IDENTITY_VERSION:
+        return _hold("terminal target identity version mismatch")
+    operation_id = target_identity.get("operation_id")
+    if (
+        not isinstance(operation_id, str)
+        or _TERMINAL_MUTATION_OPERATION_ID_RE.fullmatch(operation_id) is None
+    ):
+        return _hold("terminal target operation identity is invalid")
+    if not diagnostic_only:
+        outcome["operation_id"] = operation_id
+    base_branch = str(target_identity.get("base_branch") or "")
+    base_ref = str(target_identity.get("base_ref") or "")
+    if (
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", base_branch) is None
+        or ".." in base_branch
+        or base_branch.endswith("/")
+        or base_ref != f"origin/{base_branch}"
+    ):
+        return _hold("terminal target base ref is invalid")
+    worktree_record = target_identity.get("worktree_identity")
+    common_record = target_identity.get("common_dir_identity")
+    if not isinstance(worktree_record, dict) or not isinstance(common_record, dict):
+        return _hold("terminal target filesystem identity is incomplete")
+    worktree = Path(str(worktree_record.get("path") or ""))
+    common_dir = Path(str(common_record.get("path") or ""))
+    if not _filesystem_identity_matches(worktree, worktree_record):
+        return _hold("terminal target worktree identity drifted")
+    if not _filesystem_identity_matches(common_dir, common_record):
+        return _hold("terminal target common-dir identity drifted")
+    repo_common = _git_common_dir(repo_root)
+    target_common = _git_common_dir(worktree)
+    if repo_common != common_dir or target_common != common_dir:
+        return _hold("terminal target repository/common-dir identity mismatch")
+
+    lock_path = common_dir / "rcx_primary_worktree_sync.lock"
+    lock_handle = None
+    lock_acquired = False
+    try:
+        try:
+            lock_handle = open(lock_path, "w")
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_acquired = True
+        except OSError as exc:
+            return _hold(f"terminal readiness common-dir lock unavailable: {exc}")
+
+        if not diagnostic_only:
+            binding_digest = _terminal_mutation_binding_digest(target_identity)
+            attempt_path = _terminal_mutation_attempt_path(
+                common_dir,
+                operation_id,
+            )
+            outcome["authority_record_path"] = str(attempt_path)
+            existing_reason = _existing_terminal_mutation_attempt_reason(
+                attempt_path,
+                operation_id=operation_id,
+                binding_digest=binding_digest,
+            )
+            if existing_reason is not None:
+                return _hold(existing_reason)
+
+        # Revalidate all mutable identity fields only after taking the lock.
+        if not _filesystem_identity_matches(worktree, worktree_record):
+            return _hold("terminal target worktree identity drifted under lock")
+        if not _filesystem_identity_matches(common_dir, common_record):
+            return _hold("terminal target common-dir identity drifted under lock")
+        if (
+            _git_common_dir(repo_root) != common_dir
+            or _git_common_dir(worktree) != common_dir
+        ):
+            return _hold("terminal target common dir drifted under lock")
+        branch = _worktree_head_branch(worktree)
+        if branch != target_identity.get("expected_branch"):
+            return _hold(
+                "terminal target branch mismatch: "
+                f"expected {target_identity.get('expected_branch')}, "
+                f"found {branch or 'detached/unresolved'}"
+            )
+        head = _run(
+            ["git", "rev-parse", "HEAD"], cwd=worktree, check=False, timeout=30
+        )
+        current_head = head.stdout.strip() if head.returncode == 0 else ""
+        outcome["target_head"] = current_head or None
+        if current_head != target_identity.get("expected_head"):
+            return _hold(
+                "terminal target HEAD mismatch: "
+                f"expected {target_identity.get('expected_head')}, "
+                f"found {current_head or 'unresolved'}"
+            )
+
+        fetch = _run(
+            ["git", "fetch", "origin", base_branch],
+            cwd=worktree,
+            check=False,
+            timeout=60,
+        )
+        outcome["checked_at"] = datetime.now(timezone.utc).isoformat()
+        if fetch.returncode != 0:
+            detail = (fetch.stderr or fetch.stdout or "").strip()
+            return _hold(
+                f"fresh terminal fetch origin {base_branch} failed: "
+                f"{detail[:200] or fetch.returncode}"
+            )
+        outcome["fresh_fetch"] = True
+
+        # Fetch should not change a worktree, but recheck filesystem,
+        # repository, branch, and HEAD identity so a concurrent actor cannot
+        # substitute a different terminal target.
+        if not _filesystem_identity_matches(worktree, worktree_record):
+            return _hold(
+                "terminal target worktree identity drifted during fresh fetch"
+            )
+        if not _filesystem_identity_matches(common_dir, common_record):
+            return _hold(
+                "terminal target common-dir identity drifted during fresh fetch"
+            )
+        if (
+            _git_common_dir(repo_root) != common_dir
+            or _git_common_dir(worktree) != common_dir
+        ):
+            return _hold(
+                "terminal target repository/common-dir drifted during fresh fetch"
+            )
+        branch_after = _worktree_head_branch(worktree)
+        head_after = _run(
+            ["git", "rev-parse", "HEAD"], cwd=worktree, check=False, timeout=30
+        )
+        current_head_after = (
+            head_after.stdout.strip() if head_after.returncode == 0 else ""
+        )
+        if (
+            branch_after != target_identity.get("expected_branch")
+            or current_head_after != target_identity.get("expected_head")
+        ):
+            return _hold("terminal target branch/HEAD drifted during fresh fetch")
+
+        base_sha = _run(
+            ["git", "rev-parse", base_ref],
+            cwd=worktree,
+            check=False,
+            timeout=30,
+        )
+        if base_sha.returncode != 0 or not base_sha.stdout.strip():
+            return _hold(f"fresh terminal base ref is unresolved: {base_ref}")
+        outcome["fetched_base_sha"] = base_sha.stdout.strip()
+        behind = _run(
+            ["git", "rev-list", "--count", f"HEAD..{base_ref}"],
+            cwd=worktree,
+            check=False,
+            timeout=30,
+        )
+        if behind.returncode != 0:
+            detail = (behind.stderr or behind.stdout or "").strip()
+            return _hold(
+                f"fresh terminal behind-count failed: {detail[:200] or behind.returncode}"
+            )
+        try:
+            behind_count = int(behind.stdout.strip())
+        except ValueError:
+            return _hold("fresh terminal behind-count is not an integer")
+        outcome["behind_count"] = behind_count
+        if behind_count != 0:
+            return _hold(
+                f"terminal target is behind {base_ref} by {behind_count} commit(s)"
+            )
+
+        if diagnostic_only:
+            outcome["decision"] = "OBSERVED_READY"
+            outcome["observation"] = "behind_zero"
+            outcome["reason"] = None
+            try:
+                log(
+                    "Terminal readiness observed (diagnostic only; no mutation "
+                    "authority): freshly fetched and verified "
+                    f"{worktree} {current_head_after[:8]} at "
+                    f"behind({base_ref})=0"
+                )
+            except Exception:
+                pass
+            return outcome
+
+        attempt_path, consume_error = _consume_terminal_mutation_authority(
+            common_dir,
+            target_identity,
+        )
+        outcome["authority_record_path"] = str(attempt_path)
+        if consume_error is not None:
+            return _hold(consume_error)
+        outcome["authority_consumed"] = True
+
+        # This is the only authorization point: no GO/readiness token escapes
+        # the lock.  Durable single-use authority was consumed above before
+        # callback entry, so the callback cannot be replayed even after an
+        # exception or process interruption leaves its outcome ambiguous.
+        outcome["action_invoked"] = True
+        try:
+            action_outcome = terminal_action()
+        except Exception as exc:  # noqa: BLE001 - report action failure, never retry
+            outcome["decision"] = "ACTION_FAILED"
+            outcome["action_succeeded"] = False
+            outcome["action_error"] = f"{type(exc).__name__}: {exc}"
+            outcome["reason"] = "terminal action callback failed under lock"
+            try:
+                log(f"Terminal action failed under lock: {outcome['action_error']}")
+            except Exception:
+                pass
+            return outcome
+
+        outcome["decision"] = "ACTION_COMPLETED"
+        outcome["action_succeeded"] = True
+        outcome["action_outcome"] = action_outcome
+        outcome["reason"] = None
+        try:
+            log(
+                "Terminal action completed under lock after fresh verification: "
+                f"{worktree} {current_head_after[:8]} at behind({base_ref})=0"
+            )
+        except Exception:
+            pass
+        return outcome
+    except Exception as exc:  # noqa: BLE001 - terminal boundary fails closed
+        return _hold(f"terminal mutation boundary failed closed: {exc}")
+    finally:
+        if lock_handle is not None:
+            if lock_acquired:
+                try:
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+            try:
+                lock_handle.close()
+            except OSError:
+                pass
+
+
+def observe_terminal_mutation_readiness(
+    repo_root: Path,
+    target_identity: dict[str, Any],
+    *,
+    log: Any,
+) -> dict[str, Any]:
+    """Return a fresh diagnostic observation with no mutation authority.
+
+    Even an ``OBSERVED_READY`` result is deliberately non-authoritative and
+    cannot carry a callback.  Terminal callers must instead place the mutation
+    itself inside :func:`execute_terminal_mutation_once`.
+    """
+    return _run_terminal_mutation_boundary(
+        repo_root,
+        target_identity,
+        terminal_action=None,
+        diagnostic_only=True,
+        log=log,
+    )
+
+
+def execute_terminal_mutation_once(
+    repo_root: Path,
+    target_identity: dict[str, Any],
+    *,
+    terminal_action: Callable[[], Any],
+    log: Any,
+) -> dict[str, Any]:
+    """Freshly validate and invoke one terminal action under one common-dir lock.
+
+    The returned dictionary reports the callback's outcome only after the lock
+    has been released.  It never authorizes a later mutation or retries a
+    failed callback.
+    """
+    return _run_terminal_mutation_boundary(
+        repo_root,
+        target_identity,
+        terminal_action=terminal_action,
+        diagnostic_only=False,
+        log=log,
+    )
 
 
 PRE_PUSH_ISOLATION_VERIFIED_VALUE = "pre_push_passed"
