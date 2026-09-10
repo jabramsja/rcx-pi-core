@@ -15749,6 +15749,46 @@ def _is_pr_disposition_terminal_sweep_wave(wave_id: str) -> bool:
         return False
 
 
+def _validate_pr_disposition_no_replay_candidate_before_commit(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    candidate_sha256: str,
+) -> dict[str, Any]:
+    """Fail closed on copied-evidence drift before the finalization commit."""
+    try:
+        disposition_mod = _load_pr_disposition_executor_module()
+        result = disposition_mod.validate_no_replay_finalization_candidate(
+            repo_root,
+            wave_id=wave_id,
+            candidate_sha256=candidate_sha256,
+        )
+    except Exception as exc:  # noqa: BLE001 - this boundary must return HOLD.
+        return {
+            "authority_manifest": None,
+            "candidate_sha256": candidate_sha256,
+            "decision": "HOLD",
+            "errors": [f"no-replay finalization evidence validation failed: {exc}"],
+            "source_candidate_sha256": "",
+            "wave_id": wave_id,
+        }
+    if not isinstance(result, dict):
+        return {
+            "authority_manifest": None,
+            "candidate_sha256": candidate_sha256,
+            "decision": "HOLD",
+            "errors": ["no-replay finalization validator returned a non-object"],
+            "source_candidate_sha256": "",
+            "wave_id": wave_id,
+        }
+    return result
+
+
+validate_pr_disposition_no_replay_candidate_before_commit = (
+    _validate_pr_disposition_no_replay_candidate_before_commit
+)
+
+
 def _committed_candidate_sha256(repo_root: Path, commit_sha: str) -> str:
     """Hash the exact binary parent-to-commit diff used by staged-candidate proof."""
     if not _FULL_QUEUE_COMMIT_SHA_RE.fullmatch(str(commit_sha or "")):
@@ -15791,6 +15831,9 @@ def _terminal_route_entry(decision: str, binding: dict[str, Any]) -> dict[str, A
         "terminal_receipt": copy.deepcopy(binding),
         "tracked_packet": None,
     }
+
+
+terminal_route_entry = _terminal_route_entry
 
 
 def _refresh_post_merge_package_for_next_open_queue(
@@ -16568,12 +16611,18 @@ def _run_post_commit_pipeline(
                 "pr_number": pr_number}
 
     queue_commit_sha = ""
+    terminal_required = _is_pr_disposition_terminal_sweep_wave(
+        str(handoff.get("wave_id") or "")
+    )
     try:
         verify_root = _resolve_post_merge_verify_root(repo_root, base_branch, log=log)
         _run(["git", "fetch", "origin", base_branch], cwd=verify_root, timeout=60)
         pre_verify_status = _run(["git", "status", "--short"], cwd=verify_root).stdout.strip()
         pre_verify_dirty = _dirty_worktree_paths(verify_root) if pre_verify_status else set()
-        if pre_verify_dirty:
+        # This exact terminal wave must read the landed tracked evidence below.
+        # An ff-only update preserves unrelated dirt and fails before terminal
+        # preparation on a collision; generic dirty-root behavior stays unchanged.
+        if pre_verify_dirty and not terminal_required:
             head_sha = _run(
                 ["git", "rev-parse", f"origin/{base_branch}"], cwd=verify_root
             ).stdout.strip()
@@ -16641,19 +16690,28 @@ def _run_post_commit_pipeline(
     terminal_prepared: dict[str, Any] | None = None
     terminal_binding: dict[str, Any] | None = None
     queue_authority_error: str | None = None
-    terminal_required = _is_pr_disposition_terminal_sweep_wave(
-        str(handoff.get("wave_id") or "")
-    )
     if terminal_required:
         try:
             disposition_mod = _load_pr_disposition_executor_module()
-            candidate_sha = str(result.get("staged_candidate_sha256") or "")
-            if not candidate_sha:
-                candidate_sha = _committed_candidate_sha256(
+            reviewed_candidate_sha = str(
+                result.get("staged_candidate_sha256") or ""
+            )
+            landed_candidate_sha = reviewed_candidate_sha
+            finalization_wave_id = str(
+                getattr(disposition_mod, "TERMINAL_SWEEP_WAVE_ID", "") or ""
+            )
+            # The exact no-replay carrier binds landed and reviewed digests;
+            # established terminal paths retain the receipt-chain digest.
+            if not reviewed_candidate_sha or (
+                finalization_wave_id
+                and str(handoff.get("wave_id") or "") == finalization_wave_id
+            ):
+                landed_candidate_sha = _committed_candidate_sha256(
                     verify_root, str(result.get("commit_sha") or "")
                 )
-                if candidate_sha:
-                    result["staged_candidate_sha256"] = candidate_sha
+                if not reviewed_candidate_sha and landed_candidate_sha:
+                    reviewed_candidate_sha = landed_candidate_sha
+                    result["staged_candidate_sha256"] = reviewed_candidate_sha
             terminal_prepared = disposition_mod.prepare_terminal_sweep_receipt(
                 verify_root,
                 carrier_root=repo_root,
@@ -16662,7 +16720,8 @@ def _run_post_commit_pipeline(
                 carrier_commit_sha=str(result.get("commit_sha") or ""),
                 target_branch=target_branch,
                 base_branch=base_branch,
-                candidate_sha256=candidate_sha,
+                candidate_sha256=landed_candidate_sha,
+                expected_candidate_sha256=reviewed_candidate_sha,
             )
             result["post_merge_terminal_receipt_path"] = terminal_prepared[
                 "receipt_path"
@@ -18933,6 +18992,28 @@ def _run_commit_pipeline_impl(
             result["staged_candidate_sha256"] = hashlib.sha256(
                 staged_candidate
             ).hexdigest()
+            finalization_evidence = (
+                _validate_pr_disposition_no_replay_candidate_before_commit(
+                    repo_root,
+                    wave_id=wave_id,
+                    candidate_sha256=result["staged_candidate_sha256"],
+                )
+            )
+            result["no_replay_finalization_evidence"] = finalization_evidence
+            if finalization_evidence.get("decision") != "PASS":
+                evidence_errors = finalization_evidence.get("errors")
+                return {
+                    **result,
+                    "status": "held",
+                    "decision": "HOLD",
+                    "step": "validate_no_replay_finalization_evidence",
+                    "errors": (
+                        evidence_errors
+                        if isinstance(evidence_errors, list) and evidence_errors
+                        else ["no-replay finalization evidence did not pass"]
+                    ),
+                    "steps_completed": result["steps_completed"],
+                }
         _commit_out, retry_detail = _run_git_commit_with_self_cleared_index_lock_retry(
             repo_root,
             handoff["commit_message"],

@@ -1,0 +1,155 @@
+{
+  "copied_artifacts": [
+    {
+      "kind": "packet",
+      "path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_2026-09-10.md",
+      "sha256": "b85adda0f1e66c3b4bccff86f84f8cb835464ce31252d926d3de364e1872c444"
+    },
+    {
+      "kind": "receipt",
+      "path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1196.json",
+      "sha256": "3de546e193692612e71b9fb04dac9c02ececec379ca9779f7c28d770c2696296"
+    },
+    {
+      "kind": "receipt",
+      "path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1197.json",
+      "sha256": "de28bc1f80a6c5460fd5728cdf40fdee019ec2fdc33917268a5e57015259a96e"
+    },
+    {
+      "kind": "receipt",
+      "path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1203.json",
+      "sha256": "c5b2fc165fd731c7f9cefcafd48033962a705d3e2fe9b52201c0b79d2c58943d"
+    },
+    {
+      "kind": "receipt",
+      "path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1210.json",
+      "sha256": "b5c224d4fa4d4faa1ff2c80f6c1991bb49f5217b2ab8fab35652478d1375550f"
+    },
+    {
+      "kind": "receipt",
+      "path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1211.json",
+      "sha256": "b3a0681674f832cacf7b27b6840ca3292e6da48d39765e50b028a22a92e23859"
+    },
+    {
+      "kind": "receipt",
+      "path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1212.json",
+      "sha256": "5bdb4124773bdd100dbf674c0e7e2eb5f423e9910bcf9eb287b00c9c2df93675"
+    },
+    {
+      "kind": "receipt",
+      "path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1213.json",
+      "sha256": "7cc9e5c550c042c142ff8e7c8f3aa925fc4ec53d08b34fd727c76ca65ad8d362"
+    },
+    {
+      "kind": "receipt",
+      "path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1219.json",
+      "sha256": "7db1dfcca73fbed77c3304cd2de24710d3a0942e4daf740d68cf4066ef469f19"
+    },
+    {
+      "kind": "indicator",
+      "path": "reports/l4_wave_indicators/pr-disposition-apply-r2-2026-09-10.json",
+      "sha256": "6652024612c750df4886d75707f2ecb5121230d14a1ba6d0b87455d7315af16b"
+    }
+  ],
+  "finalization": {
+    "authority_manifest_path": "reports/control_plane/pr-disposition-r2-no-replay-finalization-authority-r1-2026-09-10.json",
+    "base_merge_commit": "1ec8c093b7e93d8b2ee65f4d40a373dc46f06add",
+    "base_pr_number": 1281,
+    "candidate_digest_authority": "phase_b_pre_commit_commit_receipt_chain",
+    "packet_native_contract_digest": "450c469cabd93e4ae5f69e2e691a8903fc611d451de1eed4acfcd860f81b00b2",
+    "packet_path": "reports/control_plane/pr-disposition-r2-no-replay-finalization-r1-2026-09-10_2026-09-10.md",
+    "wave_id": "pr-disposition-r2-no-replay-finalization-r1-2026-09-10"
+  },
+  "manifest_sha256": "3e43eb8408efded95160e8589a7b993774d5b7106349d5e9a9beba43f5606b83",
+  "schema_version": 1,
+  "source": {
+    "branch": "jabramsja/pr-disposition-apply-r2-2026-09-10",
+    "comparison_commit": "2b4218dc7c3e6f3e3d688dc6773d1777071529ee",
+    "excluded_staged_paths": [
+      "TASKS.md"
+    ],
+    "intent_namespace": "rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09",
+    "packet_path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_2026-09-10.md",
+    "packet_sha256": "b85adda0f1e66c3b4bccff86f84f8cb835464ce31252d926d3de364e1872c444",
+    "preservation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-preservation/pr-disposition-apply-r2-terminal-transition-blocked-20260910",
+    "staged_candidate_path_count": 11,
+    "staged_candidate_sha256": "36677e05e5fa5f865442e341ff1c64c60a9ef821d4d84fddfd56f5bd3e4df102",
+    "target_manifest_path": "reports/control_plane/pr-disposition-executor-enabler-r1-2026-09-09_targets.json",
+    "target_manifest_sha256": "e5034bfaac99d315b22bba52122d80f91fc0b68eba24e9f6708eb9815c2c83f9",
+    "wave_id": "pr-disposition-apply-r2-2026-09-10"
+  },
+  "targets": [
+    {
+      "head_ref_name": "jabramsja/roles-claude-opus-2026-07-01",
+      "head_sha": "1131ae748dc373f0a96f0d0875a40d4e3ccc68ba",
+      "intent_path": "rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09/pr-1196.json",
+      "node_id": "PR_kwDOQvy8bs7s8IjQ",
+      "number": 1196,
+      "operation_id": "87a360fd4c15411e8d87f092ae2e1fa9",
+      "receipt_path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1196.json"
+    },
+    {
+      "head_ref_name": "jabramsja/pager-route-claude-2026-07-01",
+      "head_sha": "02d6900ec39c3bd9da1e95e7cf0ae5507e4c7f92",
+      "intent_path": "rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09/pr-1197.json",
+      "node_id": "PR_kwDOQvy8bs7tS-PM",
+      "number": 1197,
+      "operation_id": "04afa53b63bf434e8347bcc920bd1b2d",
+      "receipt_path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1197.json"
+    },
+    {
+      "head_ref_name": "jabramsja/post-reentry-defer-not-loop-2026-07-03",
+      "head_sha": "4c466d1001b838e69ce141801fbbbe35f410d466",
+      "intent_path": "rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09/pr-1203.json",
+      "node_id": "PR_kwDOQvy8bs7tral-",
+      "number": 1203,
+      "operation_id": "567e87ebba7d4809ae85a0a39d8fa676",
+      "receipt_path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1203.json"
+    },
+    {
+      "head_ref_name": "jabramsja/never-behind-stash-ff-hold-surface-2026-07-04",
+      "head_sha": "b846d2e93be9ffbd3e25b30c1b7983ceb52c4ae7",
+      "intent_path": "rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09/pr-1210.json",
+      "node_id": "PR_kwDOQvy8bs7t02-L",
+      "number": 1210,
+      "operation_id": "e3b26658170d456890b83eb0dc703b12",
+      "receipt_path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1210.json"
+    },
+    {
+      "head_ref_name": "jabramsja/never-behind-checkignore-fence-2026-07-04",
+      "head_sha": "10d157c4eb5b667b07006686fea86d88af268646",
+      "intent_path": "rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09/pr-1211.json",
+      "node_id": "PR_kwDOQvy8bs7t2Sw3",
+      "number": 1211,
+      "operation_id": "640bed01d9674f96b0799ee8ad48b5ed",
+      "receipt_path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1211.json"
+    },
+    {
+      "head_ref_name": "jabramsja/codex-reviewer-56sol-ultra-2026-07-11",
+      "head_sha": "b6eb91a61439c2cb3a08f377d0d07a69546fd7db",
+      "intent_path": "rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09/pr-1212.json",
+      "node_id": "PR_kwDOQvy8bs7wnEHo",
+      "number": 1212,
+      "operation_id": "32d302133381451e9df053224e113494",
+      "receipt_path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1212.json"
+    },
+    {
+      "head_ref_name": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+      "head_sha": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+      "intent_path": "rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09/pr-1213.json",
+      "node_id": "PR_kwDOQvy8bs7wx1P-",
+      "number": 1213,
+      "operation_id": "bd013328be6d410f89579a01ff8d93dc",
+      "receipt_path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1213.json"
+    },
+    {
+      "head_ref_name": "jabramsja/roles-all-codex-current-dev-2026-07-29",
+      "head_sha": "28081acd74c549a7afd4292351b214228d45f451",
+      "intent_path": "rcx_pr_disposition_operations/pr-disposition-executor-enabler-r1-2026-09-09/pr-1219.json",
+      "node_id": "PR_kwDOQvy8bs74MpV0",
+      "number": 1219,
+      "operation_id": "4315ac5f7d5d407da739a1dc1bd18e1e",
+      "receipt_path": "reports/control_plane/pr-disposition-apply-r2-2026-09-10_receipts/pr-1219.json"
+    }
+  ]
+}
