@@ -1,0 +1,140 @@
+{
+  "manifest_sha256": "e5034bfaac99d315b22bba52122d80f91fc0b68eba24e9f6708eb9815c2c83f9",
+  "repository": {
+    "id": "R_kgDOQvy8bg",
+    "nameWithOwner": "jabramsja/rcx-pi-core",
+    "url": "https://github.com/jabramsja/rcx-pi-core"
+  },
+  "schema_version": 1,
+  "targets": [
+    {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/roles-all-codex-current-dev-2026-07-29",
+      "headRefOid": "28081acd74c549a7afd4292351b214228d45f451",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs74MpV0",
+      "mergedAt": null,
+      "number": 1219,
+      "state": "OPEN"
+    },
+    {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/pipeline-fix-36-commit-validation-env-sanitization-2026-07-12",
+      "headRefOid": "28b9beed3b8fbc793058446bf9854f363b82ead5",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7wx1P-",
+      "mergedAt": null,
+      "number": 1213,
+      "state": "OPEN"
+    },
+    {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/codex-reviewer-56sol-ultra-2026-07-11",
+      "headRefOid": "b6eb91a61439c2cb3a08f377d0d07a69546fd7db",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7wnEHo",
+      "mergedAt": null,
+      "number": 1212,
+      "state": "OPEN"
+    },
+    {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/never-behind-checkignore-fence-2026-07-04",
+      "headRefOid": "10d157c4eb5b667b07006686fea86d88af268646",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7t2Sw3",
+      "mergedAt": null,
+      "number": 1211,
+      "state": "OPEN"
+    },
+    {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/never-behind-stash-ff-hold-surface-2026-07-04",
+      "headRefOid": "b846d2e93be9ffbd3e25b30c1b7983ceb52c4ae7",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7t02-L",
+      "mergedAt": null,
+      "number": 1210,
+      "state": "OPEN"
+    },
+    {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/post-reentry-defer-not-loop-2026-07-03",
+      "headRefOid": "4c466d1001b838e69ce141801fbbbe35f410d466",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7tral-",
+      "mergedAt": null,
+      "number": 1203,
+      "state": "OPEN"
+    },
+    {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/pager-route-claude-2026-07-01",
+      "headRefOid": "02d6900ec39c3bd9da1e95e7cf0ae5507e4c7f92",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7tS-PM",
+      "mergedAt": null,
+      "number": 1197,
+      "state": "OPEN"
+    },
+    {
+      "baseRefName": "dev",
+      "headRefName": "jabramsja/roles-claude-opus-2026-07-01",
+      "headRefOid": "1131ae748dc373f0a96f0d0875a40d4e3ccc68ba",
+      "headRepository": {
+        "id": "R_kgDOQvy8bg",
+        "owner": {
+          "id": "MDQ6VXNlcjI3MjU3NDg3",
+          "login": "jabramsja"
+        }
+      },
+      "id": "PR_kwDOQvy8bs7s8IjQ",
+      "mergedAt": null,
+      "number": 1196,
+      "state": "OPEN"
+    }
+  ],
+  "wave_id": "pr-disposition-executor-enabler-r1-2026-09-09"
+}
