@@ -32,9 +32,13 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   setup producers
 - preserves ordinary same-config unlocked Phase A retries after a dispatcher
   failure; an existing claimed receipt still refuses re-entry
-- fresh fleet cleanup census R3 is the sole current successor
+- fleet cleanup census R3 followed and landed together with its fixture repair
+  in PR #1287
 
-### Fresh WorkingRCX Fleet Census R3 and Codex Astra Defaults (Pending)
+### Fresh WorkingRCX Fleet Census R3 and Codex Astra Defaults (Landed)
+
+- landed together with the same-PR fixture repair through PR #1287 at exact
+  merge `c209bf29841425305003eeceddfd567a93874742` on 2026-09-11T20:13:36Z
 
 - implements a new read-only CLI and temporary-fixture tests for the direct
   WorkingRCX-prefixed sibling and registered-worktree union, path-preserving
@@ -42,7 +46,7 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   every observation remains `UNCLASSIFIED`
 - synchronizes the existing Codex registry selection, fallback and committed
   default expectation to `gpt-6-astra` / `max`, preserving other providers and
-  existing all-Codex routing; the migration remains unlanded
+  existing all-Codex routing; the migration landed with PR #1287
 - the supplied revision environment selects installed Git 2.55.0 at
   `/opt/homebrew/bin/git`, satisfying both required Git capabilities after
   Bridge Round 1's Apple Git 2.24.3 failure; the CLI documents its requirements
@@ -64,14 +68,13 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   worktree registrations with 222 duplicate paths and both sources complete;
   89 missing-path records retain explicit errors; all three declared
   validations, including the census refresh and staged L4 contract, passed locally
-- this original ten-path package remains pending merge on PR #1287; its packet
-  and captured evidence stay preserved while the separate fixture repair below
-  owns the active work
-- classification remains immediate next after the census lands, followed by
+- this original ten-path package and the fixture repair below landed in the
+  same PR; captured evidence remains preserved and the source census unchanged
+- classification is now current, pending its own merge, followed immediately by
   apply and the existing downstream order; all stopped attempts remain
   preserved noncomplete evidence, and the census authorizes no fleet mutation
 
-### Census R3 CI Fixture Isolation on PR #1287 (Pending)
+### Census R3 CI Fixture Isolation on PR #1287 (Landed)
 
 - reproduced all eight fixture failures at reviewed head
   `4658184dd456d48e702176831d43c84fa5b8bfd0` using disposable ambient Git-filter
@@ -89,12 +92,42 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   environments: 52 passed, 1 skipped in each (the existing non-UTF-8 pathname
   fixture is unsupported on this filesystem); disposable validation trees
   were removed without adding fixture links to the active scratch baseline
-- the declared staged L4 check rejects the empty index; generated artifact
-  refresh, staging, L4 revalidation, review, commit, CI and merge remain with
-  the outer executor on the existing PR branch
+- the original Phase B staged L4 check rejected the empty implementation index;
+  the outer executor subsequently completed staging, revalidation, review,
+  supervisor gates, pre-push and all seven successful GitHub checks, then
+  merged the existing PR at `c209bf29841425305003eeceddfd567a93874742`
 - production census code, captured census, Astra/max defaults, original locked
-  packet and preserved recovery evidence remain unchanged and pending merge;
-  classification stays immediately next after PR #1287 lands
+  packet and preserved recovery evidence remained unchanged by the test repair;
+  the executor retired the merged R3 carrier after separate verified evidence
+  preservation and exited 0; classification is current and apply remains next
+
+### WorkingRCX Fleet Preservation-First Classification R1 (Pending Until Merge)
+
+- implements `mu/tools/executors/workingrcx_fleet_classification.py`, consuming
+  only the landed R3 census with raw SHA-256
+  `ac6f61337081c9adb7c100bac061270f6c7864aaed55d48912f50b8473d0cd81`
+  and exact comparison commit `c209bf29841425305003eeceddfd567a93874742`
+- accounts for all 411 input rows: **4 CONDITIONAL_RETIRE_CANDIDATE and 407
+  HOLD**; a finite 14-path policy screens recorded identities, with local
+  carrier object queries proving four ancestors, retaining nine unmerged
+  heads on HOLD and excluding one standalone repository
+- preserves complete source identities, observation/error evidence and all
+  89 missing-path records; primary/preservation/audit/admin/carrier and
+  canonical queue evidence remain HOLD, including clean preserved attempts
+- every conditional candidate retains unmet identity, idle/protection,
+  valuable/untracked/ignored evidence and branch/history preservation, safe
+  never-behind preparation and exact `execute_terminal_mutation_once`
+  prerequisites, including the boundary's fresh fetch and behind-zero check
+- 65 disposable focused tests passed, including all 411 remapped recorded rows,
+  source binding, local-only Git probes, dirty/unmerged/protected/unknown HOLD,
+  target byte/mtime preservation and deterministic no-clobber repeated output;
+  the real source was neither regenerated nor used to inspect live targets
+- the classifier generated the complete report; the declared staged L4 gate
+  rejected the empty implementation index. Generated packet/indicator refresh,
+  staging, revalidation and landing remain with the outer pipeline
+- no fleet or stale-PR mutation occurred. Classification remains pending until
+  merge, all 407 HOLD obligations remain unresolved, and apply stays immediate
+  next, followed by the retained recovery, exact PR1219 and Mu-production order
 
 ## 2026-09-10
 

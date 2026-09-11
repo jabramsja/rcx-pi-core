@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-fleet-classification-r1-2026-09-11",
+  "repeat_run_speedup_ratio": 1.018099,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.312453,
+  "repeat_run_raw_seconds": [
+    0.318108,
+    0.312453
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.318108
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.630561
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-11T21:53:49Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "ccae08e1e43538eafb5c615cc1c0460b692b61fd"
+}
