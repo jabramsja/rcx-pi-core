@@ -107,14 +107,14 @@ def _agent_cmd(path: Path, agent: str) -> list[str]:
     return json.loads(path.read_text())["agents"][agent]["cmd"]
 
 
-def test_committed_codex_menu_and_fallback_metadata_are_gpt_56_sol_ultra():
+def test_committed_codex_menu_and_fallback_metadata_are_gpt_6_astra_max():
     committed = json.loads(
         (REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json").read_text()
     )
     expected_codex = {
-        "display_name": "Codex 5.6 Sol ultra",
-        "model": "gpt-5.6-sol",
-        "reasoning_effort": "ultra",
+        "display_name": "Codex GPT-6 Astra max",
+        "model": "gpt-6-astra",
+        "reasoning_effort": "max",
     }
 
     assert committed["bridge_agent_defaults"]["codex"] == expected_codex
