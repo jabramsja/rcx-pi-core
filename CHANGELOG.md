@@ -4,6 +4,28 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-10
+
+### Commit-Generated Governance Retry Idempotency R3
+
+- reconstructs the exact useful R2 code/test result after that preserved lane
+  passed 33 focused tests and all 258 receipt-chain tests but did not complete
+  because malformed reviewer-envelope text failed closed and the documented
+  same-config native-stub relaunch was deterministically rejected
+- `commit_executor.py` preserves exact failed-attempt retry settlement: Step 5e
+  stages one canonical same-wave growth-cap increment and provenance entry, and
+  a retry recognizes the recomputed postimage without adding a second increment
+  or provenance suffix
+- canonical target absence retains the established non-mutating
+  `growth_cap_file_absent` outcome only when the target is absent from `HEAD`,
+  the stage-0 index, and the worktree; partial absence, tracked deletion,
+  index/worktree-only presence, and byte or mode drift remain fail-closed
+- focused regressions remain in the existing commit-executor test file, and the
+  unchanged complete receipt-chain suite remains the compatibility gate for the
+  three canonical-absence regressions that stopped R1
+- the separately queued native-stub same-config Phase-B relaunch repair remains
+  next before fresh fleet census R3; this wave changes no launcher or fleet code
+
 ## 2026-04-04
 
 ### Linked Worktree Pre-Commit Gate Truth

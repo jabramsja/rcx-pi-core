@@ -1,0 +1,25 @@
+{
+  "wave_id": "commit-generated-governance-retry-idempotency-r3-2026-09-10",
+  "repeat_run_speedup_ratio": 1.15526,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.250444,
+  "repeat_run_raw_seconds": [
+    0.289328,
+    0.250444
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.289328
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.539772
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-11T01:26:04Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "5f6159d13284a510b13f381c6924caac722ca6d1"
+}
