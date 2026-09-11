@@ -30,7 +30,9 @@ Sequential chain (seven steps, in order):
   7. optional launch   -- the dispatcher launch, OFF by default. When enabled it
                           shells out to ``executor_dispatch`` in ROUTING MODE
                           (``--routing-record <path>``, the record step 3 wrote),
-                          failing closed on a non-zero dispatcher returncode;
+                          failing closed on a non-zero dispatcher returncode and
+                          recording exact terminal authority for the one narrow
+                          same-config Phase B continuation;
                           otherwise it only returns the command it would run.
 
 Design stance -- SIMPLE SEQUENTIAL, NO TRANSACTIONAL/ROLLBACK LAYER. A partial
@@ -51,12 +53,15 @@ contract is:
     (c) routing record -- the record file is rewritten with a single next-candidate
                           keyed by wave id (no duplicate candidate).
     (d) bridge_config  -- a converging sync; a second run is a no-op-equivalent.
-  The two verification steps and the optional launch persist no artifact, so they
-  need no dedup and are safe to re-run. The contract covers exactly these steps
-  for the SAME wave-config; it makes NO claim about concurrent runs. A changed
-  config whose version-1 native packet contract differs may not reuse the same
-  wave id / tracked packet: the launcher rejects it before artifact mutation and
-  requires a corrected config under a fresh wave id.
+  The two verification steps persist no artifact. A normally completed nonzero
+  native dispatcher call persists one bus-local terminal receipt; only the exact
+  locked Phase B candidate may atomically claim it and continue through the
+  explicit Phase B surface. Interrupted claims deliberately remain claimed and
+  fail closed. The contract covers exactly these steps for the SAME wave-config;
+  it makes NO general concurrency claim. A changed config whose version-1 native
+  packet contract differs may not reuse the same wave id / tracked packet: the
+  launcher rejects it before artifact mutation and requires a corrected config
+  under a fresh wave id.
 
 The builder reuses, rather than re-implements, every setup surface: the packet
 draft builder, the tracker-note builder, the routing-record builder, the
@@ -71,12 +76,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
+import hashlib
 import json
 import os
 import sqlite3
 import shlex
 import subprocess
 import sys
+import tempfile
 from dataclasses import MISSING, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -101,6 +110,11 @@ import commit_executor as _ce  # noqa: E402
 
 _ACTIVE_BRIDGE_REVIEW_STATUSES = frozenset({"READER_RUNNING", "REVIEWER_RUNNING"})
 _ACTIVE_SDK_REVIEW_STATUSES = frozenset({"running"})
+LAUNCH_WAVE_DISPATCH_TERMINAL_VERSION = 1
+_LAUNCH_WAVE_DISPATCH_TERMINAL_NAME = "launch_wave_dispatch_terminal.json"
+_LAUNCH_WAVE_DISPATCH_TERMINAL_CLAIMED_NAME = (
+    "launch_wave_dispatch_terminal.claimed.json"
+)
 
 
 def _load_line_ref_checker() -> Any:
@@ -220,6 +234,28 @@ _POST_LOCK_RECOVERY_PROGRESS_MARKERS = (
     (_SAME_WAVE_DEFERRED_AUTH_START, 32),
     ("<!-- L4_FIELDS_FROM_TRACKER:start -->", 64),
     ("<!-- COMMIT_PATH_TRUTH_REFRESH:start -->", 128),
+)
+
+_NATIVE_PHASE_B_BASE_H2_LINES = (
+    "## Scope",
+    "## Work items",
+    "## Constraints",
+    "## Stop conditions",
+    "## Validation gates",
+    "## Acceptance criteria",
+    "## Grounding / Authorization",
+)
+_NATIVE_PHASE_B_CLARIFICATION_H2_LINE = (
+    "## Non-normative review clarification"
+)
+_NATIVE_PHASE_B_INDICATOR_START = (
+    "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->"
+)
+_NATIVE_PHASE_B_INDICATOR_HEADING = (
+    "## Phase B Indicator Scope Reconciliation"
+)
+_NATIVE_PHASE_B_INDICATOR_END = (
+    "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->"
 )
 
 
@@ -1317,6 +1353,265 @@ def _git_index_text(repo_root: Path, rel_path: str) -> str | None:
     return result.stdout
 
 
+def _git_index_bytes(repo_root: Path, rel_path: str) -> bytes | None:
+    """Return the exact staged blob bytes for *rel_path*, or ``None``."""
+    try:
+        result = subprocess.run(
+            ["git", "show", f":{rel_path}"],
+            cwd=str(repo_root),
+            capture_output=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _read_regular_file_bytes(path: Path, *, label: str) -> bytes:
+    """Read one authority artifact without following a symlink."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise LaunchWaveError(f"{label} is missing or is not a regular file: {path}")
+        return path.read_bytes()
+    except LaunchWaveError:
+        raise
+    except OSError as exc:
+        raise LaunchWaveError(f"cannot read {label} at {path}: {exc}") from exc
+
+
+def _sha256_bytes(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Atomically replace *path* with one canonical JSON object."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = -1
+    temporary_name = ""
+    try:
+        fd, temporary_name = tempfile.mkstemp(
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+    except (OSError, TypeError, ValueError) as exc:
+        raise LaunchWaveError(f"cannot atomically write {path}: {exc}") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if temporary_name:
+            try:
+                Path(temporary_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _dispatch_terminal_receipt_paths(
+    repo_root: Path,
+    *,
+    bus_dir: str | Path | None = None,
+) -> tuple[Path, Path]:
+    """Return the available and claimed terminal-receipt paths."""
+    available = _ec.agent_bus_path(
+        Path(repo_root),
+        bus_dir,
+        "meta",
+        _LAUNCH_WAVE_DISPATCH_TERMINAL_NAME,
+    )
+    claimed = _ec.agent_bus_path(
+        Path(repo_root),
+        bus_dir,
+        "meta",
+        _LAUNCH_WAVE_DISPATCH_TERMINAL_CLAIMED_NAME,
+    )
+    return available, claimed
+
+
+def _build_dispatch_terminal_receipt(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None = None,
+    returncode: int,
+) -> dict[str, Any]:
+    """Bind one completed nonzero dispatcher return to immutable authority."""
+    if type(returncode) is not int or returncode == 0:
+        raise LaunchWaveError(
+            "terminal receipt requires an exact nonzero integer returncode"
+        )
+
+    repo_root = Path(repo_root)
+    routing_path = _ec.routing_record_path(repo_root, bus_dir)
+    routing_rel = _ec.agent_bus_relpath(
+        bus_dir,
+        "meta",
+        "post_merge_routing.json",
+    ).as_posix()
+    routing_bytes = _read_regular_file_bytes(
+        routing_path,
+        label="routing record authority",
+    )
+    packet_path = repo_root / config.tracked_packet
+    worktree_packet = _read_regular_file_bytes(
+        packet_path,
+        label="worktree tracked packet authority",
+    )
+    index_packet = _git_index_bytes(repo_root, config.tracked_packet)
+    if index_packet is None:
+        raise LaunchWaveError(
+            "cannot read staged tracked packet authority at "
+            f"{config.tracked_packet}"
+        )
+
+    envelope = build_native_stub_packet_contract(config)
+    receipt: dict[str, Any] = {
+        "version": LAUNCH_WAVE_DISPATCH_TERMINAL_VERSION,
+        "state": "available",
+        "wave_id": config.wave_id,
+        "task_id": config.task_id,
+        "tracked_packet": config.tracked_packet,
+        "native_stub_packet_contract_digest": envelope["digest"],
+        "routing_record_path": routing_rel,
+        "routing_record_sha256": _sha256_bytes(routing_bytes),
+        "packet_worktree_sha256": _sha256_bytes(worktree_packet),
+        "packet_index_sha256": _sha256_bytes(index_packet),
+        "returncode": returncode,
+    }
+
+    if config.candidate_authority_enabled():
+        spec_rel = _ec.agent_bus_relpath(
+            bus_dir,
+            "meta",
+            "candidate_authority",
+            f"{config.wave_id}.spec.json",
+        ).as_posix()
+        spec_path = repo_root / spec_rel
+        spec_bytes = _read_regular_file_bytes(
+            spec_path,
+            label="candidate-authority spec",
+        )
+        receipt["candidate_authority_spec_path"] = spec_rel
+        receipt["candidate_authority_spec_sha256"] = _sha256_bytes(spec_bytes)
+    return receipt
+
+
+def _load_matching_available_dispatch_terminal_receipt(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+) -> tuple[dict[str, Any], Path, Path] | None:
+    """Return one exact current available receipt without mutating it."""
+    available, claimed = _dispatch_terminal_receipt_paths(
+        repo_root,
+        bus_dir=bus_dir,
+    )
+    if claimed.exists() or claimed.is_symlink() or not available.is_file():
+        return None
+    if available.is_symlink():
+        return None
+    try:
+        raw = json.loads(available.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    returncode = raw.get("returncode")
+    if type(returncode) is not int or returncode == 0:
+        return None
+    try:
+        expected = _build_dispatch_terminal_receipt(
+            Path(repo_root),
+            config,
+            bus_dir=bus_dir,
+            returncode=returncode,
+        )
+    except LaunchWaveError:
+        return None
+    if not _exact_typed_mapping_matches(raw, expected):
+        return None
+    return raw, available, claimed
+
+
+def _claim_dispatch_terminal_receipt(
+    available: Path,
+    claimed: Path,
+) -> None:
+    """Atomically rename available to claimed without replacing a destination."""
+    try:
+        if os.name == "nt":
+            # Windows os.rename is no-clobber when dst exists.
+            os.rename(available, claimed)
+        elif sys.platform == "darwin":
+            libc = ctypes.CDLL(None, use_errno=True)
+            renamex_np = libc.renamex_np
+            renamex_np.argtypes = [
+                ctypes.c_char_p,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            ]
+            renamex_np.restype = ctypes.c_int
+            result = renamex_np(
+                os.fsencode(available),
+                os.fsencode(claimed),
+                0x00000004,  # RENAME_EXCL
+            )
+            if result != 0:
+                error_number = ctypes.get_errno()
+                raise OSError(error_number, os.strerror(error_number))
+        elif sys.platform.startswith("linux"):
+            libc = ctypes.CDLL(None, use_errno=True)
+            renameat2 = libc.renameat2
+            renameat2.argtypes = [
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            ]
+            renameat2.restype = ctypes.c_int
+            result = renameat2(
+                -100,  # AT_FDCWD
+                os.fsencode(available),
+                -100,
+                os.fsencode(claimed),
+                0x00000001,  # RENAME_NOREPLACE
+            )
+            if result != 0:
+                error_number = ctypes.get_errno()
+                raise OSError(error_number, os.strerror(error_number))
+        else:
+            raise LaunchWaveError(
+                "atomic no-replace rename is unavailable on this platform"
+            )
+    except (FileExistsError, IsADirectoryError) as exc:
+        raise LaunchWaveError(
+            "Phase B continuation terminal receipt is already claimed"
+        ) from exc
+    except AttributeError as exc:
+        raise LaunchWaveError(
+            "atomic no-replace rename is unavailable on this platform"
+        ) from exc
+    except OSError as exc:
+        if exc.errno in {errno.EEXIST, errno.ENOTEMPTY}:
+            raise LaunchWaveError(
+                "Phase B continuation terminal receipt is already claimed"
+            ) from exc
+        raise LaunchWaveError(
+            "cannot atomically claim Phase B continuation terminal receipt: "
+            f"{exc}"
+        ) from exc
+
+
 def _native_wave_id_is_safe_for_packet_discovery(config: WaveConfig) -> bool:
     wave_id = config.wave_id
     if not isinstance(wave_id, str) or not wave_id:
@@ -1580,6 +1875,258 @@ def _native_post_commit_route_matches_config(
     )
 
 
+def _native_phase_b_route_matches_config(
+    record: Any,
+    config: WaveConfig,
+) -> bool:
+    """Match the exact producer-era route accepted by Phase B continuation."""
+    if not _native_post_commit_route_matches_config(record, config):
+        return False
+    assert isinstance(record, dict)
+
+    expected_keys = {
+        "decision",
+        "summary",
+        "request_for_agent",
+        "request_for_claude",
+        "wave_name",
+        "task_id",
+        "merged_pr",
+        "merge_sha",
+        "head_sha",
+        "state_sha",
+        "timestamp_utc",
+        "blocker_report_paths",
+        "next_candidates",
+        "founder_override",
+        NATIVE_STUB_PACKET_CONTRACT_KEY,
+        LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY,
+        "candidate_authority_required",
+        "candidate_authority",
+    }
+    if config.pager_route:
+        expected_keys.add("pager_route")
+    if set(record) != expected_keys:
+        return False
+
+    request = config.request_for_agent
+    if any(
+        (
+            type(record.get(field_name)) is not str
+            or record.get(field_name) != expected_value
+        )
+        for field_name, expected_value in (
+            ("summary", config.routing_summary),
+            ("request_for_agent", request),
+            ("request_for_claude", request),
+            ("founder_override", config.founder_override),
+        )
+    ):
+        return False
+    if record.get("merged_pr") is not None:
+        return False
+    if not _is_lower_hex_id(record.get("state_sha"), 64):
+        return False
+    timestamp = record.get("timestamp_utc")
+    if type(timestamp) is not str or not timestamp or timestamp != timestamp.strip():
+        return False
+    if config.pager_route and record.get("pager_route") != config.pager_route:
+        return False
+    return True
+
+
+def _native_phase_b_packet_matches_config(
+    packet_text: str,
+    config: WaveConfig,
+) -> bool:
+    """Accept only the one locked packet grammar eligible for this resume."""
+    if not isinstance(packet_text, str):
+        return False
+    lines = packet_text.splitlines()
+    if lines.count("Status: Phase B (locked, implementing)") != 1:
+        return False
+    if sum(line.startswith("Status:") for line in lines) != 1:
+        return False
+    if lines.count("Phase-A-Lock: LOCKED") != 1:
+        return False
+    if sum(line.startswith("Phase-A-Lock:") for line in lines) != 1:
+        return False
+
+    headings = [line for line in lines if line.startswith("## ")]
+    expected_headings = list(_NATIVE_PHASE_B_BASE_H2_LINES)
+    if _NATIVE_PHASE_B_CLARIFICATION_H2_LINE in headings:
+        expected_headings.append(_NATIVE_PHASE_B_CLARIFICATION_H2_LINE)
+    expected_headings.append(_NATIVE_PHASE_B_INDICATOR_HEADING)
+    if headings != expected_headings:
+        return False
+
+    machine_markers = [
+        line.strip()
+        for line in lines
+        if line.strip().startswith("<!-- ")
+        and (
+            ":start -->" in line.strip()
+            or ":end -->" in line.strip()
+        )
+    ]
+    if machine_markers != [
+        _NATIVE_PHASE_B_INDICATOR_START,
+        _NATIVE_PHASE_B_INDICATOR_END,
+    ]:
+        return False
+    try:
+        indicator_start = lines.index(_NATIVE_PHASE_B_INDICATOR_START)
+        indicator_heading = lines.index(_NATIVE_PHASE_B_INDICATOR_HEADING)
+        indicator_end = lines.index(_NATIVE_PHASE_B_INDICATOR_END)
+    except ValueError:
+        return False
+    if not (
+        indicator_start + 1 == indicator_heading
+        and indicator_start < indicator_end
+        and not any(line.strip() for line in lines[indicator_end + 1 :])
+    ):
+        # A final newline is discarded by splitlines(); only a substantive tail
+        # after the end marker is an out-of-order continuation candidate.
+        return False
+
+    try:
+        expected_routing = _native_stub_packet_contract_routing_record(config)
+        _pa.validate_native_stub_packet_contract(
+            expected_routing,
+            config.tracked_packet,
+            packet_text,
+            allow_post_lock_machine_sections=True,
+        )
+    except (LaunchWaveError, _pa.PhaseAExecutorError):
+        return False
+    return not check_packet_fences(
+        packet_text,
+        config,
+        allow_post_lock_machine_sections=True,
+    )
+
+
+def _native_phase_b_tracker_matches_config(
+    repo_root: Path,
+    config: WaveConfig,
+) -> bool:
+    """Match the exact config-rendered tracker note in worktree and index."""
+    tasks_path = Path(repo_root) / "TASKS.md"
+    try:
+        worktree_text = _read_regular_file_bytes(
+            tasks_path,
+            label="worktree TASKS.md authority",
+        ).decode("utf-8")
+        index_bytes = _git_index_bytes(Path(repo_root), "TASKS.md")
+        if index_bytes is None:
+            return False
+        index_text = index_bytes.decode("utf-8")
+        expected_note = _tsn.render_tracker_sync_note(build_tracker_fields(config))
+        return (
+            _tracker_note_line_for_wave(worktree_text, config.wave_id)
+            == expected_note
+            and _tracker_note_line_for_wave(index_text, config.wave_id)
+            == expected_note
+        )
+    except (
+        LaunchWaveError,
+        UnicodeDecodeError,
+        _tsn.TrackerSyncError,
+        TypeError,
+        ValueError,
+    ):
+        return False
+
+
+def _native_phase_b_packet_sources_match(
+    repo_root: Path,
+    config: WaveConfig,
+) -> bool:
+    """Require exactly one byte-identical worktree/index tracked packet."""
+    try:
+        sources = _same_wave_native_packet_sources(Path(repo_root), config)
+    except LaunchWaveError:
+        return False
+    if [source[:2] for source in sources] != [
+        ("worktree", config.tracked_packet),
+        ("index", config.tracked_packet),
+    ]:
+        return False
+    worktree_bytes = _read_regular_file_bytes(
+        Path(repo_root) / config.tracked_packet,
+        label="worktree tracked packet authority",
+    )
+    index_bytes = _git_index_bytes(Path(repo_root), config.tracked_packet)
+    if index_bytes is None or worktree_bytes != index_bytes:
+        return False
+    try:
+        packet_text = worktree_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return _native_phase_b_packet_matches_config(packet_text, config)
+
+
+def _native_phase_b_immutable_snapshot(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+    candidate_spec_path: Path,
+) -> dict[str, Any]:
+    """Capture authority and candidate bytes that bridge setup may not change."""
+    repo_root = Path(repo_root)
+    route_path = _ec.routing_record_path(repo_root, bus_dir)
+    worktree_paths = sorted(
+        {
+            *config.candidate_allowlist,
+            "TASKS.md",
+            config.tracked_packet,
+            config.indicator_artifact_ref,
+        }
+    )
+    worktree: dict[str, bytes | None] = {}
+    index: dict[str, bytes | None] = {}
+    for rel_path in worktree_paths:
+        path = repo_root / rel_path
+        if path.is_symlink():
+            raise LaunchWaveError(
+                f"Phase B immutable candidate path must not be a symlink: {rel_path}"
+            )
+        try:
+            worktree[rel_path] = path.read_bytes() if path.is_file() else None
+        except OSError as exc:
+            raise LaunchWaveError(
+                f"cannot snapshot Phase B candidate path {rel_path}: {exc}"
+            ) from exc
+        index[rel_path] = _git_index_bytes(repo_root, rel_path)
+
+    try:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--binary", "--", *worktree_paths],
+            cwd=str(repo_root),
+            capture_output=True,
+            check=False,
+        )
+    except (OSError, ValueError) as exc:
+        raise LaunchWaveError(
+            f"cannot snapshot staged Phase B candidate bytes: {exc}"
+        ) from exc
+    if staged.returncode != 0:
+        raise LaunchWaveError(
+            "cannot snapshot staged Phase B candidate bytes: git diff failed"
+        )
+    return {
+        "route": _read_regular_file_bytes(route_path, label="routing record authority"),
+        "candidate_spec": _read_regular_file_bytes(
+            candidate_spec_path,
+            label="candidate-authority spec",
+        ),
+        "worktree": worktree,
+        "index": index,
+        "staged": staged.stdout,
+    }
+
+
 def _native_post_commit_packet_matches_config(
     repo_root: Path,
     config: WaveConfig,
@@ -1721,7 +2268,7 @@ def _post_commit_candidate_authority_matches(
     return True, expected_spec_path, launch_target_branch
 
 
-def _post_commit_git_authority_matches(
+def post_commit_git_authority_matches(
     repo_root: Path,
     config: WaveConfig,
     *,
@@ -1796,6 +2343,26 @@ def _post_commit_git_authority_matches(
         and not status_result.stdout
         and commit_ancestor.returncode == 0
         and comparison_ancestor.returncode == 0
+    )
+
+
+def post_commit_continuation_ready_for_record(
+    repo_root: Path,
+    record: dict[str, Any],
+    *,
+    bus_dir: str | Path | None = None,
+) -> tuple[bool, str]:
+    """Return the dispatcher's read-only commit-continuation readiness result.
+
+    This is the launcher-owned public seam for the dispatcher predicate used by
+    same-config post-commit relaunch validation. Keeping the cross-module call
+    here lets launcher tests exercise exceptional/refusal outcomes without
+    reaching into a dispatcher-private helper.
+    """
+    return _ed._post_commit_continuation_ready_for_record(
+        repo_root,
+        record,
+        bus_dir=bus_dir,
     )
 
 
@@ -1929,7 +2496,7 @@ def _post_commit_resume_authority(
         )
     ):
         return None
-    if not _post_commit_git_authority_matches(
+    if not post_commit_git_authority_matches(
         repo_root,
         config,
         target_branch=continuation_target_branch,
@@ -1939,7 +2506,7 @@ def _post_commit_resume_authority(
 
     try:
         dispatcher_ready, _dispatcher_detail = (
-            _ed._post_commit_continuation_ready_for_record(
+            post_commit_continuation_ready_for_record(
                 repo_root,
                 record,
                 bus_dir=bus_dir,
@@ -2744,7 +3311,7 @@ def setup_bridge_max_turns_override(
     return result
 
 
-def _prestage_l4_indicator(repo_root: Path, config: WaveConfig) -> None:
+def prestage_l4_indicator(repo_root: Path, config: WaveConfig) -> None:
     """Best-effort, fail-open pre-stage of the L4 ``--staged`` indicator artifact.
 
     The recurring agent_review_crash strand: every L4 wave's Phase-B review flags
@@ -2921,6 +3488,30 @@ def build_dispatch_command(
     return cmd
 
 
+def build_phase_b_dispatch_command(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None = None,
+) -> list[str]:
+    """Build the explicit recoverable Phase B continuation command."""
+    routing_path = _ec.routing_record_path(Path(repo_root), bus_dir)
+    cmd = [
+        sys.executable,
+        str(SCRIPT_DIR / "executor_dispatch.py"),
+        "phase-b",
+        "--plan",
+        config.tracked_packet,
+        "--task-id",
+        config.task_id,
+        "--routing-record-path",
+        str(routing_path),
+    ]
+    if bus_dir is not None:
+        cmd.extend(["--bus-dir", str(bus_dir)])
+    return cmd
+
+
 def dispatcher_environment_overrides(config: WaveConfig) -> dict[str, str]:
     """Return the non-secret dispatcher env overrides requested by this wave."""
     overrides: dict[str, str] = {}
@@ -2980,6 +3571,118 @@ def dispatcher_child_environment(repo_root: Path, config: WaveConfig) -> dict[st
     return child_env
 
 
+def _maybe_launch_dispatcher_command(
+    repo_root: Path,
+    config: WaveConfig,
+    command: list[str],
+    *,
+    runner: Callable[..., Any] = subprocess.run,
+    bus_dir: str | Path | None = None,
+    claimed_receipt_path: Path | None = None,
+) -> dict[str, Any]:
+    """Run one dispatcher command and manage the terminal receipt lifecycle."""
+    repo_root = Path(repo_root)
+    runner_kwargs: dict[str, Any] = {"cwd": str(repo_root)}
+    child_env = dispatcher_child_environment(repo_root, config)
+    if child_env is not None:
+        runner_kwargs["env"] = child_env
+
+    # Exceptions, interrupts, and a still-running/non-integer result escape
+    # without minting a receipt. In the continuation case the claim therefore
+    # remains durable and later relaunches fail closed.
+    result = runner(command, **runner_kwargs)
+    returncode = getattr(result, "returncode", None)
+    if type(returncode) is not int:
+        raise LaunchWaveError(
+            "dispatcher launch did not return a normal integer terminal "
+            f"returncode (returncode={returncode!r})"
+        )
+
+    metadata = launch_metadata(config)
+    if returncode == 0:
+        if claimed_receipt_path is not None:
+            try:
+                claimed_receipt_path.unlink()
+            except OSError as exc:
+                raise LaunchWaveError(
+                    "dispatcher completed successfully but the claimed terminal "
+                    f"receipt could not be removed: {exc}"
+                ) from exc
+        return {
+            "launched": True,
+            "command": command,
+            "returncode": returncode,
+            **metadata,
+        }
+
+    try:
+        receipt = _build_dispatch_terminal_receipt(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+            returncode=returncode,
+        )
+        available_path, canonical_claimed_path = (
+            _dispatch_terminal_receipt_paths(repo_root, bus_dir=bus_dir)
+        )
+        if claimed_receipt_path is None:
+            _atomic_write_json(available_path, receipt)
+        else:
+            if claimed_receipt_path != canonical_claimed_path:
+                raise LaunchWaveError(
+                    "claimed terminal receipt path does not match the active bus"
+                )
+            # Keep the available name absent until a complete replacement has
+            # been written at the claimed name, then publish it atomically.
+            _atomic_write_json(claimed_receipt_path, receipt)
+            try:
+                os.replace(claimed_receipt_path, available_path)
+            except OSError as exc:
+                raise LaunchWaveError(
+                    "cannot atomically replace claimed terminal receipt with "
+                    f"the new available receipt: {exc}"
+                ) from exc
+    except LaunchWaveError as exc:
+        raise LaunchWaveError(
+            f"dispatcher launch failed (returncode={returncode!r}) and an exact "
+            f"terminal receipt could not be persisted: {exc}"
+        ) from exc
+
+    raise LaunchWaveError(
+        f"dispatcher launch failed (returncode={returncode!r}); an exact "
+        "single-use terminal receipt is available for the same-config Phase B "
+        "continuation."
+    )
+
+
+def _launch_post_commit_dispatcher_without_terminal_receipt(
+    repo_root: Path,
+    config: WaveConfig,
+    command: list[str],
+    *,
+    runner: Callable[..., Any],
+) -> dict[str, Any]:
+    """Preserve the established post-commit retry behavior without R4 state."""
+    runner_kwargs: dict[str, Any] = {"cwd": str(repo_root)}
+    child_env = dispatcher_child_environment(Path(repo_root), config)
+    if child_env is not None:
+        runner_kwargs["env"] = child_env
+    result = runner(command, **runner_kwargs)
+    returncode = getattr(result, "returncode", None)
+    if returncode != 0:
+        raise LaunchWaveError(
+            f"dispatcher launch failed (returncode={returncode!r}); wave setup is "
+            "complete and idempotent, but the dispatcher did not start. Resolve the "
+            "dispatcher failure and re-run with --launch."
+        )
+    return {
+        "launched": True,
+        "command": command,
+        "returncode": returncode,
+        **launch_metadata(config),
+    }
+
+
 def maybe_launch_dispatcher(
     repo_root: Path,
     config: WaveConfig,
@@ -2992,35 +3695,21 @@ def maybe_launch_dispatcher(
 
     When ``launch`` is False (the default), this persists nothing and runs no
     subprocess; it only returns the command it would run. When True, it shells
-    out via ``runner`` (injectable for tests) and FAILS CLOSED: a non-zero
-    dispatcher returncode raises :class:`LaunchWaveError` instead of reporting a
-    completed launch, so a failed dispatcher subprocess can never be mistaken
-    for a launched wave. (The wave setup itself is already persisted and
-    idempotent, so re-running the same config after fixing the dispatcher
-    failure converges -- see the bounded re-run recovery contract.)
+    out via ``runner`` (injectable for tests) and FAILS CLOSED. An exact normal
+    nonzero result records terminal authority before raising; zero, exceptions,
+    still-running results, and unhashable authority mint no receipt.
     """
     cmd = build_dispatch_command(repo_root, config, bus_dir=bus_dir)
     metadata = launch_metadata(config)
     if not launch:
         return {"launched": False, "command": cmd, **metadata}
-    runner_kwargs: dict[str, Any] = {"cwd": str(repo_root)}
-    child_env = dispatcher_child_environment(repo_root, config)
-    if child_env is not None:
-        runner_kwargs["env"] = child_env
-    result = runner(cmd, **runner_kwargs)
-    returncode = getattr(result, "returncode", None)
-    if returncode != 0:
-        raise LaunchWaveError(
-            f"dispatcher launch failed (returncode={returncode!r}); wave setup is "
-            "complete and idempotent, but the dispatcher did not start. Resolve the "
-            "dispatcher failure and re-run with --launch."
-        )
-    return {
-        "launched": True,
-        "command": cmd,
-        "returncode": returncode,
-        **metadata,
-    }
+    return _maybe_launch_dispatcher_command(
+        Path(repo_root),
+        config,
+        cmd,
+        runner=runner,
+        bus_dir=bus_dir,
+    )
 
 
 def _bridge_db_path(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
@@ -3092,6 +3781,223 @@ def _active_review_jobs(repo_root: Path, bus_dir: str | Path | None = None) -> l
         if row and row[0] and row[1]
     )
     return sorted(str(item) for item in active)
+
+
+def _path_lexists(path: Path) -> bool:
+    return os.path.lexists(path)
+
+
+def _native_phase_b_reentry_evidence_present(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+) -> bool:
+    """Detect same-attempt Phase B/terminal evidence without granting access."""
+    if (
+        config.routing_decision != "ROUTE_PHASE_A"
+        or not config.candidate_authority_enabled()
+    ):
+        return False
+    repo_root = Path(repo_root)
+    available, claimed = _dispatch_terminal_receipt_paths(
+        repo_root,
+        bus_dir=bus_dir,
+    )
+    # A claimed pathname always fences an interrupted Phase B attempt, even
+    # if the packet has subsequently been restored to its initial render.
+    if _path_lexists(claimed):
+        return True
+
+    try:
+        packet_sources = _same_wave_native_packet_sources(repo_root, config)
+    except LaunchWaveError:
+        return True
+
+    if _path_lexists(available):
+        # A normal nonzero dispatcher return can precede the Phase A lock.
+        # The exact initial worktree/index pair must retain the ordinary
+        # same-config setup retry; an available receipt alone does not prove
+        # Phase B was reached. Keep all other receipt-bearing states behind
+        # the continuation fence, including missing or incomplete packets.
+        initial_packet = render_wave_packet(config)
+        if packet_sources != [
+            ("worktree", config.tracked_packet, initial_packet),
+            ("index", config.tracked_packet, initial_packet),
+        ]:
+            return True
+
+    if any(
+        "Phase-A-Lock: LOCKED" in packet_text
+        or any(
+            line.startswith("Status: Phase B")
+            or line in _POST_LOCK_RECOVERY_STATUS_PROJECTION
+            for line in packet_text.splitlines()
+        )
+        for _source, _rel_path, packet_text in packet_sources
+    ):
+        return True
+
+    # Retain route-side evidence for an advanced packet that cannot be read by
+    # normal same-wave discovery. This branch grants no continuation authority.
+    routing_path = _ec.routing_record_path(repo_root, bus_dir)
+    try:
+        record = json.loads(routing_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not _routing_record_targets_native_attempt(record, config):
+        return False
+    try:
+        packet_text = (repo_root / config.tracked_packet).read_text(
+            encoding="utf-8"
+        )
+    except (OSError, UnicodeDecodeError):
+        return False
+    return (
+        "Phase-A-Lock: LOCKED" in packet_text
+        or any(
+            line.startswith("Status: Phase B")
+            or line in _POST_LOCK_RECOVERY_STATUS_PROJECTION
+            for line in packet_text.splitlines()
+        )
+    )
+
+
+def _native_phase_b_resume_authority(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+) -> dict[str, Any] | None:
+    """Return the exact pre-claim Phase B continuation authority, or ``None``."""
+    if (
+        config.routing_decision != "ROUTE_PHASE_A"
+        or not config.candidate_authority_enabled()
+    ):
+        return None
+    repo_root = Path(repo_root)
+    routing_path = _ec.routing_record_path(repo_root, bus_dir)
+    try:
+        record = json.loads(routing_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not _native_phase_b_route_matches_config(record, config):
+        return None
+
+    # Preserve the existing immutable native-contract validator as an explicit
+    # conjunct before applying the narrower locked Phase B grammar.
+    _require_native_stub_packet_contract_relaunch_safe(
+        repo_root,
+        config,
+        bus_dir=bus_dir,
+    )
+    if not _native_phase_b_packet_sources_match(repo_root, config):
+        return None
+    if not _native_phase_b_tracker_matches_config(repo_root, config):
+        return None
+
+    candidate_ok, candidate_spec_path, _target_branch = (
+        _post_commit_candidate_authority_matches(
+            repo_root,
+            record,
+            config,
+            bus_dir=bus_dir,
+        )
+    )
+    if not candidate_ok or candidate_spec_path is None:
+        return None
+
+    packet_path = repo_root / config.tracked_packet
+    verify_fail_closed_precondition(repo_root, config)
+    verify_three_guards(repo_root, config, packet_path)
+
+    handoff_path = _ec.agent_bus_path(
+        repo_root,
+        bus_dir,
+        "executors",
+        "phase_b_handoff.json",
+    )
+    continuation_path = _ec.agent_bus_path(
+        repo_root,
+        bus_dir,
+        "executors",
+        f"commit_executor_{config.wave_id}.json",
+    )
+    if _path_lexists(handoff_path) or _path_lexists(continuation_path):
+        return None
+    if _active_review_jobs(repo_root, bus_dir):
+        return None
+
+    indicator_path = repo_root / config.indicator_artifact_ref
+    if (
+        not config.indicator_artifact_ref
+        or indicator_path.is_symlink()
+        or not indicator_path.is_file()
+        or _git_index_bytes(repo_root, config.indicator_artifact_ref) is None
+    ):
+        return None
+
+    immutable_snapshot = _native_phase_b_immutable_snapshot(
+        repo_root,
+        config,
+        bus_dir=bus_dir,
+        candidate_spec_path=candidate_spec_path,
+    )
+    terminal = _load_matching_available_dispatch_terminal_receipt(
+        repo_root,
+        config,
+        bus_dir=bus_dir,
+    )
+    if terminal is None:
+        return None
+    receipt, available_path, claimed_path = terminal
+    return {
+        "routing_path": routing_path,
+        "candidate_authority_spec_path": candidate_spec_path,
+        "receipt": receipt,
+        "available_receipt_path": available_path,
+        "claimed_receipt_path": claimed_path,
+        "immutable_snapshot": immutable_snapshot,
+    }
+
+
+def _claimed_dispatch_terminal_receipt_matches(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+    claimed_path: Path,
+    expected_receipt: dict[str, Any],
+) -> bool:
+    """Revalidate the claimed inode after the no-clobber claim boundary."""
+    available, canonical_claimed = _dispatch_terminal_receipt_paths(
+        Path(repo_root),
+        bus_dir=bus_dir,
+    )
+    if (
+        claimed_path != canonical_claimed
+        or _path_lexists(available)
+        or claimed_path.is_symlink()
+        or not claimed_path.is_file()
+    ):
+        return False
+    try:
+        actual = json.loads(claimed_path.read_text(encoding="utf-8"))
+        returncode = actual.get("returncode") if isinstance(actual, dict) else None
+        if type(returncode) is not int or returncode == 0:
+            return False
+        current = _build_dispatch_terminal_receipt(
+            Path(repo_root),
+            config,
+            bus_dir=bus_dir,
+            returncode=returncode,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, LaunchWaveError):
+        return False
+    return (
+        _exact_typed_mapping_matches(actual, expected_receipt)
+        and _exact_typed_mapping_matches(actual, current)
+    )
 
 
 def prepare_review_authority(
@@ -3219,23 +4125,44 @@ def run_wave_setup(
     relaunch_guard_ran = _native_relaunch_guard_identity_is_safe(config)
     config_errors = config.validate(repo_root, bus_dir=bus_dir)
 
-    # A fully proven, already committed continuation is the only setup-chain
-    # bypass. All reads happen before packet/tracker/route/candidate/bridge/
-    # indicator producers. The unchanged dispatcher then selects commit-only
-    # resume from the unchanged stale canonical route.
+    # Fully proven continuation paths are the only setup-chain bypasses. All
+    # authority reads and the terminal receipt claim happen before the legacy
+    # packet/tracker/route/candidate/indicator producers.
     if launch and relaunch_guard_ran and not config_errors:
+        phase_b_reentry_evidence = _native_phase_b_reentry_evidence_present(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+        )
+        _available_receipt, existing_claimed_receipt = (
+            _dispatch_terminal_receipt_paths(repo_root, bus_dir=bus_dir)
+        )
+        if (
+            config.routing_decision == "ROUTE_PHASE_A"
+            and config.candidate_authority_enabled()
+            and _path_lexists(existing_claimed_receipt)
+        ):
+            _raise_native_stub_contract_relaunch_required(
+                "same-wave Phase B terminal receipt is already claimed; "
+                "interrupted claims have no stale-claim recovery"
+            )
+
         continuation_authority = _post_commit_resume_authority(
             repo_root,
             config,
             bus_dir=bus_dir,
         )
         if continuation_authority is not None:
-            launch_result = maybe_launch_dispatcher(
+            post_commit_command = build_dispatch_command(
                 repo_root,
                 config,
-                launch=True,
-                runner=runner,
                 bus_dir=bus_dir,
+            )
+            launch_result = _launch_post_commit_dispatcher_without_terminal_receipt(
+                repo_root,
+                config,
+                post_commit_command,
+                runner=runner,
             )
             candidate_spec_path = continuation_authority[
                 "candidate_authority_spec_path"
@@ -3254,6 +4181,100 @@ def run_wave_setup(
                 precondition_ok=True,
                 guards_ok=True,
                 launch=launch_result,
+            )
+
+        phase_b_authority = _native_phase_b_resume_authority(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+        )
+        if phase_b_authority is not None:
+            available_receipt_path = phase_b_authority[
+                "available_receipt_path"
+            ]
+            claimed_receipt_path = phase_b_authority["claimed_receipt_path"]
+            receipt = phase_b_authority["receipt"]
+            _claim_dispatch_terminal_receipt(
+                available_receipt_path,
+                claimed_receipt_path,
+            )
+            if not _claimed_dispatch_terminal_receipt_matches(
+                repo_root,
+                config,
+                bus_dir=bus_dir,
+                claimed_path=claimed_receipt_path,
+                expected_receipt=receipt,
+            ):
+                raise LaunchWaveError(
+                    "Phase B terminal receipt changed during claim; claimed "
+                    "state remains fail-closed"
+                )
+
+            # Only the two declared bridge builders may run between claim and
+            # dispatch. A missing seed is fatal for this continuation even
+            # though it remains a graceful no-op for initial setup.
+            bridge_config_path = setup_bridge_config(repo_root, bus_dir=bus_dir)
+            if bridge_config_path is None:
+                raise LaunchWaveError(
+                    "Phase B continuation requires a bridge_config.json from "
+                    "the declared active/seed source order; claimed state "
+                    "remains fail-closed"
+                )
+            max_turns_result = setup_bridge_max_turns_override(
+                repo_root,
+                config,
+                bus_dir=bus_dir,
+            )
+
+            current_snapshot = _native_phase_b_immutable_snapshot(
+                repo_root,
+                config,
+                bus_dir=bus_dir,
+                candidate_spec_path=phase_b_authority[
+                    "candidate_authority_spec_path"
+                ],
+            )
+            if current_snapshot != phase_b_authority["immutable_snapshot"]:
+                raise LaunchWaveError(
+                    "immutable Phase B authority or staged candidate bytes "
+                    "changed during bridge reconciliation; claimed state "
+                    "remains fail-closed"
+                )
+
+            phase_b_command = build_phase_b_dispatch_command(
+                repo_root,
+                config,
+                bus_dir=bus_dir,
+            )
+            launch_result = _maybe_launch_dispatcher_command(
+                repo_root,
+                config,
+                phase_b_command,
+                runner=runner,
+                bus_dir=bus_dir,
+                claimed_receipt_path=claimed_receipt_path,
+            )
+            if max_turns_result is not None:
+                launch_result["bridge_max_turns_override"] = max_turns_result
+            return WaveSetupResult(
+                wave_id=config.wave_id,
+                packet_path=str(repo_root / config.tracked_packet),
+                tracked_packet=config.tracked_packet,
+                tracker_note_written=False,
+                routing_record_path=str(phase_b_authority["routing_path"]),
+                candidate_authority_spec_path=str(
+                    phase_b_authority["candidate_authority_spec_path"]
+                ),
+                bridge_config_path=str(bridge_config_path),
+                precondition_ok=True,
+                guards_ok=True,
+                launch=launch_result,
+            )
+
+        if phase_b_reentry_evidence:
+            _raise_native_stub_contract_relaunch_required(
+                "same-wave Phase B continuation authority or terminal receipt "
+                "is incomplete, mismatched, already consumed, or forbidden"
             )
         if _post_commit_reentry_evidence_present(
             repo_root,
@@ -3317,7 +4338,7 @@ def run_wave_setup(
     # at review time and the wave strands on that EXPECTED finding. This NEVER
     # raises (Step 5 stays the commit-time authority); a no-op when the wave
     # declares no indicator.
-    _prestage_l4_indicator(repo_root, config)
+    prestage_l4_indicator(repo_root, config)
 
     # Refresh the index-sensitive canonical record after pre-staging. Reusing
     # setup_routing_record updates the shared builder's source-state metadata

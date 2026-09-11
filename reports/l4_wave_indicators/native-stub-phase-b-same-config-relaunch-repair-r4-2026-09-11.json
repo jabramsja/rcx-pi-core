@@ -1,0 +1,25 @@
+{
+  "wave_id": "native-stub-phase-b-same-config-relaunch-repair-r4-2026-09-11",
+  "repeat_run_speedup_ratio": 1.379033,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.32045,
+  "repeat_run_raw_seconds": [
+    0.441911,
+    0.32045
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.441911
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.762361
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-11T16:57:22Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "c382fcfc2277676a4354190e326ead312faab7dd"
+}
