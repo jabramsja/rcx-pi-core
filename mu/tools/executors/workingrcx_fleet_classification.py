@@ -178,15 +178,25 @@ def _git(carrier: str, *args: str) -> dict:
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_NO_LAZY_FETCH="1", GIT_NO_REPLACE_OBJECTS="1",
                GIT_GRAFT_FILE=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
                GIT_TERMINAL_PROMPT="0", GIT_PROTOCOL_FROM_USER="0", LC_ALL="C")
+    command = ["git", "--no-optional-locks", "--no-lazy-fetch",
+               "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+               "-c", "core.commitGraph=false", "-c", "advice.graftFileDeprecated=false",
+               "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "protocol.allow=never",
+               "-C", carrier, *args]
     try:
         result = subprocess.run(
-            ["git", "--no-optional-locks", "--no-lazy-fetch",
-             "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
-             "-c", "core.commitGraph=false", "-c", "advice.graftFileDeprecated=false",
-             "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "protocol.allow=never",
-             "-C", carrier, *args],
+            command,
             env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
         )
+        if (result.returncode == 129
+                and result.stderr.startswith(b"unknown option: --no-lazy-fetch\n")):
+            # Older Git rejects this global option before running the query.
+            # Retain GIT_NO_LAZY_FETCH and the transport ban on the retry.
+            command.remove("--no-lazy-fetch")
+            result = subprocess.run(
+                command,
+                env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+            )
         return {"operation": list(args), "returncode": result.returncode,
                 "stdout": os.fsdecode(result.stdout[:4096]),
                 "stderr": os.fsdecode(result.stderr[:4096]),
