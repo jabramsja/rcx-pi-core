@@ -1,6 +1,7 @@
 """Tests for recovery_gate: failure classifier and Tier 1–3 recovery."""
 from __future__ import annotations
 
+import copy
 import fcntl, io, json, os, re, shlex, sqlite3, subprocess, sys, threading, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,9 +16,56 @@ _OBSERVABILITY_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _OBSERVABILITY_ONESHOT_TIMEOUT_S = int(os.environ.get("RCX_TEST_OBSERVABILITY_ONESHOT_TIMEOUT_S", "30"))
 rg_mod = load_module("recovery_gate", _EXECUTORS_DIR / "recovery_gate.py")
+dispatch_mod = load_module(
+    "executor_dispatch_recovery_gate_boundary",
+    _EXECUTORS_DIR / "executor_dispatch.py",
+)
 dash_mod = load_module("pipeline_dashboard_observability", _OBSERVABILITY_DIR / "pipeline_dashboard.py")
 web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR / "pipeline_dashboard_web.py")
 FailureClass = rg_mod.FailureClass
+
+
+def make_noisy_chained_needs_phase_a_result() -> dict[str, object]:
+    """Reproduce the wrapped commit rejection that exposed the retry loop."""
+    commit_candidate = {
+        "status": "error",
+        "step": "build_and_run_supervisor",
+        "errors": [
+            "Supervisor returned NEEDS_PHASE_A: The five changed_files exactly "
+            "match the staged diff, the worktree remained stable during review, "
+            "and blocker_report_paths is comprehensive because "
+            "reports/deferred/blocking contains only README.md. However, the "
+            "implementation materially contradicts the locked Phase A contract, "
+            "so COMMIT_GO is not authorized."
+        ],
+        "steps_completed": [
+            "validate_inputs",
+            "ensure_feature_branch",
+            "ensure_tracker_note",
+            "stage_files",
+            "collect_and_stage_indicator",
+            "refresh_commit_packet_truth",
+            "restore_commit_retry_state",
+        ],
+        "pre_commit_decision": "NEEDS_PHASE_A",
+        "pre_commit_summary": (
+            "The implementation materially contradicts the locked Phase A contract."
+        ),
+        "wave_id": "native-stub-phase-b-same-config-relaunch-repair-r1-2026-09-10",
+    }
+    return {
+        "status": "failed",
+        "decision": "COMMIT_GO",
+        "executor": "commit_executor",
+        "exit_code": 1,
+        "stdout": json.dumps(commit_candidate, indent=2),
+        "stderr": (
+            "Historical recovery transcript: fatal: Unable to create "
+            "'/repo/.git/index.lock': File exists. Another git process seems "
+            "to be running in this repository; remove the file manually to continue."
+        ),
+        "chained_from": "phase_b_executor",
+    }
 
 
 _RECOVERY_TIMEOUT_ENV_KEYS = (
@@ -771,6 +819,259 @@ class TestClassifyFailure:
         assert rg_mod.classify_failure(
             {"status": "stale_state", "stderr": "", "step": "phase_b"}
         ) == FailureClass.STALE_EXECUTOR_STATE
+
+
+class TestNeedsPhaseATerminalFence:
+    @pytest.mark.parametrize(
+        "commit_provenance",
+        [
+            {"step": "build_and_run_supervisor"},
+            {"executor": "commit_executor"},
+        ],
+        ids=["supervisor_step", "commit_executor"],
+    )
+    def test_direct_exact_failed_commit_candidate_is_tier4(self, commit_provenance):
+        result = {
+            "status": "error",
+            "pre_commit_decision": "NEEDS_PHASE_A",
+            **commit_provenance,
+        }
+
+        failure_class = rg_mod.classify_failure(result)
+
+        assert failure_class == FailureClass.NEEDS_PHASE_A
+        assert rg_mod.tier_for(failure_class) == 4
+
+    def test_noisy_wrapped_commit_candidate_wins_before_index_lock_and_learning(
+        self,
+        tmp_path,
+    ):
+        result = make_noisy_chained_needs_phase_a_result()
+        original = copy.deepcopy(result)
+
+        with patch.object(
+            rg_mod,
+            "check_learned_patterns",
+            side_effect=AssertionError("terminal fence must precede learned lookup"),
+        ) as learned_lookup, patch.object(
+            rg_mod,
+            "run_recovery_loop",
+            side_effect=AssertionError("terminal fence must not delegate model recovery"),
+        ) as model_recovery:
+            failure_class = rg_mod.classify_failure(result)
+            recovery = rg_mod.attempt_recovery(tmp_path, result, "retry-fence-wave")
+
+        assert failure_class == FailureClass.NEEDS_PHASE_A
+        assert rg_mod.tier_for(failure_class) == 4
+        assert recovery == {
+            "recovered": False,
+            "action": "escalate",
+            "tier": 4,
+            "failure_class": FailureClass.NEEDS_PHASE_A.value,
+            "detail": "tier 4 failure (needs_phase_a) requires escalation",
+            "exhausted": False,
+        }
+        assert result == original
+        learned_lookup.assert_not_called()
+        model_recovery.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "embedded",
+        [
+            {"type": "prompt", "pre_commit_decision": "NEEDS_PHASE_A"},
+            {"status": "success", "pre_commit_decision": "NEEDS_PHASE_A"},
+        ],
+        ids=["prompt_object", "successful_object"],
+    )
+    def test_failed_outer_wrapper_cannot_supply_authority_to_embedded_decision(
+        self,
+        embedded,
+    ):
+        result = {
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": json.dumps(embedded),
+        }
+
+        failure_class = rg_mod.classify_failure(result)
+
+        assert failure_class == FailureClass.UNKNOWN_ERROR
+        assert rg_mod.tier_for(failure_class) == 3
+
+    def test_failed_commit_owned_prompt_candidate_has_no_terminal_authority(self):
+        prompt_candidate = {
+            "type": "prompt",
+            "status": "failed",
+            "step": "build_and_run_supervisor",
+            "executor": "commit_executor",
+            "pre_commit_decision": "NEEDS_PHASE_A",
+        }
+        result = {
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": json.dumps(prompt_candidate),
+        }
+
+        failure_class = rg_mod.classify_failure(result)
+
+        assert failure_class == FailureClass.UNKNOWN_ERROR
+        assert rg_mod.tier_for(failure_class) == 3
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            {
+                "status": "error",
+                "executor": "commit_executor",
+                "errors": ["Supervisor returned NEEDS_PHASE_A"],
+            },
+            {
+                "status": "failed",
+                "executor": "commit_executor",
+                "stdout": (
+                    '{"status":"error","step":"build_and_run_supervisor",'
+                    '"pre_commit_decision":"NEEDS_PHASE_A"'
+                ),
+            },
+            {
+                "status": "error",
+                "step": "build_and_run_supervisor",
+                "pre_commit_decision": "needs_phase_a",
+            },
+            {
+                "status": "error",
+                "step": "build_and_run_supervisor",
+                "pre_commit_decision": "NEEDS_PHASE_A ",
+            },
+        ],
+        ids=["prose_only", "malformed_json", "wrong_case", "trailing_space"],
+    )
+    def test_nonexact_or_unstructured_mentions_retain_nonterminal_behavior(self, result):
+        failure_class = rg_mod.classify_failure(result)
+
+        assert failure_class == FailureClass.UNKNOWN_ERROR
+        assert rg_mod.tier_for(failure_class) == 3
+
+    def test_needs_phase_b_commit_rejection_retains_tier3_behavior(self):
+        commit_candidate = {
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "errors": ["Supervisor returned NEEDS_PHASE_B: return to implementation"],
+            "pre_commit_decision": "NEEDS_PHASE_B",
+        }
+        result = {
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": json.dumps(commit_candidate),
+        }
+
+        failure_class = rg_mod.classify_failure(result)
+
+        assert failure_class == FailureClass.NEEDS_PHASE_B
+        assert rg_mod.tier_for(failure_class) == 3
+
+    def test_dispatcher_main_stops_before_chained_commit_or_model_retry(
+        self,
+        tmp_path,
+        capsys,
+    ):
+        result = make_noisy_chained_needs_phase_a_result()
+        original = copy.deepcopy(result)
+        original_candidate = json.loads(str(original["stdout"]))
+        routing_path = tmp_path / "routing.json"
+        routing_path.write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "exercise the production dispatcher retry boundary",
+                    "wave_name": "retry-fence-wave",
+                }
+            ),
+            encoding="utf-8",
+        )
+        dispatch_calls = 0
+
+        def initial_dispatch_only(*_args, **_kwargs):
+            nonlocal dispatch_calls
+            dispatch_calls += 1
+            if dispatch_calls != 1:
+                raise AssertionError("dispatcher consumed retry budget after terminal result")
+            return result
+
+        unexpected_retry = AssertionError("terminal result must not reach retry delegation")
+        with patch.object(
+            dispatch_mod.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout=f"{tmp_path}\n"),
+        ), patch.object(
+            dispatch_mod,
+            "load_config",
+            return_value=copy.deepcopy(dispatch_mod.DEFAULT_EXECUTOR_CONFIG),
+        ), patch.object(
+            dispatch_mod,
+            "dispatch",
+            side_effect=initial_dispatch_only,
+        ) as dispatch_spy, patch.object(
+            dispatch_mod,
+            "attempt_recovery",
+            wraps=dispatch_mod.attempt_recovery,
+        ) as recovery_spy, patch.object(
+            dispatch_mod,
+            "_retry_commit_only",  # ANTICHEAT_OK: fail-fast dispatcher boundary spy
+            side_effect=unexpected_retry,
+        ) as commit_retry, patch.object(
+            dispatch_mod,
+            "_clear_phase_b_state_for_retry",  # ANTICHEAT_OK: fail-fast retry-state spy
+            side_effect=unexpected_retry,
+        ) as clear_retry_state, patch.object(
+            dispatch_mod,
+            "_emit_executor_hard_fail_event",  # ANTICHEAT_OK: isolate pager I/O
+            return_value={},
+        ), patch.object(
+            rg_mod,
+            "check_learned_patterns",
+            side_effect=AssertionError("terminal fence must precede learned lookup"),
+        ) as learned_lookup, patch.object(
+            rg_mod,
+            "run_recovery_loop",
+            side_effect=AssertionError("terminal fence must not delegate model recovery"),
+        ) as model_recovery, patch.object(
+            rg_mod,
+            "emit_pipeline_agent_event",
+            return_value={},
+        ):
+            exit_code = dispatch_mod.main(
+                [
+                    "--routing-record",
+                    str(routing_path),
+                    "--retries",
+                    "2",
+                    "--json",
+                ]
+            )
+
+        emitted_result = json.loads(capsys.readouterr().out)
+        observed_recovery = result["recovery"]
+        assert exit_code == 1
+        assert dispatch_calls == 1
+        dispatch_spy.assert_called_once()
+        recovery_spy.assert_called_once()
+        commit_retry.assert_not_called()
+        clear_retry_state.assert_not_called()
+        learned_lookup.assert_not_called()
+        model_recovery.assert_not_called()
+        assert observed_recovery == {
+            "recovered": False,
+            "action": "escalate",
+            "tier": 4,
+            "failure_class": FailureClass.NEEDS_PHASE_A.value,
+            "detail": "tier 4 failure (needs_phase_a) requires escalation",
+            "exhausted": False,
+        }
+        assert emitted_result["recovery"] == observed_recovery
+        assert str(result["stdout"]) == str(original["stdout"])
+        assert json.loads(str(result["stdout"])) == original_candidate
+        assert {key: value for key, value in result.items() if key != "recovery"} == original
 
 
 class TestStagePathSymlinkAliasRecovery:
@@ -1780,7 +2081,11 @@ class TestTierMapping:
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
-        assert tier4 == {FailureClass.TERMINAL_POLICY, FailureClass.UNCLASSIFIED}
+        assert tier4 == {
+            FailureClass.NEEDS_PHASE_A,
+            FailureClass.TERMINAL_POLICY,
+            FailureClass.UNCLASSIFIED,
+        }
 
 
 class TestTransientRateLimitRecovery:
