@@ -27,16 +27,22 @@ Sequential chain (seven steps, in order):
   6. 3-guard verify    -- the three ANDed Phase A pre-lock guards: Scope-mentions-
                           TASKS.md, bare ``FOUNDER_OVERRIDE:<wave_id>``, and a
                           detector-visible TASKS.md tracker note for the wave.
-  7. optional launch   -- the dispatcher launch, OFF by default. When enabled it
-                          shells out to ``executor_dispatch`` in ROUTING MODE
-                          (``--routing-record <path>``, the record step 3 wrote),
-                          failing closed on a non-zero dispatcher returncode;
-                          otherwise it only returns the command it would run.
+  7. optional launch   -- the dispatcher launch, OFF by default. Initial setup
+                          shells out in ROUTING MODE (``--routing-record <path>``).
+                          An exactly authorized locked Phase B relaunch instead
+                          uses the existing explicit recoverable ``phase-b``
+                          surface with that canonical route, failing closed on a
+                          non-zero dispatcher returncode; otherwise this step
+                          only returns the command it would run.
 
 Design stance -- SIMPLE SEQUENTIAL, NO TRANSACTIONAL/ROLLBACK LAYER. A partial
 run (interrupted after a subset of the artifact-producing steps) is recovered by
 re-running the SAME wave-config, NOT by rolling back. The bounded re-run recovery
 contract is:
+
+  With ``--launch``, complete post-commit authority and exact locked Phase B
+  authority are checked read-only before this chain. Either continuation bypass
+  dispatches through its existing recovery surface without rerunning a producer.
 
   Re-running with the SAME wave-config is idempotent and convergent. Each of the
   four artifact-producing steps detects its own prior output and leaves exactly
@@ -221,6 +227,10 @@ _POST_LOCK_RECOVERY_PROGRESS_MARKERS = (
     ("<!-- L4_FIELDS_FROM_TRACKER:start -->", 64),
     ("<!-- COMMIT_PATH_TRUTH_REFRESH:start -->", 128),
 )
+_NATIVE_STUB_INITIAL_STATUS_LINE = (
+    "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)"
+)
+_NATIVE_STUB_INITIAL_LOCK_LINE = "Phase-A-Lock: UNLOCKED"
 
 
 def _git_probe_environment() -> dict[str, str]:
@@ -1580,6 +1590,54 @@ def _native_post_commit_route_matches_config(
     )
 
 
+def _native_phase_b_route_matches_config(
+    record: Any,
+    config: WaveConfig,
+) -> bool:
+    """Match config-derived route fields consumed by the Phase B surface.
+
+    ``_native_post_commit_route_matches_config`` owns the shared native,
+    candidate-selection, base, and launch-override checks. Phase B additionally
+    consumes the top-level request, founder, and pager fields, so those must
+    still have the exact shape emitted by ``setup_routing_record``. The route's
+    timestamp and state hash remain diagnostics rather than authority.
+    """
+    if not _native_post_commit_route_matches_config(record, config):
+        return False
+    assert isinstance(record, dict)
+    if type(config.founder_override) is not str:
+        return False
+
+    expected_fields = {
+        "summary": config.routing_summary,
+        "request_for_agent": config.request_for_agent,
+        # The shared producer emits the selected neutral request through this
+        # compatibility key too, even when the deprecated config input differs.
+        "request_for_claude": config.request_for_agent,
+        "merged_pr": None,
+        "founder_override": config.founder_override.strip(),
+    }
+    if any(
+        type(record.get(field_name)) is not type(expected_value)
+        or record.get(field_name) != expected_value
+        for field_name, expected_value in expected_fields.items()
+    ):
+        return False
+
+    if config.pager_route:
+        if (
+            type(record.get("pager_route")) is not str
+            or record.get("pager_route") != config.pager_route
+        ):
+            return False
+    elif "pager_route" in record:
+        return False
+
+    # This flag is emitted only by a completed-packet recovery reroute, never by
+    # the initial route carried by the locked, pre-handoff Phase B candidate.
+    return "allow_completed_tracked_packet" not in record
+
+
 def _native_post_commit_packet_matches_config(
     repo_root: Path,
     config: WaveConfig,
@@ -1719,6 +1777,232 @@ def _post_commit_candidate_authority_matches(
             return False, None, ""
 
     return True, expected_spec_path, launch_target_branch
+
+
+def _native_packet_locked_phase_b_lifecycle(
+    content: str,
+) -> tuple[str, str] | None:
+    """Return the packet's one exact locked Phase B header state, if present.
+
+    The native packet validator owns the allowed lifecycle vocabulary. This
+    narrower selector runs only after that validator succeeds and prevents an
+    otherwise valid unlocked Phase A packet (or a mismatched lock/status pair)
+    from selecting the recoverable Phase B surface.
+    """
+    lines = content.splitlines()
+    header_end = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if _is_native_stub_h2_line(line)
+        ),
+        len(lines),
+    )
+    header_lines = lines[:header_end]
+    status_lines = [
+        line for line in header_lines if line.startswith("Status:")
+    ]
+    lock_lines = [
+        line for line in header_lines if line.startswith("Phase-A-Lock:")
+    ]
+    if (
+        len(status_lines) == 1
+        and status_lines[0].startswith("Status: Phase B")
+        and lock_lines == ["Phase-A-Lock: LOCKED"]
+    ):
+        return status_lines[0], lock_lines[0]
+    return None
+
+
+def _native_phase_b_tracker_matches_config(
+    repo_root: Path,
+    config: WaveConfig,
+) -> bool:
+    """Bind both persisted TASKS sources to the config-derived tracker note."""
+    try:
+        expected_note = _tsn.render_tracker_sync_note(build_tracker_fields(config))
+        worktree_tasks = (repo_root / "TASKS.md").read_text(encoding="utf-8")
+        indexed_tasks = _git_index_text(repo_root, "TASKS.md")
+        if indexed_tasks is None:
+            return False
+        worktree_note = _tracker_note_line_for_wave(
+            worktree_tasks,
+            config.wave_id,
+        )
+        indexed_note = _tracker_note_line_for_wave(
+            indexed_tasks,
+            config.wave_id,
+        )
+    except (
+        OSError,
+        UnicodeDecodeError,
+        LaunchWaveError,
+        _tsn.TrackerSyncError,
+    ):
+        return False
+    return worktree_note == indexed_note == expected_note
+
+
+def _native_packet_has_phase_b_reentry_evidence(content: str) -> bool:
+    """Detect non-initial lifecycle state without interpreting packet prose."""
+    lines = content.splitlines()
+    header_end = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if _is_native_stub_h2_line(line)
+        ),
+        len(lines),
+    )
+    header_lines = lines[:header_end]
+    status_lines = [
+        line for line in header_lines if line.startswith("Status:")
+    ]
+    lock_lines = [
+        line for line in header_lines if line.startswith("Phase-A-Lock:")
+    ]
+    if (
+        status_lines != [_NATIVE_STUB_INITIAL_STATUS_LINE]
+        or lock_lines != [_NATIVE_STUB_INITIAL_LOCK_LINE]
+    ):
+        return True
+
+    post_lock_own_lines = {
+        line
+        for block in _POST_LOCK_RECOVERY_MACHINE_BLOCKS
+        for line in block
+    }
+    post_lock_own_lines.update(
+        marker for marker, _weight in _POST_LOCK_RECOVERY_PROGRESS_MARKERS
+    )
+    return any(line in post_lock_own_lines for line in lines)
+
+
+def _phase_b_resume_authority(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+) -> dict[str, Any] | None:
+    """Return exact read-only authority for a same-config Phase B resume.
+
+    This is the pre-commit sibling of ``_post_commit_resume_authority``. It
+    deliberately leaves the canonical ``ROUTE_PHASE_A`` record untouched and
+    selects the dispatcher's explicit recoverable Phase B surface only after
+    every launch-owned authority source still matches the original config.
+    """
+    routing_path = _ec.routing_record_path(repo_root, bus_dir)
+    try:
+        record = json.loads(routing_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not _native_phase_b_route_matches_config(record, config):
+        return None
+
+    # Validate every discovered worktree/index packet source before choosing
+    # the worktree packet the Phase B surface will actually read. The recovery
+    # validator admits only balanced, ordered, allowlisted post-lock machine
+    # blocks; normal Phase A never enables that lane.
+    try:
+        _require_native_stub_packet_contract_relaunch_safe(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+        )
+        packet_sources = _same_wave_native_packet_sources(repo_root, config)
+    except LaunchWaveError:
+        return None
+    selected_packet_sources = [
+        (source, packet_text)
+        for source, rel_path, packet_text in packet_sources
+        if rel_path == config.tracked_packet
+    ]
+    packet_lifecycles = [
+        _native_packet_locked_phase_b_lifecycle(packet_text)
+        for _source, packet_text in selected_packet_sources
+    ]
+    if (
+        len(selected_packet_sources) != 2
+        or {source for source, _packet_text in selected_packet_sources}
+        != {"worktree", "index"}
+        or any(lifecycle is None for lifecycle in packet_lifecycles)
+        or len(set(packet_lifecycles)) != 1
+    ):
+        return None
+
+    if not _native_phase_b_tracker_matches_config(repo_root, config):
+        return None
+
+    candidate_ok, spec_path, _launch_target_branch = (
+        _post_commit_candidate_authority_matches(
+            repo_root,
+            record,
+            config,
+            bus_dir=bus_dir,
+        )
+    )
+    if not candidate_ok or spec_path is None:
+        return None
+
+    packet_path = repo_root / config.tracked_packet
+    try:
+        verify_fail_closed_precondition(repo_root, config)
+        verify_three_guards(repo_root, config, packet_path)
+    except LaunchWaveError:
+        return None
+
+    return {
+        "routing_path": routing_path,
+        "candidate_authority_spec_path": spec_path,
+    }
+
+
+def _phase_b_reentry_evidence_present(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None,
+) -> bool:
+    """Detect an authority-bearing packet that has crossed into Phase B.
+
+    Evidence is refusal-only: it can prevent a malformed or drifted candidate
+    from falling through to setup producers, but only
+    ``_phase_b_resume_authority`` can grant continuation. Historical simple
+    configs without candidate authority retain their established rerun path.
+    """
+    packet_sources = _same_wave_native_packet_sources(repo_root, config)
+    if not any(
+        _native_packet_has_phase_b_reentry_evidence(text)
+        for _, _, text in packet_sources
+    ):
+        return False
+    if config.candidate_authority_enabled():
+        return True
+
+    routing_path = _ec.routing_record_path(repo_root, bus_dir)
+    try:
+        record = json.loads(routing_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        record = None
+    if (
+        _routing_record_targets_native_attempt(record, config)
+        and isinstance(record, dict)
+        and (
+            "candidate_authority" in record
+            or "candidate_authority_required" in record
+        )
+    ):
+        return True
+
+    try:
+        spec_path = _ca.authority_spec_path(
+            repo_root,
+            bus_dir=bus_dir,
+            wave_id=config.wave_id,
+        )
+    except (OSError, TypeError, ValueError, _ca.CandidateAuthorityError):
+        return False
+    return spec_path.exists()
 
 
 def _post_commit_git_authority_matches(
@@ -2921,6 +3205,29 @@ def build_dispatch_command(
     return cmd
 
 
+def build_phase_b_continuation_command(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None = None,
+) -> list[str]:
+    """Build the dispatcher's explicit recoverable Phase B surface command."""
+    routing_path = _ec.routing_record_path(Path(repo_root), bus_dir)
+    cmd = [
+        sys.executable,
+        str(SCRIPT_DIR / "executor_dispatch.py"),
+        "phase-b",
+        "--plan",
+        config.tracked_packet,
+        "--routing-record-path",
+        str(routing_path),
+    ]
+    if bus_dir is not None:
+        cmd.extend(["--bus-dir", str(bus_dir)])
+    cmd.append("--json")
+    return cmd
+
+
 def dispatcher_environment_overrides(config: WaveConfig) -> dict[str, str]:
     """Return the non-secret dispatcher env overrides requested by this wave."""
     overrides: dict[str, str] = {}
@@ -3000,6 +3307,47 @@ def maybe_launch_dispatcher(
     failure converges -- see the bounded re-run recovery contract.)
     """
     cmd = build_dispatch_command(repo_root, config, bus_dir=bus_dir)
+    return _maybe_launch_dispatcher_command(
+        repo_root,
+        config,
+        cmd=cmd,
+        launch=launch,
+        runner=runner,
+    )
+
+
+def maybe_launch_phase_b_continuation(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    launch: bool = False,
+    runner: Callable[..., Any] = subprocess.run,
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Optionally launch the explicit recoverable dispatcher Phase B surface."""
+    cmd = build_phase_b_continuation_command(
+        repo_root,
+        config,
+        bus_dir=bus_dir,
+    )
+    return _maybe_launch_dispatcher_command(
+        repo_root,
+        config,
+        cmd=cmd,
+        launch=launch,
+        runner=runner,
+    )
+
+
+def _maybe_launch_dispatcher_command(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    cmd: list[str],
+    launch: bool,
+    runner: Callable[..., Any],
+) -> dict[str, Any]:
+    """Run one already-authorized dispatcher command with launch overrides."""
     metadata = launch_metadata(config)
     if not launch:
         return {"launched": False, "command": cmd, **metadata}
@@ -3203,7 +3551,7 @@ def run_wave_setup(
     bus_dir: str | Path | None = None,
     runner: Callable[..., Any] = subprocess.run,
 ) -> WaveSetupResult:
-    """Run the full seven-step sequential setup chain for one wave-config.
+    """Run setup or select an exact pre-producer continuation for one config.
 
     Simple sequential: no transactional layer. A partial run is recovered by
     re-running with the SAME config (see module docstring for the bounded
@@ -3219,10 +3567,10 @@ def run_wave_setup(
     relaunch_guard_ran = _native_relaunch_guard_identity_is_safe(config)
     config_errors = config.validate(repo_root, bus_dir=bus_dir)
 
-    # A fully proven, already committed continuation is the only setup-chain
-    # bypass. All reads happen before packet/tracker/route/candidate/bridge/
-    # indicator producers. The unchanged dispatcher then selects commit-only
-    # resume from the unchanged stale canonical route.
+    # Fully proven post-commit and locked Phase B continuations are the only
+    # setup-chain bypasses. All reads happen before packet/tracker/route/
+    # candidate/bridge/indicator producers. Post-commit authority remains first
+    # so a crossed commit boundary cannot be captured by the Phase B selector.
     if launch and relaunch_guard_ran and not config_errors:
         continuation_authority = _post_commit_resume_authority(
             repo_root,
@@ -3263,6 +3611,53 @@ def run_wave_setup(
             _raise_native_stub_contract_relaunch_required(
                 "same-wave post-commit continuation authority is incomplete, "
                 "mismatched, fresh, or indeterminate"
+            )
+
+        phase_b_authority = _phase_b_resume_authority(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+        )
+        if phase_b_authority is not None:
+            launch_result = maybe_launch_phase_b_continuation(
+                repo_root,
+                config,
+                launch=True,
+                runner=runner,
+                bus_dir=bus_dir,
+            )
+            bridge_config_path = _ec.bridge_config_path(repo_root, bus_dir)
+            return WaveSetupResult(
+                wave_id=config.wave_id,
+                packet_path=str(repo_root / config.tracked_packet),
+                tracked_packet=config.tracked_packet,
+                tracker_note_written=False,
+                routing_record_path=str(phase_b_authority["routing_path"]),
+                candidate_authority_spec_path=str(
+                    phase_b_authority["candidate_authority_spec_path"]
+                ),
+                bridge_config_path=(
+                    str(bridge_config_path) if bridge_config_path.exists() else None
+                ),
+                precondition_ok=True,
+                guards_ok=True,
+                launch=launch_result,
+            )
+        if _phase_b_reentry_evidence_present(
+            repo_root,
+            config,
+            bus_dir=bus_dir,
+        ):
+            # Preserve the more specific immutable packet/route error when one
+            # is available, then refuse every other incomplete authority tuple.
+            _require_native_stub_packet_contract_relaunch_safe(
+                repo_root,
+                config,
+                bus_dir=bus_dir,
+            )
+            _raise_native_stub_contract_relaunch_required(
+                "same-wave Phase B continuation authority is incomplete, "
+                "mismatched, or indeterminate"
             )
 
     if relaunch_guard_ran:
