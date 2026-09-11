@@ -101,7 +101,11 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   the executor retired the merged R3 carrier after separate verified evidence
   preservation and exited 0; classification is current and apply remains next
 
-### WorkingRCX Fleet Preservation-First Classification R1 (Pending Until Merge)
+### WorkingRCX Fleet Preservation-First Classification R1 (Landed)
+
+- landed through PR #1288 at exact merge
+  `23197ef9079ec47a022611dcc90fa848cbf4ee9f` on 2026-09-11T22:15:34Z;
+  all seven GitHub checks succeeded and the final focused suite passed 76 tests
 
 - implements `mu/tools/executors/workingrcx_fleet_classification.py`, consuming
   only the landed R3 census with raw SHA-256
@@ -122,12 +126,38 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   source binding, local-only Git probes, dirty/unmerged/protected/unknown HOLD,
   target byte/mtime preservation and deterministic no-clobber repeated output;
   the real source was neither regenerated nor used to inspect live targets
-- the classifier generated the complete report; the declared staged L4 gate
-  rejected the empty implementation index. Generated packet/indicator refresh,
-  staging, revalidation and landing remain with the outer pipeline
-- no fleet or stale-PR mutation occurred. Classification remains pending until
-  merge, all 407 HOLD obligations remain unresolved, and apply stays immediate
-  next, followed by the retained recovery, exact PR1219 and Mu-production order
+- the classifier generated the complete report; after the initial empty-index
+  L4 rejection, the outer pipeline completed generated governance, staging,
+  revalidation, review and landing
+- no fleet or stale-PR mutation occurred. All 407 HOLD obligations remain
+  unresolved; bounded apply is current, followed by the retained recovery,
+  exact PR1219 and Mu-production order
+
+### Bounded Recoverable WorkingRCX Fleet Apply R1 (Pending Merge and Execution)
+
+- implements a finite plan/apply CLI bound to the exact PR #1288 classification
+  and raw SHA-256 `19d684abaa8c3062ed7429447382b7ccf1d8df65dc4913a27ad6efe0ed3335cf`;
+  its deterministic plan accounts for all 411 rows, four conditional targets
+  and 407 untouched HOLDs, without refreshing the census or inspecting targets
+- the separate postmerge command in
+  `reports/control_plane/workingrcx-fleet-apply-r1-2026-09-11_apply_plan.json`
+  requires freshly fetched landed tool/plan authority, exact target identity,
+  clean tracked/untracked state, idle process/native evidence and TASKS protection checks
+- verified local source/admin archives and a branch-history bundle precede
+  strictly fast-forward-only preparation with ignored-file overwrite disabled;
+  each whole-worktree move runs inside the existing target-bound one-shot
+  callback after its fresh fetch and behind-zero proof
+- fixed local intent and per-target receipts preserve ambiguous/incomplete
+  outcomes and refuse replay; destinations are new subdirectories outside all
+  411 source targets, and private evidence remains local
+- 40 disposable focused tests passed and repeated deterministic plan validation
+  passed; the declared staged L4 gate refused the empty implementation index.
+  Native staging, generated packet/indicator refresh and staged revalidation
+  remain with the outer executor
+- no live fleet action has occurred. Code landing alone is not cleanup
+  completion; per-target HOLDs preserve safety without adding another wave.
+  After the bounded attempt is recorded, recovery R2, fresh R3C6-R2 and every
+  retained PR1219/Mu obligation continue unchanged
 
 ## 2026-09-10
 
