@@ -58,18 +58,43 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 - ten disposable filter-trigger regressions now prove no filter execution or
   target byte/mtime changes, including Git indexes and refs; configuration and
   index inspection failures also retain explicit unknown evidence
-- the declared focused suite passes with 46 passed and 1 skipped (the
+- original-wave local validation recorded 46 passed and 1 skipped (the
   filesystem rejects the non-UTF-8 pathname fixture); the fresh declared JSON
   artifact records 411 UNCLASSIFIED entries from 296 direct siblings and 337
   worktree registrations with 222 duplicate paths and both sources complete;
   89 missing-path records retain explicit errors; all three declared
-  validations, including the census refresh and staged L4 contract, pass
-- the packet's existing generated scope remains the same ten authorized paths;
-  the outer executor must refresh the revised candidate's generated governance
-  and review bindings before handoff; supervisor approval and merge remain pending
+  validations, including the census refresh and staged L4 contract, passed locally
+- this original ten-path package remains pending merge on PR #1287; its packet
+  and captured evidence stay preserved while the separate fixture repair below
+  owns the active work
 - classification remains immediate next after the census lands, followed by
   apply and the existing downstream order; all stopped attempts remain
   preserved noncomplete evidence, and the census authorizes no fleet mutation
+
+### Census R3 CI Fixture Isolation on PR #1287 (Pending)
+
+- reproduced all eight fixture failures at reviewed head
+  `4658184dd456d48e702176831d43c84fa5b8bfd0` using disposable ambient Git-filter
+  configuration; the executable never ran, and unknown dirty observations
+  were the production CLI's intended safety behavior
+- fixture setup and every census invocation now use temporary home/XDG paths
+  and a Git wrapper that disables system configuration at exec; explicit
+  fixture home and PATH overrides retain the existing global-filter and
+  inspection-error coverage
+- six ambient clean/process regressions cover home, XDG and disposable system
+  configuration, asserting exact clean/dirty counts, no filter execution and
+  unchanged target/configuration bytes and mtimes; all ten existing explicit
+  local/include/global/worktree filter and submodule safety cases still pass
+- the declared focused tests pass in both ordinary and ambient-filter
+  environments: 52 passed, 1 skipped in each (the existing non-UTF-8 pathname
+  fixture is unsupported on this filesystem); disposable validation trees
+  were removed without adding fixture links to the active scratch baseline
+- the declared staged L4 check rejects the empty index; generated artifact
+  refresh, staging, L4 revalidation, review, commit, CI and merge remain with
+  the outer executor on the existing PR branch
+- production census code, captured census, Astra/max defaults, original locked
+  packet and preserved recovery evidence remain unchanged and pending merge;
+  classification stays immediately next after PR #1287 lands
 
 ## 2026-09-10
 

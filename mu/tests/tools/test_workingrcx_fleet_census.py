@@ -1,6 +1,7 @@
 """Public CLI regressions using only disposable repositories and directories."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 import errno
 import hashlib
@@ -12,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
@@ -21,16 +23,38 @@ from tests.repo_root import REPO_ROOT
 CLI = REPO_ROOT / "mu" / "tools" / "executors" / "workingrcx_fleet_census.py"
 
 
+@contextmanager
+def _fixture_git_env(**extra_env):
+    """Isolate runner config while allowing explicit fixture HOME/XDG/PATH overrides."""
+    with tempfile.TemporaryDirectory(prefix="census-fixture-git-") as directory:
+        home = Path(directory) / "home"
+        home.mkdir()
+        bindir = Path(directory) / "bin"
+        bindir.mkdir()
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        env.update(HOME=str(home), XDG_CONFIG_HOME=str(home),
+                   GIT_OPTIONAL_LOCKS="0", PYTHONDONTWRITEBYTECODE="1")
+        env.update(extra_env)
+        real_git = shutil.which("git", path=env["PATH"])
+        assert real_git
+        wrapper = bindir / "git"
+        # The production CLI drops GIT_* overrides before probing effective config.
+        # Apply system-config isolation at exec; fixture global/includes stay real.
+        wrapper.write_text(f'#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 exec {shlex.quote(real_git)} "$@"\n')
+        wrapper.chmod(0o700)
+        env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
+        yield env
+
+
 def _git(root: Path, *args: str) -> str:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_OPTIONAL_LOCKS="0")
-    result = subprocess.run(
-        ["git", "--no-optional-locks", "-c", "init.defaultBranch=main",
-         "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
-         "-c", "user.name=Census Fixture", "-c", "user.email=census@example.invalid",
-         "-C", str(root), *args],
-        env=env, capture_output=True, check=True,
-    )
+    with _fixture_git_env() as env:
+        result = subprocess.run(
+            ["git", "--no-optional-locks", "-c", "init.defaultBranch=main",
+             "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+             "-c", "user.name=Census Fixture", "-c", "user.email=census@example.invalid",
+             "-C", str(root), *args],
+            env=env, capture_output=True, check=True,
+        )
     return os.fsdecode(result.stdout).removesuffix("\n")
 
 
@@ -44,12 +68,12 @@ def _repo(path: Path) -> Path:
 
 
 def _cli(fleet: Path, anchor: Path, output: Path, **extra_env) -> tuple[subprocess.CompletedProcess, dict]:
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", **extra_env)
-    result = subprocess.run(
-        [sys.executable, str(CLI), "--fleet-root", str(fleet),
-         "--anchor-repo", str(anchor), "--output", str(output)],
-        env=env, capture_output=True,
-    )
+    with _fixture_git_env(**extra_env) as env:
+        result = subprocess.run(
+            [sys.executable, str(CLI), "--fleet-root", str(fleet),
+             "--anchor-repo", str(anchor), "--output", str(output)],
+            env=env, capture_output=True,
+        )
     report = json.loads(output.read_text(encoding="ascii"))
     assert report["entry_count"] == len(report["entries"])
     assert all(row["classification"] == "UNCLASSIFIED" for row in report["entries"])
@@ -149,6 +173,65 @@ def _filter_trigger(target: Path, script: Path, operation: str) -> str:
     info = tracked.stat()
     os.utime(tracked, ns=(info.st_atime_ns, info.st_mtime_ns + 2_000_000_000))
     return shlex.join([sys.executable, str(script)])
+
+
+@pytest.mark.parametrize("operation", ["clean", "process"])
+@pytest.mark.parametrize("config_source", ["home", "xdg", "system"])
+def test_fixture_git_isolation_preserves_clean_dirty_counts_with_ambient_filters(
+    tmp_path, monkeypatch, operation, config_source,
+):
+    ambient = tmp_path / "ambient"
+    home = ambient / "home"
+    xdg = ambient / "xdg"
+    home.mkdir(parents=True)
+    (xdg / "git").mkdir(parents=True)
+    marker = ambient / "FILTER_EXECUTED"
+    script = ambient / "filter.py"
+    script.write_text(
+        "from pathlib import Path\nimport sys\n"
+        f"Path({str(marker)!r}).touch()\n"
+        + ("sys.stdout.buffer.write(sys.stdin.buffer.read())\n" if operation == "clean"
+           else "sys.exit(1)\n")
+    )
+    attributes = ambient / "attributes"
+    attributes.write_text("tracked.txt filter=ambient-fixture\n")
+    config = {"home": home / ".gitconfig", "xdg": xdg / "git" / "config",
+              "system": ambient / "system.config"}[config_source]
+    _git(tmp_path, "config", "--file", str(config), f"filter.ambient-fixture.{operation}",
+         shlex.join([sys.executable, str(script)]))
+    _git(tmp_path, "config", "--file", str(config), "core.attributesFile", str(attributes))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    if config_source == "system":
+        # Supply a disposable system config at Git exec, without touching /etc.
+        env = _git_wrapper(tmp_path, f"os.environ['GIT_CONFIG_SYSTEM'] = {str(config)!r}\n")
+        monkeypatch.setenv("PATH", env["PATH"])
+
+    fleet = tmp_path / "fleet"
+    anchor = _repo(fleet / "WorkingRCX-main")
+    dirty = _repo(fleet / "WorkingRCX-dirty")
+    (dirty / "tracked.txt").write_text("changed fixture\n")
+    (dirty / "untracked.txt").write_text("untracked fixture\n")
+    before_fleet, before_ambient = _snapshot(fleet), _snapshot(ambient)
+
+    result, report = _cli(fleet, anchor, tmp_path / "census.json")
+
+    assert not marker.exists()
+    assert _snapshot(fleet) == before_fleet
+    assert _snapshot(ambient) == before_ambient
+    assert result.returncode == 0, result.stderr
+    assert report["coverage_complete"] is True
+    rows = _rows(report)
+    assert set(rows) == {str(anchor), str(dirty)}
+    assert rows[str(anchor)]["git"]["dirty_status"] == "clean"
+    assert rows[str(anchor)]["git"]["dirty_counts"] == {
+        "entries": 0, "tracked": 0, "untracked": 0, "staged": 0, "unstaged": 0, "unmerged": 0,
+    }
+    assert rows[str(dirty)]["git"]["dirty_status"] == "dirty"
+    assert rows[str(dirty)]["git"]["dirty_counts"] == {
+        "entries": 2, "tracked": 1, "untracked": 1, "staged": 0, "unstaged": 1, "unmerged": 0,
+    }
+    assert all(row["inspection_status"] == "ok" and row["errors"] == [] for row in rows.values())
 
 
 @pytest.mark.parametrize("operation", ["clean", "process"])
@@ -532,10 +615,11 @@ def test_cli_refuses_to_overwrite_unrelated_existing_output(tmp_path, contents):
     existing = tmp_path / "existing.json"
     existing.write_text(contents)
     before = _snapshot(tmp_path)
-    result = subprocess.run(
-        [sys.executable, str(CLI), "--fleet-root", str(tmp_path),
-         "--anchor-repo", str(anchor), "--output", str(existing)], capture_output=True,
-    )
+    with _fixture_git_env() as env:
+        result = subprocess.run(
+            [sys.executable, str(CLI), "--fleet-root", str(tmp_path),
+             "--anchor-repo", str(anchor), "--output", str(existing)], env=env, capture_output=True,
+        )
     assert result.returncode == 1
     assert b"Cannot write census artifact" in result.stderr
     assert _snapshot(tmp_path) == before
