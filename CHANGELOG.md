@@ -4,6 +4,34 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-11
+
+### Commit-Supervisor NEEDS_PHASE_A Terminal Retry Fence R2
+
+- landed through PR #1285 at exact merge
+  `c382fcfc2277676a4354190e326ead312faab7dd`
+- recovery now treats only an exact structured failed same-candidate
+  `NEEDS_PHASE_A` decision as terminal, without combining status, decision, or
+  provenance from different result objects
+
+### Native Stub Same-Config Phase B Relaunch Repair R4 (Current)
+
+- preserves corrected R2 after its three-finding Phase A stop and R3 after its
+  five-finding broad-lock nonconvergence; neither carrier is completion or
+  implementation authority
+- records a versioned, artifact-bound terminal receipt only after a native
+  dispatcher returns a normal nonzero integer, then gives one exact locked
+  same-config Phase B candidate a single-use no-clobber claim
+- revalidates route, packet worktree/index bytes, tracker, candidate authority,
+  lifecycle exclusions, active-review absence, and receipt hashes before any
+  bridge mutation; an interruption leaves the claim fail-closed
+- reconciles only the established bridge fields and resumes through the
+  explicit dispatcher Phase B surface without rerunning Phase A or tracked
+  setup producers
+- preserves ordinary same-config unlocked Phase A retries after a dispatcher
+  failure; an existing claimed receipt still refuses re-entry
+- fresh fleet cleanup census R3 is the sole immediate successor after R4 lands
+
 ## 2026-09-10
 
 ### Commit-Generated Governance Retry Idempotency R3

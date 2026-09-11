@@ -16,6 +16,7 @@ These tests cover:
 
 from __future__ import annotations
 
+import concurrent.futures
 import dataclasses
 import hashlib
 import json
@@ -23,6 +24,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -146,10 +148,8 @@ def _same_wave_deferred_non_blocking_path(config):
     )
 
 
-def _commit_recovery_packet_content(config, downstream_status):
-    """Render the exact post-lock packet mutation owned by commit_executor."""
-    import commit_executor as ce  # executors dir is on sys.path (module top)
-
+def _commit_recovery_packet_content(repo, config, downstream_status):
+    """Produce the exact post-lock packet through the public commit refresh."""
     assert downstream_status in (
         ce.COMMIT_RETRY_PENDING_STATUS,
         ce.COMMIT_RETRY_RESTORED_STATUS,
@@ -160,11 +160,74 @@ def _commit_recovery_packet_content(config, downstream_status):
         f"Status: {downstream_status}",
         1,
     )
-    return ce._refresh_same_wave_deferred_packet_authorization(  # ANTICHEAT_OK: recovery regression uses commit_executor's exact downstream packet producer so launcher tolerance cannot drift into a hand-authored test fixture
-        content,
-        wave_id=config.wave_id,
-        deferred_paths=[_same_wave_deferred_non_blocking_path(config)],
+    packet_path = repo / config.tracked_packet
+    packet_path.write_text(content, encoding="utf-8")
+
+    indicator_path = repo / config.indicator_artifact_ref
+    indicator_path.parent.mkdir(parents=True, exist_ok=True)
+    indicator_path.write_text(
+        json.dumps({"wave_id": config.wave_id}, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
+    deferred_rel = _same_wave_deferred_non_blocking_path(config)
+    deferred_path = repo / deferred_rel
+    deferred_path.parent.mkdir(parents=True, exist_ok=True)
+    deferred_path.write_text(
+        f"# Same-wave non-blocking findings for {config.wave_id}\n",
+        encoding="utf-8",
+    )
+    _git(
+        repo,
+        "add",
+        "--",
+        "TASKS.md",
+        config.tracked_packet,
+        config.indicator_artifact_ref,
+        deferred_rel,
+    )
+
+    tracker_note = _tracker_note_line(
+        (repo / "TASKS.md").read_text(encoding="utf-8"),
+        config.wave_id,
+    )
+    handoff, errors = ce.build_commit_handoff(
+        wave_id=config.wave_id,
+        task_id=config.task_id,
+        files_to_stage=[
+            "TASKS.md",
+            config.tracked_packet,
+            config.indicator_artifact_ref,
+            deferred_rel,
+        ],
+        commit_message="Refresh the same-wave recovery packet",
+        fixes_implemented=["Refresh exact same-wave deferred authorization"],
+        wave_class=config.wave_class,
+        target_gate_id=config.target_gate_id,
+        caller="phase_b",
+        tracker_note_text=tracker_note,
+        tracked_packet=config.tracked_packet,
+        deferred_items=[deferred_rel],
+        repo_root=repo,
+    )
+    assert errors == []
+    _refreshed_handoff, staged_paths, error = ce.refresh_commit_path_packet_truth(
+        repo_root=repo,
+        handoff=handoff,
+        indicator_path=config.indicator_artifact_ref,
+        commit_status="pre_commit_supervisor_pending",
+    )
+    assert error is None
+    assert deferred_rel in staged_paths
+    return packet_path.read_text(encoding="utf-8")
+
+
+def _canonical_handoff_sha_for_test(handoff):
+    canonical = json.dumps(
+        handoff,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _tracker_note_line(content, wave_id):
@@ -392,7 +455,7 @@ def _prepare_post_commit_resume_state(
             {
                 "version": ce.COMMIT_CONTINUATION_VERSION,
                 "status": ce.CONTINUATION_ACTIVE_STATUS,
-                "handoff_sha": ce._handoff_sha(handoff),  # ANTICHEAT_OK: fixture binds the exact producer digest without adding a test-only digest implementation
+                "handoff_sha": _canonical_handoff_sha_for_test(handoff),
                 "target_branch": target_branch,
                 "commit_sha": commit_sha,
                 "receipt_decision": "COMMIT_GO",
@@ -435,7 +498,11 @@ def _post_commit_resume_snapshot(repo, bus_dir):
         if item
     ]
     tracked_files = {
-        rel_path: (repo / rel_path).read_bytes()
+        rel_path: (
+            (repo / rel_path).read_bytes()
+            if (repo / rel_path).is_file()
+            else None
+        )
         for rel_path in tracked_paths
     }
     bus_path = repo / bus_dir
@@ -485,7 +552,7 @@ def _forbid_post_commit_resume_setup(monkeypatch):
         "setup_candidate_authority_spec",
         "setup_bridge_config",
         "setup_bridge_max_turns_override",
-        "_prestage_l4_indicator",
+        "prestage_l4_indicator",
     ):
         monkeypatch.setattr(lw, name, forbidden)
 
@@ -563,7 +630,7 @@ def _rewrite_json(path, mutate):
 
 def _sync_continuation_handoff_digest(state):
     handoff = json.loads(state["handoff_path"].read_text(encoding="utf-8"))
-    digest = ce._handoff_sha(handoff)  # ANTICHEAT_OK: exact producer digest is the subject of the cross-bound regression
+    digest = _canonical_handoff_sha_for_test(handoff)
     _rewrite_json(
         state["continuation_path"],
         lambda payload: payload.__setitem__("handoff_sha", digest),
@@ -761,6 +828,213 @@ def _assert_no_setup_artifacts(repo, config, *, bus_dir=".agent_bus"):
     assert not (repo / config.tracked_packet).exists()
     assert config.wave_id not in (repo / "TASKS.md").read_text(encoding="utf-8")
     assert not (repo / bus_dir).exists()
+
+
+def _phase_b_locked_implementing_packet_content(config, *, clarification=False):
+    """Render the one narrow post-Phase-A packet accepted for R4 re-entry."""
+    content = lw.render_wave_packet(config).replace(
+        "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+        "Status: Phase B (locked, implementing)",
+        1,
+    ).replace(
+        "Phase-A-Lock: UNLOCKED",
+        "Phase-A-Lock: LOCKED",
+        1,
+    )
+    if clarification:
+        content += (
+            "\n## Non-normative review clarification\n\n"
+            "This optional section carries no machine or scope authority.\n"
+        )
+    content += (
+        "\n<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+        "## Phase B Indicator Scope Reconciliation\n\n"
+        f"- Refresh wave: `{config.wave_id}`\n"
+        f"- Active packet: `{config.tracked_packet}`\n"
+        f"- Indicator artifact: `{config.indicator_artifact_ref}`\n"
+        "- Purpose: Phase B mechanically collected and staged this same-wave "
+        "L4 indicator before review.\n"
+        "- Authorized staged files:\n"
+        "  - `TASKS.md`\n"
+        f"  - `{config.tracked_packet}`\n"
+        f"  - `{config.indicator_artifact_ref}`\n"
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+    )
+    return content
+
+
+def _sha256_path(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _terminal_receipt_paths(repo, bus_dir):
+    return (
+        ec.agent_bus_path(
+            repo,
+            bus_dir,
+            "meta",
+            "launch_wave_dispatch_terminal.json",
+        ),
+        ec.agent_bus_path(
+            repo,
+            bus_dir,
+            "meta",
+            "launch_wave_dispatch_terminal.claimed.json",
+        ),
+    )
+
+
+def _prepare_native_phase_b_terminal_state(
+    repo,
+    *,
+    bus_dir=".agent_bus-phase-b-terminal",
+    returncode=73,
+    clarification=False,
+    mutate_before_return=None,
+):
+    """Run one fake completed dispatcher failure and return its exact authority."""
+    _write_fake_indicator_collector(repo)
+    config = _post_commit_authority_config_for_repo(repo)
+    available_path, claimed_path = _terminal_receipt_paths(repo, bus_dir)
+    observed = {"commands": [], "receipt_visible_before_return": None}
+
+    def runner(cmd, **kwargs):
+        observed["commands"].append((cmd, kwargs))
+        observed["receipt_visible_before_return"] = (
+            available_path.exists(),
+            claimed_path.exists(),
+        )
+        packet_path = repo / config.tracked_packet
+        packet_path.write_text(
+            _phase_b_locked_implementing_packet_content(
+                config,
+                clarification=clarification,
+            ),
+            encoding="utf-8",
+        )
+        _git(repo, "add", "--", "TASKS.md", config.tracked_packet)
+        assert packet_path.read_bytes() == subprocess.check_output(
+            ["git", "show", f":{config.tracked_packet}"],
+            cwd=repo,
+        )
+        if mutate_before_return is not None:
+            mutate_before_return(repo, config, bus_dir)
+        return subprocess.CompletedProcess(cmd, returncode)
+
+    with pytest.raises(lw.LaunchWaveError, match="dispatcher launch failed"):
+        lw.run_wave_setup(
+            repo,
+            config,
+            launch=True,
+            runner=runner,
+            bus_dir=bus_dir,
+        )
+
+    routing_path = ec.routing_record_path(repo, bus_dir)
+    routing = json.loads(routing_path.read_text(encoding="utf-8"))
+    spec_path = Path(routing["candidate_authority"]["spec_path"])
+    return {
+        "config": config,
+        "bus_dir": bus_dir,
+        "available_path": available_path,
+        "claimed_path": claimed_path,
+        "routing_path": routing_path,
+        "spec_path": spec_path,
+        "packet_path": repo / config.tracked_packet,
+        "tasks_path": repo / "TASKS.md",
+        "indicator_path": repo / config.indicator_artifact_ref,
+        "observed": observed,
+    }
+
+
+def _phase_b_resume_authority_snapshot(repo, state):
+    """Capture immutable candidate bytes at the Phase B dispatcher boundary."""
+    config = state["config"]
+
+    def optional_bytes(path):
+        path = Path(path)
+        return path.read_bytes() if path.is_file() else None
+
+    def index_bytes(rel_path):
+        result = subprocess.run(
+            ["git", "show", f":{rel_path}"],
+            cwd=repo,
+            capture_output=True,
+            check=False,
+        )
+        return result.stdout if result.returncode == 0 else None
+
+    return {
+        "packet": optional_bytes(state["packet_path"]),
+        "packet_index": index_bytes(config.tracked_packet),
+        "tasks": optional_bytes(state["tasks_path"]),
+        "tasks_index": index_bytes("TASKS.md"),
+        "routing": optional_bytes(state["routing_path"]),
+        "candidate_spec": optional_bytes(state["spec_path"]),
+        "indicator": optional_bytes(state["indicator_path"]),
+        "indicator_index": index_bytes(config.indicator_artifact_ref),
+        "index": subprocess.run(
+            ["git", "ls-files", "--stage", "-z"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        ).stdout,
+    }
+
+
+def _forbid_phase_b_resume_producers(monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Phase B continuation must not rerun tracked producers")
+
+    for name in (
+        "setup_packet",
+        "setup_tracker_note",
+        "setup_routing_record",
+        "setup_candidate_authority_spec",
+        "prestage_l4_indicator",
+    ):
+        monkeypatch.setattr(lw, name, forbidden)
+
+
+def _write_phase_b_resume_bridge(repo, bus_dir, *, agents=None, **extra):
+    path = ec.bridge_config_path(repo, bus_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "agents": agents
+        if agents is not None
+        else {
+            "sentinel": {
+                "cmd": ["python3", "sentinel_agent.py"],
+                "display_name": "Sentinel",
+                "mode": "live",
+                "prompt_via_stdin": True,
+                "timeout_s": 17,
+                "env": {"KEEP": "yes"},
+                "unknown_agent_field": {"keep": True},
+            }
+        },
+        "unknown_top_level": {"keep": True},
+        **extra,
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _rewrite_terminal_receipt_packet_hashes(state):
+    _rewrite_json(
+        state["available_path"],
+        lambda payload: payload.update(
+            {
+                "packet_worktree_sha256": _sha256_path(state["packet_path"]),
+                "packet_index_sha256": hashlib.sha256(
+                    subprocess.check_output(
+                        ["git", "show", f":{state['config'].tracked_packet}"],
+                        cwd=state["packet_path"].parents[2],
+                    )
+                ).hexdigest(),
+            }
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1297,8 +1571,6 @@ def test_native_launch_override_authority_changes_deterministically_on_fresh_rou
     second_record = lw.setup_routing_record(wave_repo, changed, bus_dir=second_bus)
     first_authority = first_record[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY]
     second_authority = second_record[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY]
-    expected_identity = lw._native_stub_packet_contract_routing_record(changed)  # ANTICHEAT_OK: directly proves the launcher's producer-only pre-write identity carries the same authority as each fresh persisted route
-
     def canonical_bytes(value):
         return json.dumps(
             value,
@@ -1308,9 +1580,6 @@ def test_native_launch_override_authority_changes_deterministically_on_fresh_rou
 
     assert canonical_bytes(first_authority) == canonical_bytes(expected)
     assert canonical_bytes(second_authority) == canonical_bytes(expected)
-    assert canonical_bytes(
-        expected_identity[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY]
-    ) == canonical_bytes(expected)
     assert canonical_bytes(first_authority) != canonical_bytes(
         lw.build_launch_wave_override_authority(config)
     )
@@ -1459,6 +1728,33 @@ def test_native_post_commit_relaunch_dispatches_commit_only_before_setup_mutatio
     }
 
 
+def test_native_post_commit_failure_does_not_create_phase_b_terminal_receipt(
+    wave_repo,
+    monkeypatch,
+):
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = ".agent_bus-post-commit-no-terminal-receipt"
+    _prepare_post_commit_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+    )
+    available, claimed = _terminal_receipt_paths(wave_repo, bus_dir)
+    _forbid_post_commit_resume_setup(monkeypatch)
+
+    with pytest.raises(lw.LaunchWaveError, match="dispatcher launch failed"):
+        lw.run_wave_setup(
+            wave_repo,
+            config,
+            launch=True,
+            runner=lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 41),
+            bus_dir=bus_dir,
+        )
+
+    assert not available.exists()
+    assert not claimed.exists()
+
+
 @pytest.mark.parametrize(
     ("field_name", "mismatched_value"),
     [
@@ -1557,14 +1853,14 @@ def test_native_post_commit_relaunch_required_authority_mismatch_refuses_before_
     )
     if proof_case == "dispatcher_not_ready":
         monkeypatch.setattr(
-            ed,
-            "_post_commit_continuation_ready_for_record",
+            lw,
+            "post_commit_continuation_ready_for_record",
             lambda *_args, **_kwargs: (False, "dispatcher commit-only not ready"),
         )
     elif proof_case == "continuation_no_forward_commit":
         monkeypatch.setattr(
             lw,
-            "_post_commit_git_authority_matches",
+            "post_commit_git_authority_matches",
             lambda *_args, **_kwargs: True,
         )
     elif proof_case == "nonancestor_commit":
@@ -2738,16 +3034,30 @@ def test_routing_record_carries_founder_override_for_commit_autobump(wave_repo):
     )
     assert on_disk["founder_override"] == config.founder_override
 
-    # The commit-flow extractor returns the wave's token from that record — the
-    # token the Step-5e growth-cap auto-bump needs (non-empty -> not stranded).
-    # Asserted directly against commit_executor's module-private extractor (the
-    # field-name contract under test): the packet forbids changing commit_executor,
-    # so we do NOT add a public seam; instead the ANTICHEAT_OK escape hatch mirrors
-    # test_executor_dispatch.py, which unit-tests this same module's internal
-    # parsers (check_private_attr_access.py allows private access on such lines).
-    import commit_executor as ce  # executors dir is on sys.path (module top)
+    # Exercise the commit consumer through its public routing-record handoff
+    # path. A tracker-only record with no tracker text must carry the launcher's
+    # persisted token into the synthesized canonical tracker note.
+    commit_record = {
+        "wave_name": on_disk["wave_name"],
+        "task_id": on_disk["task_id"],
+        "summary": on_disk["summary"],
+        "decision": "UPDATE_TRACKER_ONLY",
+        "files_to_stage": ["TASKS.md"],
+        "wave_class": config.wave_class,
+        "target_gate_id": config.target_gate_id,
+        "founder_override": on_disk["founder_override"],
+    }
+    handoff, errors = ce.prepare_handoff_from_routing_record(
+        commit_record,
+        wave_repo,
+    )
 
-    assert ce._extract_founder_override_from_routing_record(on_disk, wave_repo) == config.founder_override  # ANTICHEAT_OK: regression locks the launcher-written founder_override as the exact field the commit-flow extractor (Step-5e auto-bump source) reads
+    assert errors == []
+    assert handoff is not None
+    assert (
+        f"FOUNDER_OVERRIDE:{config.founder_override}"
+        in handoff["tracker_note_text"]
+    )
 
 
 def test_routing_record_omits_founder_override_when_builder_not_threaded(wave_repo):
@@ -3028,7 +3338,11 @@ def test_same_config_recovery_restores_staged_commit_packet_mutations(
     lw.run_wave_setup(wave_repo, config)
     packet_path = wave_repo / config.tracked_packet
     phase_b_content = _phase_b_packet_content(config)
-    commit_content = _commit_recovery_packet_content(config, downstream_status)
+    commit_content = _commit_recovery_packet_content(
+        wave_repo,
+        config,
+        downstream_status,
+    )
     deferred_path = _same_wave_deferred_non_blocking_path(config)
 
     packet_path.write_text(commit_content, encoding="utf-8")
@@ -3079,6 +3393,7 @@ def test_same_config_recovery_rejects_unauthorized_post_lock_scope_mutation(
         "other-wave-2026-06-19_bridge_nonblockers.md"
     )
     authorized = _commit_recovery_packet_content(
+        wave_repo,
         config,
         "IMPLEMENTED / LOCAL EVIDENCE",
     )
@@ -3783,7 +4098,7 @@ def test_prestage_l4_indicator_noop_when_indicator_fields_empty(wave_repo, capsy
         indicator_collection_command="",
     )
 
-    lw._prestage_l4_indicator(wave_repo, config)  # ANTICHEAT_OK: unit-tests the launcher's own private helper's declared no-op contract (empty indicator fields), mirroring this module's existing direct-call precedent
+    lw.prestage_l4_indicator(wave_repo, config)
 
     # Silent no-op: no warning, nothing staged, no indicator dir created.
     assert capsys.readouterr().err == ""
@@ -3794,6 +4109,1462 @@ def test_prestage_l4_indicator_noop_when_indicator_fields_empty(wave_repo, capsy
 # --------------------------------------------------------------------------- #
 # Optional dispatcher launch                                                  #
 # --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("bus_dir", [None, ".agent_bus-unlocked-phase-a-retry"])
+def test_same_config_unlocked_phase_a_failure_then_success_keeps_setup_retry(
+    wave_repo,
+    monkeypatch,
+    bus_dir,
+):
+    _write_fake_indicator_collector(wave_repo)
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    packet_path = wave_repo / config.tracked_packet
+    initial_packet = lw.render_wave_packet(config).encode("utf-8")
+    routing_path = ec.routing_record_path(wave_repo, bus_dir)
+    available_path, claimed_path = _terminal_receipt_paths(wave_repo, bus_dir)
+    calls = []
+
+    def runner(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        assert cmd == lw.build_dispatch_command(wave_repo, config, bus_dir=bus_dir)
+        assert "phase-b" not in cmd
+        assert not claimed_path.exists()
+        assert packet_path.read_bytes() == initial_packet
+        routing = json.loads(routing_path.read_text(encoding="utf-8"))
+        assert routing["decision"] == "ROUTE_PHASE_A"
+        assert len(routing["next_candidates"]) == 1
+        _git(wave_repo, "add", "--", "TASKS.md", config.tracked_packet)
+        if len(calls) == 1:
+            assert not available_path.exists()
+            return subprocess.CompletedProcess(cmd, 73)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    with pytest.raises(lw.LaunchWaveError, match="dispatcher launch failed"):
+        lw.run_wave_setup(
+            wave_repo, config, launch=True, runner=runner, bus_dir=bus_dir
+        )
+
+    receipt_before = available_path.read_bytes()
+    receipt = json.loads(receipt_before)
+    assert receipt["returncode"] == 73
+    assert receipt["packet_worktree_sha256"] == hashlib.sha256(initial_packet).hexdigest()
+    assert receipt["packet_index_sha256"] == receipt["packet_worktree_sha256"]
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("unlocked Phase A retry must not claim or dispatch Phase B")
+
+    monkeypatch.setattr(lw, "_claim_dispatch_terminal_receipt", forbidden)
+    monkeypatch.setattr(lw, "build_phase_b_dispatch_command", forbidden)
+
+    # A prior available failure receipt must not block this retry or a later
+    # idempotent setup after routing metadata has been refreshed.
+    for _attempt in range(2):
+        result = lw.run_wave_setup(
+            wave_repo, config, launch=True, runner=runner, bus_dir=bus_dir
+        )
+        assert result.launch["returncode"] == 0
+        assert result.tracker_note_written is True
+        assert available_path.read_bytes() == receipt_before
+        assert not claimed_path.exists()
+        assert packet_path.read_bytes() == initial_packet
+        assert subprocess.check_output(
+            ["git", "show", f":{config.tracked_packet}"], cwd=wave_repo
+        ) == initial_packet
+        assert _artifact_counts(wave_repo, config.wave_id)[:2] == (1, 1)
+
+    assert len(calls) == 3
+
+
+def test_dispatch_terminal_receipt_binds_exact_post_return_authority(wave_repo):
+    state = _prepare_native_phase_b_terminal_state(wave_repo)
+    config = state["config"]
+    available_path = state["available_path"]
+    claimed_path = state["claimed_path"]
+
+    assert state["observed"]["receipt_visible_before_return"] == (False, False)
+    assert available_path.is_file()
+    assert not claimed_path.exists()
+    receipt = json.loads(available_path.read_text(encoding="utf-8"))
+    expected_keys = {
+        "version",
+        "state",
+        "wave_id",
+        "task_id",
+        "tracked_packet",
+        "native_stub_packet_contract_digest",
+        "routing_record_path",
+        "routing_record_sha256",
+        "packet_worktree_sha256",
+        "packet_index_sha256",
+        "candidate_authority_spec_path",
+        "candidate_authority_spec_sha256",
+        "returncode",
+    }
+    assert set(receipt) == expected_keys
+    assert type(receipt["version"]) is int
+    assert receipt["version"] == lw.LAUNCH_WAVE_DISPATCH_TERMINAL_VERSION == 1
+    assert receipt["state"] == "available"
+    assert receipt["wave_id"] == config.wave_id
+    assert receipt["task_id"] == config.task_id
+    assert receipt["tracked_packet"] == config.tracked_packet
+    assert receipt["native_stub_packet_contract_digest"] == (
+        lw.build_native_stub_packet_contract(config)["digest"]
+    )
+    assert receipt["routing_record_path"] == state["routing_path"].relative_to(
+        wave_repo
+    ).as_posix()
+    assert receipt["routing_record_sha256"] == _sha256_path(state["routing_path"])
+    assert receipt["packet_worktree_sha256"] == _sha256_path(state["packet_path"])
+    assert receipt["packet_index_sha256"] == hashlib.sha256(
+        subprocess.check_output(
+            ["git", "show", f":{config.tracked_packet}"],
+            cwd=wave_repo,
+        )
+    ).hexdigest()
+    assert receipt["candidate_authority_spec_path"] == state[
+        "spec_path"
+    ].relative_to(wave_repo).as_posix()
+    assert receipt["candidate_authority_spec_sha256"] == _sha256_path(
+        state["spec_path"]
+    )
+    assert type(receipt["returncode"]) is int
+    assert receipt["returncode"] == 73
+    assert not list(available_path.parent.glob(f".{available_path.name}.*.tmp"))
+
+
+def test_dispatch_terminal_receipt_claim_is_atomic_and_single_use(
+    wave_repo,
+    monkeypatch,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=".agent_bus-phase-b-claim-race",
+    )
+    _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    available_path = state["available_path"]
+    claimed_path = state["claimed_path"]
+    available_bytes = available_path.read_bytes()
+    receipt_read_barrier = threading.Barrier(2)
+    competing_resume_refused = threading.Event()
+    runner_calls = []
+    original_read_text = Path.read_text
+
+    def synchronized_read_text(path, *args, **kwargs):
+        content = original_read_text(path, *args, **kwargs)
+        if path == available_path:
+            receipt_read_barrier.wait(timeout=10)
+        return content
+
+    def runner(cmd, **_kwargs):
+        runner_calls.append(cmd)
+        assert not available_path.exists()
+        assert claimed_path.read_bytes() == available_bytes
+        assert competing_resume_refused.wait(timeout=10)
+        raise InterruptedError("leave the winning public claim in place")
+
+    def resume_once(_index):
+        try:
+            lw.run_wave_setup(
+                wave_repo,
+                state["config"],
+                launch=True,
+                runner=runner,
+                bus_dir=state["bus_dir"],
+            )
+        except InterruptedError:
+            return "claimed", "runner interrupted"
+        except lw.LaunchWaveError as exc:
+            competing_resume_refused.set()
+            return "refused", str(exc)
+        raise AssertionError("the winning dispatcher runner must interrupt")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(Path, "read_text", synchronized_read_text)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(resume_once, range(2)))
+
+    assert sorted(result[0] for result in results) == ["claimed", "refused"]
+    refusal = next(detail for outcome, detail in results if outcome == "refused")
+    assert "terminal receipt" in refusal
+    assert len(runner_calls) == 1
+    assert not available_path.exists()
+    assert claimed_path.read_bytes() == available_bytes
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=lambda *_args, **_kwargs: pytest.fail(
+                "a consumed receipt must not dispatch"
+            ),
+            bus_dir=state["bus_dir"],
+        )
+    assert not available_path.exists()
+    assert claimed_path.read_bytes() == available_bytes
+
+
+@pytest.mark.parametrize(
+    "runner_outcome",
+    ["zero", "exception", "none", "bool", "string"],
+)
+def test_dispatch_terminal_receipt_is_not_minted_without_normal_integer_nonzero_return(
+    wave_repo,
+    runner_outcome,
+):
+    _write_fake_indicator_collector(wave_repo)
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = f".agent_bus-no-terminal-{runner_outcome}"
+    available_path, claimed_path = _terminal_receipt_paths(wave_repo, bus_dir)
+
+    def runner(cmd, **_kwargs):
+        assert not available_path.exists()
+        assert not claimed_path.exists()
+        if runner_outcome == "exception":
+            raise RuntimeError("runner failed before returning")
+        returncode = {
+            "zero": 0,
+            "none": None,
+            "bool": True,
+            "string": "9",
+        }[runner_outcome]
+        return type("Result", (), {"returncode": returncode})()
+
+    if runner_outcome == "zero":
+        result = lw.run_wave_setup(
+            wave_repo,
+            config,
+            launch=True,
+            runner=runner,
+            bus_dir=bus_dir,
+        )
+        assert result.launch["returncode"] == 0
+    else:
+        expected = RuntimeError if runner_outcome == "exception" else lw.LaunchWaveError
+        with pytest.raises(expected):
+            lw.run_wave_setup(
+                wave_repo,
+                config,
+                launch=True,
+                runner=runner,
+                bus_dir=bus_dir,
+            )
+
+    assert not available_path.exists()
+    assert not claimed_path.exists()
+
+
+@pytest.mark.parametrize(
+    "missing_authority",
+    ["routing", "packet_worktree", "packet_index", "candidate_spec"],
+)
+def test_dispatch_terminal_receipt_refuses_missing_hash_authority(
+    wave_repo,
+    missing_authority,
+):
+    _write_fake_indicator_collector(wave_repo)
+    config = _post_commit_authority_config_for_repo(wave_repo)
+    bus_dir = f".agent_bus-unhashable-{missing_authority}"
+    available_path, claimed_path = _terminal_receipt_paths(wave_repo, bus_dir)
+
+    def runner(cmd, **_kwargs):
+        packet_path = wave_repo / config.tracked_packet
+        packet_path.write_text(
+            _phase_b_locked_implementing_packet_content(config),
+            encoding="utf-8",
+        )
+        _git(wave_repo, "add", "--", "TASKS.md", config.tracked_packet)
+        routing_path = ec.routing_record_path(wave_repo, bus_dir)
+        routing = json.loads(routing_path.read_text(encoding="utf-8"))
+        spec_path = Path(routing["candidate_authority"]["spec_path"])
+        if missing_authority == "routing":
+            routing_path.unlink()
+        elif missing_authority == "packet_worktree":
+            packet_path.unlink()
+        elif missing_authority == "packet_index":
+            subprocess.run(
+                ["git", "update-index", "--force-remove", "--", config.tracked_packet],
+                cwd=wave_repo,
+                check=True,
+            )
+        else:
+            spec_path.unlink()
+        return subprocess.CompletedProcess(cmd, 19)
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            config,
+            launch=True,
+            runner=runner,
+            bus_dir=bus_dir,
+        )
+
+    assert not available_path.exists()
+    assert not claimed_path.exists()
+
+
+@pytest.mark.parametrize("clarification", [False, True], ids=["base", "clarification"])
+def test_exact_phase_b_terminal_receipt_resumes_once_without_phase_a_or_producers(
+    wave_repo,
+    monkeypatch,
+    clarification,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=f".agent_bus-phase-b-positive-{clarification}",
+        clarification=clarification,
+    )
+    config = state["config"]
+    bridge_path = _write_phase_b_resume_bridge(
+        wave_repo,
+        state["bus_dir"],
+    )
+    bridge_before = bridge_path.read_bytes()
+    authority_before = _phase_b_resume_authority_snapshot(wave_repo, state)
+    terminal_payload = json.loads(
+        state["available_path"].read_text(encoding="utf-8")
+    )
+    events = []
+    real_setup_bridge = lw.setup_bridge_config
+    real_setup_max_turns = lw.setup_bridge_max_turns_override
+
+    def setup_bridge(repo_root, *, bus_dir=None):
+        assert not state["available_path"].exists()
+        assert state["claimed_path"].is_file()
+        events.append("setup_bridge_config")
+        return real_setup_bridge(repo_root, bus_dir=bus_dir)
+
+    def setup_max_turns(repo_root, proposed, *, bus_dir=None):
+        assert events == ["setup_bridge_config"]
+        assert state["claimed_path"].is_file()
+        events.append("setup_bridge_max_turns_override")
+        return real_setup_max_turns(repo_root, proposed, bus_dir=bus_dir)
+
+    def runner(cmd, **kwargs):
+        events.append("runner")
+        assert json.loads(
+            state["claimed_path"].read_text(encoding="utf-8")
+        ) == terminal_payload
+        assert not state["available_path"].exists()
+        assert cmd == lw.build_phase_b_dispatch_command(
+            wave_repo,
+            config,
+            bus_dir=state["bus_dir"],
+        )
+        assert cmd[2] == "phase-b"
+        assert "--plan" in cmd
+        assert cmd[cmd.index("--plan") + 1] == config.tracked_packet
+        assert "--routing-record-path" in cmd
+        assert cmd[cmd.index("--routing-record-path") + 1] == str(
+            state["routing_path"]
+        )
+        assert "--bus-dir" in cmd
+        assert cmd[cmd.index("--bus-dir") + 1] == state["bus_dir"]
+        assert "--routing-record" not in cmd
+        assert kwargs["cwd"] == str(wave_repo)
+        env = kwargs["env"]
+        assert env["RCX_IMPLEMENTER_AGENT_OVERRIDE"] == "codex"
+        assert env["RCX_REVIEWER_AGENT_OVERRIDE"] == "codex"
+        assert env["RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"] == "codex"
+        assert _phase_b_resume_authority_snapshot(wave_repo, state) == authority_before
+        return subprocess.CompletedProcess(cmd, 0)
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", setup_bridge)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", setup_max_turns)
+
+    result = lw.run_wave_setup(
+        wave_repo,
+        config,
+        launch=True,
+        runner=runner,
+        bus_dir=state["bus_dir"],
+    )
+
+    assert events == [
+        "setup_bridge_config",
+        "setup_bridge_max_turns_override",
+        "runner",
+    ]
+    assert result.launch["launched"] is True
+    assert result.launch["returncode"] == 0
+    assert result.tracker_note_written is False
+    assert bridge_path.read_bytes() == bridge_before
+    assert _phase_b_resume_authority_snapshot(wave_repo, state) == authority_before
+    assert not state["available_path"].exists()
+    assert not state["claimed_path"].exists()
+
+    repeat_calls = []
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            config,
+            launch=True,
+            runner=lambda *args, **kwargs: repeat_calls.append((args, kwargs)),
+            bus_dir=state["bus_dir"],
+        )
+    assert repeat_calls == []
+
+
+@pytest.mark.parametrize(
+    "receipt_case",
+    [
+        "malformed-json",
+        "extra-key",
+        "missing-key",
+        "version",
+        "state",
+        "wave-id",
+        "task-id",
+        "tracked-packet",
+        "native-digest",
+        "route-path",
+        "route-sha",
+        "worktree-sha",
+        "index-sha",
+        "candidate-path",
+        "candidate-sha",
+        "zero-returncode",
+        "bool-returncode",
+    ],
+)
+def test_phase_b_resume_rejects_every_terminal_receipt_mismatch_before_bridge_mutation(
+    wave_repo,
+    monkeypatch,
+    receipt_case,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=f".agent_bus-bad-receipt-{receipt_case}",
+    )
+    bridge_path = _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    if receipt_case == "malformed-json":
+        state["available_path"].write_text("{not-json", encoding="utf-8")
+    else:
+        def mutate(payload):
+            if receipt_case == "extra-key":
+                payload["unexpected"] = True
+            elif receipt_case == "missing-key":
+                payload.pop("wave_id")
+            elif receipt_case == "version":
+                payload["version"] = 2
+            elif receipt_case == "state":
+                payload["state"] = "claimed"
+            elif receipt_case == "wave-id":
+                payload["wave_id"] = "other-wave"
+            elif receipt_case == "task-id":
+                payload["task_id"] = "[OTHER]"
+            elif receipt_case == "tracked-packet":
+                payload["tracked_packet"] = "reports/control_plane/other.md"
+            elif receipt_case == "native-digest":
+                payload["native_stub_packet_contract_digest"] = "0" * 64
+            elif receipt_case == "route-path":
+                payload["routing_record_path"] = ".agent_bus-other/meta/post_merge_routing.json"
+            elif receipt_case == "route-sha":
+                payload["routing_record_sha256"] = "0" * 64
+            elif receipt_case == "worktree-sha":
+                payload["packet_worktree_sha256"] = "0" * 64
+            elif receipt_case == "index-sha":
+                payload["packet_index_sha256"] = "0" * 64
+            elif receipt_case == "candidate-path":
+                payload["candidate_authority_spec_path"] = ".agent_bus-other/spec.json"
+            elif receipt_case == "candidate-sha":
+                payload["candidate_authority_spec_sha256"] = "0" * 64
+            elif receipt_case == "zero-returncode":
+                payload["returncode"] = 0
+            elif receipt_case == "bool-returncode":
+                payload["returncode"] = True
+            else:
+                raise AssertionError(receipt_case)
+
+        _rewrite_json(state["available_path"], mutate)
+
+    before = _post_commit_resume_snapshot(wave_repo, state["bus_dir"])
+    producer_calls = []
+
+    def forbidden(*args, **kwargs):
+        producer_calls.append((args, kwargs))
+        raise AssertionError("invalid receipt must fail before bridge mutation")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", forbidden)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", forbidden)
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=forbidden,
+            bus_dir=state["bus_dir"],
+        )
+
+    assert producer_calls == []
+    assert bridge_path.is_file()
+    assert _post_commit_resume_snapshot(wave_repo, state["bus_dir"]) == before
+    assert state["available_path"].is_file()
+    assert not state["claimed_path"].exists()
+
+
+@pytest.mark.parametrize(
+    "receipt_state",
+    ["missing", "already-claimed", "available-symlink", "claimed-symlink"],
+)
+def test_phase_b_resume_refuses_missing_preclaimed_or_symlink_receipt_before_bridge(
+    wave_repo,
+    monkeypatch,
+    receipt_state,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=f".agent_bus-receipt-state-{receipt_state}",
+    )
+    bridge_path = _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    original = state["available_path"].read_bytes()
+    target = state["available_path"].with_name("terminal-receipt-target.json")
+    if receipt_state == "missing":
+        state["available_path"].unlink()
+    elif receipt_state == "already-claimed":
+        state["claimed_path"].write_bytes(original)
+    elif receipt_state == "available-symlink":
+        state["available_path"].unlink()
+        target.write_bytes(original)
+        state["available_path"].symlink_to(target.name)
+    elif receipt_state == "claimed-symlink":
+        target.write_bytes(original)
+        state["claimed_path"].symlink_to(target.name)
+    else:
+        raise AssertionError(receipt_state)
+
+    before = _post_commit_resume_snapshot(wave_repo, state["bus_dir"])
+    calls = []
+
+    def forbidden(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("invalid receipt state must fail before mutation")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", forbidden)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", forbidden)
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=forbidden,
+            bus_dir=state["bus_dir"],
+        )
+
+    assert calls == []
+    assert bridge_path.is_file()
+    assert _post_commit_resume_snapshot(wave_repo, state["bus_dir"]) == before
+
+
+def test_phase_b_index_only_advanced_state_without_receipt_never_falls_through(
+    wave_repo,
+    monkeypatch,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=".agent_bus-index-only-no-receipt",
+    )
+    bridge_path = _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    state["available_path"].unlink()
+    state["packet_path"].unlink()
+    calls = []
+
+    def forbidden(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("indexed Phase B authority must refuse before mutation")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", forbidden)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", forbidden)
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=forbidden,
+            bus_dir=state["bus_dir"],
+        )
+
+    assert calls == []
+    assert bridge_path.is_file()
+    assert not state["packet_path"].exists()
+    assert not state["available_path"].exists()
+    assert not state["claimed_path"].exists()
+
+
+def test_phase_b_available_receipt_without_packet_never_falls_through(
+    wave_repo,
+    monkeypatch,
+):
+    state = _prepare_native_phase_b_terminal_state(wave_repo)
+    _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    state["packet_path"].unlink()
+    _git(wave_repo, "update-index", "--force-remove", "--", state["config"].tracked_packet)
+    before = _post_commit_resume_snapshot(wave_repo, state["bus_dir"])
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("missing packet must refuse before setup or dispatch")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", forbidden)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", forbidden)
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=forbidden,
+            bus_dir=state["bus_dir"],
+        )
+
+    assert state["available_path"].is_file()
+    assert not state["claimed_path"].exists()
+    assert _post_commit_resume_snapshot(wave_repo, state["bus_dir"]) == before
+
+
+def _invalid_phase_b_packet_content(valid, case):
+    start = "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->"
+    heading = "## Phase B Indicator Scope Reconciliation"
+    end = "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->"
+    block = valid[valid.index(start) :]
+    if case == "phase-a-status":
+        return valid.replace(
+            "Status: Phase B (locked, implementing)",
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+            1,
+        )
+    if case == "duplicate-status":
+        return valid.replace(
+            "Status: Phase B (locked, implementing)",
+            "Status: Phase B (locked, implementing)\n"
+            "Status: Phase B (locked, implementing)",
+            1,
+        )
+    if case == "pre-supervisor-status":
+        return valid.replace(
+            "Status: Phase B (locked, implementing)",
+            "Status: Phase B (pre-supervisor pending, bridge-converged)",
+            1,
+        )
+    if case == "implemented-pending-status":
+        return valid.replace(
+            "Status: Phase B (locked, implementing)",
+            "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT",
+            1,
+        )
+    if case == "implemented-local-status":
+        return valid.replace(
+            "Status: Phase B (locked, implementing)",
+            "Status: IMPLEMENTED / LOCAL EVIDENCE",
+            1,
+        )
+    if case == "missing-lock":
+        return valid.replace("Phase-A-Lock: LOCKED\n", "", 1)
+    if case == "unlocked":
+        return valid.replace("Phase-A-Lock: LOCKED", "Phase-A-Lock: UNLOCKED", 1)
+    if case == "duplicate-lock":
+        return valid.replace(
+            "Phase-A-Lock: LOCKED",
+            "Phase-A-Lock: LOCKED\nPhase-A-Lock: LOCKED",
+            1,
+        )
+    if case == "duplicate-indicator":
+        return valid.rstrip() + "\n\n" + block
+    if case == "missing-indicator":
+        return valid[: valid.index(start)].rstrip() + "\n"
+    if case == "missing-indicator-start":
+        return valid.replace(f"{start}\n", "", 1)
+    if case == "missing-indicator-end":
+        return valid.replace(end, "", 1)
+    if case == "indicator-out-of-order":
+        return valid.replace(f"{start}\n{heading}", f"{heading}\n{start}", 1)
+    if case == "indicator-end-before-start":
+        return valid.replace(start, "<!-- __indicator_placeholder__ -->", 1).replace(
+            end,
+            start,
+            1,
+        ).replace("<!-- __indicator_placeholder__ -->", end, 1)
+    if case == "unknown-machine-marker":
+        return valid.replace(
+            start,
+            "<!-- UNKNOWN_PHASE_B_MACHINE_BLOCK:start -->\n"
+            "<!-- UNKNOWN_PHASE_B_MACHINE_BLOCK:end -->\n"
+            f"{start}",
+            1,
+        )
+    if case == "unknown-h2":
+        return valid.rstrip() + "\n\n## Unknown Machine Authority\n\n- no\n"
+    if case == "base-h2-out-of-order":
+        first, second = "## Scope", "## Work items"
+        return valid.replace(first, "## __first_placeholder__", 1).replace(
+            second,
+            first,
+            1,
+        ).replace("## __first_placeholder__", second, 1)
+    if case == "duplicate-base-h2":
+        first = "## Scope"
+        return valid.replace(first, f"{first}\n\n{first}", 1)
+    if case == "tail-after-indicator":
+        return valid.rstrip() + "\n\nOut-of-order authority tail.\n"
+    if case == "duplicate-clarification":
+        clarification = (
+            "## Non-normative review clarification\n\n"
+            "This optional section carries no machine or scope authority.\n"
+        )
+        return valid.rstrip() + "\n\n" + clarification
+    reserved_blocks = {
+        "commit-generated": (
+            "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:start -->",
+            "## Commit-Time Generated Governance Authorization",
+            "<!-- COMMIT_GENERATED_GOVERNANCE_AUTH:end -->",
+        ),
+        "deferred": (
+            "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->",
+            "## Same-Wave Deferred Non-Blocking Authorization",
+            "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->",
+        ),
+        "commit-path": (
+            "<!-- COMMIT_PATH_TRUTH_REFRESH:start -->",
+            "## Commit Path Truth Refresh",
+            "<!-- COMMIT_PATH_TRUTH_REFRESH:end -->",
+        ),
+    }
+    if case in reserved_blocks:
+        reserved_start, reserved_heading, reserved_end = reserved_blocks[case]
+        return (
+            valid.rstrip()
+            + f"\n\n{reserved_start}\n{reserved_heading}\n\n- no\n{reserved_end}\n"
+        )
+    if case == "l4-tracker":
+        return (
+            valid.rstrip()
+            + "\n\n<!-- L4_FIELDS_FROM_TRACKER:start -->\n"
+            "- target_gate_id: G8\n"
+            "<!-- L4_FIELDS_FROM_TRACKER:end -->\n"
+        )
+    raise AssertionError(case)
+
+
+@pytest.mark.parametrize(
+    "packet_case",
+    [
+        "phase-a-status",
+        "duplicate-status",
+        "pre-supervisor-status",
+        "implemented-pending-status",
+        "implemented-local-status",
+        "missing-lock",
+        "unlocked",
+        "duplicate-lock",
+        "duplicate-indicator",
+        "missing-indicator",
+        "missing-indicator-start",
+        "missing-indicator-end",
+        "indicator-out-of-order",
+        "indicator-end-before-start",
+        "unknown-machine-marker",
+        "unknown-h2",
+        "base-h2-out-of-order",
+        "duplicate-base-h2",
+        "tail-after-indicator",
+        "duplicate-clarification",
+        "commit-generated",
+        "deferred",
+        "l4-tracker",
+        "commit-path",
+    ],
+)
+def test_phase_b_resume_rejects_every_noncanonical_status_or_machine_block_before_claim(
+    wave_repo,
+    monkeypatch,
+    packet_case,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=f".agent_bus-bad-packet-{packet_case}",
+        clarification=(packet_case == "duplicate-clarification"),
+    )
+    bridge_path = _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    valid = state["packet_path"].read_text(encoding="utf-8")
+    state["packet_path"].write_text(
+        _invalid_phase_b_packet_content(valid, packet_case),
+        encoding="utf-8",
+    )
+    _git(wave_repo, "add", "--", state["config"].tracked_packet)
+    _rewrite_terminal_receipt_packet_hashes(state)
+    before = _post_commit_resume_snapshot(wave_repo, state["bus_dir"])
+    bridge_calls = []
+
+    def forbidden(*args, **kwargs):
+        bridge_calls.append((args, kwargs))
+        raise AssertionError("invalid packet must fail before bridge mutation")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", forbidden)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", forbidden)
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=forbidden,
+            bus_dir=state["bus_dir"],
+        )
+
+    assert bridge_calls == []
+    assert bridge_path.is_file()
+    assert _post_commit_resume_snapshot(wave_repo, state["bus_dir"]) == before
+    assert state["available_path"].is_file()
+    assert not state["claimed_path"].exists()
+
+
+@pytest.mark.parametrize(
+    "authority_case",
+    [
+        "config",
+        "route-decision",
+        "launch-authority",
+        "native-envelope",
+        "tracker-note",
+        "candidate-spec",
+        "worktree-index-mismatch",
+        "missing-worktree",
+        "missing-index",
+        "extra-same-wave-packet",
+        "outside-candidate-scope",
+    ],
+)
+def test_phase_b_resume_rejects_each_immutable_authority_mismatch_before_bridge_mutation(
+    wave_repo,
+    monkeypatch,
+    authority_case,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=f".agent_bus-bad-authority-{authority_case}",
+    )
+    config = state["config"]
+    proposed = config
+    bridge_path = _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    if authority_case == "config":
+        proposed = dataclasses.replace(config, work_items=["changed authority"])
+    elif authority_case == "route-decision":
+        _rewrite_json(
+            state["routing_path"],
+            lambda payload: payload.__setitem__("decision", "ROUTE_PHASE_B"),
+        )
+    elif authority_case == "launch-authority":
+        _rewrite_json(
+            state["routing_path"],
+            lambda payload: payload[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY].__setitem__(
+                "pager_route", "claude"
+            ),
+        )
+    elif authority_case == "native-envelope":
+        _rewrite_json(
+            state["routing_path"],
+            lambda payload: payload[lw.NATIVE_STUB_PACKET_CONTRACT_KEY].__setitem__(
+                "digest", "0" * 64
+            ),
+        )
+    elif authority_case == "tracker-note":
+        state["tasks_path"].write_text(
+            state["tasks_path"].read_text(encoding="utf-8").replace(
+                f", {config.wave_id}):",
+                ", other-wave):",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        _git(wave_repo, "add", "--", "TASKS.md")
+    elif authority_case == "candidate-spec":
+        _rewrite_json(
+            state["spec_path"],
+            lambda payload: payload.__setitem__("reviewer_agent", "claude"),
+        )
+    elif authority_case == "worktree-index-mismatch":
+        state["packet_path"].write_text(
+            state["packet_path"].read_text(encoding="utf-8").replace(
+                "\n<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->",
+                "\n## Non-normative review clarification\n\n"
+                "Worktree-only clarification.\n\n"
+                "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        _rewrite_terminal_receipt_packet_hashes(state)
+    elif authority_case == "missing-worktree":
+        state["packet_path"].unlink()
+    elif authority_case == "missing-index":
+        subprocess.run(
+            ["git", "update-index", "--force-remove", "--", config.tracked_packet],
+            cwd=wave_repo,
+            check=True,
+        )
+    elif authority_case == "extra-same-wave-packet":
+        extra = (
+            wave_repo
+            / "reports"
+            / "control_plane"
+            / f"{config.wave_id}_other.md"
+        )
+        extra.write_text(state["packet_path"].read_text(encoding="utf-8"), encoding="utf-8")
+    elif authority_case == "outside-candidate-scope":
+        (wave_repo / "outside.txt").write_text("outside\n", encoding="utf-8")
+        _git(wave_repo, "add", "--", "outside.txt")
+    else:
+        raise AssertionError(authority_case)
+
+    before = _post_commit_resume_snapshot(wave_repo, state["bus_dir"])
+    bridge_calls = []
+
+    def forbidden(*args, **kwargs):
+        bridge_calls.append((args, kwargs))
+        raise AssertionError("authority mismatch must fail before bridge mutation")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", forbidden)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", forbidden)
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            proposed,
+            launch=True,
+            runner=forbidden,
+            bus_dir=state["bus_dir"],
+        )
+
+    assert bridge_calls == []
+    assert bridge_path.is_file()
+    assert _post_commit_resume_snapshot(wave_repo, state["bus_dir"]) == before
+    assert state["available_path"].is_file()
+    assert not state["claimed_path"].exists()
+
+
+@pytest.mark.parametrize(
+    "forbidden_case",
+    ["handoff", "commit-continuation", "reader", "reviewer", "sdk-running"],
+)
+def test_phase_b_resume_forbidden_lifecycle_evidence_is_read_only_and_preclaim(
+    wave_repo,
+    monkeypatch,
+    forbidden_case,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=f".agent_bus-forbidden-{forbidden_case}",
+    )
+    config = state["config"]
+    _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    if forbidden_case == "handoff":
+        artifact = ec.agent_bus_path(
+            wave_repo,
+            state["bus_dir"],
+            "executors",
+            "phase_b_handoff.json",
+        )
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text('{"sentinel":"handoff"}\n', encoding="utf-8")
+    elif forbidden_case == "commit-continuation":
+        artifact = ec.agent_bus_path(
+            wave_repo,
+            state["bus_dir"],
+            "executors",
+            f"commit_executor_{config.wave_id}.json",
+        )
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text('{"sentinel":"continuation"}\n', encoding="utf-8")
+    elif forbidden_case in {"reader", "reviewer"}:
+        artifact = wave_repo / state["bus_dir"] / "bridge.db"
+        conn = sqlite3.connect(artifact)
+        conn.execute("CREATE TABLE jobs (job_id TEXT, status TEXT)")
+        status = "READER_RUNNING" if forbidden_case == "reader" else "REVIEWER_RUNNING"
+        conn.execute("INSERT INTO jobs VALUES (?, ?)", (f"{forbidden_case}-job", status))
+        conn.commit()
+        conn.close()
+    else:
+        artifact = wave_repo / ".scratch" / "phase_b_agent_review_r4.status.json"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(
+            json.dumps({"status": "running", "running_agents": ["verifier"]}) + "\n",
+            encoding="utf-8",
+        )
+    artifact_before = artifact.read_bytes()
+    before = _post_commit_resume_snapshot(wave_repo, state["bus_dir"])
+    bridge_calls = []
+
+    def forbidden(*args, **kwargs):
+        bridge_calls.append((args, kwargs))
+        raise AssertionError("active lifecycle evidence must refuse before mutation")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", forbidden)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", forbidden)
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            config,
+            launch=True,
+            runner=forbidden,
+            bus_dir=state["bus_dir"],
+        )
+
+    assert bridge_calls == []
+    assert artifact.read_bytes() == artifact_before
+    assert _post_commit_resume_snapshot(wave_repo, state["bus_dir"]) == before
+    assert state["available_path"].is_file()
+    assert not state["claimed_path"].exists()
+
+
+@pytest.mark.parametrize("reset_to_unlocked", [False, True], ids=["locked", "unlocked"])
+@pytest.mark.parametrize("runner_outcome", ["runtime-error", "keyboard", "none"])
+def test_phase_b_resume_interruption_leaves_claimed_and_later_relaunch_fails_closed(
+    wave_repo,
+    monkeypatch,
+    runner_outcome,
+    reset_to_unlocked,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=f".agent_bus-interrupted-{runner_outcome}",
+    )
+    _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    terminal_payload = json.loads(
+        state["available_path"].read_text(encoding="utf-8")
+    )
+
+    def runner(cmd, **_kwargs):
+        assert state["claimed_path"].is_file()
+        assert not state["available_path"].exists()
+        if runner_outcome == "runtime-error":
+            raise RuntimeError("unexpected runner failure")
+        if runner_outcome == "keyboard":
+            raise KeyboardInterrupt()
+        return type("Running", (), {"returncode": None})()
+
+    expected = {
+        "runtime-error": RuntimeError,
+        "keyboard": KeyboardInterrupt,
+        "none": lw.LaunchWaveError,
+    }[runner_outcome]
+    with pytest.raises(expected):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=runner,
+            bus_dir=state["bus_dir"],
+        )
+
+    assert not state["available_path"].exists()
+    assert json.loads(state["claimed_path"].read_text(encoding="utf-8")) == terminal_payload
+    if reset_to_unlocked:
+        state["packet_path"].write_text(
+            lw.render_wave_packet(state["config"]), encoding="utf-8"
+        )
+        _git(wave_repo, "add", "--", state["config"].tracked_packet)
+    before = _post_commit_resume_snapshot(wave_repo, state["bus_dir"])
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("an interrupted claim must refuse before bridge mutation")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", forbidden)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", forbidden)
+    repeated_calls = []
+    with pytest.raises(lw.LaunchWaveError, match="already claimed"):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=lambda *args, **kwargs: repeated_calls.append((args, kwargs)),
+            bus_dir=state["bus_dir"],
+        )
+    assert repeated_calls == []
+    assert state["claimed_path"].is_file()
+    assert _post_commit_resume_snapshot(wave_repo, state["bus_dir"]) == before
+
+
+def test_phase_b_resume_normal_nonzero_replaces_claim_with_new_available_receipt(
+    wave_repo,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=".agent_bus-phase-b-nonzero-replacement",
+        returncode=73,
+    )
+    _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    first = json.loads(state["available_path"].read_text(encoding="utf-8"))
+
+    def runner(cmd, **_kwargs):
+        assert state["claimed_path"].is_file()
+        assert not state["available_path"].exists()
+        return subprocess.CompletedProcess(cmd, 29)
+
+    with pytest.raises(lw.LaunchWaveError, match="dispatcher launch failed"):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=runner,
+            bus_dir=state["bus_dir"],
+        )
+
+    assert state["available_path"].is_file()
+    assert not state["claimed_path"].exists()
+    second = json.loads(state["available_path"].read_text(encoding="utf-8"))
+    assert second == {**first, "returncode": 29}
+
+
+@pytest.mark.parametrize("bridge_case", ["absent", "malformed", "non-object"])
+def test_phase_b_resume_bridge_failure_occurs_after_claim_and_before_dispatch(
+    wave_repo,
+    bridge_case,
+):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=f".agent_bus-phase-b-bridge-{bridge_case}",
+    )
+    bridge_path = ec.bridge_config_path(wave_repo, state["bus_dir"])
+    bridge_before = None
+    if bridge_case == "malformed":
+        bridge_path.write_text("{not-json", encoding="utf-8")
+        bridge_before = bridge_path.read_bytes()
+    elif bridge_case == "non-object":
+        bridge_path.write_text("[]\n", encoding="utf-8")
+        bridge_before = bridge_path.read_bytes()
+    dispatch_calls = []
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=lambda *args, **kwargs: dispatch_calls.append((args, kwargs)),
+            bus_dir=state["bus_dir"],
+        )
+
+    assert dispatch_calls == []
+    assert not state["available_path"].exists()
+    assert state["claimed_path"].is_file()
+    if bridge_case == "absent":
+        assert not bridge_path.exists()
+    else:
+        assert bridge_path.read_bytes() == bridge_before
+
+
+@pytest.mark.parametrize("selected_source", [0, 1, 2])
+def test_phase_b_resume_bridge_seed_uses_first_existing_declared_source_after_claim(
+    wave_repo,
+    monkeypatch,
+    selected_source,
+):
+    carrier = (
+        wave_repo.parent
+        / f"{wave_repo.name}-phase-b-seed-carrier-{selected_source}"
+    )
+    _git(
+        wave_repo,
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        f"phase-b-seed-carrier-{selected_source}",
+        str(carrier),
+    )
+    (carrier / ".gitignore").write_text(
+        ".agent_bus\n.agent_bus-*\n",
+        encoding="utf-8",
+    )
+    _git(carrier, "add", "--", ".gitignore")
+    _git(carrier, "commit", "-q", "-m", "ignore runtime buses")
+    state = _prepare_native_phase_b_terminal_state(
+        carrier,
+        bus_dir=f".agent_bus-phase-b-seed-order-{selected_source}",
+    )
+    active_path = ec.bridge_config_path(carrier, state["bus_dir"])
+    assert not active_path.exists()
+    sources = [
+        ec.bridge_config_path(carrier),
+        ec.bridge_config_path(wave_repo, state["bus_dir"]),
+        ec.bridge_config_path(wave_repo),
+    ]
+    for index, source in enumerate(sources[selected_source:], start=selected_source):
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            json.dumps(
+                {
+                    "agents": {
+                        "sentinel": {
+                            "cmd": ["python3", f"seed-{index}.py"],
+                            "display_name": f"Seed {index}",
+                            "mode": "live",
+                        }
+                    },
+                    "selected_seed": index,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    _forbid_phase_b_resume_producers(monkeypatch)
+    runner_observed = []
+
+    def runner(cmd, **_kwargs):
+        assert state["claimed_path"].is_file()
+        runner_observed.append(
+            json.loads(active_path.read_text(encoding="utf-8"))["selected_seed"]
+        )
+        return subprocess.CompletedProcess(cmd, 0)
+
+    result = lw.run_wave_setup(
+        carrier,
+        state["config"],
+        launch=True,
+        runner=runner,
+        bus_dir=state["bus_dir"],
+    )
+
+    assert result.launch["returncode"] == 0
+    assert runner_observed == [selected_source]
+    assert json.loads(active_path.read_text(encoding="utf-8"))["selected_seed"] == (
+        selected_source
+    )
+
+
+def test_phase_b_resume_preserves_live_bridge_fields_and_reconciles_only_defaults(
+    wave_repo,
+):
+    executor_config = wave_repo / "mu" / "tools" / "executors" / "executor_config.json"
+    example_config = wave_repo / "mu" / "tools" / "agents" / "bridge_config.example.json"
+    executor_config.parent.mkdir(parents=True, exist_ok=True)
+    example_config.parent.mkdir(parents=True, exist_ok=True)
+    executor_config.write_text(
+        json.dumps(
+            {
+                "role_agents": {"implementer": "codex", "reviewer": "codex"},
+                "bridge_agent_defaults": {
+                    "claude": {
+                        "display_name": "Claude Current",
+                        "model": "claude-current",
+                        "effort": "high",
+                    },
+                    "codex": {
+                        "display_name": "Codex Current",
+                        "model": "gpt-current",
+                        "reasoning_effort": "xhigh",
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    example_config.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "claude": {
+                        "cmd": ["claude", "--model", "example", "--max-turns", "88"],
+                    },
+                    "codex": {
+                        "cmd": [
+                            "codex",
+                            "exec",
+                            "-",
+                            "-m",
+                            "example",
+                            "-c",
+                            'model_reasoning_effort="low"',
+                            "--sandbox",
+                            "danger-full-access",
+                        ],
+                        "display_name": "Codex Example",
+                        "mode": "live",
+                        "prompt_via_stdin": True,
+                        "timeout_s": 1200,
+                        "env": {"EXAMPLE": "kept"},
+                        "seed_only": {"keep": True},
+                    },
+                }
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _git(
+        wave_repo,
+        "add",
+        "--",
+        executor_config.relative_to(wave_repo).as_posix(),
+        example_config.relative_to(wave_repo).as_posix(),
+    )
+    _git(wave_repo, "commit", "-q", "-m", "bridge sync inputs")
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=".agent_bus-phase-b-bridge-sync",
+    )
+    live_agents = {
+        "claude": {
+            "cmd": [
+                "claude",
+                "--print",
+                "--model",
+                "stale",
+                "--effort",
+                "low",
+                "--max-turns",
+                "12",
+                "--keep-arg",
+                "keep-value",
+            ],
+            "display_name": "Claude Stale",
+            "mode": "custom-mode",
+            "prompt_via_stdin": False,
+            "timeout_s": 321,
+            "env": {"LIVE": "kept"},
+            "unknown_agent_field": ["keep"],
+        },
+        "custom": {
+            "cmd": ["python3", "custom.py", "--opaque", "value"],
+            "display_name": "Custom",
+            "mode": "custom",
+            "prompt_via_stdin": True,
+            "timeout_s": 654,
+            "env": {"CUSTOM": "kept"},
+            "unknown_agent_field": {"keep": True},
+        },
+    }
+    bridge_path = _write_phase_b_resume_bridge(
+        wave_repo,
+        state["bus_dir"],
+        agents=live_agents,
+        invocation_unknown=["keep"],
+    )
+    runner_bridge = {}
+
+    def runner(cmd, **_kwargs):
+        assert state["claimed_path"].is_file()
+        runner_bridge.update(json.loads(bridge_path.read_text(encoding="utf-8")))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    result = lw.run_wave_setup(
+        wave_repo,
+        state["config"],
+        launch=True,
+        runner=runner,
+        bus_dir=state["bus_dir"],
+    )
+
+    assert result.launch["returncode"] == 0
+    assert state["config"].max_turns is None
+    assert runner_bridge["unknown_top_level"] == {"keep": True}
+    assert runner_bridge["invocation_unknown"] == ["keep"]
+    claude = runner_bridge["agents"]["claude"]
+    assert claude["cmd"] == [
+        "claude",
+        "--print",
+        "--model",
+        "claude-current",
+        "--effort",
+        "high",
+        "--max-turns",
+        "88",
+        "--keep-arg",
+        "keep-value",
+    ]
+    assert claude["display_name"] == "Claude Current"
+    assert {key: claude[key] for key in (
+        "mode",
+        "prompt_via_stdin",
+        "timeout_s",
+        "env",
+        "unknown_agent_field",
+    )} == {
+        "mode": "custom-mode",
+        "prompt_via_stdin": False,
+        "timeout_s": 321,
+        "env": {"LIVE": "kept"},
+        "unknown_agent_field": ["keep"],
+    }
+    assert runner_bridge["agents"]["custom"] == live_agents["custom"]
+    codex = runner_bridge["agents"]["codex"]
+    assert codex["cmd"] == [
+        "codex",
+        "exec",
+        "-",
+        "-m",
+        "gpt-current",
+        "-c",
+        'model_reasoning_effort="xhigh"',
+        "--sandbox",
+        "danger-full-access",
+    ]
+    assert codex["display_name"] == "Codex Current"
+    assert codex["mode"] == "live"
+    assert codex["prompt_via_stdin"] is True
+    assert codex["timeout_s"] == 1200
+    assert codex["env"] == {"EXAMPLE": "kept"}
+    assert codex["seed_only"] == {"keep": True}
+
+
+def test_phase_b_terminal_receipt_is_bus_local(wave_repo, monkeypatch):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo,
+        bus_dir=".agent_bus-phase-b-bus-a",
+    )
+    bus_b = ".agent_bus-phase-b-bus-b"
+    other_available, other_claimed = _terminal_receipt_paths(
+        wave_repo,
+        bus_b,
+    )
+    receipt_before = state["available_path"].read_bytes()
+    lw.setup_routing_record(wave_repo, state["config"], bus_dir=bus_b)
+    lw.setup_candidate_authority_spec(wave_repo, state["config"], bus_dir=bus_b)
+    _write_phase_b_resume_bridge(wave_repo, bus_b)
+    bus_b_before = _post_commit_resume_snapshot(wave_repo, bus_b)
+    calls = []
+
+    def forbidden(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("a receipt from another bus must not authorize resume")
+
+    _forbid_phase_b_resume_producers(monkeypatch)
+    monkeypatch.setattr(lw, "setup_bridge_config", forbidden)
+    monkeypatch.setattr(lw, "setup_bridge_max_turns_override", forbidden)
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(
+            wave_repo,
+            state["config"],
+            launch=True,
+            runner=forbidden,
+            bus_dir=bus_b,
+        )
+
+    assert calls == []
+    assert state["available_path"].read_bytes() == receipt_before
+    assert not state["claimed_path"].exists()
+    assert not other_available.exists()
+    assert not other_claimed.exists()
+    assert _post_commit_resume_snapshot(wave_repo, bus_b) == bus_b_before
 
 
 def test_launch_off_by_default_runs_no_subprocess(wave_repo):
