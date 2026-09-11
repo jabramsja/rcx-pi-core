@@ -152,6 +152,7 @@ class FailureClass(Enum):
     COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP = "commit_supervisor_structural_override_package_gap"
     PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP = "phase_b_l4_structural_tracker_note_gap"
     # Tier 4 -- escalate (never recover)
+    NEEDS_PHASE_A = "needs_phase_a"
     TERMINAL_POLICY = "terminal_policy"
     UNCLASSIFIED = "unclassified"
 
@@ -195,6 +196,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP: 2,
     FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP: 2,
     FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP: 2,
+    FailureClass.NEEDS_PHASE_A: 4,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
 }
 
@@ -512,6 +514,12 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     reason_lower = reason_text.lower()
     step_lower = " ".join(part for part in (step, embedded_step) if part).lower()
     status_failed = status in ("error", "failed") or embedded_status in ("error", "failed")
+
+    # Tier 4: an exact pre-commit NEEDS_PHASE_A rejection is terminal.  Keep
+    # status, decision, and commit provenance bound to one structured candidate;
+    # an outer failure must not borrow a decision from unrelated embedded JSON.
+    if _looks_like_structured_pre_commit_needs_phase_a(result):
+        return FailureClass.NEEDS_PHASE_A
 
     # Narrow exception before terminal policy: a pre-commit supervisor rejection
     # caused by package-local wave identity or staged-scope loss is recoverable
@@ -1341,6 +1349,22 @@ def _extract_result_candidates(result: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(candidate, dict):
             candidates.append(candidate)
     return candidates
+
+
+def _looks_like_structured_pre_commit_needs_phase_a(
+    result: dict[str, Any],
+) -> bool:
+    """Return true only for one failed, commit-owned, non-prompt mapping."""
+    return any(
+        candidate.get("type") != "prompt"
+        and candidate.get("status") in ("error", "failed")
+        and candidate.get("pre_commit_decision") == "NEEDS_PHASE_A"
+        and (
+            candidate.get("step") == "build_and_run_supervisor"
+            or candidate.get("executor") == "commit_executor"
+        )
+        for candidate in _extract_result_candidates(result)
+    )
 
 
 def _merge_result_candidates(result: dict[str, Any]) -> dict[str, Any]:
@@ -11517,8 +11541,15 @@ def attempt_recovery(
         finally:
             _ACTIVE_BUS_DIR.reset(token)
     t0 = time.monotonic()
-    # Learning store pre-classification override (before static classifier)
-    learned = check_learned_patterns(repo_root, result)
+    # This exact structured terminal fence precedes learned matching.  A learned
+    # incidental-text route (for example historical index.lock prose) cannot
+    # authorize another attempt after the commit supervisor requests Phase A.
+    terminal_needs_phase_a = _looks_like_structured_pre_commit_needs_phase_a(result)
+    learned = (
+        None
+        if terminal_needs_phase_a
+        else check_learned_patterns(repo_root, result)
+    )
     if learned is not None:
         # Terminal-policy outcomes must NEVER be overridden by learned patterns.
         # classify_failure() is a pure dict-inspection function — safe to call.
@@ -11548,7 +11579,11 @@ def attempt_recovery(
                 )
                 fc, tier = static_fc, static_tier
     else:
-        fc = classify_failure(result)
+        fc = (
+            FailureClass.NEEDS_PHASE_A
+            if terminal_needs_phase_a
+            else classify_failure(result)
+        )
         tier = tier_for(fc)
         # FIXED-entry fallback: consult .claude/rules/learning.md for
         # manually curated Tier 1 candidates when no auto-observed match.
