@@ -139,6 +139,41 @@ def _phase_b_packet_content(config):
     return content
 
 
+def _r2_phase_b_packet_content(config, staged_paths):
+    """Model the exact locked packet shape preserved from the failed R2 review."""
+    content = lw.render_wave_packet(config)
+    content = content.replace(
+        "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+        "Status: Phase B (locked, implementing)",
+        1,
+    )
+    content = content.replace(
+        "Phase-A-Lock: UNLOCKED",
+        "Phase-A-Lock: LOCKED",
+        1,
+    )
+    authorized_files = "\n".join(
+        f"  - `{path}`" for path in sorted(staged_paths)
+    )
+    content += (
+        "\n<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+        "## Phase B Indicator Scope Reconciliation\n\n"
+        "<!-- PHASE_B_INDICATOR_SCOPE_AUTHORITY:BROAD_PACKAGE_SNAPSHOT -->\n\n"
+        f"- Refresh wave: `{config.wave_id}`\n"
+        f"- Active packet: `{config.tracked_packet}`\n"
+        f"- Indicator artifact: `{config.indicator_artifact_ref}`\n"
+        "- Purpose: Phase B mechanically collected and staged this same-wave "
+        "L4 indicator before review so the tracker note, Gate 8 package, and "
+        "governing packet describe one staged scope.\n"
+        "- Scope binding: no indicator file other than the artifact above is "
+        "in scope for this wave.\n"
+        "- Authorized staged files:\n"
+        f"{authorized_files}\n"
+        "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+    )
+    return content
+
+
 def _same_wave_deferred_non_blocking_path(config):
     return (
         "reports/deferred/non_blocking/"
@@ -302,6 +337,34 @@ def _post_commit_authority_config_for_repo(repo):
     )
 
 
+def _phase_b_authority_config_for_repo(repo):
+    """Build the strict candidate-authority config used by the R2 regression."""
+    probe = make_config(
+        implementer_agent="codex",
+        reviewer_agent="codex",
+        pager_route="codex",
+        request_for_agent="Resume the exact locked Phase B candidate.",
+    )
+    candidate_allowlist = [
+        "CHANGELOG.md",
+        "TASKS.md",
+        "mu/tests/tools/test_launch_wave.py",
+        "mu/tools/executors/launch_wave.py",
+        probe.tracked_packet,
+        _authority_indicator_ref(probe),
+        _same_wave_deferred_non_blocking_path(probe),
+    ]
+    return dataclasses.replace(
+        probe,
+        indicator_artifact_ref=_authority_indicator_ref(probe),
+        indicator_collection_command=_authority_indicator_command(probe),
+        comparison_commit=_head_sha(repo),
+        candidate_allowlist=candidate_allowlist,
+        pre_review_authority=True,
+        precommit_inventory=True,
+    )
+
+
 def _expanded_post_commit_packet_content(config):
     """Model the exact config-bound packet after Phase A locks it."""
     return _phase_b_packet_content(config)
@@ -418,6 +481,72 @@ def _prepare_post_commit_resume_state(
         "continuation_path": continuation_path,
         "candidate_spec_path": Path(routing["candidate_authority"]["spec_path"]),
         "launch_target_authority_present": target_authority is not None,
+    }
+
+
+def _prepare_phase_b_resume_state(repo, config, *, bus_dir):
+    """Produce the exact staged, pre-handoff Phase B state observed in R2."""
+    lw.run_wave_setup(repo, config, bus_dir=bus_dir)
+
+    staged_paths = sorted(
+        path
+        for path in config.candidate_allowlist
+        if path != _same_wave_deferred_non_blocking_path(config)
+    )
+    candidate_contents = {
+        "CHANGELOG.md": "# Candidate changelog\n",
+        "mu/tools/executors/launch_wave.py": "# candidate launcher change\n",
+        "mu/tests/tools/test_launch_wave.py": "# candidate launcher regression\n",
+    }
+    for rel_path, content in candidate_contents.items():
+        path = repo / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    packet_path = repo / config.tracked_packet
+    packet_path.write_text(
+        _r2_phase_b_packet_content(config, staged_paths),
+        encoding="utf-8",
+    )
+    _git(repo, "add", "--", *staged_paths)
+
+    routing_path = ec.routing_record_path(repo, bus_dir)
+    routing = json.loads(routing_path.read_text(encoding="utf-8"))
+    candidate_spec_path = Path(routing["candidate_authority"]["spec_path"])
+    handoff_path = ec.agent_bus_path(
+        repo,
+        bus_dir,
+        "executors",
+        "phase_b_handoff.json",
+    )
+    assert routing["decision"] == "ROUTE_PHASE_A"
+    assert _staged_paths(repo) == staged_paths
+    assert packet_path.read_bytes() == subprocess.check_output(
+        ["git", "show", f":{config.tracked_packet}"],
+        cwd=repo,
+    )
+    expected_tracker_note = tsn.render_tracker_sync_note(
+        lw.build_tracker_fields(config)
+    )
+    assert _tracker_note_line(
+        (repo / "TASKS.md").read_text(encoding="utf-8"),
+        config.wave_id,
+    ) == expected_tracker_note
+    assert _tracker_note_line(
+        subprocess.check_output(
+            ["git", "show", ":TASKS.md"],
+            cwd=repo,
+            text=True,
+        ),
+        config.wave_id,
+    ) == expected_tracker_note
+    assert candidate_spec_path.is_file()
+    assert not handoff_path.exists()
+    return {
+        "routing_path": routing_path,
+        "candidate_spec_path": candidate_spec_path,
+        "handoff_path": handoff_path,
+        "staged_paths": staged_paths,
     }
 
 
@@ -740,6 +869,197 @@ def _assert_post_commit_resume_refused(
     def runner(*args, **kwargs):
         dispatch_calls.append((args, kwargs))
         raise AssertionError("invalid continuation proof must not dispatch")
+
+    with pytest.raises(
+        lw.LaunchWaveError,
+        match="corrected-config-relaunch-required",
+    ):
+        lw.run_wave_setup(
+            repo,
+            config,
+            launch=True,
+            runner=runner,
+            bus_dir=bus_dir,
+        )
+
+    assert dispatch_calls == []
+    assert _post_commit_resume_snapshot(repo, bus_dir) == before
+
+
+def _mutate_phase_b_resume_proof(repo, config, state, case):
+    routing_path = state["routing_path"]
+    spec_path = state["candidate_spec_path"]
+    packet_path = repo / config.tracked_packet
+    proposed = config
+
+    if case == "native_config_mismatch":
+        proposed = dataclasses.replace(
+            config,
+            work_items=["Changed same-wave native contract"],
+        )
+    elif case == "tracker_config_mismatch":
+        proposed = dataclasses.replace(
+            config,
+            evidence_delta="Changed tracker-only evidence delta",
+        )
+    elif case == "routing_envelope_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload[lw.NATIVE_STUB_PACKET_CONTRACT_KEY].__setitem__(
+                "digest", "0" * 64
+            ),
+        )
+    elif case == "launch_authority_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload[lw.LAUNCH_WAVE_OVERRIDE_AUTHORITY_KEY].__setitem__(
+                "reviewer_agent", "claude"
+            ),
+        )
+    elif case == "top_level_pager_route_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__("pager_route", "claude"),
+        )
+    elif case == "top_level_founder_override_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__(
+                "founder_override", "foreign-wave"
+            ),
+        )
+    elif case == "top_level_request_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__(
+                "request_for_agent", "Changed Phase B request"
+            ),
+        )
+    elif case == "top_level_compat_request_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__(
+                "request_for_claude", "Changed compatibility request"
+            ),
+        )
+    elif case == "top_level_summary_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload.__setitem__(
+                "summary", "Changed Phase B route summary"
+            ),
+        )
+    elif case == "candidate_identity_mismatch":
+        _rewrite_json(
+            routing_path,
+            lambda payload: payload["candidate_authority"]["spec_identity"].__setitem__(
+                "spec_hash", "0" * 64
+            ),
+        )
+    elif case == "candidate_spec_mismatch":
+        _rewrite_json(
+            spec_path,
+            lambda payload: payload.__setitem__("reviewer_agent", "claude"),
+        )
+    elif case == "staged_scope_drift":
+        outside_path = repo / "outside.txt"
+        outside_path.write_text("outside candidate scope\n", encoding="utf-8")
+        _git(repo, "add", "--", "outside.txt")
+    elif case == "indexed_packet_identity_mismatch":
+        valid_packet = packet_path.read_text(encoding="utf-8")
+        tampered = valid_packet.replace(
+            f"Wave ID: {config.wave_id}",
+            "Wave ID: foreign-wave",
+            1,
+        )
+        packet_path.write_text(tampered, encoding="utf-8")
+        _git(repo, "add", "--", config.tracked_packet)
+        packet_path.write_text(valid_packet, encoding="utf-8")
+    elif case == "indexed_packet_lifecycle_downgrade":
+        locked_packet = packet_path.read_text(encoding="utf-8")
+        packet_path.write_text(lw.render_wave_packet(config), encoding="utf-8")
+        _git(repo, "add", "--", config.tracked_packet)
+        packet_path.write_text(locked_packet, encoding="utf-8")
+        indexed_packet = subprocess.check_output(
+            ["git", "show", f":{config.tracked_packet}"],
+            cwd=repo,
+            text=True,
+        )
+        assert "Status: Phase A" in indexed_packet
+        assert "Phase-A-Lock: UNLOCKED" in indexed_packet
+        assert "Status: Phase B" in locked_packet
+        assert "Phase-A-Lock: LOCKED" in locked_packet
+    elif case == "worktree_packet_identity_mismatch":
+        packet_path.write_text(
+            packet_path.read_text(encoding="utf-8").replace(
+                f"Wave ID: {config.wave_id}",
+                "Wave ID: foreign-wave",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif case == "status_mismatch":
+        packet_path.write_text(
+            packet_path.read_text(encoding="utf-8").replace(
+                "Status: Phase B (locked, implementing)",
+                "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        _git(repo, "add", "--", config.tracked_packet)
+    elif case == "lock_mismatch":
+        packet_path.write_text(
+            packet_path.read_text(encoding="utf-8").replace(
+                "Phase-A-Lock: LOCKED",
+                "Phase-A-Lock: UNLOCKED",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        _git(repo, "add", "--", config.tracked_packet)
+    elif case == "machine_block_unbalanced":
+        packet_path.write_text(
+            packet_path.read_text(encoding="utf-8").replace(
+                "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n",
+                "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        _git(repo, "add", "--", config.tracked_packet)
+    elif case == "machine_block_unallowlisted":
+        packet_path.write_text(
+            packet_path.read_text(encoding="utf-8").replace(
+                "## Phase B Indicator Scope Reconciliation",
+                "## Unrecognized Phase B Authority",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        _git(repo, "add", "--", config.tracked_packet)
+    elif case == "routing_missing":
+        routing_path.unlink()
+    else:
+        raise AssertionError(f"unknown Phase B resume proof mutation: {case}")
+    return proposed
+
+
+def _assert_phase_b_resume_refused(
+    repo,
+    config,
+    monkeypatch,
+    *,
+    bus_dir,
+):
+    """Require Phase B authority drift to stop before producers or dispatch."""
+    before = _post_commit_resume_snapshot(repo, bus_dir)
+    dispatch_calls = []
+    _forbid_post_commit_resume_setup(monkeypatch)
+
+    def runner(*args, **kwargs):
+        dispatch_calls.append((args, kwargs))
+        raise AssertionError("invalid Phase B continuation must not dispatch")
 
     with pytest.raises(
         lw.LaunchWaveError,
@@ -1422,6 +1742,196 @@ def test_native_locked_precommit_packet_for_historical_simple_config_still_dispa
     assert result.candidate_authority_spec_path is None
     assert packet_path.read_text(encoding="utf-8") == locked_packet
     assert _artifact_counts(wave_repo, config.wave_id) == (1, 1, 1)
+
+
+def test_native_phase_b_same_config_relaunch_dispatches_phase_b_before_setup_mutation(
+    wave_repo,
+    monkeypatch,
+):
+    _write_fake_indicator_collector(wave_repo)
+    config = _phase_b_authority_config_for_repo(wave_repo)
+    bus_dir = ".agent_bus-phase-b-same-config"
+    state = _prepare_phase_b_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+    )
+    before = _post_commit_resume_snapshot(wave_repo, bus_dir)
+    dispatch_calls = []
+    _forbid_post_commit_resume_setup(monkeypatch)
+
+    class Result:
+        returncode = 0
+
+    def runner(cmd, **kwargs):
+        assert _post_commit_resume_snapshot(wave_repo, bus_dir) == before
+        assert kwargs["cwd"] == str(wave_repo)
+        assert cmd == lw.build_phase_b_continuation_command(
+            wave_repo,
+            config,
+            bus_dir=bus_dir,
+        )
+        assert cmd[2] == "phase-b"
+        assert cmd[cmd.index("--plan") + 1] == config.tracked_packet
+        assert "--task-id" not in cmd
+        assert cmd[cmd.index("--routing-record-path") + 1] == str(
+            state["routing_path"]
+        )
+        assert cmd[cmd.index("--bus-dir") + 1] == bus_dir
+        assert "--routing-record" not in cmd
+        assert "--bootstrap-exception" not in cmd
+        assert json.loads(
+            state["routing_path"].read_text(encoding="utf-8")
+        )["decision"] == "ROUTE_PHASE_A"
+        env = kwargs["env"]
+        assert env["RCX_IMPLEMENTER_AGENT_OVERRIDE"] == "codex"
+        assert env["RCX_REVIEWER_AGENT_OVERRIDE"] == "codex"
+        assert env["RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE"] == "codex"
+        assert env["RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT"] == str(
+            wave_repo.resolve()
+        )
+        dispatch_calls.append(cmd)
+        return Result()
+
+    result = lw.run_wave_setup(
+        wave_repo,
+        config,
+        launch=True,
+        runner=runner,
+        bus_dir=bus_dir,
+    )
+
+    assert dispatch_calls == [
+        lw.build_phase_b_continuation_command(
+            wave_repo,
+            config,
+            bus_dir=bus_dir,
+        )
+    ]
+    assert result.launch["launched"] is True
+    assert result.tracker_note_written is False
+    assert result.routing_record_path == str(state["routing_path"])
+    assert result.candidate_authority_spec_path == str(
+        state["candidate_spec_path"]
+    )
+    assert result.launch["launch_overrides"] == {
+        "implementer_agent": "codex",
+        "reviewer_agent": "codex",
+        "pager_route": "codex",
+    }
+    assert not state["handoff_path"].exists()
+    assert _post_commit_resume_snapshot(wave_repo, bus_dir) == before
+
+
+def test_phase_b_continuation_command_leaves_task_identity_to_canonical_route(
+    wave_repo,
+):
+    config = dataclasses.replace(
+        _phase_b_authority_config_for_repo(wave_repo),
+        task_id="TASK-X",
+    )
+
+    command = lw.build_phase_b_continuation_command(
+        wave_repo,
+        config,
+        bus_dir=".agent_bus-phase-b-task-authority",
+    )
+
+    assert "--task-id" not in command
+    assert config.task_id not in command
+
+
+def test_native_unlocked_same_config_launch_still_dispatches_phase_a(wave_repo):
+    _write_fake_indicator_collector(wave_repo)
+    config = dataclasses.replace(
+        _phase_b_authority_config_for_repo(wave_repo),
+        scope_items=[
+            "TASKS.md remains tracker authority even when this explanatory "
+            "body text names Phase-A-Lock: LOCKED."
+        ],
+    )
+    bus_dir = ".agent_bus-phase-b-unlocked"
+    lw.run_wave_setup(wave_repo, config, bus_dir=bus_dir)
+    packet_text = (wave_repo / config.tracked_packet).read_text(encoding="utf-8")
+    assert "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)" in packet_text
+    assert "Phase-A-Lock: UNLOCKED" in packet_text
+    dispatch_calls = []
+
+    class Result:
+        returncode = 0
+
+    def runner(cmd, **_kwargs):
+        dispatch_calls.append(cmd)
+        return Result()
+
+    result = lw.run_wave_setup(
+        wave_repo,
+        config,
+        launch=True,
+        runner=runner,
+        bus_dir=bus_dir,
+    )
+
+    assert dispatch_calls == [
+        lw.build_dispatch_command(wave_repo, config, bus_dir=bus_dir)
+    ]
+    assert dispatch_calls[0][2] != "phase-b"
+    assert "--routing-record" in dispatch_calls[0]
+    assert result.launch["launched"] is True
+    assert result.tracker_note_written is True
+
+
+@pytest.mark.parametrize(
+    "proof_case",
+    [
+        "native_config_mismatch",
+        "tracker_config_mismatch",
+        "routing_envelope_mismatch",
+        "launch_authority_mismatch",
+        "top_level_pager_route_mismatch",
+        "top_level_founder_override_mismatch",
+        "top_level_request_mismatch",
+        "top_level_compat_request_mismatch",
+        "top_level_summary_mismatch",
+        "candidate_identity_mismatch",
+        "candidate_spec_mismatch",
+        "staged_scope_drift",
+        "indexed_packet_identity_mismatch",
+        "indexed_packet_lifecycle_downgrade",
+        "worktree_packet_identity_mismatch",
+        "status_mismatch",
+        "lock_mismatch",
+        "machine_block_unbalanced",
+        "machine_block_unallowlisted",
+        "routing_missing",
+    ],
+)
+def test_native_phase_b_same_config_relaunch_authority_mismatch_refuses_before_setup(
+    wave_repo,
+    monkeypatch,
+    proof_case,
+):
+    _write_fake_indicator_collector(wave_repo)
+    config = _phase_b_authority_config_for_repo(wave_repo)
+    bus_dir = f".agent_bus-phase-b-refusal-{proof_case}"
+    state = _prepare_phase_b_resume_state(
+        wave_repo,
+        config,
+        bus_dir=bus_dir,
+    )
+    proposed = _mutate_phase_b_resume_proof(
+        wave_repo,
+        config,
+        state,
+        proof_case,
+    )
+
+    _assert_phase_b_resume_refused(
+        wave_repo,
+        proposed,
+        monkeypatch,
+        bus_dir=bus_dir,
+    )
 
 
 @pytest.mark.parametrize(

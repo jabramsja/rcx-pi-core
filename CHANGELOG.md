@@ -6,6 +6,24 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-10
 
+### Native Stub Phase B Same-Config Relaunch Repair R1
+
+- `launch_wave.py` now selects the existing recoverable dispatcher Phase B
+  surface before any setup producer only when the unchanged native wave config,
+  canonical routing envelope, launch authority, candidate authority, and every
+  discovered packet source pass the existing exact validators
+- the selector requires one locked Phase B lifecycle with only balanced,
+  ordered, allowlisted post-lock machine blocks, dispatches with the tracked
+  packet, canonical `ROUTE_PHASE_A` record, namespaced bus, and existing role
+  and pager overrides, and leaves packet, index, tracker, route, authority,
+  indicator, and staged-candidate bytes untouched at the dispatch boundary
+- unlocked initial launches continue through Phase A; changed configuration,
+  routing, launch authority, candidate authority, packet identity, lifecycle,
+  or machine-block structure remains rejected before dispatch
+- the existing launcher test file models the preserved R2-shaped state and
+  proves exactly one Phase B dispatch, no Phase A dispatch, boundary byte
+  preservation, the unchanged initial path, and fail-closed authority drift
+
 ### Commit-Generated Governance Retry Idempotency R3
 
 - reconstructs the exact useful R2 code/test result after that preserved lane
@@ -23,8 +41,9 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 - focused regressions remain in the existing commit-executor test file, and the
   unchanged complete receipt-chain suite remains the compatibility gate for the
   three canonical-absence regressions that stopped R1
-- the separately queued native-stub same-config Phase-B relaunch repair remains
-  next before fresh fleet census R3; this wave changes no launcher or fleet code
+- the separately landed native-stub same-config Phase-B relaunch repair clears
+  the launcher prerequisite; fresh fleet census R3 remains immediately next,
+  while retry-idempotency R3 itself changed no launcher or fleet code
 
 ## 2026-04-04
 
