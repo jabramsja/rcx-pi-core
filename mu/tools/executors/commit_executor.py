@@ -18052,6 +18052,21 @@ def _growth_cap_snapshots_stable(
     )
 
 
+def _growth_cap_plan_has_mixed_same_wave_transition(plan: Any) -> bool:
+    """True when one cap records this wave and another still needs its bump."""
+    if not isinstance(plan, dict) or not plan.get("bump_edits"):
+        return False
+    cap_bumps = plan.get("cap_bumps")
+    if not isinstance(cap_bumps, dict):
+        return False
+    reasons = {
+        str(target.get("reason") or "")
+        for target in cap_bumps.values()
+        if isinstance(target, dict)
+    }
+    return {"already_recorded", "bumped"}.issubset(reasons)
+
+
 def _verify_growth_cap_generated_candidate(
     repo_root: Path,
     *,
@@ -18078,6 +18093,7 @@ def _verify_growth_cap_generated_candidate(
     if (
         second.get("head_records_same_wave")
         and not allow_same_invocation_head_provenance
+        and not _growth_cap_plan_has_mixed_same_wave_transition(plan)
     ):
         return "uncommitted growth-cap retry is stale after same-wave HEAD provenance"
     if _growth_cap_snapshot_candidate_state(second) != "postimage":
@@ -18292,7 +18308,15 @@ def _maybe_autobump_growth_cap_for_founder_override(
         return outcome
 
     if candidate_state == "postimage":
-        if repeated.get("head_records_same_wave"):
+        # HEAD provenance is file-wide, but idempotency is cap-specific.  An
+        # exact postimage remains retry-authoritative when one cap already
+        # records this wave and the canonical plan bumps the other cap.
+        if (
+            repeated.get("head_records_same_wave")
+            and not _growth_cap_plan_has_mixed_same_wave_transition(
+                repeated.get("plan")
+            )
+        ):
             return _authority_failure(
                 "uncommitted postimage reuse is forbidden after same-wave provenance "
                 "exists in HEAD"
