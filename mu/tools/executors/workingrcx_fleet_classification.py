@@ -175,10 +175,14 @@ def _validate_inventory(census: dict) -> None:
 
 def _git(carrier: str, *args: str) -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    # Git 2.43 rejects --no-lazy-fetch and ignores GIT_NO_LAZY_FETCH. Keep the
+    # latter for newer Git, but enforce the portable empty transport allowlist:
+    # protocol.allow=never alone can be overridden by local protocol.*.allow.
+    # Missing objects must stay unavailable; never retry with weaker guards.
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_NO_LAZY_FETCH="1", GIT_NO_REPLACE_OBJECTS="1",
                GIT_GRAFT_FILE=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
-               GIT_TERMINAL_PROMPT="0", GIT_PROTOCOL_FROM_USER="0", LC_ALL="C")
-    command = ["git", "--no-optional-locks", "--no-lazy-fetch",
+               GIT_TERMINAL_PROMPT="0", GIT_PROTOCOL_FROM_USER="0", GIT_ALLOW_PROTOCOL="", LC_ALL="C")
+    command = ["git", "--no-optional-locks",
                "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
                "-c", "core.commitGraph=false", "-c", "advice.graftFileDeprecated=false",
                "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "protocol.allow=never",
@@ -188,15 +192,6 @@ def _git(carrier: str, *args: str) -> dict:
             command,
             env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
         )
-        if (result.returncode == 129
-                and result.stderr.startswith(b"unknown option: --no-lazy-fetch\n")):
-            # Older Git rejects this global option before running the query.
-            # Retain GIT_NO_LAZY_FETCH and the transport ban on the retry.
-            command.remove("--no-lazy-fetch")
-            result = subprocess.run(
-                command,
-                env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
-            )
         return {"operation": list(args), "returncode": result.returncode,
                 "stdout": os.fsdecode(result.stdout[:4096]),
                 "stderr": os.fsdecode(result.stderr[:4096]),
@@ -205,8 +200,8 @@ def _git(carrier: str, *args: str) -> dict:
         return {"operation": list(args), "error": type(exc).__name__}
 
 
-def _success(probe: dict, stdout: str = "") -> bool:
-    return (probe.get("returncode") == 0 and probe.get("stdout") == stdout
+def _success(probe: dict, stdout: str = "", *, returncode: int = 0) -> bool:
+    return (probe.get("returncode") == returncode and probe.get("stdout") == stdout
             and probe.get("stderr") == "" and probe.get("output_truncated") is False)
 
 
@@ -218,8 +213,7 @@ def _ancestry(carrier: str, head: str, base: str) -> dict:
     status = "UNKNOWN"
     if _success(probe):
         status = "ANCESTOR"
-    elif (probe.get("returncode") == 1 and probe.get("stdout") == ""
-          and probe.get("stderr") == "" and probe.get("output_truncated") is False):
+    elif _success(probe, returncode=1):
         status = "NOT_ANCESTOR"
     return {"status": status, "probes": [object_probe, probe]}
 
@@ -232,6 +226,14 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
         raise ValueError("base-commit must be an exact 40-character commit ID")
     if not _success(_git(carrier, "rev-parse", "--show-toplevel"), carrier + "\n"):
         raise ValueError("Run from the root of the fresh classification carrier")
+    # Older Git may rewrite partial-clone config before a transport ban rejects
+    # its implicit fetch. Refuse every promisor configuration before querying
+    # objects, including filter-only settings and false/duplicate promisor keys.
+    # Only a clean no-match result establishes this portable no-fetch boundary.
+    promisor = _git(carrier, "config", "--get-regexp",
+                    r"^(extensions\.partialclone|remote\..*\.(promisor|partialclonefilter))$")
+    if not _success(promisor, returncode=1):
+        raise ValueError("Cannot establish a read-only, no-fetch carrier: partial-clone/promisor configuration is present or inconclusive")
     if not _success(_git(carrier, "cat-file", "-t", base_commit), "commit\n"):
         raise ValueError("Exact comparison commit unavailable in the local carrier")
     if not _success(_git(carrier, "merge-base", "--is-ancestor", base_commit, "HEAD")):

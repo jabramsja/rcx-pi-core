@@ -97,6 +97,27 @@ def fixture(tmp_path):
     return f
 
 
+@pytest.fixture
+def legacy_git_env(fixture):
+    f = fixture
+    bindir = f.root / "bin"
+    bindir.mkdir()
+    wrapper = bindir / "git"
+    wrapper.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\n"
+        "if '--no-lazy-fetch' in sys.argv:\n"
+        "    sys.stderr.write('unknown option: --no-lazy-fetch\\nusage: git <command> [<args>]\\n'); sys.exit(129)\n"
+        "args = sys.argv[sys.argv.index('-C') + 2:]\n"
+        f"with open({str(f.root / 'legacy-git-queries.jsonl')!r}, 'a') as out: out.write(json.dumps(args) + '\\n')\n"
+        # Emulate Git 2.43 ignoring the newer environment switch as well.
+        "os.environ.pop('GIT_NO_LAZY_FETCH', None)\n"
+        f"os.execv({f.git!r}, [{f.git!r}, *sys.argv[1:]])\n"
+    )
+    wrapper.chmod(0o700)
+    return {**f.env, "PATH": str(bindir) + os.pathsep + f.env["PATH"],
+            "GIT_PROTOCOL_FROM_USER": "0"}
+
+
 def run_cli(f, data=None, *, expected=None, extra=(), output=None, base=None, env=None):
     if data is not None:
         f.census.write_text(json.dumps(data, ensure_ascii=True) + "\n", encoding="ascii")
@@ -350,8 +371,9 @@ def test_cli_refuses_output_clobber_or_target_write(fixture, kind):
     assert (f.output.read_bytes() if f.output.exists() else None) == old_output
 
 
-@pytest.mark.parametrize("probe_failure", [False, True])
-def test_cli_queries_only_local_carrier_with_fetch_and_writes_disabled(fixture, probe_failure):
+@pytest.mark.parametrize("probe_failure", ["none", "ancestry", "config"])
+@pytest.mark.parametrize("legacy_git", [False, True], ids=["current-git", "git-2.43"])
+def test_cli_queries_only_local_carrier_with_fetch_and_writes_disabled(fixture, probe_failure, legacy_git):
     f = fixture
     bindir = f.root / "bin"
     bindir.mkdir()
@@ -359,19 +381,25 @@ def test_cli_queries_only_local_carrier_with_fetch_and_writes_disabled(fixture, 
     wrapper = bindir / "git"
     wrapper.write_text(
         f"#!{sys.executable}\nimport json, os, sys\n"
+        f"if {legacy_git!r} and '--no-lazy-fetch' in sys.argv:\n"
+        "    sys.stderr.write('unknown option: --no-lazy-fetch\\nusage: git <command> [<args>]\\n'); sys.exit(129)\n"
         f"assert sys.argv[sys.argv.index('-C') + 1] == {str(f.carrier)!r}\n"
         "args = sys.argv[sys.argv.index('-C') + 2:]\n"
-        "assert args[0] in ('rev-parse', 'cat-file', 'merge-base')\n"
-        "assert '--no-lazy-fetch' in sys.argv and '--no-optional-locks' in sys.argv\n"
+        "assert args[0] in ('rev-parse', 'config', 'cat-file', 'merge-base')\n"
+        "assert '--no-optional-locks' in sys.argv\n"
         "assert 'protocol.allow=never' in sys.argv\n"
+        "assert os.environ['GIT_ALLOW_PROTOCOL'] == ''\n"
         "assert os.environ['GIT_NO_LAZY_FETCH'] == '1'\n"
         "assert os.environ['GIT_OPTIONAL_LOCKS'] == '0'\n"
         "assert os.environ['GIT_NO_REPLACE_OBJECTS'] == '1'\n"
         "assert os.environ['GIT_CONFIG_NOSYSTEM'] == '1'\n"
         "assert os.environ['GIT_CONFIG_GLOBAL'] == os.devnull\n"
         f"with open({str(log)!r}, 'a') as out: out.write(json.dumps(args) + '\\n')\n"
-        f"if {probe_failure!r} and args == ['merge-base', '--is-ancestor', {f.base!r}, {f.base!r}]:\n"
+        f"if {probe_failure == 'config'!r} and args[0] == 'config':\n"
+        "    sys.stderr.write('inconclusive local configuration query\\n'); sys.exit(128)\n"
+        f"if {probe_failure == 'ancestry'!r} and args == ['merge-base', '--is-ancestor', {f.base!r}, {f.base!r}]:\n"
         "    sys.stderr.write('inconclusive local object query\\n'); sys.exit(128)\n"
+        f"if {legacy_git!r}: os.environ.pop('GIT_NO_LAZY_FETCH', None)\n"
         f"os.execv({f.git!r}, [{f.git!r}, *sys.argv[1:]])\n"
     )
     wrapper.chmod(0o700)
@@ -379,16 +407,103 @@ def test_cli_queries_only_local_carrier_with_fetch_and_writes_disabled(fixture, 
     home = f.root / "ambient-home"
     home.mkdir()
     (home / ".gitconfig").write_text(f'[filter "ambient"]\n clean = touch {marker}\n process = touch {marker}\n')
-    before = snapshot(f.fleet)
+    before = snapshot(f.fleet), snapshot(f.carrier)
     result = run_cli(f, env={**f.env, "PATH": str(bindir) + os.pathsep + f.env["PATH"],
+                             "GIT_ALLOW_PROTOCOL": "file:https", "GIT_NO_LAZY_FETCH": "0",
                              "HOME": str(home), "XDG_CONFIG_HOME": str(home)})
-    assert result.returncode == 0, result.stderr
-    assert not marker.exists() and snapshot(f.fleet) == before
+    assert not marker.exists() and (snapshot(f.fleet), snapshot(f.carrier)) == before
     queries = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [query[0] for query in queries[:2]] == ["rev-parse", "config"]
+    if probe_failure == "config":
+        assert result.returncode == 2
+        assert "read-only, no-fetch carrier" in result.stderr
+        assert not f.output.exists()
+        assert len(queries) == 2
+        return
+    assert result.returncode == 0, result.stderr
     assert ["merge-base", "--is-ancestor", f.base, f.base] in queries
     entry = report(f)["entries"][0]
-    assert entry["decision"] == ("HOLD" if probe_failure else "CONDITIONAL_RETIRE_CANDIDATE")
-    assert entry["ancestry"]["status"] == ("UNKNOWN" if probe_failure else "ANCESTOR")
+    assert entry["decision"] == ("HOLD" if probe_failure == "ancestry" else "CONDITIONAL_RETIRE_CANDIDATE")
+    assert entry["ancestry"]["status"] == ("UNKNOWN" if probe_failure == "ancestry" else "ANCESTOR")
+
+
+@pytest.mark.parametrize("settings", [
+    [("extensions.partialClone", "missing")],
+    [("remote.missing.partialCloneFilter", "blob:none")],
+    [("remote.missing.promisor", "false")],
+    [("remote.missing.promisor", "true"), ("remote.missing.promisor", "false")],
+], ids=["extension", "filter-only", "false-promisor", "duplicate-promisor"])
+def test_cli_legacy_git_refuses_promisor_configuration_before_object_queries(fixture, legacy_git_env, settings):
+    f = fixture
+    for key, value in settings:
+        git(f, f.carrier, "config", "--add", key, value)
+    before = snapshot(f.fleet), snapshot(f.carrier)
+    result = run_cli(f, env=legacy_git_env)
+    assert result.returncode == 2
+    assert "read-only, no-fetch carrier" in result.stderr
+    assert not f.output.exists()
+    queries = [json.loads(line) for line in (f.root / "legacy-git-queries.jsonl").read_text().splitlines()]
+    assert [query[0] for query in queries] == ["rev-parse", "config"]
+    assert (snapshot(f.fleet), snapshot(f.carrier)) == before
+
+
+@pytest.mark.parametrize("missing_comparison_base", [False, True], ids=["recorded-head", "comparison-base"])
+def test_cli_legacy_git_cannot_lazy_fetch_through_protocol_override(fixture, legacy_git_env, missing_comparison_base):
+    f = fixture
+    bindir = f.root / "bin"
+    marker = f.root / "fetch-helper-ran"
+    helper = bindir / "git-remote-classification"
+    helper.write_text(
+        f"#!{sys.executable}\nfrom pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('implicit fetch attempted\\n')\n"
+        "raise SystemExit(1)\n"
+    )
+    helper.chmod(0o700)
+    git(f, f.carrier, "config", "remote.missing.url", "classification::missing")
+    git(f, f.carrier, "config", "remote.missing.promisor", "true")
+    git(f, f.carrier, "config", "protocol.classification.allow", "always")
+    missing_head = "1" * 40
+    # Prove this fixture attempts a fetch despite the generic protocol ban.
+    probe = subprocess.run(
+        [f.git, "-c", "protocol.allow=never", "-C", str(f.carrier), "cat-file", "-t", missing_head],
+        env=legacy_git_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+    )
+    assert probe.returncode != 0 and marker.exists(), probe.stderr
+    marker.unlink()
+    entry = row(f)
+    entry["git"]["HEAD"] = entry["registered_worktrees"][0]["HEAD"] = missing_head
+    before = snapshot(f.fleet), snapshot(f.carrier)
+    result = run_cli(f, inventory(f, [entry, row(f, "WorkingRCX-local-merged")]),
+                     base=missing_head if missing_comparison_base else f.base, env=legacy_git_env)
+    assert not marker.exists()
+    assert (snapshot(f.fleet), snapshot(f.carrier)) == before
+    assert result.returncode == 2
+    assert "read-only, no-fetch carrier" in result.stderr
+    assert not f.output.exists()
+
+
+def test_cli_legacy_git_does_not_import_objects_from_local_promisor(fixture, legacy_git_env):
+    f = fixture
+    remote = f.root / "remote"
+    remote.mkdir()
+    git(f, remote, "init", "-q")
+    (remote / "remote-only.txt").write_text("object absent from the carrier\n")
+    git(f, remote, "add", "remote-only.txt")
+    git(f, remote, "commit", "-qm", "remote-only evidence")
+    remote_head = git(f, remote, "rev-parse", "HEAD")
+    git(f, remote, "config", "uploadpack.allowFilter", "true")
+    git(f, f.carrier, "config", "remote.missing.url", remote.as_uri())
+    git(f, f.carrier, "config", "remote.missing.promisor", "true")
+    git(f, f.carrier, "config", "protocol.file.allow", "always")
+    entry = row(f)
+    entry["git"]["HEAD"] = entry["registered_worktrees"][0]["HEAD"] = remote_head
+    before = snapshot(f.fleet), snapshot(f.carrier), snapshot(remote)
+    result = run_cli(f, inventory(f, [entry, row(f, "WorkingRCX-local-merged")]),
+                     env={**legacy_git_env, "GIT_ALLOW_PROTOCOL": "file", "GIT_NO_LAZY_FETCH": "0"})
+    assert result.returncode == 2
+    assert "read-only, no-fetch carrier" in result.stderr
+    assert not f.output.exists()
+    assert (snapshot(f.fleet), snapshot(f.carrier), snapshot(remote)) == before
 
 
 def test_cli_accounts_for_all_recorded_categories_in_remapped_disposable_inventory(fixture):

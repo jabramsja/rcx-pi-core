@@ -89,7 +89,7 @@ FOUNDER_OVERRIDE:workingrcx-fleet-classification-r1-2026-09-11
 - `indicator_collection_command`: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id workingrcx-fleet-classification-r1-2026-09-11 --output reports/l4_wave_indicators/workingrcx-fleet-classification-r1-2026-09-11.json.
 - `target_gate_id`: G8.
 - `evidence_command`: `PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_workingrcx_fleet_classification.py --tb=short && PYTHONDONTWRITEBYTECODE=1 python3 mu/tools/executors/workingrcx_fleet_classification.py --census reports/control_plane/workingrcx-fleet-census-r3-2026-09-11_census.json --base-commit c209bf29841425305003eeceddfd567a93874742 --output reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_classification.json && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id workingrcx-fleet-classification-r1-2026-09-11 --wave-class L4_ENABLER`.
-- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `CHANGELOG.md`, `TASKS.md`, `mu/tests/tools/test_workingrcx_fleet_classification.py`, `mu/tools/executors/workingrcx_fleet_classification.py`, `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md`, `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_classification.json`, `reports/l4_wave_indicators/workingrcx-fleet-classification-r1-2026-09-11.json`, `mu/tests/docs/test_growth_caps.py`.
+- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `CHANGELOG.md`, `TASKS.md`, `mu/tests/tools/test_workingrcx_fleet_classification.py`, `mu/tools/executors/workingrcx_fleet_classification.py`, `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md`, `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_classification.json`, `reports/l4_wave_indicators/workingrcx-fleet-classification-r1-2026-09-11.json`, `mu/tests/docs/test_growth_caps.py`.
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
 - `boot0_progress_state`: HOLD.
@@ -100,7 +100,7 @@ FOUNDER_OVERRIDE:workingrcx-fleet-classification-r1-2026-09-11
 ## Commit-Time Generated Governance Authorization
 
 - Refresh wave: `workingrcx-fleet-classification-r1-2026-09-11`
-- Step-5e provenance: `bumped`
+- Step-5e provenance: `already_recorded`
 - Purpose: commit automation may bind the exact same-wave growth-cap governance file after Phase B review; first bumps require staged-index proof, while already-recorded reuse requires clean HEAD/index proof.
 - Authorized generated governance path(s):
   - `mu/tests/docs/test_growth_caps.py`
@@ -115,22 +115,19 @@ FOUNDER_OVERRIDE:workingrcx-fleet-classification-r1-2026-09-11
 - Refresh wave: `workingrcx-fleet-classification-r1-2026-09-11`
 - Active packet: `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `7a869b14b0026f6554582c011729c87a8f98b4e7e8a73aeafbd706093e35df38`
+- Tracker note sha256: `c89a090dc5c53df03a05f1d985f308a641b240809cdde36d5c830333d6c90219`
 - Indicator artifact: `reports/l4_wave_indicators/workingrcx-fleet-classification-r1-2026-09-11.json`
 - Evidence command: `PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_workingrcx_fleet_classification.py --tb=short && PYTHONDONTWRITEBYTECODE=1 python3 mu/tools/executors/workingrcx_fleet_classification.py --census reports/control_plane/workingrcx-fleet-census-r3-2026-09-11_census.json --base-commit c209bf29841425305003eeceddfd567a93874742 --output reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_classification.json && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id workingrcx-fleet-classification-r1-2026-09-11 --wave-class L4_ENABLER`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `CHANGELOG.md`, `TASKS.md`, `mu/tests/tools/test_workingrcx_fleet_classification.py`, `mu/tools/executors/workingrcx_fleet_classification.py`, `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md`, `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_classification.json`, `reports/l4_wave_indicators/workingrcx-fleet-classification-r1-2026-09-11.json`, `mu/tests/docs/test_growth_caps.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `CHANGELOG.md`, `TASKS.md`, `mu/tests/tools/test_workingrcx_fleet_classification.py`, `mu/tools/executors/workingrcx_fleet_classification.py`, `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md`, `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_classification.json`, `reports/l4_wave_indicators/workingrcx-fleet-classification-r1-2026-09-11.json`, `mu/tests/docs/test_growth_caps.py`.
 - Commit-generated governance paths:
   - `mu/tests/docs/test_growth_caps.py`
 - Evidence handles:
   - `commit_time_generated_governance`: `mu/tests/docs/test_growth_caps.py`
   - `indicator`: `reports/l4_wave_indicators/workingrcx-fleet-classification-r1-2026-09-11.json`
 - Current staged files:
-  - `CHANGELOG.md`
   - `TASKS.md`
-  - `mu/tests/docs/test_growth_caps.py`
   - `mu/tests/tools/test_workingrcx_fleet_classification.py`
   - `mu/tools/executors/workingrcx_fleet_classification.py`
   - `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_2026-09-11.md`
-  - `reports/control_plane/workingrcx-fleet-classification-r1-2026-09-11_classification.json`
   - `reports/l4_wave_indicators/workingrcx-fleet-classification-r1-2026-09-11.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
