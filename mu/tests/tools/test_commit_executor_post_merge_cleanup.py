@@ -3599,9 +3599,11 @@ def test_growth_cap_autobump_recorded_test_cap_still_bumps_tool_script(tmp_path)
 
 
 def test_growth_cap_autobump_is_idempotent_on_second_run(tmp_path):
-    """(d) Idempotency: two runs bump CAP_TEST_FILES once; the second detects
-    the existing same-wave provenance and leaves the cap unchanged with no
-    duplicate provenance comment."""
+    """(d) Idempotency: two uncommitted runs produce one exact staged bump.
+
+    The second run derives the postimage from HEAD and settles it without
+    treating mutable same-wave text as committed P0IC3 provenance.
+    """
     primary, env = _init_growth_cap_repo(
         tmp_path, baseline=3, cap=0,
         existing_test_files=[
@@ -3624,12 +3626,393 @@ def test_growth_cap_autobump_is_idempotent_on_second_run(tmp_path):
         founder_override_token=GROWTH_CAP_WAVE_ID, log=log2,
     )
     assert out2["bumped"] is False, out2
-    assert out2["reason"] == "already_recorded", out2
+    assert out2["retry_settled"] is True, out2
+    assert out2["reason"] == "retry_settled", out2
 
     text, _, cap = _read_growth_cap_values(primary)
     assert cap == 1, text  # bumped once, not twice
     assert text.count(f"FOUNDER_OVERRIDE:{GROWTH_CAP_WAVE_ID}") == 1, text
-    assert any("no bump (idempotent retry)" in m for m in lines2), lines2
+    assert any("settled retry" in m and "without another increment" in m for m in lines2), lines2
+
+
+def _raw_growth_cap_repo_state(primary: Path) -> tuple[str, bytes, bytes]:
+    return (
+        _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip(),
+        subprocess.run(
+            ["git", "ls-files", "--stage", "-z"],
+            cwd=primary,
+            capture_output=True,
+            check=True,
+        ).stdout,
+        subprocess.run(
+            ["git", "status", "--porcelain=v1", "-z"],
+            cwd=primary,
+            capture_output=True,
+            check=True,
+        ).stdout,
+    )
+
+
+def test_growth_cap_autobump_all_surface_canonical_absence_is_non_mutating(tmp_path):
+    """A minimal repo without the target retains the established absent no-op."""
+    primary = _init_repo(tmp_path)
+    env = _git_env()
+    _stage_new_test_file(primary, env, "mu/tests/test_absent_growth_cap_target.py")
+    target = primary / commit_mod.GROWTH_CAP_TEST_RELPATH
+
+    assert not _git(
+        ["ls-tree", "--name-only", "HEAD", "--", commit_mod.GROWTH_CAP_TEST_RELPATH],
+        cwd=primary,
+    ).stdout.strip()
+    assert not _git(
+        ["ls-files", "--stage", "--", commit_mod.GROWTH_CAP_TEST_RELPATH],
+        cwd=primary,
+    ).stdout.strip()
+    assert not os.path.lexists(target)
+    before = _raw_growth_cap_repo_state(primary)
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary,
+        wave_id=GROWTH_CAP_WAVE_ID,
+        base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID,
+        log=_noop_log,
+    )
+
+    assert outcome["bumped"] is False, outcome
+    assert outcome["retry_settled"] is False, outcome
+    assert outcome["reason"] == "growth_cap_file_absent", outcome
+    assert outcome["retry_authority_error"] == "", outcome
+    assert outcome["commit_generated_governance_paths"] == [], outcome
+    assert outcome["new_test_files"] == [], outcome
+    assert outcome["new_tool_scripts"] == [], outcome
+    assert _raw_growth_cap_repo_state(primary) == before
+    assert not os.path.lexists(target)
+
+
+@pytest.mark.parametrize(
+    "target_state",
+    ["head_only", "index_only", "worktree_only", "index_and_worktree"],
+)
+def test_growth_cap_autobump_partial_absence_remains_fail_closed(
+    tmp_path,
+    target_state,
+):
+    """Only simultaneous HEAD/index/worktree absence gets the absent no-op."""
+    env = _git_env()
+    if target_state == "head_only":
+        primary, env = _init_growth_cap_repo(
+            tmp_path,
+            baseline=3,
+            cap=0,
+            existing_test_files=[
+                "mu/tests/test_existing_1.py",
+                "mu/tests/test_existing_2.py",
+            ],
+        )
+        _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+        _git(["rm", "--", commit_mod.GROWTH_CAP_TEST_RELPATH], cwd=primary, env=env)
+    else:
+        primary = _init_repo(tmp_path)
+        _stage_new_test_file(primary, env, "mu/tests/test_partial_growth_cap_target.py")
+        target = primary / commit_mod.GROWTH_CAP_TEST_RELPATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            _growth_cap_source(1, 0, ""),
+            encoding="utf-8",
+        )
+        if target_state in {"index_only", "index_and_worktree"}:
+            _git(["add", "--", commit_mod.GROWTH_CAP_TEST_RELPATH], cwd=primary, env=env)
+        if target_state == "index_only":
+            target.unlink()
+
+    target = primary / commit_mod.GROWTH_CAP_TEST_RELPATH
+    target_existed_before = os.path.lexists(target)
+    target_bytes_before = target.read_bytes() if target_existed_before else None
+    target_mode_before = (
+        stat.S_IMODE(os.lstat(target).st_mode) if target_existed_before else None
+    )
+    before = _raw_growth_cap_repo_state(primary)
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary,
+        wave_id=GROWTH_CAP_WAVE_ID,
+        base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID,
+        log=_noop_log,
+    )
+
+    assert outcome["bumped"] is False, outcome
+    assert outcome["retry_settled"] is False, outcome
+    assert outcome["reason"] == "retry_authority_error", outcome
+    assert outcome["retry_authority_error"], outcome
+    assert outcome["commit_generated_governance_paths"] == [], outcome
+    assert _raw_growth_cap_repo_state(primary) == before
+    assert os.path.lexists(target) is target_existed_before
+    if target_existed_before:
+        assert target.read_bytes() == target_bytes_before
+        assert stat.S_IMODE(os.lstat(target).st_mode) == target_mode_before
+
+
+def _growth_cap_index_entry(primary: Path) -> tuple[str, str, str]:
+    output = _git(
+        ["ls-files", "--stage", "--", commit_mod.GROWTH_CAP_TEST_RELPATH],
+        cwd=primary,
+    ).stdout.strip().splitlines()
+    assert len(output) == 1, output
+    metadata, path = output[0].split("\t", 1)
+    mode, oid, stage = metadata.split()
+    assert path == commit_mod.GROWTH_CAP_TEST_RELPATH
+    return mode, oid, stage
+
+
+def _growth_cap_head_entry(primary: Path) -> tuple[str, str]:
+    output = _git(
+        ["ls-tree", "HEAD", "--", commit_mod.GROWTH_CAP_TEST_RELPATH],
+        cwd=primary,
+    ).stdout.strip()
+    metadata, path = output.split("\t", 1)
+    mode, object_type, oid = metadata.split()
+    assert object_type == "blob"
+    assert path == commit_mod.GROWTH_CAP_TEST_RELPATH
+    return mode, oid
+
+
+def _replace_growth_cap_index_entry(primary: Path, mode: str, oid: str) -> None:
+    _git(
+        [
+            "update-index",
+            "--cacheinfo",
+            f"{mode},{oid},{commit_mod.GROWTH_CAP_TEST_RELPATH}",
+        ],
+        cwd=primary,
+    )
+
+
+@pytest.mark.parametrize(
+    "retry_state",
+    [
+        "worktree_only_postimage",
+        "index_only_postimage",
+        "unstaged_dirty_postimage",
+        "wrong_wave_postimage",
+        "forged_same_wave_cap",
+        "duplicate_provenance",
+        "noncanonical_equivalent_bytes",
+        "worktree_mode_drift",
+        "head_advanced_without_cap",
+        "unmerged_index_stages",
+    ],
+)
+def test_commit_generated_governance_growth_cap_retry_rejects_non_authoritative_state(
+    tmp_path,
+    retry_state,
+):
+    """Only the exact HEAD preimage or exact generated postimage may settle."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path,
+        baseline=3,
+        cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py",
+            "mu/tests/test_existing_2.py",
+        ],
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+    first = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary,
+        wave_id=GROWTH_CAP_WAVE_ID,
+        base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID,
+        log=_noop_log,
+    )
+    assert first["bumped"] is True, first
+
+    growth_path = primary / commit_mod.GROWTH_CAP_TEST_RELPATH
+    postimage = growth_path.read_bytes()
+    head_preimage = subprocess.run(
+        ["git", "show", f"HEAD:{commit_mod.GROWTH_CAP_TEST_RELPATH}"],
+        cwd=primary,
+        capture_output=True,
+        check=True,
+    ).stdout
+    head_mode, head_oid = _growth_cap_head_entry(primary)
+    post_mode, post_oid, post_stage = _growth_cap_index_entry(primary)
+    assert post_stage == "0"
+
+    if retry_state == "worktree_only_postimage":
+        _replace_growth_cap_index_entry(primary, head_mode, head_oid)
+    elif retry_state == "index_only_postimage":
+        growth_path.write_bytes(head_preimage)
+    elif retry_state == "unstaged_dirty_postimage":
+        growth_path.write_bytes(postimage + b"# unstaged retry drift\n")
+    elif retry_state == "wrong_wave_postimage":
+        wrong_wave = (
+            head_preimage.decode("utf-8")
+            .replace(
+                "CAP_TEST_FILES = 0",
+                "CAP_TEST_FILES = 1  # +1 for test_new_feature.py "
+                "(other-wave wave, FOUNDER_OVERRIDE:other-wave)",
+                1,
+            )
+            .encode("utf-8")
+        )
+        growth_path.write_bytes(wrong_wave)
+        _git(["add", "--", commit_mod.GROWTH_CAP_TEST_RELPATH], cwd=primary)
+    elif retry_state == "forged_same_wave_cap":
+        forged = postimage.replace(b"CAP_TEST_FILES = 1", b"CAP_TEST_FILES = 2", 1)
+        growth_path.write_bytes(forged)
+        _git(["add", "--", commit_mod.GROWTH_CAP_TEST_RELPATH], cwd=primary)
+    elif retry_state == "duplicate_provenance":
+        canonical_token = f"FOUNDER_OVERRIDE:{GROWTH_CAP_WAVE_ID}".encode("utf-8")
+        forged = postimage.replace(
+            canonical_token,
+            canonical_token + b"; " + canonical_token,
+            1,
+        )
+        growth_path.write_bytes(forged)
+        _git(["add", "--", commit_mod.GROWTH_CAP_TEST_RELPATH], cwd=primary)
+    elif retry_state == "noncanonical_equivalent_bytes":
+        noncanonical = postimage.replace(b"CAP_TEST_FILES = 1", b"CAP_TEST_FILES=1", 1)
+        growth_path.write_bytes(noncanonical)
+        _git(["add", "--", commit_mod.GROWTH_CAP_TEST_RELPATH], cwd=primary)
+    elif retry_state == "worktree_mode_drift":
+        os.chmod(
+            growth_path,
+            stat.S_IMODE(os.lstat(growth_path).st_mode) | stat.S_IXUSR,
+        )
+    elif retry_state == "head_advanced_without_cap":
+        # Simulate an intervening commit that absorbs the governed addition
+        # but not Step 5e's staged cap postimage.  The next derivation now sees
+        # no new governed path; it must reject the still-staged target instead
+        # of falling through the legacy no-new-files no-op.
+        _replace_growth_cap_index_entry(primary, head_mode, head_oid)
+        _git(["commit", "-m", "advance HEAD without growth cap"], cwd=primary, env=env)
+        growth_path.write_bytes(postimage)
+        _git(["add", "--", commit_mod.GROWTH_CAP_TEST_RELPATH], cwd=primary)
+    else:
+        assert retry_state == "unmerged_index_stages"
+        _git(
+            ["update-index", "--force-remove", "--", commit_mod.GROWTH_CAP_TEST_RELPATH],
+            cwd=primary,
+        )
+        index_info = (
+            f"{head_mode} {head_oid} 1\t{commit_mod.GROWTH_CAP_TEST_RELPATH}\n"
+            f"{head_mode} {head_oid} 2\t{commit_mod.GROWTH_CAP_TEST_RELPATH}\n"
+            f"{post_mode} {post_oid} 3\t{commit_mod.GROWTH_CAP_TEST_RELPATH}\n"
+        )
+        subprocess.run(
+            ["git", "update-index", "--index-info"],
+            cwd=primary,
+            input=index_info,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+    head_before = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    index_before = subprocess.run(
+        ["git", "ls-files", "--stage", "-z"],
+        cwd=primary,
+        capture_output=True,
+        check=True,
+    ).stdout
+    worktree_before = growth_path.read_bytes()
+    worktree_mode_before = stat.S_IMODE(os.lstat(growth_path).st_mode)
+
+    outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary,
+        wave_id=GROWTH_CAP_WAVE_ID,
+        base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID,
+        log=_noop_log,
+    )
+
+    assert outcome["bumped"] is False, outcome
+    assert outcome["retry_settled"] is False, outcome
+    assert outcome["reason"] == "retry_authority_error", outcome
+    assert outcome["retry_authority_error"], outcome
+    assert outcome["commit_generated_governance_paths"] == [], outcome
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == head_before
+    assert subprocess.run(
+        ["git", "ls-files", "--stage", "-z"],
+        cwd=primary,
+        capture_output=True,
+        check=True,
+    ).stdout == index_before
+    assert growth_path.read_bytes() == worktree_before
+    assert stat.S_IMODE(os.lstat(growth_path).st_mode) == worktree_mode_before
+
+
+def test_commit_generated_governance_growth_cap_committed_continuation_remains_valid(
+    tmp_path,
+):
+    """A successful commit expires retry authority and retains P0IC3 reuse."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path,
+        baseline=3,
+        cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py",
+            "mu/tests/test_existing_2.py",
+        ],
+    )
+    _stage_new_test_file(primary, env, "mu/tests/tools/test_new_feature.py")
+    first = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary,
+        wave_id=GROWTH_CAP_WAVE_ID,
+        base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID,
+        log=_noop_log,
+    )
+    assert first["bumped"] is True, first
+    _git(["commit", "-m", "commit exact generated growth cap"], cwd=primary, env=env)
+
+    second = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary,
+        wave_id=GROWTH_CAP_WAVE_ID,
+        base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID,
+        log=_noop_log,
+    )
+
+    assert second["bumped"] is False, second
+    assert second["retry_settled"] is False, second
+    assert second["reason"] == "already_recorded", second
+    assert second["commit_generated_governance_paths"] == [
+        commit_mod.GROWTH_CAP_TEST_RELPATH
+    ]
+    text, _, cap = _read_growth_cap_values(primary)
+    assert cap == 1, text
+    assert text.count(f"FOUNDER_OVERRIDE:{GROWTH_CAP_WAVE_ID}") == 1
+    assert not _growth_cap_staged(primary)
+    assert _git(
+        ["diff", "--quiet", "--", commit_mod.GROWTH_CAP_TEST_RELPATH],
+        cwd=primary,
+    ).returncode == 0
+
+
+def test_commit_generated_governance_rejects_unsupported_growth_cap_path(tmp_path):
+    repo = _init_repo(tmp_path)
+    handoff = {"wave_id": "commit-generated-unsupported-growth-cap-wave"}
+    before = _git(["status", "--porcelain=v1", "-z"], cwd=repo).stdout
+
+    refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+        repo_root=repo,
+        handoff=handoff,
+        indicator_path="reports/l4_wave_indicators/unused.json",
+        commit_status="pre_commit_supervisor_pending",
+        commit_generated_governance_paths=["mu/tests/docs/not_growth_caps.py"],
+        commit_generated_governance_provenance="bumped",
+    )
+
+    assert refreshed is handoff
+    assert staged == []
+    assert error == (
+        "unsupported commit-generated governance path before supervisor: "
+        "mu/tests/docs/not_growth_caps.py"
+    )
+    assert _git(["status", "--porcelain=v1", "-z"], cwd=repo).stdout == before
 
 
 def test_growth_cap_autobump_headroom_yields_zero_shortfall_no_bump(tmp_path):
@@ -4136,3 +4519,235 @@ def test_growth_cap_autobump_strands_without_declared_override_on_normal_commit_
     _, _, cap = _read_growth_cap_values(primary)
     assert cap == 0, cap
     assert not _growth_cap_staged(primary)
+
+
+def test_commit_generated_governance_growth_cap_failed_attempt_retry_settles_before_supervisor(
+    tmp_path,
+    monkeypatch,
+):
+    """Drive the reproduced Step5e -> Step8 failure -> Step4 retry lifecycle."""
+    import types
+
+    primary, env = _init_growth_cap_repo(
+        tmp_path,
+        baseline=3,
+        cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py",
+            "mu/tests/test_existing_2.py",
+        ],
+    )
+    _add_growth_cap_pipeline_scaffolding(primary)
+    new_test_path = "mu/tests/tools/test_new_feature.py"
+    _stage_new_test_file(primary, env, new_test_path)
+
+    wave_id = GROWTH_CAP_WAVE_ID
+    packet_path = "reports/control_plane/commit_generated_governance_retry.md"
+    packet = primary / packet_path
+    packet.parent.mkdir(parents=True, exist_ok=True)
+    packet.write_text(
+        "# Commit Generated Governance Retry\n\n"
+        "Status: COMPLETED (commit-ready, supervisor COMMIT_GO)\n"
+        f"Wave ID: {wave_id}\n"
+        "Class: L4_ENABLER\n"
+        "Target gate: G8\n\n"
+        f"FOUNDER_OVERRIDE:{wave_id}\n",
+        encoding="utf-8",
+    )
+    handoff = _growth_cap_normal_commit_handoff(wave_id, declare_override=True)
+    handoff.update(
+        {
+            "files_to_stage": [new_test_path, packet_path, "TASKS.md"],
+            "tracked_packet": packet_path,
+            "scope_items": [packet_path],
+        }
+    )
+    (primary / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Ra\n\n"
+        f"{handoff['tracker_note_text']}\n"
+        "  6. **[FOUNDER-ORDERED-REDTEAM-COMMIT-GENERATED-GOVERNANCE-RETRY] "
+        "IMPLEMENTED / LOCAL EVIDENCE (2026-09-10).** "
+        "Task: `[COMMIT-GENERATED-GOVERNANCE-RETRY]`. "
+        f"Wave ID: `{wave_id}`. Class: `L4_ENABLER`. Packet: `{packet_path}`.\n\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    hook = primary / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/usr/bin/env bash\necho retry-fixture >&2\nexit 17\n", encoding="utf-8")
+
+    supervisor_receipt = primary / ".scratch" / "step6_retry_receipt.json"
+    supervisor_receipt.parent.mkdir(parents=True, exist_ok=True)
+    supervisor_receipt.write_text(
+        json.dumps(
+            {
+                "decision": "COMMIT_GO",
+                "staged_sha": "fixture",
+                "timestamp_utc": "2026-09-10T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    supervisor_packages: list[dict] = []
+
+    def _supervisor(package_path, *args, **kwargs):
+        supervisor_packages.append(
+            json.loads(Path(package_path).read_text(encoding="utf-8"))
+        )
+        return types.SimpleNamespace(
+            decision="COMMIT_GO",
+            summary="retry lifecycle fixture",
+            receipt_path=".scratch/step6_retry_receipt.json",
+        )
+
+    monkeypatch.setattr(
+        commit_mod,
+        "_load_repo_meta_bridge_client",
+        lambda repo_root: (_supervisor, Exception),
+    )
+    real_autobump = getattr(
+        commit_mod, "_maybe_autobump_growth_cap_for_founder_override"
+    )
+    autobump_outcomes: list[dict] = []
+
+    def _capture_autobump(*args, **kwargs):
+        value = real_autobump(*args, **kwargs)
+        autobump_outcomes.append(json.loads(json.dumps(value)))
+        return value
+
+    monkeypatch.setattr(
+        commit_mod,
+        "_maybe_autobump_growth_cap_for_founder_override",
+        _capture_autobump,
+    )
+
+    base_head = _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip()
+    first = commit_mod.run_commit_pipeline(handoff, repo_root=primary)
+
+    assert first["status"] == "error", first
+    assert first["step"] == "run_pre_commit_script", first
+    assert "settle_commit_generated_governance" in first["steps_completed"]
+    assert "build_and_run_supervisor" in first["steps_completed"]
+    assert "validate_receipt" in first["steps_completed"]
+    assert "git_commit" not in first["steps_completed"]
+    assert autobump_outcomes[0]["bumped"] is True, autobump_outcomes[0]
+    assert autobump_outcomes[0]["reason"] == "bumped", autobump_outcomes[0]
+    growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+    growth_file = primary / growth_path
+    first_postimage = growth_file.read_bytes()
+    first_index_blob = subprocess.run(
+        ["git", "show", f":{growth_path}"],
+        cwd=primary,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert first_index_blob == first_postimage
+    assert growth_path in json.loads(
+        (primary / ".agent_bus" / "executors" / "phase_b_handoff.json").read_text(
+            encoding="utf-8"
+        )
+    )["files_to_stage"]
+    assert commit_mod.COMMIT_RETRY_PENDING_STATUS in packet.read_text(encoding="utf-8")
+
+    retry_handoff = json.loads(
+        (primary / ".agent_bus" / "executors" / "phase_b_handoff.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    second = commit_mod.run_commit_pipeline(retry_handoff, repo_root=primary)
+
+    assert second["status"] == "error", second
+    assert second["step"] == "run_pre_commit_script", second
+    assert "restore_commit_retry_state" in second["steps_completed"]
+    assert "settle_commit_generated_governance" in second["steps_completed"]
+    assert "build_and_run_supervisor" in second["steps_completed"]
+    assert second["steps_completed"].index("restore_commit_retry_state") < second[
+        "steps_completed"
+    ].index("settle_commit_generated_governance")
+    assert second["steps_completed"].index("settle_commit_generated_governance") < second[
+        "steps_completed"
+    ].index("build_and_run_supervisor")
+    assert len(autobump_outcomes) == 2, autobump_outcomes
+    assert autobump_outcomes[1]["bumped"] is False, autobump_outcomes[1]
+    assert autobump_outcomes[1]["retry_settled"] is True, autobump_outcomes[1]
+    assert autobump_outcomes[1]["reason"] == "retry_settled", autobump_outcomes[1]
+
+    retry_package = supervisor_packages[1]
+    assert retry_package["changed_files"].count(growth_path) == 1
+    assert retry_package["scope_items"].count(growth_path) == 1
+    target_entries = _git(
+        ["ls-files", "--stage", "--", growth_path], cwd=primary
+    ).stdout.strip().splitlines()
+    assert len(target_entries) == 1, target_entries
+    assert target_entries[0].split()[2] == "0", target_entries
+    assert subprocess.run(
+        ["git", "show", f":{growth_path}"],
+        cwd=primary,
+        capture_output=True,
+        check=True,
+    ).stdout == first_postimage
+    assert growth_file.read_bytes() == first_postimage
+    final_text, _, final_cap = _read_growth_cap_values(primary)
+    assert final_cap == 1, final_text
+    assert final_text.count(f"FOUNDER_OVERRIDE:{wave_id}") == 1, final_text
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == base_head
+
+
+def test_commit_generated_governance_growth_cap_invalid_retry_stops_before_supervisor(
+    tmp_path,
+    monkeypatch,
+):
+    """A forged durable target is fatal even when Step 4 authorizes its path."""
+    primary, env = _init_growth_cap_repo(
+        tmp_path,
+        baseline=3,
+        cap=0,
+        existing_test_files=[
+            "mu/tests/test_existing_1.py",
+            "mu/tests/test_existing_2.py",
+        ],
+    )
+    _add_growth_cap_pipeline_scaffolding(primary)
+    new_test_path = "mu/tests/tools/test_new_feature.py"
+    _stage_new_test_file(primary, env, new_test_path)
+    first = commit_mod.maybe_autobump_growth_cap_for_founder_override(
+        repo_root=primary,
+        wave_id=GROWTH_CAP_WAVE_ID,
+        base_branch="dev",
+        founder_override_token=GROWTH_CAP_WAVE_ID,
+        log=_noop_log,
+    )
+    assert first["bumped"] is True, first
+    growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+    growth_file = primary / growth_path
+    growth_file.write_bytes(
+        growth_file.read_bytes().replace(
+            b"CAP_TEST_FILES = 1", b"CAP_TEST_FILES = 2", 1
+        )
+    )
+    _git(["add", "--", growth_path], cwd=primary)
+
+    supervisor_called = False
+
+    def _supervisor(*args, **kwargs):
+        nonlocal supervisor_called
+        supervisor_called = True
+        raise AssertionError("supervisor must not authorize forged retry bytes")
+
+    monkeypatch.setattr(
+        commit_mod,
+        "_load_repo_meta_bridge_client",
+        lambda repo_root: (_supervisor, Exception),
+    )
+    handoff = _growth_cap_normal_commit_handoff(
+        GROWTH_CAP_WAVE_ID, declare_override=True
+    )
+    handoff["files_to_stage"] = [new_test_path, growth_path]
+    result = commit_mod.run_commit_pipeline(handoff, repo_root=primary)
+
+    assert result["status"] == "error", result
+    assert result["step"] == "settle_commit_generated_governance", result
+    assert "retry authority rejected candidate" in result["errors"][0]
+    assert supervisor_called is False

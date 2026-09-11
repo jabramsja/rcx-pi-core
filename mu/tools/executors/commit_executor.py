@@ -17259,6 +17259,265 @@ _GROWTH_CAP_TOOL_VALUE_RE = re.compile(
     r"^(?P<prefix>CAP_TOOL_SCRIPTS\s*=\s*)(?P<value>\d+)(?P<rest>[^\n]*)$",
     re.MULTILINE,
 )
+_GROWTH_CAP_RETRY_AUTHORITY_SCHEMA = "RetryAuthorityV1"
+_GROWTH_CAP_SETTLEMENT_ALGORITHM_VERSION = 1
+_GIT_OBJECT_OID_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+_GIT_BLOB_INDEX_MODES = frozenset({"100644", "100755", "120000"})
+_GIT_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
+
+
+def _run_git_bytes(
+    repo_root: Path,
+    args: list[str],
+    *,
+    input_bytes: bytes | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run a bounded Git read/hash command without text newline conversion."""
+    run_env = {k: v for k, v in os.environ.items() if not k.startswith("RCX_SKIP_")}
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        env=run_env,
+        input=input_bytes,
+    )
+
+
+def _git_bytes_diagnostic(proc: subprocess.CompletedProcess[bytes]) -> str:
+    raw = proc.stderr or proc.stdout or b""
+    return raw.decode("utf-8", errors="replace").strip()[:300]
+
+
+def _canonical_retry_git_path(raw_path: bytes) -> tuple[str | None, str | None]:
+    try:
+        path = raw_path.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return None, "index contains a path that is not canonical UTF-8"
+    if not path or path != _normalize_repo_relpath(path):
+        return None, f"index path is not canonical: {path!r}"
+    if _is_absolute_untrusted_path(path) or _has_path_traversal(path):
+        return None, f"index path is unsafe: {path!r}"
+    return path, None
+
+
+def _parse_retry_index_entries(
+    raw: bytes,
+) -> tuple[list[dict[str, str]] | None, str | None]:
+    """Parse one unique, canonical stage-0 entry for every index path."""
+    if raw and not raw.endswith(b"\0"):
+        return None, "Git index listing is not NUL terminated"
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        try:
+            metadata, raw_path = record.split(b"\t", 1)
+            raw_mode, raw_oid, raw_stage = metadata.split(b" ")
+            mode = raw_mode.decode("ascii", errors="strict")
+            oid = raw_oid.decode("ascii", errors="strict")
+            stage = raw_stage.decode("ascii", errors="strict")
+        except (ValueError, UnicodeDecodeError):
+            return None, "Git index contains a malformed entry"
+        path, path_error = _canonical_retry_git_path(raw_path)
+        if path_error or path is None:
+            return None, path_error or "Git index path is malformed"
+        if stage != "0":
+            return None, (
+                "Git index is ambiguous: unmerged stage "
+                f"{stage} is present for {path}"
+            )
+        if path in seen:
+            return None, f"Git index contains a duplicate stage-0 entry for {path}"
+        if mode not in _GIT_BLOB_INDEX_MODES:
+            return None, f"Git index mode is unsupported for retry authority: {mode} {path}"
+        if not _GIT_OBJECT_OID_RE.fullmatch(oid):
+            return None, f"Git index object id is malformed for {path}"
+        seen.add(path)
+        entries.append({"path": path, "mode": mode, "blob_oid": oid})
+    return sorted(entries, key=lambda entry: entry["path"]), None
+
+
+def _parse_retry_head_tree_entries(
+    raw: bytes,
+) -> tuple[list[dict[str, str]] | None, str | None]:
+    if raw and not raw.endswith(b"\0"):
+        return None, "HEAD tree listing is not NUL terminated"
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        try:
+            metadata, raw_path = record.split(b"\t", 1)
+            raw_mode, raw_type, raw_oid = metadata.split(b" ")
+            mode = raw_mode.decode("ascii", errors="strict")
+            object_type = raw_type.decode("ascii", errors="strict")
+            oid = raw_oid.decode("ascii", errors="strict")
+        except (ValueError, UnicodeDecodeError):
+            return None, "HEAD tree contains a malformed entry"
+        path, path_error = _canonical_retry_git_path(raw_path)
+        if path_error or path is None:
+            return None, path_error or "HEAD tree path is malformed"
+        if path in seen:
+            return None, f"HEAD tree contains a duplicate path: {path}"
+        if mode not in _GIT_BLOB_INDEX_MODES or object_type != "blob":
+            return None, (
+                "HEAD tree entry is unsupported for retry authority: "
+                f"{mode} {object_type} {path}"
+            )
+        if not _GIT_OBJECT_OID_RE.fullmatch(oid):
+            return None, f"HEAD tree object id is malformed for {path}"
+        seen.add(path)
+        entries.append({"path": path, "mode": mode, "blob_oid": oid})
+    return sorted(entries, key=lambda entry: entry["path"]), None
+
+
+def _retry_index_entries(repo_root: Path) -> tuple[list[dict[str, str]] | None, str | None]:
+    try:
+        proc = _run_git_bytes(repo_root, ["ls-files", "--full-name", "--stage", "-z"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"could not read the Git index: {exc}"
+    if proc.returncode != 0:
+        return None, f"could not read the Git index: {_git_bytes_diagnostic(proc)}"
+    return _parse_retry_index_entries(proc.stdout)
+
+
+def _retry_head_snapshot(
+    repo_root: Path,
+) -> tuple[str | None, list[dict[str, str]] | None, str | None]:
+    try:
+        head_proc = _run_git_bytes(repo_root, ["rev-parse", "--verify", "HEAD^{commit}"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, None, f"could not resolve HEAD: {exc}"
+    if head_proc.returncode != 0:
+        return None, None, f"could not resolve HEAD: {_git_bytes_diagnostic(head_proc)}"
+    try:
+        head_oid = head_proc.stdout.strip().decode("ascii", errors="strict")
+    except UnicodeDecodeError:
+        return None, None, "resolved HEAD object id is not ASCII"
+    if not _GIT_OBJECT_OID_RE.fullmatch(head_oid):
+        return None, None, "resolved HEAD object id is malformed"
+    try:
+        tree_proc = _run_git_bytes(repo_root, ["ls-tree", "-r", "-z", "--full-tree", head_oid])
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, None, f"could not read HEAD tree: {exc}"
+    if tree_proc.returncode != 0:
+        return None, None, f"could not read HEAD tree: {_git_bytes_diagnostic(tree_proc)}"
+    tree_entries, tree_error = _parse_retry_head_tree_entries(tree_proc.stdout)
+    if tree_error:
+        return None, None, tree_error
+    return head_oid, tree_entries, None
+
+
+def _validate_retry_index_objects(
+    repo_root: Path,
+    entries: list[dict[str, str]],
+) -> str | None:
+    """Require every fingerprinted index OID to resolve to an exact blob."""
+    unique_oids = sorted({entry["blob_oid"] for entry in entries})
+    if not unique_oids:
+        return None
+    request = ("\n".join(unique_oids) + "\n").encode("ascii")
+    try:
+        proc = _run_git_bytes(
+            repo_root,
+            ["cat-file", "--batch-check=%(objectname) %(objecttype)"],
+            input_bytes=request,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"could not validate Git index objects: {exc}"
+    if proc.returncode != 0:
+        return f"could not validate Git index objects: {_git_bytes_diagnostic(proc)}"
+    lines = proc.stdout.splitlines()
+    if len(lines) != len(unique_oids):
+        return "Git object validation returned an ambiguous result"
+    for expected_oid, raw_line in zip(unique_oids, lines):
+        try:
+            fields = raw_line.decode("ascii", errors="strict").split()
+        except UnicodeDecodeError:
+            return "Git object validation returned non-ASCII output"
+        if fields != [expected_oid, "blob"]:
+            return f"required Git index blob is missing or corrupt: {expected_oid}"
+    return None
+
+
+def _git_blob_bytes(repo_root: Path, oid: str) -> tuple[bytes | None, str | None]:
+    try:
+        proc = _run_git_bytes(repo_root, ["cat-file", "blob", oid])
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"could not read required Git blob {oid}: {exc}"
+    if proc.returncode != 0:
+        return None, (
+            f"required Git blob is missing or corrupt: {oid}: "
+            f"{_git_bytes_diagnostic(proc)}"
+        )
+    return proc.stdout, None
+
+
+def _git_blob_oid_for_bytes(repo_root: Path, data: bytes) -> tuple[str | None, str | None]:
+    """Compute an object-format-aware blob OID without writing the object."""
+    try:
+        proc = _run_git_bytes(repo_root, ["hash-object", "--stdin"], input_bytes=data)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"could not hash growth-cap bytes: {exc}"
+    if proc.returncode != 0:
+        return None, f"could not hash growth-cap bytes: {_git_bytes_diagnostic(proc)}"
+    try:
+        oid = proc.stdout.strip().decode("ascii", errors="strict")
+    except UnicodeDecodeError:
+        return None, "growth-cap blob object id is not ASCII"
+    if not _GIT_OBJECT_OID_RE.fullmatch(oid):
+        return None, "growth-cap blob object id is malformed"
+    return oid, None
+
+
+def _regular_worktree_bytes_and_git_mode(
+    path: Path,
+) -> tuple[bytes | None, str | None, str | None]:
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        return None, None, f"could not stat growth-cap worktree path: {exc}"
+    if not stat.S_ISREG(info.st_mode):
+        return None, None, "growth-cap worktree path is not a regular file"
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        return None, None, f"could not read growth-cap worktree bytes: {exc}"
+    git_mode = "100755" if info.st_mode & 0o111 else "100644"
+    return data, git_mode, None
+
+
+def _atomic_replace_regular_file_bytes(path: Path, data: bytes) -> str | None:
+    """Atomically replace a regular file while preserving its filesystem mode."""
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        return f"could not stat growth-cap file before atomic replacement: {exc}"
+    if not stat.S_ISREG(info.st_mode):
+        return "growth-cap file is not regular before atomic replacement"
+    temp_name = ""
+    try:
+        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.retry-", dir=path.parent)
+        with os.fdopen(fd, "wb") as stream:
+            os.fchmod(stream.fileno(), stat.S_IMODE(info.st_mode))
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_name, path)
+        temp_name = ""
+        return None
+    except OSError as exc:
+        return f"could not atomically replace growth-cap file: {exc}"
+    finally:
+        if temp_name:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
 
 
 def _is_mu_test_file_path(relpath: str) -> bool:
@@ -17391,10 +17650,441 @@ def _cap_provenance_records_wave(cap_comment: str, wave_id: str) -> bool:
     """True when a CAP_* comment already records THIS wave."""
     if not cap_comment:
         return False
-    if _extract_same_wave_founder_override_token(cap_comment, wave_id):
-        return True
-    raw = (wave_id or "").strip()
-    return bool(raw) and raw in cap_comment
+    return bool(_extract_same_wave_founder_override_token(cap_comment, wave_id))
+
+
+def _unique_growth_cap_match(
+    pattern: re.Pattern[str],
+    text: str,
+    *,
+    label: str,
+) -> tuple[re.Match[str] | None, str | None]:
+    matches = list(pattern.finditer(text))
+    if len(matches) != 1:
+        return None, f"growth-cap preimage has {len(matches)} canonical {label} assignments"
+    return matches[0], None
+
+
+def _growth_cap_plan_from_head_preimage(
+    *,
+    head_text: str,
+    wave_id: str,
+    new_test_files: list[str],
+    new_tool_scripts: list[str],
+    projected_test_count: int,
+    projected_tool_count: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Compute the sole canonical postimage from immutable HEAD bytes."""
+    plan: dict[str, Any] = {
+        "shortfall": 0,
+        "bump_amount": 0,
+        "previous_cap": None,
+        "new_cap": None,
+        "cap_bumps": {},
+        "bump_edits": [],
+        "target_reasons": [],
+        "expected_text": head_text,
+    }
+    target_specs = [
+        {
+            "cap_name": "CAP_TEST_FILES",
+            "baseline_re": _GROWTH_CAP_TEST_BASELINE_RE,
+            "cap_re": _GROWTH_CAP_TEST_VALUE_RE,
+            "new_paths": new_test_files,
+            "projected_count": projected_test_count,
+            "noun": "test file(s)",
+        },
+        {
+            "cap_name": "CAP_TOOL_SCRIPTS",
+            "baseline_re": _GROWTH_CAP_TOOL_BASELINE_RE,
+            "cap_re": _GROWTH_CAP_TOOL_VALUE_RE,
+            "new_paths": new_tool_scripts,
+            "projected_count": projected_tool_count,
+            "noun": "tool script(s)",
+        },
+    ]
+
+    for spec in target_specs:
+        new_paths = list(spec["new_paths"])
+        if not new_paths:
+            continue
+        cap_name = str(spec["cap_name"])
+        baseline_match, baseline_error = _unique_growth_cap_match(
+            spec["baseline_re"], head_text, label=f"{cap_name} baseline"
+        )
+        if baseline_error or baseline_match is None:
+            return None, baseline_error or "growth-cap baseline is ambiguous"
+        cap_match, cap_error = _unique_growth_cap_match(
+            spec["cap_re"], head_text, label=cap_name
+        )
+        if cap_error or cap_match is None:
+            return None, cap_error or "growth-cap assignment is ambiguous"
+
+        baseline = int(baseline_match.group(1))
+        current_cap = int(cap_match.group("value"))
+        projected_count = int(spec["projected_count"])
+        shortfall = projected_count - (baseline + current_cap)
+        cap_comment = cap_match.group("rest")
+        target_outcome = {
+            "bumped": False,
+            "shortfall": shortfall,
+            "bump_amount": 0,
+            "new_paths": new_paths,
+            "previous_cap": current_cap,
+            "new_cap": None,
+            "reason": "",
+        }
+        plan["cap_bumps"][cap_name] = target_outcome
+        if plan["previous_cap"] is None or cap_name == "CAP_TEST_FILES":
+            plan["previous_cap"] = current_cap
+            plan["shortfall"] = shortfall
+
+        if _cap_provenance_records_wave(cap_comment, wave_id):
+            target_outcome["reason"] = "already_recorded"
+            plan["target_reasons"].append("already_recorded")
+            continue
+        if shortfall <= 0:
+            target_outcome["reason"] = "zero_shortfall"
+            plan["target_reasons"].append("zero_shortfall")
+            continue
+
+        new_cap = current_cap + shortfall
+        target_outcome.update(
+            {
+                "bumped": True,
+                "bump_amount": shortfall,
+                "new_cap": new_cap,
+                "reason": "bumped",
+            }
+        )
+        if not plan["bump_edits"]:
+            plan["new_cap"] = new_cap
+        plan["bump_amount"] += shortfall
+        plan["target_reasons"].append("bumped")
+        plan["bump_edits"].append(
+            {
+                "cap_name": cap_name,
+                "cap_match": cap_match,
+                "cap_comment": cap_comment,
+                "new_cap": new_cap,
+                "shortfall": shortfall,
+                "file_desc": ", ".join(Path(path).name for path in new_paths),
+                "noun": spec["noun"],
+            }
+        )
+
+    expected_text = head_text
+    for edit in sorted(
+        plan["bump_edits"], key=lambda item: item["cap_match"].start(), reverse=True
+    ):
+        cap_match = edit["cap_match"]
+        cap_comment = edit["cap_comment"]
+        provenance = (
+            f"+{edit['shortfall']} for {edit['file_desc']} "
+            f"({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})"
+        )
+        if "#" in cap_comment:
+            new_rest = f"{cap_comment}; {provenance}"
+        else:
+            new_rest = f"{cap_comment}  # {provenance}"
+        new_line = f"{cap_match.group('prefix')}{edit['new_cap']}{new_rest}"
+        expected_text = (
+            expected_text[: cap_match.start()]
+            + new_line
+            + expected_text[cap_match.end() :]
+        )
+    plan["expected_text"] = expected_text
+    return plan, None
+
+
+def _capture_growth_cap_retry_authority(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    base_branch: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Re-derive RetryAuthorityV1 without trusting current target bytes."""
+    if not isinstance(wave_id, str) or not WAVE_ID_RE.fullmatch(wave_id):
+        return None, f"growth-cap retry authority requires a canonical wave_id: {wave_id!r}"
+    if normalize_wave_id(wave_id) != wave_id:
+        return None, f"growth-cap retry authority wave_id is not canonical: {wave_id!r}"
+
+    head_oid, head_entries, head_error = _retry_head_snapshot(repo_root)
+    if head_error or head_oid is None or head_entries is None:
+        return None, head_error or "could not capture HEAD for retry authority"
+    index_entries, index_error = _retry_index_entries(repo_root)
+    if index_error or index_entries is None:
+        return None, index_error or "could not capture index for retry authority"
+
+    head_by_path = {entry["path"]: entry for entry in head_entries}
+    index_by_path = {entry["path"]: entry for entry in index_entries}
+    head_target = head_by_path.get(GROWTH_CAP_TEST_RELPATH)
+    index_target = index_by_path.get(GROWTH_CAP_TEST_RELPATH)
+
+    head_text = ""
+    head_bytes = b""
+    head_records_same_wave = False
+    if head_target is not None:
+        if head_target["mode"] not in _GIT_REGULAR_FILE_MODES:
+            return None, "growth-cap target has an unsupported mode in HEAD"
+        head_bytes_value, blob_error = _git_blob_bytes(repo_root, head_target["blob_oid"])
+        if blob_error or head_bytes_value is None:
+            return None, blob_error or "could not read growth-cap HEAD preimage"
+        head_bytes = head_bytes_value
+        head_hash, head_hash_error = _git_blob_oid_for_bytes(repo_root, head_bytes)
+        if head_hash_error or head_hash != head_target["blob_oid"]:
+            return None, head_hash_error or "growth-cap HEAD blob hash mismatch"
+        try:
+            head_text = head_bytes.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            return None, "growth-cap HEAD preimage is not canonical UTF-8"
+        head_records_same_wave = bool(
+            _extract_same_wave_founder_override_token(head_text, wave_id)
+        )
+
+    if head_records_same_wave:
+        new_test_files = _new_mu_test_files_vs_merge_base(repo_root, base_branch)
+        new_tool_scripts = _new_mu_tool_scripts_vs_merge_base(repo_root, base_branch)
+    else:
+        head_paths = set(head_by_path)
+        new_test_files = sorted(
+            entry["path"]
+            for entry in index_entries
+            if entry["path"] not in head_paths and _is_mu_test_file_path(entry["path"])
+        )
+        new_tool_scripts = sorted(
+            entry["path"]
+            for entry in index_entries
+            if entry["path"] not in head_paths and _is_mu_tool_script_path(entry["path"])
+        )
+
+    snapshot: dict[str, Any] = {
+        "head_oid": head_oid,
+        "head_records_same_wave": head_records_same_wave,
+        "new_test_files": new_test_files,
+        "new_tool_scripts": new_tool_scripts,
+        "index_entries": index_entries,
+    }
+    target_path = repo_root / GROWTH_CAP_TEST_RELPATH
+    canonical_target_absent = (
+        head_target is None
+        and index_target is None
+        and not os.path.lexists(target_path)
+    )
+    snapshot["canonical_target_absent"] = canonical_target_absent
+    if canonical_target_absent:
+        # Preserve the established no-op for minimal commit fixtures, but only
+        # after proving simultaneous absence from immutable HEAD, the parsed
+        # stage-0 index, and the worktree.  Any partial presence continues into
+        # the fail-closed checks below.
+        return snapshot, None
+    if not new_test_files and not new_tool_scripts:
+        # A retry handoff can still carry the generated target after HEAD has
+        # moved far enough that the governed addition is no longer new.  Do
+        # not let the legacy no-new-files no-op turn that stale staged delta
+        # into an authorization bypass: absence of a transition requires the
+        # target to be the exact clean HEAD preimage (or canonically absent in
+        # every surface).
+        if head_target is None:
+            return None, (
+                "growth-cap target exists outside HEAD when no governed "
+                "transition is reproducible"
+            )
+        if index_target is None:
+            return None, "growth-cap target is missing from the stage-0 index"
+        if index_target["mode"] not in _GIT_REGULAR_FILE_MODES:
+            return None, "growth-cap target has an unsupported index mode"
+        object_error = _validate_retry_index_objects(repo_root, index_entries)
+        if object_error:
+            return None, object_error
+        worktree_bytes, worktree_mode, worktree_error = (
+            _regular_worktree_bytes_and_git_mode(target_path)
+        )
+        if worktree_error or worktree_bytes is None or worktree_mode is None:
+            return None, worktree_error or "could not capture growth-cap worktree state"
+        if (
+            index_target != head_target
+            or worktree_bytes != head_bytes
+            or worktree_mode != head_target["mode"]
+        ):
+            return None, (
+                "growth-cap target is not the exact clean HEAD preimage when "
+                "no governed transition is reproducible"
+            )
+        snapshot.update(
+            {
+                "head_target": head_target,
+                "head_bytes": head_bytes,
+                "index_target": index_target,
+                "worktree_bytes": worktree_bytes,
+                "worktree_mode": worktree_mode,
+            }
+        )
+        return snapshot, None
+    if head_target is None:
+        return None, (
+            "growth-cap target preimage is missing from HEAD and canonical absence "
+            "is unsupported"
+        )
+    if index_target is None:
+        return None, "growth-cap target is missing from the stage-0 index"
+    if index_target["mode"] not in _GIT_REGULAR_FILE_MODES:
+        return None, "growth-cap target has an unsupported index mode"
+
+    object_error = _validate_retry_index_objects(repo_root, index_entries)
+    if object_error:
+        return None, object_error
+    worktree_bytes, worktree_mode, worktree_error = (
+        _regular_worktree_bytes_and_git_mode(repo_root / GROWTH_CAP_TEST_RELPATH)
+    )
+    if worktree_error or worktree_bytes is None or worktree_mode is None:
+        return None, worktree_error or "could not capture growth-cap worktree state"
+
+    non_target_entries = [
+        entry for entry in index_entries if entry["path"] != GROWTH_CAP_TEST_RELPATH
+    ]
+    pre_step5e_entries = sorted(
+        [*non_target_entries, head_target], key=lambda entry: entry["path"]
+    )
+    projected_test_count = sum(
+        1 for entry in pre_step5e_entries if _is_mu_test_file_path(entry["path"])
+    )
+    projected_tool_count = sum(
+        1 for entry in pre_step5e_entries if _is_mu_tool_script_path(entry["path"])
+    )
+    plan, plan_error = _growth_cap_plan_from_head_preimage(
+        head_text=head_text,
+        wave_id=wave_id,
+        new_test_files=new_test_files,
+        new_tool_scripts=new_tool_scripts,
+        projected_test_count=projected_test_count,
+        projected_tool_count=projected_tool_count,
+    )
+    if plan_error or plan is None:
+        return None, plan_error or "could not compute growth-cap postimage"
+    expected_bytes = str(plan["expected_text"]).encode("utf-8")
+    expected_oid, expected_oid_error = _git_blob_oid_for_bytes(repo_root, expected_bytes)
+    if expected_oid_error or expected_oid is None:
+        return None, expected_oid_error or "could not hash growth-cap postimage"
+    expected_target = {
+        "path": GROWTH_CAP_TEST_RELPATH,
+        "mode": head_target["mode"],
+        "blob_oid": expected_oid,
+    }
+    expected_entries = sorted(
+        [*non_target_entries, expected_target], key=lambda entry: entry["path"]
+    )
+    authority = {
+        "schema": _GROWTH_CAP_RETRY_AUTHORITY_SCHEMA,
+        "settlement_algorithm_version": _GROWTH_CAP_SETTLEMENT_ALGORITHM_VERSION,
+        "wave_id": wave_id,
+        "base_head_oid": head_oid,
+        "target_preimage": head_target,
+        "authorized_non_target_index_fingerprint": non_target_entries,
+        "pre_step5e_index_fingerprint": pre_step5e_entries,
+        "expected_postimage": expected_target,
+        "expected_post_step5e_index_fingerprint": expected_entries,
+    }
+    authority_bytes = (
+        json.dumps(
+            authority,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    snapshot.update(
+        {
+            "head_target": head_target,
+            "head_bytes": head_bytes,
+            "index_target": index_target,
+            "worktree_bytes": worktree_bytes,
+            "worktree_mode": worktree_mode,
+            "non_target_entries": non_target_entries,
+            "plan": plan,
+            "expected_bytes": expected_bytes,
+            "expected_target": expected_target,
+            "expected_entries": expected_entries,
+            "authority_digest": hashlib.sha256(authority_bytes).hexdigest(),
+        }
+    )
+    return snapshot, None
+
+
+def _growth_cap_snapshot_candidate_state(snapshot: dict[str, Any]) -> str:
+    index_target = snapshot.get("index_target")
+    worktree_bytes = snapshot.get("worktree_bytes")
+    worktree_mode = snapshot.get("worktree_mode")
+    head_target = snapshot.get("head_target")
+    expected_target = snapshot.get("expected_target")
+    if (
+        index_target == head_target
+        and worktree_bytes == snapshot.get("head_bytes")
+        and worktree_mode == head_target.get("mode")
+    ):
+        return "preimage"
+    if (
+        index_target == expected_target
+        and worktree_bytes == snapshot.get("expected_bytes")
+        and worktree_mode == expected_target.get("mode")
+    ):
+        return "postimage"
+    return "invalid"
+
+
+def _growth_cap_snapshots_stable(
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> bool:
+    return all(
+        before.get(key) == after.get(key)
+        for key in (
+            "authority_digest",
+            "head_oid",
+            "head_records_same_wave",
+            "index_target",
+            "worktree_bytes",
+            "worktree_mode",
+            "expected_target",
+            "expected_bytes",
+        )
+    )
+
+
+def _verify_growth_cap_generated_candidate(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    base_branch: str,
+    allow_same_invocation_head_provenance: bool,
+) -> str | None:
+    """Recompute and byte-check the exact staged target before supervisor."""
+    first, first_error = _capture_growth_cap_retry_authority(
+        repo_root, wave_id=wave_id, base_branch=base_branch
+    )
+    if first_error or first is None:
+        return first_error or "could not rederive growth-cap retry authority"
+    second, second_error = _capture_growth_cap_retry_authority(
+        repo_root, wave_id=wave_id, base_branch=base_branch
+    )
+    if second_error or second is None:
+        return second_error or "could not repeat growth-cap retry authority check"
+    if not _growth_cap_snapshots_stable(first, second):
+        return "growth-cap retry authority changed before supervisor handoff"
+    plan = second.get("plan")
+    if not isinstance(plan, dict) or not plan.get("bump_edits"):
+        return "growth-cap generated candidate no longer has one reproducible postimage"
+    if (
+        second.get("head_records_same_wave")
+        and not allow_same_invocation_head_provenance
+    ):
+        return "uncommitted growth-cap retry is stale after same-wave HEAD provenance"
+    if _growth_cap_snapshot_candidate_state(second) != "postimage":
+        return "growth-cap generated candidate is not the exact staged postimage"
+    if second.get("index_entries") != second.get("expected_entries"):
+        return "growth-cap generated candidate has an unexpected complete index fingerprint"
+    return None
 
 
 def _restore_growth_cap_file(
@@ -17433,18 +18123,17 @@ def _maybe_autobump_growth_cap_for_founder_override(
     founder_override_token: str,
     log: Any,
 ) -> dict[str, Any]:
-    """Automate founder-authorized CAP_TEST_FILES/CAP_TOOL_SCRIPTS bumps.
+    """Settle the exact founder-authorized growth-cap postimage.
 
-    Returns a structured outcome. Mutates mu/tests/docs/test_growth_caps.py and
-    stages it ONLY on a genuine bump: a wave that (1) adds >=1 new staged file
-    for a governed growth cap absent on the merge base, (2) whose committed
-    (git-index) count exceeds the relevant baseline + cap by a positive shortfall,
-    (3) has no prior same-wave provenance on that cap, and (4) carries the
-    FOUNDER_OVERRIDE token Gate 8 validates. Any other case is a no-op
-    (fail-closed); the gate strands the commit exactly as today.
+    The current target is never an authority input.  The sole expected
+    postimage is recomputed from the target's HEAD blob plus the complete
+    stage-0 index with that target replaced by its HEAD preimage.  An exact
+    already-staged postimage may therefore settle a failed pre-commit attempt
+    without a second increment; every mixed or byte-different state is fatal.
     """
     outcome: dict[str, Any] = {
         "bumped": False,
+        "retry_settled": False,
         "shortfall": 0,
         "bump_amount": 0,
         "new_test_files": [],
@@ -17453,215 +18142,247 @@ def _maybe_autobump_growth_cap_for_founder_override(
         "new_cap": None,
         "cap_bumps": {},
         "commit_generated_governance_paths": [],
+        "retry_authority_error": "",
         "reason": "",
     }
-    cap_file = repo_root / "mu" / "tests" / "docs" / "test_growth_caps.py"
-    if not cap_file.exists():
-        outcome["reason"] = "growth_cap_file_absent"
+    cap_file = repo_root / GROWTH_CAP_TEST_RELPATH
+
+    def _authority_failure(detail: str) -> dict[str, Any]:
+        error = f"growth-cap retry authority rejected candidate: {detail}"
+        outcome.update(
+            {
+                "bumped": False,
+                "retry_settled": False,
+                "bump_amount": 0,
+                "new_cap": None,
+                "commit_generated_governance_paths": [],
+                "retry_authority_error": error,
+                "reason": "retry_authority_error",
+            }
+        )
+        for target in outcome["cap_bumps"].values():
+            if isinstance(target, dict) and target.get("reason") == "bumped":
+                target.update(
+                    {
+                        "bumped": False,
+                        "bump_amount": 0,
+                        "new_cap": None,
+                        "reason": "retry_authority_error",
+                    }
+                )
+        log(f"Step 5e: {error} (fail-closed)")
         return outcome
 
-    # (1) Detect genuinely-new staged governed files (absent on the merge base).
-    new_test_files = _new_mu_test_files_vs_merge_base(repo_root, base_branch)
-    new_tool_scripts = _new_mu_tool_scripts_vs_merge_base(repo_root, base_branch)
-    outcome["new_test_files"] = new_test_files
-    outcome["new_tool_scripts"] = new_tool_scripts
-    if not new_test_files and not new_tool_scripts:
-        # Preserve the legacy reason for existing tests/callers. There are no
-        # governed additions of any type here.
+    def _clear_pending_growth_cap_bumps(reason: str) -> None:
+        outcome["bumped"] = False
+        outcome["retry_settled"] = False
+        outcome["bump_amount"] = 0
+        outcome["new_cap"] = None
+        for target in outcome["cap_bumps"].values():
+            if isinstance(target, dict) and target.get("reason") == "bumped":
+                target.update(
+                    {
+                        "bumped": False,
+                        "bump_amount": 0,
+                        "new_cap": None,
+                        "reason": reason,
+                    }
+                )
+
+    captured, capture_error = _capture_growth_cap_retry_authority(
+        repo_root, wave_id=wave_id, base_branch=base_branch
+    )
+    if capture_error or captured is None:
+        return _authority_failure(capture_error or "authority capture failed")
+    if captured.get("canonical_target_absent") is True:
+        outcome["reason"] = "growth_cap_file_absent"
+        return outcome
+    outcome["new_test_files"] = list(captured.get("new_test_files") or [])
+    outcome["new_tool_scripts"] = list(captured.get("new_tool_scripts") or [])
+    if not outcome["new_test_files"] and not outcome["new_tool_scripts"]:
         outcome["reason"] = "no_new_test_files"
         return outcome
 
-    # (2) Compute cap SHORTFALLS from COMMITTED (git-index) counts — NOT on-disk
-    # rglob counts (which would fold in untracked working-tree strays and
-    # permanently over-grant a cap) and NOT raw new-file counts.
-    try:
-        cap_text = cap_file.read_text(encoding="utf-8")
-    except OSError:
-        outcome["reason"] = "growth_cap_file_unreadable"
-        return outcome
-
-    target_specs = [
+    plan = captured.get("plan")
+    if not isinstance(plan, dict):
+        return _authority_failure("canonical growth-cap plan is missing")
+    outcome.update(
         {
-            "cap_name": "CAP_TEST_FILES",
-            "baseline_re": _GROWTH_CAP_TEST_BASELINE_RE,
-            "cap_re": _GROWTH_CAP_TEST_VALUE_RE,
-            "new_paths": new_test_files,
-            "projected_count": _count_tracked_mu_test_files(repo_root),
-            "noun": "test file(s)",
-        },
-        {
-            "cap_name": "CAP_TOOL_SCRIPTS",
-            "baseline_re": _GROWTH_CAP_TOOL_BASELINE_RE,
-            "cap_re": _GROWTH_CAP_TOOL_VALUE_RE,
-            "new_paths": new_tool_scripts,
-            "projected_count": _count_tracked_mu_tool_scripts(repo_root),
-            "noun": "tool script(s)",
-        },
-    ]
-    bump_edits: list[dict[str, Any]] = []
-    target_reasons: list[str] = []
-
-    for spec in target_specs:
-        new_paths = list(spec["new_paths"])
-        if not new_paths:
-            continue
-        cap_name = str(spec["cap_name"])
-        baseline_match = spec["baseline_re"].search(cap_text)
-        cap_match = spec["cap_re"].search(cap_text)
-        if baseline_match is None or cap_match is None:
-            outcome["reason"] = "growth_cap_constants_unparsed"
-            return outcome
-        baseline = int(baseline_match.group(1))
-        current_cap = int(cap_match.group("value"))
-        projected_count = int(spec["projected_count"])
-        shortfall = projected_count - (baseline + current_cap)
-        cap_comment = cap_match.group("rest")
-        target_outcome = {
-            "bumped": False,
-            "shortfall": shortfall,
-            "bump_amount": 0,
-            "new_paths": new_paths,
-            "previous_cap": current_cap,
-            "new_cap": None,
-            "reason": "",
+            "shortfall": int(plan.get("shortfall") or 0),
+            "bump_amount": int(plan.get("bump_amount") or 0),
+            "previous_cap": plan.get("previous_cap"),
+            "new_cap": plan.get("new_cap"),
+            "cap_bumps": copy.deepcopy(plan.get("cap_bumps") or {}),
         }
-        outcome["cap_bumps"][cap_name] = target_outcome
-        if outcome["previous_cap"] is None or cap_name == "CAP_TEST_FILES":
-            outcome["previous_cap"] = current_cap
-            outcome["shortfall"] = shortfall
-
-        # (3) Idempotency guard: this wave's provenance is already recorded on
-        # this cap. Continue, because another cap in the same file may still need
-        # a first-time bump on a retry.
-        if _cap_provenance_records_wave(cap_comment, wave_id):
-            target_outcome["reason"] = "already_recorded"
-            target_reasons.append("already_recorded")
+    )
+    bump_edits = list(plan.get("bump_edits") or [])
+    target_reasons = list(plan.get("target_reasons") or [])
+    for cap_name, target in outcome["cap_bumps"].items():
+        if isinstance(target, dict) and target.get("reason") == "already_recorded":
             log(
-                f"Step 5e: {cap_name} already records FOUNDER_OVERRIDE wave "
-                f"{wave_id}; no bump (idempotent retry)"
+                f"Step 5e: {cap_name} already records committed "
+                f"FOUNDER_OVERRIDE wave {wave_id}; no additional bump"
             )
-            continue
-
-        # (4) Headroom / consolidation: this cap already covers the count.
-        if shortfall <= 0:
-            target_outcome["reason"] = "zero_shortfall"
-            target_reasons.append("zero_shortfall")
-            log(
-                f"Step 5e: {cap_name} auto-bump no-op for wave {wave_id} "
-                f"(shortfall={shortfall} <= 0; headroom/consolidation)"
-            )
-            continue
-
-        # (5) Fail-closed: a wave with no FOUNDER_OVERRIDE is never auto-bumped.
-        if not (founder_override_token or "").strip():
-            outcome["reason"] = "no_founder_override"
-            target_outcome["reason"] = "no_founder_override"
-            log(
-                f"Step 5e: new {spec['noun']} push {cap_name} over cap "
-                f"(shortfall={shortfall}) but wave {wave_id} carries no "
-                f"FOUNDER_OVERRIDE; growth-cap gate will strand the commit "
-                f"(fail-closed)"
-            )
-            return outcome
-
-        new_cap = current_cap + shortfall
-        target_outcome["bumped"] = True
-        target_outcome["bump_amount"] = shortfall
-        target_outcome["new_cap"] = new_cap
-        target_outcome["reason"] = "bumped"
-        if not outcome["bumped"]:
-            outcome["new_cap"] = new_cap
-        outcome["bumped"] = True
-        outcome["bump_amount"] += shortfall
-        target_reasons.append("bumped")
-        bump_edits.append(
-            {
-                "cap_name": cap_name,
-                "cap_match": cap_match,
-                "cap_comment": cap_comment,
-                "new_cap": new_cap,
-                "shortfall": shortfall,
-                "file_desc": ", ".join(Path(path).name for path in new_paths),
-            }
-        )
 
     if not bump_edits:
+        if _growth_cap_snapshot_candidate_state(captured) != "preimage":
+            return _authority_failure(
+                "target is not the exact HEAD preimage when no generated transition exists"
+            )
+        repeated, repeated_error = _capture_growth_cap_retry_authority(
+            repo_root, wave_id=wave_id, base_branch=base_branch
+        )
+        if repeated_error or repeated is None:
+            return _authority_failure(
+                repeated_error or "could not repeat no-op authority check"
+            )
+        if not _growth_cap_snapshots_stable(captured, repeated):
+            return _authority_failure("HEAD, index, or worktree changed during no-op check")
         if "already_recorded" in target_reasons:
             outcome["commit_generated_governance_paths"] = [GROWTH_CAP_TEST_RELPATH]
         if target_reasons and all(reason == "already_recorded" for reason in target_reasons):
             outcome["reason"] = "already_recorded"
         elif "zero_shortfall" in target_reasons:
             outcome["reason"] = "zero_shortfall"
+            for cap_name, target in outcome["cap_bumps"].items():
+                if isinstance(target, dict) and target.get("reason") == "zero_shortfall":
+                    log(
+                        f"Step 5e: {cap_name} auto-bump no-op for wave {wave_id} "
+                        f"(shortfall={target['shortfall']} <= 0; headroom/consolidation)"
+                    )
         elif target_reasons:
-            outcome["reason"] = target_reasons[0]
+            outcome["reason"] = str(target_reasons[0])
         else:
             outcome["reason"] = "no_new_test_files"
         return outcome
 
-    def _clear_pending_growth_cap_bumps(reason: str) -> None:
-        outcome["bumped"] = False
-        outcome["bump_amount"] = 0
-        outcome["new_cap"] = None
+    candidate_state = _growth_cap_snapshot_candidate_state(captured)
+    repeated, repeated_error = _capture_growth_cap_retry_authority(
+        repo_root, wave_id=wave_id, base_branch=base_branch
+    )
+    if repeated_error or repeated is None:
+        return _authority_failure(repeated_error or "could not repeat authority check")
+    if not _growth_cap_snapshots_stable(captured, repeated):
+        return _authority_failure("HEAD, non-target index, target, or worktree changed")
+    if candidate_state == "invalid":
+        return _authority_failure(
+            "target must be the exact HEAD preimage or exact recomputed postimage "
+            "in both index and worktree"
+        )
+
+    normalized_token = _normalize_founder_override_token(founder_override_token)
+    has_same_wave_override = bool(normalized_token) and (
+        normalize_wave_id(normalized_token) == wave_id
+        and WAVE_ID_RE.fullmatch(normalized_token) is not None
+    )
+    if not has_same_wave_override:
+        if candidate_state == "postimage":
+            return _authority_failure(
+                "exact postimage has no matching founder-override invocation authority"
+            )
+        outcome["reason"] = "no_founder_override"
+        _clear_pending_growth_cap_bumps("no_founder_override")
+        for edit in bump_edits:
+            log(
+                f"Step 5e: new {edit['noun']} push {edit['cap_name']} over cap "
+                f"(shortfall={edit['shortfall']}) but wave {wave_id} carries no "
+                "matching FOUNDER_OVERRIDE; growth-cap gate will strand the commit "
+                "(fail-closed)"
+            )
+        return outcome
+
+    if candidate_state == "postimage":
+        if repeated.get("head_records_same_wave"):
+            return _authority_failure(
+                "uncommitted postimage reuse is forbidden after same-wave provenance "
+                "exists in HEAD"
+            )
+        if repeated.get("index_entries") != repeated.get("expected_entries"):
+            return _authority_failure("complete staged fingerprint differs from postimage")
+        outcome.update(
+            {
+                "bumped": False,
+                "retry_settled": True,
+                "bump_amount": 0,
+                "reason": "retry_settled",
+                "commit_generated_governance_paths": [GROWTH_CAP_TEST_RELPATH],
+            }
+        )
         for target in outcome["cap_bumps"].values():
             if isinstance(target, dict) and target.get("reason") == "bumped":
-                target["bumped"] = False
-                target["bump_amount"] = 0
-                target["new_cap"] = None
-                target["reason"] = reason
-
-    new_text = cap_text
-    for edit in sorted(bump_edits, key=lambda item: item["cap_match"].start(), reverse=True):
-        cap_match = edit["cap_match"]
-        cap_comment = edit["cap_comment"]
-        provenance = (
-            f"+{edit['shortfall']} for {edit['file_desc']} "
-            f"({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})"
+                target.update(
+                    {
+                        "bumped": False,
+                        "bump_amount": 0,
+                        "reason": "retry_settled",
+                    }
+                )
+        log(
+            "Step 5e: exact same-wave growth-cap postimage already staged; "
+            f"settled retry for {wave_id} without another increment"
         )
-        if "#" in cap_comment:
-            new_rest = f"{cap_comment}; {provenance}"
-        else:
-            new_rest = f"{cap_comment}  # {provenance}"
-        new_line = f"{cap_match.group('prefix')}{edit['new_cap']}{new_rest}"
-        new_text = new_text[: cap_match.start()] + new_line + new_text[cap_match.end():]
-    try:
-        cap_file.write_text(new_text, encoding="utf-8")
-    except OSError as exc:
-        outcome["reason"] = f"growth_cap_write_failed: {exc}"
+        return outcome
+
+    write_error = _atomic_replace_regular_file_bytes(
+        cap_file, bytes(repeated["expected_bytes"])
+    )
+    if write_error:
+        outcome["reason"] = f"growth_cap_write_failed: {write_error}"
         _clear_pending_growth_cap_bumps("growth_cap_write_failed")
         return outcome
-    # Stage the cap bump so the Step 8 growth-cap gate sees it. If staging fails
-    # for ANY reason — git add raises, or the file is somehow not in the staged
-    # set afterward — the bump MUST NOT linger unstaged in the working tree: a
-    # working-tree-only cap edit would let the gate pass on a value the commit
-    # never includes (fail-open) and would poison the same-wave idempotency guard
-    # on retry. Roll the file back so the bump is a complete no-op and the gate
-    # falls through to the unmodified (too-low) cap and strands the commit
-    # fail-closed, exactly as if no auto-bump had been attempted.
+
     try:
         _run(["git", "add", "--", GROWTH_CAP_TEST_RELPATH], cwd=repo_root)
-        staged = GROWTH_CAP_TEST_RELPATH in _current_staged_diff_paths(repo_root)
     except Exception as exc:
-        _restore_growth_cap_file(cap_file, cap_text, log=log)
+        rollback_error = _atomic_replace_regular_file_bytes(
+            cap_file, bytes(repeated["head_bytes"])
+        )
+        try:
+            _run(
+                [
+                    "git",
+                    "update-index",
+                    "--cacheinfo",
+                    (
+                        f"{repeated['head_target']['mode']},"
+                        f"{repeated['head_target']['blob_oid']},"
+                        f"{GROWTH_CAP_TEST_RELPATH}"
+                    ),
+                ],
+                cwd=repo_root,
+            )
+        except Exception as rollback_exc:
+            rollback_error = rollback_error or f"index rollback failed: {rollback_exc}"
         outcome["reason"] = f"growth_cap_stage_failed: {exc}"
         _clear_pending_growth_cap_bumps("growth_cap_stage_failed")
         log(
             f"Step 5e: growth-cap auto-bump rolled back for wave {wave_id} "
             f"(staging failed: {exc}); cap left unchanged so the Step 8 gate "
-            f"strands the commit (fail-closed)"
+            "strands the commit (fail-closed)"
         )
+        if rollback_error:
+            return _authority_failure(rollback_error)
         return outcome
-    if not staged:
-        _restore_growth_cap_file(cap_file, cap_text, log=log)
-        outcome["reason"] = "growth_cap_not_staged"
-        _clear_pending_growth_cap_bumps("growth_cap_not_staged")
-        log(
-            f"Step 5e: growth-cap auto-bump rolled back for wave {wave_id} "
-            f"(cap edit did not stage); cap left unchanged so the Step 8 gate "
-            f"strands the commit (fail-closed)"
-        )
-        return outcome
-    outcome["reason"] = "bumped"
-    outcome["commit_generated_governance_paths"] = [GROWTH_CAP_TEST_RELPATH]
+
+    settled, settled_error = _capture_growth_cap_retry_authority(
+        repo_root, wave_id=wave_id, base_branch=base_branch
+    )
+    if settled_error or settled is None:
+        return _authority_failure(settled_error or "post-stage authority capture failed")
+    if settled.get("authority_digest") != repeated.get("authority_digest"):
+        return _authority_failure("HEAD or non-target index changed during staging")
+    if _growth_cap_snapshot_candidate_state(settled) != "postimage":
+        return _authority_failure("staged target is not the exact expected postimage")
+    if settled.get("index_entries") != settled.get("expected_entries"):
+        return _authority_failure("complete post-stage index fingerprint is unexpected")
+
+    outcome.update(
+        {
+            "bumped": True,
+            "reason": "bumped",
+            "commit_generated_governance_paths": [GROWTH_CAP_TEST_RELPATH],
+        }
+    )
     for edit in bump_edits:
         log(
             f"Step 5e: auto-bumped {edit['cap_name']} +{edit['shortfall']} "
@@ -17698,6 +18419,11 @@ def _step5e_generated_governance_provenance(outcome: dict[str, Any]) -> str:
     reason = str(outcome.get("reason") or "").strip()
     if outcome.get("bumped") is True:
         return reason or "bumped"
+    if reason == "retry_settled" and outcome.get("retry_settled") is True:
+        # The target already carries the exact recomputed bump from the failed
+        # attempt.  Externally it remains the existing bounded `bumped`
+        # provenance; `already_recorded` stays reserved for clean HEAD reuse.
+        return "bumped"
     if reason == "already_recorded":
         return reason
     cap_bumps = outcome.get("cap_bumps")
@@ -17718,6 +18444,9 @@ def _commit_generated_governance_paths_from_step5e_outcome(
     if not isinstance(outcome, dict):
         return [], "", None
     reason = str(outcome.get("reason") or "").strip()
+    retry_authority_error = outcome.get("retry_authority_error")
+    if isinstance(retry_authority_error, str) and retry_authority_error.strip():
+        return [], reason, retry_authority_error.strip()
     provenance = _step5e_generated_governance_provenance(outcome)
     has_supported_provenance = bool(provenance)
     if (
@@ -18497,8 +19226,10 @@ def _run_commit_pipeline_impl(
     # stays consistent) and the receipt, so Step 8 verification matches. Placed
     # OUTSIDE the skip_supervisor guard so it also covers the no-supervisor path
     # (the Step 8 gate runs regardless). No FOUNDER_OVERRIDE -> no bump (the gate
-    # strands the commit exactly as today). An auto-bump error never regresses
-    # the commit path: it falls through to the unmodified Step 8 gate.
+    # strands the commit exactly as today). Any unexpected authority error is
+    # promoted to a structured fatal settlement result before supervisor; a
+    # retry-authorized staged target must never bypass validation merely
+    # because Step 5e raised while deriving its authority tuple.
     growth_cap_outcome: dict[str, Any] = {}
     try:
         growth_cap_outcome = _maybe_autobump_growth_cap_for_founder_override(
@@ -18510,8 +19241,13 @@ def _run_commit_pipeline_impl(
         )
         result["growth_cap_autobump_outcome"] = growth_cap_outcome
     except Exception as exc:
+        authority_error = (
+            "growth-cap retry authority rejected candidate: unexpected "
+            f"authority derivation failure: {exc}"
+        )
         growth_cap_outcome = {
             "bumped": False,
+            "retry_settled": False,
             "shortfall": 0,
             "bump_amount": 0,
             "new_test_files": [],
@@ -18520,10 +19256,11 @@ def _run_commit_pipeline_impl(
             "new_cap": None,
             "cap_bumps": {},
             "commit_generated_governance_paths": [],
-            "reason": f"error: {exc}",
+            "retry_authority_error": authority_error,
+            "reason": "retry_authority_error",
         }
         result["growth_cap_autobump_outcome"] = growth_cap_outcome
-        log(f"Step 5e: growth-cap auto-bump skipped (non-fatal error: {exc})")
+        log(f"Step 5e: {authority_error} (fail-closed)")
 
     generated_paths, generated_provenance, generated_path_error = (
         _commit_generated_governance_paths_from_step5e_outcome(growth_cap_outcome)
@@ -18576,10 +19313,26 @@ def _run_commit_pipeline_impl(
             handoff_sha = generated_handoff_sha
             result["handoff_sha"] = handoff_sha
         try:
-            generated_files, generated_force = _stage_handoff_paths(
+            generated_path_set = set(generated_paths)
+            generated_files = _canonicalize_stage_paths(
+                repo_root, list(handoff["files_to_stage"])
+            )
+            generated_force = _canonicalize_stage_paths(
+                repo_root, list(handoff.get("force_add_files", []))
+            )
+            # Step 5e has already staged (or exactly validated) the generated
+            # target.  Re-stage only the packet/tracker/indicator refreshes;
+            # another `git add` of the mutable target would reopen a TOCTOU and
+            # violate the single-stage settlement contract.  Keep the full path
+            # list in the durable handoff so retry Step 4 still re-stages it.
+            _stage_handoff_paths(
                 repo_root,
-                files_to_stage=list(handoff["files_to_stage"]),
-                force_files=list(handoff.get("force_add_files", [])),
+                files_to_stage=[
+                    path for path in generated_files if path not in generated_path_set
+                ],
+                force_files=[
+                    path for path in generated_force if path not in generated_path_set
+                ],
                 scope_files=list(handoff.get("scope_items", [])),
             )
             handoff = {
@@ -18606,6 +19359,26 @@ def _run_commit_pipeline_impl(
                 ],
                 "steps_completed": result["steps_completed"],
             }
+        if generated_provenance == "bumped":
+            generated_candidate_error = _verify_growth_cap_generated_candidate(
+                repo_root,
+                wave_id=wave_id,
+                base_branch=base_branch,
+                allow_same_invocation_head_provenance=(
+                    growth_cap_outcome.get("bumped") is True
+                    and growth_cap_outcome.get("retry_settled") is not True
+                ),
+            )
+            if generated_candidate_error:
+                return {
+                    "status": "error",
+                    "step": "settle_commit_generated_governance",
+                    "errors": [
+                        "commit-generated governance post-refresh validation "
+                        f"failed: {generated_candidate_error}"
+                    ],
+                    "steps_completed": result["steps_completed"],
+                }
         result["steps_completed"].append("settle_commit_generated_governance")
         log(
             "Step 5e: settled commit-generated governance authority for "
