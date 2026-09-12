@@ -4,6 +4,31 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-12
+
+### Ordinary Bridge-Fix Outcome and Dispatcher Boundary R3C6-R4 (Phase B)
+
+- reconstructs only the four hash-preserved R3 source/test diffs on exact
+  PR #1291 merge `fdfc58d52c717785a5696a8c3d36f9c934ee0030`; stopped R3/R2
+  remain noncomplete evidence
+- retains verified durable `IN_FLIGHT`, strictly sealed
+  `SUCCESS_PENDING_FINALIZE`, independent input authority, actor-free
+  finalization and exact-command success continuation
+- preserves native ordinary authority, mutation, finalizer and post-success
+  validation errors before dispatcher recovery or checkpoint clearing, through
+  both CLI entrypoints, A-to-B chaining and later continuation results; shared
+  pre-actor errors require the selected bus's ordinary checkpoint
+- reproduced the required checkpoint-loss defect with eight failing public
+  regressions before correction; those eight now pass, and the extended
+  48-case native CLI/dispatcher set passes with no protected-error recovery or
+  replay. Explicit actor failures retain their existing recovery behavior
+- the complete declared two-module command passed 1510 tests in 912.78
+  seconds, including the existing identity, private-review and reentry controls.
+  The reproduced core defect is resolved by regression evidence; independent
+  native review, staged authority/L4 checks and merge are still required. R4 occupies the same slot,
+  exact P0IBRRCP closure remains NEXT, and both consumed fleet operations and
+  all later obligations remain unchanged
+
 ## 2026-09-11
 
 ### Commit-Supervisor NEEDS_PHASE_A Terminal Retry Fence R2

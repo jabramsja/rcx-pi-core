@@ -866,6 +866,7 @@ def _checkpoint_bridge_fix_pending(
     all_non_blocking: list[dict[str, Any]],
     finding_history: dict[str, int],
     bridge_fix_authority_fields: dict[str, Any],
+    finalization_context: dict[str, Any],
 ) -> None:
     """Persist the exact pre-fix bridge state so crash-resume can continue honestly."""
     checkpoint = {
@@ -885,6 +886,12 @@ def _checkpoint_bridge_fix_pending(
         "finding_history": finding_history,
     }
     checkpoint.update(bridge_fix_authority_fields)
+    checkpoint.update(_bridge_fix_mutation_fields({
+        **finalization_context,
+        "checkpoint": json.loads(json.dumps(checkpoint, allow_nan=False)),
+        "pre_fix_files": None,
+        "next_step": f"bridge_round_{round_num}",
+    }, "PENDING"))
     _save_state(repo_root, checkpoint)
 
 
@@ -2087,6 +2094,19 @@ BRIDGE_FIX_AUTHORITY_CARRY_FIELDS = (
     "bridge_fix_pre_actor_scope_files",
     "bridge_fix_pre_actor_scope_fingerprint",
 )
+BRIDGE_FIX_MUTATION_VERSION = 1
+BRIDGE_FIX_MUTATION_STATES = frozenset({"PENDING", "IN_FLIGHT", "SUCCESS_PENDING_FINALIZE"})
+BRIDGE_FIX_MUTATION_FIELDS = frozenset({
+    "version", "state", "context_sha256", "result", "result_sha256", "mutation_sha256",
+})
+BRIDGE_FIX_MUTATION_CARRY_FIELDS = (
+    "bridge_fix_mutation_context", "bridge_fix_expected_context_sha256",
+    "bridge_fix_mutation", "bridge_fix_expected_mutation_sha256",
+)
+BRIDGE_FIX_MUTATION_CONTEXT_FIELDS = frozenset({
+    "checkpoint", "plan", "pre_fix_files", "next_step", "plan_declared_files",
+    "exact_stage_scope_files", "pytest_gate_timeout",
+})
 LAUNCH_TRACKER_RESTORE_STATE_VERSION = 1
 LAUNCH_TRACKER_RESTORE_MARKER = (
     "Phase-B-Launch-Tracker-Restore: "
@@ -2993,6 +3013,200 @@ def _bridge_fix_authority_carry_fields(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _bridge_fix_mutation_fields(
+    context: dict[str, Any],
+    outcome: str,
+    actor_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bind the ordinary outcome to a snapshot without changing input authority."""
+    mutation = {
+        "version": BRIDGE_FIX_MUTATION_VERSION,
+        "state": outcome,
+        "context_sha256": _canonical_json_sha256(context),
+        "result": actor_result,
+        "result_sha256": _canonical_json_sha256(actor_result) if actor_result is not None else None,
+    }
+    mutation["mutation_sha256"] = _canonical_json_sha256(mutation)
+    # No references into actor-owned objects may survive sealing.
+    return json.loads(json.dumps({
+        "bridge_fix_mutation_context": context,
+        "bridge_fix_expected_context_sha256": mutation["context_sha256"],
+        "bridge_fix_mutation": mutation,
+        "bridge_fix_expected_mutation_sha256": mutation["mutation_sha256"],
+    }, allow_nan=False))
+
+
+def _bridge_fix_success_result_issue(value: Any) -> str | None:
+    if not isinstance(value, dict) or value.get("status") != "success":
+        return "actor result must be an explicit success object"
+    if not _valid_state_int(value.get("exit_code")) or value["exit_code"] != 0:
+        return "actor success requires integer exit_code 0"
+    for field in ("output", "stderr", "job_id"):
+        if not isinstance(value.get(field), str):
+            return f"actor success {field} must be text"
+    if not value["job_id"].strip():
+        return "actor success job_id must be non-empty"
+    if type(value.get("model_override_applied")) is not bool:
+        return "actor success model_override_applied must be boolean"
+    try:
+        if json.loads(json.dumps(value, allow_nan=False)) != value:
+            return "actor success must be lossless JSON"
+        _canonical_json_sha256(value)
+    except (TypeError, ValueError, UnicodeError):
+        return "actor success must be finite canonical JSON"
+    return None
+
+
+def _bridge_fix_mutation_issue(state: dict[str, Any]) -> tuple[str, str] | None:
+    mutation = state.get("bridge_fix_mutation")
+    context = state.get("bridge_fix_mutation_context")
+    if not isinstance(mutation, dict) or set(mutation) != BRIDGE_FIX_MUTATION_FIELDS:
+        return "malformed", "ordinary mutation requires the version-1 field set"
+    if not _valid_state_int(mutation["version"]) or mutation["version"] != BRIDGE_FIX_MUTATION_VERSION:
+        return "malformed", "ordinary mutation version must be integer 1"
+    outcome = mutation["state"]
+    if not isinstance(outcome, str) or outcome not in BRIDGE_FIX_MUTATION_STATES:
+        return "malformed", "ordinary mutation state is invalid"
+    if not isinstance(context, dict) or set(context) != BRIDGE_FIX_MUTATION_CONTEXT_FIELDS:
+        return "malformed", "ordinary mutation context requires the version-1 field set"
+    source = context["checkpoint"]
+    if not isinstance(source, dict):
+        return "malformed", "ordinary mutation source checkpoint must be an object"
+    issue = _bridge_fix_pending_authority_issue(source)
+    if issue is not None:
+        return issue
+    if _bridge_fix_authority_carry_fields(source) != _bridge_fix_authority_carry_fields(state):
+        return "checkpoint_mismatch", "ordinary mutation substituted sealed input authority"
+    for field in ("wave_id", "plan_path"):
+        if source.get(field) != state.get(field):
+            return "checkpoint_mismatch", f"ordinary mutation {field} differs from checkpoint"
+        if source[field] != source["bridge_fix_plan_authority"]["identity"][field]:
+            return "checkpoint_mismatch", f"ordinary mutation {field} differs from sealed input"
+    for field in ("bridge_rounds", "current_bridge_round"):
+        if not _valid_state_int(source.get(field)):
+            return "malformed", f"ordinary source {field} must be an integer"
+    for field in ("implementer_changed", "executor_created", "baseline_wave_files"):
+        paths = source.get(field)
+        if not isinstance(paths, list) or any(not _valid_state_string(p) for p in paths):
+            return "malformed", f"ordinary source {field} must be a text list"
+    if not isinstance(source.get("all_non_blocking"), list) or not isinstance(source.get("finding_history"), dict):
+        return "malformed", "ordinary source findings bookkeeping is invalid"
+    if state.get("completed_step") == "bridge_fix_pending":
+        enclosing = {k: v for k, v in state.items() if k not in BRIDGE_FIX_MUTATION_CARRY_FIELDS}
+        if enclosing != source:
+            return "checkpoint_mismatch", "ordinary source differs from enclosing checkpoint"
+    elif outcome != "SUCCESS_PENDING_FINALIZE":
+        return "checkpoint_mismatch", "unfinished mutation requires bridge_fix_pending"
+    if context["next_step"] != f"bridge_round_{source['current_bridge_round']}":
+        return "checkpoint_mismatch", "ordinary mutation next-state intent is invalid"
+    plan = context["plan"]
+    if not isinstance(plan, dict) or not isinstance(plan.get("content"), str):
+        return "malformed", "ordinary mutation requires a sealed plan snapshot"
+    for field in ("plan_declared_files", "exact_stage_scope_files", "pre_fix_files"):
+        paths = context[field]
+        if paths is None and (field == "plan_declared_files" or (field == "pre_fix_files" and outcome == "PENDING")):
+            continue
+        if not isinstance(paths, list) or any(not _valid_state_string(p) for p in paths):
+            return "malformed", f"ordinary context {field} must be a text list"
+        if field != "plan_declared_files" and paths != sorted(set(paths)):
+            return "malformed", f"ordinary context {field} must be sorted and unique"
+    if not _valid_state_int(context["pytest_gate_timeout"]) or context["pytest_gate_timeout"] <= 0:
+        return "malformed", "ordinary pytest timeout must be a positive integer"
+    if outcome == "SUCCESS_PENDING_FINALIZE":
+        result_issue = _bridge_fix_success_result_issue(mutation["result"])
+        if result_issue is not None:
+            return "malformed", result_issue
+    elif mutation["result"] is not None or mutation["result_sha256"] is not None:
+        return "malformed", "unfinished mutation cannot carry an actor result"
+    try:
+        if _sha256_bytes(plan["content"].encode("utf-8")) != source["bridge_fix_plan_sha256"]:
+            return "digest_mismatch", "ordinary plan snapshot differs from sealed input"
+        context_digest = _canonical_json_sha256(context)
+        mutation_digest = _canonical_json_sha256({k: v for k, v in mutation.items() if k != "mutation_sha256"})
+        if outcome == "SUCCESS_PENDING_FINALIZE" and mutation["result_sha256"] != _canonical_json_sha256(mutation["result"]):
+            return "digest_mismatch", "ordinary success result digest is invalid"
+    except (TypeError, ValueError, UnicodeError) as exc:
+        return "malformed", f"ordinary mutation cannot be hashed: {exc}"
+    for field, expected in (("context_sha256", context_digest), ("mutation_sha256", mutation_digest)):
+        if not _valid_sha256(mutation[field]) or mutation[field] != expected:
+            return "digest_mismatch", f"ordinary mutation {field} is invalid"
+    if state.get("bridge_fix_expected_context_sha256") != context_digest:
+        return "checkpoint_mismatch", "ordinary mutation differs from independent context anchor"
+    if state.get("bridge_fix_expected_mutation_sha256") != mutation_digest:
+        return "checkpoint_mismatch", "ordinary mutation differs from independent outcome anchor"
+    return None
+
+
+def _bridge_fix_mutation_error(issue: tuple[str, str], *, step: str = "bridge_fix_mutation") -> dict[str, Any]:
+    return {
+        "status": "error", "step": step, "authority_error": issue[0],
+        "errors": [f"Ordinary bridge-fix mutation rejected ({issue[0]}): {issue[1]}. Checkpoint preserved; actor replay is forbidden."],
+    }
+
+
+def _save_bridge_fix_transition(
+    repo_root: Path, previous: dict[str, Any], following: dict[str, Any],
+) -> None:
+    """Use the existing atomic writer, verifying durable authority on both sides."""
+    shape_error = _validate_resumable_state_shape(_state_file_path(repo_root), following)
+    if shape_error is not None:
+        raise PhaseBExecutorError("; ".join(shape_error["errors"]))
+    if _canonical_json_sha256(_load_state(repo_root)) != _canonical_json_sha256(previous):
+        raise PhaseBExecutorError("ordinary checkpoint changed before save")
+    _save_state(repo_root, following)
+    if _canonical_json_sha256(_load_state(repo_root)) != _canonical_json_sha256(following):
+        raise PhaseBExecutorError("ordinary checkpoint failed save verification")
+
+
+def _finalize_bridge_fix_success(repo_root: Path, state: dict[str, Any]) -> dict[str, Any]:
+    """Finish a sealed ordinary success without any actor or remediation calls."""
+    issue = _bridge_fix_mutation_issue(state)
+    if issue is not None:
+        return _bridge_fix_mutation_error(issue)
+    if state["bridge_fix_mutation"]["state"] != "SUCCESS_PENDING_FINALIZE":
+        return _bridge_fix_mutation_error(("not_success", "finalization requires explicit sealed success"))
+    context = state["bridge_fix_mutation_context"]
+    try:
+        if _canonical_json_sha256(_load_state(repo_root)) != _canonical_json_sha256(state):
+            raise PhaseBExecutorError("ordinary checkpoint changed before finalization")
+        source = context["checkpoint"]
+        exact_scope = set(context["exact_stage_scope_files"])
+        fix_files = set(_collect_changed_files(repo_root)) - set(context["pre_fix_files"])
+        implementer_changed = set(source["implementer_changed"]) | fix_files
+        if exact_scope:
+            fix_files &= exact_scope
+            implementer_changed &= exact_scope
+        implementer_changed = _reconcile_bridge_fix_scope(repo_root, implementer_changed, fix_files)
+        changed_files = _collect_wave_owned_files(
+            repo_root, source["plan_path"], context["plan_declared_files"],
+            implementer_changed or None, set(source["executor_created"]) or None,
+            set(source["baseline_wave_files"]) or None,
+        )
+        test_files = _select_pytest_gate_files(sorted(fix_files), repo_root)
+        if test_files:
+            pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=context["pytest_gate_timeout"])
+            if pytest_result.get("passed") is not True:
+                return {
+                    "status": "error", "step": "bridge_fix_finalize_pytest",
+                    "errors": ["Post-success pytest failed; SUCCESS_PENDING_FINALIZE preserved. Automatic pytest remediation is deferred."],
+                    "pytest_result": pytest_result,
+                }
+        completed = {
+            **source,
+            **{field: state[field] for field in BRIDGE_FIX_MUTATION_CARRY_FIELDS},
+            "completed_step": context["next_step"],
+            "last_bridge_decision": source["bridge_decision"],
+            "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
+            "implementer_changed": sorted(implementer_changed),
+        }
+        completed.pop("bridge_decision")
+        completed.pop("bridge_fix_findings")
+        _save_bridge_fix_transition(repo_root, state, completed)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return _bridge_fix_mutation_error(("finalization_failed", str(exc)), step="bridge_fix_finalize")
+    return {"status": "success", "step": "bridge_fix_finalize", "checkpoint": completed, "changed_files": changed_files}
+
+
 def _validate_loaded_state_container(state_path: Path, state: dict[str, Any]) -> dict[str, Any] | None:
     missing: list[str] = []
     if not _valid_state_string(state.get("plan_path")):
@@ -3052,6 +3266,10 @@ def _validate_resumable_state_shape(state_path: Path, state: dict[str, Any]) -> 
         authority_issue = _bridge_fix_authority_issue(state)
         if authority_issue is not None:
             return _bridge_fix_authority_load_error(state_path, authority_issue)
+    if completed_step == "bridge_fix_pending" or any(field in state for field in BRIDGE_FIX_MUTATION_CARRY_FIELDS):
+        mutation_issue = _bridge_fix_mutation_issue(state)
+        if mutation_issue is not None:
+            return _state_load_error("bridge_fix_mutation", _bridge_fix_mutation_error(mutation_issue)["errors"][0])
     if completed_step in PRIVATE_ATTR_QUESTION_STEPS:
         terminal_result = state.get("terminal_result")
         if not isinstance(terminal_result, dict) or terminal_result.get("status") != "question_for_founder":
@@ -7240,6 +7458,7 @@ def _bridge_fix_active_identity(
     plan: dict[str, Any],
     plan_path: str,
     wave_id: str,
+    refresh_plan: bool = True,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Resolve bridge-fix identity from live invocation authority, not checkpoint data."""
     candidate_required = _candidate_authority_required_from_routing_record(routing_record)
@@ -7309,7 +7528,7 @@ def _bridge_fix_active_identity(
     # packet bytes.  Re-reading again during _apply_bridge_fix also closes the
     # interval between sealing and actor invocation instead of trusting this
     # cache on the validation pass.
-    if plan_path and not plan_path.startswith("<"):
+    if refresh_plan and plan_path and not plan_path.startswith("<"):
         try:
             live_plan = load_plan_packet(repo_root, plan_path)
         except (PhaseBExecutorError, OSError, RuntimeError, UnicodeError, ValueError) as exc:
@@ -7425,6 +7644,30 @@ def _bridge_fix_active_context_issue(
         return "active_context_mismatch", "checkpoint base commit does not match the active run"
     if state.get("bridge_fix_comparison_commit") != active_identity["comparison_commit"]:
         return "active_context_mismatch", "checkpoint comparison commit does not match the active run"
+    return None
+
+
+def _bridge_fix_outcome_invocation_issue(
+    state: dict[str, Any], routing_record: dict[str, Any], plan_path: str | None,
+) -> tuple[str, str] | None:
+    """Check independent invocation identity before adopting a saved plan snapshot."""
+    waves = [routing_record[key] for key in ("wave_name", "wave_id") if key in routing_record]
+    for wave in waves:
+        if not _valid_state_string(wave) or normalize_wave_id(wave) != state["wave_id"]:
+            return "active_context_mismatch", "recovery routing wave does not match checkpoint"
+    routed_plan = _dispatcher_handoff_plan_path(routing_record)
+    if routed_plan and routed_plan != state["plan_path"]:
+        return "active_context_mismatch", "recovery routing plan does not match checkpoint"
+    if plan_path is None:
+        if not waves:
+            return "active_context_mismatch", "planless recovery requires an independent routing wave"
+        # Match the existing synthetic plan convention without deriving from
+        # the checkpoint or reading an actor-mutable packet.
+        expected_plan = routed_plan or f"<planless:{waves[0]}>"
+        if expected_plan != state["plan_path"]:
+            return "active_context_mismatch", "recovery requires independent matching plan authority"
+    elif plan_path != state["plan_path"]:
+        return "active_context_mismatch", "recovery invocation plan does not match checkpoint"
     return None
 
 
@@ -9138,8 +9381,19 @@ def run_phase_b(
         else:
             return _state_plan_mismatch_result(saved_state, plan_path)
 
+    # Started ordinary outcomes resolve before branch/tracker work or live plan
+    # loading. Never infer the current invocation's identity from saved state.
+    if saved_step == "bridge_fix_pending" and not resume_after:
+        activated_state = _activate_matching_saved_state(saved_state)
+        if isinstance(activated_state, dict):
+            return activated_state
+        resume_after = activated_state
+    ordinary_outcome_recovery = bool(
+        saved_step == "bridge_fix_pending"
+        and saved_state["bridge_fix_mutation"]["state"] != "PENDING"
+    )
     branch_stash_error = (
-        None if private_attr_prepared_recovery
+        None if private_attr_prepared_recovery or ordinary_outcome_recovery
         else _restore_pending_branch_switch_stash(repo_root)
     )
     if branch_stash_error:
@@ -9206,7 +9460,16 @@ def run_phase_b(
                     "errors": [f"Routing record load failed: {exc}. Use --bootstrap-exception to override."]}
 
     # Plan loading: either from --plan path or derived from routing record
-    if plan_path:
+    if ordinary_outcome_recovery:
+        invocation_issue = _bridge_fix_outcome_invocation_issue(saved_state, routing_record, plan_path)
+        if invocation_issue is not None:
+            return _state_load_error_result(
+                _bridge_fix_authority_load_error(_state_file_path(repo_root), invocation_issue)
+            )
+        plan = saved_state["bridge_fix_mutation_context"]["plan"]
+        plan_path = saved_state["plan_path"]
+        result["plan_path"] = plan_path
+    elif plan_path:
         try:
             plan = load_plan_packet(repo_root, plan_path)
         except PhaseBExecutorError as exc:
@@ -9293,6 +9556,7 @@ def run_phase_b(
             plan=plan,
             plan_path=plan_path,
             wave_id=wave_id,
+            refresh_plan=not ordinary_outcome_recovery,
         )
         if active_identity_error is not None or active_identity is None:
             issue = (
@@ -9313,6 +9577,23 @@ def run_phase_b(
                     active_context_issue,
                 )
             )
+        if ordinary_outcome_recovery:
+            if saved_state["bridge_fix_mutation"]["state"] == "IN_FLIGHT":
+                return _bridge_fix_mutation_error((
+                    "ambiguous_outcome", "IN_FLIGHT has no sealed success; actor replay is forbidden",
+                ))
+            finalized = _finalize_bridge_fix_success(repo_root, saved_state)
+            if finalized["status"] != "success":
+                return finalized
+            return {
+                "status": "continue_phase_b", "step": "bridge_fix_finalize",
+                "resumed_from": "bridge_fix_pending",
+                "plan_path": plan_path, "wave_id": wave_id,
+                "completed_step": finalized["checkpoint"]["completed_step"],
+                "bridge_rounds": finalized["checkpoint"]["bridge_rounds"],
+                "bridge_fix_result": saved_state["bridge_fix_mutation"]["result"],
+                "checkpoint_sha256": _sha256_bytes(_state_file_path(repo_root).read_bytes()),
+            }
     launch_tracker_restore_session: dict[str, Any] | None = None
     launch_tracker_routing_record: dict[str, Any] | None = None
     try:
@@ -9511,6 +9792,10 @@ def run_phase_b(
             result["private_attr_gate_test_files"] = saved_state["private_attr_gate_test_files"]
 
     bridge_fix_authority_fields: dict[str, Any] = {}
+    bridge_fix_outcome_fields = {
+        field: saved_state[field] for field in BRIDGE_FIX_MUTATION_CARRY_FIELDS
+        if saved_state and field in saved_state
+    }
     if saved_state and any(
         field in saved_state for field in BRIDGE_FIX_AUTHORITY_CARRY_FIELDS
     ):
@@ -9519,6 +9804,7 @@ def run_phase_b(
     def _carry_bridge_fix_authority(state: dict[str, Any]) -> dict[str, Any]:
         if bridge_fix_authority_fields:
             state.update(bridge_fix_authority_fields)
+        state.update(bridge_fix_outcome_fields)
         return state
     # Merge persisted dirty-wave scope with the current repo dirty baseline so
     # late follow-up fixes made after a saved checkpoint are not silently dropped
@@ -9562,183 +9848,19 @@ def run_phase_b(
             learning_context=_learning_context_for_new_prompt(),
         )
 
-    def _complete_bridge_fix(
-        round_num: int,
-        fix_result: dict[str, Any],
-        pre_fix_files: set[str],
-        *,
-        bridge_decision: str = "",
-    ) -> dict[str, Any] | None:
-        """Finalize a bridge-fix implementer run and persist the completed round."""
+    def _complete_bridge_fix(success_state: dict[str, Any]) -> dict[str, Any] | None:
         nonlocal implementer_changed, changed_files
-
-        log(f"Implementer fix result: {fix_result['status']}")
-
-        if fix_result["status"] != "success":
-            return _implementer_failure_result(
-                step="implementer_bridge_fix",
-                message=(
-                    f"Implementer failed during bridge fix round {round_num}: "
-                    f"{fix_result['status']} (exit={fix_result['exit_code']})"
-                ),
-                impl_result=fix_result,
-            )
-
-        # Track what the fix round changed. The local pytest pass should only
-        # exercise tests introduced or edited by this fix round, not every
-        # pre-existing test file already present in the broader replay scope.
-        post_fix_files = set(_collect_changed_files(repo_root))
-        current_fix_changed = sorted(post_fix_files - pre_fix_files)
-        implementer_changed |= set(current_fix_changed)
-        if exact_stage_scope_files:
-            current_fix_changed = sorted(set(current_fix_changed) & exact_stage_scope_files)
-            implementer_changed &= exact_stage_scope_files
-        reconciled_implementer_changed = _reconcile_bridge_fix_scope(
-            repo_root,
-            implementer_changed,
-            set(current_fix_changed),
-        )
-        if reconciled_implementer_changed != implementer_changed:
-            log(
-                "Bridge fix reconciled implementer scope from "
-                f"{len(implementer_changed)} to {len(reconciled_implementer_changed)} file(s)"
-            )
-            implementer_changed = reconciled_implementer_changed
-        changed_files = _collect_wave_owned_files(
-            repo_root,
-            plan_path,
-            plan_declared_files,
-            implementer_changed or None,
-            executor_created or None,
-            baseline_wave_files or None,
-        )
-        log(
-            f"Changed files after bridge fix: {len(changed_files)} "
-            f"(current fix touched {len(current_fix_changed)})"
-        )
-
-        test_files = _select_pytest_gate_files(current_fix_changed, repo_root)
-        if test_files:
-            log(f"Running pytest on {len(test_files)} newly changed test file(s)...")
-            pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=pytest_gate_timeout)
-            if not pytest_result["passed"]:
-                log(f"pytest FAILED (exit={pytest_result['exit_code']}) — feeding back to implementer as blocking")
-                pytest_prompt = build_implementation_prompt(
-                    plan.get("content", "")
-                    + f"\n\n## pytest FAILURE after bridge round {round_num}\n\n"
-                    + f"Exit code: {pytest_result['exit_code']}\n"
-                    + f"stdout:\n{pytest_result['stdout'][:3000]}\n"
-                    + f"stderr:\n{pytest_result['stderr'][:1000]}",
-                    repo_root=repo_root,
-                    wave_id=wave_id,
-                    scope_hint=f"Fix pytest failures from bridge round {round_num}",
-                    learning_context=_learning_context_for_new_prompt(),
-                )
-                pre_pytest_fix_files = set(_collect_changed_files(repo_root))
-                pytest_fix_transition = f"round-{round_num}:pytest_fix"
-                try:
-                    _emit_phase_b_event(
-                        repo_root,
-                        routing_record=routing_record,
-                        plan=plan,
-                        plan_path=plan_path,
-                        event_type="phase_b_implementer_started",
-                        state="pytest_fix_started",
-                        transition_key=_phase_b_transition_key(
-                            pytest_fix_transition,
-                            "pytest_fix_started",
-                        ),
-                        summary=(
-                            "Phase B implementer started pytest fix after "
-                            f"bridge round {round_num}"
-                        ),
-                        artifact_paths={"plan": plan_path},
-                    )
-                except Exception as exc:
-                    return {
-                        "status": "error",
-                        "step": "phase_b_pager",
-                        "errors": [
-                            "Phase B pager emission failed before pytest-fix "
-                            f"implementer: {exc}"
-                        ],
-                    }
-                pytest_fix = invoke_implementer(
-                    repo_root, pytest_prompt,
-                    backend=backend, model_override=model,
-                    timeout=timeout, verbose=verbose,
-                    bus_dir=_active_bus_dir(),
-                )
-                try:
-                    _emit_phase_b_event(
-                        repo_root,
-                        routing_record=routing_record,
-                        plan=plan,
-                        plan_path=plan_path,
-                        event_type="phase_b_implementer_completed",
-                        state=f"pytest_fix_{pytest_fix.get('status', 'completed')}",
-                        transition_key=_phase_b_transition_key(
-                            pytest_fix_transition,
-                            "pytest_fix_completed",
-                        ),
-                        summary=(
-                            "Phase B implementer completed pytest fix after "
-                            f"bridge round {round_num} with "
-                            f"{pytest_fix.get('status', 'unknown')}"
-                        ),
-                        artifact_paths={"plan": plan_path},
-                    )
-                except Exception as exc:
-                    return {
-                        "status": "error",
-                        "step": "phase_b_pager",
-                        "errors": [
-                            "Phase B pager emission failed after pytest-fix "
-                            f"implementer: {exc}"
-                        ],
-                    }
-                if pytest_fix["status"] != "success":
-                    return _implementer_failure_result(
-                        step="pytest_fix",
-                        message=(
-                            "Implementer failed fixing pytest failures: "
-                            f"{pytest_fix['status']}"
-                        ),
-                        impl_result=pytest_fix,
-                    )
-                post_pytest_fix_files = set(_collect_changed_files(repo_root))
-                implementer_changed |= (post_pytest_fix_files - pre_pytest_fix_files)
-                if exact_stage_scope_files:
-                    implementer_changed &= exact_stage_scope_files
-                changed_files = _collect_wave_owned_files(
-                    repo_root,
-                    plan_path,
-                    plan_declared_files,
-                    implementer_changed or None,
-                    executor_created or None,
-                    baseline_wave_files or None,
-                )
-
-        _save_state(repo_root, _carry_bridge_fix_authority({
-            "plan_path": plan_path,
-            "completed_step": f"bridge_round_{round_num}",
-            "wave_id": wave_id,
-            "bridge_rounds": round_num,
-            "current_bridge_round": round_num,
-            "last_bridge_decision": bridge_decision,
-            "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
-            "deferred_packet_path": deferred_packet_path,
-            "implementer_changed": sorted(implementer_changed),
-            "executor_created": sorted(executor_created),
-            "baseline_wave_files": sorted(baseline_wave_files),
-            "all_non_blocking": all_non_blocking,
-            "finding_history": finding_history,
-        }))
+        finalized = _finalize_bridge_fix_success(repo_root, success_state)
+        if finalized["status"] != "success":
+            return finalized
+        implementer_changed = set(finalized["checkpoint"]["implementer_changed"])
+        changed_files = finalized["changed_files"]
         return None
 
     def _apply_bridge_fix(round_num: int, bridge_decision: str, findings_for_impl: str) -> dict[str, Any] | None:
         """Consume only a validated durable PENDING prompt, then persist completion."""
-        nonlocal bridge_fix_authority_fields
+        nonlocal bridge_fix_authority_fields, bridge_fix_outcome_fields
+        pending_state: dict[str, Any] = {}
 
         def _authority_failure(issue: tuple[str, str]) -> dict[str, Any]:
             error_type, detail = issue
@@ -9753,7 +9875,7 @@ def run_phase_b(
             }
 
         def _validated_prompt() -> tuple[str | None, dict[str, Any] | None]:
-            nonlocal bridge_fix_authority_fields
+            nonlocal bridge_fix_authority_fields, pending_state
             durable_state = _load_state(repo_root)
             if durable_state is None:
                 return None, _authority_failure(
@@ -9771,6 +9893,8 @@ def run_phase_b(
                 return None, _authority_failure(
                     ("checkpoint_mismatch", "durable checkpoint is not bridge_fix_pending")
                 )
+            if durable_state["bridge_fix_mutation"]["state"] != "PENDING":
+                return None, _bridge_fix_mutation_error(("already_started", "actor requires PENDING mutation"))
             if (
                 durable_state.get("current_bridge_round") != round_num
                 or durable_state.get("bridge_decision") != bridge_decision
@@ -9830,6 +9954,7 @@ def run_phase_b(
                     )
                 )
             bridge_fix_authority_fields = _bridge_fix_authority_carry_fields(durable_state)
+            pending_state = durable_state
             return authority["prompt"], None
 
         # Validate once before emitting actor intent and once immediately before
@@ -9861,12 +9986,36 @@ def run_phase_b(
             return authority_error
         assert fix_prompt is not None
         pre_fix_files = set(_collect_changed_files(repo_root))
+        context = {**pending_state["bridge_fix_mutation_context"], "pre_fix_files": sorted(pre_fix_files)}
+        in_flight = {**pending_state, **_bridge_fix_mutation_fields(context, "IN_FLIGHT")}
+        try:
+            _save_bridge_fix_transition(repo_root, pending_state, in_flight)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return _bridge_fix_mutation_error(("save_failed", str(exc)))
         fix_result = invoke_implementer(
             repo_root, fix_prompt,
             backend=backend, model_override=model,
             timeout=timeout, verbose=verbose,
             bus_dir=_active_bus_dir(),
         )
+        success_state: dict[str, Any] | None = None
+        if isinstance(fix_result, dict) and fix_result.get("status") == "success":
+            result_issue = _bridge_fix_success_result_issue(fix_result)
+            if result_issue is not None:
+                return _bridge_fix_mutation_error(("invalid_success", result_issue))
+            try:
+                success_state = {
+                    **in_flight,
+                    **_bridge_fix_mutation_fields(context, "SUCCESS_PENDING_FINALIZE", fix_result),
+                }
+                _save_bridge_fix_transition(repo_root, in_flight, success_state)
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                return _bridge_fix_mutation_error(("success_save_failed", str(exc)))
+            bridge_fix_outcome_fields = {
+                field: success_state[field] for field in BRIDGE_FIX_MUTATION_CARRY_FIELDS
+            }
+        elif not isinstance(fix_result, dict):
+            return _bridge_fix_mutation_error(("invalid_result", "actor result must be an object"))
         try:
             _emit_phase_b_event(
                 repo_root,
@@ -9888,12 +10037,14 @@ def run_phase_b(
                 "step": "phase_b_pager",
                 "errors": [f"Phase B pager emission failed after bridge-fix implementer: {exc}"],
             }
-        return _complete_bridge_fix(
-            round_num,
-            fix_result,
-            pre_fix_files,
-            bridge_decision=bridge_decision,
-        )
+        if success_state is None:
+            return _implementer_failure_result(
+                step="implementer_bridge_fix",
+                message=(f"Implementer failed during bridge fix round {round_num}: "
+                         f"{fix_result.get('status')} (exit={fix_result.get('exit_code')})"),
+                impl_result=fix_result,
+            )
+        return _complete_bridge_fix(success_state)
 
     def _start_bridge_fix(
         round_num: int,
@@ -9961,6 +10112,12 @@ def run_phase_b(
             all_non_blocking=all_non_blocking,
             finding_history=finding_history,
             bridge_fix_authority_fields=bridge_fix_authority_fields,
+            finalization_context={
+                "plan": plan,
+                "plan_declared_files": plan_declared_files,
+                "exact_stage_scope_files": sorted(exact_stage_scope_files),
+                "pytest_gate_timeout": pytest_gate_timeout,
+            },
         )
         return _apply_bridge_fix(round_num, bridge_decision, findings_for_impl)
 
@@ -13533,6 +13690,58 @@ def run_phase_b(
     return result
 
 
+def ordinary_bridge_fix_failure_blocks_recovery(
+    repo_root: Path,
+    result: dict[str, Any],
+    *,
+    bus_dir: str | Path | None = None,
+) -> bool:
+    """Shared native CLI/dispatcher refusal contract for ordinary outcomes."""
+    if result.get("status") != "error":
+        return False
+    step = result.get("step")
+    if step in (
+        "bridge_fix_authority", "bridge_fix_mutation",
+        "bridge_fix_finalize", "bridge_fix_finalize_pytest",
+    ):
+        return True
+    if step == "load_state" and result.get("state_error") in (
+        "bridge_fix_authority", "bridge_fix_mutation",
+    ):
+        return True
+    # These errors are shared with other lifecycles. Only an outstanding
+    # ordinary checkpoint makes them protected here. In particular, explicit
+    # implementer_bridge_fix failures keep their original recovery semantics.
+    if step not in (
+        "load_state", "load_plan", "load_routing_record", "validate_inputs", "phase_b_pager",
+    ):
+        return False
+    try:
+        state = json.loads(agent_bus_path(
+            repo_root, bus_dir, "executors", STATE_FILE_NAME,
+        ).read_bytes())
+    except (OSError, ValueError, UnicodeError, ExecutorCommonError):
+        return False
+    # Incomplete checkpoint fields can still identify ownership for refusal.
+    # This read neither grants replay authority nor adopts live plan bytes.
+    if not isinstance(state, dict):
+        return False
+    completed_step = state.get("completed_step")
+    if completed_step == "bridge_fix_pending":
+        return True
+    # Finalization hands the same ordinary checkpoint to the later invocation.
+    # Shared pre-actor errors must retain that success too. Once a separately
+    # owned lifecycle writes its checkpoint, a carried old outcome grants no
+    # protection from that lifecycle's existing recovery behavior.
+    mutation = state.get("bridge_fix_mutation")
+    return (
+        isinstance(mutation, dict)
+        and mutation.get("state") == "SUCCESS_PENDING_FINALIZE"
+        and isinstance(completed_step, str)
+        and (completed_step == "bridge_converged" or re.fullmatch(r"bridge_round_[1-9][0-9]*", completed_step) is not None)
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Phase B executor: implement locked plan through bridge convergence",
@@ -13646,9 +13855,17 @@ def main() -> int:
         bus_dir=args.bus_dir,
     )
 
+    protected_ordinary_failure = ordinary_bridge_fix_failure_blocks_recovery(
+        repo_root, result, bus_dir=args.bus_dir,
+    )
+    if protected_ordinary_failure and isinstance(result.get("state_path"), Path):
+        # Preserve native JSON error output for rejected ordinary checkpoints.
+        result = {**result, "state_path": str(result["state_path"])}
+
     if (
-        result.get("status") not in ("success", "ready", "commit_ready")
+        result.get("status") not in ("success", "ready", "commit_ready", "continue_phase_b")
         and not args.dispatcher_owned_recovery
+        and not protected_ordinary_failure
     ):
         try:
             from recovery_gate import attempt_recovery
@@ -13692,7 +13909,7 @@ def main() -> int:
 
     if result.get("recovery", {}).get("recovered"):
         return 0
-    return 0 if result.get("status") in ("success", "ready", "commit_ready") else 1
+    return 0 if result.get("status") in ("success", "ready", "commit_ready", "continue_phase_b") else 1
 
 
 if __name__ == "__main__":

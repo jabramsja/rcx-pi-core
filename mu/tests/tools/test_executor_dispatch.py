@@ -17740,3 +17740,238 @@ class TestPrDispositionTerminalReceiptRouting:
             phase_b_routing["next_candidates"][0]["terminal_receipt"]
             == record["terminal_receipt"]
         )
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("checkpoint_step", ["bridge_round_2", "bridge_converged"])
+@pytest.mark.parametrize("bus_dir", [None, ".agent_bus-ordinary"])
+def test_ordinary_finalization_continues_with_exact_command_and_checkpoint(tmp_path, entry, checkpoint_step, bus_dir):
+    """Consumer contract test; the Phase B module covers the real producer."""
+    import hashlib
+
+    plan_path = "reports/control_plane/ordinary.md"
+    (tmp_path / plan_path).parent.mkdir(parents=True)
+    (tmp_path / plan_path).write_text("# Plan\nWave ID: ordinary\nPhase-A-Lock: LOCKED\n")
+    route = {**_VALID_ROUTING_RECORD, "wave_id": "ordinary", "tracked_packet": plan_path}
+    state_path = tmp_path / (bus_dir or ".agent_bus") / "executors" / "phase_b_state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({
+        "plan_path": plan_path, "wave_id": "ordinary", "completed_step": checkpoint_step,
+        "bridge_fix_mutation": {"state": "SUCCESS_PENDING_FINALIZE"},
+    }, indent=3) + "\n")
+    before = state_path.read_bytes()
+    payload = {
+        "status": "continue_phase_b", "step": "bridge_fix_finalize", "resumed_from": "bridge_fix_pending",
+        "plan_path": plan_path, "wave_id": "ordinary", "completed_step": checkpoint_step,
+        "checkpoint_sha256": hashlib.sha256(before).hexdigest(),
+    }
+    # A leftover handoff must never take precedence over ordinary continuation.
+    state_path.with_name("phase_b_handoff.json").write_text('{"stale": true}\n')
+    calls = []
+
+    def process(command, *, cwd, timeout):
+        assert Path(command[1]).name == "phase_b_executor.py"
+        assert cwd == tmp_path
+        assert state_path.read_bytes() == before
+        calls.append(command)
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+        assert command == calls[0]
+        assert len(calls) == 2
+        assert "--dispatcher-owned-recovery" in command
+        if bus_dir:
+            assert command[command.index("--bus-dir") + 1] == bus_dir
+        # The later invocation owns its normal lifecycle and terminal result.
+        return subprocess.CompletedProcess(command, 1, '{"status":"question_for_founder"}', "")
+
+    argv = ["phase-b", "--plan", plan_path, "--routing-record-json", json.dumps(route), "--max-rounds", "7"]
+    if bus_dir:
+        argv += ["--bus-dir", bus_dir]
+    args = dispatch_mod.build_surface_parser().parse_args(argv)
+    with patch.dict(os.environ), \
+         patch.object(dispatch_mod, "_run_executor_in_group", side_effect=process), \
+         patch.object(dispatch_mod, "attempt_recovery") as recovery, \
+         patch.object(dispatch_mod, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_emit_executor_hard_fail_event"):
+        if entry == "surface":
+            assert dispatch_mod.run_recoverable_surface_command(args, repo_root=tmp_path, config={}) == 1
+        else:
+            result = dispatch_mod.dispatch(route, repo_root=tmp_path, skip_freshness=True, bus_dir=bus_dir)
+            assert result["status"] == "failed"
+            assert result["executor"] == "phase_b_executor"
+    assert len(calls) == 2
+    assert state_path.read_bytes() == before
+    recovery.assert_not_called()
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("invalid", ["digest", "step", "wave", "outcome", "repeated"])
+def test_invalid_ordinary_continuation_preserves_checkpoint_without_recovery(tmp_path, entry, invalid):
+    import hashlib
+
+    plan_path = "reports/control_plane/ordinary.md"
+    (tmp_path / plan_path).parent.mkdir(parents=True)
+    (tmp_path / plan_path).write_text("# Plan\nWave ID: ordinary\nPhase-A-Lock: LOCKED\n")
+    route = {**_VALID_ROUTING_RECORD, "wave_id": "ordinary", "tracked_packet": plan_path}
+    state_path = tmp_path / ".agent_bus" / "executors" / "phase_b_state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({
+        "plan_path": plan_path, "wave_id": "ordinary", "completed_step": "bridge_round_2",
+        "bridge_fix_mutation": {"state": "IN_FLIGHT" if invalid == "outcome" else "SUCCESS_PENDING_FINALIZE"},
+    }) + "\n")
+    before = state_path.read_bytes()
+    payload = {
+        "status": "continue_phase_b", "step": "bridge_fix_finalize", "resumed_from": "bridge_fix_pending",
+        "plan_path": plan_path, "wave_id": "ordinary", "completed_step": "bridge_round_2",
+        "checkpoint_sha256": hashlib.sha256(before).hexdigest(),
+    }
+    if invalid == "digest":
+        payload["checkpoint_sha256"] = "f" * 64
+    elif invalid == "step":
+        payload["step"] = "post_reentry_needs_phase_b"
+    elif invalid == "wave":
+        payload["wave_id"] = "foreign"
+    state_path.with_name("phase_b_handoff.json").write_text('{"stale":true}')
+    args = dispatch_mod.build_surface_parser().parse_args([
+        "phase-b", "--plan", plan_path, "--routing-record-json", json.dumps(route),
+    ])
+
+    def process(command, **_kwargs):
+        assert Path(command[1]).name == "phase_b_executor.py"
+        assert state_path.read_bytes() == before
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    with patch.dict(os.environ), \
+         patch.object(dispatch_mod, "_run_executor_in_group", side_effect=process) as child, \
+         patch.object(dispatch_mod, "attempt_recovery") as recovery, \
+         patch.object(dispatch_mod, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"):
+        if entry == "surface":
+            assert dispatch_mod.run_recoverable_surface_command(args, repo_root=tmp_path, config={}) == 1
+        else:
+            result = dispatch_mod.dispatch(route, repo_root=tmp_path, skip_freshness=True)
+            assert result["status"] == "error"
+            assert result["step"] == "ordinary_bridge_fix_continuation"
+    assert child.call_count == (2 if invalid == "repeated" else 1)
+    recovery.assert_not_called()
+    assert state_path.read_bytes() == before
+
+
+def test_ordinary_success_without_continuation_keeps_missing_handoff_failure(tmp_path):
+    route = {**_VALID_ROUTING_RECORD, "wave_id": "ordinary"}
+    with patch.object(dispatch_mod, "_run_executor_in_group", return_value=subprocess.CompletedProcess(
+        ["phase-b"], 0, '{"status":"success"}', "",
+    )) as child:
+        result = dispatch_mod.dispatch(route, repo_root=tmp_path, skip_freshness=True)
+    assert result["status"] == "failed"
+    assert result["message"] == "Phase B converged but no handoff file found"
+    child.assert_called_once()
+
+
+@pytest.mark.parametrize("step", [
+    "load_state", "load_plan", "load_routing_record", "validate_inputs", "phase_b_pager",
+])
+@pytest.mark.parametrize("checkpoint_step,protected", [
+    ("bridge_fix_pending", True), ("bridge_round_2", True), ("bridge_converged", True),
+    ("needs_phase_b_reentry", False), ("private_attr_remediation_prepared_pending_review", False),
+    (None, False),
+])
+def test_ordinary_shared_error_uses_only_selected_checkpoint_owner(
+    tmp_path, step, checkpoint_step, protected,
+):
+    """Public dispatch retains shared errors only while ordinary work owns them."""
+    default = tmp_path / ".agent_bus" / "executors" / "phase_b_state.json"
+    selected = tmp_path / ".agent_bus-selected" / "executors" / "phase_b_state.json"
+    default.parent.mkdir(parents=True)
+    default.write_text('{"completed_step":"bridge_fix_pending"}\n')
+    default_bytes = default.read_bytes()
+    if checkpoint_step:
+        selected.parent.mkdir(parents=True)
+        selected.write_text(json.dumps({
+            "completed_step": checkpoint_step,
+            "bridge_fix_mutation": {"state": "SUCCESS_PENDING_FINALIZE"},
+        }, indent=3) + "\n")
+    before = selected.read_bytes() if checkpoint_step else None
+    payload = {"status": "error", "step": step, "state_error": "missing_fields",
+               "errors": ["IN_FLIGHT checkpoint preserved; actor replay forbidden"],
+               "state_path": ".agent_bus/executors/phase_b_state.json"}
+
+    def child(command, *, cwd, timeout):
+        assert command[command.index("--bus-dir") + 1] == ".agent_bus-selected"
+        return subprocess.CompletedProcess(command, 1, json.dumps(payload), "")
+
+    with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=child) as process, \
+         patch.object(dispatch_mod, "attempt_recovery") as recovery:
+        result = dispatch_mod.dispatch(
+            _VALID_ROUTING_RECORD, repo_root=tmp_path, skip_freshness=True, bus_dir=".agent_bus-selected",
+        )
+    assert result["status"] == ("error" if protected else "failed")
+    assert result["executor"] == "phase_b_executor"
+    assert json.loads(result["stdout"]) == payload
+    if protected:
+        assert result["step"] == step
+        assert result["errors"] == payload["errors"]
+        assert result["state_error"] == "missing_fields"
+    assert default.read_bytes() == default_bytes
+    assert (selected.read_bytes() if selected.exists() else None) == before
+    recovery.assert_not_called()
+    process.assert_called_once()
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("step,checkpoint_step", [
+    ("implementer", "implemented"),
+    ("implementer_reentry_fix", "needs_phase_b_reentry"),
+    ("phase_b_pager", "needs_phase_b_reentry"),
+    ("load_state", "private_attr_remediation_prepared_pending_review"),
+])
+def test_ordinary_error_fence_preserves_other_lifecycle_cli_recovery(
+    tmp_path, capsys, entry, step, checkpoint_step,
+):
+    plan = "reports/control_plane/ordinary.md"
+    (tmp_path / plan).parent.mkdir(parents=True)
+    (tmp_path / plan).write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+    route = {**_VALID_ROUTING_RECORD, "wave_name": "ordinary", "tracked_packet": plan}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(route))
+    state_path = tmp_path / ".agent_bus-selected" / "executors" / "phase_b_state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({
+        "completed_step": checkpoint_step,
+        "bridge_fix_mutation": {"state": "SUCCESS_PENDING_FINALIZE"},
+    }))
+    before = state_path.read_bytes()
+    # Prose and an old carried outcome cannot impersonate the ordinary owner.
+    payload = {"status": "error", "step": step, "errors": ["ordinary IN_FLIGHT ambiguous_outcome"]}
+    argv = (["phase-b", "--plan", plan, "--routing-record-json", json.dumps(route)]
+            if entry == "surface" else
+            ["--routing-record", str(route_path), "--skip-freshness", "--retries", "2"])
+    argv.extend(["--json", "--bus-dir", ".agent_bus-selected"])
+    real_run = subprocess.run
+
+    def isolated_git(command, *args, **kwargs):
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(tmp_path), "")
+        return real_run(command, *args, **kwargs)
+
+    with patch.dict(os.environ), \
+         patch.object(dispatch_mod, "_run_executor_in_group", return_value=subprocess.CompletedProcess(
+             ["phase_b_executor.py"], 1, json.dumps(payload), "",
+         )) as process, \
+         patch.object(dispatch_mod, "attempt_recovery", return_value={"recovered": False, "tier": 4}) as recovery, \
+         patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=tmp_path), \
+         patch.object(dispatch_mod, "load_config", return_value={}), \
+         patch.object(subprocess, "run", side_effect=isolated_git), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_emit_executor_hard_fail_event"):
+        assert dispatch_mod.main(argv) == 1
+    recovery.assert_called_once()
+    process.assert_called_once()
+    assert state_path.read_bytes() == before
