@@ -35,12 +35,14 @@ import json
 import os
 import re
 import signal
+import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
 import time
 import uuid
+from contextlib import closing
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2102,6 +2104,14 @@ PRIVATE_ATTR_QUESTION_STEPS = {
     "private_attr_remediation_question_for_founder",
     "reentry_private_attr_remediation_question_for_founder",
 }
+PRIVATE_ATTR_UNPREPARED_STEPS = {
+    "private_attr_remediation_pending_review",
+    "reentry_private_attr_remediation_pending_review",
+}
+PRIVATE_ATTR_PREPARED_STEPS = {
+    "private_attr_remediation_prepared_pending_review",
+    "reentry_private_attr_remediation_prepared_pending_review",
+}
 RESUMABLE_STATE_STEPS = {
     "implementer",
     "agent_review",
@@ -2111,6 +2121,7 @@ RESUMABLE_STATE_STEPS = {
     "needs_phase_b_reentry",
     "reentry_private_attr_remediation_pending_review",
     *PRIVATE_ATTR_QUESTION_STEPS,
+    *PRIVATE_ATTR_PREPARED_STEPS,
 }
 
 
@@ -6983,6 +6994,245 @@ def _git_head_commit_or_none(repo_root: Path) -> str | None:
     return candidate if _valid_commit_id(candidate) else None
 
 
+def _private_attr_index_snapshot(repo_root: Path, files: list[str]) -> dict[str, Any]:
+    """Read literal index objects and require identical candidate worktree bytes."""
+    def git(*args: str) -> bytes:
+        completed = subprocess.run(
+            ["git", *args], cwd=repo_root, capture_output=True, check=False,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        )
+        if completed.returncode:
+            raise PhaseBExecutorError(f"Cannot read prepared index authority: {args[0]}")
+        return completed.stdout
+
+    raw_index = git("ls-files", "--stage", "-z")
+    entries: dict[str, tuple[str, str]] = {}
+    for record in raw_index.split(b"\0"):
+        if not record:
+            continue
+        header, raw_path = record.split(b"\t", 1)
+        mode, oid, stage = header.decode("ascii").split()
+        if stage != "0":
+            raise PhaseBExecutorError("Prepared index contains an unmerged entry")
+        entries[raw_path.decode("utf-8")] = (mode, oid)
+    staged = sorted(git(
+        "diff", "--cached", "--name-only", "--no-renames", "-z", "HEAD", "--",
+    ).decode("utf-8").rstrip("\0").split("\0"))
+    staged = [path for path in staged if path]
+    if not set(staged).issubset(files):
+        raise PhaseBExecutorError("Prepared index contains paths outside the review inventory")
+    blobs: list[dict[str, Any]] = []
+    for path in files:
+        full_path = repo_root / path
+        entry = entries.get(path)
+        if entry is None:
+            if full_path.exists() or full_path.is_symlink() or path not in staged:
+                raise PhaseBExecutorError(f"Prepared path is not staged: {path}")
+            blobs.append({"path": path, "mode": None, "oid": None, "sha256": None})
+            continue
+        mode, oid = entry
+        content = git("cat-file", "blob", oid)
+        file_stat = full_path.lstat()
+        if mode == "120000" and stat.S_ISLNK(file_stat.st_mode):
+            worktree = os.fsencode(os.readlink(full_path))
+            worktree_mode = "120000"
+        elif mode in {"100644", "100755"} and stat.S_ISREG(file_stat.st_mode):
+            worktree = full_path.read_bytes()
+            worktree_mode = "100755" if file_stat.st_mode & 0o111 else "100644"
+        else:
+            raise PhaseBExecutorError(f"Prepared index/worktree type mismatch: {path}")
+        if content != worktree or mode != worktree_mode:
+            raise PhaseBExecutorError(f"Prepared index/worktree bytes or mode mismatch: {path}")
+        blobs.append({"path": path, "mode": mode, "oid": oid, "sha256": _sha256_bytes(content)})
+    return {
+        "head_commit": git("rev-parse", "HEAD^{commit}").decode().strip(),
+        "branch": git("rev-parse", "--abbrev-ref", "HEAD").decode().strip(),
+        "index_entries_sha256": _sha256_bytes(raw_index),
+        "staged_files": staged,
+        "blobs": blobs,
+    }
+
+
+def _private_attr_candidate_binding(
+    repo_root: Path, wave_id: str, routing_record: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind existing launch metadata/spec/receipt without refreshing any of them."""
+    required = _candidate_authority_required_from_routing_record(routing_record)
+    metadata = _candidate_authority_metadata_from_routing_record(routing_record)
+    if "candidate_authority_required" in routing_record and not isinstance(
+        routing_record["candidate_authority_required"], bool,
+    ):
+        raise PhaseBExecutorError("Malformed private-review candidate authority requirement")
+    if "candidate_authority" in routing_record and metadata is None:
+        raise PhaseBExecutorError("Malformed private-review candidate authority metadata")
+    if metadata is not None and "required" in metadata and not isinstance(metadata["required"], bool):
+        raise PhaseBExecutorError("Malformed private-review candidate authority requirement")
+    guard_error = _guard_candidate_authority_scope_if_configured(
+        repo_root, wave_id=wave_id, context="private-review checkpoint",
+        required=required, trusted_metadata=metadata,
+    )
+    if guard_error:
+        raise PhaseBExecutorError(guard_error)
+    spec_path = _candidate_authority_spec_path(repo_root, wave_id=wave_id)
+    if metadata and metadata.get("spec_path"):
+        spec_path = repo_root / metadata["spec_path"]
+    receipt_path = _candidate_authority.receipt_path_for(
+        repo_root, bus_dir=_active_bus_dir(), wave_id=wave_id,
+        phase="phase_b", review_round=PHASE_B_BRIDGE_AUTHORITY_ROUND,
+    )
+    return {
+        "required": required,
+        "metadata": metadata,
+        "spec_sha256": _sha256_bytes(spec_path.read_bytes()) if spec_path.exists() else None,
+        "receipt_sha256": (
+            _sha256_bytes(receipt_path.read_bytes()) if spec_path.exists() else None
+        ),
+    }
+
+
+def _private_attr_prepared_authority(
+    repo_root: Path, state: dict[str, Any], *, routing_record: dict[str, Any],
+    plan: dict[str, Any], plan_path: str, wave_id: str,
+) -> dict[str, Any]:
+    identity, error = _bridge_fix_active_identity(
+        repo_root, routing_record=routing_record, plan=plan,
+        plan_path=plan_path, wave_id=wave_id,
+    )
+    if error or identity is None:
+        raise PhaseBExecutorError(error or "Missing prepared review identity")
+    return {
+        "version": 1,
+        "identity": identity,
+        "candidate": _private_attr_candidate_binding(repo_root, wave_id, routing_record),
+        "index": _private_attr_index_snapshot(repo_root, state["private_attr_review_files"]),
+    }
+
+
+def _validate_private_attr_prepared_state(
+    repo_root: Path, state: dict[str, Any], *, routing_record: dict[str, Any],
+    plan: dict[str, Any], plan_path: str, wave_id: str,
+) -> dict[str, Any] | None:
+    """Fail before any recovery mutation; live bytes never become saved authority."""
+    try:
+        if _load_state(repo_root) != state:
+            raise PhaseBExecutorError("Durable prepared checkpoint changed during recovery")
+        payload = {key: value for key, value in state.items() if key != "private_attr_prepared_sha256"}
+        if state.get("private_attr_prepared_sha256") != _canonical_json_sha256(payload):
+            raise PhaseBExecutorError("Missing or mismatched prepared checkpoint digest")
+        if state.get("wave_id") != wave_id or state.get("plan_path") != plan_path:
+            raise PhaseBExecutorError("Prepared checkpoint wave/plan identity mismatch")
+        for key in (
+            "private_attr_review_files", "implementer_changed", "executor_created",
+            "baseline_wave_files", "private_attr_gate_test_files",
+        ):
+            files = state.get(key)
+            if not isinstance(files, list) or any(
+                not isinstance(path, str) or not path or path.startswith("/")
+                or "\\" in path or "\0" in path
+                or any(part in {"", ".", ".."} for part in path.split("/"))
+                for path in files
+            ) or files != sorted(set(files)):
+                raise PhaseBExecutorError(f"Malformed prepared checkpoint inventory: {key}")
+        if not state["private_attr_review_files"]:
+            raise PhaseBExecutorError("Prepared review inventory is empty")
+        if not isinstance(state.get("all_non_blocking"), list) or any(
+            not isinstance(finding, dict) for finding in state["all_non_blocking"]
+        ) or not isinstance(state.get("finding_history"), dict):
+            raise PhaseBExecutorError("Malformed prepared findings context")
+        if any(not _valid_state_int(count) for count in state["finding_history"].values()):
+            raise PhaseBExecutorError("Malformed prepared finding history")
+        if "deferred_packet_path" not in state or (
+            state["deferred_packet_path"] is not None
+            and not _valid_state_string(state["deferred_packet_path"])
+        ):
+            raise PhaseBExecutorError("Malformed prepared deferred identity")
+        reentry = state["completed_step"].startswith("reentry_")
+        review_round = state.get("private_attr_review_round")
+        expected_summary = (
+            ("Phase B re-entry" if reentry else "Phase B")
+            + f" private-attr remediation review R{state['bridge_rounds'] + 1} for {plan_path}"
+        )
+        if (
+            not _valid_state_int(review_round) or review_round != state["bridge_rounds"] + 1
+            or state.get("private_attr_review_summary") != expected_summary
+            or not _valid_state_string(state.get("private_attr_review_reader"))
+        ):
+            raise PhaseBExecutorError("Malformed prepared reviewer round/context identity")
+        expected = _private_attr_prepared_authority(
+            repo_root, state, routing_record=routing_record, plan=plan,
+            plan_path=plan_path, wave_id=wave_id,
+        )
+        if state.get("private_attr_prepared_authority") != expected:
+            raise PhaseBExecutorError("Prepared checkpoint authority or staged candidate changed")
+    except (PhaseBExecutorError, OSError, ValueError, TypeError, KeyError) as exc:
+        return {
+            "status": "error", "step": "private_attr_prepared_resume",
+            "authority_error": "invalid", "errors": [str(exc)],
+        }
+    return None
+
+
+def _read_recovered_private_attr_envelope(
+    repo_root: Path, job_id: str, bridge_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Consume the retained canonical reviewer turn for this exact bridge job."""
+    if bridge_result.get("job_id") != job_id:
+        raise PhaseBExecutorError("Recovered reviewer job identity mismatch")
+    db_path = agent_bus_path(repo_root, _active_bus_dir(), "bridge.db").resolve()
+    with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        turns = conn.execute(
+            "SELECT t.* FROM turns t JOIN jobs j ON j.job_id = t.job_id "
+            "WHERE t.job_id = ? AND t.round_no = j.current_round "
+            "AND t.agent_role = 'reviewer' AND t.is_canonical = 1 "
+            "AND t.status = 'completed'", (job_id,),
+        ).fetchall()
+    if len(turns) != 1:
+        raise PhaseBExecutorError("Missing or ambiguous retained recovered reviewer turn")
+    turn = turns[0]
+    envelope = json.loads(turn["envelope_json"] or "null")
+    if not isinstance(envelope, dict):
+        raise PhaseBExecutorError("Recovered reviewer envelope must be an object")
+    for key in ("job_id", "turn_id", "agent_role", "decision", "summary", "request_for_next_agent"):
+        if not isinstance(envelope.get(key), str):
+            raise PhaseBExecutorError(f"Malformed recovered reviewer envelope: {key}")
+    if (
+        envelope["job_id"] != job_id or envelope["turn_id"] != turn["turn_id"]
+        or not re.fullmatch(rf"{re.escape(job_id)}--r{turn['round_no']}-reviewer-[0-9a-f]{{8}}", turn["turn_id"])
+        or envelope["agent_role"] != "reviewer"
+        or envelope["decision"] != turn["decision"]
+        or envelope["decision"] != bridge_result.get("decision")
+        or envelope["decision"] not in RECOGNIZED_BRIDGE_DECISIONS
+    ):
+        raise PhaseBExecutorError("Recovered reviewer job/turn/decision identity mismatch")
+    for key in ("findings", "touched_files_claimed", "validations_claimed"):
+        if not isinstance(envelope.get(key), list):
+            raise PhaseBExecutorError(f"Malformed recovered reviewer envelope: {key}")
+    if any(not isinstance(path, str) for path in envelope["touched_files_claimed"]):
+        raise PhaseBExecutorError("Malformed recovered reviewer touched files")
+    for finding in envelope["findings"]:
+        if not isinstance(finding, dict) or any(
+            not isinstance(finding.get(key), str)
+            for key in ("title", "file", "evidence_cmd", "evidence_result")
+        ):
+            raise PhaseBExecutorError("Malformed recovered reviewer finding")
+        if (
+            finding.get("class") not in {"DEFECT", "POLICY_BOUND", "DOC_ACCURACY"}
+            or finding.get("severity") not in {"low", "medium", "high", "critical"}
+            or finding.get("status") not in {"new", "addressed", "persisting", "blocked"}
+            or not _valid_state_int(finding.get("line_start"))
+            or not _valid_state_int(finding.get("line_end"))
+            or finding["line_end"] < finding["line_start"]
+        ):
+            raise PhaseBExecutorError("Malformed recovered reviewer finding schema")
+        if "disposition" in finding and finding["disposition"] not in ALLOWED_FINDING_DISPOSITIONS:
+            raise PhaseBExecutorError("Malformed recovered reviewer finding disposition")
+    for validation in envelope["validations_claimed"]:
+        if not isinstance(validation, dict) or not isinstance(validation.get("command"), str) or validation.get("result") not in {"pass", "fail", "not_run"}:
+            raise PhaseBExecutorError("Malformed recovered reviewer validation")
+    return envelope
+
+
 def _bridge_fix_active_identity(
     repo_root: Path,
     *,
@@ -8867,6 +9117,16 @@ def run_phase_b(
     saved_state = _load_state(repo_root)
     if _is_state_load_error(saved_state):
         return _state_load_error_result(saved_state)
+    saved_step = saved_state.get("completed_step") if saved_state else None
+    if isinstance(saved_step, str) and saved_step in PRIVATE_ATTR_UNPREPARED_STEPS:
+        return {
+            "status": "error", "step": "private_attr_prepared_resume",
+            "authority_error": "unprepared",
+            "errors": ["Private-attr pending checkpoint predates preparation; prepared authority is unavailable."],
+        }
+    private_attr_prepared_recovery = bool(
+        isinstance(saved_step, str) and saved_step in PRIVATE_ATTR_PREPARED_STEPS
+    )
     resume_after: str = ""
     if saved_state and plan_path is not None:
         saved_plan = saved_state.get("plan_path")
@@ -8878,7 +9138,10 @@ def run_phase_b(
         else:
             return _state_plan_mismatch_result(saved_state, plan_path)
 
-    branch_stash_error = _restore_pending_branch_switch_stash(repo_root)
+    branch_stash_error = (
+        None if private_attr_prepared_recovery
+        else _restore_pending_branch_switch_stash(repo_root)
+    )
     if branch_stash_error:
         return {
             "status": "error",
@@ -8999,6 +9262,29 @@ def run_phase_b(
         or plan_path.replace("reports/control_plane/", "").replace(".md", "")
     )
     wave_id = normalize_wave_id(raw_wave_id)
+    if private_attr_prepared_recovery:
+        # Resolve reduced dispatcher metadata read-only. Capturing/restoring a
+        # tracker note is forbidden until the prepared review has been consumed.
+        if _launch_tracker_restore_marker_required(str(plan.get("content") or "")):
+            try:
+                _, launch_route, _, _ = _resolve_launch_tracker_restore_authority(
+                    repo_root, plan=plan, plan_path=plan_path,
+                    wave_id=wave_id, routing_record=routing_record,
+                )
+            except LaunchTrackerRestoreError as exc:
+                return _launch_tracker_restore_error_result(exc)
+            routing_record = {
+                **routing_record,
+                "candidate_authority_required": launch_route["candidate_authority_required"],
+                "candidate_authority": launch_route["candidate_authority"],
+            }
+        assert saved_state is not None
+        prepared_error = _validate_private_attr_prepared_state(
+            repo_root, saved_state, routing_record=routing_record, plan=plan,
+            plan_path=plan_path, wave_id=wave_id,
+        )
+        if prepared_error is not None:
+            return prepared_error
     if resume_after == "bridge_fix_pending":
         assert saved_state is not None
         active_identity, active_identity_error = _bridge_fix_active_identity(
@@ -9033,7 +9319,7 @@ def run_phase_b(
         (
             launch_tracker_restore_session,
             launch_tracker_routing_record,
-        ) = prepare_launch_tracker_restore(
+        ) = (None, None) if private_attr_prepared_recovery else prepare_launch_tracker_restore(
             repo_root,
             plan=plan,
             plan_path=plan_path,
@@ -9192,7 +9478,7 @@ def run_phase_b(
                 log(f"Learning context loaded ({len(learning_context)} chars)")
         return learning_context
 
-    if resume_after != "bridge_fix_pending":
+    if resume_after != "bridge_fix_pending" and not private_attr_prepared_recovery:
         _learning_context_for_new_prompt()
 
     # Track implementer-changed files: snapshot before, diff after
@@ -9207,6 +9493,7 @@ def run_phase_b(
     # Track repeat-finding counts across bridge rounds (key → consecutive blocking count)
     finding_history: dict[str, int] = {}
     changed_files: list[str] = []
+    deferred_packet_path: str | None = result.get("deferred_packet_path")
 
     # Restore wave-owned file tracking from persisted state (R7-1: crash-resume)
     if saved_state and resume_after:
@@ -9220,6 +9507,8 @@ def run_phase_b(
             all_non_blocking = list(saved_state["all_non_blocking"])
         if saved_state.get("finding_history"):
             finding_history = dict(saved_state["finding_history"])
+        if private_attr_prepared_recovery:
+            result["private_attr_gate_test_files"] = saved_state["private_attr_gate_test_files"]
 
     bridge_fix_authority_fields: dict[str, Any] = {}
     if saved_state and any(
@@ -9234,7 +9523,8 @@ def run_phase_b(
     # Merge persisted dirty-wave scope with the current repo dirty baseline so
     # late follow-up fixes made after a saved checkpoint are not silently dropped
     # from supervisor packaging on resume.
-    baseline_wave_files |= (set(_collect_baseline_wave_files(repo_root, plan_path)) - fenced_out_files)
+    if not private_attr_prepared_recovery:
+        baseline_wave_files |= (set(_collect_baseline_wave_files(repo_root, plan_path)) - fenced_out_files)
     baseline_wave_files = _restrict_baseline_to_exact_scope(
         baseline_wave_files,
         exact_stage_scope_files or None,
@@ -9756,10 +10046,11 @@ def run_phase_b(
         candidate_files: list[str],
         *,
         reentry: bool,
+        prepared: bool = False,
     ) -> list[str]:
-        """Checkpoint private-attr remediation before the required fresh review."""
-        scoped_files = _bridge_review_scope_files(candidate_files)
-        _save_state(repo_root, _carry_bridge_fix_authority({
+        """Keep pre-preparation state distinct from sealed staged review authority."""
+        scoped_files = sorted(set(_bridge_review_scope_files(candidate_files)))
+        pending_state = _carry_bridge_fix_authority({
             "plan_path": plan_path,
             "completed_step": _private_attr_pending_review_step(reentry=reentry),
             "wave_id": wave_id,
@@ -9771,8 +10062,35 @@ def run_phase_b(
             "baseline_wave_files": sorted(baseline_wave_files),
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
-            "private_attr_gate_test_files": result.get("private_attr_gate_test_files", []),
-        }))
+            "private_attr_gate_test_files": sorted(set(result.get("private_attr_gate_test_files", []))),
+        })
+        prior_state = _load_state(repo_root) or {}
+        for field in (
+            "reentry_findings", "last_reentry_bridge_decision", "last_bridge_decision",
+            "runtime_pre_push_failure_reentry", "agent_review_report_path", "agent_review_status_path",
+        ):
+            if field in prior_state:
+                pending_state[field] = prior_state[field]
+        if prepared:
+            pending_state.update({
+                "completed_step": (
+                    "reentry_private_attr_remediation_prepared_pending_review" if reentry
+                    else "private_attr_remediation_prepared_pending_review"
+                ),
+                "private_attr_review_files": scoped_files,
+                "private_attr_review_round": result["bridge_rounds"] + 1,
+                "private_attr_review_summary": (
+                    ("Phase B re-entry" if reentry else "Phase B")
+                    + f" private-attr remediation review R{result['bridge_rounds'] + 1} for {plan_path}"
+                ),
+                "private_attr_review_reader": backend,
+            })
+            pending_state["private_attr_prepared_authority"] = _private_attr_prepared_authority(
+                repo_root, pending_state, routing_record=routing_record, plan=plan,
+                plan_path=plan_path, wave_id=wave_id,
+            )
+            pending_state["private_attr_prepared_sha256"] = _canonical_json_sha256(pending_state)
+        _save_state(repo_root, pending_state)
         return scoped_files
 
     def _run_private_attr_gate_with_remediation(
@@ -9880,11 +10198,15 @@ def run_phase_b(
         candidate_files: list[str],
         *,
         reentry: bool = False,
+        prepared_state: dict[str, Any] | None = None,
     ) -> tuple[list[str], dict[str, Any] | None]:
         """Freshly review implementer changes made by the private-attr gate."""
         nonlocal all_non_blocking, deferred_packet_path, changed_files
 
-        current_files = _bridge_review_scope_files(candidate_files)
+        current_files = (
+            list(prepared_state["private_attr_review_files"]) if prepared_state is not None
+            else _bridge_review_scope_files(candidate_files)
+        )
         next_round = int(result.get("bridge_rounds") or 0) + 1
         private_attr_review_budget = max(1, max_bridge_rounds)
         private_attr_review_limit = max_bridge_rounds + private_attr_review_budget
@@ -9904,29 +10226,50 @@ def run_phase_b(
                     "proceed to commit without fresh review."
                 ],
             }
-        log(
-            ("Re-entry " if reentry else "")
-            + "private-attr remediation: preparing "
-            f"{len(current_files)} wave-owned files before fresh bridge review..."
-        )
-        current_files, preparation_error = _prepare_phase_b_pre_review_package(
-            repo_root,
-            candidate_files=current_files,
-            exact_stage_scope_files=exact_stage_scope_files,
-            plan_path=plan_path,
-            wave_id=wave_id,
-            wave_class=wave_class,
-            step_prefix=step_name,
-            context="private-attr remediation bridge review",
-            **candidate_authority_package_kwargs,
-        )
-        if preparation_error is not None:
-            return current_files, preparation_error
-        indicator_path = _phase_b_same_wave_indicator_path(wave_id)
-        if indicator_path in current_files:
-            executor_created.add(indicator_path)
+        if prepared_state is not None:
+            preparation_error = _validate_private_attr_prepared_state(
+                repo_root, prepared_state, routing_record=routing_record, plan=plan,
+                plan_path=plan_path, wave_id=wave_id,
+            )
+            if preparation_error is not None:
+                return current_files, preparation_error
+            if prepared_state["private_attr_review_reader"] != backend:
+                return current_files, {
+                    "status": "error", "step": "private_attr_prepared_resume",
+                    "authority_error": "reader_mismatch", "errors": ["Prepared reviewer reader identity changed"],
+                }
+        else:
+            log(
+                ("Re-entry " if reentry else "")
+                + "private-attr remediation: preparing "
+                f"{len(current_files)} wave-owned files before fresh bridge review..."
+            )
+            current_files, preparation_error = _prepare_phase_b_pre_review_package(
+                repo_root,
+                candidate_files=current_files,
+                exact_stage_scope_files=exact_stage_scope_files,
+                plan_path=plan_path,
+                wave_id=wave_id,
+                wave_class=wave_class,
+                step_prefix=step_name,
+                context="private-attr remediation bridge review",
+                **candidate_authority_package_kwargs,
+            )
+            if preparation_error is not None:
+                return current_files, preparation_error
+            indicator_path = _phase_b_same_wave_indicator_path(wave_id)
+            if indicator_path in current_files:
+                executor_created.add(indicator_path)
+            try:
+                current_files = _save_private_attr_pending_review_state(
+                    current_files, reentry=reentry, prepared=True,
+                )
+            except (PhaseBExecutorError, OSError, ValueError, TypeError) as exc:
+                return current_files, {
+                    "status": "error", "step": f"{step_name}_checkpoint",
+                    "errors": [str(exc)],
+                }
         changed_files = current_files
-
         bridge_job_id = (
             f"phase-b-reentry-private-attr-r{next_round}-{uuid.uuid4().hex[:8]}"
             if reentry
@@ -9944,6 +10287,7 @@ def run_phase_b(
             bridge_result = run_bridge_review(
                 repo_root,
                 (
+                    prepared_state["private_attr_review_summary"] if prepared_state is not None else
                     ("Phase B re-entry" if reentry else "Phase B")
                     + f" private-attr remediation review R{next_round} for {plan_path}"
                 ),
@@ -10005,11 +10349,35 @@ def run_phase_b(
                 ],
             }
 
+        recovered_envelope: dict[str, Any] | None = None
+        if prepared_state is not None:
+            # Every decision, including QUESTION, must pass this boundary before
+            # deferred-state sync, correction actors, or checkpoint replacement.
+            try:
+                recovered_envelope = _read_recovered_private_attr_envelope(
+                    repo_root, bridge_job_id, bridge_result,
+                )
+            except (PhaseBExecutorError, sqlite3.Error, OSError, ValueError, TypeError) as exc:
+                return current_files, {
+                    "status": "error", "step": "private_attr_recovered_review_material",
+                    "errors": [str(exc)],
+                }
+            preparation_error = _validate_private_attr_prepared_state(
+                repo_root, prepared_state, routing_record=routing_record, plan=plan,
+                plan_path=plan_path, wave_id=wave_id,
+            )
+            if preparation_error is not None:
+                return current_files, preparation_error
+
         if (
             bridge_result["exit_code"] == 0
             and _is_go_bridge_decision(bridge_decision)
         ):
-            render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
+            render, raw_texts = (
+                ("", ["BEGIN_AGENT_ENVELOPE\n" + json.dumps(recovered_envelope) + "\nEND_AGENT_ENVELOPE"])
+                if recovered_envelope is not None
+                else _read_bridge_review_material(repo_root, bridge_job_id)
+            )
             parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
             blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
             if blocking_findings:
@@ -10082,7 +10450,13 @@ def run_phase_b(
                     "Founder input required."
                 ],
             }
-            render = _read_bridge_render(repo_root, bridge_job_id)
+            render = (
+                "\n\n".join((recovered_envelope["summary"], recovered_envelope["request_for_next_agent"]))
+                if recovered_envelope is not None
+                else _read_bridge_render(repo_root, bridge_job_id)
+            )
+            if recovered_envelope is not None:
+                question_result["bridge_envelope"] = recovered_envelope
             if render:
                 question_result["bridge_render"] = render[:2000]
             _save_state(repo_root, _carry_bridge_fix_authority({
@@ -10131,7 +10505,11 @@ def run_phase_b(
                     ],
                 }
 
-            render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
+            render, raw_texts = (
+                ("", ["BEGIN_AGENT_ENVELOPE\n" + json.dumps(recovered_envelope) + "\nEND_AGENT_ENVELOPE"])
+                if recovered_envelope is not None
+                else _read_bridge_review_material(repo_root, bridge_job_id)
+            )
             parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
             blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
 
@@ -10209,19 +10587,38 @@ def run_phase_b(
             ],
         }
 
+    # Consume the owed prepared review before branch, packet, gate or packaging
+    # work. A validated decision then follows the existing continuation below.
+    if private_attr_prepared_recovery:
+        assert saved_state is not None
+        changed_files, private_attr_resume_error = _run_private_attr_remediation_bridge_review(
+            saved_state["private_attr_review_files"],
+            reentry=resume_after.startswith("reentry_"),
+            prepared_state=saved_state,
+        )
+        if private_attr_resume_error is not None:
+            return private_attr_resume_error
+        try:
+            launch_tracker_restore_session, launch_tracker_routing_record = prepare_launch_tracker_restore(
+                repo_root, plan=plan, plan_path=plan_path,
+                wave_id=wave_id, routing_record=routing_record,
+            )
+        except LaunchTrackerRestoreError as exc:
+            return _launch_tracker_restore_error_result(exc)
+
     # Determine which steps to skip based on resume state
     _RESUME_ORDER = [
         "implementer",
         "agent_review",
         "bridge_fix_pending",
         "bridge_converged",
-        "private_attr_remediation_pending_review",
+        "private_attr_remediation_prepared_pending_review",
         "needs_phase_b_reentry",
-        "reentry_private_attr_remediation_pending_review",
+        "reentry_private_attr_remediation_prepared_pending_review",
     ]
-    _resume_private_attr_review = resume_after == "private_attr_remediation_pending_review"
+    _resume_private_attr_review = resume_after == "private_attr_remediation_prepared_pending_review"
     _resume_reentry_private_attr_review = (
-        resume_after == "reentry_private_attr_remediation_pending_review"
+        resume_after == "reentry_private_attr_remediation_prepared_pending_review"
     )
     _skip_to_reentry = resume_after == "needs_phase_b_reentry" or _resume_reentry_private_attr_review
     reentry_runtime_pre_push_failure = bool(
@@ -10235,8 +10632,7 @@ def run_phase_b(
         or resume_after in {
             "bridge_fix_pending",
             "bridge_converged",
-            "private_attr_remediation_pending_review",
-            "reentry_private_attr_remediation_pending_review",
+            *PRIVATE_ATTR_PREPARED_STEPS,
         }
         or _skip_to_reentry
     )
@@ -10656,8 +11052,7 @@ def run_phase_b(
     bridge_converged = _skip_through_bridge and resume_after in (
         "bridge_converged",
         "needs_phase_b_reentry",
-        "private_attr_remediation_pending_review",
-        "reentry_private_attr_remediation_pending_review",
+        *PRIVATE_ATTR_PREPARED_STEPS,
     )
     deferred_packet_path: str | None = result.get("deferred_packet_path")
 
@@ -11207,13 +11602,16 @@ def run_phase_b(
             result["errors"] = [line_ref_error]
             _clear_state(repo_root)
             return result
-        changed_files, private_attr_error, private_attr_remediated = _run_private_attr_gate_with_remediation(
-            changed_files,
-            reentry=False,
-        )
+        if _resume_private_attr_review:
+            private_attr_error, private_attr_remediated = None, False
+        else:
+            changed_files, private_attr_error, private_attr_remediated = _run_private_attr_gate_with_remediation(
+                changed_files,
+                reentry=False,
+            )
         if private_attr_error is not None:
             return private_attr_error
-        if private_attr_remediated or _resume_private_attr_review:
+        if private_attr_remediated:
             changed_files, private_attr_bridge_error = _run_private_attr_remediation_bridge_review(
                 changed_files,
                 reentry=False,
@@ -12200,21 +12598,22 @@ def run_phase_b(
             result["errors"] = [line_ref_error]
             _clear_state(repo_root)
             return result
-        changed_files, private_attr_error, private_attr_remediated = _run_private_attr_gate_with_remediation(
-            changed_files,
-            reentry=True,
-        )
+        if _resume_reentry_private_attr_review:
+            private_attr_error, private_attr_remediated = None, False
+        else:
+            changed_files, private_attr_error, private_attr_remediated = _run_private_attr_gate_with_remediation(
+                changed_files,
+                reentry=True,
+            )
         if private_attr_error is not None:
             _clear_state(repo_root)
             return private_attr_error
-        if private_attr_remediated or _resume_reentry_private_attr_review:
+        if private_attr_remediated:
             changed_files, private_attr_bridge_error = _run_private_attr_remediation_bridge_review(
                 changed_files,
                 reentry=True,
             )
             if private_attr_bridge_error is not None:
-                if private_attr_bridge_error.get("status") != "question_for_founder":
-                    _clear_state(repo_root)
                 return private_attr_bridge_error
             _normalize_control_packet_line_refs(
                 repo_root,

@@ -164,7 +164,10 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 - original receipts, source/admin archives, history and the consumed common-dir
   claim remain immutable; R1 must never be replayed. Cleanup remains incomplete
 
-### Observed Fleet Apply Action Reconciliation R2 (Implementation; Merge and Execution Pending)
+### Observed Fleet Apply Action Reconciliation R2 (Landed; Live Attempt Consumed)
+
+- landed through PR #1290 at exact merge
+  `d6be67a8019c373f961e8c224cd7cb9c0646d746` on 2026-09-12T00:52:55Z
 
 - adds the fixed `--reconcile-r1` planning/apply mode in the existing cleanup
   slot; deterministic planning binds the landed classification and R1 plan
@@ -180,15 +183,73 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   children, locks, protection, drift and uncertain process probes remain HOLD
 - retains each fresh lsof observation in new local outcomes, including output,
   warnings and timeout evidence; the historical lsof cause remains unknown
-- the exact one-time postmerge command and new outcome locations are recorded
-  in TASKS and the reconciliation plan. No live reconciliation has run;
-  recovery R2, PR1219 and Mu order remain unchanged, with no extra queue item
-- final Phase B validation passed all 102 disposable focused tests and repeated
-  deterministic planning; the staged L4 gate refused the empty implementation
-  index. Native staging, indicator generation and staged revalidation remain
-  with the outer pipeline
-  After the bounded attempt is recorded, recovery R2, fresh R3C6-R2 and every
-  retained PR1219/Mu obligation continue unchanged
+- the one-time live follow-up exited 3: index 292 made one recoverable move to
+  `292/worktree`; indices 159, 163 and 305 remain INCOMPLETE at their source
+  paths after preparation, with no destination or terminal callback
+- the recorded lsof observations retain open-file refusals after fast-forward;
+  no process was killed or gate relaxed. All 407 original HOLDs remain untouched
+- TASKS retains the consumed command, outcome locations and summary SHA-256
+  `22a6302ed49034823912b5ffecc7bf233d0b1ecaf6cf81e21a24e26240a6bf80`;
+  neither R1 nor R2 may be replayed, and this result is not fleet-wide closure
+- recovery R2 is the existing current slot, followed by fresh R3C6-R2 and every
+  retained PR1219/Mu obligation, with no additional cleanup queue item
+
+### Private-Review Prepared-Checkpoint Byte-Preserving Resume R2 (PR #1291 Unmerged)
+
+- reconstructed from exact PR #1290 merge; all stopped candidates remain
+  preserved noncomplete evidence, with no imported code or review authority
+- ordinary and reentry private-attribute remediation retain a non-resumable
+  pre-preparation checkpoint, then save distinct prepared pending state after
+  successful staging, bound to launch identity, review round, saved findings,
+  deferred identity, staged path inventory, index modes and object/blob bytes
+- prepared recovery verifies the saved authority and index/worktree equality
+  before mutation, then invokes the owed reviewer without preparing, collecting
+  L4 evidence, restaging or replaying implementation before that review
+- recovered decisions require the retained canonical reviewer envelope and
+  exact job/turn/decision identity before continuation; malformed or missing
+  material preserves pending state, and valid QUESTION remains terminal
+- the declared full `test_phase_b_executor.py` module passed all 693 tests;
+  public regressions exercise both recovery paths, preparation crash boundaries,
+  authority and byte mismatches, recovered QUESTION material and GO continuation
+- original implementation passed first-round Phase A/B, three supervisors and
+  pre-push and is committed in open, UNMERGED PR #1291 at
+  `571f0999288f6a5c8f4d76bda9aa0c45ddc58ea5`; green-gate run `34668334150`
+  attempts 1 and 2 failed on the unchanged census fixture's disappearing
+  `maintenance.lock`. The 693-test result covers the private-review module;
+  the census fixture repair has its own whole-module evidence below
+
+### PR #1291 Fixture CI Repair R2 — Native Existing-Branch Binding (Phase B)
+
+- prior narrow repair `private-review-r2-ci-fixture-maintenance-2026-09-11`
+  passed 40 tests/1 existing skip, first-round Phase A/B and two supervisors,
+  then stopped before commit/push because its input omitted the literal
+  `existing PR branch` marker and explicit control-surface authorization;
+  native commit selected a new branch from origin/dev. This was a branch-binding
+  stop, not a test failure; all stopped candidates, indexes and evidence remain
+  preserved and supply no fresh approval authority
+- corrected wave `private-review-r2-ci-fixture-maintenance-r2-2026-09-11`
+  implements exactly the preserved 19-line repair, SHA256
+  `74a9c5e0a3abe0affcd9541d8a736cccb8cfc630418dfcbf9dfd6e8aeb9ac33b`:
+  fixture Git calls receive `-c maintenance.auto=false`, and a trace regression
+  requires a real fixture commit with no Git maintenance/gc child starts
+- declared Phase B-local validation
+  `PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_workingrcx_fleet_census.py --tb=short`
+  passed **40 tests with 1 unchanged skip in 44.81s**. Snapshot bytes, mtimes,
+  indexes, refs, output-preservation assertions and explicit filter/submodule
+  coverage remain unchanged; the prior unsuppressed trace proof is retained
+- the fresh locked native packet preserves `existing PR branch` and
+  `Authorized control-surface L4_ENABLER`. Read-only evaluation of the native
+  Phase B selector resolves exactly
+  `jabramsja/phase-b-private-review-byte-preserving-resume-r2-2026-09-11`;
+  native staging, indexed packet authorization and commit handoff remain with
+  the outer pipeline
+- this repair is locally implemented and validated, still uncommitted;
+  current-wave Phase B review, supervisors, push, CI and merge remain pending.
+  PR #1291 remains unmerged in the same landing slot, with no new PR
+- cleanup remains **1 MOVED / 3 INCOMPLETE / 407 prior HOLD**, and both R1/R2
+  one-shot operations remain consumed. Fresh R3C6-R2 stays immediate next only
+  after actual PR #1291 merge and native closeout, followed by every retained
+  PR1219/Mu obligation in its existing order
 
 ## 2026-09-10
 
