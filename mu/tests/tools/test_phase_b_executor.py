@@ -167,6 +167,553 @@ def _make_mock_impl():
     return mock_impl
 
 
+@pytest.fixture
+def implementer_ownership_lane(tmp_path):
+    """Drive each mutator from public Phase B, with real checkpoint/file IO."""
+    def create(kind, source_path):
+        repo = tmp_path / "ownership"
+        repo.mkdir()
+        plan_path, test_path, _ = _write_bridge_receipt_fixture_repo(repo, "ownership", source_path=source_path)
+        impl = _make_mock_impl()
+        lane = SimpleNamespace(
+            repo=repo, plan_path=plan_path, impl=impl, kind=kind, source_path=source_path,
+            state_path=repo / ".agent_bus/executors/phase_b_state.json",
+            counts={"implementer": 0, "review": 0, "supervisor": 0},
+            target={"initial": 1, "private": 2, "supervisor_reentry": 2,
+                    "bridge_reentry": 3, "reentry_private": 3}[kind],
+            boundary="actor", armed=True, post_success=False,
+            pending={"wave_id": "ownership"}, mocks={},
+        )
+        gate_calls = 0
+
+        def actor(*args, **kwargs):
+            lane.counts["implementer"] += 1
+            target = test_path if kind in {"private", "reentry_private"} and lane.counts["implementer"] == lane.target else source_path
+            with (repo / target).open("a") as output:
+                output.write(f"# actor {lane.counts['implementer']}\n")
+            if lane.armed and lane.counts["implementer"] == lane.target:
+                lane.armed = False
+                if lane.boundary == "actor":
+                    raise PrivateReviewCrash("owned invocation interrupted")
+                lane.post_success = True
+            return {"status": "success", "exit_code": 0, "output": "done", "stderr": "",
+                    "job_id": f"ownership-{lane.counts['implementer']}", "model_override_applied": False}
+
+        def collect(*args, **kwargs):
+            if lane.post_success:
+                lane.post_success = False
+                raise PrivateReviewCrash("post-success collection interrupted")
+            dirty = subprocess.run(
+                ["git", "status", "--porcelain", "--untracked-files=all"],
+                cwd=repo, capture_output=True, text=True, check=True,
+            ).stdout.splitlines()
+            return sorted(line[3:] for line in dirty if not line[3:].startswith((".agent_bus/", ".scratch/")))
+
+        def bridge(*args, **kwargs):
+            lane.counts["review"] += 1
+            decision = "REQUEST_CHANGES" if kind == "bridge_reentry" and lane.counts["review"] == 2 else "GO"
+            return {"decision": decision, "exit_code": int(decision != "GO"),
+                    "stdout": decision, "stderr": "", "job_id": kwargs["job_id"]}
+
+        def supervisor(*args, **kwargs):
+            lane.counts["supervisor"] += 1
+            reentry = kind in {"supervisor_reentry", "bridge_reentry", "reentry_private"}
+            decision = "NEEDS_PHASE_B" if reentry and lane.counts["supervisor"] == 1 else "COMMIT_GO"
+            return {"exit_code": 0, "receipt_path": ".agent_bus/meta/pre_commit_receipts/test.json",
+                    "parsed": {"decision": decision, "summary": "Exact reentry findings\npre-push runtime failure",
+                               "status": "success", "findings": []}}
+
+        def gate(*args, **kwargs):
+            nonlocal gate_calls
+            gate_calls += 1
+            failed = (kind == "private" and gate_calls == 1) or (kind == "reentry_private" and gate_calls == 2)
+            return {"passed": not failed, "skipped": False, "exit_code": int(failed),
+                    "test_files": [test_path], "stdout": "Exact private attribute finding", "stderr": ""}
+
+        impl.invoke_implementer.side_effect = actor
+        stack = ExitStack()
+        stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+        for name, kwargs in {
+            "_collect_changed_files": {"side_effect": collect},
+            "run_bridge_review": {"side_effect": bridge},
+            "run_pre_commit_supervisor": {"side_effect": supervisor},
+            "run_private_attr_gate": {"side_effect": gate},
+            "run_sdk_agents": {"return_value": {"exit_code": 0}},
+            "_read_bridge_render": {"return_value": "Exact bridge reentry findings"},
+            "_run_pytest_on_files": {"return_value": {"passed": True, "exit_code": 0}},
+        }.items():
+            lane.mocks[name] = stack.enter_context(patch.object(pb_mod, name, **kwargs))
+        lane.run = lambda **kwargs: pb_mod.run_phase_b(
+            repo, plan_path, max_bridge_rounds=5,
+            routing_record_override=_VALID_ROUTING_RECORD.copy(), **kwargs,
+        )
+        return lane, stack
+    with ExitStack() as lanes:
+        def managed(kind, *, source_path="f.py"):
+            lane, stack = create(kind, source_path)
+            lanes.enter_context(stack)
+            return lane
+        yield managed
+
+
+@pytest.fixture
+def sdk_ownership_lane(implementer_ownership_lane):
+    lane = implementer_ownership_lane("initial", source_path="mu/tools/ownership_probe.py")
+    lane.armed = False
+    lane.impl.load_executor_config.return_value["agent_review_enabled"] = True
+    lane.counts["sdk"] = 0
+    lane.bridge_checkpoints = []
+
+    def sdk(repo_root, files, **kwargs):
+        assert files == [lane.source_path]
+        lane.counts["sdk"] += 1
+        checkpoint = json.loads(lane.state_path.read_bytes())
+        assert checkpoint["implementer_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+        report, status = ".agent_bus/sdk_report.md", ".agent_bus/sdk_status.json"
+        (repo_root / report).write_text("SDK review completed\n")
+        (repo_root / status).write_text('{"status": "complete"}\n')
+        return {"exit_code": 0, "report_path": report, "status_path": status}
+
+    def bridge(*args, **kwargs):
+        lane.counts["review"] += 1
+        lane.bridge_checkpoints.append(json.loads(lane.state_path.read_bytes()))
+        return {"decision": "", "exit_code": 2, "stdout": "",
+                "stderr": "injected bridge infrastructure failure", "job_id": kwargs["job_id"]}
+
+    lane.mocks["run_sdk_agents"].side_effect = sdk
+    lane.mocks["run_bridge_review"].side_effect = bridge
+    return lane
+
+
+@pytest.mark.parametrize("entry", ["phase_b", "surface", "routing"])
+@pytest.mark.parametrize("failure", ["subprocess", "post_go_pager"])
+def test_sdk_checkpoint_public_resume_retains_implementer_success(sdk_ownership_lane, entry, failure):
+    lane = sdk_ownership_lane
+    with ExitStack() as stack:
+        if failure != "subprocess":
+            original_bridge = lane.mocks["run_bridge_review"].side_effect
+
+            def review(*args, **kwargs):
+                result = original_bridge(*args, **kwargs)
+                if lane.counts["review"] == 1:
+                    result.update(exit_code=0, decision="GO", stdout="GO", stderr="")
+                return result
+
+            def pager(_repo, **event):
+                if event["state"] == "bridge_go":
+                    raise OSError("post-GO pager unavailable")
+
+            lane.mocks["run_bridge_review"].side_effect = review
+            stack.enter_context(patch.object(pb_mod, "_emit_phase_b_event", side_effect=pager))
+        recovery = MagicMock(return_value={"recovered": False, "tier": 4})
+        if entry == "phase_b":
+            run = lane.run
+        else:
+            stack.enter_context(patch.dict(sys.modules))
+            stack.enter_context(patch.dict(os.environ))
+            dispatcher = load_module("sdk_ownership_dispatcher", _EXECUTORS_DIR / "executor_dispatch.py")
+            route = {**_VALID_ROUTING_RECORD, "wave_name": "ownership", "plan_path": lane.plan_path,
+                     "tracked_packet": lane.plan_path,
+                     "next_candidates": [{"candidate": "ownership", "bounded": True, "tracked_packet": lane.plan_path}]}
+            route_path = lane.repo / "routing.json"
+            route_path.write_text(json.dumps(route))
+            argv = (["phase-b", "--plan", lane.plan_path, "--routing-record-json", json.dumps(route)]
+                    if entry == "surface" else ["--routing-record", str(route_path), "--skip-freshness", "--retries", "2"])
+            payloads = []
+
+            def child(command, *, cwd, timeout):
+                assert Path(command[1]).name == "phase_b_executor.py"
+                payload = lane.run()
+                payloads.append(payload)
+                return subprocess.CompletedProcess(command, 1, json.dumps(payload), "")
+
+            real_run = subprocess.run
+
+            def isolated_git(command, *args, **kwargs):
+                if command == ["git", "rev-parse", "--show-toplevel"]:
+                    return subprocess.CompletedProcess(command, 0, str(lane.repo), "")
+                return real_run(command, *args, **kwargs)
+
+            for name, kwargs in {
+                "_run_executor_in_group": {"side_effect": child},
+                "attempt_recovery": {"new": recovery},
+                "resolve_repo_root_for_dispatch": {"return_value": lane.repo},
+                "load_config": {"return_value": {}},
+                "_LaneMonitor": {}, "_install_wave_end_signal_cleanup": {},
+                "_remove_wave_end_signal_cleanup": {}, "_emit_executor_hard_fail_event": {},
+            }.items():
+                stack.enter_context(patch.object(dispatcher, name, **kwargs))
+            stack.enter_context(patch.object(subprocess, "run", side_effect=isolated_git))
+
+            def run():
+                assert dispatcher.main([*argv, "--json"]) == 1
+                return payloads[-1]
+
+        first = run()
+        counts = lane.counts.copy()
+        before = lane.state_path.read_bytes() if lane.state_path.exists() else None
+        protected = pb_mod.implementer_failure_blocks_recovery(lane.repo, first)
+        second = run()
+
+    assert first["step"] == ("bridge_subprocess" if failure == "subprocess" else "phase_b_pager")
+    assert second["step"] == "bridge_subprocess"
+    assert counts == {"implementer": 1, "review": 1, "supervisor": 0, "sdk": 1}
+    assert lane.counts == {**counts, "review": 2}, (
+        "actor counts before/after", counts, lane.counts,
+        "retained checkpoint", before is not None, "recovery blocked", protected,
+    )
+    assert before is not None and lane.state_path.read_bytes() == before
+    assert protected and pb_mod.implementer_failure_blocks_recovery(lane.repo, second)
+    assert all(state["completed_step"] == "agent_review" for state in lane.bridge_checkpoints)
+    assert all(state["implementer_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE" for state in lane.bridge_checkpoints)
+    recovery.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["initial", "supervisor_reentry", "bridge_reentry"])
+def test_post_go_pager_public_resume_keeps_completed_implementer(implementer_ownership_lane, kind):
+    lane = implementer_ownership_lane(kind)
+    lane.armed = False
+    original_bridge = lane.mocks["run_bridge_review"].side_effect
+    reviewed_checkpoints = []
+    interrupted = False
+
+    def review(*args, **kwargs):
+        result = original_bridge(*args, **kwargs)
+        if lane.counts["implementer"] == lane.target:
+            reviewed_checkpoints.append(lane.state_path.read_bytes())
+            result.update(exit_code=0, decision="GO", stdout="GO")
+        return result
+
+    def pager(_repo, **event):
+        nonlocal interrupted
+        if (event["event_type"] == "phase_b_bridge_completed"
+                and lane.counts["implementer"] == lane.target and not interrupted):
+            interrupted = True
+            raise OSError("post-GO pager unavailable")
+
+    lane.mocks["run_bridge_review"].side_effect = review
+    with patch.object(pb_mod, "_emit_phase_b_event", side_effect=pager):
+        first = lane.run()
+        counts = lane.counts.copy()
+        retained = lane.state_path.read_bytes() if lane.state_path.exists() else None
+        protected = pb_mod.implementer_failure_blocks_recovery(lane.repo, first)
+        second = lane.run()
+
+    assert first["status"] == "error" and first["step"] == "phase_b_pager", first
+    assert counts["implementer"] == lane.target
+    assert second["status"] == "commit_ready", second
+    assert lane.counts["implementer"] == counts["implementer"], (counts, lane.counts)
+    assert lane.counts["review"] == counts["review"] + 1
+    assert retained == reviewed_checkpoints[0] and protected
+    assert json.loads(retained)["implementer_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+    assert not lane.state_path.exists()
+
+
+def test_post_go_checkpoint_save_failure_retains_completed_implementer(sdk_ownership_lane):
+    lane = sdk_ownership_lane
+    reviewed_checkpoints = []
+
+    def review(*args, **kwargs):
+        lane.counts["review"] += 1
+        reviewed_checkpoints.append(lane.state_path.read_bytes())
+        return {"exit_code": 0, "decision": "GO", "stdout": "GO", "stderr": "", "job_id": kwargs["job_id"]}
+
+    real_replace = os.replace
+
+    def fail_convergence_save(source, destination):
+        if (Path(destination) == lane.state_path
+                and json.loads(Path(source).read_bytes())["completed_step"] == "bridge_converged"):
+            raise OSError("convergence checkpoint replacement failed")
+        return real_replace(source, destination)
+
+    lane.mocks["run_bridge_review"].side_effect = review
+    with patch.object(os, "replace", side_effect=fail_convergence_save):
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="convergence checkpoint replacement failed"):
+            lane.run()
+    assert lane.state_path.read_bytes() == reviewed_checkpoints[0]
+    assert pb_mod.implementer_failure_blocks_recovery(lane.repo, {"status": "error"})
+    assert lane.run()["status"] == "commit_ready"
+    assert lane.counts == {"implementer": 1, "sdk": 1, "review": 2, "supervisor": 2}
+    assert not lane.state_path.exists()
+
+
+@pytest.mark.parametrize("failure", ["raise", "omit"])
+def test_sdk_checkpoint_write_failure_retains_success(sdk_ownership_lane, failure):
+    lane = sdk_ownership_lane
+    real_replace = os.replace
+    snapshots = []
+
+    def failed_replace(source, destination):
+        if Path(destination) == lane.state_path and json.loads(Path(source).read_bytes())["completed_step"] == "agent_review":
+            snapshots.append(lane.state_path.read_bytes())
+            if failure == "raise":
+                raise OSError("SDK checkpoint replacement failed")
+            return None
+        return real_replace(source, destination)
+
+    with patch.object(os, "replace", side_effect=failed_replace):
+        result = lane.run()
+    assert result["step"] == "implementer_mutation"
+    assert result["authority_error"] == "continuation_save_failed"
+    assert snapshots == [lane.state_path.read_bytes()]
+    assert lane.counts == {"implementer": 1, "sdk": 1, "review": 0, "supervisor": 0}
+    assert pb_mod.implementer_failure_blocks_recovery(lane.repo, result)
+    resumed = lane.run()
+    assert resumed["step"] == "bridge_subprocess"
+    assert lane.counts == {"implementer": 1, "sdk": 2, "review": 1, "supervisor": 0}
+    assert json.loads(lane.state_path.read_bytes())["implementer_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+
+
+@pytest.mark.parametrize("decision", ["GO", "REQUEST_CHANGES", "NO_GO"])
+def test_sdk_checkpoint_review_decision_consumes_success(sdk_ownership_lane, decision):
+    lane = sdk_ownership_lane
+    assert lane.run()["step"] == "bridge_subprocess"
+
+    def review(*args, **kwargs):
+        lane.counts["review"] += 1
+        verdict = decision if lane.counts["review"] == 2 else "GO"
+        return {"exit_code": int(verdict in {"REQUEST_CHANGES", "NO_GO"}), "decision": verdict,
+                "stdout": verdict, "stderr": "", "job_id": kwargs["job_id"]}
+
+    lane.mocks["run_bridge_review"].side_effect = review
+    result = lane.run()
+    assert result["status"] == "commit_ready", result
+    # The existing packet-status refresh obtains a second supervisor receipt.
+    correction = int(decision in {"REQUEST_CHANGES", "NO_GO"})
+    assert lane.counts == {"implementer": 1 + correction, "sdk": 1,
+                           "review": 2 + correction, "supervisor": 2}
+    assert not lane.state_path.exists()
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_sdk_checkpoint_question_refuses_implementation(sdk_ownership_lane, exit_code):
+    lane = sdk_ownership_lane
+    assert lane.run()["step"] == "bridge_subprocess"
+    lane.mocks["run_bridge_review"].side_effect = None
+    lane.mocks["run_bridge_review"].return_value = {
+        "exit_code": exit_code, "decision": "QUESTION", "stdout": "QUESTION", "stderr": "", "job_id": "question",
+    }
+    result = lane.run()
+    assert result["status"] == "question_for_founder", result
+    assert lane.counts["implementer"] == lane.counts["sdk"] == 1
+    assert lane.counts["supervisor"] == 0
+    assert not list((lane.repo / ".agent_bus/executors").glob("*handoff*.json"))
+
+
+@pytest.mark.parametrize("kind", ["private", "supervisor_reentry"])
+def test_sdk_checkpoint_cannot_substitute_other_implementer_continuations(implementer_ownership_lane, kind):
+    lane = implementer_ownership_lane(kind)
+    lane.boundary = "success"
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    checkpoint = json.loads(lane.state_path.read_bytes())
+    checkpoint.update({"completed_step": "agent_review", "agent_review_scope": ["mu/tools/probe.py"],
+                       "agent_review_scope_fingerprint": "a" * 64, "agent_exit_code": 0})
+    lane.state_path.write_text(json.dumps(checkpoint))
+    before, counts = lane.state_path.read_bytes(), lane.counts.copy()
+    result = lane.run()
+    assert result["state_error"] == "implementer_mutation", result
+    assert lane.counts == counts
+    assert lane.state_path.read_bytes() == before
+    assert pb_mod.implementer_failure_blocks_recovery(lane.repo, result)
+
+
+@pytest.mark.parametrize("kind", ["initial", "private", "supervisor_reentry", "bridge_reentry", "reentry_private"])
+def test_inflight_implementer_public_resume_keeps_one_owner(implementer_ownership_lane, kind):
+    lane = implementer_ownership_lane(kind)
+    with pytest.raises(PrivateReviewCrash, match="owned invocation interrupted"):
+        lane.run()
+    before = lane.state_path.read_bytes() if lane.state_path.exists() else None
+    counts = lane.counts.copy()
+    candidate = (lane.repo / "f.py").read_bytes()
+    result = lane.run(force=True)
+    assert lane.counts == counts, ("actor counts before/after", counts, lane.counts, result)
+    assert before is not None and lane.state_path.read_bytes() == before
+    assert (lane.repo / "f.py").read_bytes() == candidate
+    assert result["status"] == "error"
+    assert result["authority_error"] == "ambiguous_outcome"
+
+
+@pytest.mark.parametrize("kind", ["initial", "private", "supervisor_reentry", "bridge_reentry", "reentry_private"])
+def test_implementer_success_sealed_before_collection(implementer_ownership_lane, kind):
+    lane = implementer_ownership_lane(kind)
+    lane.boundary = "success"
+    with pytest.raises(PrivateReviewCrash, match="post-success collection interrupted"):
+        lane.run()
+    counts = lane.counts.copy()
+    result = lane.run()
+    assert lane.counts == counts, ("actor counts before/after", counts, lane.counts, result)
+    assert result["status"] == "continue_phase_b", result
+    assert result["step"] == "implementer_finalize"
+    checkpoint = json.loads(lane.state_path.read_bytes())
+    assert result["checkpoint_sha256"] == hashlib.sha256(lane.state_path.read_bytes()).hexdigest()
+    assert checkpoint["completed_step"] == result["completed_step"]
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("chain", [False, True], ids=["direct", "a_to_b"])
+@pytest.mark.parametrize("outcome", ["actor", "success", "unprepared", "prepared"])
+def test_inflight_implementer_native_dispatcher_preserves_ownership(implementer_ownership_lane, capsys, entry, chain, outcome):
+    private = outcome in {"unprepared", "prepared"}
+    lane = implementer_ownership_lane("private" if private else "initial")
+    lane.boundary = outcome
+    if private:
+        lane.armed = False
+        boundary = lane.mocks["run_private_attr_gate" if outcome == "unprepared" else "run_bridge_review"]
+        prior = boundary.side_effect
+
+        def interrupted_continuation(*args, **kwargs):
+            if lane.counts["implementer"] == lane.target:
+                raise PrivateReviewCrash("private continuation interrupted")
+            return prior(*args, **kwargs)
+
+        boundary.side_effect = interrupted_continuation
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    before = lane.state_path.read_bytes() if lane.state_path.exists() else None
+    lane.impl.invoke_implementer.side_effect = PrivateReviewCrash("duplicate mutator")
+    lane.impl.invoke_implementer.reset_mock()
+    with patch.dict(sys.modules), patch.dict(os.environ):
+        dispatcher = load_module("implementer_ownership_dispatcher", _EXECUTORS_DIR / "executor_dispatch.py")
+        route = {**_VALID_ROUTING_RECORD, "wave_name": "ownership", "plan_path": lane.plan_path,
+                 "tracked_packet": lane.plan_path,
+                 "next_candidates": [{"candidate": "ownership", "bounded": True, "tracked_packet": lane.plan_path}]}
+        if chain:
+            route["decision"] = "ROUTE_PHASE_A"
+        route_path = lane.repo / "routing.json"
+        route_path.write_text(json.dumps(route))
+        argv = (["phase-a", "--plan-name", "ownership", "--summary", "ownership probe"] if chain else
+                ["phase-b", "--plan", lane.plan_path, "--routing-record-json", json.dumps(route)])
+        if entry == "routing":
+            argv = ["--routing-record", str(route_path), "--skip-freshness", "--retries", "2"]
+        argv.append("--json")
+        commands, payloads = [], []
+
+        def child(command, *, cwd, timeout):
+            if Path(command[1]).name == "phase_a_executor.py":
+                assert chain
+                payload = {"status": "success", "plan_path": lane.plan_path}
+                return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+            assert Path(command[1]).name == "phase_b_executor.py"
+            if commands:
+                assert command == commands[0]
+                assert payloads[-1]["status"] == "continue_phase_b"
+                (lane.repo / lane.plan_path).unlink()
+            commands.append(command)
+            try:
+                payload = lane.run()
+            except PrivateReviewCrash:
+                return subprocess.CompletedProcess(command, 1, "", "interrupted child")
+            payloads.append(payload)
+            return subprocess.CompletedProcess(command, 0 if payload["status"] == "continue_phase_b" else 1, json.dumps(payload), "")
+
+        real_run = subprocess.run
+
+        def isolated_git(command, *args, **kwargs):
+            if command == ["git", "rev-parse", "--show-toplevel"]:
+                return subprocess.CompletedProcess(command, 0, str(lane.repo), "")
+            return real_run(command, *args, **kwargs)
+
+        with patch.object(dispatcher, "_run_executor_in_group", side_effect=child), \
+             patch.object(dispatcher, "attempt_recovery", return_value={"recovered": False, "tier": 4}) as recovery, \
+             patch.object(dispatcher, "resolve_repo_root_for_dispatch", return_value=lane.repo), \
+             patch.object(dispatcher, "load_config", return_value={}), \
+             patch.object(subprocess, "run", side_effect=isolated_git), \
+             patch.object(dispatcher, "_LaneMonitor"), \
+             patch.object(dispatcher, "_install_wave_end_signal_cleanup"), \
+             patch.object(dispatcher, "_remove_wave_end_signal_cleanup"), \
+             patch.object(dispatcher, "_emit_executor_hard_fail_event"):
+            assert dispatcher.main(argv) == 1
+    lane.impl.invoke_implementer.assert_not_called()
+    recovery.assert_not_called()
+    if outcome == "success" and not chain:
+        assert [p["status"] for p in payloads] == ["continue_phase_b", "error"]
+        assert payloads[-1]["step"] == "load_plan"
+        assert lane.state_path.exists()
+    else:
+        assert before is not None and lane.state_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["initial", "private", "supervisor_reentry", "bridge_reentry", "reentry_private"])
+@pytest.mark.parametrize("status,code", [("error", 1), ("timeout", -1), ("stale", -2)])
+def test_owned_implementer_explicit_failure_keeps_recovery_semantics(implementer_ownership_lane, kind, status, code):
+    lane = implementer_ownership_lane(kind)
+    lane.armed = False
+    real_actor = lane.impl.invoke_implementer.side_effect
+
+    def failure(*args, **kwargs):
+        result = real_actor(*args, **kwargs)
+        if lane.counts["implementer"] == lane.target:
+            result.update(status=status, exit_code=code, stderr="explicit actor failure", error_subtype="test_failure")
+        return result
+
+    lane.impl.invoke_implementer.side_effect = failure
+    result = lane.run()
+    assert result["status"] == "error", result
+    assert result["implementer_status"] == status
+    assert result["error_subtype"] == "test_failure"
+    assert lane.counts["implementer"] == lane.target
+    assert not pb_mod.ordinary_bridge_fix_failure_blocks_recovery(lane.repo, result)
+    if lane.state_path.exists():
+        counts = lane.counts.copy()
+        retained = lane.run()
+        assert retained["step"] == result["step"]
+        assert retained["implementer_status"] == status
+        assert retained["error_subtype"] == "test_failure"
+        assert lane.counts == counts
+
+
+@pytest.mark.parametrize("boundary", ["IN_FLIGHT", "SUCCESS_PENDING_FINALIZE", "implementer"])
+@pytest.mark.parametrize("failure", ["raise", "omit"])
+def test_implementer_ownership_atomic_failure_preserves_evidence(implementer_ownership_lane, boundary, failure):
+    lane = implementer_ownership_lane("initial")
+    lane.armed = False
+    real_replace = os.replace
+    snapshots = []
+
+    def fail_replace(source, destination):
+        if Path(destination) == lane.state_path:
+            state = json.loads(Path(source).read_bytes())
+            if boundary in (state["completed_step"], state.get("implementer_mutation", {}).get("state")):
+                snapshots.append(lane.state_path.read_bytes() if lane.state_path.exists() else None)
+                if failure == "raise":
+                    raise OSError("ownership replacement failed")
+                return None  # Reported write success is not durable ownership.
+        return real_replace(source, destination)
+
+    with patch.object(os, "replace", side_effect=fail_replace):
+        result = lane.run()
+    assert result["step"] == "implementer_mutation", result
+    assert lane.counts["implementer"] == (0 if boundary == "IN_FLIGHT" else 1)
+    assert lane.counts["review"] == lane.counts["supervisor"] == 0
+    assert snapshots and (lane.state_path.read_bytes() if lane.state_path.exists() else None) == snapshots[-1]
+    assert pb_mod.ordinary_bridge_fix_failure_blocks_recovery(lane.repo, result)
+
+
+@pytest.mark.parametrize("defect", ["context", "result", "missing", "torn", "step"])
+def test_implementer_ownership_corruption_cannot_authorize_resume(implementer_ownership_lane, defect):
+    lane = implementer_ownership_lane("initial")
+    lane.boundary = "success"
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    state = json.loads(lane.state_path.read_bytes())
+    if defect == "context":
+        state["implementer_mutation_context"]["prompt"] = "different prompt"
+    elif defect == "result":
+        state["implementer_mutation"]["result"]["exit_code"] = True
+    elif defect == "missing":
+        del state["implementer_mutation"]
+    elif defect == "step":
+        state["completed_step"] = "agent_review"
+    lane.state_path.write_text("{torn" if defect == "torn" else json.dumps(state))
+    before, counts = lane.state_path.read_bytes(), lane.counts.copy()
+    result = lane.run()
+    assert result["status"] == "error", result
+    assert lane.counts == counts
+    assert lane.state_path.read_bytes() == before
+    assert pb_mod.ordinary_bridge_fix_failure_blocks_recovery(lane.repo, result)
+
+
 def _init_git_repo(repo: Path) -> None:
     subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
@@ -237,6 +784,8 @@ def _write_pre_review_plan(repo: Path, wave_id: str) -> tuple[str, str]:
 def _write_bridge_receipt_fixture_repo(
     repo: Path,
     wave_id: str,
+    *,
+    source_path: str = "f.py",
 ) -> tuple[str, str, str]:
     plan_path = "reports/control_plane/plan.md"
     test_path = "mu/tests/tools/test_public_bridge_receipt.py"
@@ -245,7 +794,7 @@ def _write_bridge_receipt_fixture_repo(
     (repo / "reports" / "control_plane").mkdir(parents=True, exist_ok=True)
     (repo / "mu" / "tools" / "metrics").mkdir(parents=True, exist_ok=True)
     (repo / "mu" / "tests" / "tools").mkdir(parents=True, exist_ok=True)
-    (repo / "f.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / source_path).write_text("VALUE = 1\n", encoding="utf-8")
     (repo / test_path).write_text(
         "def test_public_bridge_receipt_smoke():\n"
         "    assert True\n",
@@ -274,7 +823,7 @@ def _write_bridge_receipt_fixture_repo(
         "## Scope\n\n"
         "This lock package may stage exactly these same-wave files:\n\n"
         "- `TASKS.md`\n"
-        "- `f.py`\n"
+        f"- `{source_path}`\n"
         f"- `{test_path}`\n"
         f"- `{plan_path}`\n"
         f"- `{indicator_path}`\n",
@@ -12168,8 +12717,11 @@ class TestBridgeFixPendingResume:
                 pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
         bridge_mock.assert_not_called()
         reentry_state = json.loads(state_path.read_text(encoding="utf-8"))
-        assert reentry_state["completed_step"] == "needs_phase_b_reentry"
-        assert reentry_state["bridge_fix_plan_authority"] == sealed_authority
+        assert reentry_state["completed_step"] == "implementer_mutation"
+        assert reentry_state["implementer_mutation"]["state"] == "IN_FLIGHT"
+        continuation = reentry_state["implementer_mutation_context"]["checkpoint"]
+        assert continuation["completed_step"] == "needs_phase_b_reentry"
+        assert continuation["bridge_fix_plan_authority"] == sealed_authority
 
     def test_post_fix_scope_drift_preserves_authority_in_sdk_review_checkpoint(
         self,
@@ -13817,9 +14369,12 @@ class TestResumeNeedsPhaseB:
         assert prompt.index("# Plan") < prompt.index(heading) < prompt.index(exact_findings)
         assert f"{heading}\n\n{exact_findings}" in prompt
         checkpoint = pre_invocation_checkpoints[0]
-        assert checkpoint["completed_step"] == "needs_phase_b_reentry"
-        assert checkpoint["reentry_findings"] == exact_findings
-        assert checkpoint["last_reentry_bridge_decision"] == saved_decision
+        assert checkpoint["completed_step"] == "implementer_mutation"
+        assert checkpoint["implementer_mutation"]["state"] == "IN_FLIGHT"
+        continuation = checkpoint["implementer_mutation_context"]["checkpoint"]
+        assert continuation["completed_step"] == "needs_phase_b_reentry"
+        assert continuation["reentry_findings"] == exact_findings
+        assert continuation["last_reentry_bridge_decision"] == saved_decision
 
     def test_runtime_pre_push_reentry_refuses_control_only_commit_ready(self, tmp_path):
         """Runtime pre-push failures must not be repackaged as control-only COMMIT_GO."""
@@ -16012,8 +16567,12 @@ class TestBridgeTimeoutIsError:
 
         assert result["status"] == "error"
         assert any("timed out" in e for e in result.get("errors", []))
-        # State must be cleared to prevent stale resume
-        assert pb_mod._load_state(repo) is None  # ANTICHEAT_OK: testing internal executor functions
+        # The reviewer timeout cannot erase a successfully completed mutator.
+        checkpoint = json.loads((repo / ".agent_bus/executors/phase_b_state.json").read_bytes())
+        assert checkpoint["completed_step"] == "implementer"
+        assert checkpoint["implementer_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+        assert pb_mod.ordinary_bridge_fix_failure_blocks_recovery(repo, result)
+        mock_impl.invoke_implementer.assert_called_once()
 
     def test_bridge_timeout_does_not_silently_retry(self, tmp_path):
         """Bridge timeout must NOT cause multiple bridge invocations (no silent retry)."""

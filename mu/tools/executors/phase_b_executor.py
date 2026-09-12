@@ -42,7 +42,8 @@ import sys
 import tempfile
 import time
 import uuid
-from contextlib import closing
+from functools import wraps
+from contextlib import closing, contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
@@ -133,6 +134,17 @@ except ImportError:
 
 class PhaseBExecutorError(RuntimeError):
     """Raised when Phase B executor cannot proceed."""
+
+
+class ImplementerOwnershipError(PhaseBExecutorError):
+    """An owned invocation could not establish its durable outcome."""
+
+    def __init__(self, reason: str, detail: str):
+        super().__init__(detail)
+        self.result = {
+            "status": "error", "step": "implementer_mutation", "authority_error": reason,
+            "errors": [f"Implementer ownership rejected ({reason}): {detail}. Checkpoint preserved."],
+        }
 
 
 class LaunchTrackerRestoreError(PhaseBExecutorError):
@@ -2103,6 +2115,10 @@ BRIDGE_FIX_MUTATION_CARRY_FIELDS = (
     "bridge_fix_mutation_context", "bridge_fix_expected_context_sha256",
     "bridge_fix_mutation", "bridge_fix_expected_mutation_sha256",
 )
+IMPLEMENTER_MUTATION_CARRY_FIELDS = tuple(
+    field.replace("bridge_fix_", "implementer_", 1)
+    for field in BRIDGE_FIX_MUTATION_CARRY_FIELDS
+)
 BRIDGE_FIX_MUTATION_CONTEXT_FIELDS = frozenset({
     "checkpoint", "plan", "pre_fix_files", "next_step", "plan_declared_files",
     "exact_stage_scope_files", "pytest_gate_timeout",
@@ -2133,6 +2149,7 @@ PRIVATE_ATTR_PREPARED_STEPS = {
     "reentry_private_attr_remediation_prepared_pending_review",
 }
 RESUMABLE_STATE_STEPS = {
+    "implementer_mutation",
     "implementer",
     "agent_review",
     "bridge_fix_pending",
@@ -3158,6 +3175,177 @@ def _save_bridge_fix_transition(
         raise PhaseBExecutorError("ordinary checkpoint failed save verification")
 
 
+def _implementer_mutation_fields(
+    context: dict[str, Any], outcome: str, actor_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    # Reuse the landed canonical, detached outcome representation and writer.
+    return {
+        key.replace("bridge_fix_", "implementer_", 1): value
+        for key, value in _bridge_fix_mutation_fields(context, outcome, actor_result).items()
+    }
+
+
+def _implementer_mutation_issue(state: dict[str, Any]) -> str | None:
+    mutation = state.get("implementer_mutation")
+    context = state.get("implementer_mutation_context")
+    if not isinstance(mutation, dict) or set(mutation) != BRIDGE_FIX_MUTATION_FIELDS:
+        return "missing or malformed implementer outcome"
+    if type(mutation["version"]) is not int or mutation["version"] != 1:
+        return "invalid implementer outcome version"
+    if mutation["state"] not in ("IN_FLIGHT", "SUCCESS_PENDING_FINALIZE", "FAILED"):
+        return "invalid implementer outcome state"
+    if not isinstance(context, dict) or set(context) != {
+        "kind", "identity", "plan", "routing_record", "checkpoint", "pre_files", "prompt",
+        "plan_declared_files", "exact_stage_scope_files", "fenced_out_files",
+        "pytest_gate_timeout", "wave_class", "reader", "candidate_authority_kwargs",
+    }:
+        return "missing or malformed implementer continuation context"
+    if context["kind"] not in ("initial", "private", "reentry"):
+        return "invalid implementer entrypoint"
+    checkpoint, identity = context["checkpoint"], context["identity"]
+    if not isinstance(checkpoint, dict) or not isinstance(identity, dict):
+        return "invalid implementer checkpoint identity"
+    expected_steps = {
+        "initial": ("implementer",),
+        "reentry": ("needs_phase_b_reentry",),
+        "private": tuple(PRIVATE_ATTR_UNPREPARED_STEPS),
+    }[context["kind"]]
+    if checkpoint.get("completed_step") not in expected_steps:
+        return "invalid sealed implementer continuation step"
+    if not _valid_state_int(checkpoint.get("bridge_rounds")) or state.get("bridge_rounds") != checkpoint["bridge_rounds"]:
+        return "implementer round differs from sealed continuation"
+    for field in ("implementer_changed", "executor_created", "baseline_wave_files"):
+        paths = checkpoint.get(field)
+        if not isinstance(paths, list) or any(not _valid_state_string(path) for path in paths):
+            return f"invalid sealed implementer {field}"
+    if state.get("completed_step") != "implementer_mutation":
+        allowed_steps = [checkpoint["completed_step"]]
+        if context["kind"] == "initial":
+            allowed_steps.append("agent_review")
+        if context["kind"] == "private":
+            allowed_steps.append(checkpoint["completed_step"].replace("_pending_review", "_prepared_pending_review"))
+        if mutation["state"] != "SUCCESS_PENDING_FINALIZE" or state.get("completed_step") not in allowed_steps:
+            return "unfinished or substituted implementer continuation"
+        if state.get("completed_step") == "agent_review" and not (
+            isinstance(state.get("agent_review_scope"), list) and state["agent_review_scope"]
+            and all(_valid_state_string(path) for path in state["agent_review_scope"])
+            and _valid_sha256(state.get("agent_review_scope_fingerprint"))
+            and _valid_state_int(state.get("agent_exit_code"))
+            and state["agent_exit_code"] >= 0 and state["agent_exit_code"] != 4
+        ):
+            return "incomplete implementer SDK review continuation"
+    for field in ("wave_id", "plan_path"):
+        if not _valid_state_string(state.get(field)) or checkpoint.get(field) != state[field] or identity.get(field) != state[field]:
+            return f"implementer {field} differs from sealed context"
+    if not isinstance(context["plan"], dict) or not isinstance(context["plan"].get("content"), str):
+        return "invalid sealed implementer plan"
+    if not isinstance(context["routing_record"], dict) or not isinstance(context["prompt"], str):
+        return "invalid sealed implementer invocation"
+    for field in ("pre_files", "exact_stage_scope_files", "fenced_out_files", "plan_declared_files"):
+        value = context[field]
+        if field == "plan_declared_files" and value is None:
+            continue
+        if not isinstance(value, list) or any(not _valid_state_string(path) for path in value):
+            return f"invalid implementer {field}"
+    if not _valid_state_int(context["pytest_gate_timeout"]) or context["pytest_gate_timeout"] <= 0:
+        return "invalid implementer validation timeout"
+    if mutation["state"] == "SUCCESS_PENDING_FINALIZE":
+        issue = _bridge_fix_success_result_issue(mutation["result"])
+        if issue:
+            return issue
+    elif mutation["state"] == "FAILED":
+        if not _explicit_implementer_failure(mutation["result"]):
+            return "invalid explicit implementer failure"
+    elif mutation["result"] is not None or mutation["result_sha256"] is not None:
+        return "unfinished implementer cannot carry a result"
+    try:
+        expected = _implementer_mutation_fields(context, mutation["state"], mutation["result"])
+        if any(state.get(key) != value for key, value in expected.items()):
+            return "implementer outcome or context digest mismatch"
+        if _sha256_bytes(context["plan"]["content"].encode("utf-8")) != identity.get("plan_sha256"):
+            return "implementer plan differs from sealed identity"
+    except (TypeError, ValueError, UnicodeError):
+        return "implementer ownership is not canonical JSON"
+    return None
+
+
+def _explicit_implementer_failure(value: Any) -> bool:
+    return (
+        isinstance(value, dict) and value.get("status") in ("error", "timeout", "stale")
+        and type(value.get("exit_code")) is int and value["exit_code"] != 0
+    )
+
+
+def _finalize_implementer_success(
+    repo_root: Path, state: dict[str, Any], *, recovering: bool = False,
+) -> dict[str, Any]:
+    """Finish only the sealed actor's bookkeeping, without invoking any actor."""
+    issue = _implementer_mutation_issue(state)
+    if issue or state["implementer_mutation"]["state"] != "SUCCESS_PENDING_FINALIZE":
+        raise ImplementerOwnershipError("invalid_success", issue or "sealed success required")
+    context = state["implementer_mutation_context"]
+    try:
+        completed = json.loads(json.dumps(context["checkpoint"]))
+        exact = set(context["exact_stage_scope_files"])
+        delta = set(_collect_changed_files(repo_root)) - set(context["pre_files"])
+        if context["kind"] != "reentry":
+            delta -= set(context["fenced_out_files"])
+        changed = set(completed["implementer_changed"]) | delta
+        if exact:
+            changed &= exact
+        completed["implementer_changed"] = sorted(changed)
+        files = _collect_wave_owned_files(
+            repo_root, completed["plan_path"], context["plan_declared_files"], changed or None,
+            set(completed["executor_created"]) or None, set(completed["baseline_wave_files"]) or None,
+        )
+        if context["kind"] != "initial":
+            if not completed["plan_path"].startswith("<"):
+                files = sorted(set(files) | {completed["plan_path"]})
+            if exact:
+                files = [path for path in files if path in exact]
+            completed["bridge_scope_fingerprint"] = _bridge_scope_fingerprint(repo_root, files)
+        completed.update({key: state[key] for key in IMPLEMENTER_MUTATION_CARRY_FIELDS})
+        if context["kind"] == "private" and recovering:
+            gate = run_private_attr_gate(repo_root, files, timeout=context["pytest_gate_timeout"])
+            if not (gate.get("passed") or gate.get("skipped")):
+                raise ImplementerOwnershipError("finalization_failed", private_attr_gate_summary(
+                    gate, reentry=completed["completed_step"].startswith("reentry_"),
+                ))
+            reentry = completed["completed_step"].startswith("reentry_")
+            files, error = _prepare_phase_b_pre_review_package(
+                repo_root, candidate_files=files, exact_stage_scope_files=exact,
+                plan_path=completed["plan_path"], wave_id=completed["wave_id"], wave_class=context["wave_class"],
+                step_prefix="implementer_finalize", context="private-attr remediation bridge review",
+                **context["candidate_authority_kwargs"],
+            )
+            if error is not None:
+                raise ImplementerOwnershipError("finalization_failed", str(error))
+            files = sorted(set(files))
+            completed.update({
+                "completed_step": ("reentry_" if reentry else "") + "private_attr_remediation_prepared_pending_review",
+                "private_attr_review_files": files,
+                "private_attr_review_round": completed["bridge_rounds"] + 1,
+                "private_attr_review_summary": ("Phase B re-entry" if reentry else "Phase B")
+                    + f" private-attr remediation review R{completed['bridge_rounds'] + 1} for {completed['plan_path']}",
+                "private_attr_review_reader": context["reader"],
+                "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, files),
+            })
+            indicator = _phase_b_same_wave_indicator_path(completed["wave_id"])
+            if indicator in files:
+                completed["executor_created"] = sorted(set(completed["executor_created"]) | {indicator})
+            completed["private_attr_prepared_authority"] = _private_attr_prepared_authority(
+                repo_root, completed, routing_record=context["routing_record"], plan=dict(context["plan"]),
+                plan_path=completed["plan_path"], wave_id=completed["wave_id"],
+            )
+            completed["private_attr_prepared_sha256"] = _canonical_json_sha256(completed)
+        _save_bridge_fix_transition(repo_root, state, completed)
+        return {"checkpoint": completed, "changed_files": files}
+    except ImplementerOwnershipError:
+        raise
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise ImplementerOwnershipError("finalization_failed", str(exc)) from exc
+
+
 def _finalize_bridge_fix_success(repo_root: Path, state: dict[str, Any]) -> dict[str, Any]:
     """Finish a sealed ordinary success without any actor or remediation calls."""
     issue = _bridge_fix_mutation_issue(state)
@@ -3217,6 +3405,10 @@ def _validate_loaded_state_container(state_path: Path, state: dict[str, Any]) ->
 
 
 def _validate_resumable_state_shape(state_path: Path, state: dict[str, Any]) -> dict[str, Any] | None:
+    if state.get("completed_step") == "implementer_mutation" or any(key in state for key in IMPLEMENTER_MUTATION_CARRY_FIELDS):
+        issue = _implementer_mutation_issue(state)
+        if issue is not None:
+            return _state_load_error("implementer_mutation", issue)
     missing: list[str] = []
     completed_step = state.get("completed_step")
     if not _valid_state_string(completed_step):
@@ -3364,11 +3556,52 @@ def _load_state(repo_root: Path) -> dict[str, Any] | None:
     return state
 
 
-def _clear_state(repo_root: Path) -> None:
+def _clear_state(repo_root: Path, *, terminal_success: bool = False) -> None:
     """Remove persisted state file after successful completion."""
+    if implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=_active_bus_dir()):
+        state = _load_state(repo_root)
+        if not (
+            terminal_success and isinstance(state, dict)
+            and state.get("completed_step") != "implementer_mutation"
+            and _implementer_mutation_issue(state) is None
+            and state["implementer_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+        ):
+            return
     state_path = _state_file_path(repo_root)
     if state_path.exists():
         state_path.unlink()
+
+
+def _consume_implementer_review_continuation(repo_root: Path, review: dict[str, Any]) -> None:
+    """GO retains completed ownership until the next checkpoint or terminal handoff."""
+    decision = review.get("decision")
+    if not (
+        (review.get("exit_code") == 0 and decision in ("GO", "GO_WITH_NON_BLOCKING", "QUESTION", "REQUEST_CHANGES", "NO_GO"))
+        or (review.get("exit_code") == 1 and decision in ("REQUEST_CHANGES", "NO_GO"))
+    ):
+        return
+    state = _load_state(repo_root)
+    if not isinstance(state, dict) or "implementer_mutation" not in state:
+        return
+    if state.get("completed_step") == "implementer_mutation":
+        raise ImplementerOwnershipError("ambiguous_outcome", "review cannot consume an unfinished mutator")
+    issue = _implementer_mutation_issue(state)
+    if issue:
+        raise ImplementerOwnershipError("invalid_checkpoint", issue)
+    if _is_go_bridge_decision(decision):
+        # Pager emission and convergence bookkeeping can still fail. The next
+        # durable checkpoint (or terminal handoff) consumes this success; merely
+        # returning GO must not let error cleanup erase the completed actor.
+        return
+    following = {key: value for key, value in state.items() if key not in IMPLEMENTER_MUTATION_CARRY_FIELDS}
+    # Prepared private review seals its own entire checkpoint. Its existing
+    # decision journal owns consumption; never rewrite that prepared surface.
+    if state.get("completed_step") in PRIVATE_ATTR_PREPARED_STEPS:
+        return
+    try:
+        _save_bridge_fix_transition(repo_root, state, following)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise ImplementerOwnershipError("continuation_save_failed", str(exc)) from exc
 
 
 def update_plan_packet_status(repo_root: Path, plan_path: str, new_status: str) -> None:
@@ -9273,6 +9506,17 @@ def _implementer_failure_result(
     return result
 
 
+def _preserve_implementer_ownership(run):
+    @wraps(run)
+    def guarded(*args, **kwargs):
+        try:
+            return run(*args, **kwargs)
+        except ImplementerOwnershipError as exc:
+            return exc.result
+    return guarded
+
+
+@_preserve_implementer_ownership
 def run_phase_b(
     repo_root: Path,
     plan_path: str | None = None,
@@ -9361,6 +9605,53 @@ def run_phase_b(
     if _is_state_load_error(saved_state):
         return _state_load_error_result(saved_state)
     saved_step = saved_state.get("completed_step") if saved_state else None
+    if saved_step == "implementer_mutation":
+        issue = _implementer_mutation_issue(saved_state)
+        if issue:
+            raise ImplementerOwnershipError("invalid_checkpoint", issue)
+        mutation = saved_state["implementer_mutation"]
+        if mutation["state"] == "IN_FLIGHT":
+            raise ImplementerOwnershipError("ambiguous_outcome", "IN_FLIGHT has no sealed outcome; actor replay is forbidden")
+        context = saved_state["implementer_mutation_context"]
+        try:
+            active_route = routing_record_override if routing_record_override is not None else load_routing_record(repo_root, bus_dir=_active_bus_dir())
+            if isinstance(active_route, dict) and "_merge_task_id" in active_route:
+                active_route = {
+                    **load_routing_record(repo_root, bus_dir=_active_bus_dir()),
+                    "task_id": active_route["_merge_task_id"],
+                }
+            if not isinstance(active_route, dict) or active_route.get("decision") != "ROUTE_PHASE_B":
+                raise PhaseBExecutorError("owned continuation requires ROUTE_PHASE_B")
+            invocation_issue = _bridge_fix_outcome_invocation_issue(
+                saved_state, active_route, plan_path,
+            )
+            if invocation_issue:
+                raise PhaseBExecutorError(invocation_issue[1])
+            identity, error = _bridge_fix_active_identity(
+                repo_root, routing_record=active_route, plan=context["plan"],
+                plan_path=saved_state["plan_path"], wave_id=saved_state["wave_id"], refresh_plan=False,
+            )
+            if error or identity != context["identity"]:
+                raise PhaseBExecutorError(error or "owned invocation identity changed")
+        except (ExecutorCommonError, PhaseBExecutorError, OSError, TypeError, ValueError) as exc:
+            raise ImplementerOwnershipError("invocation_mismatch", str(exc)) from exc
+        if mutation["state"] == "FAILED":
+            failure_step = {
+                "initial": "implementer", "reentry": "implementer_reentry",
+                "private": ("reentry_private_attr_gate" if context["checkpoint"]["completed_step"].startswith("reentry_") else "private_attr_gate"),
+            }[context["kind"]]
+            return _implementer_failure_result(
+                step=failure_step,
+                message="Retained explicit implementer failure", impl_result=mutation["result"],
+            )
+        finalized = _finalize_implementer_success(repo_root, saved_state, recovering=True)
+        checkpoint = finalized["checkpoint"]
+        return {
+            "status": "continue_phase_b", "step": "implementer_finalize", "resumed_from": "implementer_mutation",
+            "plan_path": checkpoint["plan_path"], "wave_id": checkpoint["wave_id"],
+            "completed_step": checkpoint["completed_step"], "bridge_rounds": checkpoint["bridge_rounds"],
+            "checkpoint_sha256": _sha256_bytes(_state_file_path(repo_root).read_bytes()),
+        }
     if isinstance(saved_step, str) and saved_step in PRIVATE_ATTR_UNPREPARED_STEPS:
         return {
             "status": "error", "step": "private_attr_prepared_resume",
@@ -9806,6 +10097,85 @@ def run_phase_b(
             state.update(bridge_fix_authority_fields)
         state.update(bridge_fix_outcome_fields)
         return state
+
+    @contextmanager
+    def _owned_implementer(
+        prompt: str, *, kind: str, pre_files: set[str], completed_step: str,
+        continuation: dict[str, Any] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Own the visible actor call, sealing its result before the caller continues."""
+        nonlocal implementer_changed, changed_files
+        previous = _load_state(repo_root)
+        if previous and previous.get("completed_step") == "implementer_mutation":
+            raise ImplementerOwnershipError("already_started", "a prior invocation still owns Phase B")
+        checkpoint = _carry_bridge_fix_authority({
+            "plan_path": plan_path, "wave_id": wave_id, "completed_step": completed_step,
+            "bridge_rounds": result["bridge_rounds"], "deferred_packet_path": deferred_packet_path,
+            "implementer_changed": sorted(implementer_changed), "executor_created": sorted(executor_created),
+            "baseline_wave_files": sorted(baseline_wave_files), "all_non_blocking": all_non_blocking,
+            "finding_history": finding_history,
+            **(continuation or {}),
+        })
+        if kind == "private":
+            checkpoint["private_attr_gate_test_files"] = sorted(set(result.get("private_attr_gate_test_files", [])))
+            for field in (
+                "reentry_findings", "last_reentry_bridge_decision", "last_bridge_decision",
+                "runtime_pre_push_failure_reentry", "agent_review_report_path", "agent_review_status_path",
+            ):
+                if field in (previous or {}):
+                    checkpoint[field] = previous[field]
+        try:
+            identity, error = _bridge_fix_active_identity(
+                repo_root, routing_record=routing_record, plan=plan, plan_path=plan_path,
+                wave_id=wave_id, refresh_plan=False,
+            )
+            if error or identity is None:
+                raise ImplementerOwnershipError("invalid_identity", error or "missing invocation identity")
+            context = {
+                "kind": kind, "identity": identity, "plan": plan, "routing_record": routing_record,
+                "checkpoint": checkpoint, "pre_files": sorted(pre_files), "prompt": prompt,
+                "plan_declared_files": plan_declared_files, "exact_stage_scope_files": sorted(exact_stage_scope_files),
+                "fenced_out_files": sorted(fenced_out_files), "pytest_gate_timeout": pytest_gate_timeout,
+                "wave_class": wave_class, "reader": backend,
+                "candidate_authority_kwargs": candidate_authority_package_kwargs,
+            }
+            in_flight = {
+                "plan_path": plan_path, "wave_id": wave_id, "completed_step": "implementer_mutation",
+                "bridge_rounds": result["bridge_rounds"],
+                **_implementer_mutation_fields(context, "IN_FLIGHT"),
+            }
+            _save_bridge_fix_transition(repo_root, previous, in_flight)
+        except ImplementerOwnershipError:
+            raise
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise ImplementerOwnershipError("save_failed", str(exc)) from exc
+        # No actor-owned references survive the durable pre-invocation seal.
+        context = in_flight["implementer_mutation_context"]
+        invocation = {"prompt": context["prompt"], "result": None}
+        try:
+            yield invocation
+        except Exception as exc:
+            raise ImplementerOwnershipError("ambiguous_outcome", str(exc)) from exc
+        actor_result = invocation["result"]
+        if isinstance(actor_result, dict) and actor_result.get("status") == "success":
+            issue = _bridge_fix_success_result_issue(actor_result)
+            if issue:
+                raise ImplementerOwnershipError("invalid_success", issue)
+            outcome = "SUCCESS_PENDING_FINALIZE"
+        elif _explicit_implementer_failure(actor_result):
+            outcome = "FAILED"
+        else:
+            raise ImplementerOwnershipError("invalid_result", "actor did not return an explicit outcome")
+        try:
+            sealed = {**in_flight, **_implementer_mutation_fields(context, outcome, actor_result)}
+            _save_bridge_fix_transition(repo_root, in_flight, sealed)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise ImplementerOwnershipError("outcome_save_failed", str(exc)) from exc
+        if outcome == "SUCCESS_PENDING_FINALIZE":
+            finalized = _finalize_implementer_success(repo_root, sealed)
+            implementer_changed = set(finalized["checkpoint"]["implementer_changed"])
+            changed_files = finalized["changed_files"]
+        invocation["result"] = sealed["implementer_mutation"]["result"]
     # Merge persisted dirty-wave scope with the current repo dirty baseline so
     # late follow-up fixes made after a saved checkpoint are not silently dropped
     # from supervisor packaging on resume.
@@ -10139,41 +10509,7 @@ def run_phase_b(
                 impl_result=impl_result,
             )
 
-        post_reentry_files = set(_collect_changed_files(repo_root))
-        implementer_changed |= (post_reentry_files - pre_reentry_files)
-        if exact_stage_scope_files:
-            implementer_changed &= exact_stage_scope_files
-        changed_files = _collect_wave_owned_files(
-            repo_root,
-            plan_path,
-            plan_declared_files,
-            implementer_changed or None,
-            executor_created or None,
-            baseline_wave_files or None,
-        )
-        changed_files = _bridge_review_scope_files(changed_files)
-        log(
-            f"Re-entry changed files: {len(changed_files)} "
-            f"(implementer touched {len(post_reentry_files - pre_reentry_files)})"
-        )
-        _save_state(repo_root, _carry_bridge_fix_authority({
-            "plan_path": plan_path,
-            "completed_step": "needs_phase_b_reentry",
-            "wave_id": wave_id,
-            "bridge_rounds": result["bridge_rounds"],
-            "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
-            "deferred_packet_path": deferred_packet_path,
-            "implementer_changed": sorted(implementer_changed),
-            "executor_created": sorted(executor_created),
-            "baseline_wave_files": sorted(baseline_wave_files),
-            "all_non_blocking": all_non_blocking,
-            "finding_history": finding_history,
-            "reentry_findings": reentry_findings,
-            "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
-            "skip_reentry_implementer_once": True,
-            "pending_reentry_bridge_round": pending_bridge_round,
-        }))
-        log("Re-entry: checkpointed implemented fixes before bridge review")
+        # The owned invocation already sealed and finalized this success.
         return None
 
     def _bridge_review_scope_files(candidate_files: list[str]) -> list[str]:
@@ -10222,6 +10558,9 @@ def run_phase_b(
             "private_attr_gate_test_files": sorted(set(result.get("private_attr_gate_test_files", []))),
         })
         prior_state = _load_state(repo_root) or {}
+        for field in IMPLEMENTER_MUTATION_CARRY_FIELDS:
+            if field in prior_state:
+                pending_state[field] = prior_state[field]
         for field in (
             "reentry_findings", "last_reentry_bridge_decision", "last_bridge_decision",
             "runtime_pre_push_failure_reentry", "agent_review_report_path", "agent_review_status_path",
@@ -10307,15 +10646,15 @@ def run_phase_b(
                 scope_hint="Fix private-attribute access in wave-owned Python tests",
                 learning_context=_learning_context_for_new_prompt(),
             )
-            fix_result = invoke_implementer(
-                repo_root,
-                fix_prompt,
-                backend=backend,
-                model_override=model,
-                timeout=timeout,
-                verbose=verbose,
-                bus_dir=_active_bus_dir(),
-            )
+            with _owned_implementer(
+                fix_prompt, kind="private", pre_files=pre_gate_fix_files,
+                completed_step=_private_attr_pending_review_step(reentry=reentry),
+            ) as invocation:
+                invocation["result"] = invoke_implementer(
+                    repo_root, invocation["prompt"], backend=backend, model_override=model,
+                    timeout=timeout, verbose=verbose, bus_dir=_active_bus_dir(),
+                )
+            fix_result = invocation["result"]
             if fix_result["status"] != "success":
                 return current_files, _implementer_failure_result(
                     step=step_name,
@@ -10326,23 +10665,7 @@ def run_phase_b(
                     impl_result=fix_result,
                 ), remediated
 
-            post_gate_fix_files = set(_collect_changed_files(repo_root))
-            implementer_changed |= (post_gate_fix_files - pre_gate_fix_files) - fenced_out_files
-            if exact_stage_scope_files:
-                implementer_changed &= exact_stage_scope_files
-            current_files = _collect_wave_owned_files(
-                repo_root,
-                plan_path,
-                plan_declared_files,
-                implementer_changed or None,
-                executor_created or None,
-                baseline_wave_files or None,
-            )
-            current_files = _save_private_attr_pending_review_state(
-                current_files,
-                reentry=reentry,
-            )
-            changed_files = current_files
+            current_files = changed_files
             remediated = True
 
         return current_files, {
@@ -10485,6 +10808,7 @@ def run_phase_b(
         result["bridge_stdout_path"] = bridge_result.get("stdout_path")
         result["bridge_stderr_path"] = bridge_result.get("stderr_path")
         bridge_decision = bridge_result.get("decision", "")
+        _consume_implementer_review_continuation(repo_root, bridge_result)
         log(
             ("Re-entry " if reentry else "")
             + f"private-attr remediation bridge decision: {bridge_decision!r} "
@@ -10890,14 +11214,14 @@ def run_phase_b(
             wave_id=wave_id,
             learning_context=_learning_context_for_new_prompt(),
         )
-        impl_result = invoke_implementer(
-            repo_root, impl_prompt,
-            backend=backend,
-            model_override=model,
-            timeout=timeout,
-            verbose=verbose,
-            bus_dir=_active_bus_dir(),
-        )
+        with _owned_implementer(
+            impl_prompt, kind="initial", pre_files=pre_impl_files, completed_step="implementer",
+        ) as invocation:
+            invocation["result"] = invoke_implementer(
+                repo_root, invocation["prompt"], backend=backend, model_override=model,
+                timeout=timeout, verbose=verbose, bus_dir=_active_bus_dir(),
+            )
+        impl_result = invocation["result"]
         result["implementer_invoked"] = True
         result["implementer_status"] = impl_result["status"]
         result["model_override_applied"] = impl_result.get("model_override_applied", False)
@@ -10971,33 +11295,6 @@ def run_phase_b(
                     result["errors"] = [f"Phase B pager emission failed after implementer: {exc}"]
             return result
 
-        # Collect changed files after implementer ran — track what implementer actually changed
-        post_impl_files = set(_collect_changed_files(repo_root))
-        implementer_changed = (post_impl_files - pre_impl_files) - fenced_out_files
-        if exact_stage_scope_files:
-            implementer_changed &= exact_stage_scope_files
-        changed_files = _collect_wave_owned_files(
-            repo_root,
-            plan_path,
-            plan_declared_files,
-            implementer_changed or None,
-            executor_created or None,
-            baseline_wave_files or None,
-        )
-        log(f"Changed files after implementer: {len(changed_files)} (implementer touched {len(implementer_changed)})")
-
-        # Persist state after implementer
-        _save_state(repo_root, {
-            "plan_path": plan_path,
-            "completed_step": "implementer",
-            "wave_id": wave_id,
-            "bridge_rounds": 0,
-            "implementer_changed": sorted(implementer_changed),
-            "executor_created": sorted(executor_created),
-            "baseline_wave_files": sorted(baseline_wave_files),
-            "all_non_blocking": all_non_blocking,
-            "finding_history": finding_history,
-        })
 
     if launch_tracker_restore_session is not None:
         try:
@@ -11127,6 +11424,7 @@ def run_phase_b(
                         "errors": [authority_error],
                     }
                 agent_timeout = config.get("timeouts", {}).get("agent_review", 1500)
+                pre_agent_state = _load_state(repo_root)
                 agent_result = run_sdk_agents(
                     repo_root,
                     agent_files,
@@ -11167,7 +11465,7 @@ def run_phase_b(
                         "treating as warning (findings forwarded to bridge review)"
                     )
 
-                _save_state(repo_root, _carry_bridge_fix_authority({
+                agent_checkpoint = _carry_bridge_fix_authority({
                     "plan_path": plan_path,
                     "completed_step": "agent_review",
                     "wave_id": wave_id,
@@ -11184,7 +11482,20 @@ def run_phase_b(
                     "agent_review_status_path": agent_result.get("status_path"),
                     "agent_review_stdout_path": agent_result.get("stdout_path"),
                     "agent_review_stderr_path": agent_result.get("stderr_path"),
-                }))
+                })
+                if pre_agent_state and any(field in pre_agent_state for field in IMPLEMENTER_MUTATION_CARRY_FIELDS):
+                    # SDK completion transfers the owed review; it does not consume
+                    # implementer success. A bridge failure must retain that owner.
+                    agent_checkpoint.update({
+                        field: pre_agent_state[field] for field in IMPLEMENTER_MUTATION_CARRY_FIELDS
+                        if field in pre_agent_state
+                    })
+                    try:
+                        _save_bridge_fix_transition(repo_root, pre_agent_state, agent_checkpoint)
+                    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                        raise ImplementerOwnershipError("continuation_save_failed", str(exc)) from exc
+                else:
+                    _save_state(repo_root, agent_checkpoint)
 
             if result["agent_exit_code"] != 0:
                 if result["agent_exit_code"] == 1:
@@ -11336,6 +11647,7 @@ def run_phase_b(
         result["bridge_stdout_path"] = bridge_result.get("stdout_path")
         result["bridge_stderr_path"] = bridge_result.get("stderr_path")
         bridge_decision = bridge_result.get("decision", "")
+        _consume_implementer_review_continuation(repo_root, bridge_result)
         log(f"Bridge decision: {bridge_decision!r} (exit={bridge_result['exit_code']})")
 
         # Bridge supervision failures are hard errors — do not silently retry
@@ -12283,12 +12595,22 @@ def run_phase_b(
                         "step": "phase_b_pager",
                         "errors": [f"Phase B pager emission failed before re-entry implementer: {exc}"],
                     }
-                impl_result = invoke_implementer(
-                    repo_root, reentry_prompt,
-                    backend=backend, model_override=model,
-                    timeout=timeout, verbose=verbose,
-                    bus_dir=_active_bus_dir(),
-                )
+                with _owned_implementer(
+                    reentry_prompt, kind="reentry", pre_files=pre_reentry_files,
+                    completed_step="needs_phase_b_reentry",
+                    continuation={
+                        "reentry_findings": findings_for_impl,
+                        "last_reentry_bridge_decision": bridge_decision,
+                        "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
+                        "skip_reentry_implementer_once": True,
+                        "pending_reentry_bridge_round": reentry_round,
+                    },
+                ) as invocation:
+                    invocation["result"] = invoke_implementer(
+                        repo_root, invocation["prompt"], backend=backend, model_override=model,
+                        timeout=timeout, verbose=verbose, bus_dir=_active_bus_dir(),
+                    )
+                impl_result = invocation["result"]
                 try:
                     _emit_phase_b_event(
                         repo_root,
@@ -12380,6 +12702,7 @@ def run_phase_b(
                     "errors": [f"Phase B pager emission failed after re-entry reviewer launch: {exc}"],
                 }
             bridge_decision = bridge_result.get("decision", "")
+            _consume_implementer_review_continuation(repo_root, bridge_result)
             log(f"Reentry bridge decision: {bridge_decision!r}")
 
             # Bridge supervision failures are hard errors in re-entry too
@@ -12618,12 +12941,22 @@ def run_phase_b(
                         "step": "phase_b_pager",
                         "errors": [f"Phase B pager emission failed before re-entry implementer: {exc}"],
                     }
-                impl_result = invoke_implementer(
-                    repo_root, reentry_prompt,
-                    backend=backend, model_override=model,
-                    timeout=timeout, verbose=verbose,
-                    bus_dir=_active_bus_dir(),
-                )
+                with _owned_implementer(
+                    reentry_prompt, kind="reentry", pre_files=pre_reentry_files,
+                    completed_step="needs_phase_b_reentry",
+                    continuation={
+                        "reentry_findings": findings_for_impl,
+                        "last_reentry_bridge_decision": bridge_decision,
+                        "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
+                        "skip_reentry_implementer_once": True,
+                        "pending_reentry_bridge_round": reentry_round + 1,
+                    },
+                ) as invocation:
+                    invocation["result"] = invoke_implementer(
+                        repo_root, invocation["prompt"], backend=backend, model_override=model,
+                        timeout=timeout, verbose=verbose, bus_dir=_active_bus_dir(),
+                    )
+                impl_result = invocation["result"]
                 try:
                     _emit_phase_b_event(
                         repo_root,
@@ -13684,10 +14017,42 @@ def run_phase_b(
         result["errors"] = [f"Phase B pager emission failed at commit_ready: {exc}"]
         _clear_state(repo_root)
         return result
-    # Clear state file on successful completion
-    _clear_state(repo_root)
+    # The terminal handoff consumes finalized ownership, never an in-flight actor.
+    _clear_state(repo_root, terminal_success=True)
     log(f"Handoff written: {handoff_path}")
     return result
+
+
+def implementer_failure_blocks_recovery(
+    repo_root: Path, result: dict[str, Any], *, bus_dir: str | Path | None = None,
+) -> bool:
+    """Read selected-bus ownership for refusal only, including non-JSON exits."""
+    if result.get("status") in ("success", "ready", "commit_ready", "continue_phase_b"):
+        return False
+    if result.get("step") in ("implementer_mutation", "implementer_finalize"):
+        return True
+    if result.get("step") == "load_state" and result.get("state_error") == "implementer_mutation":
+        return True
+    try:
+        path = agent_bus_path(repo_root, bus_dir, "executors", STATE_FILE_NAME)
+    except ExecutorCommonError:
+        return False
+    try:
+        state = json.loads(path.read_bytes())
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError, UnicodeError):
+        # A torn/unreadable ownership container is never permission to retry.
+        return True
+    if not isinstance(state, dict):
+        return True
+    mutation = state.get("implementer_mutation")
+    if state.get("completed_step") == "implementer_mutation" or any(key in state for key in IMPLEMENTER_MUTATION_CARRY_FIELDS):
+        return not (
+            isinstance(mutation, dict) and mutation.get("state") == "FAILED"
+            and _implementer_mutation_issue(state) is None
+        )
+    return False
 
 
 def ordinary_bridge_fix_failure_blocks_recovery(
@@ -13697,6 +14062,8 @@ def ordinary_bridge_fix_failure_blocks_recovery(
     bus_dir: str | Path | None = None,
 ) -> bool:
     """Shared native CLI/dispatcher refusal contract for ordinary outcomes."""
+    if implementer_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir):
+        return True
     if result.get("status") != "error":
         return False
     step = result.get("step")

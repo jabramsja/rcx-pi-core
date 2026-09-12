@@ -55,6 +55,67 @@ recovery_mod = load_module(
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
 
 
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("failure", ["native", "empty", "timeout", "embedded_recovery"])
+@pytest.mark.parametrize("completed_step", ["implementer_mutation", "implementer", "agent_review", "needs_phase_b_reentry"])
+def test_owned_implementer_failure_never_reaches_dispatcher_recovery(tmp_path, capsys, entry, failure, completed_step):
+    """Incomplete or completed ownership still fences recovery, even without child JSON."""
+    plan = "reports/control_plane/owned.md"
+    (tmp_path / plan).parent.mkdir(parents=True)
+    (tmp_path / plan).write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+    route = {**_VALID_ROUTING_RECORD, "wave_name": "owned", "tracked_packet": plan}
+    route_path = tmp_path / "routing.json"
+    route_path.write_text(json.dumps(route))
+    state_path = tmp_path / ".agent_bus-selected/executors/phase_b_state.json"
+    state_path.parent.mkdir(parents=True)
+    before = json.dumps({
+        "completed_step": completed_step, "plan_path": plan, "wave_id": "owned",
+        "implementer_mutation": {
+            "state": "IN_FLIGHT" if completed_step == "implementer_mutation" else "SUCCESS_PENDING_FINALIZE",
+        },
+    }).encode()
+    payload = {"status": "error", "step": "implementer_mutation", "authority_error": "ambiguous_outcome",
+               "errors": ["Interrupted implementer; checkpoint preserved"]}
+    if completed_step != "implementer_mutation":
+        payload = {"status": "error", "step": "phase_b_pager", "errors": ["Post-GO pager unavailable"]}
+    if failure == "embedded_recovery":
+        payload = {"status": "failed", "recovery": {"recovered": True, "tier": 2}}
+    calls = []
+
+    def child(command, *, cwd, timeout):
+        calls.append(command)
+        assert len(calls) == 1, "Dispatcher replayed an owned mutator"
+        state_path.write_bytes(before)
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, timeout)
+        return subprocess.CompletedProcess(command, 1, "" if failure == "empty" else json.dumps(payload), "")
+
+    argv = (["phase-b", "--plan", plan, "--routing-record-json", json.dumps(route)] if entry == "surface" else
+            ["--routing-record", str(route_path), "--skip-freshness", "--retries", "2"])
+    argv.extend(["--json", "--bus-dir", ".agent_bus-selected"])
+    real_run = subprocess.run
+
+    def isolated_git(command, *args, **kwargs):
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(tmp_path), "")
+        return real_run(command, *args, **kwargs)
+
+    with patch.dict(os.environ), \
+         patch.object(dispatch_mod, "_run_executor_in_group", side_effect=child), \
+         patch.object(dispatch_mod, "attempt_recovery", return_value={"recovered": False, "tier": 4}) as recovery, \
+         patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=tmp_path), \
+         patch.object(dispatch_mod, "load_config", return_value={}), \
+         patch.object(subprocess, "run", side_effect=isolated_git), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_emit_executor_hard_fail_event"):
+        assert dispatch_mod.main(argv) == 1
+    recovery.assert_not_called()
+    assert len(calls) == 1
+    assert state_path.read_bytes() == before
+
+
 def test_local_validation_scripts_default_bounded_xdist_workers_with_env_override():
     audit_fast = (REPO_ROOT / "mu" / "tools" / "audits" / "audit_fast.sh").read_text(
         encoding="utf-8"
