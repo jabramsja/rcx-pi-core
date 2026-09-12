@@ -81,14 +81,26 @@ execution authority; no exit 0, restoration or replay is claimed.
 
 The existing closure baton is rich numbered entry 28, with inline
 `Task: [NEXT-CODEX-POST-REDTEAM]`, exact Wave ID, class `MAINTENANCE`, category
-`PROGRAM QUEUE` and canonical packet. Read-only invocation of the actual native
-`commit_executor._next_open_founder_ordered_queue_entry(Path.cwd())` returned:
+`PROGRAM QUEUE` and canonical packet. Queue selection also depends on the
+packet's authoritative `Status` header. Review of the prior final candidate
+found that `Status: IMPLEMENTED / LOCAL EVIDENCE` caused
+`packet_status_is_completed()` to classify the packet as complete, so the
+selector skipped this CURRENT row and returned `PR1219-P0IBRRCO`. That
+invalidates the earlier selector observation as evidence for the final candidate.
+
+The packet now retains `Status: CURRENT / LOCAL EVIDENCE` until native landing,
+preserving local functional evidence while keeping this obligation open.
+Final-candidate execution of
+`commit_executor._next_open_founder_ordered_queue_entry(Path.cwd())` remains
+pending with native owners; no selector execution was performed during this
+edit-only remediation. It must return these fields:
 
 ```json
 {
   "wave_id": "pr1219-p0ibrrcp-exact-closure-r1-2026-09-12",
   "packet": "reports/control_plane/pr1219-p0ibrrcp-exact-closure-r1-2026-09-12_2026-09-12.md",
   "state": "CURRENT",
+  "status": "CURRENT / LOCAL EVIDENCE",
   "category": "PROGRAM QUEUE"
 }
 ```
