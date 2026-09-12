@@ -11336,8 +11336,8 @@ class TestValidationRunsMechanically:
             timeout=300,
         )
 
-    def test_pytest_failure_fed_back_as_blocking(self, tmp_path):
-        """pytest failure after implementer fix becomes a blocking finding."""
+    def test_pytest_failure_preserves_success_without_remediation(self, tmp_path):
+        """Post-success pytest stops with the exact actor outcome still sealed."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -11400,10 +11400,14 @@ class TestValidationRunsMechanically:
             }):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        # pytest was called (at least once)
-        assert pytest_calls[0] >= 1
-        # Implementer re-invoked to fix pytest failure
-        assert mock_impl.invoke_implementer.call_count >= 3
+        assert pytest_calls[0] == 1
+        assert mock_impl.invoke_implementer.call_count == 2  # Initial + ordinary fix.
+        assert bridge_calls[0] == 1
+        assert result["step"] == "bridge_fix_finalize_pytest"
+        state = json.loads((repo / ".agent_bus/executors/phase_b_state.json").read_text())
+        assert state["completed_step"] == "bridge_fix_pending"
+        assert state["bridge_fix_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+        assert state["bridge_fix_mutation"]["result"] == mock_impl.invoke_implementer.return_value
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -11665,7 +11669,7 @@ class TestBridgeFixPendingResume:
     """Initial bridge-fix checkpoints must survive crashes between review and fix."""
 
     @staticmethod
-    def _write_repo(tmp_path: Path) -> tuple[Path, str]:
+    def write_repo(tmp_path: Path) -> tuple[Path, str]:
         repo = tmp_path / "repo"
         repo.mkdir()
         plan_path = "reports/control_plane/plan.md"
@@ -11678,10 +11682,10 @@ class TestBridgeFixPendingResume:
         return repo, plan_path
 
     @staticmethod
-    def _state_path(repo: Path) -> Path:
+    def state_path(repo: Path) -> Path:
         return repo / ".agent_bus" / "executors" / "phase_b_state.json"
 
-    def _produce_pending(
+    def produce_pending(
         self,
         repo: Path,
         plan_path: str,
@@ -11689,11 +11693,9 @@ class TestBridgeFixPendingResume:
         learning_context: str = "ORIGINAL LEARNING",
     ) -> tuple[dict[str, Any], MagicMock]:
         mock_impl = _make_mock_impl()
-        impl_success = dict(mock_impl.invoke_implementer.return_value)
-        mock_impl.invoke_implementer.side_effect = [
-            impl_success,
-            RuntimeError("Simulated crash before bridge fix implementer completes"),
-        ]
+        def stop_before_actor(_repo, **event):
+            if event.get("state") == "bridge_fix_started":
+                raise KeyboardInterrupt("PENDING before bridge fix invocation")
         mock_impl.build_implementation_prompt.side_effect = (
             lambda source, **kwargs: (
                 f"PROMPT\nLEARNING={kwargs['learning_context']}\nSOURCE={source}"
@@ -11720,15 +11722,16 @@ class TestBridgeFixPendingResume:
                  "job_id": "phase-b-r1-test",
              }), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
-             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
-            with pytest.raises(RuntimeError, match="Simulated crash"):
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()), \
+             patch.object(pb_mod, "_emit_phase_b_event", side_effect=stop_before_actor):
+            with pytest.raises(KeyboardInterrupt, match="PENDING"):
                 pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
 
-        state = json.loads(self._state_path(repo).read_text(encoding="utf-8"))
+        state = json.loads(self.state_path(repo).read_text(encoding="utf-8"))
         return state, mock_impl
 
     @staticmethod
-    def _rehash_authority(state: dict[str, Any]) -> None:
+    def rehash_authority(state: dict[str, Any]) -> None:
         authority = state["bridge_fix_plan_authority"]
         authority_without_digest = {
             key: value
@@ -11747,8 +11750,8 @@ class TestBridgeFixPendingResume:
         state["bridge_fix_expected_authority_sha256"] = authority["authority_sha256"]
 
     def test_request_changes_checkpoints_before_fix_implementer(self, tmp_path):
-        repo, plan_path = self._write_repo(tmp_path)
-        state, mock_impl = self._produce_pending(repo, plan_path)
+        repo, plan_path = self.write_repo(tmp_path)
+        state, mock_impl = self.produce_pending(repo, plan_path)
 
         assert state["completed_step"] == "bridge_fix_pending"
         assert state["current_bridge_round"] == 1
@@ -11756,7 +11759,9 @@ class TestBridgeFixPendingResume:
         assert state["bridge_fix_findings"]
         authority = state["bridge_fix_plan_authority"]
         assert authority["version"] == 1
-        assert authority["prompt"] == mock_impl.invoke_implementer.call_args_list[1].args[1]
+        mock_impl.invoke_implementer.assert_called_once()  # Initial implementation only.
+        assert state["bridge_fix_mutation"]["state"] == "PENDING"
+        assert authority["prompt"].endswith(mock_impl.build_implementation_prompt.call_args.args[0])
         assert authority["prompt_sha256"] == hashlib.sha256(
             authority["prompt"].encode("utf-8")
         ).hexdigest()
@@ -11797,11 +11802,9 @@ class TestBridgeFixPendingResume:
 
         scope_files = ["TASKS.md", "f.py", plan_path, indicator_path]
         first_impl = _make_mock_impl()
-        impl_success = dict(first_impl.invoke_implementer.return_value)
-        first_impl.invoke_implementer.side_effect = [
-            impl_success,
-            RuntimeError("Simulated crash after live packet refresh"),
-        ]
+        def stop_after_refresh(_repo, **event):
+            if event.get("state") == "bridge_fix_started":
+                raise KeyboardInterrupt("after live packet refresh")
         first_impl.build_implementation_prompt.side_effect = (
             lambda source, **_kwargs: source
         )
@@ -11833,11 +11836,12 @@ class TestBridgeFixPendingResume:
              patch.object(pb_mod, "load_routing_record", return_value={
                  **_VALID_ROUTING_RECORD,
                  "task_id": "[PIPELINE-RECOVERY]",
-             }):
-            with pytest.raises(RuntimeError, match="after live packet refresh"):
+             }), \
+             patch.object(pb_mod, "_emit_phase_b_event", side_effect=stop_after_refresh):
+            with pytest.raises(KeyboardInterrupt, match="after live packet refresh"):
                 pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
 
-        state_path = self._state_path(repo)
+        state_path = self.state_path(repo)
         pending_state = json.loads(state_path.read_text(encoding="utf-8"))
         authority = pending_state["bridge_fix_plan_authority"]
         live_plan = (repo / plan_path).read_text(encoding="utf-8")
@@ -11847,7 +11851,8 @@ class TestBridgeFixPendingResume:
             live_plan.encode("utf-8")
         ).hexdigest()
         assert live_plan in authority["prompt"]
-        assert first_impl.invoke_implementer.call_args_list[1].args[1] == authority["prompt"]
+        first_impl.invoke_implementer.assert_called_once()
+        assert first_impl.build_implementation_prompt.call_args.args[0] == authority["prompt"]
 
         resumed_impl = _make_mock_impl()
         resumed_learning = MagicMock(return_value="DRIFTED LEARNING")
@@ -11879,8 +11884,8 @@ class TestBridgeFixPendingResume:
         assert resumed_state["completed_step"] == "bridge_round_1"
 
     def test_resume_from_bridge_fix_pending_invokes_fix_then_resumes_next_round(self, tmp_path):
-        repo, plan_path = self._write_repo(tmp_path)
-        pending_state, _ = self._produce_pending(repo, plan_path)
+        repo, plan_path = self.write_repo(tmp_path)
+        pending_state, _ = self.produce_pending(repo, plan_path)
         sealed_prompt = pending_state["bridge_fix_plan_authority"]["prompt"]
 
         mock_impl = _make_mock_impl()
@@ -11923,9 +11928,9 @@ class TestBridgeFixPendingResume:
         assert bridge_calls and any("phase-b-r2-" in job_id for job_id in bridge_calls)
 
     def test_pending_scope_drift_is_actor_free_and_preserves_checkpoint(self, tmp_path):
-        repo, plan_path = self._write_repo(tmp_path)
-        self._produce_pending(repo, plan_path)
-        state_path = self._state_path(repo)
+        repo, plan_path = self.write_repo(tmp_path)
+        self.produce_pending(repo, plan_path)
+        state_path = self.state_path(repo)
         pending_bytes = state_path.read_bytes()
         (repo / "f.py").write_text("VALUE = 2\n", encoding="utf-8")
 
@@ -11965,10 +11970,10 @@ class TestBridgeFixPendingResume:
         field,
         malformed_value,
     ):
-        repo, plan_path = self._write_repo(tmp_path)
-        state, _ = self._produce_pending(repo, plan_path)
+        repo, plan_path = self.write_repo(tmp_path)
+        state, _ = self.produce_pending(repo, plan_path)
         state["bridge_fix_plan_authority"][field] = malformed_value
-        state_path = self._state_path(repo)
+        state_path = self.state_path(repo)
         state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
         malformed_bytes = state_path.read_bytes()
 
@@ -11994,8 +11999,8 @@ class TestBridgeFixPendingResume:
         tmp_path,
         substitution,
     ):
-        repo, plan_path = self._write_repo(tmp_path)
-        state, _ = self._produce_pending(repo, plan_path)
+        repo, plan_path = self.write_repo(tmp_path)
+        state, _ = self.produce_pending(repo, plan_path)
         authority = state["bridge_fix_plan_authority"]
         if substitution == "foreign_wave":
             authority["identity"]["wave_id"] = "foreign-wave"
@@ -12006,8 +12011,8 @@ class TestBridgeFixPendingResume:
             authority["checkpoint_transition_identity"] = (
                 "bridge_fix_pending:" + authority["checkpoint_id"]
             )
-        self._rehash_authority(state)
-        state_path = self._state_path(repo)
+        self.rehash_authority(state)
+        state_path = self.state_path(repo)
         state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
         substituted_bytes = state_path.read_bytes()
 
@@ -12020,14 +12025,16 @@ class TestBridgeFixPendingResume:
 
         assert result["status"] == "error"
         assert result["step"] == "load_state"
-        assert result["state_error"] == "bridge_fix_authority"
+        assert result["state_error"] == (
+            "bridge_fix_mutation" if substitution == "foreign_wave" else "bridge_fix_authority"
+        )
         mock_impl.invoke_implementer.assert_not_called()
         bridge_mock.assert_not_called()
         assert state_path.read_bytes() == substituted_bytes
 
     def test_new_round_after_pending_recovery_loads_current_learning(self, tmp_path):
-        repo, plan_path = self._write_repo(tmp_path)
-        pending_state, _ = self._produce_pending(
+        repo, plan_path = self.write_repo(tmp_path)
+        pending_state, _ = self.produce_pending(
             repo,
             plan_path,
             learning_context="ORIGINAL LEARNING",
@@ -12084,10 +12091,10 @@ class TestBridgeFixPendingResume:
         assert mock_impl.build_implementation_prompt.call_count == 1
 
     def test_sealed_authority_is_identical_in_downstream_resumable_checkpoints(self, tmp_path):
-        repo, plan_path = self._write_repo(tmp_path)
-        pending_state, _ = self._produce_pending(repo, plan_path)
+        repo, plan_path = self.write_repo(tmp_path)
+        pending_state, _ = self.produce_pending(repo, plan_path)
         sealed_authority = pending_state["bridge_fix_plan_authority"]
-        state_path = self._state_path(repo)
+        state_path = self.state_path(repo)
 
         bridge_round_impl = _make_mock_impl()
         with patch.dict(sys.modules, {
@@ -12168,13 +12175,13 @@ class TestBridgeFixPendingResume:
         self,
         tmp_path,
     ):
-        repo, plan_path = self._write_repo(tmp_path)
-        pending_state, _ = self._produce_pending(repo, plan_path)
+        repo, plan_path = self.write_repo(tmp_path)
+        pending_state, _ = self.produce_pending(repo, plan_path)
         sealed_authority_fields = {
             field: pending_state[field]
             for field in pb_mod.BRIDGE_FIX_AUTHORITY_CARRY_FIELDS
         }
-        state_path = self._state_path(repo)
+        state_path = self.state_path(repo)
 
         bridge_round_impl = _make_mock_impl()
         with patch.dict(sys.modules, {
@@ -13611,106 +13618,30 @@ class TestEmptyFilesToStageBlocksCommitReady:
 
 @pytest.mark.usefixtures("mock_routing_record")
 class TestPytestFixTracksChangedFiles:
-    """After pytest-fix implementer pass, newly changed files must be tracked."""
+    """Saved ordinary success must survive pytest failure without remediation."""
 
-    def test_pytest_fix_files_included_in_wave_owned(self, tmp_path):
-        """Files created by pytest-fix implementer pass are captured via implementer_changed."""
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        (repo / "reports" / "control_plane").mkdir(parents=True)
-        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+    def test_post_success_pytest_failure_retains_outcome(self, ordinary_mutation_lane):
+        lane = ordinary_mutation_lane
 
-        mock_impl = _make_mock_impl()
+        def actor(*_args, **_kwargs):
+            lane.mocks["_collect_changed_files"].return_value = ["f.py", "mu/tests/tools/test_added.py"]
+            return dict(lane.impl.invoke_implementer.return_value)
 
-        bridge_calls = [0]
-        def bridge_side(*a, **kw):
-            bridge_calls[0] += 1
-            if bridge_calls[0] == 1:
-                return {"exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
-                        "decision": "REQUEST_CHANGES", "job_id": "j1"}
-            return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
-                    "decision": "GO", "job_id": "j2"}
-
-        # Simulate: _collect_changed_files returns progressively more files
-        # to create diffs that populate implementer_changed.
-        # Calls: 1=pre-impl, 2=post-impl, 3=pre-bridge-fix, 4=post-bridge-fix,
-        # 5=pre-pytest-fix, 6=post-pytest-fix (new helper appears here), 7+=stable
-        changed_files_calls = [0]
-        def changed_files_side(root):
-            changed_files_calls[0] += 1
-            if changed_files_calls[0] == 1:
-                return []  # pre-implementer
-            if changed_files_calls[0] <= 4:
-                return ["mu/tests/tools/test_existing.py"]
-            if changed_files_calls[0] == 5:
-                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
-            if changed_files_calls[0] == 6:
-                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
-            # Call 7+: post-pytest-fix — new helper file appears
-            return ["mu/tests/tools/test_foo.py", "mu/tools/executors/new_helper.py"]
-
-        pytest_calls = [0]
-        def pytest_side(repo_root, test_files, **kw):
-            pytest_calls[0] += 1
-            if pytest_calls[0] == 1:
-                return {"exit_code": 1, "stdout": "FAILED", "stderr": "", "passed": False}
-            return {"exit_code": 0, "stdout": "passed", "stderr": "", "passed": True}
-
-        # Track what _collect_wave_owned_files returns across the bridge/pytest-fix path.
-        wave_owned_results = []
-        wave_owned_calls = [0]
-
-        def tracking_collect(*a, **kw):
-            wave_owned_calls[0] += 1
-            # Calls 3-4 are the two mandatory pre-actor authority checks.
-            if wave_owned_calls[0] <= 4:
-                result = ["mu/tests/tools/test_existing.py"]
-            elif wave_owned_calls[0] == 5:
-                result = ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
-            else:
-                result = ["mu/tools/executors/new_helper.py"]
-            wave_owned_results.append(result)
-            return result
-
-        pager_calls = []
-
-        def fake_emit(repo_root, **kwargs):
-            pager_calls.append(kwargs)
-            return {"enabled": True, "event_id": f"evt-{len(pager_calls)}", "attempted": []}
-
-        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
-             patch.object(pb_mod, "_collect_changed_files", side_effect=changed_files_side), \
-             patch.object(pb_mod, "_collect_wave_owned_files", side_effect=tracking_collect), \
-             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
-             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
-             patch.object(pb_mod, "_read_bridge_render", return_value="findings"), \
-             patch.object(pb_mod, "_run_pytest_on_files", side_effect=pytest_side), \
-             patch.object(pb_mod, "_stage_files", return_value=True), \
-             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
-             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
-                 "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
-                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
-             }):
-            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
-
-        # The pytest-fix implementer was invoked (3 calls: initial + bridge fix + pytest fix)
-        assert mock_impl.invoke_implementer.call_count >= 3
-        # The new file should appear in the final wave-owned collection
-        # (via implementer_changed tracking from the pytest-fix pass)
-        last_wave_owned = wave_owned_results[-1] if wave_owned_results else []
-        assert "mu/tools/executors/new_helper.py" in last_wave_owned
-        pytest_fix_events = [
-            call for call in pager_calls
-            if str(call.get("transition_key", "")).startswith("round-1:pytest_fix:")
-        ]
-        assert [call["event_type"] for call in pytest_fix_events] == [
-            "phase_b_implementer_started",
-            "phase_b_implementer_completed",
-        ]
-        assert [call["state"] for call in pytest_fix_events] == [
-            "pytest_fix_started",
-            "pytest_fix_success",
-        ]
+        lane.impl.invoke_implementer.side_effect = actor
+        with patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": False, "exit_code": 1}):
+            result = pb_mod.run_phase_b(lane.repo, lane.plan_path)
+            sealed = lane.state_path.read_bytes()
+            assert result["step"] == "bridge_fix_finalize_pytest"
+            assert json.loads(sealed)["bridge_fix_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+            lane.impl.invoke_implementer.assert_called_once()
+            lane.impl.invoke_implementer.reset_mock()
+            for _ in range(2):
+                result = pb_mod.run_phase_b(lane.repo, lane.plan_path)
+                assert result["step"] == "bridge_fix_finalize_pytest"
+                assert lane.state_path.read_bytes() == sealed
+        lane.impl.invoke_implementer.assert_not_called()
+        lane.impl.build_implementation_prompt.assert_not_called()
+        lane.mocks["run_bridge_review"].assert_not_called()
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -16549,16 +16480,32 @@ class TestPlanlessPhaseB:
         assert captured["plan_path"] is None
         assert captured["routing_record_override"] == routing_record
 
-    def test_main_attempts_standalone_recovery_on_failure(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("step,checkpoint_step", [
+        ("implementer_bridge_fix", None),
+        ("implementer", None),
+        ("implementer_reentry_fix", "needs_phase_b_reentry"),
+        ("phase_b_pager", "needs_phase_b_reentry"),
+        ("load_state", "private_attr_remediation_prepared_pending_review"),
+    ])
+    def test_main_attempts_standalone_recovery_on_failure(self, tmp_path, monkeypatch, step, checkpoint_step):
         repo = tmp_path / "repo"
         repo.mkdir()
         recovery_calls: dict[str, object] = {}
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_state.json"
+        if checkpoint_step:
+            state_path.parent.mkdir(parents=True)
+            # A later lifecycle can retain an older ordinary success outcome.
+            state_path.write_text(json.dumps({
+                "completed_step": checkpoint_step,
+                "bridge_fix_mutation": {"state": "SUCCESS_PENDING_FINALIZE"},
+            }))
+        before = state_path.read_bytes() if checkpoint_step else None
 
         def fake_git_rev_parse(args, capture_output, text, check):
             return SimpleNamespace(stdout=str(repo))
 
         def fake_run_phase_b(repo_root, plan_path, **kwargs):
-            return {"status": "error", "step": "implementer_bridge_fix", "wave_id": "standalone-wave"}
+            return {"status": "error", "step": step, "wave_id": "standalone-wave"}
 
         def fake_attempt_recovery(repo_root, result, wave_id, bus_dir=None):
             recovery_calls["repo_root"] = repo_root
@@ -16578,6 +16525,8 @@ class TestPlanlessPhaseB:
         assert recovery_calls["repo_root"] == repo
         assert recovery_calls["status"] == "error"
         assert recovery_calls["wave_id"] == "standalone-wave"
+        if checkpoint_step:
+            assert state_path.read_bytes() == before
 
     def test_main_skips_internal_recovery_when_dispatcher_owns_it(self, tmp_path, monkeypatch):
         repo = tmp_path / "repo"
@@ -17972,3 +17921,943 @@ class TestLaunchTrackerRestoreCapability:
             / "executors"
             / pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME
         ).exists()
+
+
+@pytest.fixture
+def ordinary_mutation_lane(tmp_path):
+    """Obtain a real PENDING checkpoint from the public orchestration path."""
+    support = TestBridgeFixPendingResume()
+    repo, plan_path = support.write_repo(tmp_path)
+    pending, _ = support.produce_pending(repo, plan_path)
+    impl = _make_mock_impl()
+    with ExitStack() as stack:
+        stack.enter_context(patch.dict(sys.modules, {
+            "phase_b_implementer": impl,
+            "recovery_gate": SimpleNamespace(load_relevant_learnings=MagicMock()),
+        }))
+        mocks = {}
+        for name, kwargs in {
+            "_collect_changed_files": {"return_value": ["f.py"]},
+            "_collect_wave_owned_files": {"return_value": ["f.py"]},
+            "load_routing_record": {"return_value": _VALID_ROUTING_RECORD.copy()},
+            "run_bridge_review": {"side_effect": KeyboardInterrupt("next review boundary")},
+            "run_sdk_agents": {},
+            "_stage_files": {"return_value": True},
+            "_emit_phase_b_event": {},
+        }.items():
+            mocks[name] = stack.enter_context(patch.object(pb_mod, name, **kwargs))
+        yield SimpleNamespace(
+            repo=repo, plan_path=plan_path, pending=pending, impl=impl,
+            state_path=support.state_path(repo), mocks=mocks,
+        )
+
+
+class TestOrdinaryBridgeFixMutationOutcome:
+    @staticmethod
+    def run(lane, **kwargs):
+        return pb_mod.run_phase_b(lane.repo, lane.plan_path, max_bridge_rounds=5, **kwargs)
+
+    @staticmethod
+    def read(lane):
+        return json.loads(lane.state_path.read_text())
+
+    @staticmethod
+    def digest(value):
+        return hashlib.sha256(json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+        ).encode()).hexdigest()
+
+    @staticmethod
+    def assert_actor_free(lane):
+        lane.impl.invoke_implementer.assert_not_called()
+        lane.mocks["run_bridge_review"].assert_not_called()
+        lane.mocks["run_sdk_agents"].assert_not_called()
+
+    def seal_success(self, lane):
+        def stop_at_pager(_repo, **event):
+            if event.get("state") == "bridge_fix_success":
+                assert self.read(lane)["bridge_fix_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+                raise OSError("post-success pager interruption")
+        lane.mocks["_emit_phase_b_event"].side_effect = stop_at_pager
+        result = self.run(lane)
+        assert result["step"] == "phase_b_pager", result
+        lane.mocks["_emit_phase_b_event"].side_effect = None
+        lane.impl.invoke_implementer.assert_called_once()
+        lane.impl.invoke_implementer.reset_mock()
+        return self.read(lane)
+
+    def interrupt_outcome(self, lane, outcome):
+        if outcome == "SUCCESS_PENDING_FINALIZE":
+            return self.seal_success(lane)
+        lane.impl.invoke_implementer.side_effect = KeyboardInterrupt("actor interrupted")
+        with pytest.raises(KeyboardInterrupt, match="actor interrupted"):
+            self.run(lane)
+        lane.impl.invoke_implementer.assert_called_once()
+        lane.impl.invoke_implementer.reset_mock()
+        return self.read(lane)
+
+    @pytest.mark.parametrize("boundary", ["PENDING", "IN_FLIGHT", "SUCCESS_PENDING_FINALIZE", "bridge_round_1"])
+    def test_atomic_save_failure_preserves_previous_checkpoint(self, ordinary_mutation_lane, boundary):
+        lane = ordinary_mutation_lane
+        real_replace = os.replace
+        before_failure = []
+
+        def fail_replace(source, destination):
+            if Path(destination) == lane.state_path:
+                candidate = json.loads(Path(source).read_text())
+                if boundary in (candidate["completed_step"], candidate.get("bridge_fix_mutation", {}).get("state")):
+                    before_failure.append(lane.state_path.read_bytes())
+                    raise OSError("atomic boundary failure")
+            return real_replace(source, destination)
+
+        if boundary == "PENDING":
+            lane.state_path.write_text(json.dumps({
+                "plan_path": lane.plan_path, "wave_id": lane.pending["wave_id"],
+                "completed_step": "agent_review", "bridge_rounds": 0,
+            }))
+            lane.mocks["run_bridge_review"].side_effect = None
+            lane.mocks["run_bridge_review"].return_value = {
+                "exit_code": 1, "decision": "REQUEST_CHANGES", "stdout": "Fix blocker", "stderr": "",
+            }
+        with patch.object(os, "replace", side_effect=fail_replace):
+            if boundary == "PENDING":
+                with pytest.raises(pb_mod.PhaseBExecutorError, match="atomic"):
+                    self.run(lane)
+            else:
+                assert self.run(lane)["status"] == "error"
+        assert before_failure
+        assert lane.state_path.read_bytes() == before_failure[-1]
+        if boundary in {"PENDING", "IN_FLIGHT"}:
+            lane.impl.invoke_implementer.assert_not_called()
+        else:
+            lane.impl.invoke_implementer.assert_called_once()
+            assert self.read(lane)["bridge_fix_mutation"]["state"] == (
+                "IN_FLIGHT" if boundary == "SUCCESS_PENDING_FINALIZE" else "SUCCESS_PENDING_FINALIZE"
+            )
+            assert self.read(lane)["bridge_fix_plan_authority"] == lane.pending["bridge_fix_plan_authority"]
+
+    @pytest.mark.parametrize("outcome,error", [("IN_FLIGHT", "save_failed"), ("SUCCESS_PENDING_FINALIZE", "success_save_failed")])
+    def test_durable_save_must_be_verified(self, ordinary_mutation_lane, outcome, error):
+        lane = ordinary_mutation_lane
+        real_save = getattr(pb_mod, "_save_state")
+
+        def omit_write(repo, state):
+            if state.get("bridge_fix_mutation", {}).get("state") != outcome:
+                return real_save(repo, state)
+            return lane.state_path
+
+        with patch.object(pb_mod, "_save_state", side_effect=omit_write):
+            result = self.run(lane)
+        assert result["authority_error"] == error
+        assert "verification" in result["errors"][0]
+        if outcome == "IN_FLIGHT":
+            self.assert_actor_free(lane)
+        else:
+            lane.impl.invoke_implementer.assert_called_once()
+            assert self.read(lane)["bridge_fix_mutation"]["state"] == "IN_FLIGHT"
+        assert all(c.kwargs.get("state") != "bridge_fix_success" for c in lane.mocks["_emit_phase_b_event"].call_args_list)
+
+    def test_interruption_after_in_flight_replace_authorizes_zero_actors(self, ordinary_mutation_lane):
+        lane = ordinary_mutation_lane
+        real_replace = os.replace
+
+        def interrupt_after_replace(source, destination):
+            started = Path(destination) == lane.state_path and json.loads(Path(source).read_text()).get("bridge_fix_mutation", {}).get("state") == "IN_FLIGHT"
+            real_replace(source, destination)
+            if started:
+                raise KeyboardInterrupt("persisted before actor")
+
+        with patch.object(os, "replace", side_effect=interrupt_after_replace):
+            with pytest.raises(KeyboardInterrupt, match="persisted before actor"):
+                self.run(lane)
+        before = lane.state_path.read_bytes()
+        assert self.run(lane)["authority_error"] == "ambiguous_outcome"
+        assert lane.state_path.read_bytes() == before
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("plan_change", ["edited", "deleted", "invalid_utf8"])
+    def test_in_actor_interrupt_never_replays_or_reads_live_plan(self, ordinary_mutation_lane, plan_change):
+        lane = ordinary_mutation_lane
+
+        def actor(*_args, **_kwargs):
+            state = self.read(lane)
+            assert state["bridge_fix_mutation"]["state"] == "IN_FLIGHT"
+            assert state["bridge_fix_plan_authority"] == lane.pending["bridge_fix_plan_authority"]
+            plan = lane.repo / lane.plan_path
+            if plan_change == "deleted":
+                plan.unlink()
+            else:
+                plan.write_bytes(b"\xff" if plan_change == "invalid_utf8" else b"actor plan edits")
+            (lane.repo / "f.py").write_text("ACTOR_MUTATED = True\n")
+            raise KeyboardInterrupt("actor interrupted")
+
+        lane.impl.invoke_implementer.side_effect = actor
+        with pytest.raises(KeyboardInterrupt, match="actor interrupted"):
+            self.run(lane)
+        lane.impl.invoke_implementer.reset_mock()
+        before = lane.state_path.read_bytes()
+        with patch.object(pb_mod, "load_plan_packet", side_effect=AssertionError("live plan read")):
+            for _ in range(2):
+                assert self.run(lane)["authority_error"] == "ambiguous_outcome"
+                assert lane.state_path.read_bytes() == before
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("status,code", [("error", 1), ("timeout", -1), ("stale", -2)])
+    def test_explicit_failure_keeps_original_semantics_and_ambiguous_restart(self, ordinary_mutation_lane, status, code):
+        lane = ordinary_mutation_lane
+        lane.impl.invoke_implementer.return_value.update(status=status, exit_code=code)
+        result = self.run(lane)
+        assert result["step"] == "implementer_bridge_fix"
+        assert result["implementer_status"] == status
+        assert str(code) in result["errors"][0]
+        assert self.read(lane)["bridge_fix_mutation"]["state"] == "IN_FLIGHT"
+        lane.impl.invoke_implementer.reset_mock()
+        assert self.run(lane)["authority_error"] == "ambiguous_outcome"
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("field,value", [
+        ("exit_code", False), ("exit_code", 0.0), ("exit_code", 1),
+        ("output", []), ("stderr", None), ("job_id", ""),
+        ("model_override_applied", 0), ("extra", float("nan")), ("extra", (1, 2)),
+    ])
+    def test_invalid_success_is_not_sealed(self, ordinary_mutation_lane, field, value):
+        lane = ordinary_mutation_lane
+        lane.impl.invoke_implementer.return_value[field] = value
+        result = self.run(lane)
+        assert result["authority_error"] == "invalid_success"
+        assert self.read(lane)["bridge_fix_mutation"]["state"] == "IN_FLIGHT"
+        lane.mocks["run_bridge_review"].assert_not_called()
+        assert all(c.kwargs.get("state") != "bridge_fix_success" for c in lane.mocks["_emit_phase_b_event"].call_args_list)
+
+    def test_recovered_success_matches_uninterrupted_checkpoint_and_exact_result(self, ordinary_mutation_lane):
+        lane = ordinary_mutation_lane
+        lane.impl.invoke_implementer.return_value["extra"] = {"nested": [1, "unchanged"]}
+        sealed = []
+
+        def observe(_repo, **event):
+            if event.get("state") == "bridge_fix_success":
+                sealed.append(lane.state_path.read_bytes())
+
+        lane.mocks["_emit_phase_b_event"].side_effect = observe
+        with pytest.raises(KeyboardInterrupt, match="next review boundary"):
+            self.run(lane)
+        uninterrupted = lane.state_path.read_bytes()
+        assert self.read(lane)["completed_step"] == "bridge_round_1"
+        lane.state_path.write_bytes(sealed[0])  # Disposable crash snapshot before finalizer.
+        lane.impl.invoke_implementer.reset_mock()
+        lane.mocks["run_bridge_review"].reset_mock()
+        (lane.repo / lane.plan_path).write_bytes(b"\xffactor plan edits")
+        with patch.object(pb_mod, "load_plan_packet", side_effect=AssertionError("live plan read")):
+            result = self.run(lane)
+        assert result["step"] == "bridge_fix_finalize"
+        assert result["bridge_fix_result"] == lane.impl.invoke_implementer.return_value
+        assert lane.state_path.read_bytes() == uninterrupted
+        assert self.read(lane)["bridge_fix_plan_authority"] == lane.pending["bridge_fix_plan_authority"]
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("boundary", ["scope", "pytest", "save"])
+    def test_finalizer_interruption_and_retry_invoke_zero_actors(self, ordinary_mutation_lane, boundary):
+        lane = ordinary_mutation_lane
+        self.seal_success(lane)
+        before = lane.state_path.read_bytes()
+        target = {"scope": "_collect_wave_owned_files", "pytest": "_run_pytest_on_files", "save": "_save_state"}[boundary]
+        if boundary == "pytest":
+            lane.mocks["_collect_changed_files"].return_value = ["f.py", "mu/tests/tools/test_added.py"]
+        with patch.object(pb_mod, target, side_effect=KeyboardInterrupt("finalizer interrupted")):
+            with pytest.raises(KeyboardInterrupt, match="finalizer interrupted"):
+                self.run(lane)
+        assert lane.state_path.read_bytes() == before
+        with patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True}):
+            assert self.run(lane)["completed_step"] == "bridge_round_1"
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("boundary", ["scope", "pytest"])
+    def test_post_success_validation_failure_preserves_success(self, ordinary_mutation_lane, boundary):
+        lane = ordinary_mutation_lane
+        self.seal_success(lane)
+        lane.mocks["_collect_changed_files"].return_value = ["f.py", "mu/tests/tools/test_added.py"]
+        before = lane.state_path.read_bytes()
+        failure = (patch.object(pb_mod, "_collect_wave_owned_files", side_effect=ValueError("invalid scope"))
+                   if boundary == "scope" else patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": False}))
+        with failure:
+            for _ in range(2):
+                assert self.run(lane)["status"] == "error"
+                assert lane.state_path.read_bytes() == before
+        lane.impl.build_implementation_prompt.assert_not_called()
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("mutation", [
+        "missing", "version_bool", "state_list", "unknown_state", "missing_result", "result_digest",
+        "self_consistent_result", "self_consistent_state", "self_consistent_round",
+        "self_consistent_checkpoint", "self_consistent_intent", "self_consistent_plan",
+        "self_consistent_findings", "self_consistent_decision",
+    ])
+    def test_substituted_outcomes_reject_before_actors(self, ordinary_mutation_lane, mutation):
+        lane = ordinary_mutation_lane
+        state = self.seal_success(lane)
+        outcome = state["bridge_fix_mutation"]
+        context = state["bridge_fix_mutation_context"]
+        source = context["checkpoint"]
+        authority = source["bridge_fix_plan_authority"]
+        if mutation == "missing":
+            state.pop("bridge_fix_mutation")
+        elif mutation == "version_bool":
+            outcome["version"] = True
+        elif mutation == "state_list":
+            outcome["state"] = []
+        elif mutation == "unknown_state":
+            outcome["state"] = "KNOWN_FAILURE_RETRY"
+        elif mutation == "missing_result":
+            outcome["result"] = None
+        elif mutation == "result_digest":
+            outcome["result"]["output"] = "foreign result"
+        elif mutation == "self_consistent_result":
+            outcome["result"]["job_id"] = "foreign-job"
+            outcome["result_sha256"] = self.digest(outcome["result"])
+        elif mutation == "self_consistent_state":
+            outcome.update(state="PENDING", result=None, result_sha256=None)
+        elif mutation == "self_consistent_round":
+            source["current_bridge_round"] += 1
+            source["bridge_rounds"] = source["current_bridge_round"]
+            authority["round"] = source["current_bridge_round"]
+            context["next_step"] = f"bridge_round_{authority['round']}"
+        elif mutation == "self_consistent_checkpoint":
+            source["bridge_fix_checkpoint_id"] = authority["checkpoint_id"] = "f" * 32
+            source["bridge_fix_checkpoint_transition_identity"] = authority["checkpoint_transition_identity"] = "bridge_fix_pending:" + "f" * 32
+        elif mutation == "self_consistent_intent":
+            context["next_step"] = "bridge_converged"
+        elif mutation == "self_consistent_plan":
+            context["plan"]["content"] = "substituted plan"
+        elif mutation == "self_consistent_findings":
+            source["bridge_fix_findings"] = authority["bridge_findings"] = "foreign findings"
+            source["bridge_fix_findings_sha256"] = authority["bridge_findings_sha256"] = hashlib.sha256(b"foreign findings").hexdigest()
+        elif mutation == "self_consistent_decision":
+            source["bridge_decision"] = authority["bridge_decision"] = "NO_GO"
+        if mutation.startswith("self_consistent_"):
+            TestBridgeFixPendingResume.rehash_authority(source)
+            outcome["context_sha256"] = self.digest(context)
+            outcome["mutation_sha256"] = self.digest({k: v for k, v in outcome.items() if k != "mutation_sha256"})
+        lane.state_path.write_text(json.dumps(state))
+        before = lane.state_path.read_bytes()
+        assert self.run(lane)["status"] == "error"
+        assert lane.state_path.read_bytes() == before
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("outcome", ["IN_FLIGHT", "SUCCESS_PENDING_FINALIZE"])
+    @pytest.mark.parametrize("field", ["wave_name", "wave_id", "plan_path", "tracked_packet", "next_candidates", "task_id", "head_sha", "comparison_commit"])
+    @pytest.mark.parametrize("explicit_plan", [False, True])
+    def test_foreign_recovery_identity_never_adopts_saved_plan(self, ordinary_mutation_lane, outcome, field, explicit_plan):
+        lane = ordinary_mutation_lane
+        self.interrupt_outcome(lane, outcome)
+        before = lane.state_path.read_bytes()
+        route = {**_VALID_ROUTING_RECORD, "wave_id": lane.pending["wave_id"], "tracked_packet": lane.plan_path}
+        if field in {"wave_name", "wave_id"}:
+            route[field] = "foreign-wave"
+        elif field == "task_id":
+            route[field] = "[FOREIGN-TASK]"
+        elif field in {"head_sha", "comparison_commit"}:
+            route[field] = "f" * 40
+        else:
+            route.pop("tracked_packet")
+            route[field] = [{"tracked_packet": "foreign.md"}] if field == "next_candidates" else "foreign.md"
+        with patch.object(pb_mod, "load_plan_packet", side_effect=AssertionError("live plan read")):
+            for _ in range(2):
+                result = pb_mod.run_phase_b(lane.repo, lane.plan_path if explicit_plan else None, routing_record_override=route.copy(), force=True)
+                assert result["status"] == "error"
+                assert result["state_error"] == "bridge_fix_authority"
+                assert lane.state_path.read_bytes() == before
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("outcome", ["IN_FLIGHT", "SUCCESS_PENDING_FINALIZE"])
+    @pytest.mark.parametrize("source", ["plan_path", "tracked_packet", "next_candidates"])
+    def test_independently_authorized_planless_recovery(self, ordinary_mutation_lane, outcome, source):
+        lane = ordinary_mutation_lane
+        original = self.interrupt_outcome(lane, outcome)
+        route = {**_VALID_ROUTING_RECORD, "wave_id": lane.pending["wave_id"], source: (
+            [{"tracked_packet": lane.plan_path}] if source == "next_candidates" else lane.plan_path
+        )}
+        before = lane.state_path.read_bytes()
+        with patch.object(pb_mod, "load_plan_packet", side_effect=AssertionError("live plan read")):
+            result = pb_mod.run_phase_b(lane.repo, routing_record_override=route)
+        if outcome == "IN_FLIGHT":
+            assert result["authority_error"] == "ambiguous_outcome"
+            assert lane.state_path.read_bytes() == before
+        else:
+            assert result["completed_step"] == "bridge_round_1"
+            assert result["bridge_fix_result"] == original["bridge_fix_mutation"]["result"]
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("outcome", ["IN_FLIGHT", "SUCCESS_PENDING_FINALIZE"])
+    @pytest.mark.parametrize("missing", ["wave_id", "tracked_packet"])
+    def test_planless_recovery_requires_independent_identity(self, ordinary_mutation_lane, outcome, missing):
+        lane = ordinary_mutation_lane
+        self.interrupt_outcome(lane, outcome)
+        before = lane.state_path.read_bytes()
+        route = {**_VALID_ROUTING_RECORD, "wave_id": lane.pending["wave_id"], "tracked_packet": lane.plan_path}
+        route.pop(missing)
+        with patch.object(pb_mod, "load_plan_packet", side_effect=AssertionError("live plan read")):
+            result = pb_mod.run_phase_b(lane.repo, routing_record_override=route)
+        assert result["state_error"] == "bridge_fix_authority"
+        assert lane.state_path.read_bytes() == before
+        self.assert_actor_free(lane)
+
+    @pytest.mark.parametrize("entry", ["surface", "routing"])
+    @pytest.mark.parametrize("bus_dir", [None, ".agent_bus-ordinary"])
+    def test_recovered_finalization_dispatches_next_phase_b_with_checkpoint(self, ordinary_mutation_lane, capsys, entry, bus_dir):
+        """Preserved R2 regression through both native CLIs and dispatcher loops."""
+        lane = ordinary_mutation_lane
+        success = self.seal_success(lane)
+        if bus_dir:
+            selected_state = lane.repo / bus_dir / "executors" / "phase_b_state.json"
+            selected_state.parent.mkdir(parents=True)
+            lane.state_path.replace(selected_state)
+            lane.state_path = selected_state
+        route = {**_VALID_ROUTING_RECORD, "wave_name": lane.pending["wave_id"], "plan_path": lane.plan_path, "tracked_packet": lane.plan_path}
+        routing_file = lane.repo / "ordinary-routing.json"
+        routing_file.write_text(json.dumps(route))
+        argv = (["phase-b", "--plan", lane.plan_path, "--max-rounds", "5",
+                 "--routing-record-json", json.dumps(route)] if entry == "surface" else
+                ["--routing-record", str(routing_file), "--skip-freshness", "--retries", "2"])
+        argv.append("--json")
+        if bus_dir:
+            argv.extend(["--bus-dir", bus_dir])
+        invocations, finalized = [], []
+        real_run = subprocess.run
+
+        class NextInvocation(BaseException):
+            pass
+
+        def isolated_git(command, *a, **kw):
+            if command == ["git", "rev-parse", "--show-toplevel"]:
+                return subprocess.CompletedProcess(command, 0, str(lane.repo), "")
+            return real_run(command, *a, **kw)
+
+        def isolated_phase_b(command, *, cwd, timeout):
+            assert Path(command[1]).name == "phase_b_executor.py", command
+            assert cwd == lane.repo
+            assert "--dispatcher-owned-recovery" in command
+            if bus_dir:
+                assert command[command.index("--bus-dir") + 1] == bus_dir
+            invocations.append(command)
+            if len(invocations) == 2:
+                assert command == invocations[0]
+                assert lane.state_path.read_bytes() == finalized[0]
+                self.assert_actor_free(lane)
+                raise NextInvocation
+            capsys.readouterr()
+            with patch.object(sys, "argv", command[1:]), patch.object(subprocess, "run", side_effect=isolated_git):
+                code = pb_mod.main()
+            output = capsys.readouterr()
+            finalized.append(lane.state_path.read_bytes())
+            assert self.read(lane)["completed_step"] == "bridge_round_1"
+            assert self.read(lane)["bridge_fix_mutation"] == success["bridge_fix_mutation"]
+            return subprocess.CompletedProcess(command, code, output.out, output.err)
+
+        with patch.dict(sys.modules), patch.dict(os.environ):
+            saved_recovery = sys.modules["recovery_gate"]
+            dispatcher = load_module("ordinary_outcome_dispatcher", _EXECUTORS_DIR / "executor_dispatch.py")
+            sys.modules["recovery_gate"] = saved_recovery
+            with patch.object(dispatcher, "_run_executor_in_group", side_effect=isolated_phase_b), \
+                 patch.object(dispatcher, "attempt_recovery", return_value={"recovered": False}) as recovery, \
+                 patch.object(dispatcher, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+                 patch.object(dispatcher, "resolve_repo_root_for_dispatch", return_value=lane.repo), \
+                 patch.object(dispatcher, "load_config", return_value={}), \
+                 patch.object(subprocess, "run", side_effect=isolated_git), \
+                 patch.object(dispatcher, "_LaneMonitor"), \
+                 patch.object(dispatcher, "_install_wave_end_signal_cleanup"), \
+                 patch.object(dispatcher, "_remove_wave_end_signal_cleanup"), \
+                 patch.object(dispatcher, "_emit_executor_hard_fail_event"):
+                try:
+                    dispatcher.main(argv)
+                except NextInvocation:
+                    pass
+        assert len(invocations) == 2, ("Finalization did not schedule the later Phase B invocation", recovery.call_args)
+        assert lane.state_path.read_bytes() == finalized[0]
+        self.assert_actor_free(lane)
+        recovery.assert_not_called()
+
+
+@pytest.mark.parametrize("dispatcher_owned", [False, True])
+@pytest.mark.parametrize("json_output", [False, True])
+def test_ordinary_finalization_cli_is_nonterminal_without_recovery(ordinary_mutation_lane, capsys, dispatcher_owned, json_output):
+    lane = ordinary_mutation_lane
+    support = TestOrdinaryBridgeFixMutationOutcome()
+    support.seal_success(lane)
+    real_run = subprocess.run
+    recovery = MagicMock(side_effect=AssertionError("ordinary finalization called recovery actor"))
+
+    def isolated_git(command, *args, **kwargs):
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(lane.repo), "")
+        return real_run(command, *args, **kwargs)
+
+    argv = ["phase_b_executor.py", "--plan", lane.plan_path]
+    if dispatcher_owned:
+        argv.append("--dispatcher-owned-recovery")
+    if json_output:
+        argv.append("--json")
+    with patch.dict(sys.modules, {"recovery_gate": SimpleNamespace(attempt_recovery=recovery)}), \
+         patch.object(sys, "argv", argv), \
+         patch.object(subprocess, "run", side_effect=isolated_git):
+        assert pb_mod.main() == 0
+    output = capsys.readouterr().out
+    if json_output:
+        result = json.loads(output)
+        assert result["status"] == "continue_phase_b"
+        assert result["checkpoint_sha256"] == hashlib.sha256(lane.state_path.read_bytes()).hexdigest()
+        assert result["completed_step"] == "bridge_round_1"
+        assert "recovery" not in result
+        assert not result.get("handoff_path")
+    else:
+        assert "[phase-b] Status: continue_phase_b" in output
+    recovery.assert_not_called()
+    support.assert_actor_free(lane)
+
+
+def _run_ordinary_mutation_cli(
+    lane, capsys, *, json_output=True, plan_path=None, routing=None,
+    bus_dir=None, dispatcher_owned=False,
+):
+    """Run the native CLI and orchestration with isolated process/model boundaries."""
+    real_run = subprocess.run
+    recovery = MagicMock(return_value={"recovered": True, "tier": 3})
+
+    def isolated_git(command, *args, **kwargs):
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(lane.repo), "")
+        return real_run(command, *args, **kwargs)
+
+    argv = ["phase_b_executor.py", "--plan", plan_path or lane.plan_path]
+    if json_output:
+        argv.append("--json")
+    if routing is not None:
+        argv.extend(["--routing-record", json.dumps(routing)])
+    if bus_dir is not None:
+        argv.extend(["--bus-dir", bus_dir])
+    if dispatcher_owned:
+        argv.append("--dispatcher-owned-recovery")
+    capsys.readouterr()
+    with patch.dict(sys.modules, {"recovery_gate": SimpleNamespace(
+        attempt_recovery=recovery, load_relevant_learnings=MagicMock(return_value=""),
+    )}), patch.object(sys, "argv", argv), patch.object(subprocess, "run", side_effect=isolated_git):
+        code = pb_mod.main()
+    output = capsys.readouterr().out
+    return code, json.loads(output) if json_output else output, recovery
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+@pytest.mark.parametrize("boundary", [
+    "in_flight_save", "ambiguous_outcome", "invalid_success", "success_save", "success_pager",
+    "fresh_pytest", "finalize_pytest", "finalize_scope", "finalize_save",
+    "missing_mutation", "missing_checkpoint_field", "foreign_wave", "foreign_plan",
+    "routing_validation", "sealed_plan_validation",
+])
+def test_ordinary_failure_cli_preserves_checkpoint_without_recovery(
+    ordinary_mutation_lane, capsys, boundary, json_output,
+):
+    lane = ordinary_mutation_lane
+    support = TestOrdinaryBridgeFixMutationOutcome()
+    saved_success_boundaries = {
+        "finalize_pytest", "finalize_scope", "finalize_save", "missing_mutation",
+        "missing_checkpoint_field", "foreign_wave", "foreign_plan", "routing_validation",
+        "sealed_plan_validation",
+    }
+    if boundary in saved_success_boundaries:
+        support.seal_success(lane)
+    elif boundary == "ambiguous_outcome":
+        support.interrupt_outcome(lane, "IN_FLIGHT")
+    if boundary in {"missing_mutation", "missing_checkpoint_field"}:
+        state = support.read(lane)
+        state.pop("bridge_fix_mutation" if boundary == "missing_mutation" else "current_bridge_round")
+        lane.state_path.write_text(json.dumps(state))
+    before = [lane.state_path.read_bytes()]
+    expected_step = {
+        "success_pager": "phase_b_pager", "fresh_pytest": "bridge_fix_finalize_pytest",
+        "finalize_pytest": "bridge_fix_finalize_pytest", "finalize_scope": "bridge_fix_finalize",
+        "finalize_save": "bridge_fix_finalize", "missing_mutation": "load_state",
+        "missing_checkpoint_field": "load_state", "foreign_wave": "load_state",
+        "foreign_plan": "load_state", "routing_validation": "validate_inputs",
+        "sealed_plan_validation": "validate_inputs",
+    }.get(boundary, "bridge_fix_mutation")
+    route = None
+    if boundary == "foreign_wave":
+        route = {**_VALID_ROUTING_RECORD, "wave_id": "foreign-wave"}
+    elif boundary == "routing_validation":
+        route = {**_VALID_ROUTING_RECORD, "decision": "ROUTE_PHASE_A"}
+    actors_expected = boundary in {"invalid_success", "success_save", "success_pager", "fresh_pytest"}
+
+    def observe(_repo, **event):
+        if event.get("state") == "bridge_fix_success":
+            before.append(lane.state_path.read_bytes())
+            if boundary == "success_pager":
+                raise OSError("post-success pager failed")
+
+    lane.mocks["_emit_phase_b_event"].side_effect = observe
+    real_replace = os.replace
+    failing_state = {
+        "in_flight_save": "IN_FLIGHT", "success_save": "SUCCESS_PENDING_FINALIZE",
+        "finalize_save": "bridge_round_1",
+    }.get(boundary)
+
+    def fail_save(source, destination):
+        if Path(destination) == lane.state_path:
+            following = json.loads(Path(source).read_text())
+            if failing_state in (following["completed_step"], following["bridge_fix_mutation"]["state"]):
+                before.append(lane.state_path.read_bytes())
+                raise OSError("injected atomic save failure")
+        return real_replace(source, destination)
+
+    def invalid_success(*args, **kwargs):
+        before.append(lane.state_path.read_bytes())
+        return {**lane.impl.invoke_implementer.return_value, "job_id": ""}
+
+    def actor_changes_tests(*args, **kwargs):
+        lane.mocks["_collect_changed_files"].return_value = ["f.py", "mu/tests/tools/test_added.py"]
+        return dict(lane.impl.invoke_implementer.return_value)
+
+    with ExitStack() as stack:
+        if failing_state:
+            stack.enter_context(patch.object(os, "replace", side_effect=fail_save))
+        if boundary == "invalid_success":
+            lane.impl.invoke_implementer.side_effect = invalid_success
+        if boundary == "fresh_pytest":
+            lane.impl.invoke_implementer.side_effect = actor_changes_tests
+        if boundary == "finalize_pytest":
+            lane.mocks["_collect_changed_files"].return_value = ["f.py", "mu/tests/tools/test_added.py"]
+        if boundary in {"fresh_pytest", "finalize_pytest"}:
+            stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                "passed": False, "exit_code": 1, "stdout": "injected failing test", "stderr": "",
+            }))
+        if boundary == "finalize_scope":
+            lane.mocks["_collect_wave_owned_files"].side_effect = ValueError("invalid scope")
+        if boundary == "sealed_plan_validation":
+            stack.enter_context(patch.object(pb_mod, "validate_inputs", side_effect=pb_mod.PhaseBExecutorError("invalid sealed plan")))
+        code, output, recovery = _run_ordinary_mutation_cli(
+            lane, capsys, json_output=json_output, routing=route,
+            plan_path="foreign.md" if boundary == "foreign_plan" else None,
+        )
+
+    recovery.assert_not_called()
+    assert code == 1
+    assert lane.state_path.read_bytes() == before[-1]
+    if json_output:
+        assert output["status"] == "error"
+        assert output["step"] == expected_step
+        assert "recovery" not in output
+        assert not output.get("handoff_path")
+        if expected_step == "load_state":
+            assert output["state_path"] == ".agent_bus/executors/phase_b_state.json"
+    else:
+        assert "[phase-b] Status: error" in output
+        assert "[phase-b] Recovery:" not in output
+    lane.mocks["run_bridge_review"].assert_not_called()
+    lane.mocks["run_sdk_agents"].assert_not_called()
+    lane.impl.build_implementation_prompt.assert_not_called()
+    assert lane.impl.invoke_implementer.call_count == int(actors_expected)
+
+
+@pytest.mark.parametrize("status,exit_code", [("error", 1), ("timeout", -1), ("stale", -2)])
+def test_ordinary_explicit_failure_cli_keeps_recovery_but_restart_is_ambiguous(
+    ordinary_mutation_lane, capsys, status, exit_code,
+):
+    lane = ordinary_mutation_lane
+    support = TestOrdinaryBridgeFixMutationOutcome()
+    lane.impl.invoke_implementer.return_value.update(status=status, exit_code=exit_code)
+    code, result, recovery = _run_ordinary_mutation_cli(lane, capsys)
+    assert code == 0  # Existing standalone recovery success semantics.
+    assert result["step"] == "implementer_bridge_fix"
+    assert result["implementer_status"] == status
+    assert result["recovery"]["recovered"] is True
+    recovery.assert_called_once()
+    lane.impl.invoke_implementer.assert_called_once()
+    assert support.read(lane)["bridge_fix_mutation"]["state"] == "IN_FLIGHT"
+    before = lane.state_path.read_bytes()
+    lane.impl.invoke_implementer.reset_mock()
+
+    code, result, recovery = _run_ordinary_mutation_cli(lane, capsys)
+    recovery.assert_not_called()
+    assert code == 1
+    assert result["authority_error"] == "ambiguous_outcome"
+    assert "recovery" not in result
+    assert lane.state_path.read_bytes() == before
+    support.assert_actor_free(lane)
+
+
+@pytest.mark.parametrize("dispatcher_owned", [False, True])
+def test_ordinary_failure_cli_preserves_selected_bus_and_json_error(
+    ordinary_mutation_lane, capsys, dispatcher_owned,
+):
+    lane = ordinary_mutation_lane
+    support = TestOrdinaryBridgeFixMutationOutcome()
+    support.seal_success(lane)
+    bus_dir = ".agent_bus-ordinary"
+    state_path = lane.repo / bus_dir / "executors" / "phase_b_state.json"
+    state_path.parent.mkdir(parents=True)
+    lane.state_path.replace(state_path)
+    before = state_path.read_bytes()
+
+    code, result, recovery = _run_ordinary_mutation_cli(
+        lane, capsys, plan_path="foreign.md", bus_dir=bus_dir,
+        dispatcher_owned=dispatcher_owned,
+    )
+    recovery.assert_not_called()
+    assert code == 1
+    assert result["state_error"] == "plan_mismatch"
+    assert result["state_path"] == f"{bus_dir}/executors/phase_b_state.json"
+    assert "recovery" not in result
+    assert state_path.read_bytes() == before
+    assert not lane.state_path.exists()
+    support.assert_actor_free(lane)
+
+
+def run_ordinary_dispatcher_cli(lane, capsys, *, entry, bus_dir=None, chain=False,
+                                after_continuation=None, recovery_result=None):
+    """Preserved public probe: isolate child processes, retain retry and state IO."""
+    route = {**_VALID_ROUTING_RECORD, "wave_name": lane.pending["wave_id"],
+             "plan_path": lane.plan_path, "tracked_packet": lane.plan_path,
+             "next_candidates": [{"candidate": lane.pending["wave_id"],
+                                  "bounded": True, "tracked_packet": lane.plan_path}]}
+    if chain:
+        route["decision"] = "ROUTE_PHASE_A"
+    routing_file = lane.repo / "ordinary-routing.json"
+    routing_file.write_text(json.dumps(route))
+    if entry == "surface":
+        argv = (["phase-a", "--plan-name", lane.pending["wave_id"], "--summary", "ordinary probe"]
+                if chain else ["phase-b", "--plan", lane.plan_path, "--routing-record-json", json.dumps(route)])
+        argv.extend(["--max-rounds", "5"])
+    else:
+        argv = ["--routing-record", str(routing_file), "--skip-freshness", "--retries", "2"]
+    argv.append("--json")
+    if bus_dir:
+        argv.extend(["--bus-dir", bus_dir])
+    real_run = subprocess.run
+    commands, payloads, snapshots = [], [], []
+    extra_invocations = []
+
+    class UnexpectedReplay(BaseException):
+        pass
+
+    def isolated_git(command, *args, **kwargs):
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(lane.repo), "")
+        return real_run(command, *args, **kwargs)
+
+    def native_child(command, *, cwd, timeout):
+        assert cwd == lane.repo
+        if Path(command[1]).name == "phase_a_executor.py":
+            assert chain
+            return subprocess.CompletedProcess(command, 0, json.dumps({
+                "status": "success", "plan_path": lane.plan_path,
+            }), "")
+        assert Path(command[1]).name == "phase_b_executor.py", command
+        assert "--dispatcher-owned-recovery" in command
+        if bus_dir:
+            assert command[command.index("--bus-dir") + 1] == bus_dir
+        if payloads and payloads[-1]["status"] != "continue_phase_b":
+            extra_invocations.append(command)
+            raise UnexpectedReplay
+        if commands:
+            assert command == commands[0]
+            assert lane.state_path.read_bytes() == snapshots[-1]
+            TestOrdinaryBridgeFixMutationOutcome.assert_actor_free(lane)
+            assert after_continuation is not None
+            after_continuation()
+        commands.append(command)
+        capsys.readouterr()
+        with patch.object(sys, "argv", command[1:]), patch.object(subprocess, "run", side_effect=isolated_git):
+            code = pb_mod.main()
+        output = capsys.readouterr()
+        payloads.append(json.loads(output.out))
+        snapshots.append(lane.state_path.read_bytes())
+        return subprocess.CompletedProcess(command, code, output.out, output.err)
+
+    with patch.dict(sys.modules), patch.dict(os.environ):
+        saved_recovery = sys.modules["recovery_gate"]
+        dispatcher = load_module("ordinary_error_dispatcher", _EXECUTORS_DIR / "executor_dispatch.py")
+        sys.modules["recovery_gate"] = saved_recovery
+        with patch.object(dispatcher, "_run_executor_in_group", side_effect=native_child), \
+             patch.object(dispatcher, "attempt_recovery", return_value=recovery_result or {
+                 "recovered": True, "tier": 2, "failure_class": "unknown_error",
+             }) as recovery, \
+             patch.object(dispatcher, "_apply_recovery_overrides", return_value=None), \
+             patch.object(dispatcher, "resolve_repo_root_for_dispatch", return_value=lane.repo), \
+             patch.object(dispatcher, "load_config", return_value={}), \
+             patch.object(subprocess, "run", side_effect=isolated_git), \
+             patch.object(dispatcher, "_LaneMonitor"), \
+             patch.object(dispatcher, "_install_wave_end_signal_cleanup"), \
+             patch.object(dispatcher, "_remove_wave_end_signal_cleanup"), \
+             patch.object(dispatcher, "_emit_executor_hard_fail_event"):
+            try:
+                code = dispatcher.main(argv)
+            except UnexpectedReplay:
+                code = None
+    return SimpleNamespace(code=code, output=capsys.readouterr().out, commands=commands,
+                           payloads=payloads, snapshots=snapshots,
+                           extra_invocations=extra_invocations, recovery=recovery)
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("bus_dir", [None, ".agent_bus-ordinary"])
+@pytest.mark.parametrize("outcome", ["IN_FLIGHT", "SUCCESS_PENDING_FINALIZE"])
+@pytest.mark.parametrize("chain", [False, True], ids=["direct", "a_to_b"])
+def test_ordinary_dispatcher_error_preserves_real_checkpoint(
+    ordinary_mutation_lane, capsys, entry, bus_dir, outcome, chain,
+):
+    lane = ordinary_mutation_lane
+    support = TestOrdinaryBridgeFixMutationOutcome()
+    support.interrupt_outcome(lane, outcome)
+    if bus_dir:
+        selected = lane.repo / bus_dir / "executors" / "phase_b_state.json"
+        selected.parent.mkdir(parents=True)
+        lane.state_path.replace(selected)
+        lane.state_path = selected
+    before = lane.state_path.read_bytes()
+    if outcome == "SUCCESS_PENDING_FINALIZE":
+        lane.mocks["_collect_wave_owned_files"].side_effect = ValueError("post-success scope failure")
+    result = run_ordinary_dispatcher_cli(lane, capsys, entry=entry, bus_dir=bus_dir, chain=chain)
+    assert result.payloads[-1]["status"] == "error"
+    assert result.payloads[-1]["step"] == (
+        "bridge_fix_mutation" if outcome == "IN_FLIGHT" else "bridge_fix_finalize"
+    )
+    assert result.recovery.call_count == 0, (
+        "Protected ordinary error reached generic recovery", result.recovery.call_args,
+        "checkpoint exists", lane.state_path.exists(), "replay", result.extra_invocations,
+    )
+    assert result.code == 1
+    assert len(result.commands) == 1
+    assert not result.extra_invocations
+    assert lane.state_path.read_bytes() == before
+    assert '"status": "error"' in result.output
+    support.assert_actor_free(lane)
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("bus_dir", [None, ".agent_bus-ordinary"])
+@pytest.mark.parametrize("chain", [False, True], ids=["direct", "a_to_b"])
+def test_ordinary_dispatcher_continuation_retains_later_native_error(
+    ordinary_mutation_lane, capsys, entry, bus_dir, chain,
+):
+    lane = ordinary_mutation_lane
+    support = TestOrdinaryBridgeFixMutationOutcome()
+    sealed = support.seal_success(lane)
+    if bus_dir:
+        selected = lane.repo / bus_dir / "executors" / "phase_b_state.json"
+        selected.parent.mkdir(parents=True)
+        lane.state_path.replace(selected)
+        lane.state_path = selected
+
+    def missing_plan():
+        # The completed ordinary checkpoint still owns the later invocation.
+        # Only the actor-mutable plan is unavailable; no checkpoint is rewritten.
+        (lane.repo / lane.plan_path).unlink()
+
+    result = run_ordinary_dispatcher_cli(
+        lane, capsys, entry=entry, bus_dir=bus_dir, chain=chain, after_continuation=missing_plan,
+    )
+    assert [p["status"] for p in result.payloads] == ["continue_phase_b", "error"]
+    assert result.payloads[-1]["step"] == "load_plan"
+    result.recovery.assert_not_called()
+    assert result.code == 1
+    assert result.commands[0] == result.commands[1]
+    assert not result.extra_invocations
+    assert lane.state_path.read_bytes() == result.snapshots[0] == result.snapshots[1]
+    assert support.read(lane)["bridge_fix_mutation"] == sealed["bridge_fix_mutation"]
+    assert support.read(lane)["completed_step"] == "bridge_round_1"
+    assert '"status": "error"' in result.output
+    support.assert_actor_free(lane)
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("boundary,expected_step,actors", [
+    ("authority", "load_state", 0),
+    ("missing_mutation", "load_state", 0),
+    ("missing_checkpoint_field", "load_state", 0),
+    ("in_flight_save", "bridge_fix_mutation", 0),
+    ("success_save", "bridge_fix_mutation", 1),
+    ("invalid_success", "bridge_fix_mutation", 1),
+    ("success_pager", "phase_b_pager", 1),
+    ("finalize_pytest", "bridge_fix_finalize_pytest", 0),
+    ("finalize_save", "bridge_fix_finalize", 0),
+])
+def test_ordinary_dispatcher_preserves_emitted_error_vocabulary(
+    ordinary_mutation_lane, capsys, entry, boundary, expected_step, actors,
+):
+    lane = ordinary_mutation_lane
+    support = TestOrdinaryBridgeFixMutationOutcome()
+    if boundary in {"authority", "missing_mutation", "missing_checkpoint_field", "finalize_pytest", "finalize_save"}:
+        support.seal_success(lane)
+    if boundary in {"authority", "missing_mutation", "missing_checkpoint_field"}:
+        state = support.read(lane)
+        if boundary == "authority":
+            state["bridge_fix_plan_authority"]["prompt"] += "\nforeign authority"
+        else:
+            state.pop("bridge_fix_mutation" if boundary == "missing_mutation" else "current_bridge_round")
+        lane.state_path.write_text(json.dumps(state))
+    before = [lane.state_path.read_bytes()]
+
+    def actor(*args, **kwargs):
+        before.append(lane.state_path.read_bytes())
+        value = dict(lane.impl.invoke_implementer.return_value)
+        if boundary == "invalid_success":
+            value["job_id"] = ""
+        return value
+
+    def pager(_repo, **event):
+        if event.get("state") == "bridge_fix_success":
+            before.append(lane.state_path.read_bytes())
+            if boundary == "success_pager":
+                raise OSError("post-success pager unavailable")
+
+    lane.impl.invoke_implementer.side_effect = actor
+    lane.mocks["_emit_phase_b_event"].side_effect = pager
+    real_replace = os.replace
+    failure = {"in_flight_save": "IN_FLIGHT", "success_save": "SUCCESS_PENDING_FINALIZE",
+               "finalize_save": "bridge_round_1"}.get(boundary)
+
+    def save(source, destination):
+        if Path(destination) == lane.state_path:
+            candidate = json.loads(Path(source).read_text())
+            if failure in (candidate["completed_step"], candidate["bridge_fix_mutation"]["state"]):
+                before.append(lane.state_path.read_bytes())
+                raise OSError("atomic checkpoint save failed")
+        return real_replace(source, destination)
+
+    with ExitStack() as stack:
+        if failure:
+            stack.enter_context(patch.object(os, "replace", side_effect=save))
+        if boundary == "finalize_pytest":
+            lane.mocks["_collect_changed_files"].return_value = ["f.py", "mu/tests/tools/test_added.py"]
+            stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                "passed": False, "exit_code": 1, "stdout": "failing validation", "stderr": "",
+            }))
+        result = run_ordinary_dispatcher_cli(lane, capsys, entry=entry)
+    assert result.payloads[-1]["status"] == "error"
+    assert result.payloads[-1]["step"] == expected_step
+    result.recovery.assert_not_called()
+    assert result.code == 1
+    assert len(result.commands) == 1
+    assert not result.extra_invocations
+    assert lane.state_path.read_bytes() == before[-1]
+    assert lane.impl.invoke_implementer.call_count == actors
+    lane.mocks["run_bridge_review"].assert_not_called()
+    lane.mocks["run_sdk_agents"].assert_not_called()
+    lane.impl.build_implementation_prompt.assert_not_called()
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("status,exit_code", [("error", 1), ("timeout", -1), ("stale", -2)])
+def test_ordinary_dispatcher_explicit_actor_failure_keeps_existing_recovery(
+    ordinary_mutation_lane, capsys, entry, status, exit_code,
+):
+    lane = ordinary_mutation_lane
+    lane.impl.invoke_implementer.return_value.update(status=status, exit_code=exit_code)
+    result = run_ordinary_dispatcher_cli(lane, capsys, entry=entry)
+    assert result.payloads[-1]["step"] == "implementer_bridge_fix"
+    assert result.payloads[-1]["implementer_status"] == status
+    assert json.loads(result.snapshots[-1])["bridge_fix_mutation"]["state"] == "IN_FLIGHT"
+    result.recovery.assert_called_once()
+    assert len(result.extra_invocations) == 1
+    assert not lane.state_path.exists()  # Existing caller-visible retry behavior.
+    lane.impl.invoke_implementer.assert_called_once()
+    lane.mocks["run_bridge_review"].assert_not_called()
+    lane.mocks["run_sdk_agents"].assert_not_called()

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import re
@@ -84,6 +85,16 @@ except ImportError:
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     _common_routing_record_path = _mod.routing_record_path
     terminate_process_tree = _mod.terminate_process_tree
+
+try:
+    from phase_b_executor import ordinary_bridge_fix_failure_blocks_recovery
+except ImportError:
+    import importlib.util as _ilu
+    _phase_b_spec = _ilu.spec_from_file_location("phase_b_executor", str(SCRIPT_DIR / "phase_b_executor.py"))
+    _phase_b_mod = _ilu.module_from_spec(_phase_b_spec)
+    assert _phase_b_spec.loader is not None
+    _phase_b_spec.loader.exec_module(_phase_b_mod)
+    ordinary_bridge_fix_failure_blocks_recovery = _phase_b_mod.ordinary_bridge_fix_failure_blocks_recovery
 
 try:
     from pipeline_monitor_identity import (
@@ -2193,7 +2204,12 @@ def run_recoverable_surface_command(
                 try:
                     completed = _run_executor_in_group(cmd, cwd=repo_root, timeout=timeout)
                     _emit_completed_process_output(completed)
-                    if executor_name == "commit_executor":
+                    ordinary_error = _ordinary_bridge_fix_error_result(
+                        executor_name, completed, repo_root=repo_root, bus_dir=bus_dir,
+                    )
+                    if ordinary_error is not None:
+                        result = ordinary_error
+                    elif executor_name == "commit_executor":
                         if completed.returncode != 0:
                             result = {
                                 "status": "failed",
@@ -2253,6 +2269,9 @@ def run_recoverable_surface_command(
                         "stderr": "",
                     }
 
+            if _is_protected_ordinary_dispatch_error(result, repo_root=repo_root, bus_dir=bus_dir):
+                _emit_surface_stop_result(result, json_output=bool(getattr(args, "json", False)))
+                break
             embedded_recovery = result.get("recovery")
             if isinstance(embedded_recovery, dict) and embedded_recovery.get("recovered"):
                 if getattr(args, "verbose", False):
@@ -2970,6 +2989,86 @@ def _carry_forward_candidate_authority(
     return carried, None
 
 
+def _is_protected_ordinary_dispatch_error(
+    result: dict[str, Any], *, repo_root: Path, bus_dir: str | Path | None,
+) -> bool:
+    """Stop before every retry consumer, including embedded recovery results."""
+    return (
+        result.get("executor") == "phase_b_executor"
+        and result.get("status") == "error"
+        and (
+            result.get("step") == "ordinary_bridge_fix_continuation"
+            or ordinary_bridge_fix_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
+        )
+    )
+
+
+def _ordinary_bridge_fix_error_result(
+    executor_name: str, completed: subprocess.CompletedProcess[str], *,
+    repo_root: Path, bus_dir: str | Path | None, chain_origin: str | None = None,
+) -> dict[str, Any] | None:
+    """Retain the native error before generic failed-process wrapping loses it.
+
+    The producer owns the structured error vocabulary. Shared pre-actor errors
+    additionally require the selected bus's outstanding ordinary checkpoint;
+    neither error prose nor a result's claimed checkpoint path grants ownership.
+    """
+    if executor_name != "phase_b_executor":
+        return None
+    payload = _extract_structured_stdout_payload(completed.stdout or "")
+    if not isinstance(payload, dict) or not ordinary_bridge_fix_failure_blocks_recovery(
+        repo_root, payload, bus_dir=bus_dir,
+    ):
+        return None
+    return {
+        **payload, "status": "error", "decision": "ROUTE_PHASE_B",
+        "executor": executor_name, "exit_code": completed.returncode,
+        "stdout": completed.stdout, "stderr": completed.stderr,
+        **({"chained_from": chain_origin} if chain_origin else {}),
+    }
+
+
+def _ordinary_bridge_fix_continuation_issue(
+    payload: dict[str, Any], *, repo_root: Path,
+    record: dict[str, Any], bus_dir: str | Path | None,
+) -> str | None:
+    """Check the producer's byte-bound nonterminal result without changing state."""
+    if payload.get("step") != "bridge_fix_finalize" or payload.get("resumed_from") != "bridge_fix_pending":
+        return "continuation requires recovered ordinary finalization"
+    step = payload.get("completed_step")
+    if not isinstance(step, str) or (
+        step != "bridge_converged" and re.fullmatch(r"bridge_round_[1-9][0-9]*", step) is None
+    ):
+        return "continuation requires an existing finalized bridge checkpoint"
+    digest = payload.get("checkpoint_sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        return "continuation requires the exact checkpoint byte digest"
+    try:
+        raw = agent_bus_path(repo_root, bus_dir, "executors", "phase_b_state.json").read_bytes()
+        if hashlib.sha256(raw).hexdigest() != digest:
+            return "finalized checkpoint bytes changed before continuation"
+        state = json.loads(raw)
+    except (OSError, ValueError, UnicodeError) as exc:
+        return f"cannot read finalized checkpoint: {exc}"
+    if not isinstance(state, dict):
+        return "finalized checkpoint must be an object"
+    for field in ("plan_path", "wave_id", "completed_step"):
+        if not isinstance(payload.get(field), str) or not payload[field] or state.get(field) != payload[field]:
+            return f"continuation {field} does not match finalized checkpoint"
+    mutation = state.get("bridge_fix_mutation")
+    if not isinstance(mutation, dict) or mutation.get("state") != "SUCCESS_PENDING_FINALIZE":
+        return "continuation requires a sealed ordinary success"
+    for field in ("wave_name", "wave_id"):
+        if field in record and (not isinstance(record[field], str) or normalize_wave_id(record[field]) != state["wave_id"]):
+            return "continuation does not match the routed wave"
+    routed_plan = record.get("plan_path") or _routing_record_tracked_packet(record)
+    if routed_plan and routed_plan != state["plan_path"]:
+        return "continuation does not match the routed plan"
+    if record.get("task_id") and record["task_id"] != state.get("bridge_fix_task_id"):
+        return "continuation does not match the routed task"
+    return None
+
+
 def _continue_successful_executor_chain(
     executor_name: str,
     completed: subprocess.CompletedProcess[str],
@@ -2985,6 +3084,11 @@ def _continue_successful_executor_chain(
     max_bridge_rounds: int | None = None,
 ) -> dict[str, Any]:
     """Continue the A→B→commit chain after a successful executor leg."""
+    ordinary_error = _ordinary_bridge_fix_error_result(
+        executor_name, completed, repo_root=repo_root, bus_dir=bus_dir, chain_origin=chain_origin,
+    )
+    if ordinary_error is not None:
+        return ordinary_error
     executor_script_dir = _script_dir_for_repo(script_repo_root)
     if executor_name in {"phase_a_executor", "phase_b_executor"}:
         terminal_hold = _terminal_receipt_gate_result(repo_root, record or {})
@@ -3167,6 +3271,12 @@ def _continue_successful_executor_chain(
             }
         if emit_output:
             _emit_completed_process_output(phase_b_result)
+        ordinary_error = _ordinary_bridge_fix_error_result(
+            "phase_b_executor", phase_b_result, repo_root=repo_root, bus_dir=bus_dir,
+            chain_origin="phase_a_executor",
+        )
+        if ordinary_error is not None:
+            return ordinary_error
         if phase_b_result.returncode != 0:
             return {
                 "status": "failed",
@@ -3191,6 +3301,56 @@ def _continue_successful_executor_chain(
         )
 
     if executor_name == "phase_b_executor":
+        payload = _extract_structured_stdout_payload(completed.stdout or "")
+        if isinstance(payload, dict) and payload.get("status") == "continue_phase_b":
+            issue = _ordinary_bridge_fix_continuation_issue(
+                payload, repo_root=repo_root, record=record or {}, bus_dir=bus_dir,
+            )
+            # The command comes from the process owner, never from the result.
+            # Retain the exact routing, bus, options and selected script owner.
+            command = completed.args
+            if (
+                not isinstance(command, (list, tuple))
+                or len(command) < 2
+                or any(not isinstance(arg, str) for arg in command)
+                or Path(command[1]).name != "phase_b_executor.py"
+            ):
+                issue = issue or "original Phase B invocation command is unavailable"
+            if issue is not None:
+                return {
+                    "status": "error", "step": "ordinary_bridge_fix_continuation",
+                    "decision": "ROUTE_PHASE_B", "executor": executor_name,
+                    "message": f"Ordinary continuation rejected: {issue}. Checkpoint preserved.",
+                }
+            phase_b_timeout = config.get("timeouts", {}).get("phase_b_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["phase_b_executor"])
+            try:
+                completed = _run_executor_in_group(list(command), cwd=repo_root, timeout=phase_b_timeout)
+            except subprocess.TimeoutExpired:
+                return {
+                    "status": "timeout", "decision": "ROUTE_PHASE_B", "executor": executor_name,
+                    "message": f"Phase B executor timed out after {phase_b_timeout}s",
+                    "chained_from": chain_origin,
+                }
+            if emit_output:
+                _emit_completed_process_output(completed)
+            ordinary_error = _ordinary_bridge_fix_error_result(
+                executor_name, completed, repo_root=repo_root, bus_dir=bus_dir, chain_origin=chain_origin,
+            )
+            if ordinary_error is not None:
+                return ordinary_error
+            if completed.returncode != 0:
+                return {
+                    "status": "failed", "decision": "ROUTE_PHASE_B", "executor": executor_name,
+                    "exit_code": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr,
+                    "chained_from": chain_origin,
+                }
+            following = _extract_structured_stdout_payload(completed.stdout or "")
+            if isinstance(following, dict) and following.get("status") == "continue_phase_b":
+                return {
+                    "status": "error", "step": "ordinary_bridge_fix_continuation",
+                    "decision": "ROUTE_PHASE_B", "executor": executor_name,
+                    "message": "Repeated ordinary continuation without consuming the finalized checkpoint; checkpoint preserved.",
+                }
         handoff_path = agent_bus_path(repo_root, bus_dir, "executors", "phase_b_handoff.json")
         if not handoff_path.exists():
             origin = chain_origin or "phase_b_executor"
@@ -4748,6 +4908,11 @@ def dispatch(
         result = _run_executor_in_group(
             executor_args, cwd=repo, timeout=timeout,
         )
+        ordinary_error = _ordinary_bridge_fix_error_result(
+            executor_name, result, repo_root=repo, bus_dir=bus_dir,
+        )
+        if ordinary_error is not None:
+            return ordinary_error
         if result.returncode != 0:
             return {
                 "status": "failed",
@@ -5544,6 +5709,8 @@ def main(argv: list[str] | None = None) -> int:
                         verbose=args.verbose,
                         bus_dir=args.bus_dir,
                     )
+                if _is_protected_ordinary_dispatch_error(result, repo_root=repo_root, bus_dir=args.bus_dir):
+                    break
                 embedded_recovery = result.get("recovery")
                 if isinstance(embedded_recovery, dict) and embedded_recovery.get("recovered"):
                     if args.verbose:
