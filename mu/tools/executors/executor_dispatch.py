@@ -87,7 +87,7 @@ except ImportError:
     terminate_process_tree = _mod.terminate_process_tree
 
 try:
-    from phase_b_executor import ordinary_bridge_fix_failure_blocks_recovery
+    from phase_b_executor import implementer_failure_blocks_recovery, ordinary_bridge_fix_failure_blocks_recovery
 except ImportError:
     import importlib.util as _ilu
     _phase_b_spec = _ilu.spec_from_file_location("phase_b_executor", str(SCRIPT_DIR / "phase_b_executor.py"))
@@ -95,6 +95,7 @@ except ImportError:
     assert _phase_b_spec.loader is not None
     _phase_b_spec.loader.exec_module(_phase_b_mod)
     ordinary_bridge_fix_failure_blocks_recovery = _phase_b_mod.ordinary_bridge_fix_failure_blocks_recovery
+    implementer_failure_blocks_recovery = _phase_b_mod.implementer_failure_blocks_recovery
 
 try:
     from pipeline_monitor_identity import (
@@ -2125,6 +2126,10 @@ def run_recoverable_surface_command(
         "phase-b": "phase_b_executor",
         "commit": "commit_executor",
     }[args.surface]
+    ownership_error = _owned_phase_b_entry_error(executor_name, repo_root=repo_root, bus_dir=bus_dir)
+    if ownership_error is not None:
+        _emit_surface_stop_result(ownership_error, json_output=bool(getattr(args, "json", False)))
+        return 1
     decision = _surface_decision(args)
     surface_record = _surface_record_for_chain(args, repo_root)
     explicit_commit_handoff = args.surface == "commit" and getattr(args, "handoff", None)
@@ -2989,16 +2994,44 @@ def _carry_forward_candidate_authority(
     return carried, None
 
 
+def _owned_phase_b_entry_error(
+    executor_name: str, *, repo_root: Path, bus_dir: str | Path | None,
+) -> dict[str, Any] | None:
+    """Fence existing ownership before routing refresh or another Phase A actor."""
+    if executor_name not in {"phase_a_executor", "phase_b_executor"}:
+        return None
+    if not implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir):
+        return None
+    try:
+        state = json.loads(agent_bus_path(repo_root, bus_dir, "executors", "phase_b_state.json").read_bytes())
+        if (
+            executor_name == "phase_b_executor" and isinstance(state, dict)
+            and isinstance(state.get("implementer_mutation"), dict)
+            and state["implementer_mutation"].get("state") == "SUCCESS_PENDING_FINALIZE"
+        ):
+            # The producer revalidates this sealed outcome before finalization.
+            return None
+    except (OSError, ValueError, UnicodeError):
+        pass
+    return {
+        "status": "error", "decision": "ROUTE_PHASE_B", "executor": "phase_b_executor",
+        "step": "implementer_mutation", "authority_error": "outstanding_ownership",
+        "errors": ["Phase B implementer ownership is outstanding; resume its known outcome through Phase B. Checkpoint preserved."],
+    }
+
+
 def _is_protected_ordinary_dispatch_error(
     result: dict[str, Any], *, repo_root: Path, bus_dir: str | Path | None,
 ) -> bool:
     """Stop before every retry consumer, including embedded recovery results."""
     return (
         result.get("executor") == "phase_b_executor"
-        and result.get("status") == "error"
         and (
-            result.get("step") == "ordinary_bridge_fix_continuation"
-            or ordinary_bridge_fix_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
+            implementer_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
+            or (result.get("status") == "error" and (
+                result.get("step") == "ordinary_bridge_fix_continuation"
+                or ordinary_bridge_fix_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
+            ))
         )
     )
 
@@ -3016,6 +3049,15 @@ def _ordinary_bridge_fix_error_result(
     if executor_name != "phase_b_executor":
         return None
     payload = _extract_structured_stdout_payload(completed.stdout or "")
+    if not isinstance(payload, dict) or not ordinary_bridge_fix_failure_blocks_recovery(repo_root, payload, bus_dir=bus_dir):
+        if implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir):
+            # Timeout/abrupt-exit/embedded-recovery output cannot erase ownership.
+            # A legitimate byte-bound finalization result is consumed below.
+            if not (isinstance(payload, dict) and payload.get("status") == "continue_phase_b"):
+                payload = {
+                    "status": "error", "step": "implementer_mutation", "authority_error": "unresolved_outcome",
+                    "errors": ["Phase B exited with outstanding implementer ownership; checkpoint preserved."],
+                }
     if not isinstance(payload, dict) or not ordinary_bridge_fix_failure_blocks_recovery(
         repo_root, payload, bus_dir=bus_dir,
     ):
@@ -3033,10 +3075,15 @@ def _ordinary_bridge_fix_continuation_issue(
     record: dict[str, Any], bus_dir: str | Path | None,
 ) -> str | None:
     """Check the producer's byte-bound nonterminal result without changing state."""
-    if payload.get("step") != "bridge_fix_finalize" or payload.get("resumed_from") != "bridge_fix_pending":
+    implementer = payload.get("step") == "implementer_finalize" and payload.get("resumed_from") == "implementer_mutation"
+    if not implementer and (payload.get("step") != "bridge_fix_finalize" or payload.get("resumed_from") != "bridge_fix_pending"):
         return "continuation requires recovered ordinary finalization"
     step = payload.get("completed_step")
-    if not isinstance(step, str) or (
+    if implementer:
+        if step not in ("implementer", "needs_phase_b_reentry", "private_attr_remediation_prepared_pending_review",
+                        "reentry_private_attr_remediation_prepared_pending_review"):
+            return "continuation requires the finalized implementer checkpoint"
+    elif not isinstance(step, str) or (
         step != "bridge_converged" and re.fullmatch(r"bridge_round_[1-9][0-9]*", step) is None
     ):
         return "continuation requires an existing finalized bridge checkpoint"
@@ -3055,7 +3102,7 @@ def _ordinary_bridge_fix_continuation_issue(
     for field in ("plan_path", "wave_id", "completed_step"):
         if not isinstance(payload.get(field), str) or not payload[field] or state.get(field) != payload[field]:
             return f"continuation {field} does not match finalized checkpoint"
-    mutation = state.get("bridge_fix_mutation")
+    mutation = state.get("implementer_mutation" if implementer else "bridge_fix_mutation")
     if not isinstance(mutation, dict) or mutation.get("state") != "SUCCESS_PENDING_FINALIZE":
         return "continuation requires a sealed ordinary success"
     for field in ("wave_name", "wave_id"):
@@ -3064,7 +3111,13 @@ def _ordinary_bridge_fix_continuation_issue(
     routed_plan = record.get("plan_path") or _routing_record_tracked_packet(record)
     if routed_plan and routed_plan != state["plan_path"]:
         return "continuation does not match the routed plan"
-    if record.get("task_id") and record["task_id"] != state.get("bridge_fix_task_id"):
+    task_id = state.get("bridge_fix_task_id")
+    if implementer:
+        context = state.get("implementer_mutation_context")
+        if not isinstance(context, dict) or not isinstance(context.get("identity"), dict):
+            return "continuation requires the sealed implementer invocation identity"
+        task_id = context["identity"].get("task_id")
+    if record.get("task_id") and record["task_id"] != task_id:
         return "continuation does not match the routed task"
     return None
 
@@ -3875,6 +3928,8 @@ def _clear_phase_b_state_for_retry(
     """
     if result.get("executor") != "phase_b_executor":
         return
+    if _is_protected_ordinary_dispatch_error(result, repo_root=repo_root, bus_dir=bus_dir):
+        return
     recovery = result.get("recovery")
     if (
         isinstance(recovery, dict)
@@ -4449,6 +4504,11 @@ def dispatch(
             "message": str(exc),
         }
     cfg = config or load_config()
+    ownership_error = _owned_phase_b_entry_error(
+        resolve_executor(record.get("decision", "")), repo_root=repo, bus_dir=bus_dir,
+    )
+    if ownership_error is not None:
+        return ownership_error
     # Preserve caller/canonical identity before TASKS.md tracked_packet backfill.
     identity_record = record
     record = _restore_canonical_supervisor_terminal_receipt(

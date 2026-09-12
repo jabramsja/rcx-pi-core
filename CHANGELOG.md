@@ -6,8 +6,44 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-12
 
-### Exact P0IBRRCP Landed-Evidence and Queue Closure (Phase B, CURRENT)
+### Preserved P0IBRRCO Implementer Ownership R2 (Phase B, CURRENT)
 
+- ports exactly the two production and two test modules from the read-only
+  R1 terminal `candidate_snapshot` under
+  `reports/archive/control_plane/p0ibrrco-inflight-r1-evidence-2026-09-12/terminal_recovery_timeout_stop/`;
+  all four SHA256 values match its manifest on exact PR #1293 merge
+  `c7fed5bba8de7898b686a636cecc42e379968eec`. R1 execution artifacts and
+  approvals remain historical evidence
+- retains durable ownership before initial, private-remediation and reentry
+  mutation; seals known success before fallible finalization; carries ownership
+  through SDK review and post-GO pager/convergence checkpoint handling. Both
+  dispatcher routes preserve unresolved ownership before retry, recovery or
+  state clearing. Ordinary success, explicit failure, corrective
+  REQUEST_CHANGES/NO_GO and QUESTION refusal retain their existing behavior
+- credits the archived R1 public before/after reproductions: 14 initial
+  ownership failures, three SDK replay failures and seven post-GO failures
+  before their respective repairs. The completed candidate passed 51 focused
+  checks and all 1613 tests in 268.76s with four work-stealing workers; these
+  are historical results. R1 stopped after the separate native serial recovery
+  validation hit its 300-second cap and repeated the same target, without a CO
+  commit or merge
+- the fresh R2 control-surface invariant check passes all six invariants,
+  including INV-2; the exact full two-module command with four work-stealing
+  workers passed all 1613 tests in 268.41s. Current independent review,
+  native governance generation and providerless landing remain
+  outer-executor-owned and pending
+- retains this same CO queue position as CURRENT, with P0IBRRC immediately
+  NEXT, all later task identities in order, Mu production before optimization,
+  stopped evidence and the held TASKS stash preserved. No later RRC semantics,
+  recovery infrastructure, runtime, substrate or fleet behavior changes
+
+### Exact P0IBRRCP Landed-Evidence and Queue Closure (Landed)
+
+- landed through PR #1293 at exact merge
+  `c7fed5bba8de7898b686a636cecc42e379968eec` on 2026-09-12T14:55:50Z,
+  from repaired head `f39be0ab874ac951b386c957c684c3c5c779472e`;
+  native launcher/dispatcher exited 0 at 14:59:27Z and primary fast-forward
+  reached the exact merge
 - verifies only the normal-root recorded-child requirement already implemented
   and tested in PR #1256, merge `0a4c24120141723d70e6dd1c476ffaa70b1ff9ca`,
   an ancestor of exact PR #1292 merge
@@ -23,21 +59,27 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   existing semantic position; the native selector returns this exact wave and
   canonical packet. The two inherited successor paragraphs retain their
   historical merge facts and now match current queue order
-- exact P0IBRRCP closure remains CURRENT until native landing; P0IBRRCO is
-  immediately NEXT, then P0IBRRC, P0IBRRT, P0IBRR, P0IB1, P0IB2 and every later
-  recorded item, with Mu optimization last. Private-review R2, all aliases,
+- exact P0IBRRCP closure is LANDED; P0IBRRCO is CURRENT, then P0IBRRC
+  immediately NEXT, P0IBRRT, P0IBRR, P0IB1, P0IB2 and every later recorded item,
+  with Mu optimization last. Private-review R2, all aliases,
   stopped evidence, immutable cleanup claims/backups and consumed outcomes
   1 MOVED/3 INCOMPLETE/407 prior HOLD remain preserved; no fleet replay or PR
-  terminal action occurs during this Phase B implementation
-- fresh launch/Phase A authority is bound to the exact PR #1292 merge;
-  Phase B independent review, staged MAINTENANCE governance, supervisors and
-  the providerless commit/pre-push/CI/merge/postmerge path remain native-owned
-  and pending. No broader process, runtime, substrate or Mu completion is claimed
-- supervisor re-entry reconciles the same-wave canonical tracker to the locked
+  terminal action is added by this ownership implementation
+- predecessor Phase A/Phase B and three supervisors approved after same-wave
+  MAINTENANCE class-header correction. The independent same-PR P1
+  packet-lifecycle finding was repaired in two docs; green-gate run
+  `34700014415`, attempt 1, passed 11107 main-suite tests with 22 skipped in
+  529.75s, and all seven checks passed. Native current-head review wait timed
+  out after 59s; its clean current-head snapshot policy proceeded through fresh
+  CI verification and merge. No independent repaired-head review clearance is
+  claimed. Full terminal evidence remains in
+  `reports/archive/control_plane/p0ibrrcp-exact-closure-r1-evidence-2026-09-12/`;
+  held TASKS stash `673a84136e45aba8d69686d41b2039e27447193d` remains preserved
+- supervisor re-entry reconciled the same-wave canonical tracker to the locked
   MAINTENANCE classification, including its no-op proof and defer reason; a
-  tracker-derived packet Class header prevents native package refresh from
-  falling back to L4_ENABLER. Native package regeneration and affected governance
-  validations remain pending with the outer Phase B owner
+  tracker-derived packet Class header prevented native package refresh from
+  falling back to L4_ENABLER. No broader process, runtime, substrate or Mu
+  completion is credited to this documentation closure
 
 ### Ordinary Bridge-Fix Outcome and Dispatcher Boundary R3C6-R4 (Landed)
 
@@ -75,8 +117,8 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   `reports/archive/control_plane/r3c6-r4-evidence-2026-09-12/terminal_closeout_observation.json`;
   no native exit 0, restored/replayed carrier or imported predecessor authority
   is claimed. The carrier is deregistered and no predecessor owner remains
-- R4 landed in the same slot; exact P0IBRRCP closure is CURRENT with fresh
-  independent authority, P0IBRRCO remains immediately NEXT, and both consumed
+- R4 landed in the same slot; exact P0IBRRCP closure later LANDED in PR #1293,
+  P0IBRRCO is CURRENT with P0IBRRC immediately NEXT, and both consumed
   fleet operations and every later independent obligation remain unchanged
 
 ## 2026-09-11
