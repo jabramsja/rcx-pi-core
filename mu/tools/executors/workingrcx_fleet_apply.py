@@ -2,15 +2,17 @@
 """The four-target fleet operation; planning never inspects the live targets.
 
 Apply is a foreground, postmerge operation only. Immutable local intent and
-stage receipts make interruption discoverable; there is deliberately no retry,
-resume, force, removal, or configurable candidate mode. Exit 3 means at least
-one HOLD/INCOMPLETE outcome, not fleet-wide completion.
+stage receipts make interruption discoverable. --reconcile-r1 admits only the
+four pinned zero-move outcomes to a separate one-shot operation; neither mode
+can resume or replay a consumed operation. Exit 3 means at least one
+HOLD/INCOMPLETE outcome, not fleet-wide completion.
 """
 from __future__ import annotations
 
 import argparse
 from collections import Counter
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -34,6 +36,23 @@ SCRIPT_PATH = Path(__file__).resolve()
 FLEET_ROOT = Path("/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal")
 COMMON_DIR = FLEET_ROOT / "WorkingRCX/.git"
 OPERATION_ROOT = FLEET_ROOT / f"fleet-apply-preserved-{WAVE_ID}"
+R1_MERGE = "a9e8d85a3d2f08b1a599c8f8ddecdc23f6ea38ec"
+RECONCILE_WAVE_ID = "workingrcx-fleet-apply-action-reconciliation-r2-2026-09-11"
+RECONCILE_PLAN_PATH = Path(f"reports/control_plane/{RECONCILE_WAVE_ID}_plan.json")
+RECONCILE_OPERATION_ROOT = FLEET_ROOT / f"fleet-apply-preserved-{RECONCILE_WAVE_ID}"
+R1_RECEIPT_HASHES = {
+    "intent.json": "a5d34bc15ba7a3fb72d000e8fa80a94196fbe0610a7131a9fe11c9f7a7cc2ed8",
+    "plan.json": "8387fd46b515a0f939ca2c9a7b1438833584369dc2092babd172a8d67f6e1433",
+    "summary.json": "b1f786822c76da35b0f0de916dc71a6adf521489468c5c2ed38ea82f34de21f8",
+    "159/outcome.json": "b6b58ddc4a53471df915360657484cb1d64b5c9650c3304b0a84bc2ebaa23cbb",
+    "163/outcome.json": "afae12ffde80fffe4dd5d6397fd57d79feb63f91f2a573806a4f13f6d417c615",
+    "292/intent.json": "d2cb2d14de9ff97136ab8eaeb016a04b3be9ee872401b2557fe9ec81f43e6fde",
+    "292/outcome.json": "1826bbe3c8a512395330e0a1649f800891c3c74deb49ff288e0422c48f388873",
+    "292/preparation.json": "552b5d007a9f7c1df177464887a79cc3793cdd6ecbfa009c84d06ccd64fe374f",
+    "292/before.json": "444886f28e2b0a343f8ad77a8d9aaef9da6a278b2e7798591334c981c65a8fa5",
+    "292/gitdir-before.json": "be8ce4908ad9d009dff3abb6bd7110841a3590d25fba14523a08e6ab8a5b3671",
+    "305/outcome.json": "e47921523c305a56b27d16aa5d8410177608572814abd0e2b70a4465f5238271",
+}
 CANDIDATES = tuple(
     dict(path=str(FLEET_ROOT / name), HEAD=head, branch="refs/heads/" + branch,
          common_dir=str(COMMON_DIR), git_dir=str(COMMON_DIR / "worktrees" / name))
@@ -62,6 +81,10 @@ GIT_SETTINGS = (
 
 class Hold(RuntimeError):
     """An unmet prerequisite, never permission to adapt the operation."""
+
+    def __init__(self, message: str, *, diagnostic: dict | None = None):
+        super().__init__(message)
+        self.diagnostic = diagnostic
 
 
 def encoded(value: object) -> bytes:
@@ -224,7 +247,8 @@ def validate_classification(data: dict) -> None:
         raise Hold("Malformed or incomplete classification") from exc
 
 
-def build_plan(repo: Path, classification: Path, sha256: str, commit: str) -> dict:
+def build_plan(repo: Path, classification: Path, sha256: str, commit: str,
+               *, reconcile_r1: bool = False) -> dict:
     if sha256 != CLASSIFICATION_SHA256 or commit != CLASSIFICATION_COMMIT:
         raise Hold("Wrong pinned source hash or predecessor")
     if classification.absolute() != repo / CLASSIFICATION_PATH:
@@ -251,23 +275,56 @@ def build_plan(repo: Path, classification: Path, sha256: str, commit: str) -> di
                          outcome="PENDING_POSTMERGE_ACTION_TIME_CHECKS",
                          destination=str(OPERATION_ROOT / str(row["source_index"]) / "worktree"))
         entries.append(entry)
-    return dict(schema_version=1, wave_id=WAVE_ID, mutation_authorized=False,
+    plan = dict(schema_version=1, wave_id=WAVE_ID, mutation_authorized=False,
                 classification_path=str(CLASSIFICATION_PATH), classification_sha256=sha256,
                 classification_commit=commit, entry_count=411, untouched_holds=407,
                 conditional_candidates=4, operation_root=str(OPERATION_ROOT),
                 entries=entries, postmerge_command=postmerge_command())
+    if not reconcile_r1:
+        return plan
+    # Only carrier-local landed blobs are read here, including in CI. The
+    # pinned local receipts are prerequisites for APPLY, never planning input.
+    raw_plan = read_plain(repo / PLAN_PATH)
+    with safe_git_environment():
+        git(repo, "merge-base", "--is-ancestor", R1_MERGE, "HEAD")
+        if (digest(raw_plan) != R1_RECEIPT_HASHES["plan.json"]
+                or raw_plan != encoded(plan)
+                or raw_plan != git(repo, "show", f"{R1_MERGE}:{PLAN_PATH}")):
+            raise Hold("R1 plan differs from exact landed authority")
+    for entry in entries:
+        if entry["action"] == "UNTOUCHED_HOLD":
+            continue
+        index = entry["source_index"]
+        if index not in (159, 163, 292, 305):
+            raise Hold("Reconciliation is outside the four observed outcomes")
+        entry.update(
+            destination=str(RECONCILE_OPERATION_ROOT / str(index) / "worktree"),
+            action_time_head=R1_MERGE if index == 292 else entry["source_identity"]["HEAD"],
+            r1_outcome=dict(status="INCOMPLETE" if index == 292 else "HOLD",
+                            prepared_head=None, boundary=None,
+                            preparation_started=index == 292,
+                            terminal_action_started=False))
+    plan.update(wave_id=RECONCILE_WAVE_ID, operation_root=str(RECONCILE_OPERATION_ROOT),
+                r1_authority=dict(wave_id=WAVE_ID, merge_commit=R1_MERGE,
+                                  plan_path=str(PLAN_PATH), operation_root=str(OPERATION_ROOT),
+                                  metadata_sha256=dict(R1_RECEIPT_HASHES)),
+                postmerge_command=postmerge_command(reconcile_r1=True))
+    return plan
 
 
-def postmerge_command() -> str:
+def postmerge_command(*, reconcile_r1: bool = False) -> str:
     return ("PYTHONDONTWRITEBYTECODE=1 python3 " + str(TOOL_PATH)
             + " --classification " + str(CLASSIFICATION_PATH)
             + " --classification-sha256 " + CLASSIFICATION_SHA256
             + " --classification-commit " + CLASSIFICATION_COMMIT
-            + " --plan-output " + str(PLAN_PATH)
-            + " --apply --operation-root " + shlex.quote(str(OPERATION_ROOT)))
+            + (" --reconcile-r1" if reconcile_r1 else "")
+            + " --plan-output " + str(RECONCILE_PLAN_PATH if reconcile_r1 else PLAN_PATH)
+            + " --apply --operation-root "
+            + shlex.quote(str(RECONCILE_OPERATION_ROOT if reconcile_r1 else OPERATION_ROOT)))
 
 
 def require_landed(repo: Path, plan: dict) -> str:
+    plan_path = RECONCILE_PLAN_PATH if plan["wave_id"] == RECONCILE_WAVE_ID else PLAN_PATH
     if SCRIPT_PATH != repo / TOOL_PATH:
         raise Hold("Apply must execute the landed carrier tool")
     if (repo / line(git(repo, "rev-parse", "--git-common-dir"))).resolve() != COMMON_DIR:
@@ -276,12 +333,12 @@ def require_landed(repo: Path, plan: dict) -> str:
     landed = line(git(repo, "rev-parse", "origin/dev"))
     git(repo, "merge-base", "--is-ancestor", CLASSIFICATION_COMMIT, landed)
     git(repo, "merge-base", "--is-ancestor", "HEAD", landed)
-    for path in (TOOL_PATH, TEST_PATH, PLAN_PATH,
+    for path in (TOOL_PATH, TEST_PATH, PLAN_PATH, plan_path,
                  Path("mu/tools/executors/commit_executor.py"),
                  Path("mu/tools/executors/executor_common.py")):
         if read_plain(repo / path) != git(repo, "show", f"{landed}:{path}"):
             raise Hold(f"Unlanded or modified apply authority: {path}")
-    if read_plain(repo / PLAN_PATH) != encoded(plan):
+    if read_plain(repo / plan_path) != encoded(plan):
         raise Hold("Landed plan differs from the fixed operation")
     return landed
 
@@ -380,35 +437,157 @@ def preserve_archive(root: Path, output: Path, manifest: dict) -> None:
         stream.flush()
         os.fsync(stream.fileno())
     sync_directory(output.parent)
-    observed = {}
-    with tarfile.open(output, "r") as archive:
-        for member in archive:
-            name = member.name.removeprefix("./")
-            entry = {"mode": member.mode}
-            if member.isdir():
-                entry["kind"] = "directory"
-            elif member.issym():
-                entry.update(kind="symlink", target=member.linkname)
-            elif member.isfile() or member.islnk():
-                stream = archive.extractfile(member)
-                if stream is None:
-                    raise Hold("Archive member is unreadable")
-                h, size = hashlib.sha256(), 0
-                with stream:
-                    while chunk := stream.read(1024 * 1024):
-                        h.update(chunk)
-                        size += len(chunk)
-                entry.update(kind="file", size=size, sha256=h.hexdigest())
-            else:
-                raise Hold("Unsupported preservation archive entry")
-            if name in observed:
-                raise Hold("Duplicate preservation archive entry")
-            observed[name] = entry
-    if observed != manifest or tree_manifest(root) != manifest:
+    verify_archive(output, manifest)
+    if tree_manifest(root) != manifest:
         raise Hold("Preservation archive/source verification failed")
 
 
-def process_idle(ident: dict) -> None:
+def verify_archive(path: Path, manifest: dict) -> None:
+    """Verify archived bytes/modes without extracting or following links."""
+    plain_directory(path.parent)
+    observed = {}
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise Hold("Preservation archive is not a single-link regular file")
+        with tarfile.open(fileobj=source, mode="r") as archive:
+            for member in archive:
+                name = member.name.removeprefix("./")
+                entry = {"mode": member.mode}
+                if member.isdir():
+                    entry["kind"] = "directory"
+                elif member.issym():
+                    entry.update(kind="symlink", target=member.linkname)
+                elif member.isfile() or member.islnk():
+                    stream = archive.extractfile(member)
+                    if stream is None:
+                        raise Hold("Archive member is unreadable")
+                    h, size = hashlib.sha256(), 0
+                    with stream:
+                        while chunk := stream.read(1024 * 1024):
+                            h.update(chunk)
+                            size += len(chunk)
+                    entry.update(kind="file", size=size, sha256=h.hexdigest())
+                else:
+                    raise Hold("Unsupported preservation archive entry")
+                if name in observed:
+                    raise Hold("Duplicate preservation archive entry")
+                observed[name] = entry
+        if stable_stat(os.fstat(source.fileno())) != stable_stat(info):
+            raise Hold("Preservation archive changed during verification")
+    if observed != manifest:
+        raise Hold("Preservation archive/manifest verification failed")
+
+
+def read_r1_receipts(repo: Path) -> dict:
+    """Exact consumed receipt shape; any added stage also refuses follow-up."""
+    plain_directory(OPERATION_ROOT)
+    expected_root = {"intent.json", "plan.json", "summary.json", "159", "163", "292", "305"}
+    if {p.name for p in OPERATION_ROOT.iterdir()} != expected_root:
+        raise Hold("R1 operation contents changed or a prior terminal action started")
+    receipts = {}
+    for name, expected_hash in R1_RECEIPT_HASHES.items():
+        raw = read_plain(OPERATION_ROOT / name)
+        if digest(raw) != expected_hash:
+            raise Hold(f"R1 receipt SHA-256 changed: {name}")
+        receipts[name] = json.loads(raw)
+    old_plan = build_plan(repo, repo / CLASSIFICATION_PATH, CLASSIFICATION_SHA256, CLASSIFICATION_COMMIT)
+    if (receipts["plan.json"] != old_plan
+            or read_plain(repo / PLAN_PATH) != encoded(old_plan)
+            or git(repo, "show", f"{R1_MERGE}:{PLAN_PATH}") != encoded(old_plan)):
+        raise Hold("R1 receipt plan contradicts landed classification/plan authority")
+    intent = dict(wave_id=WAVE_ID, state="OPERATION_STARTED_OUTCOME_UNKNOWN", landed=R1_MERGE,
+                  plan_sha256=R1_RECEIPT_HASHES["plan.json"], operation_root=str(OPERATION_ROOT))
+    if (receipts["intent.json"] != intent
+            or read_plain(COMMON_DIR / f"rcx_fleet_apply_{WAVE_ID}.json") != encoded(intent)):
+        raise Hold("R1 consumed common-directory claim changed")
+    outcomes = []
+    for entry in old_plan["entries"]:
+        if entry["action"] == "UNTOUCHED_HOLD":
+            continue
+        index = entry["source_index"]
+        directory = OPERATION_ROOT / str(index)
+        plain_directory(directory)
+        names = {"intent.json", "outcome.json"}
+        if index == 292:
+            names |= {"preparation.json", "before.json", "before.tar", "gitdir-before.json",
+                      "gitdir-before.tar", "history.bundle"}
+        if {p.name for p in directory.iterdir()} != names:
+            raise Hold("R1 receipt stages changed or a prior terminal action started")
+        if read_plain(directory / "intent.json") != encoded(entry):
+            raise Hold("R1 target intent contradicts the original plan")
+        outcome = dict(source_identity=entry["source_identity"], destination=entry["destination"],
+                       status="INCOMPLETE" if index == 292 else "HOLD", prepared_head=None,
+                       boundary=None, reason=("Open target files/processes or uncertain lsof evidence"
+                                             if index == 292 else
+                                             "Native ownership status is active or uncertain"))
+        if receipts[f"{index}/outcome.json"] != outcome:
+            raise Hold("R1 outcome contradicts the exact no-terminal-action observation")
+        outcomes.append(outcome)
+    summary = dict(wave_id=WAVE_ID, outcomes=outcomes, untouched_holds=407,
+                   outcome_counts={"HOLD": 3, "INCOMPLETE": 1},
+                   operation_outcomes_recorded=True, fleet_clean=False)
+    if receipts["summary.json"] != summary:
+        raise Hold("R1 summary contradicts its four recorded outcomes")
+    preparation = receipts["292/preparation.json"]
+    if (not isinstance(preparation, dict) or set(preparation) != {
+            "state", "original", "prepared_head", "history_bundle_sha256"}
+            or preparation["state"] != "PREPARATION_STARTED_OUTCOME_UNKNOWN"
+            or preparation["original"] != old_plan["entries"][292]["source_identity"]
+            or preparation["prepared_head"] != R1_MERGE):
+        raise Hold("R1 preparation contradicts original/prepared identity")
+    return receipts
+
+
+def verify_r1_preservation(repo: Path) -> dict:
+    receipts = read_r1_receipts(repo)
+    directory = OPERATION_ROOT / "292"
+    hashes = {name: file_hash(directory / name)
+              for name in ("before.tar", "gitdir-before.tar", "history.bundle")}
+    verify_archive(directory / "before.tar", receipts["292/before.json"])
+    verify_archive(directory / "gitdir-before.tar", receipts["292/gitdir-before.json"])
+    preparation = receipts["292/preparation.json"]
+    bundle = directory / "history.bundle"
+    if hashes["history.bundle"] != preparation["history_bundle_sha256"]:
+        raise Hold("R1 preserved history bundle SHA-256 changed")
+    git(repo, "bundle", "verify", str(bundle))
+    ident = preparation["original"]
+    if line(git(repo, "bundle", "list-heads", str(bundle))) != ident["HEAD"] + " " + ident["branch"]:
+        raise Hold("R1 bundle does not preserve exactly the original branch history")
+    git(repo, "merge-base", "--is-ancestor", ident["HEAD"], R1_MERGE)
+    verify_r1_unchanged(repo, hashes)
+    return hashes
+
+
+def verify_r1_unchanged(repo: Path, preservation_hashes: dict) -> None:
+    read_r1_receipts(repo)
+    for name, expected in preservation_hashes.items():
+        if file_hash(OPERATION_ROOT / "292" / name) != expected:
+            raise Hold(f"R1 preservation changed: {name}")
+
+
+def verify_r1_prepared_target(ident: dict, current: dict) -> None:
+    target, admin = Path(ident["path"]), Path(ident["git_dir"])
+    git(target, "merge-base", "--is-ancestor", ident["HEAD"], R1_MERGE)
+    last_log = read_plain(admin / "logs/HEAD").splitlines()
+    if (read_plain(admin / "ORIG_HEAD").strip() != ident["HEAD"].encode()
+            or not last_log or last_log[-1].split()[:2] != [ident["HEAD"].encode(), R1_MERGE.encode()]):
+        raise Hold("R1 original-to-prepared fast-forward transition is unverifiable")
+    tracked = {os.fsdecode(p) for p in git(target, "ls-tree", "-r", "--name-only", "-z",
+                                         ident["HEAD"]).split(b"\0") if p}
+    original = json.loads(read_plain(OPERATION_ROOT / "292/before.json"))
+    verify_untracked_preserved(tracked, original, current)
+
+
+def verify_untracked_preserved(tracked: set[str], before: dict, after: dict) -> None:
+    tracked_tree = tracked | {str(p) for name in tracked for p in Path(name).parents}
+    for name, evidence in before.items():
+        if name not in tracked_tree and after.get(name) != evidence:
+            raise Hold("Untracked/ignored evidence changed during preparation")
+
+
+def process_idle(ident: dict) -> dict:
     target = Path(ident["path"])
     proc = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,command="],
                           capture_output=True, timeout=30)
@@ -422,13 +601,25 @@ def process_idle(ident: dict) -> None:
                 (str(target), ident["git_dir"], ident["branch"].removeprefix("refs/heads/"))):
             raise Hold("Active process references target identity")
     # +D is limited to this exact target, and includes open descendants/cwds.
-    proc = subprocess.run(["lsof", "-nP", "+D", str(target), "-Fpn"],
-                          capture_output=True, timeout=30)
+    command = ["lsof", "-nP", "+D", str(target), "-Fpn"]
+    diagnostic = dict(probe="lsof", command=command,
+                      observed_at=datetime.now(timezone.utc).isoformat())
+    try:
+        proc = subprocess.run(command, capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        diagnostic.update(returncode=None, error=str(exc),
+                          stdout=os.fsdecode(getattr(exc, "stdout", None) or b""),
+                          stderr=os.fsdecode(getattr(exc, "stderr", None) or b""))
+        raise Hold("Open target files/processes or uncertain lsof evidence",
+                   diagnostic=diagnostic) from exc
+    diagnostic.update(returncode=proc.returncode, stdout=os.fsdecode(proc.stdout),
+                      stderr=os.fsdecode(proc.stderr))
     if proc.stdout or proc.stderr or proc.returncode != 1:
-        raise Hold("Open target files/processes or uncertain lsof evidence")
+        raise Hold("Open target files/processes or uncertain lsof evidence", diagnostic=diagnostic)
+    return diagnostic
 
 
-def native_idle(target: Path, manifest: dict) -> None:
+def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> None:
     for name, entry in manifest.items():
         if not any(part.startswith(".agent_bus") for part in Path(name).parts):
             continue
@@ -460,6 +651,31 @@ def native_idle(target: Path, manifest: dict) -> None:
                         raise Hold("Native process identity remains live")
             state = str(value.get("state", value.get("status", ""))).lower()
             terminal_states = {"idle", "done", "complete", "completed", "failed", "stopped"}
+            if reconcile_r1 and (not state or ("state" in value and "status" in value
+                                               and value["state"] != value["status"])):
+                raise Hold("Native ownership status is active or uncertain")
+            if reconcile_r1 and state in {"tier3_exhausted", "tier3_short_circuited"}:
+                # Only the two observed _finish_recovery_status records. No
+                # inference from a state name alone, and no status-file edits.
+                try:
+                    finished = datetime.fromisoformat(value.get("finished_at", ""))
+                except (TypeError, ValueError):
+                    raise Hold("Native recovery finish evidence is uncertain") from None
+                expected_outcome = ("exhausted" if state == "tier3_exhausted"
+                                    else "short_circuited_non_actionable")
+                if (path.name != "recovery_status.json" or value.get("state") != state
+                        or value.get("status", state) != state or value.get("active") is not False
+                        or finished.tzinfo is None or value.get("recovered") is not False
+                        or type(value.get("exhausted")) is not bool
+                        or value.get("child_pid") != 0 or value.get("child_role") != ""
+                        or value.get("current_command") != "" or value.get("outcome") != expected_outcome
+                        or (state == "tier3_exhausted" and (
+                            value["exhausted"] is not True or value.get("last_action") != "exhausted"))
+                        or (state == "tier3_short_circuited" and (
+                            (value.get("last_action"), value["exhausted"])
+                            not in (("escalate", True), ("skip", False))))):
+                    raise Hold("Native ownership status is active or uncertain")
+                terminal_states.add(state)
             if (value.get("active") is True
                     or ("active" in value and type(value["active"]) is not bool)
                     or (state and state not in terminal_states)
@@ -486,14 +702,22 @@ def unprotected(repo: Path, ident: dict) -> None:
                 raise Hold("TASKS retains an exact target identity; protection is not disproved")
 
 
-def inspect_target(repo: Path, ident: dict, *, head: str | None = None) -> tuple[set[str], dict]:
+def inspect_target(repo: Path, ident: dict, *, head: str | None = None,
+                   reconcile_r1: bool = False, process_checks: list | None = None) -> tuple[set[str], dict]:
     inspect_identity(ident, head=head)
     target = Path(ident["path"])
     tracked = clean_state(target)
     unprotected(repo, ident)
     manifest = tree_manifest(target)
-    native_idle(target, manifest)
-    process_idle(ident)
+    native_idle(target, manifest, reconcile_r1=reconcile_r1)
+    try:
+        diagnostic = process_idle(ident)
+    except Hold as exc:
+        if process_checks is not None and exc.diagnostic is not None:
+            process_checks.append(exc.diagnostic)
+        raise
+    if process_checks is not None and diagnostic is not None:
+        process_checks.append(diagnostic)
     return tracked, manifest
 
 
@@ -509,16 +733,36 @@ def preparation_lock(common: Path):
         yield
 
 
-def apply_target(repo: Path, entry: dict, directory: Path, boundary) -> dict:
+def apply_target(repo: Path, entry: dict, directory: Path, boundary,
+                 *, r1_preservation: dict | None = None) -> dict:
     ident = entry["source_identity"]
     target, destination = Path(ident["path"]), Path(entry["destination"])
     outcome = dict(source_identity=ident, destination=str(destination), status="HOLD",
                    reason=None, prepared_head=None, boundary=None)
+    starting_head = entry.get("action_time_head", ident["HEAD"])
+    reconcile_r1 = r1_preservation is not None
+    process_checks = None
+    if r1_preservation is not None:
+        process_checks = []
+        outcome.update(action_time_head=starting_head, r1_outcome=entry["r1_outcome"],
+                       process_checks=process_checks)
     preparation_started = False
     move_started = False
+    preserved = {}
+
+    def check_preservation():
+        if reconcile_r1:
+            verify_r1_unchanged(repo, r1_preservation)
+            if any(file_hash(directory / name) != expected for name, expected in preserved.items()):
+                raise Hold("Current preservation changed before mutation")
+
     try:
         with preparation_lock(Path(ident["common_dir"])):
-            tracked, before = inspect_target(repo, ident)
+            check_preservation()
+            tracked, before = inspect_target(repo, ident, head=starting_head,
+                                             reconcile_r1=reconcile_r1, process_checks=process_checks)
+            if r1_preservation is not None and entry["source_index"] == 292:
+                verify_r1_prepared_target(ident, before)
             if target.stat().st_dev != directory.stat().st_dev:
                 raise Hold("Preservation destination is not on the source filesystem")
             git(target, "merge-base", "--is-ancestor", ident["HEAD"], CLASSIFICATION_COMMIT)
@@ -535,29 +779,36 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary) -> dict:
             sync_directory(directory)
             git(target, "bundle", "verify", str(bundle))
             if line(git(target, "bundle", "list-heads", str(bundle), ident["branch"])) != (
-                    ident["HEAD"] + " " + ident["branch"]):
+                    starting_head + " " + ident["branch"]):
                 raise Hold("Original branch history was not preserved")
+            if reconcile_r1:
+                preserved = {name: file_hash(directory / name) for name in (
+                    "before.json", "before.tar", "gitdir-before.json", "gitdir-before.tar", "history.bundle")}
+                outcome["preservation_sha256"] = preserved
             # Preserve admin evidence (including any old FETCH_HEAD) before
             # the first target fetch, as well as before the fast-forward.
             git(target, "fetch", "origin", "dev")
             prepared = line(git(target, "rev-parse", "origin/dev"))
-            git(target, "merge-base", "--is-ancestor", ident["HEAD"], prepared)
-            _, check = inspect_target(repo, ident)
+            git(target, "merge-base", "--is-ancestor", starting_head, prepared)
+            _, check = inspect_target(repo, ident, head=starting_head,
+                                      reconcile_r1=reconcile_r1, process_checks=process_checks)
             if check != before:
                 raise Hold("Source changed while preservation was being verified")
-            write_new(directory / "preparation.json", encoded(dict(
+            check_preservation()
+            preparation = dict(
                 state="PREPARATION_STARTED_OUTCOME_UNKNOWN", original=ident,
-                prepared_head=prepared, history_bundle_sha256=file_hash(bundle))))
+                prepared_head=prepared, history_bundle_sha256=file_hash(bundle))
+            if r1_preservation is not None:
+                preparation["action_time_head"] = starting_head
+            write_new(directory / "preparation.json", encoded(preparation))
             preparation_started = True
             # Reuse the supported clean never-behind operation. The public
             # sync_primary_worktree_to_base helper deliberately selects the
             # PRIMARY, so it must never be used to prepare these linked targets.
             git(target, "merge", "--ff-only", "--no-overwrite-ignore", prepared)
-            _, after = inspect_target(repo, ident, head=prepared)
-            tracked_tree = tracked | {str(p) for name in tracked for p in Path(name).parents}
-            for name, evidence in before.items():
-                if name not in tracked_tree and after.get(name) != evidence:
-                    raise Hold("Untracked/ignored evidence changed during preparation")
+            _, after = inspect_target(repo, ident, head=prepared,
+                                      reconcile_r1=reconcile_r1, process_checks=process_checks)
+            verify_untracked_preserved(tracked, before, after)
             git(target, "merge-base", "--is-ancestor", ident["HEAD"], prepared)
             write_new(directory / "prepared.json", encoded(after))
             outcome["prepared_head"] = prepared
@@ -572,7 +823,9 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary) -> dict:
             nonlocal move_started
             # Called only after the existing boundary's fresh fetch and
             # behind-zero proof, continuously under its common-directory lock.
-            _, fresh = inspect_target(repo, ident, head=prepared)
+            check_preservation()
+            _, fresh = inspect_target(repo, ident, head=prepared,
+                                      reconcile_r1=reconcile_r1, process_checks=process_checks)
             if fresh != after or os.path.lexists(destination):
                 raise Hold("Prepared content or destination drifted before move")
             write_new(directory / "move-started.json", encoded(dict(
@@ -598,35 +851,39 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary) -> dict:
             outcome.update(status="INCOMPLETE", reason=result.get("reason"))
         else:
             outcome["reason"] = result.get("reason") or "Terminal boundary HOLD"
-    except (Hold, OSError, ValueError, subprocess.SubprocessError) as exc:
+    except (Hold, OSError, ValueError, tarfile.TarError, subprocess.SubprocessError) as exc:
         incomplete = move_started or (preparation_started and outcome["prepared_head"] is None)
         outcome.update(status="INCOMPLETE" if incomplete else "HOLD", reason=str(exc))
     write_new(directory / "outcome.json", encoded(outcome))
     return outcome
 
 
-def apply_plan(repo: Path, plan: dict) -> dict:
+def apply_plan(repo: Path, plan: dict, *, reconcile_r1: bool = False) -> dict:
     # No caller-supplied plan can broaden the fixed targets or destinations.
-    expected = build_plan(repo, repo / CLASSIFICATION_PATH, CLASSIFICATION_SHA256, CLASSIFICATION_COMMIT)
+    expected = build_plan(repo, repo / CLASSIFICATION_PATH, CLASSIFICATION_SHA256,
+                          CLASSIFICATION_COMMIT, reconcile_r1=reconcile_r1)
     if plan != expected:
         raise Hold("Apply plan does not match its pinned classification")
     with safe_git_environment(network=True):
         landed = require_landed(repo, plan)
-        plain_directory(OPERATION_ROOT.parent)
+        operation_root = RECONCILE_OPERATION_ROOT if reconcile_r1 else OPERATION_ROOT
+        wave_id = RECONCILE_WAVE_ID if reconcile_r1 else WAVE_ID
+        plain_directory(operation_root.parent)
         plain_directory(COMMON_DIR)
         for entry in plan["entries"]:
             source = Path(entry["path"])
-            if OPERATION_ROOT == source or source in OPERATION_ROOT.parents:
+            if operation_root == source or source in operation_root.parents:
                 raise Hold("Preservation output lies inside a source target")
-        if os.path.lexists(OPERATION_ROOT):
+        if os.path.lexists(operation_root):
             raise Hold("Operation already consumed or ambiguous; inspect local receipts, never replay")
-        intent = dict(wave_id=WAVE_ID, state="OPERATION_STARTED_OUTCOME_UNKNOWN", landed=landed,
-                      plan_sha256=digest(encoded(plan)), operation_root=str(OPERATION_ROOT))
+        r1_preservation = verify_r1_preservation(repo) if reconcile_r1 else None
+        intent = dict(wave_id=wave_id, state="OPERATION_STARTED_OUTCOME_UNKNOWN", landed=landed,
+                      plan_sha256=digest(encoded(plan)), operation_root=str(operation_root))
         # This second fixed anchor also survives relocation of the receipt tree.
-        write_new(COMMON_DIR / f"rcx_fleet_apply_{WAVE_ID}.json", encoded(intent))
-        new_directory(OPERATION_ROOT)
-        write_new(OPERATION_ROOT / "intent.json", encoded(intent))
-        write_new(OPERATION_ROOT / "plan.json", encoded(plan))
+        write_new(COMMON_DIR / f"rcx_fleet_apply_{wave_id}.json", encoded(intent))
+        new_directory(operation_root)
+        write_new(operation_root / "intent.json", encoded(intent))
+        write_new(operation_root / "plan.json", encoded(plan))
         try:
             from . import commit_executor as boundary
         except ImportError:
@@ -635,14 +892,14 @@ def apply_plan(repo: Path, plan: dict) -> dict:
         for entry in plan["entries"]:
             if entry["action"] == "UNTOUCHED_HOLD":
                 continue
-            directory = OPERATION_ROOT / str(entry["source_index"])
+            directory = operation_root / str(entry["source_index"])
             new_directory(directory)
             write_new(directory / "intent.json", encoded(entry))
-            outcomes.append(apply_target(repo, entry, directory, boundary))
-        summary = dict(wave_id=WAVE_ID, outcomes=outcomes, untouched_holds=407,
+            outcomes.append(apply_target(repo, entry, directory, boundary, r1_preservation=r1_preservation))
+        summary = dict(wave_id=wave_id, outcomes=outcomes, untouched_holds=407,
                        outcome_counts=dict(Counter(o["status"] for o in outcomes)),
                        operation_outcomes_recorded=True, fleet_clean=False)
-        write_new(OPERATION_ROOT / "summary.json", encoded(summary))
+        write_new(operation_root / "summary.json", encoded(summary))
         return summary
 
 
@@ -653,18 +910,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--classification-commit", required=True)
     parser.add_argument("--plan-output", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--reconcile-r1", action="store_true",
+                        help="Plan the fixed follow-up to the four pinned R1 zero-move outcomes")
     parser.add_argument("--operation-root", type=Path)
     args = parser.parse_args(argv)
     try:
         repo = Path.cwd().resolve()
-        plan = build_plan(repo, args.classification, args.classification_sha256, args.classification_commit)
-        if args.plan_output.absolute() != repo / PLAN_PATH:
+        plan = build_plan(repo, args.classification, args.classification_sha256,
+                          args.classification_commit, reconcile_r1=args.reconcile_r1)
+        plan_path = RECONCILE_PLAN_PATH if args.reconcile_r1 else PLAN_PATH
+        operation_root = RECONCILE_OPERATION_ROOT if args.reconcile_r1 else OPERATION_ROOT
+        if args.plan_output.absolute() != repo / plan_path:
             raise Hold("Only the wave-owned plan output is allowed")
         if args.apply:
-            if args.operation_root != OPERATION_ROOT:
+            if args.operation_root != operation_root:
                 raise Hold("Apply requires the exact explicit preservation destination")
-            result = apply_plan(repo, plan)
-            print(json.dumps(dict(receipts=str(OPERATION_ROOT / "summary.json"),
+            result = apply_plan(repo, plan, reconcile_r1=args.reconcile_r1)
+            print(json.dumps(dict(receipts=str(operation_root / "summary.json"),
                                   outcome_counts=result["outcome_counts"], untouched_holds=407)))
             return 0 if result["outcome_counts"] == {"MOVED": 4} else 3
         if args.operation_root is not None:
@@ -672,7 +934,7 @@ def main(argv: list[str] | None = None) -> int:
         write_new(args.plan_output, encoded(plan), verify_existing=True)
         print("Plan verified: 411 rows; 4 conditional targets; 407 untouched HOLDs; no fleet actions.")
         return 0
-    except (Hold, OSError, ValueError, subprocess.SubprocessError) as exc:
+    except (Hold, OSError, ValueError, tarfile.TarError, subprocess.SubprocessError) as exc:
         print(f"HOLD: {exc}", file=sys.stderr)
         return 2
 

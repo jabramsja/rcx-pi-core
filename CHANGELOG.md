@@ -133,7 +133,11 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   unresolved; bounded apply is current, followed by the retained recovery,
   exact PR1219 and Mu-production order
 
-### Bounded Recoverable WorkingRCX Fleet Apply R1 (Pending Merge and Execution)
+### Bounded Recoverable WorkingRCX Fleet Apply R1 (Code Landed; Zero Moves)
+
+- landed through PR #1289 at exact merge
+  `a9e8d85a3d2f08b1a599c8f8ddecdc23f6ea38ec`; its one postmerge invocation
+  exited 3 with **0 MOVED, 3 HOLD, 1 INCOMPLETE** and 407 untouched HOLDs
 
 - implements a finite plan/apply CLI bound to the exact PR #1288 classification
   and raw SHA-256 `19d684abaa8c3062ed7429447382b7ccf1d8df65dc4913a27ad6efe0ed3335cf`;
@@ -150,12 +154,39 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 - fixed local intent and per-target receipts preserve ambiguous/incomplete
   outcomes and refuse replay; destinations are new subdirectories outside all
   411 source targets, and private evidence remains local
-- 40 disposable focused tests passed and repeated deterministic plan validation
-  passed; the declared staged L4 gate refused the empty implementation index.
-  Native staging, generated packet/indicator refresh and staged revalidation
-  remain with the outer executor
-- no live fleet action has occurred. Code landing alone is not cleanup
-  completion; per-target HOLDs preserve safety without adding another wave.
+- 40 disposable focused tests and repeated deterministic plan validation passed;
+  the outer pipeline completed staging, governance, review, supervisors and
+  seven successful GitHub checks before merge
+- three targets stopped at inactive recovery states the tool did not recognize;
+  index 292 fast-forwarded to the recorded prepared head, then stopped at lsof.
+  The old probe retained no handle or warning detail. All boundary fields are
+  null, and no terminal identity, move-started receipt or destination exists
+- original receipts, source/admin archives, history and the consumed common-dir
+  claim remain immutable; R1 must never be replayed. Cleanup remains incomplete
+
+### Observed Fleet Apply Action Reconciliation R2 (Implementation; Merge and Execution Pending)
+
+- adds the fixed `--reconcile-r1` planning/apply mode in the existing cleanup
+  slot; deterministic planning binds the landed classification and R1 plan
+  without inspecting live targets or requiring host-local receipts in CI
+- pins eleven R1 metadata hashes, all four no-terminal-action outcomes and the
+  original claim; verifies index 292's archives, branch history, fast-forward
+  transition and original ignored evidence before adopting its prepared HEAD
+- retains original source provenance separately from action-time HEAD, with a
+  new one-shot claim and preservation destination; all moves still use the
+  existing exact-target callback and its fresh fetch/behind-zero proof
+- admits only coherent inactive finished `tier3_exhausted` and
+  `tier3_short_circuited` recovery records during reconciliation; live owners,
+  children, locks, protection, drift and uncertain process probes remain HOLD
+- retains each fresh lsof observation in new local outcomes, including output,
+  warnings and timeout evidence; the historical lsof cause remains unknown
+- the exact one-time postmerge command and new outcome locations are recorded
+  in TASKS and the reconciliation plan. No live reconciliation has run;
+  recovery R2, PR1219 and Mu order remain unchanged, with no extra queue item
+- final Phase B validation passed all 102 disposable focused tests and repeated
+  deterministic planning; the staged L4 gate refused the empty implementation
+  index. Native staging, indicator generation and staged revalidation remain
+  with the outer pipeline
   After the bounded attempt is recorded, recovery R2, fresh R3C6-R2 and every
   retained PR1219/Mu obligation continue unchanged
 
