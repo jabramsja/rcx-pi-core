@@ -164,7 +164,10 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 - original receipts, source/admin archives, history and the consumed common-dir
   claim remain immutable; R1 must never be replayed. Cleanup remains incomplete
 
-### Observed Fleet Apply Action Reconciliation R2 (Implementation; Merge and Execution Pending)
+### Observed Fleet Apply Action Reconciliation R2 (Landed; Live Attempt Consumed)
+
+- landed through PR #1290 at exact merge
+  `d6be67a8019c373f961e8c224cd7cb9c0646d746` on 2026-09-12T00:52:55Z
 
 - adds the fixed `--reconcile-r1` planning/apply mode in the existing cleanup
   slot; deterministic planning binds the landed classification and R1 plan
@@ -180,15 +183,36 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   children, locks, protection, drift and uncertain process probes remain HOLD
 - retains each fresh lsof observation in new local outcomes, including output,
   warnings and timeout evidence; the historical lsof cause remains unknown
-- the exact one-time postmerge command and new outcome locations are recorded
-  in TASKS and the reconciliation plan. No live reconciliation has run;
-  recovery R2, PR1219 and Mu order remain unchanged, with no extra queue item
-- final Phase B validation passed all 102 disposable focused tests and repeated
-  deterministic planning; the staged L4 gate refused the empty implementation
-  index. Native staging, indicator generation and staged revalidation remain
-  with the outer pipeline
-  After the bounded attempt is recorded, recovery R2, fresh R3C6-R2 and every
-  retained PR1219/Mu obligation continue unchanged
+- the one-time live follow-up exited 3: index 292 made one recoverable move to
+  `292/worktree`; indices 159, 163 and 305 remain INCOMPLETE at their source
+  paths after preparation, with no destination or terminal callback
+- the recorded lsof observations retain open-file refusals after fast-forward;
+  no process was killed or gate relaxed. All 407 original HOLDs remain untouched
+- TASKS retains the consumed command, outcome locations and summary SHA-256
+  `22a6302ed49034823912b5ffecc7bf233d0b1ecaf6cf81e21a24e26240a6bf80`;
+  neither R1 nor R2 may be replayed, and this result is not fleet-wide closure
+- recovery R2 is the existing current slot, followed by fresh R3C6-R2 and every
+  retained PR1219/Mu obligation, with no additional cleanup queue item
+
+### Private-Review Prepared-Checkpoint Byte-Preserving Resume R2 (Phase B)
+
+- reconstructed from exact PR #1290 merge; all stopped candidates remain
+  preserved noncomplete evidence, with no imported code or review authority
+- ordinary and reentry private-attribute remediation retain a non-resumable
+  pre-preparation checkpoint, then save distinct prepared pending state after
+  successful staging, bound to launch identity, review round, saved findings,
+  deferred identity, staged path inventory, index modes and object/blob bytes
+- prepared recovery verifies the saved authority and index/worktree equality
+  before mutation, then invokes the owed reviewer without preparing, collecting
+  L4 evidence, restaging or replaying implementation before that review
+- recovered decisions require the retained canonical reviewer envelope and
+  exact job/turn/decision identity before continuation; malformed or missing
+  material preserves pending state, and valid QUESTION remains terminal
+- the declared full `test_phase_b_executor.py` module passed all 693 tests;
+  public regressions exercise both recovery paths, preparation crash boundaries,
+  authority and byte mismatches, recovered QUESTION material and GO continuation. Native review,
+  governance, commit and landing remain with the outer pipeline; fresh R3C6-R2
+  stays next, including its separate actor-outcome/finalization obligation
 
 ## 2026-09-10
 

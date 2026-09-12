@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 from contextlib import ExitStack
@@ -181,6 +182,24 @@ def _git_stdout(repo: Path, *args: str) -> str:
         text=True,
     )
     return result.stdout.strip()
+
+
+def _init_private_review_git_fixture(repo: Path, files: list[str] | None = None) -> None:
+    """Give private-review orchestration fixtures actual staged object authority."""
+    _init_git_repo(repo)
+    for name in files or ["mu/tests/tools/test_foo.py"]:
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("# candidate fixture\n", encoding="utf-8")
+    _git_stdout(repo, "add", "-A")
+    _git_stdout(repo, "commit", "-m", "fixture base")
+    _git_stdout(repo, "checkout", "-b", "jabramsja/plan")
+
+
+def _stage_private_review_git_fixture(repo: Path, files: list[str]) -> bool:
+    _git_stdout(repo, "add", "--", *files)
+    return True
 
 
 def _write_canonical_tasks(repo: Path, wave_id: str) -> None:
@@ -6210,6 +6229,7 @@ class TestFinalPytestGate:
         (repo / "reports" / "control_plane").mkdir(parents=True)
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
+        _init_private_review_git_fixture(repo)
         mock_impl = _make_mock_impl()
         gate_fail = {
             "passed": False,
@@ -6242,7 +6262,7 @@ class TestFinalPytestGate:
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
              }), \
-             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_stage_files", side_effect=_stage_private_review_git_fixture), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
                  "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
@@ -6264,6 +6284,7 @@ class TestFinalPytestGate:
         (repo / "reports" / "control_plane").mkdir(parents=True)
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
+        _init_private_review_git_fixture(repo)
         mock_impl = _make_mock_impl()
         gate_fail = {
             "passed": False,
@@ -6304,7 +6325,7 @@ class TestFinalPytestGate:
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
              }), \
-             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_stage_files", side_effect=_stage_private_review_git_fixture), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
                  "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
@@ -6326,6 +6347,7 @@ class TestFinalPytestGate:
         (repo / "reports" / "control_plane").mkdir(parents=True)
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
+        _init_private_review_git_fixture(repo)
         mock_impl = _make_mock_impl()
         gate_fail = {
             "passed": False,
@@ -6365,7 +6387,7 @@ class TestFinalPytestGate:
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
              }), \
-             patch.object(pb_mod, "_stage_files", return_value=True):
+             patch.object(pb_mod, "_stage_files", side_effect=_stage_private_review_git_fixture):
             first = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=3)
 
         assert first["status"] == "question_for_founder"
@@ -6402,7 +6424,7 @@ class TestFinalPytestGate:
         pytest_mock.assert_not_called()
         supervisor_mock.assert_not_called()
 
-    def test_resume_private_attr_remediation_requires_fresh_bridge_review(self, tmp_path):
+    def test_unprepared_private_attr_checkpoint_rejects_resume(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -6425,6 +6447,7 @@ class TestFinalPytestGate:
             "private_attr_gate_test_files": changed_files,
         }))
 
+        original_checkpoint = state_file.read_bytes()
         mock_impl = _make_mock_impl()
         gate_pass = {
             "passed": True,
@@ -6467,14 +6490,14 @@ class TestFinalPytestGate:
              patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=3)
 
-        assert result["status"] == "commit_ready"
-        assert result.get("resumed_from") == "private_attr_remediation_pending_review"
+        assert result["status"] == "error"
+        assert result["authority_error"] == "unprepared"
+        assert state_file.read_bytes() == original_checkpoint
         mock_impl.invoke_implementer.assert_not_called()
         mock_agents.assert_not_called()
-        mock_bridge.assert_called_once()
-        assert "private-attr remediation review" in mock_bridge.call_args.args[1]
+        mock_bridge.assert_not_called()
 
-    def test_resume_private_attr_review_runs_after_bridge_budget_exhausted(self, tmp_path):
+    def test_unprepared_private_attr_checkpoint_rejects_resume_at_budget_limit(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -6497,6 +6520,7 @@ class TestFinalPytestGate:
             "private_attr_gate_test_files": changed_files,
         }))
 
+        original_checkpoint = state_file.read_bytes()
         mock_impl = _make_mock_impl()
         gate_pass = {
             "passed": True,
@@ -6539,12 +6563,328 @@ class TestFinalPytestGate:
              patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=2)
 
-        assert result["status"] == "commit_ready"
-        assert result.get("resumed_from") == "private_attr_remediation_pending_review"
+        assert result["status"] == "error"
+        assert result["authority_error"] == "unprepared"
+        assert state_file.read_bytes() == original_checkpoint
         mock_impl.invoke_implementer.assert_not_called()
         mock_agents.assert_not_called()
-        mock_bridge.assert_called_once()
-        assert "private-attr remediation review R3" in mock_bridge.call_args.args[1]
+        mock_bridge.assert_not_called()
+
+
+class PrivateReviewCrash(BaseException):
+    """Model process death without allowing executor exception handling to finish."""
+
+
+@pytest.fixture
+def private_review_checkpoint(tmp_path, real_pre_review_package):
+    def create(*, reentry=False, boundary="prepared", max_rounds=3):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave = "private-review-resume"
+        plan_path, test_path, indicator_path = _write_bridge_receipt_fixture_repo(repo, wave)
+        deferred = f"reports/deferred/non_blocking/{wave}_bridge_nonblockers.md"
+        with (repo / plan_path).open("a") as plan:
+            plan.write(f"- `{deferred}`\n")
+        finding = {
+            "class": "DOC_ACCURACY", "severity": "high", "disposition": "non_blocking",
+            "title": "Retained advisory", "file": test_path, "line_start": 1,
+            "line_end": 1, "evidence_cmd": "inspection", "evidence_result": "advisory",
+            "status": "new",
+        }
+        material = "BEGIN_AGENT_ENVELOPE\n" + json.dumps({"findings": [finding]}) + "\nEND_AGENT_ENVELOPE"
+        impl = _make_successful_impl_with_edits(test_path)
+        state_path = repo / ".agent_bus/executors/phase_b_state.json"
+        gates = 0
+        with ExitStack() as stack:
+            def gate(*args, **kwargs):
+                nonlocal gates
+                gates += 1
+                failure_round = 2 if reentry else 1
+                if gates == failure_round + 1:
+                    state = json.loads(state_path.read_text())
+                    assert state["completed_step"].endswith("remediation_pending_review")
+                    assert "private_attr_prepared_authority" not in state
+                    if boundary == "unprepared":
+                        raise PrivateReviewCrash()
+                    if boundary == "during_preparation":
+                        stack.enter_context(patch.object(
+                            pb_mod, "_collect_and_stage_l4_indicator_artifact", side_effect=PrivateReviewCrash,
+                        ))
+                return {
+                    "passed": gates != failure_round, "skipped": False,
+                    "test_files": [test_path], "exit_code": int(gates == failure_round),
+                    "stdout": "private attr test failure", "stderr": "",
+                }
+
+            def bridge(repo_root, summary, **kwargs):
+                if "private-attr remediation" in summary:
+                    state = json.loads(state_path.read_text())
+                    assert state["completed_step"].endswith("remediation_prepared_pending_review")
+                    assert state["private_attr_review_summary"] == summary
+                    assert f"-r{state['private_attr_review_round']}-" in kwargs["job_id"]
+                    assert (repo / indicator_path).read_bytes() == subprocess.run(
+                        ["git", "show", f":{indicator_path}"], cwd=repo,
+                        capture_output=True, check=True,
+                    ).stdout
+                    raise PrivateReviewCrash()
+                return {"decision": "GO", "exit_code": 0, "stdout": "GO", "stderr": "", "job_id": kwargs["job_id"]}
+
+            stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+            stack.enter_context(patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0}))
+            stack.enter_context(patch.object(pb_mod, "run_bridge_review", side_effect=bridge))
+            stack.enter_context(patch.object(pb_mod, "_read_bridge_review_material", return_value=("", [material])))
+            stack.enter_context(patch.object(pb_mod, "run_private_attr_gate", side_effect=gate))
+            stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}))
+            stack.enter_context(patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                "exit_code": 0, "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+                "parsed": {"decision": "NEEDS_PHASE_B", "summary": "Fix reentry", "findings": [], "status": "success"},
+            }))
+            with pytest.raises(PrivateReviewCrash):
+                result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=max_rounds, routing_record_override=_VALID_ROUTING_RECORD.copy())
+                pytest.fail(f"Expected crash boundary, got {result}")
+        return SimpleNamespace(
+            repo=repo, plan_path=plan_path, state_path=state_path,
+            state=json.loads(state_path.read_text()), test_path=test_path,
+            indicator_path=indicator_path, finding=finding,
+        )
+    return create
+
+
+def _private_review_candidate_bytes(fixture):
+    paths = sorted(set([
+        fixture.plan_path, fixture.test_path, fixture.indicator_path, "TASKS.md", "f.py",
+        fixture.state.get("deferred_packet_path") or "missing-deferred",
+    ]))
+    return {
+        path: ((fixture.repo / path).read_bytes(), (fixture.repo / path).stat().st_mode)
+        if (fixture.repo / path).exists() else None for path in paths
+    } | {"index": (fixture.repo / ".git/index").read_bytes()}
+
+
+def _retain_private_review_envelope(fixture, job_id, decision, defect=None):
+    turn_id = f"{job_id}--r1-reviewer-1234abcd"
+    envelope = {
+        "job_id": job_id, "turn_id": turn_id, "agent_role": "reviewer",
+        "decision": decision, "summary": "Founder question retained",
+        "request_for_next_agent": "Founder input required",
+        "touched_files_claimed": [], "validations_claimed": [],
+        "findings": [fixture.finding],
+    }
+    if defect == "missing":
+        return
+    if defect == "job":
+        envelope["job_id"] = "other-job"
+    elif defect == "turn":
+        envelope["turn_id"] = f"{job_id}--r1-reviewer-8765abcd"
+    elif defect == "decision":
+        envelope["decision"] = "GO" if decision != "GO" else "QUESTION"
+    elif defect == "role":
+        envelope["agent_role"] = "reader"
+    elif defect == "findings":
+        envelope["findings"] = {}
+    elif defect == "finding":
+        envelope["findings"] = ["malformed"]
+    elif defect == "disposition":
+        envelope["findings"] = [{**fixture.finding, "disposition": "optional"}]
+    elif defect == "schema":
+        del envelope["validations_claimed"]
+    encoded = "{broken" if defect == "json" else json.dumps(envelope)
+    if defect == "null":
+        encoded = "null"
+    with sqlite3.connect(fixture.repo / ".agent_bus/bridge.db") as conn:
+        conn.executescript((_EXECUTORS_DIR.parent / "agents/bridge_schema.sql").read_text())
+        conn.execute(
+            "INSERT INTO jobs (job_id, created_at, updated_at, status, task_text, reader_agent, "
+            "reviewer_agent, acceptance_checks_json, current_round) VALUES (?, '', '', 'DONE', '', 'codex', 'codex', '[]', 1)",
+            (job_id,),
+        )
+        conn.execute(
+            "INSERT INTO turns (turn_id, job_id, round_no, agent_role, status, decision, "
+            "state_sha_start, prompt_path, raw_output_path, envelope_json, started_at) "
+            "VALUES (?, ?, 1, 'reviewer', 'completed', ?, '', '', '', ?, '')",
+            (turn_id, job_id, decision, encoded),
+        )
+
+
+def _private_review_forbidden_work(stack):
+    return [stack.enter_context(patch.object(pb_mod, name)) for name in (
+        "_prepare_phase_b_pre_review_package", "_collect_and_stage_l4_indicator_artifact",
+        "_stage_files_for_pipeline", "_stage_files", "_normalize_control_packet_line_refs",
+        "_restore_pending_branch_switch_stash", "prepare_launch_tracker_restore",
+        "run_private_attr_gate", "run_sdk_agents", "run_pre_commit_supervisor",
+        "_save_state", "_clear_state",
+    )]
+
+
+@pytest.mark.parametrize("reentry", [False, True], ids=["ordinary", "reentry"])
+class TestPreparedPrivateReviewResume:
+    @pytest.mark.parametrize("boundary", ["unprepared", "during_preparation"])
+    def test_unprepared_crash_fails_before_mutations_or_actors(self, private_review_checkpoint, reentry, boundary):
+        fixture = private_review_checkpoint(reentry=reentry, boundary=boundary)
+        checkpoint = fixture.state_path.read_bytes()
+        candidate = _private_review_candidate_bytes(fixture)
+        impl = _make_mock_impl()
+        with ExitStack() as stack:
+            forbidden = _private_review_forbidden_work(stack)
+            stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+            bridge = stack.enter_context(patch.object(pb_mod, "run_bridge_review"))
+            result = pb_mod.run_phase_b(fixture.repo, fixture.plan_path)
+        assert result["authority_error"] == "unprepared"
+        for actor in [*forbidden, bridge, impl.invoke_implementer]:
+            actor.assert_not_called()
+        assert fixture.state_path.read_bytes() == checkpoint
+        assert _private_review_candidate_bytes(fixture) == candidate
+
+    @pytest.mark.parametrize("change", [
+        "missing_authority", "malformed_authority", "round", "findings", "deferred", "wave",
+        "comparison", "task", "candidate", "plan", "unstaged", "staged", "mode", "inventory",
+    ])
+    def test_invalid_prepared_authority_preserves_candidate_and_checkpoint(self, private_review_checkpoint, reentry, change):
+        fixture = private_review_checkpoint(reentry=reentry)
+        route = _VALID_ROUTING_RECORD.copy()
+        state = fixture.state
+        if change == "missing_authority":
+            del state["private_attr_prepared_authority"]
+        elif change == "malformed_authority":
+            state["private_attr_prepared_authority"] = []
+        elif change == "round":
+            state["bridge_rounds"] += 1
+        elif change == "findings":
+            state["all_non_blocking"] = []
+        elif change == "deferred":
+            state["deferred_packet_path"] = None
+        elif change == "wave":
+            state["wave_id"] = "another-wave"
+        elif change == "comparison":
+            route["comparison_commit"] = "b" * 40
+        elif change == "task":
+            route["task_id"] = "[OTHER-TASK]"
+        elif change == "candidate":
+            route["candidate_authority_required"] = True
+        elif change == "plan":
+            with (fixture.repo / fixture.plan_path).open("a") as plan:
+                plan.write("Changed governing plan\n")
+            _git_stdout(fixture.repo, "add", fixture.plan_path)
+        elif change in {"unstaged", "staged"}:
+            (fixture.repo / fixture.test_path).write_bytes(b"# altered candidate\r\n")
+            if change == "staged":
+                _git_stdout(fixture.repo, "add", fixture.test_path)
+        elif change == "mode":
+            _git_stdout(fixture.repo, "update-index", "--chmod=+x", fixture.test_path)
+        elif change == "inventory":
+            (fixture.repo / "extra.py").write_text("# extra staged path\n")
+            _git_stdout(fixture.repo, "add", "extra.py")
+        fixture.state_path.write_text(json.dumps(state))
+        checkpoint = fixture.state_path.read_bytes()
+        candidate = _private_review_candidate_bytes(fixture)
+        impl = _make_mock_impl()
+        with ExitStack() as stack:
+            forbidden = _private_review_forbidden_work(stack)
+            stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+            bridge = stack.enter_context(patch.object(pb_mod, "run_bridge_review"))
+            result = pb_mod.run_phase_b(fixture.repo, fixture.plan_path, routing_record_override=route)
+        assert result["status"] == "error"
+        for actor in [*forbidden, bridge, impl.invoke_implementer]:
+            actor.assert_not_called()
+        assert fixture.state_path.read_bytes() == checkpoint
+        assert _private_review_candidate_bytes(fixture) == candidate
+
+    @pytest.mark.parametrize("decision", ["QUESTION", "GO", "REQUEST_CHANGES", "NO_GO"])
+    @pytest.mark.parametrize("defect", ["missing", "json", "null", "job", "turn", "decision", "role", "findings", "finding", "disposition", "schema"])
+    def test_invalid_recovered_material_preserves_pending_state(self, private_review_checkpoint, reentry, decision, defect):
+        fixture = private_review_checkpoint(reentry=reentry)
+        checkpoint = fixture.state_path.read_bytes()
+        candidate = _private_review_candidate_bytes(fixture)
+        impl = _make_mock_impl()
+        def reviewer(repo_root, summary, **kwargs):
+            assert _private_review_candidate_bytes(fixture) == candidate
+            assert fixture.state_path.read_bytes() == checkpoint
+            _retain_private_review_envelope(fixture, kwargs["job_id"], decision, defect)
+            return {"decision": decision, "job_id": kwargs["job_id"], "exit_code": 0, "stdout": decision, "stderr": ""}
+        with ExitStack() as stack:
+            forbidden = _private_review_forbidden_work(stack)
+            stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+            bridge = stack.enter_context(patch.object(pb_mod, "run_bridge_review", side_effect=reviewer))
+            result = pb_mod.run_phase_b(fixture.repo, fixture.plan_path, routing_record_override=_VALID_ROUTING_RECORD.copy())
+        assert result["status"] == "error"
+        assert result["step"] == "private_attr_recovered_review_material"
+        bridge.assert_called_once()
+        for actor in [*forbidden, impl.invoke_implementer]:
+            actor.assert_not_called()
+        assert fixture.state_path.read_bytes() == checkpoint
+        assert _private_review_candidate_bytes(fixture) == candidate
+
+    def test_valid_question_retains_terminal_semantics_and_dispositions(self, private_review_checkpoint, reentry):
+        fixture = private_review_checkpoint(reentry=reentry)
+        candidate = _private_review_candidate_bytes(fixture)
+        impl = _make_mock_impl()
+        def reviewer(repo_root, summary, **kwargs):
+            assert _private_review_candidate_bytes(fixture) == candidate
+            assert summary == fixture.state["private_attr_review_summary"]
+            assert f"-r{fixture.state['private_attr_review_round']}-" in kwargs["job_id"]
+            _retain_private_review_envelope(fixture, kwargs["job_id"], "QUESTION")
+            return {"decision": "QUESTION", "job_id": kwargs["job_id"], "exit_code": 0, "stdout": "QUESTION", "stderr": ""}
+        with ExitStack() as stack:
+            # QUESTION alone may replace the checkpoint after validation.
+            forbidden = [stack.enter_context(patch.object(pb_mod, name)) for name in (
+                "_prepare_phase_b_pre_review_package", "_collect_and_stage_l4_indicator_artifact",
+                "_stage_files_for_pipeline", "_normalize_control_packet_line_refs",
+                "prepare_launch_tracker_restore", "run_private_attr_gate", "run_sdk_agents",
+            )]
+            stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+            bridge = stack.enter_context(patch.object(pb_mod, "run_bridge_review", side_effect=reviewer))
+            first = pb_mod.run_phase_b(fixture.repo, fixture.plan_path, routing_record_override=_VALID_ROUTING_RECORD.copy())
+            terminal_bytes = fixture.state_path.read_bytes()
+            second = pb_mod.run_phase_b(fixture.repo, fixture.plan_path)
+        assert first["status"] == second["status"] == "question_for_founder"
+        terminal = json.loads(terminal_bytes)
+        assert terminal["completed_step"].endswith("remediation_question_for_founder")
+        assert terminal["all_non_blocking"] == fixture.state["all_non_blocking"]
+        assert terminal["all_non_blocking"][0]["disposition"] == "non_blocking"
+        assert terminal["finding_history"] == fixture.state["finding_history"]
+        assert terminal["deferred_packet_path"] == fixture.state["deferred_packet_path"]
+        assert fixture.state_path.read_bytes() == terminal_bytes
+        assert _private_review_candidate_bytes(fixture) == candidate
+        bridge.assert_called_once()
+        for actor in [*forbidden, impl.invoke_implementer]:
+            actor.assert_not_called()
+
+    @pytest.mark.parametrize("max_rounds", [2, 3])
+    def test_valid_go_resumes_owed_round_then_existing_handoff(self, private_review_checkpoint, reentry, max_rounds):
+        fixture = private_review_checkpoint(reentry=reentry, max_rounds=max_rounds)
+        candidate = _private_review_candidate_bytes(fixture)
+        impl = _make_mock_impl()
+        events = []
+        def reviewer(repo_root, summary, **kwargs):
+            assert _private_review_candidate_bytes(fixture) == candidate
+            assert events == []
+            assert f"review R{fixture.state['bridge_rounds'] + 1}" in summary
+            _retain_private_review_envelope(fixture, kwargs["job_id"], "GO")
+            events.append("reviewed")
+            return {"decision": "GO", "job_id": kwargs["job_id"], "exit_code": 0, "stdout": "GO", "stderr": ""}
+        def supervisor(*args, **kwargs):
+            assert events[0] == "reviewed"
+            events.append("supervisor")
+            return {
+                "exit_code": 0, "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "findings": [], "status": "success"},
+            }
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+            bridge = stack.enter_context(patch.object(pb_mod, "run_bridge_review", side_effect=reviewer))
+            preparation = stack.enter_context(patch.object(pb_mod, "_prepare_phase_b_pre_review_package"))
+            gate = stack.enter_context(patch.object(pb_mod, "run_private_attr_gate"))
+            sdk = stack.enter_context(patch.object(pb_mod, "run_sdk_agents"))
+            stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}))
+            stack.enter_context(patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor))
+            stack.enter_context(patch.object(pb_mod, "prepare_commit_handoff", return_value=fixture.repo / ".agent_bus/handoff.json"))
+            result = pb_mod.run_phase_b(fixture.repo, fixture.plan_path, max_bridge_rounds=max_rounds, routing_record_override=_VALID_ROUTING_RECORD.copy())
+        assert result["status"] == "commit_ready", result
+        assert result["bridge_rounds"] == fixture.state["bridge_rounds"] + 1
+        assert not fixture.state_path.exists()
+        bridge.assert_called_once()
+        for actor in [preparation, gate, sdk, impl.invoke_implementer]:
+            actor.assert_not_called()
 
 
 class TestBridgeRenderAssociation:
@@ -10230,6 +10570,8 @@ class TestOnlyBlockingToImplementer:
         (repo / "reports" / "control_plane").mkdir(parents=True)
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
+        if convergence_site == "private_attr":
+            _init_private_review_git_fixture(repo)
         mock_impl = _make_mock_impl()
         finding_title = f"{convergence_site} explicit non-blocker"
         envelope = json.dumps({
@@ -10359,7 +10701,10 @@ class TestOnlyBlockingToImplementer:
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
              }), \
-             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_stage_files", side_effect=(
+                 _stage_private_review_git_fixture if convergence_site == "private_attr"
+                 else lambda *_args, **_kwargs: True
+             )), \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor_side_effect), \
              patch.object(
                  pb_mod,
@@ -10368,7 +10713,7 @@ class TestOnlyBlockingToImplementer:
              ):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=3)
 
-        assert result["status"] == "commit_ready"
+        assert result["status"] == "commit_ready", result
         assert bridge_call_count[0] == len(bridge_decisions)
         packet_rel = "reports/deferred/non_blocking/plan_bridge_nonblockers.md"
         packet = repo / packet_rel
@@ -12617,6 +12962,7 @@ class TestSdkReviewScopeSelection:
             "mu/tests/tools/test_foo.py",
             indicator_path,
         ]
+        _init_private_review_git_fixture(repo, changed_files)
         mock_impl = _make_mock_impl()
         events: list[tuple[str, object]] = []
         gate_fail = {
@@ -12642,7 +12988,7 @@ class TestSdkReviewScopeSelection:
 
         def stage_side(repo_root, files):
             events.append(("stage", list(files)))
-            return True
+            return _stage_private_review_git_fixture(repo_root, files)
 
         def bridge_side(repo_root, summary, **kwargs):
             events.append(("bridge", summary))
