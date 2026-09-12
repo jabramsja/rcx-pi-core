@@ -48,8 +48,11 @@ def _fixture_git_env(**extra_env):
 
 def _git(root: Path, *args: str) -> str:
     with _fixture_git_env() as env:
+        # Detached post-commit maintenance can remove maintenance.lock during
+        # _snapshot, even with optional locks disabled. Keep fixture setup quiet.
         result = subprocess.run(
             ["git", "--no-optional-locks", "-c", "init.defaultBranch=main",
+             "-c", "maintenance.auto=false",
              "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
              "-c", "user.name=Census Fixture", "-c", "user.email=census@example.invalid",
              "-C", str(root), *args],
@@ -408,6 +411,22 @@ def _git_wrapper(tmp_path: Path, body: str) -> dict:
     )
     wrapper.chmod(0o700)
     return {"PATH": str(bindir) + os.pathsep + os.environ["PATH"]}
+
+
+def test_fixture_git_does_not_launch_automatic_maintenance(tmp_path, monkeypatch):
+    trace = tmp_path / "git-trace.jsonl"
+    env = _git_wrapper(tmp_path, f"os.environ['GIT_TRACE2_EVENT'] = {str(trace)!r}\n")
+    monkeypatch.setenv("PATH", env["PATH"])
+
+    _repo(tmp_path / "WorkingRCX-main")
+
+    events = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert any(event.get("event") == "cmd_name" and event.get("name") == "commit"
+               for event in events)
+    maintenance = [event["argv"] for event in events
+                   if event.get("event") == "child_start"
+                   and event.get("argv", [])[:2] in (["git", "maintenance"], ["git", "gc"])]
+    assert maintenance == []
 
 
 @pytest.mark.parametrize("operation", ["rev-parse", "status", "config", "ls-files"])
