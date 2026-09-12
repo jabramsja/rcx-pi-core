@@ -6,9 +6,46 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-12
 
-### Ordinary Bridge-Fix Outcome and Dispatcher Boundary R3C6-R4 (Phase B)
+### Exact P0IBRRCP Landed-Evidence and Queue Closure (Phase B, CURRENT)
 
-- reconstructs only the four hash-preserved R3 source/test diffs on exact
+- verifies only the normal-root recorded-child requirement already implemented
+  and tested in PR #1256, merge `0a4c24120141723d70e6dd1c476ffaa70b1ff9ca`,
+  an ancestor of exact PR #1292 merge
+  `f7e27eadabd7d599ae2fd550aef23b21349b9b96`; this MAINTENANCE wave changes
+  documentation and native governance only
+- the [bounded closure report](reports/control_plane/pr1219-p0ibrrcp-exact-closure-r1-2026-09-12_closure.md)
+  maps current file:line evidence to preserved prior/current child snapshots,
+  bounded cleanup before normal return, root exit/output preservation and the
+  unchanged synchronized real-process regression; the single declared fresh
+  regression passed (1 passed in 1.04s), and the identical command passed again
+  during classification re-entry (1 passed in 0.93s)
+- reconciles the existing closure baton into one rich numbered entry at its
+  existing semantic position; the native selector returns this exact wave and
+  canonical packet. The two inherited successor paragraphs retain their
+  historical merge facts and now match current queue order
+- exact P0IBRRCP closure remains CURRENT until native landing; P0IBRRCO is
+  immediately NEXT, then P0IBRRC, P0IBRRT, P0IBRR, P0IB1, P0IB2 and every later
+  recorded item, with Mu optimization last. Private-review R2, all aliases,
+  stopped evidence, immutable cleanup claims/backups and consumed outcomes
+  1 MOVED/3 INCOMPLETE/407 prior HOLD remain preserved; no fleet replay or PR
+  terminal action occurs during this Phase B implementation
+- fresh launch/Phase A authority is bound to the exact PR #1292 merge;
+  Phase B independent review, staged MAINTENANCE governance, supervisors and
+  the providerless commit/pre-push/CI/merge/postmerge path remain native-owned
+  and pending. No broader process, runtime, substrate or Mu completion is claimed
+- supervisor re-entry reconciles the same-wave canonical tracker to the locked
+  MAINTENANCE classification, including its no-op proof and defer reason; a
+  tracker-derived packet Class header prevents native package refresh from
+  falling back to L4_ENABLER. Native package regeneration and affected governance
+  validations remain pending with the outer Phase B owner
+
+### Ordinary Bridge-Fix Outcome and Dispatcher Boundary R3C6-R4 (Landed)
+
+- landed through PR #1292 at exact merge
+  `f7e27eadabd7d599ae2fd550aef23b21349b9b96` on 2026-09-12T13:11:06Z, from
+  head `9674ec343f0455efdfaca03109692477db3d308e`; primary HEAD and remote
+  `dev` match the merge
+- reconstructed only the four hash-preserved R3 source/test diffs on exact
   PR #1291 merge `fdfc58d52c717785a5696a8c3d36f9c934ee0030`; stopped R3/R2
   remain noncomplete evidence
 - retains verified durable `IN_FLIGHT`, strictly sealed
@@ -23,11 +60,24 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   48-case native CLI/dispatcher set passes with no protected-error recovery or
   replay. Explicit actor failures retain their existing recovery behavior
 - the complete declared two-module command passed 1510 tests in 912.78
-  seconds, including the existing identity, private-review and reentry controls.
-  The reproduced core defect is resolved by regression evidence; independent
-  native review, staged authority/L4 checks and merge are still required. R4 occupies the same slot,
-  exact P0IBRRCP closure remains NEXT, and both consumed fleet operations and
-  all later obligations remain unchanged
+  seconds, including the existing identity, private-review and reentry controls;
+  independent Phase B passed 61 focused tests, three supervisors returned
+  COMMIT_GO, and native pre-commit/pre-push and all seven GitHub checks passed.
+  Green-gate run `34695050659`, attempt 1, passed 11107 main-suite tests with
+  22 skipped on the exact head above. These are retained predecessor results,
+  not fresh full-suite validation of this documentation closure
+- post-retirement closeout is a separate nonblocking bookkeeping exception:
+  native R4 exited 1 at 2026-09-12T13:12:50Z after carrier removal; recovery
+  could not import the deleted pager and terminal-receipt persistence failed.
+  The prior failed/timeout triggering payload was not retained; its cause and
+  successful old successor-package publication remain NOT_ESTABLISHED.
+  Read-only primary evidence is
+  `reports/archive/control_plane/r3c6-r4-evidence-2026-09-12/terminal_closeout_observation.json`;
+  no native exit 0, restored/replayed carrier or imported predecessor authority
+  is claimed. The carrier is deregistered and no predecessor owner remains
+- R4 landed in the same slot; exact P0IBRRCP closure is CURRENT with fresh
+  independent authority, P0IBRRCO remains immediately NEXT, and both consumed
+  fleet operations and every later independent obligation remain unchanged
 
 ## 2026-09-11
 
