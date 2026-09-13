@@ -165,6 +165,7 @@ BRIDGE_REVIEW_POLL_INTERVAL = 30.0
 BRIDGE_REVIEW_POLL_SLEEP = 5.0
 BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
+BRIDGE_PROCESS_OWNER_ENV = "RCX_PHASE_B_BRIDGE_OWNER"
 DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
 # Structural/L4 gates can legitimately exceed 40 minutes under the Phase B
 # final sweep. Keep a bounded cap while allowing the configured executor budget
@@ -4763,6 +4764,42 @@ def _bridge_process_snapshot(root_pid: int, repo_root: Path) -> tuple[tuple[int,
     return tuple(sorted(descendants)), cpu_fingerprint
 
 
+def _bridge_owned_processes(repo_root: Path, ownership_token: str) -> tuple[int, ...]:
+    """Find inherited bridge ownership even after setsid and root reparenting.
+
+    The per-invocation marker is installed before launch, so this reconciliation
+    needs no earlier live-parent snapshot. It covers environment-inheriting
+    descendants; it is not containment of processes that discard the marker.
+    """
+    try:
+        proc = subprocess.run(
+            ["ps", "axeww", "-o", "pid=,command="],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        # Preserve the existing graph/recorded-child cleanup when ps is unavailable.
+        return ()
+
+    marker = f"{BRIDGE_PROCESS_OWNER_ENV}={ownership_token}"
+    owned_pids: set[int] = set()
+    for line in proc.stdout.splitlines():
+        fields = line.split(None, 1)
+        if len(fields) != 2 or marker not in fields[1].split():
+            continue
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            continue
+        if pid > 0:
+            owned_pids.add(pid)
+    return tuple(sorted(owned_pids))
+
+
 def _bridge_file_fingerprint(path: Path) -> tuple[bool, int, int | None]:
     if not path.exists():
         return (False, 0, None)
@@ -4964,6 +5001,9 @@ def _run_bridge_review_subprocess(
     stdout_path = scratch_dir / f"phase_b_bridge_{run_id}.stdout.log"
     stderr_path = scratch_dir / f"phase_b_bridge_{run_id}.stderr.log"
     poll_sleep = min(BRIDGE_REVIEW_POLL_SLEEP, poll_interval)
+    ownership_token = uuid.uuid4().hex
+    bridge_env = dict(os.environ if env is None else env)
+    bridge_env[BRIDGE_PROCESS_OWNER_ENV] = ownership_token
 
     with stdout_path.open("w", encoding="utf-8") as stdout_handle, \
             stderr_path.open("w", encoding="utf-8") as stderr_handle:
@@ -4973,10 +5013,18 @@ def _run_bridge_review_subprocess(
             stdout=stdout_handle,
             stderr=stderr_handle,
             text=True,
-            env=env,
+            env=bridge_env,
             start_new_session=True,
         )
         last_child_pids: tuple[int, ...] = ()
+
+        def _cleanup_bridge(child_pids: tuple[int, ...]) -> None:
+            owned_pids = set(child_pids).union(
+                last_child_pids, _bridge_owned_processes(repo_root, ownership_token)
+            )
+            owned_pids.discard(proc.pid)
+            _terminate_bridge_subprocess(proc, child_pids=tuple(sorted(owned_pids)))
+
         try:
             if on_started is not None:
                 on_started()
@@ -5038,12 +5086,7 @@ def _run_bridge_review_subprocess(
                             "stdout_path": str(stdout_path.relative_to(repo_root)),
                             "stderr_path": str(stderr_path.relative_to(repo_root)),
                         })
-                    _terminate_bridge_subprocess(
-                        proc,
-                        child_pids=tuple(
-                            sorted(set(last_child_pids).union(current_child_pids))
-                        ),
-                    )
+                    _cleanup_bridge(current_child_pids)
                     os.truncate(stdout_path, stdout_size)
                     os.truncate(stderr_path, stderr_size)
                     stdout, stderr = _read_logs()
@@ -5056,7 +5099,7 @@ def _run_bridge_review_subprocess(
                     }
 
                 if not snapshot["child_pids"] and idle_for >= aggregation_hang_timeout:
-                    _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
+                    _cleanup_bridge(snapshot["child_pids"])
                     stdout, stderr = _read_logs()
                     return {
                         "exit_code": -3,
@@ -5071,7 +5114,7 @@ def _run_bridge_review_subprocess(
                     }
 
                 if idle_for >= stale_timeout:
-                    _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
+                    _cleanup_bridge(snapshot["child_pids"])
                     stdout, stderr = _read_logs()
                     return {
                         "exit_code": -2,
@@ -5087,7 +5130,7 @@ def _run_bridge_review_subprocess(
                     }
 
                 if now - start_time >= timeout:
-                    _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
+                    _cleanup_bridge(snapshot["child_pids"])
                     stdout, stderr = _read_logs()
                     return {
                         "exit_code": -1,
@@ -5116,10 +5159,7 @@ def _run_bridge_review_subprocess(
                 cleanup_child_pids.update(cleanup_snapshot.get("child_pids") or ())
             except BaseException:
                 pass
-            _terminate_bridge_subprocess(
-                proc,
-                child_pids=tuple(sorted(pid for pid in cleanup_child_pids if pid)),
-            )
+            _cleanup_bridge(tuple(sorted(pid for pid in cleanup_child_pids if pid)))
             raise
 
 
