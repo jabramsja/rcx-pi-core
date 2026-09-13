@@ -6,7 +6,42 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-13
 
-### P0T2 Landed Private-Review Durability Evidence (Phase B, CURRENT)
+### P0T3 Retained Fast-Root Process Ownership Closure R2 (Phase B, CURRENT)
+
+- addresses only retained finding8 and subsumed P0A/P0B on exact PR #1302
+  merge `75e323921116c2ea6cc739d3472c4cb97c730d9f`. Installs a unique
+  inherited bridge ownership marker before launch and reconciles matching
+  processes with recorded/current descendants at each cleanup boundary.
+  This recovers ownership when the root exits before the first parent-graph
+  snapshot, including when `on_started` raises. The existing bounded
+  termination, received-output boundary and `on_result` ordering are retained
+- adds two real-process cases in `TestBridgeReviewMonitoring`, arranging root
+  exit before any snapshot without mocking discovery or liveness. The declared
+  command `PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_phase_b_executor.py::TestBridgeReviewMonitoring --tb=short`
+  first produced **2 failed / 7 passed in 4.18s, exit 1** at the post-return
+  child-liveness assertions, then **9 passed in 4.13s, exit 0** after the fix.
+  Both cases verify owned children dead after return/unwind, unrelated
+  processes alive and unconditional fixture cleanup. Existing recorded-child,
+  monitor-exception, callback, timeout and ordinary cleanup retain their credit
+- keeps the rich P0T3 row 36 CURRENT with class `L4_ENABLER`, P0T4 immediately
+  NEXT, then P0R2/P1-P5 and every later queue identity/order. The 2026-09-13
+  same-wave TASKS tracker note owns L4 fields; the native packet derives them
+  while preserving its nine launcher-owned header lines. Native packet/indicator
+  generation, changed-test/control-surface gates, independent reviews and
+  commit/CI/merge remain outer-executor work. R1 stays stopped and preserved;
+  no new prerequisite, fleet/stopped-PR/stash action or Mu semantic advancement.
+  The proof covers the two retained environment-inheriting schedules with
+  process enumeration available; it makes no arbitrary-process containment claim
+
+### P0T2 Landed Private-Review Durability Evidence (Landed)
+
+- landed through PR #1302 at
+  `75e323921116c2ea6cc739d3472c4cb97c730d9f` on 2026-09-13T21:16:20Z,
+  from head `917e460b979995451424a949f91e7d30e6389186`. The recorded
+  predecessor closeout reports native exit 0 at 21:19:55Z, exact PRIMARY
+  fast-forward, absent owners and all seven CI checks SUCCESS. Its green-gate
+  passed 11689 tests with 22 skipped and 6 warnings in 615.84s, plus separate
+  1/515/149 passing gates. These are historical results for that landed head
 
 - documents existing P0L round-2 findings 5/6 and subsumed P0C on exact
   PR #1301 merge `8e7c32a1438c21d47337ad16c77e9cec4bcb5ab6`. Implementation
@@ -30,11 +65,12 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   package reader uses that header for regeneration, matching the launch-bound
   specification, rich queue selector row and closure report
 - synchronizes the live queue owners and native tracker notes: P0T1 row 34
-  LANDED PR #1301, rich P0T2 row 35 CURRENT until native landing, P0T3
-  immediately NEXT, then P0T4/P0R2/P1-P5 and all remaining recorded work,
-  Mu production before optimization. Native indicator collection, independent
-  reviews and commit/CI/merge remain outer-executor work. Held TASKS
-  `8271020746511cb9a7917f584dc23766660072de`, older stashes/stopped carriers,
+  LANDED PR #1301, P0T2 row 35 LANDED PR #1302, rich P0T3 row 36
+  CURRENT, P0T4 immediately NEXT, then P0R2/P1-P5 and all remaining recorded
+  work, Mu production before optimization. P0T2 native independent reviews,
+  indicator collection and commit/CI/merge completed; P0T3 has its own pending
+  native gates. Held P0T2 TASKS `7bfc528ba351bf6800e3aea12278d584457505be`,
+  the earlier `8271020746511cb9a7917f584dc23766660072de`, older stashes/stopped carriers,
   open stopped PR #1284/#1298 and consumed fleet 1 MOVED / 3 INCOMPLETE /
   407 prior HOLDs remain preserved. The late P0T1 bootstrap-exception review
   stays deferred/nonblocking; post-retirement pager fallback belongs to P0R2

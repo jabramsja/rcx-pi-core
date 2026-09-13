@@ -8105,6 +8105,123 @@ class TestBridgeRenderAssociation:
 class TestBridgeReviewMonitoring:
     """Bridge review supervision fails closed on stale reviewer tails."""
 
+    @pytest.mark.parametrize("callback_fails", [False, True], ids=["normal-return", "callback-error"])
+    def test_bridge_fast_root_exit_before_first_snapshot_cleans_detached_child(
+        self, tmp_path, callback_fails,
+    ):
+        identity_path = tmp_path / "bridge-processes.json"
+        child_code = "import time; time.sleep(60)"
+        parent_code = (
+            "import json, os, pathlib, subprocess, sys\n"
+            "child = subprocess.Popen(\n"
+            "    [sys.executable, '-c', sys.argv[1]], start_new_session=True,\n"
+            "    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,\n"
+            ")\n"
+            "pathlib.Path(sys.argv[2]).write_text(json.dumps({\n"
+            "    'root': os.getpid(), 'child': child.pid,\n"
+            "}), encoding='utf-8')\n"
+            "print('fast bridge stdout', flush=True)\n"
+            "print('fast bridge stderr', file=sys.stderr, flush=True)\n"
+        )
+        root_procs: list[subprocess.Popen[str]] = []
+        child_pids: list[int] = []
+        snapshots: list[dict[str, Any]] = []
+        received_results: list[dict[str, Any]] = []
+        real_popen = pb_mod.subprocess.Popen
+        real_snapshot = pb_mod._bridge_progress_snapshot  # ANTICHEAT_OK: retain real descendant discovery
+        run_env = {**os.environ, "RCX_FINDING8_FIXTURE": "present"} if callback_fails else None
+        original_env = run_env.copy() if run_env is not None else None
+        unrelated = None
+
+        def tracking_popen(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            if kwargs.get("start_new_session"):
+                root_procs.append(proc)
+            return proc
+
+        def on_started():
+            deadline = pb_mod.time.monotonic() + 5
+            while pb_mod.time.monotonic() < deadline:
+                try:
+                    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+                except (FileNotFoundError, json.JSONDecodeError):
+                    pb_mod.time.sleep(0.01)
+                    continue
+                assert len(root_procs) == 1
+                assert identity["root"] == root_procs[0].pid
+                child_pids.append(identity["child"])
+                assert root_procs[0].wait(timeout=5) == 0
+                assert not snapshots, "fixture must exit before the first snapshot"
+                assert pb_mod._pid_is_live(child_pids[0])  # ANTICHEAT_OK: real orphan exists before executor cleanup
+                if callback_fails:
+                    raise RuntimeError("fast-root callback exploded")
+                return
+            raise AssertionError("bridge fixture did not report its child")
+
+        def tracking_snapshot(*args, **kwargs):
+            snapshot = real_snapshot(*args, **kwargs)
+            snapshots.append(snapshot)
+            return snapshot
+
+        def on_result(result):
+            assert pb_mod._pid_is_live(child_pids[0])  # ANTICHEAT_OK: received output is delivered before cleanup
+            received_results.append(result)
+
+        try:
+            unrelated = real_popen(
+                [sys.executable, "-c", child_code], start_new_session=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            with patch.object(pb_mod.subprocess, "Popen", side_effect=tracking_popen), \
+                 patch.object(pb_mod, "_bridge_progress_snapshot", side_effect=tracking_snapshot):
+                def run_bridge():
+                    return pb_mod._run_bridge_review_subprocess(  # ANTICHEAT_OK: retained finding8 real-process regression
+                        tmp_path,
+                        [sys.executable, "-c", parent_code, child_code, str(identity_path)],
+                        job_id="fast-root-job", timeout=10, verbose=False,
+                        env=run_env, on_started=on_started, on_result=on_result,
+                        poll_interval=0.01,
+                    )
+
+                if callback_fails:
+                    with pytest.raises(RuntimeError, match="fast-root callback exploded"):
+                        run_bridge()
+                    assert not received_results
+                else:
+                    result = run_bridge()
+                    assert result["exit_code"] == 0
+                    assert result["stdout"] == "fast bridge stdout\n"
+                    assert result["stderr"] == "fast bridge stderr\n"
+                    assert received_results == [result]
+
+            assert len(child_pids) == 1
+            assert snapshots and all(child_pids[0] not in s["child_pids"] for s in snapshots)
+            assert unrelated.poll() is None, "cleanup must leave unrelated processes alive"
+            assert run_env == original_env, "caller environment must not be mutated"
+            assert not pb_mod._pid_is_live(child_pids[0])  # ANTICHEAT_OK: must be dead at normal return or callback unwind
+        finally:
+            # Stop roots before reading fallback identity so fixture failures cannot
+            # race another spawn; cleanup remains unconditional on assertion failure.
+            fixture_roots = [*root_procs, *([unrelated] if unrelated is not None else [])]
+            for proc in fixture_roots:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
+            cleanup_pids = set(child_pids)
+            try:
+                cleanup_pids.add(json.loads(identity_path.read_text(encoding="utf-8"))["child"])
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+            for pid in cleanup_pids:
+                try:
+                    os.kill(pid, pb_mod.signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            deadline = pb_mod.time.monotonic() + 5
+            while any(pb_mod._pid_is_live(pid) for pid in cleanup_pids) and pb_mod.time.monotonic() < deadline:  # ANTICHEAT_OK: verify test-only fallback cleanup
+                pb_mod.time.sleep(0.05)
+            assert all(not pb_mod._pid_is_live(pid) for pid in cleanup_pids)  # ANTICHEAT_OK: never leave a live test descendant
+
     def test_bridge_review_stale_kills_subprocess(self, tmp_path):
         stdout_log = tmp_path / ".scratch" / "phase_b_bridge_stale-job.stdout.log"
         stdout_log.parent.mkdir(parents=True, exist_ok=True)
@@ -8120,6 +8237,7 @@ class TestBridgeReviewMonitoring:
         monotonic_values = iter([0.0, 0.0, 0.0, 2.0, 2.0])
 
         with patch.object(pb_mod.subprocess, "Popen", return_value=proc), \
+             patch.object(pb_mod, "_bridge_owned_processes", return_value=()), \
              patch.object(pb_mod, "_bridge_progress_snapshot", side_effect=[
                  frozen_snapshot,
                  frozen_snapshot,
@@ -8486,6 +8604,7 @@ class TestBridgeReviewMonitoring:
         }
 
         with patch.object(pb_mod.subprocess, "Popen", return_value=proc), \
+             patch.object(pb_mod, "_bridge_owned_processes", return_value=()), \
              patch.object(pb_mod, "_bridge_progress_snapshot", side_effect=[
                  first_snapshot,
                  RuntimeError("snapshot exploded"),

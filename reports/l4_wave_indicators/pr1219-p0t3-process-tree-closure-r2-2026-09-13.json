@@ -1,0 +1,25 @@
+{
+  "wave_id": "pr1219-p0t3-process-tree-closure-r2-2026-09-13",
+  "repeat_run_speedup_ratio": 1.003861,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.333052,
+  "repeat_run_raw_seconds": [
+    0.334338,
+    0.333052
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.334338
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.66739
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-13T22:40:30Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "75e323921116c2ea6cc739d3472c4cb97c730d9f"
+}
