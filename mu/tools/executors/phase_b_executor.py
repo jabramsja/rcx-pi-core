@@ -3658,7 +3658,10 @@ def _terminal_question_identity(
         plan.get("wave_id") or plan_path.replace("reports/control_plane/", "").replace(".md", "")
     )
     for key in ("wave_id", "wave_name"):
-        if key in routing_record and routing_record[key] != wave_id:
+        routed_wave = routing_record.get(key)
+        if routed_wave is None or (isinstance(routed_wave, str) and not routed_wave.strip()):
+            continue
+        if not isinstance(routed_wave, str) or normalize_wave_id(routed_wave) != wave_id:
             raise PhaseBExecutorError("Terminal routing wave does not match plan")
     identity, error = _bridge_fix_active_identity(
         repo_root, routing_record=routing_record, plan=plan, plan_path=plan_path,
@@ -3736,6 +3739,20 @@ def _promote_received_question(repo_root: Path, state: dict[str, Any]) -> dict[s
     return state
 
 
+def _save_terminal_question_render(
+    repo_root: Path, state: dict[str, Any], render: str,
+) -> dict[str, Any]:
+    """Enrich the durable founder question without changing verdict authority."""
+    if not render or state["terminal_result"].get("bridge_render") == render[:2000]:
+        return state
+    state = {
+        **state,
+        "terminal_result": {**state["terminal_result"], "bridge_render": render[:2000]},
+    }
+    _save_state(repo_root, state)
+    return state
+
+
 def _recover_terminal_question(
     repo_root: Path, state: dict[str, Any], plan_path: str | None,
     routing_record_override: dict[str, Any] | None,
@@ -3766,6 +3783,15 @@ def _recover_terminal_question(
                 or state.get("question_step") not in {"question_for_founder", "reentry_question_for_founder"}
             ):
                 raise PhaseBExecutorError("Terminal QUESTION lacks accepted invocation-bound verdict evidence")
+            if not state["terminal_result"].get("bridge_render"):
+                # Cleanup or rendering may have failed after the early journal.
+                # Read only the validated job's artifact; preserve founder wait
+                # if that display artifact is still unavailable.
+                try:
+                    render = _read_bridge_render(repo_root, job_id)
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    render = ""
+                state = _save_terminal_question_render(repo_root, state, render)
         promoted = _promote_received_question(repo_root, state)
         result = _private_attr_question_result_from_state(promoted)
         result["resumed_from"] = state["completed_step"]
@@ -12158,7 +12184,7 @@ def run_phase_b(
                 routing_record=routing_record, result=result, round_num=round_num, reentry=False,
             )
             if received is not None:
-                _promote_received_question(repo_root, received)
+                received = _promote_received_question(repo_root, received)
             result["status"] = "question_for_founder"
             result["errors"] = [
                 f"Bridge returned QUESTION (round {round_num}). "
@@ -12168,6 +12194,8 @@ def run_phase_b(
                 render = _read_bridge_render(repo_root, bridge_job_id)
                 if render:
                     result["bridge_render"] = render[:2000]
+                    if received is not None:
+                        _save_terminal_question_render(repo_root, received, render)
                 _emit_phase_b_event(
                     repo_root,
                     routing_record=routing_record,
@@ -13228,7 +13256,7 @@ def run_phase_b(
                     routing_record=routing_record, result=result, round_num=reentry_round, reentry=True,
                 )
                 if received is not None:
-                    _promote_received_question(repo_root, received)
+                    received = _promote_received_question(repo_root, received)
                 result["status"] = "question_for_founder"
                 result["bridge_job_id"] = bridge_job_id
                 result["bridge_stdout_path"] = bridge_result.get("stdout_path")
@@ -13241,6 +13269,8 @@ def run_phase_b(
                     render = _read_bridge_render(repo_root, bridge_job_id)
                     if render:
                         result["bridge_render"] = render[:2000]
+                        if received is not None:
+                            _save_terminal_question_render(repo_root, received, render)
                     _emit_phase_b_event(
                         repo_root,
                         routing_record=routing_record,
