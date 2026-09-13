@@ -18,7 +18,11 @@ Role contract:
 - Do NOT edit source files unless this job's task explicitly delegates implementation to you.
 - Do NOT mutate repo state to make review easier. Never use `git stash`, `git checkout`, `git restore`, `git reset`, `git commit`, `git merge`, `git rebase`, `git clean`, `git push`, or similar repo-mutating commands during review.
 - If a proof step would require changing tracked files or the git index, report that limit under `NOT_CHECKED` instead of changing state.
-- Keep any temporary artifacts under `.scratch/` only.
+- Do not perform destructive cleanup, delete files or directories, or clear caches during review.
+- Do not create reviewer worktrees, staged copies, or repository copies for validation. Review the supplied candidate in place.
+- Use supplied candidate evidence and validation receipts as authority. Do not run duplicate broad validation, canonical suites, or startup/commit/pre-push gates.
+- Only narrow read-only probes needed to substantiate a concrete finding are permitted, within the active evidence contract and provider safety policy. If a probe requires mutation, report the limit under `NOT_CHECKED`.
+- Honor the provider safety policy. Do not bypass safeguards, hide task intent, rephrase to evade a refusal, or repeat prohibited work. If this review cannot be performed within policy, stop and report that limit.
 - If you believe implementation is needed, report it as a finding — do not implement it yourself.
 
 Job:

@@ -15,7 +15,7 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
@@ -32,6 +32,8 @@ from bridge_adapters import (
     AGENT_DECISION_PLACEHOLDER,
     AGENT_ENVELOPE_REQUIRED_KEYS,
     BridgeAdapterError,
+    CODEX_PROVIDER_SAFETY_REFUSAL,
+    CodexProviderSafetyRefusal,
     _prepare_adapter_env,
     extract_agent_envelope_candidates,
     get_adapter,
@@ -463,6 +465,57 @@ Classify findings as DEFECT (design flaw), POLICY_BOUND (needs founder decision)
 
 class BridgeError(RuntimeError):
     """Raised when supervisor execution cannot continue."""
+
+
+class BridgeRefusalTerminal(BridgeError):
+    """A durable provider-policy stop; the CLI emits its complete final object."""
+
+    def __init__(self, terminal: dict[str, Any]) -> None:
+        super().__init__(CODEX_PROVIDER_SAFETY_REFUSAL)
+        self.terminal = terminal
+
+
+def _refusal_actions(conn: sqlite3.Connection, job_id: str, kind: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT metadata FROM job_actions WHERE job_id = ? AND action = ? AND actor = ? ORDER BY id",
+        (job_id, f"codex_reviewer_refusal_{kind}", "bridge_supervisor"),
+    ).fetchall()
+    return [json.loads(row["metadata"]) for row in rows]
+
+
+def _record_refusal_action(conn: sqlite3.Connection, job_id: str, kind: str, payload: dict[str, Any]) -> None:
+    conn.execute(
+        "INSERT INTO job_actions(job_id, action, actor, timestamp, metadata) VALUES (?, ?, ?, ?, ?)",
+        (job_id, f"codex_reviewer_refusal_{kind}", "bridge_supervisor", utc_now(),
+         json.dumps(payload, sort_keys=True, allow_nan=False)),
+    )
+
+
+def _finish_reviewer_refusal(conn: sqlite3.Connection, paths: BridgePaths, job_id: str, round_no: int, reason: str) -> None:
+    prior = _refusal_actions(conn, job_id, "terminal")
+    if prior:
+        raise BridgeRefusalTerminal(prior[0])
+    refusals = _refusal_actions(conn, job_id, "evidence")
+    fresh_turns = _refusal_actions(conn, job_id, "fresh_turn")
+    terminal = {
+        "source": "bridge_supervisor", "version": 1, "status": "error",
+        "error_code": CODEX_PROVIDER_SAFETY_REFUSAL,
+        "terminal_decision": "POLICY_BOUND", "terminal_reason": reason,
+        "job_id": job_id, "turn_id": refusals[-1]["turn_id"],
+        "agent_role": "reviewer", "provider": "codex",
+        "refusal_count": len(refusals), "fresh_review_attempts": len(fresh_turns),
+        "fresh_turn_id": fresh_turns[0]["turn_id"] if fresh_turns else None,
+        "refusals": refusals,
+    }
+    _record_refusal_action(conn, job_id, "terminal", terminal)
+    # Commits the terminal object and job status together under the bridge lock.
+    update_job_status(conn, job_id, "DONE", current_round=round_no, terminal_decision="POLICY_BOUND")
+    try:
+        render_job(paths, conn, job_id)
+    finally:
+        # Transcript rendering cannot turn a persisted policy stop into a
+        # generic crash that downstream recovery could use to mutate code.
+        raise BridgeRefusalTerminal(terminal)
 
 
 class _BridgeLock:
@@ -1512,6 +1565,7 @@ def execute_agent_turn(
     attempt: int = 1,
     stream: bool = False,
     prompt_baseline_sha: str | None = None,
+    fresh_refusal_review: bool = False,
 ) -> tuple[str, dict[str, Any], Path, Path, RepoState]:
     state_start = compute_repo_state(paths.repo_root)
     short_uuid = uuid.uuid4().hex[:8]
@@ -1525,6 +1579,17 @@ def execute_agent_turn(
     adapter = get_adapter(config, adapter_name)
     turn_timeout_s = _bridge_turn_timeout_s(adapter.timeout_s)
     zero_output_timeout_s = BRIDGE_ZERO_OUTPUT_TIMEOUT_S if agent_role == "reviewer" else None
+
+    if fresh_refusal_review:
+        # Inspect the same expanded command the adapter will run. A new bridge
+        # UUID alone does not make a provider resume command a fresh turn.
+        cmd, _ = _prepare_adapter_env(adapter, {
+            "prompt_file": str(prompt_path), "repo_root": str(paths.repo_root),
+            "job_id": job["job_id"], "turn_id": turn_id, "agent_role": agent_role,
+            "bus_dir": str(_bridge_paths_bus_rel(paths)),
+        })
+        if any(arg in {"resume", "--resume", "--last"} or arg.startswith("--resume=") for arg in cmd):
+            _finish_reviewer_refusal(conn, paths, job["job_id"], round_no, "fresh_turn_unavailable")
 
     # Pre-allocate raw output file so it exists from adapter start
     raw_dir = paths.raw_dir / job["job_id"]
@@ -1543,6 +1608,10 @@ def execute_agent_turn(
         raw_output_path=raw_output_path,
         started_at=started_at,
     )
+    if fresh_refusal_review:
+        # Reserve the sole fresh provider invocation durably BEFORE dispatch.
+        _record_refusal_action(conn, job["job_id"], "fresh_turn", {"turn_id": turn_id})
+        conn.commit()
     # Store prompt-baseline sha for crash recovery staleness detection
     if prompt_baseline_sha:
         conn.execute(
@@ -1567,12 +1636,24 @@ def execute_agent_turn(
             bus_dir=_bridge_paths_bus_rel(paths),
         )
     except (BridgeAdapterError, Exception) as exc:
+        refusal = exc.provider_refusal if isinstance(exc, BridgeAdapterError) else None
+        qualified = (
+            isinstance(refusal, CodexProviderSafetyRefusal)
+            and refusal.job_id == job["job_id"] and refusal.turn_id == turn_id
+            and refusal.agent_role == agent_role == "reviewer"
+            and refusal.provider == adapter_name == "codex"
+        )
+        if qualified:
+            _record_refusal_action(conn, job["job_id"], "evidence", {
+                **asdict(refusal), "raw_output_path": str(raw_output_path),
+                "adapter_error": str(exc),
+            })
         # Update turn to FAILED on adapter error
         update_turn_complete(
             conn,
             turn_id=turn_id,
             status="FAILED",
-            decision="ERROR",
+            decision=CODEX_PROVIDER_SAFETY_REFUSAL if qualified else "ERROR",
             state_sha_end=compute_repo_state(paths.repo_root).state_sha,
             finished_at=utc_now(),
         )
@@ -1701,16 +1782,34 @@ def _run_reviewer_phase(
     stream: bool = False,
     include_diff: bool = True,
 ) -> str | None:
-    """Run reviewer (with staleness retry). Returns terminal decision or None for REQUEST_CHANGES continuation."""
+    """Run reviewer with separate staleness and durable provider-refusal budgets."""
     reviewer_attempt = 0
     reviewer_envelope: dict[str, Any] | None = None
     while reviewer_attempt < 2:
+        refusals = _refusal_actions(conn, job_id, "evidence")
+        fresh_turns = _refusal_actions(conn, job_id, "fresh_turn")
+        if len(refusals) >= 2:
+            _finish_reviewer_refusal(conn, paths, job_id, round_no, "repeated_refusal")
+        fresh_refusal_review = bool(refusals) and not fresh_turns
+        if refusals and fresh_turns:
+            fresh_turn = conn.execute("SELECT status FROM turns WHERE turn_id = ?", (fresh_turns[0]["turn_id"],)).fetchone()
+            if fresh_turn is None or fresh_turn["status"] != "completed":
+                _finish_reviewer_refusal(conn, paths, job_id, round_no, "fresh_turn_unresolved")
         reviewer_attempt += 1
         try:
             update_job_status(conn, job_id, "REVIEWER_RUNNING", current_round=round_no)
             _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reviewer ({job['reviewer_agent']})...")
             review_state_start = compute_repo_state(paths.repo_root)
             reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results, include_diff=include_diff)
+            if fresh_refusal_review:
+                reviewer_prompt += (
+                    "\nThe prior reviewer turn was refused by the provider safety policy. "
+                    "This is the sole fresh attempt at the same authorized read-only review. "
+                    "Do not resume or reuse the refused turn, conceal task intent, override "
+                    "safeguards, or repeat prohibited work. Use the supplied candidate evidence; "
+                    "perform only permitted narrow read-only probes. If this review cannot be "
+                    "performed within policy, stop and report that limit.\n"
+                )
             reviewer_turn_id, reviewer_envelope, _, raw_path, _ = execute_agent_turn(
                 conn,
                 paths,
@@ -1722,8 +1821,30 @@ def _run_reviewer_phase(
                 attempt=reviewer_attempt,
                 stream=stream,
                 prompt_baseline_sha=review_state_start.state_sha,
+                fresh_refusal_review=fresh_refusal_review,
             )
+        except BridgeAdapterError:
+            # Only evidence written by execute_agent_turn for this invocation
+            # authorizes refusal handling. Exception text has no authority.
+            current_refusals = _refusal_actions(conn, job_id, "evidence")
+            if len(current_refusals) > len(refusals):
+                if len(current_refusals) >= 2:
+                    _finish_reviewer_refusal(conn, paths, job_id, round_no, "repeated_refusal")
+                reviewer_attempt -= 1  # a refusal does not spend a stale retry
+                continue
+            if fresh_refusal_review and _refusal_actions(conn, job_id, "fresh_turn"):
+                # A crash in the reserved fresh turn must stop before generic
+                # recovery can mistake the unresolved review for repair work.
+                _finish_reviewer_refusal(conn, paths, job_id, round_no, "fresh_turn_unresolved")
+            update_job_status(conn, job_id, "AWAITING_REVIEWER_APPROVAL", current_round=round_no)
+            raise
+        except BridgeRefusalTerminal:
+            raise
         except BaseException:
+            if fresh_refusal_review and _refusal_actions(conn, job_id, "fresh_turn"):
+                # Invalid output or interruption after reservation consumes the
+                # same budget; persist the policy stop in this invocation.
+                _finish_reviewer_refusal(conn, paths, job_id, round_no, "fresh_turn_unresolved")
             # Restore job status so continue/recovery works.
             # Catch BaseException to ensure job status is NEVER left stranded in
             # *_RUNNING regardless of exception type (PermissionError, BrokenPipeError, etc).
@@ -1751,6 +1872,10 @@ def _run_reviewer_phase(
             ("stale", "STALE", review_state_end.state_sha, reviewer_turn_id),
         )
         conn.commit()
+        if fresh_refusal_review:
+            # Persist the policy stop before optional transcript rendering;
+            # the durable producer still emits it if that rendering fails.
+            _finish_reviewer_refusal(conn, paths, job_id, round_no, "fresh_turn_stale")
         render_job(paths, conn, job_id)
         if reviewer_attempt >= 2:
             raise BridgeError(
@@ -1789,6 +1914,9 @@ def _run_reviewer_phase(
 def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, pause_after_reader: bool = False) -> str:
     with open_db(paths) as conn:
         job = read_job(conn, job_id)
+        terminal_refusals = _refusal_actions(conn, job_id, "terminal")
+        if terminal_refusals:
+            raise BridgeRefusalTerminal(terminal_refusals[0])
         if job["terminal_decision"]:
             _log(verbose, f"Job already terminal: {job['terminal_decision']}")
             render_job(paths, conn, job_id)
@@ -2039,6 +2167,9 @@ def continue_job(paths: BridgePaths, job_id: str, *, verbose: bool = False) -> s
     init_db(paths)
     with open_db(paths) as conn:
         job = read_job(conn, job_id)
+        terminal_refusals = _refusal_actions(conn, job_id, "terminal")
+        if terminal_refusals:
+            raise BridgeRefusalTerminal(terminal_refusals[0])
         if job["status"] != "AWAITING_REVIEWER_APPROVAL":
             raise BridgeError(
                 f"Job '{job_id}' is not paused (status: {job['status']}). "
@@ -3015,6 +3146,9 @@ def main(argv: list[str] | None = None) -> int:
                 output = render_job(paths, conn, args.job_id)
             print(output)
             return 0
+    except BridgeRefusalTerminal as exc:
+        print(json.dumps(exc.terminal, sort_keys=True, allow_nan=False), file=sys.stderr)
+        return 1
     except (BridgeError, BridgeAdapterError, MigrationVersionError, ExecutorCommonError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

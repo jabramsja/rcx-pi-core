@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 from unittest.mock import patch
+from dataclasses import asdict
 
 import pytest
 
@@ -26,6 +27,341 @@ executor_common = load_module(
     "executor_common_for_bridge_defaults",
     REPO_ROOT / "mu" / "tools" / "executors" / "executor_common.py",
 )
+
+# Historical P0IB attempt R2, bridge Round 1, raw SHA256
+# 5872772e8707dd8fef8a295208e028ae1245cb90f3bacf4da634841e1ea9c795,
+# physical lines 289/290. These are provider data, never retry instructions.
+REFUSAL_MESSAGE = (
+    "This content was flagged for possible cybersecurity risk. If this seems wrong, "
+    "try rephrasing your request. To get authorized for security work, join the "
+    "Trusted Access for Cyber program: https://chatgpt.com/cyber"
+)
+REFUSAL_EVENTS = [
+    {"type": "error", "message": REFUSAL_MESSAGE},
+    {"type": "turn.failed", "error": {"message": REFUSAL_MESSAGE}},
+]
+REFUSAL_JSONL = "\n".join(json.dumps(event) for event in REFUSAL_EVENTS) + "\n"
+
+
+def setup_refusal_bridge(tmp_path: Path, outcomes: list[str]):
+    """Real bridge and adapter; only the external provider is a fixture process."""
+    repo = tmp_path / "refusal-repo"
+    repo.mkdir()
+    _init_temp_repo(repo)
+    paths = bridge.bridge_paths(repo)
+    bridge.init_db(paths)
+    script = tmp_path / "provider.py"
+    calls = tmp_path / "provider-calls.json"
+    script.write_text(
+        "import json, os, pathlib, sys\n"
+        "if sys.argv[3] == 'reader':\n"
+        "    sys.stdin.read()\n"
+        "    print('BEGIN_AGENT_ENVELOPE\\n' + json.dumps({'job_id': sys.argv[1], 'turn_id': sys.argv[2], "
+        "'agent_role': 'reader', 'decision': 'REQUEST_CHANGES', 'summary': 'implemented', "
+        "'findings': [], 'touched_files_claimed': [], 'validations_claimed': [], "
+        "'request_for_next_agent': 'review'}) + '\\nEND_AGENT_ENVELOPE')\n"
+        "    sys.exit(0)\n"
+        f"calls = pathlib.Path({str(calls)!r})\n"
+        "seen = json.loads(calls.read_text()) if calls.exists() else []\n"
+        "prompt = sys.stdin.read()\n"
+        "seen.append({'job_id': sys.argv[1], 'turn_id': sys.argv[2], 'prompt': prompt, 'pid': os.getpid()})\n"
+        "calls.write_text(json.dumps(seen))\n"
+        f"outcome = {outcomes!r}[min(len(seen) - 1, {len(outcomes) - 1})]\n"
+        "if outcome == 'refuse':\n"
+        f"    print({REFUSAL_JSONL!r}, end='')\n"
+        "    print('provider exit evidence', file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+        "if outcome == 'crash':\n"
+        "    print('ordinary reviewer crash', file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+        "if outcome == 'malformed':\n"
+        "    print('malformed reviewer output')\n"
+        "    sys.exit(0)\n"
+        "if outcome == 'stale':\n"
+        "    pathlib.Path('README.md').write_text('changed by staleness fixture')\n"
+        "    outcome = 'GO'\n"
+        "envelope = {'job_id': sys.argv[1], 'turn_id': sys.argv[2], "
+        "'agent_role': 'reviewer', 'decision': outcome, 'summary': 'reviewed', "
+        "'findings': [], 'touched_files_claimed': [], 'validations_claimed': [], "
+        "'request_for_next_agent': ''}\n"
+        "print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', "
+        "'text': 'BEGIN_AGENT_ENVELOPE\\n' + json.dumps(envelope) + '\\nEND_AGENT_ENVELOPE'}}))\n"
+        "print(json.dumps({'type': 'turn.completed'}))\n",
+        encoding="utf-8",
+    )
+    paths.config_path.write_text(json.dumps({"agents": {"codex": {
+        "cmd": [sys.executable, str(script), "{job_id}", "{turn_id}", "{agent_role}", "--json"],
+        "timeout_s": 30, "prompt_via_stdin": True,
+    }}}), encoding="utf-8")
+    return paths, calls
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_provider_refusal_exact_chronology_is_typed_and_bound(tmp_path, stream):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Read-only review")
+    raw = tmp_path / "raw.txt"
+    stdout = json.dumps({"type": "item.completed", "item": {
+        "type": "agent_message", "text": "Review progress before refusal",
+    }}) + "\n" + ('{"type":"item.started","item":{"type":"command_execution"}}\n' * 287) + REFUSAL_JSONL
+    script = tmp_path / "provider.py"
+    script.write_text(f"import sys; print({stdout!r}, end=''); sys.exit(1)")
+    spec = adapters.AdapterSpec("codex", [sys.executable, str(script), "--json"], 30)
+    with pytest.raises(adapters.BridgeAdapterError) as caught:
+        adapters.run_adapter(spec, prompt_text="Read-only review", prompt_path=prompt,
+            repo_root=tmp_path, job_id="bound-job", turn_id="bound-turn",
+            agent_role="reviewer", stream=stream, raw_output_path=raw)
+    assert caught.value.returncode == 1
+    evidence = asdict(caught.value.provider_refusal)
+    assert evidence["job_id"] == "bound-job"
+    assert evidence["turn_id"] == "bound-turn"
+    assert evidence["agent_role"] == "reviewer"
+    assert evidence["provider"] == "codex"
+    assert evidence["returncode"] == 1
+    assert evidence["raw_stdout"] == stdout == raw.read_text()
+    assert evidence["error_line"] == 289 and evidence["failed_line"] == 290
+    assert caught.value.returncode == 1
+    assert "Review progress before refusal" in caught.value.output
+
+
+@pytest.mark.parametrize("case", [
+    "arbitrary_exit", "nested", "quoted", "nonterminal", "success_later",
+    "reversed", "different_message", "malformed", "duplicate_key", "nonfinite",
+    "stderr_only", "other_provider", "other_role", "exit_zero", "no_json",
+])
+def test_provider_refusal_lookalikes_have_no_authority(tmp_path, case):
+    stdout, stderr, provider, role, code = REFUSAL_JSONL, "", "codex", "reviewer", 1
+    if case == "arbitrary_exit":
+        stdout = json.dumps({"type": "error", "message": "connection lost"}) + "\n"
+    elif case == "nested":
+        stdout = json.dumps({"type": "item.completed", "item": REFUSAL_EVENTS}) + "\n"
+    elif case == "quoted":
+        stdout = json.dumps({"type": "item.completed", "item": {
+            "type": "agent_message", "text": REFUSAL_JSONL}}) + "\n"
+    elif case in {"nonterminal", "success_later"}:
+        stdout += json.dumps({"type": "turn.completed" if case == "success_later" else "turn.started"}) + "\n"
+    elif case == "reversed":
+        stdout = "\n".join(json.dumps(e) for e in reversed(REFUSAL_EVENTS)) + "\n"
+    elif case == "different_message":
+        stdout = stdout.replace("possible cybersecurity risk", "some other reason")
+    elif case == "malformed":
+        stdout = "malformed JSON\n" + stdout
+    elif case == "duplicate_key":
+        stdout = stdout.replace('"type": "error"', '"type": "ignored", "type": "error"')
+    elif case == "nonfinite":
+        stdout = '{"type":"progress","value":NaN}\n' + stdout
+    elif case == "stderr_only":
+        stdout, stderr = "", stdout
+    elif case == "other_provider":
+        provider = "claude"
+    elif case == "other_role":
+        role = "reader"
+    elif case == "exit_zero":
+        code = 0
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Read-only review")
+    script = tmp_path / "provider.py"
+    script.write_text(f"import sys; print({stdout!r}, end=''); print({stderr!r}, end='', file=sys.stderr); sys.exit({code})")
+    spec = adapters.AdapterSpec(provider, [sys.executable, str(script)] +
+        ([] if case == "no_json" else ["--json"]), 30)
+    kwargs = dict(prompt_text="Read-only review", prompt_path=prompt, repo_root=tmp_path,
+        job_id="bound-job", turn_id="bound-turn", agent_role=role)
+    if code == 0:
+        adapters.run_adapter(spec, **kwargs)
+    else:
+        with pytest.raises(adapters.BridgeAdapterError) as caught:
+            adapters.run_adapter(spec, **kwargs)
+        assert caught.value.returncode == code
+        assert getattr(caught.value, "provider_refusal", None) is None
+
+
+@pytest.mark.parametrize("decision", ["GO", "NO_GO", "REQUEST_CHANGES", "QUESTION"])
+def test_provider_refusal_one_fresh_review_preserves_verdict(tmp_path, decision):
+    paths, calls = setup_refusal_bridge(tmp_path, ["refuse", decision])
+    assert bridge.review_job(paths, task_text="Review the authorized candidate",
+        reader_summary="Supplied validation receipts", job_id="fresh-review") == decision
+    seen = json.loads(calls.read_text())
+    assert len(seen) == 2
+    assert seen[0]["turn_id"] != seen[1]["turn_id"]
+    assert seen[0]["pid"] != seen[1]["pid"]
+    assert "Review the authorized candidate" in seen[1]["prompt"]
+    assert "provider safety policy" in seen[1]["prompt"]
+    assert "Do not resume" in seen[1]["prompt"]
+    assert "prior reviewer turn was refused" in seen[1]["prompt"]
+    with sqlite3.connect(paths.db_path) as conn:
+        turns = conn.execute("SELECT round_no, decision FROM turns WHERE agent_role='reviewer' ORDER BY rowid").fetchall()
+    assert turns == [(1, "CODEX_PROVIDER_SAFETY_REFUSAL"), (1, decision)]
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+@pytest.mark.parametrize("fresh_outcome,refusal_count,terminal_reason", [
+    ("refuse", 2, "repeated_refusal"),
+    ("crash", 1, "fresh_turn_unresolved"),
+    ("malformed", 1, "fresh_turn_unresolved"),
+])
+def test_provider_refusal_failed_fresh_review_is_durable_terminal(
+    tmp_path, capsys, verbose, fresh_outcome, refusal_count, terminal_reason,
+):
+    paths, calls = setup_refusal_bridge(tmp_path, ["refuse", fresh_outcome, "GO"])
+    before = (paths.repo_root / "README.md").read_bytes()
+    args = ["--repo-root", str(paths.repo_root), "review", "--job-id", "refused-job",
+        "--task", "Read-only review", "--summary", "Supplied receipts"]
+    if verbose:
+        args.append("-v")
+    assert bridge.main(args) == 1
+    captured = capsys.readouterr()
+    terminal = json.loads(captured.err.strip().split("\n")[-1])
+    assert terminal["error_code"] == "CODEX_PROVIDER_SAFETY_REFUSAL"
+    assert terminal["terminal_decision"] == "POLICY_BOUND"
+    assert terminal["job_id"] == "refused-job"
+    assert terminal["agent_role"] == "reviewer"
+    assert terminal["refusal_count"] == refusal_count
+    assert terminal["terminal_reason"] == terminal_reason
+    assert terminal["fresh_review_attempts"] == 1
+    seen = json.loads(calls.read_text())
+    assert len(seen) == 2
+    assert terminal["fresh_turn_id"] == seen[1]["turn_id"] != seen[0]["turn_id"]
+    assert len(terminal["refusals"]) == refusal_count
+    for evidence in terminal["refusals"]:
+        assert evidence["raw_stdout"] == REFUSAL_JSONL
+        assert evidence["raw_stderr"] == "provider exit evidence\n"
+        assert "exited 1" in evidence["adapter_error"]
+        raw = Path(evidence["raw_output_path"]).read_text()
+        assert all(json.dumps(event) in raw for event in REFUSAL_EVENTS)
+        assert "provider exit evidence" in raw
+    with sqlite3.connect(paths.db_path) as conn:
+        job = conn.execute("SELECT status, terminal_decision FROM jobs").fetchone()
+        records = conn.execute("SELECT metadata FROM job_actions WHERE action='codex_reviewer_refusal_terminal'").fetchall()
+        fresh_turn = conn.execute("SELECT status, decision, raw_output_path FROM turns WHERE turn_id = ?",
+            (terminal["fresh_turn_id"],)).fetchone()
+    assert job == ("DONE", "POLICY_BOUND")
+    assert [json.loads(row[0]) for row in records] == [terminal]
+    assert fresh_turn[:2] == ("FAILED", "CODEX_PROVIDER_SAFETY_REFUSAL" if fresh_outcome == "refuse" else "ERROR")
+    if fresh_outcome != "refuse":
+        evidence_text = "ordinary reviewer crash" if fresh_outcome == "crash" else "malformed reviewer output"
+        assert evidence_text in Path(fresh_turn[2]).read_text()
+    assert bridge.main(["--repo-root", str(paths.repo_root), "run", "refused-job"]) == 1
+    assert json.loads(capsys.readouterr().err.strip().split("\n")[-1]) == terminal
+    assert len(json.loads(calls.read_text())) == 2
+    assert (paths.repo_root / "README.md").read_bytes() == before
+
+
+@pytest.mark.parametrize("outcomes,terminal_reason", [
+    (["stale", "refuse", "GO"], None),
+    (["refuse", "stale", "GO"], "fresh_turn_stale"),
+])
+def test_provider_refusal_budget_is_distinct_from_staleness(tmp_path, outcomes, terminal_reason):
+    paths, calls = setup_refusal_bridge(tmp_path, outcomes)
+    if terminal_reason:
+        with pytest.raises(bridge.BridgeRefusalTerminal) as caught:
+            bridge.review_job(paths, task_text="Read-only review", reader_summary="receipts")
+        assert caught.value.terminal["terminal_reason"] == terminal_reason
+        assert len(json.loads(calls.read_text())) == 2
+    else:
+        assert bridge.review_job(paths, task_text="Read-only review", reader_summary="receipts") == "GO"
+        assert len(json.loads(calls.read_text())) == 3
+
+
+@pytest.mark.parametrize("boundary", ["before_reservation", "after_reservation"])
+def test_provider_refusal_budget_survives_interruption(tmp_path, monkeypatch, capsys, boundary):
+    paths, calls = setup_refusal_bridge(tmp_path, ["refuse", "GO"])
+    target = "execute_agent_turn" if boundary == "before_reservation" else "run_adapter"
+    original = getattr(bridge, target)
+    invocations = []
+
+    def interrupt(*args, **kwargs):
+        invocations.append(kwargs)
+        if len(invocations) == 2:
+            raise KeyboardInterrupt("fresh review interruption")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(bridge, target, interrupt)
+    expected_error = KeyboardInterrupt if boundary == "before_reservation" else bridge.BridgeRefusalTerminal
+    with pytest.raises(expected_error) as caught:
+        bridge.review_job(paths, task_text="Read-only review", reader_summary="receipts", job_id="interrupted")
+    assert len(json.loads(calls.read_text())) == 1
+    if boundary == "after_reservation":
+        # Persist and emit the stop in the failing invocation, before recovery.
+        assert caught.value.terminal["terminal_reason"] == "fresh_turn_unresolved"
+        with sqlite3.connect(paths.db_path) as conn:
+            records = conn.execute("SELECT metadata FROM job_actions WHERE action='codex_reviewer_refusal_terminal'").fetchall()
+        assert [json.loads(row[0]) for row in records] == [caught.value.terminal]
+    monkeypatch.setattr(bridge, target, original)
+    code = bridge.main(["--repo-root", str(paths.repo_root), "run", "interrupted"])
+    if boundary == "before_reservation":
+        assert code == 0
+        assert len(json.loads(calls.read_text())) == 2
+    else:
+        assert code == 1
+        terminal = json.loads(capsys.readouterr().err.strip().split("\n")[-1])
+        assert terminal["terminal_reason"] == "fresh_turn_unresolved"
+        assert terminal["fresh_review_attempts"] == 1
+        assert terminal == caught.value.terminal
+        assert len(json.loads(calls.read_text())) == 1
+
+
+def test_provider_refusal_rejects_provider_resume_before_fresh_invocation(tmp_path, monkeypatch):
+    paths, calls = setup_refusal_bridge(tmp_path, ["refuse", "GO"])
+    original = bridge.run_adapter
+
+    def configured_resume(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except adapters.BridgeAdapterError:
+            config = json.loads(paths.config_path.read_text())
+            config["agents"]["codex"]["cmd"].append("resume")
+            paths.config_path.write_text(json.dumps(config))
+            raise
+
+    monkeypatch.setattr(bridge, "run_adapter", configured_resume)
+    with pytest.raises(bridge.BridgeRefusalTerminal) as caught:
+        bridge.review_job(paths, task_text="Read-only review", reader_summary="receipts")
+    assert caught.value.terminal["terminal_reason"] == "fresh_turn_unavailable"
+    assert caught.value.terminal["fresh_review_attempts"] == 0
+    assert len(json.loads(calls.read_text())) == 1
+
+
+def test_provider_refusal_budget_persists_across_normal_rounds(tmp_path):
+    paths, calls = setup_refusal_bridge(tmp_path, ["refuse", "REQUEST_CHANGES", "refuse", "GO"])
+    job = bridge.submit_job(paths, task_text="Read-only review", scope_hint=None,
+        wave_class="MAINTENANCE", allow_edits=True, reader_agent="codex", reviewer_agent="codex",
+        max_rounds=3, acceptance_checks=[], job_id="multi-round-refusal")
+    with pytest.raises(bridge.BridgeRefusalTerminal) as caught:
+        bridge.run_job(paths, job)
+    terminal = caught.value.terminal
+    assert terminal["refusal_count"] == 2 and terminal["fresh_review_attempts"] == 1
+    assert len(json.loads(calls.read_text())) == 3
+    assert terminal["fresh_turn_id"] != terminal["turn_id"]
+
+
+def test_provider_refusal_render_failure_cannot_erase_terminal(tmp_path, monkeypatch, capsys):
+    paths, calls = setup_refusal_bridge(tmp_path, ["refuse", "refuse", "GO"])
+    original = bridge.render_job
+
+    def fail_terminal_render(_paths, conn, job_id):
+        job = bridge.read_job(conn, job_id)
+        if job["terminal_decision"] == "POLICY_BOUND":
+            raise OSError("optional transcript render unavailable")
+        return original(_paths, conn, job_id)
+
+    monkeypatch.setattr(bridge, "render_job", fail_terminal_render)
+    assert bridge.main(["--repo-root", str(paths.repo_root), "review", "--job-id", "render-failure",
+        "--task", "Read-only review", "--summary", "receipts"]) == 1
+    terminal = json.loads(capsys.readouterr().err.strip().split("\n")[-1])
+    assert terminal["refusal_count"] == 2
+    assert bridge.main(["--repo-root", str(paths.repo_root), "continue", "render-failure"]) == 1
+    assert json.loads(capsys.readouterr().err.strip().split("\n")[-1]) == terminal
+    assert len(json.loads(calls.read_text())) == 2
+
+
+def test_provider_refusal_prompt_boundaries(tmp_path):
+    paths, calls = setup_refusal_bridge(tmp_path, ["GO"])
+    assert bridge.review_job(paths, task_text="Read-only review", reader_summary="receipts") == "GO"
+    prompt = json.loads(calls.read_text())[0]["prompt"]
+    for boundary in ("destructive cleanup", "reviewer worktrees", "staged copies",
+                     "duplicate broad validation", "narrow read-only probes", "provider safety policy"):
+        assert boundary in prompt
+    assert "Keep any temporary artifacts under `.scratch/` only" not in prompt
 
 
 def _git(repo: Path, *args: str) -> str:

@@ -153,6 +153,7 @@ class FailureClass(Enum):
     PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP = "phase_b_l4_structural_tracker_note_gap"
     # Tier 4 -- escalate (never recover)
     NEEDS_PHASE_A = "needs_phase_a"
+    CODEX_PROVIDER_SAFETY_REFUSAL = "codex_provider_safety_refusal"
     TERMINAL_POLICY = "terminal_policy"
     UNCLASSIFIED = "unclassified"
 
@@ -197,6 +198,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP: 2,
     FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP: 2,
     FailureClass.NEEDS_PHASE_A: 4,
+    FailureClass.CODEX_PROVIDER_SAFETY_REFUSAL: 4,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
 }
 
@@ -471,6 +473,93 @@ def _is_bridge_go_with_only_deferrable_findings(
 # Classifier -- pure dict inspection, no external calls
 # ---------------------------------------------------------------------------
 
+_FATAL_CODEX_LAUNCH_HINTS = (
+    "codex cannot access session files", "failed to create session",
+    "missing bearer or basic authentication in header", "401 unauthorized",
+)
+
+
+def _canonical_reviewer_refusal(result: dict[str, Any]) -> bool:
+    """Consume PR1296 fields from a Phase B result, never arbitrary text/nesting."""
+    payload = result
+    if result.get("executor") == "phase_b_executor":
+        # The dispatcher's public process result wraps one complete Phase B
+        # JSON result in stdout. Do not use the general text-search parser.
+        if result.get("status") != "failed" or type(result.get("exit_code")) is not int or result["exit_code"] == 0:
+            return False
+        def strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            obj: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in obj:
+                    raise ValueError("duplicate JSON key")
+                obj[key] = value
+            return obj
+
+        def reject_constant(value: str) -> None:
+            raise ValueError(f"invalid JSON constant: {value}")
+
+        try:
+            payload = json.loads(result.get("stdout", ""), object_pairs_hook=strict_object, parse_constant=reject_constant)
+        except (ValueError, TypeError, RecursionError):
+            return False
+    if not isinstance(payload, dict) or payload.get("status") != "error":
+        return False
+    terminal = payload.get("bridge_terminal_result")
+    if not isinstance(terminal, dict):
+        return False
+    job_id = payload.get("bridge_job_id")
+    if (
+        not isinstance(job_id, str) or not job_id.strip()
+        or type(payload.get("bridge_exit_code")) is not int
+        or payload["bridge_exit_code"] in (0, -1, -2, -3)
+        or any(not isinstance(payload.get(key), str) or not payload[key].strip()
+               for key in ("bridge_stdout_path", "bridge_stderr_path"))
+        or terminal.get("source") != "bridge_supervisor"
+        or type(terminal.get("version")) is not int or terminal["version"] != 1
+        or terminal.get("status") != "error"
+        or terminal.get("error_code") != "CODEX_PROVIDER_SAFETY_REFUSAL"
+        or terminal.get("terminal_decision") != "POLICY_BOUND"
+        or terminal.get("job_id") != job_id
+        or terminal.get("agent_role") != "reviewer" or terminal.get("provider") != "codex"
+    ):
+        return False
+    count, attempts = terminal.get("refusal_count"), terminal.get("fresh_review_attempts")
+    refusals = terminal.get("refusals")
+    if (
+        type(count) is not int or count not in (1, 2)
+        or type(attempts) is not int or attempts not in (0, 1)
+        or not isinstance(refusals, list) or len(refusals) != count
+    ):
+        return False
+    turns = []
+    for evidence in refusals:
+        if (
+            not isinstance(evidence, dict) or evidence.get("job_id") != job_id
+            or evidence.get("agent_role") != "reviewer" or evidence.get("provider") != "codex"
+            or type(evidence.get("returncode")) is not int or evidence["returncode"] == 0
+            or any(not isinstance(evidence.get(key), str) or not evidence[key].strip()
+                   for key in ("turn_id", "raw_output_path", "raw_stdout", "adapter_error"))
+            or not isinstance(evidence.get("raw_stderr"), str)
+            or type(evidence.get("error_line")) is not int or evidence["error_line"] < 1
+            or type(evidence.get("failed_line")) is not int or evidence["failed_line"] <= evidence["error_line"]
+        ):
+            return False
+        turns.append(evidence["turn_id"])
+    if len(set(turns)) != count or terminal.get("turn_id") != turns[-1]:
+        return False
+    reason, fresh_id = terminal.get("terminal_reason"), terminal.get("fresh_turn_id")
+    if reason == "repeated_refusal":
+        # The fresh review may have completed REQUEST_CHANGES before a later
+        # normal round refuses; that still cannot replenish the refusal budget.
+        return count == 2 and attempts == 1 and isinstance(fresh_id, str) and bool(fresh_id.strip()) and fresh_id != turns[0]
+    if reason == "fresh_turn_unavailable":
+        return count == 1 and attempts == 0 and fresh_id is None
+    return (
+        reason in ("fresh_turn_unresolved", "fresh_turn_stale") and count == 1 and attempts == 1
+        and isinstance(fresh_id, str) and bool(fresh_id.strip()) and fresh_id not in turns
+    )
+
+
 def classify_failure(result: dict[str, Any]) -> FailureClass:
     """Classify an executor failure result into a FailureClass."""
     status = result.get("status", "")
@@ -536,6 +625,16 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.TERMINAL_POLICY
     if embedded_status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
+
+    if status_failed and _canonical_reviewer_refusal(result):
+        # Preserve auth and accepted-GO precedence, but never let incidental
+        # raw/error evidence route a canonical refusal into a mutating tier.
+        if any(hint in combined_lower or hint in reason_lower for hint in _FATAL_CODEX_LAUNCH_HINTS):
+            return FailureClass.UNCLASSIFIED
+        go_decision, go_findings = _bridge_decision_and_findings(result)
+        if _is_bridge_go_with_only_deferrable_findings(go_decision, go_findings):
+            return FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS
+        return FailureClass.CODEX_PROVIDER_SAFETY_REFUSAL
 
     if _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result):
         return FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
@@ -764,15 +863,9 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         or "failed to stage files" in reason_lower
     ):
         return FailureClass.GIT_STAGING_CONFLICT
-    fatal_codex_launch_hints = (
-        "codex cannot access session files",
-        "failed to create session",
-        "missing bearer or basic authentication in header",
-        "401 unauthorized",
-    )
     if status_failed and any(
         hint in combined_lower or hint in reason_lower
-        for hint in fatal_codex_launch_hints
+        for hint in _FATAL_CODEX_LAUNCH_HINTS
     ):
         return FailureClass.UNCLASSIFIED
     # Deferrable bridge GO guard -- placed AHEAD of the broad review-crash
