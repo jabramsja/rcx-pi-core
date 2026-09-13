@@ -6,7 +6,46 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-13
 
-### P0IBRR Reviewer-Refusal R2 Bounded Reconstruction (Phase B, CURRENT)
+### P0IB1 Recovery Authority R2 Preserved Bytecode Repair (Phase B, CURRENT)
+
+- restored only the preserved `recovery_gate.py` and `test_recovery_gate.py`
+  postimages on exact PR #1297 merge
+  `5d852e20bd73ff75147c8fb6b117c195c0ec4855`, matching SHA256
+  `6021cf7ce3c1d3f60663c5686dcc3bbd84a45f427b3cbebb7a0ebe6e6cddd007`
+  and `a4e8f95b5b52cf1ac62b216138e1ab05ba267b75568d5797e2c0679b7957316e`.
+  The shared candidate-authority builder and its test remain unchanged
+- preserves the selected launch bus, required/optional spec identity and
+  committed builder authority through actual recovery retry. Recovery rebuilds
+  and verifies the current receipt before producing the retry; helper imports
+  suppress bytecode writes and restore the caller setting
+- credits R1's preserved 15 authority-loss reproductions and later seven
+  bytecode-enabled failures: the helper import generated an unallowlisted
+  `phase_b_executor.pyc` before receipt preparation. The test-only dual-mode
+  baseline was 7 failed / 1402 passed in 88.31s; the bounded repair then passed
+  1409 recovery-module tests in 89.87s. These are historical results. The first
+  delegate's new scratch log failed audit; the second repository-nested-temp
+  rerun was interrupted with an undiagnosed failure marker, not a completed
+  validation or a second final audit rejection
+- fresh R2 validation passed all 1456 tests in 47.03s with the declared complete
+  two-module command and four workers, ordinary external OS temp fixtures and
+  streamed output. The retained tests force both bytecode settings, verify the
+  producer receipt before the existing consumer can rebuild it, and retain
+  required-authority, legacy, candidate-code nonexecution and receipt controls
+- existing IB1 row33 remains sole CURRENT under the R2 packet, IB2 immediately
+  NEXT, all114 queue identities/order retained and Mu before optimization.
+  PR #1298 remains OPEN stopped evidence; its branch/worktree/logs and held
+  TASKS stash `c5c096f235692045998e37c36533e89c0b84220a` remain preserved.
+  Native reviews, generated indicator, governance, CI, merge and PRIMARY
+  fast-forward remain outer-executor work
+
+### P0IBRR Reviewer-Refusal R2 Bounded Reconstruction (Landed)
+
+- landed in PR #1297 at exact merge
+  `5d852e20bd73ff75147c8fb6b117c195c0ec4855` on 2026-09-13T07:05:52Z.
+  Native exit0 at 07:09:22Z and exact PRIMARY/dev fast-forward were verified
+  in the terminal observation recorded by TASKS; all seven current-head GitHub
+  checks succeeded. The held TASKS stash
+  `c5c096f235692045998e37c36533e89c0b84220a` remains retained
 
 - reconstructs the six owned bridge/recovery paths from hash-verified R1
   implementation evidence on exact PR #1296 merge
@@ -24,10 +63,9 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   passed 78 in 9.64s; the complete declared two-module command passed 1625 in
   45.14s with four workers and unchanged six-file hashes. R1's 1624 tests in
   45.50s remain historical evidence; R1 is preserved STOPPED_NOT_LANDED
-- existing RR remains sole CURRENT, IB1 then IB2 immediately NEXT, with all
-  existing queue identities/order and held/stopped/consumed evidence retained.
-  Independent review, native governance, CI, merge and PRIMARY fast-forward
-  remain outer-executor work. No runtime/substrate or launcher change
+- RR is LANDED; existing IB1 remains sole CURRENT with IB2 immediately NEXT,
+  all existing queue identities/order and held/stopped/consumed evidence
+  retained. No runtime/substrate or launcher change
 
 ## 2026-09-12
 
