@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import contextmanager, redirect_stdout, redirect_stderr
 import pytest
 
 from mu.tests.tools.module_loader import load_module
@@ -15270,6 +15270,328 @@ fi
 # ---------------------------------------------------------------------------
 # Regression tests for recovery-tier3-wiring remaining items (2), (4), (5)
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def post_reentry_authority(tmp_path, monkeypatch):
+    """Supply a launch bus and Git candidate; recovery and authority stay real."""
+    import candidate_authority as ca
+    import executor_common as ec
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    wave_id = "recovery-authority-test-2026-09-13"
+    plan_path = "reports/control_plane/plan.md"
+    indicator = f"reports/l4_wave_indicators/{wave_id}.json"
+    (repo / "reports" / "control_plane").mkdir(parents=True)
+    (repo / "src").mkdir()
+    (repo / "TASKS.md").write_text("# TASKS\n")
+    (repo / plan_path).write_text(f"Wave ID: {wave_id}\nFOUNDER_OVERRIDE:{wave_id}\n")
+    (repo / "src" / "keep.txt").write_text("base\n")
+    (repo / "src" / "delete.txt").write_text("delete me\n")
+    metrics = repo / "tools" / "metrics"
+    metrics.mkdir(parents=True)
+    # Supply only the metric collector's external output; the production
+    # authority builder still stages, records and verifies the actual candidate.
+    (metrics / "collect_l4_wave_indicators.py").write_text(
+        "import argparse, json\n"
+        "from pathlib import Path\n"
+        "p=argparse.ArgumentParser(); p.add_argument('--wave-id', required=True); "
+        "p.add_argument('--output', required=True); a=p.parse_args()\n"
+        "out=Path(a.output); out.parent.mkdir(parents=True, exist_ok=True)\n"
+        "out.write_text(json.dumps({'wave_id': a.wave_id, 'static': True}, sort_keys=True)+'\\n')\n"
+    )
+    git("init", "-q")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test User")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    executors = repo / "mu" / "tools" / "executors"
+    executors.mkdir(parents=True)
+    # The committed fixture is the landed source. Candidate edits below must
+    # never become the Python implementation used to authorize that candidate.
+    for name in ("candidate_authority", "executor_common", "phase_b_executor"):
+        (executors / f"{name}.py").write_bytes((_EXECUTORS_DIR / f"{name}.py").read_bytes())
+    git("add", "mu")
+    git("commit", "-q", "-m", "landed executor fixture")
+    base = git("rev-parse", "HEAD")
+    bus = ".agent_bus-recovery-selected"
+    with (repo / ".git" / "info" / "exclude").open("a") as exclude:
+        exclude.write(f"\n/{bus}/\n/.agent_bus/\n")
+    (repo / bus).mkdir()
+    (repo / bus / "bridge_config.json").write_text(json.dumps({
+        "agents": {"codex": {
+            "display_name": "Codex gpt-6-astra max",
+            "cmd": [
+                "codex", "exec", "-", "--json", "-m", "gpt-6-astra",
+                "-c", 'model_reasoning_effort="max"',
+            ],
+        }},
+    }))
+    spec = ca.CandidateAuthoritySpec.from_mapping({
+        "wave_id": wave_id,
+        "comparison_commit": base,
+        "candidate_allowlist": [
+            "TASKS.md", plan_path, indicator,
+            "src/keep.txt", "src/delete.txt", "src/new.txt",
+            "mu/tools/executors/candidate_authority.py",
+        ],
+        "plan_path": plan_path,
+        "phase": "phase_b",
+        "review_round": "r1",
+        "indicator_artifact_ref": indicator,
+        "indicator_collection_command": (
+            "python3 tools/metrics/collect_l4_wave_indicators.py "
+            f"--wave-id {wave_id} --output {indicator}"
+        ),
+        "wave_class": "L4_ENABLER",
+        "require_l4_staged": True,
+        "reviewer_agent": "codex",
+    })
+    spec_path = ca.write_authority_spec(repo, spec, bus_dir=bus)
+    route = {
+        "decision": "ROUTE_PHASE_B", "summary": "selected launch",
+        "wave_name": spec.wave_id, "task_id": "[RECOVERY-AUTHORITY]",
+        "tracked_packet": spec.plan_path,
+        "candidate_authority_required": True,
+        "candidate_authority": {
+            "required": True, "precommit_inventory": True,
+            "spec_path": str(spec_path),
+            "spec_identity": ca.authority_spec_identity(repo, spec, authority_required=True),
+        },
+    }
+    route_path = ec.routing_record_path(repo, bus)
+    route_path.write_text(json.dumps(route))
+    # A different/default bus must not supply an optional downgrade.
+    default_route = ec.routing_record_path(repo, ".agent_bus")
+    default_route.parent.mkdir(parents=True)
+    default_route.write_text(json.dumps({
+        "decision": "ROUTE_PHASE_B", "summary": "unselected legacy bus",
+        "candidate_authority_required": False,
+    }))
+    (repo / "src" / "keep.txt").write_text("authorized candidate\n")
+    original_receipt = ca.prepare_candidate_authority(repo, spec, bus_dir=bus)
+    pb = load_module("phase_b_recovery_authority_consumer", _EXECUTORS_DIR / "phase_b_executor.py")
+    monkeypatch.setattr(rg_mod, "SCRIPT_DIR", executors)
+    token = pb._ACTIVE_BUS_DIR.set(Path(bus))  # ANTICHEAT_OK: selects the supplied consumer bus, not authority results
+
+    def recover():
+        result = {
+            "status": "needs_phase_b", "step": "post_reentry_supervisor",
+            "plan_path": spec.plan_path, "bridge_rounds": 6,
+            "changed_files": ["src/keep.txt"],
+            # Result prose/objects are deliberately not launch authority.
+            "candidate_authority_required": False,
+            "candidate_authority": {"required": False},
+        }
+        recovery = rg_mod.attempt_recovery(repo, result, spec.wave_id, bus_dir=bus)
+        return recovery, result
+
+    def consume(retry):
+        return pb.prepare_candidate_authority_if_configured(
+            repo, wave_id=spec.wave_id, phase="phase_b", review_round="recovered-consumer",
+            context="post-reentry regression",
+            required=pb._candidate_authority_required_from_routing_record(retry),  # ANTICHEAT_OK: unchanged routing consumer under test
+            trusted_metadata=pb._candidate_authority_metadata_from_routing_record(retry),  # ANTICHEAT_OK: unchanged routing consumer under test
+        )
+
+    yield SimpleNamespace(
+        repo=repo, ca=ca, pb=pb, spec=spec, bus=bus, route=route, route_path=route_path,
+        spec_path=spec_path, original_receipt=original_receipt,
+        recover=recover, consume=consume,
+        checkpoint=repo / bus / "executors" / "phase_b_state.json",
+    )
+    pb._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: restore supplied consumer bus
+
+
+@pytest.mark.parametrize("mutate_candidate", [False, True])
+def test_post_reentry_required_authority_reaches_existing_consumer(post_reentry_authority, mutate_candidate):
+    f = post_reentry_authority
+    if mutate_candidate:
+        (f.repo / "src" / "keep.txt").write_text("authorized recovery edit\n")
+        with pytest.raises(f.ca.CandidateAuthorityError, match="stale"):
+            f.ca.verify_current_receipt(f.repo, Path(f.original_receipt["receipt_path"]), trusted_spec=f.spec)
+    recovery, result = f.recover()
+    assert recovery["recovered"] is True, recovery
+    retry = dispatch_mod._recovered_retry_record(result, current_record=f.route)  # ANTICHEAT_OK: real dispatcher transport of the producer record
+    # Verify the producer's binding before the consumer can stage or rebuild it.
+    recovery_receipt = f.ca.verify_current_receipt(
+        f.repo, f.ca.receipt_path_for(
+            f.repo, bus_dir=f.bus, wave_id=f.spec.wave_id,
+            phase="phase_b", review_round="recovery-post-reentry",
+        ),
+        trusted_spec=f.spec, phase="phase_b", review_round="recovery-post-reentry",
+    )["receipt"]
+    if mutate_candidate:
+        assert recovery_receipt["index_tree_hash"] != f.original_receipt["index_tree_hash"]
+    else:
+        assert recovery_receipt["index_tree_hash"] == f.original_receipt["index_tree_hash"]
+    receipt_path, error = f.consume(retry)
+    assert error is None, error
+    assert receipt_path
+    assert retry.get("candidate_authority_required") is True
+    assert retry.get("candidate_authority") == f.route["candidate_authority"]
+    assert retry["task_id"] == f.route["task_id"]
+    assert retry["wave_name"] == f.spec.wave_id
+    assert retry["plan_path"] == f.spec.plan_path
+    assert retry["state_sha"]
+    receipt = f.ca.verify_current_receipt(
+        f.repo, Path(receipt_path), trusted_spec=f.spec,
+        phase="phase_b", review_round="recovered-consumer",
+    )["receipt"]
+    assert receipt["comparison_commit"] == f.spec.comparison_commit
+    assert receipt["candidate_allowlist"] == list(f.spec.candidate_allowlist)
+    if mutate_candidate:
+        assert receipt["index_tree_hash"] != f.original_receipt["index_tree_hash"]
+    assert json.loads(f.route_path.read_text()) == f.route
+
+
+@pytest.mark.parametrize("damage", [
+    "missing_spec", "missing_metadata", "missing_identity", "missing_requirement",
+    "conflicting_requirement", "orphaned_spec", "stale_comparison", "widened_allowlist", "wrong_wave",
+    "wrong_packet", "wrong_bus", "fabricated_identity", "outside_candidate",
+])
+def test_post_reentry_required_authority_fails_closed(post_reentry_authority, damage):
+    f = post_reentry_authority
+    raw_spec = json.loads(f.spec_path.read_text())
+    if damage == "missing_spec":
+        f.spec_path.unlink()
+    elif damage == "missing_metadata":
+        del f.route["candidate_authority"]
+    elif damage == "missing_identity":
+        del f.route["candidate_authority"]["spec_identity"]
+    elif damage == "missing_requirement":
+        del f.route["candidate_authority_required"]
+        del f.route["candidate_authority"]["required"]
+    elif damage == "conflicting_requirement":
+        f.route["candidate_authority"]["required"] = False
+    elif damage == "orphaned_spec":
+        del f.route["candidate_authority"]
+        f.route["candidate_authority_required"] = False
+    elif damage == "stale_comparison":
+        raw_spec["comparison_commit"] = "HEAD~1"
+    elif damage == "widened_allowlist":
+        raw_spec["candidate_allowlist"].append("src/extra.txt")
+    elif damage == "wrong_wave":
+        raw_spec["wave_id"] = "other-wave"
+    elif damage == "wrong_packet":
+        raw_spec["plan_path"] = "TASKS.md"
+    elif damage == "wrong_bus":
+        other_spec = f.repo / ".agent_bus" / "meta" / "candidate_authority" / f"{f.spec.wave_id}.spec.json"
+        other_spec.parent.mkdir(parents=True)
+        other_spec.write_text(json.dumps(raw_spec))
+        f.route["candidate_authority"]["spec_path"] = str(other_spec)
+    elif damage == "fabricated_identity":
+        f.route["candidate_authority"]["spec_identity"]["spec_hash"] = "0" * 64
+    elif damage == "outside_candidate":
+        (f.repo / "src" / "extra.txt").write_text("not authorized\n")
+    if damage in {"stale_comparison", "widened_allowlist", "wrong_wave", "wrong_packet"}:
+        f.spec_path.write_text(json.dumps(raw_spec))
+    f.route_path.write_text(json.dumps(f.route))
+    before_index = subprocess.check_output(["git", "write-tree"], cwd=f.repo)
+    recovery, result = f.recover()
+    # On the broken producer, demonstrate the unchanged consumer's optional
+    # skip for the actual missing-spec retry, not merely absent dictionary keys.
+    if damage == "missing_spec" and recovery["recovered"]:
+        assert f.consume(result["retry_record"]) == (None, None)
+    assert recovery["recovered"] is False, recovery
+    assert "candidate_authority" in recovery["action"]
+    assert "retry_record" not in result
+    assert not f.checkpoint.exists()
+    assert subprocess.check_output(["git", "write-tree"], cwd=f.repo) == before_index
+
+
+def test_post_reentry_candidate_authority_python_cannot_authorize_itself(post_reentry_authority, monkeypatch):
+    f = post_reentry_authority
+    marker = f.repo / f.bus / "candidate-python-executed"
+    candidate_module = f.repo / "mu" / "tools" / "executors" / "candidate_authority.py"
+    candidate_module.write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('candidate authority executed')\n"
+        "raise RuntimeError('candidate must not be imported')\n"
+    )
+    monkeypatch.delitem(sys.modules, "candidate_authority", raising=False)
+    recovery, result = f.recover()
+    assert recovery["recovered"] is True, recovery
+    assert not marker.exists()
+    assert result["retry_record"].get("candidate_authority") == f.route["candidate_authority"]
+    receipt_path, error = f.consume(result["retry_record"])
+    assert error is None, error
+    assert receipt_path
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("damage", ["missing", "stale", "fabricated"])
+def test_post_reentry_verifies_rebuilt_receipt_before_success(post_reentry_authority, monkeypatch, damage):
+    f = post_reentry_authority
+    original_context = rg_mod._landed_post_reentry_authority  # ANTICHEAT_OK: inject corruption after the real builder returns; verification remains real
+    prepared = []
+
+    @contextmanager
+    def corrupt_builder_output():
+        with original_context() as authority:
+            prepare = authority.prepare_candidate_authority
+
+            def prepare_then_corrupt(*args, **kwargs):
+                receipt = prepare(*args, **kwargs)
+                prepared.append(receipt)
+                receipt_path = Path(receipt["receipt_path"])
+                if damage == "missing":
+                    receipt_path.unlink()
+                elif damage == "stale":
+                    (f.repo / "src" / "keep.txt").write_text("edit after receipt preparation\n")
+                else:
+                    corrupted = json.loads(receipt_path.read_text())
+                    corrupted["index_tree_hash"] = "0" * 40
+                    receipt_path.write_text(json.dumps(corrupted))
+                return receipt
+
+            monkeypatch.setattr(authority, "prepare_candidate_authority", prepare_then_corrupt)
+            yield authority
+
+    monkeypatch.setattr(rg_mod, "_landed_post_reentry_authority", corrupt_builder_output)  # ANTICHEAT_OK: supplied receipt-write fault boundary, no success verdict fabricated
+    f.checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    before_checkpoint = b'{"completed_step":"preserved prior recovery evidence"}\n'
+    f.checkpoint.write_bytes(before_checkpoint)
+    recovery, result = f.recover()
+    assert len(prepared) == 1
+    assert recovery["recovered"] is False, recovery
+    assert recovery["action"] == "candidate_authority_reentry_failed"
+    assert "retry_record" not in result
+    assert f.checkpoint.read_bytes() == before_checkpoint
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_post_reentry_explicit_optional_authority_remains_optional(post_reentry_authority, configured):
+    f = post_reentry_authority
+    f.route["candidate_authority_required"] = False
+    if configured:
+        f.route["candidate_authority"]["required"] = False
+        f.route["candidate_authority"]["spec_identity"] = f.ca.authority_spec_identity(
+            f.repo, f.spec, authority_required=False,
+        )
+    else:
+        del f.route["candidate_authority"]
+        f.spec_path.unlink()
+    f.route_path.write_text(json.dumps(f.route))
+    recovery, result = f.recover()
+    assert recovery["recovered"] is True, recovery
+    retry = result["retry_record"]
+    assert retry.get("candidate_authority_required") is False
+    receipt_path, error = f.consume(retry)
+    assert error is None, error
+    if configured:
+        assert retry["candidate_authority"] == f.route["candidate_authority"]
+        assert receipt_path
+    else:
+        assert "candidate_authority" not in retry
+        assert receipt_path is None
 
 
 class TestNeedsPhaseB_Tier3:

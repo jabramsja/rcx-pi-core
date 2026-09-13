@@ -6,7 +6,42 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-13
 
-### P0IBRR Reviewer-Refusal R2 Bounded Reconstruction (Phase B, CURRENT)
+### P0IB1 Recovery Candidate-Authority Preservation (Phase B, CURRENT)
+
+- preserves selected-bus launch authority through the real post-reentry retry
+  and unchanged Phase B consumer: exact comparison commit, literal allowlist,
+  wave/packet/spec identity and the authority requirement survive the handoff.
+  Recovery verifies launch identity, rebuilds with the landed builder and
+  verifies the current receipt before seeding state or publishing a retry
+- reads the two fixed authority modules from one committed executor HEAD and
+  keeps those bindings during the existing task/scope readers. Candidate-side
+  authority Python cannot authorize itself. Missing, stale or fabricated
+  required authority fails closed; explicit optional legacy routes and existing
+  task/state/QUESTION/refusal lifecycle behavior remain covered
+- unchanged baseline passed 1414 tests in 36.70s. Fresh public-boundary
+  reproduction failed 15 cases in 4.58s, including the missing-spec optional
+  skip. Present-spec receipt preparation and the existing dict-copy handoff
+  repair retain their landed credit. Post-reentry controls passed 36 in 6.17s;
+  both complete declared modules passed 1435 in 42.43s with four workers and
+  matching production/test hashes, including receipt verification before the
+  consumer can rebuild it. Fixtures use ordinary external OS temporary paths.
+  The private-attribute checker passes after cross-test private fixture calls
+  were replaced with local Git/data setup and public candidate-authority APIs
+- changes only recovery_gate.py, its existing test module and bounded tracker/
+  changelog governance. The shared candidate-authority builder and its tests
+  remain unchanged. IB1 is sole CURRENT, IB2 immediately NEXT; all later queue
+  identities/order, held stashes and stopped/consumed evidence remain retained.
+  Independent review, native governance artifacts/staging, providerless commit,
+  CI, merge and PRIMARY fast-forward remain outer-executor work
+
+### P0IBRR Reviewer-Refusal R2 Bounded Reconstruction (Landed)
+
+- landed in PR #1297 at exact merge
+  `5d852e20bd73ff75147c8fb6b117c195c0ec4855` on 2026-09-13T07:05:52Z.
+  Native exit0 at 07:09:22Z and exact PRIMARY/remote fast-forward with prior
+  owners absent were recorded at 07:14:58Z. The held TASKS stash
+  `c5c096f235692045998e37c36533e89c0b84220a` and all older evidence remain
+  preserved
 
 - reconstructs the six owned bridge/recovery paths from hash-verified R1
   implementation evidence on exact PR #1296 merge
@@ -24,10 +59,9 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   passed 78 in 9.64s; the complete declared two-module command passed 1625 in
   45.14s with four workers and unchanged six-file hashes. R1's 1624 tests in
   45.50s remain historical evidence; R1 is preserved STOPPED_NOT_LANDED
-- existing RR remains sole CURRENT, IB1 then IB2 immediately NEXT, with all
-  existing queue identities/order and held/stopped/consumed evidence retained.
-  Independent review, native governance, CI, merge and PRIMARY fast-forward
-  remain outer-executor work. No runtime/substrate or launcher change
+- existing RR is LANDED, IB1 is sole CURRENT and IB2 immediately NEXT. All
+  existing queue identities/order and held/stopped/consumed evidence remain
+  retained. No runtime/substrate or launcher change
 
 ## 2026-09-12
 

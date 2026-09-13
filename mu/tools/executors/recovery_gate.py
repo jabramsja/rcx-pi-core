@@ -26,11 +26,13 @@ import sys
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path, PurePosixPath
+from types import ModuleType
 from typing import Any, Callable, NamedTuple, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -3912,6 +3914,117 @@ def _post_reentry_resume_state_sha(repo_root: Path) -> str:
         return ""
 
 
+@contextmanager
+def _landed_post_reentry_authority():
+    """Use the running executor's committed builder, never candidate Python.
+
+    Both fixed modules come from one resolved HEAD of the executor checkout.
+    Keep their imports bound while the existing Phase B task/scope readers run:
+    those readers can otherwise indirectly import the edited authority module.
+    This is only the recovery authority boundary, not a general executor loader.
+    """
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=SCRIPT_DIR,
+        capture_output=True, text=True, check=True, timeout=30,
+    ).stdout.strip()
+    names = ("executor_common", "candidate_authority")
+    previous = {name: sys.modules.get(name) for name in names}
+    try:
+        for name in names:
+            source = subprocess.run(
+                ["git", "show", f"{revision}:mu/tools/executors/{name}.py"],
+                cwd=SCRIPT_DIR, capture_output=True, check=True, timeout=30,
+            ).stdout
+            module = ModuleType(name)
+            module.__file__ = str(SCRIPT_DIR / f"{name}.py")
+            sys.modules[name] = module
+            exec(compile(source, module.__file__, "exec"), module.__dict__)
+        yield sys.modules["candidate_authority"]
+    finally:
+        for name, original in previous.items():
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
+
+
+def _prepare_post_reentry_candidate_authority(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    plan_path: str,
+    result_payload: dict[str, Any],
+) -> tuple[dict[str, Any], str | None, list[str] | None]:
+    """Bind the retry to selected launch truth and verify its rebuilt receipt."""
+    route_path = _bus_path(repo_root, "meta", "post_merge_routing.json")
+    route = _resolve_routing_record(repo_root, _active_bus_dir()) if route_path.exists() else {}
+    if not isinstance(route, dict):
+        raise ValueError("candidate authority routing record is not an object")
+    carried = {
+        key: route[key]
+        for key in ("candidate_authority_required", "candidate_authority")
+        if key in route
+    }
+    expected_path = _bus_path(
+        repo_root.resolve(), "meta", "candidate_authority", f"{wave_id}.spec.json",
+    )
+    required = route.get("candidate_authority_required")
+    # Explicit non-authority legacy routes retain their optional consumer. An
+    # orphaned launch spec is not evidence that required authority was disabled.
+    if (
+        "candidate_authority" not in route and not expected_path.exists()
+        and (required is False or "candidate_authority_required" not in route)
+    ):
+        return carried, None, None
+    metadata = route.get("candidate_authority")
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("required"), bool):
+        raise ValueError("candidate authority requires launch metadata and a boolean requirement")
+    if "candidate_authority_required" in route and (
+        not isinstance(required, bool) or required is not metadata["required"]
+    ):
+        raise ValueError("candidate authority requirement disagrees with launch metadata")
+    required = metadata["required"]
+    identity = metadata.get("spec_identity")
+    if not isinstance(identity, dict) or identity.get("authority_required") is not required:
+        raise ValueError("candidate authority requires a paired launch-bound spec identity")
+    raw_path = metadata.get("spec_path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("candidate authority launch metadata is missing spec_path")
+    spec_path = Path(raw_path)
+    if not spec_path.is_absolute():
+        spec_path = repo_root / spec_path
+    if spec_path.resolve() != expected_path:
+        raise ValueError("candidate authority spec_path does not belong to the selected wave/bus")
+
+    with _landed_post_reentry_authority() as authority:
+        spec = authority.load_authority_spec(expected_path)
+        authority.verify_authority_spec_identity(repo_root, spec, identity)
+        if (
+            spec.wave_id != wave_id or spec.plan_path != plan_path
+            or normalize_wave_id(str(route.get("wave_name") or route.get("wave_id") or "")) != wave_id
+            or _routing_plan_path(route) != spec.plan_path
+        ):
+            raise ValueError("candidate authority wave/packet does not match the recovery route")
+        authority.guard_candidate_scope_before_mutation(repo_root, spec)
+        task_id = _post_reentry_resume_task_id(repo_root, result_payload, plan_path)
+        scope_files = _post_reentry_scope_files(repo_root, result_payload, plan_path)
+        recovery_spec = authority.CandidateAuthoritySpec.from_mapping({
+            **spec.to_dict(), "phase": "phase_b", "review_round": "recovery-post-reentry",
+        })
+        # Authorized edits can stale an earlier receipt. Rebuild from the
+        # verified launch spec and re-check the actual current index; no receipt
+        # or authority object supplied in the failing result is a trust source.
+        receipt = authority.prepare_candidate_authority(
+            repo_root, recovery_spec, bus_dir=_active_bus_dir(),
+        )
+        authority.verify_current_receipt(
+            repo_root, Path(receipt["receipt_path"]), trusted_spec=recovery_spec,
+            phase="phase_b", review_round="recovery-post-reentry",
+        )
+    carried["candidate_authority_required"] = required
+    return carried, task_id, scope_files
+
+
 def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """Resume the deterministic Phase B re-entry path after a post-reentry veto."""
     result = kw.get("result", {})
@@ -3950,6 +4063,19 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
     except (TypeError, ValueError):
         bridge_rounds = 0
 
+    try:
+        carried_authority, authority_task_id, authority_scope_files = (
+            _prepare_post_reentry_candidate_authority(
+                repo_root, wave_id=normalize_wave_id(wave_hint),
+                plan_path=plan_path, result_payload=result_payload,
+            )
+        )
+    except Exception as exc:
+        return _fix_result(
+            False, "candidate_authority_reentry_failed",
+            f"cannot authorize post-reentry retry: {exc}",
+        )
+
     findings = str(
         result_payload.get("pre_commit_summary")
         or _summarize_result_reason(result_payload)
@@ -3967,7 +4093,10 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
         "post_reentry_prior_bridge_rounds": bridge_rounds,
         "reentry_findings": findings,
     }
-    scope_files = _post_reentry_scope_files(repo_root, result_payload, plan_path)
+    scope_files = (
+        authority_scope_files if authority_scope_files is not None
+        else _post_reentry_scope_files(repo_root, result_payload, plan_path)
+    )
     scope_fingerprint = str(result_payload.get("bridge_scope_fingerprint") or "").strip()
     if not scope_fingerprint:
         scope_fingerprint = _bridge_scope_fingerprint_for_files(repo_root, scope_files)
@@ -4013,6 +4142,7 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
     # mutates the caller's result, which attempt_recovery passes by reference).
     resume_wave_id = resume_state["wave_id"]
     retry_record: dict[str, Any] = {
+        **carried_authority,
         "decision": "ROUTE_PHASE_B",
         "wave_name": resume_wave_id,
         "summary": "Resume Phase B NEEDS_PHASE_B re-entry from recovery-seeded state",
@@ -4031,7 +4161,10 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
     # task_id Phase B injects into the resumed handoff.  Omitting it makes the
     # in-memory record compare expected=None against the handoff's real task_id
     # and the commit chain is rejected fail-closed (bridge round 2 finding).
-    resume_task_id = _post_reentry_resume_task_id(repo_root, result_payload, plan_path)
+    resume_task_id = (
+        authority_task_id if authority_task_id is not None
+        else _post_reentry_resume_task_id(repo_root, result_payload, plan_path)
+    )
     if resume_task_id:
         retry_record["task_id"] = resume_task_id
     # Carry the dispatcher's freshness identity (state_sha) so the resumed

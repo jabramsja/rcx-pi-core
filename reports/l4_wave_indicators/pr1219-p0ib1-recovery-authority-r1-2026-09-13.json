@@ -1,0 +1,25 @@
+{
+  "wave_id": "pr1219-p0ib1-recovery-authority-r1-2026-09-13",
+  "repeat_run_speedup_ratio": 1.250231,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.324253,
+  "repeat_run_raw_seconds": [
+    0.405391,
+    0.324253
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.405391
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.729644
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-13T08:05:25Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "5d852e20bd73ff75147c8fb6b117c195c0ec4855"
+}
