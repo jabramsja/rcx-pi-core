@@ -6,7 +6,40 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-12
 
-### Preserved P0IBRRC Reentry-Private Checkpoint Handoff R2 (Phase B, CURRENT)
+### P0IBRRT Lossless Phase B Terminal-Result Transport (Phase B, CURRENT)
+
+- carries the complete final standalone reviewer terminal JSON object through
+  ordinary, reentry, private-attribute and reentry-private-attribute review
+  failures, including the prepared-review material error return. Qualification
+  requires a nonzero integer exit other than the three executor sentinels,
+  exact active/bridge/payload job identity, and nonblank direct error and
+  terminal-decision strings. Opaque members retain their decoded values;
+  companion exit, job and complete-stream paths bind to the failed invocation
+- fresh public-path tests on exact PR #1295 merge
+  `e8bb22ee251c5bf81f7ca6d98651fd507e508257` reproduced all 16 missing-object
+  failures in 3.15s. Two prepared private-review resume cases then reproduced
+  the same omission in the retained-material error return in 2.54s, with
+  candidate bytes and checkpoint authority preserved. Existing verdict,
+  timeout, prepared-review and cleanup controls passed all 138 tests in 38.18s.
+  After repair, all 300 focused regressions/controls passed in 46.98s and the
+  exact declared full Phase B module command passed all 1155 tests in 267.74s.
+  Production and test SHA256 values remained unchanged throughout the full run
+- keeps the existing recognized verdict branches and PR #1291/#1292/#1294/#1295
+  lifecycle authority. RRT remains the sole CURRENT queue row and RR is
+  immediately NEXT as the policy consumer, followed by IB1/IB2 and every later
+  task in order, Mu production before optimization. Independent review and
+  native same-wave governance/landing remain pending
+
+### Preserved P0IBRRC Reentry-Private Checkpoint Handoff R2 (Landed)
+
+- landed through PR #1295 at exact merge
+  `e8bb22ee251c5bf81f7ca6d98651fd507e508257` on 2026-09-13T02:17:31Z,
+  from head `f79a88188870caf01b1a92c20f4bb40ee779f2f0`; TASKS records exact
+  PRIMARY/remote fast-forward and old-owner absence at 02:30:22Z. The native
+  post-retirement exit1 remains preserved: pager import/fallback failed against
+  retired source and terminal-receipt persistence lost routing authority.
+  The original triggering failure payload was not retained. The held TASKS
+  stash `249344221c03f8c1baa551f36e51efb61a2c4422` remains immutable evidence
 
 - reconstructs the two production and two test modules from the preserved R1
   repair on exact PR #1294 merge
@@ -28,15 +61,15 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   all 134 focused regressions passed in 55.48s and all six control-surface
   invariants passed. The unchanged complete two-module evidence command passed
   all 1741 tests in 315.70s with four work-stealing workers; production and test
-  hashes remained unchanged throughout validation. Fresh independent reviews,
-  native governance generation and providerless landing remain
-  outer-executor-owned and pending
+  hashes remained unchanged throughout validation. Independent Phase B GO,
+  native final pytest PASS, three COMMIT_GO supervisors with all 11 gates PASS,
+  and all seven current-head GitHub checks passed before the recorded merge
 - credits PR #1291 prepared review, PR #1292 ordinary ownership and PR #1294
   general implementer ownership. R1 is STOPPED_NO_LANDING after actual
   pre-validation scratch-audit rejection; its evidence and all held stashes
   remain preserved. This run uses the ordinary external OS temporary directory
-- retains existing RRC row30 as CURRENT, RRT immediately NEXT, then
-  RR/IB1/IB2 and every later task in order, Mu production before optimization.
+- retains existing RRC row30 as LANDED, RRT CURRENT and RR immediately NEXT, then
+  IB1/IB2 and every later task in order, Mu production before optimization.
   Both consumed fleet operations retain 1 MOVED/3 INCOMPLETE/407 prior HOLD
 
 ### Preserved P0IBRRCO Implementer Ownership R2 (Landed)

@@ -9738,6 +9738,224 @@ class TestBridgeLoopReinvokesImplementer:
         assert result["step"] == "implementer_bridge_fix"
 
 
+@pytest.fixture(params=["normal", "reentry", "private_attr", "reentry_private_attr"])
+def terminal_review_lane(tmp_path, request):
+    """Reach each review failure from public Phase B with external actors stubbed."""
+    scenario = request.param
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plan_path = "reports/control_plane/plan.md"
+    (repo / plan_path).parent.mkdir(parents=True)
+    (repo / plan_path).write_text("# Plan\nPhase-A-Lock: LOCKED\n", encoding="utf-8")
+    test_path = "mu/tests/tools/test_foo.py"
+    _init_private_review_git_fixture(repo, [test_path])
+    private = "private_attr" in scenario
+    reentry = "reentry" in scenario
+    target_round = 1 + int(private) + int(reentry)
+    lane = SimpleNamespace(repo=repo, scenario=scenario, target_round=target_round, calls=[])
+
+    def run(*, exit_code=7, decision="", alter=None):
+        impl = _make_mock_impl()
+        lane.impl = impl
+
+        def review(_repo, summary, **kwargs):
+            job_id = kwargs["job_id"]
+            lane.calls.append(summary)
+            if len(lane.calls) != target_round:
+                return {"exit_code": 0, "decision": "GO", "stdout": "GO\n",
+                        "stderr": "", "job_id": job_id}
+            assert ("private-attr remediation" in summary) is private
+            assert ("re-entry" in summary.lower()) is reentry
+            lane.job_id = job_id
+            lane.terminal = {
+                "agent_role": "reviewer", "job_id": job_id,
+                "error_code": " opaque_error \t", "terminal_decision": " opaque_terminal ",
+                "detail": "x" * 900 + "tail beyond byte500: \u03bb\u2028\u2029",
+                "extra": {"nested": [False, None, 17, {"stderr": "preserve\nthis"}]},
+                "stdout_path": "opaque payload member, not a companion binding",
+            }
+            stderr = "diagnostic preamble " + "p" * 600 + "\n" + json.dumps(
+                lane.terminal, ensure_ascii=False,
+            ) + "\n \t\n"
+            bridge = {
+                "exit_code": exit_code, "decision": decision, "job_id": job_id,
+                "stdout": f"review output\n{decision}\n", "stderr": stderr,
+                "stdout_path": f"{job_id}.stdout.log", "stderr_path": f"{job_id}.stderr.log",
+            }
+            if alter is not None:
+                alter(bridge, lane.terminal)
+            for stream in ("stdout", "stderr"):
+                (repo / bridge[f"{stream}_path"]).write_text(bridge[stream], encoding="utf-8")
+            lane.bridge = bridge.copy()
+            return bridge
+
+        gate_pass = {"passed": True, "exit_code": 0, "test_files": [test_path]}
+        gate_fail = {**gate_pass, "passed": False, "exit_code": 1, "stdout": "private attr"}
+        gates = iter(([gate_pass] if reentry else []) + ([gate_fail, gate_pass] if private else []))
+        supervisors = iter(["NEEDS_PHASE_B"] if reentry else [])
+
+        def supervisor(*_args, **_kwargs):
+            return {
+                "exit_code": 0, "parsed": {"decision": next(supervisors, "COMMIT_GO"),
+                "summary": "review correction", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=[test_path]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=[test_path]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=review), \
+             patch.object(pb_mod, "_read_bridge_review_material", return_value=("", [])), \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=lambda *_a, **_kw: next(gates, gate_pass)), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}), \
+             patch.object(pb_mod, "_stage_files", side_effect=_stage_private_review_git_fixture), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus/handoff.json"):
+            return pb_mod.run_phase_b(
+                repo, plan_path, max_bridge_rounds=5,
+                routing_record_override=_VALID_ROUTING_RECORD.copy(),
+            )
+
+    lane.run = run
+    return lane
+
+
+class TestBridgeTerminalResultTransport:
+    @pytest.mark.parametrize(("decision", "exit_code"), [
+        ("", 7), ("", 1), ("", -15), ("GO", 7), ("NO_GO", 7), ("REQUEST_CHANGES", 7),
+    ])
+    def test_transports_complete_terminal_object(self, terminal_review_lane, decision, exit_code):
+        lane = terminal_review_lane
+        result = lane.run(decision=decision, exit_code=exit_code)
+        expected_step = {
+            "normal": "bridge_subprocess", "reentry": "reentry_bridge_subprocess",
+            "private_attr": "private_attr_bridge_review",
+            "reentry_private_attr": "reentry_private_attr_bridge_review",
+        }[lane.scenario]
+        if "private_attr" in lane.scenario and decision in {"NO_GO", "REQUEST_CHANGES"}:
+            expected_step += "_subprocess"
+        assert result["status"] == "error", result
+        assert result["step"] == expected_step, result
+        assert len(lane.calls) == lane.target_round
+        assert "agent_role" not in lane.bridge["stderr"][:500]
+        assert result.get("bridge_terminal_result") == lane.terminal
+        assert result["bridge_exit_code"] == lane.bridge["exit_code"]
+        assert type(result["bridge_exit_code"]) is int
+        assert result["bridge_job_id"] == lane.job_id == lane.bridge["job_id"]
+        for stream in ("stdout", "stderr"):
+            assert result[f"bridge_{stream}_path"] == lane.bridge[f"{stream}_path"]
+            assert (lane.repo / result[f"bridge_{stream}_path"]).read_text(encoding="utf-8") == lane.bridge[stream]
+        assert not {"terminal_result", "terminal_decision", "error_code"}.intersection(result)
+
+    @pytest.mark.parametrize("defect", [
+        "payload_job", "bridge_job", "both_jobs", "empty_job", "role", "padded_role", "nested", "array", "scalar",
+        "missing_error", "blank_error", "nonstring_error", "missing_terminal", "blank_terminal",
+        "nonstring_terminal", "malformed", "prose", "trailing_prose", "historical", "two_objects",
+    ])
+    def test_unqualified_terminal_data_remains_generic(self, terminal_review_lane, defect):
+        lane = terminal_review_lane
+
+        def alter(bridge, terminal):
+            payload = dict(terminal)
+            if defect in {"payload_job", "empty_job", "both_jobs"}:
+                payload["job_id"] = "" if defect == "empty_job" else "other-job"
+                if defect == "both_jobs":
+                    bridge["job_id"] = payload["job_id"]
+            elif defect == "bridge_job":
+                bridge["job_id"] = "other-job"
+            elif defect == "role":
+                payload["agent_role"] = "implementer"
+            elif defect == "padded_role":
+                payload["agent_role"] = " reviewer "
+            elif defect == "nested":
+                payload = {"history": payload}
+            elif defect == "array":
+                payload = [payload]
+            elif defect == "scalar":
+                payload = "terminal text"
+            elif defect.endswith(("error", "terminal")):
+                field = "error_code" if defect.endswith("error") else "terminal_decision"
+                if defect.startswith("missing"):
+                    payload.pop(field)
+                else:
+                    payload[field] = " \t" if defect.startswith("blank") else 7
+            encoded = json.dumps(payload)
+            bridge["stderr"] = {
+                "malformed": encoded[:-1], "prose": "reviewer: " + encoded,
+                "trailing_prose": encoded + " suffix", "historical": encoded + "\nlater diagnostic",
+                "two_objects": encoded + " " + encoded,
+            }.get(defect, encoded) + "\n"
+
+        result = lane.run(alter=alter)
+        assert result["status"] == "error", result
+        assert len(lane.calls) == lane.target_round
+        assert "bridge_terminal_result" not in result
+        assert "bridge_exit_code" not in result
+
+    @pytest.mark.parametrize("exit_code", [-1, -2, -3, 0, True, 7.0, "7"])
+    def test_sentinel_success_and_noninteger_exits_omit_authority(self, terminal_review_lane, exit_code):
+        result = terminal_review_lane.run(exit_code=exit_code)
+        assert result["status"] == "error", result
+        assert "bridge_terminal_result" not in result
+        assert "bridge_exit_code" not in result
+
+    @pytest.mark.parametrize(("decision", "exit_code", "status"), [
+        ("GO", 0, "commit_ready"),
+        ("NO_GO", 0, "commit_ready"), ("NO_GO", 1, "commit_ready"),
+        ("REQUEST_CHANGES", 0, "commit_ready"), ("REQUEST_CHANGES", 1, "commit_ready"),
+        ("QUESTION", 0, "question_for_founder"), ("QUESTION", 7, "question_for_founder"),
+    ])
+    def test_recognized_verdict_precedes_terminal_payload(self, terminal_review_lane, decision, exit_code, status):
+        lane = terminal_review_lane
+        result = lane.run(exit_code=exit_code, decision=decision)
+        assert result["status"] == status, result
+        assert "bridge_terminal_result" not in result
+        assert "bridge_exit_code" not in result
+        if decision in {"NO_GO", "REQUEST_CHANGES"}:
+            assert len(lane.calls) > lane.target_round
+            assert lane.impl.invoke_implementer.call_count > lane.target_round
+
+    @pytest.mark.parametrize("reentry", [False, True])
+    def test_prepared_review_failure_transports_without_changing_checkpoint(self, private_review_checkpoint, reentry):
+        fixture = private_review_checkpoint(reentry=reentry)
+        checkpoint = fixture.state_path.read_bytes()
+        candidate = _private_review_candidate_bytes(fixture)
+        captured = {}
+        impl = _make_mock_impl()
+
+        def reviewer(repo_root, summary, **kwargs):
+            terminal = {
+                "agent_role": "reviewer", "job_id": kwargs["job_id"],
+                "error_code": "opaque_error", "terminal_decision": "opaque_terminal",
+                "extra": ["x" * 900, {"retained": True}],
+            }
+            captured.update(
+                terminal=terminal, exit_code=7, job_id=kwargs["job_id"], decision="",
+                stdout="review output", stderr="p" * 600 + "\n" + json.dumps(terminal) + "\n",
+                stdout_path="review.stdout.log", stderr_path="review.stderr.log",
+            )
+            for stream in ("stdout", "stderr"):
+                (repo_root / captured[f"{stream}_path"]).write_text(captured[stream], encoding="utf-8")
+            return {key: value for key, value in captured.items() if key != "terminal"}
+
+        with ExitStack() as stack:
+            forbidden = _private_review_forbidden_work(stack)
+            stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+            bridge = stack.enter_context(patch.object(pb_mod, "run_bridge_review", side_effect=reviewer))
+            result = pb_mod.run_phase_b(fixture.repo, fixture.plan_path, routing_record_override=_VALID_ROUTING_RECORD.copy())
+        assert result["status"] == "error", result
+        assert result["step"] == "private_attr_recovered_review_material"
+        bridge.assert_called_once()
+        for actor in [*forbidden, impl.invoke_implementer]:
+            actor.assert_not_called()
+        assert fixture.state_path.read_bytes() == checkpoint
+        assert _private_review_candidate_bytes(fixture) == candidate
+        assert result.get("bridge_terminal_result") == captured["terminal"]
+        for field in ("exit_code", "job_id", "stdout_path", "stderr_path"):
+            assert result[f"bridge_{field}"] == captured[field]
+
+
 @pytest.mark.usefixtures("mock_routing_record")
 class TestBridgeDecisionExitContract:
     """REQUEST_CHANGES/NO_GO remain recoverable under the bridge CLI exit contract."""
