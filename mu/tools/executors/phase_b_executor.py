@@ -4929,6 +4929,43 @@ def _run_bridge_review_subprocess(
             raise
 
 
+def _bridge_terminal_failure_fields(
+    bridge_result: dict[str, Any], job_id: str,
+) -> dict[str, Any]:
+    """Bind opaque terminal evidence only on an already-failed review path."""
+    exit_code = bridge_result.get("exit_code")
+    if type(exit_code) is not int or exit_code in (0, -1, -2, -3):
+        return {}
+    if not isinstance(job_id, str) or not job_id.strip() or bridge_result.get("job_id") != job_id:
+        return {}
+    stderr = bridge_result.get("stderr")
+    if not isinstance(stderr, str):
+        return {}
+    # Use physical stream lines: Unicode separators may be opaque JSON values.
+    final_line = next((line for line in reversed(stderr.split("\n")) if line.strip()), "")
+    try:
+        terminal = json.loads(final_line)
+    except (ValueError, RecursionError):
+        return {}
+    if (
+        not isinstance(terminal, dict)
+        or terminal.get("agent_role") != "reviewer"
+        or terminal.get("job_id") != job_id
+        or any(
+            not isinstance(terminal.get(field), str) or not terminal[field].strip()
+            for field in ("error_code", "terminal_decision")
+        )
+    ):
+        return {}
+    return {
+        "bridge_terminal_result": terminal,
+        "bridge_exit_code": exit_code,
+        "bridge_job_id": job_id,
+        "bridge_stdout_path": bridge_result["stdout_path"],
+        "bridge_stderr_path": bridge_result["stderr_path"],
+    }
+
+
 def run_bridge_review(
     repo_root: Path,
     task_summary: str,
@@ -11020,6 +11057,7 @@ def run_phase_b(
                 return current_files, {
                     "status": "error", "step": "private_attr_recovered_review_material",
                     "errors": [str(exc)],
+                    **_bridge_terminal_failure_fields(bridge_result, bridge_job_id),
                 }
             preparation_error = _validate_private_attr_prepared_state(
                 repo_root, prepared_state, routing_record=routing_record, plan=plan,
@@ -11165,6 +11203,7 @@ def run_phase_b(
                         "Unexpected exit with a recoverable review decision is not recoverable. "
                         f"stderr: {bridge_result.get('stderr', '')[:500]}"
                     ],
+                    **_bridge_terminal_failure_fields(bridge_result, bridge_job_id),
                 }
 
             render, raw_texts = (
@@ -11248,6 +11287,7 @@ def run_phase_b(
                 "Bridge did not approve the post-private-attr-remediation diff "
                 f"(decision={bridge_decision!r}, exit={bridge_result['exit_code']})."
             ],
+            **_bridge_terminal_failure_fields(bridge_result, bridge_job_id),
         }
 
     # A reentry-private correction owes its gate and fresh private review. It
@@ -11994,6 +12034,7 @@ def run_phase_b(
                     f"Unexpected exit with {bridge_decision} is not recoverable. "
                     f"stderr: {bridge_result.get('stderr', '')[:500]}"
                 ]
+                result.update(_bridge_terminal_failure_fields(bridge_result, bridge_job_id))
                 _clear_state(repo_root)
                 return result
 
@@ -12062,6 +12103,7 @@ def run_phase_b(
                 f"(exit={bridge_result['exit_code']}). "
                 f"stderr: {bridge_result.get('stderr', '')[:500]}"
             ]
+            result.update(_bridge_terminal_failure_fields(bridge_result, bridge_job_id))
             _clear_state(repo_root)
             return result
 
@@ -13058,6 +13100,7 @@ def run_phase_b(
                         f"Unexpected exit with {bridge_decision} is not recoverable. "
                         f"stderr: {bridge_result.get('stderr', '')[:500]}"
                     ]
+                    result.update(_bridge_terminal_failure_fields(bridge_result, bridge_job_id))
                     _clear_state(repo_root)
                     return result
 
@@ -13220,6 +13263,7 @@ def run_phase_b(
                     f"(exit={bridge_result['exit_code']}). "
                     f"stderr: {bridge_result.get('stderr', '')[:500]}"
                 ]
+                result.update(_bridge_terminal_failure_fields(bridge_result, bridge_job_id))
                 _clear_state(repo_root)
                 return result
 
