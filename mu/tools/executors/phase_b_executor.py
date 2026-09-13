@@ -2144,6 +2144,10 @@ PRIVATE_ATTR_QUESTION_STEPS = {
     "private_attr_remediation_question_for_founder",
     "reentry_private_attr_remediation_question_for_founder",
 }
+QUESTION_RECEIVED_STEP = "bridge_question_received"
+QUESTION_TERMINAL_STEPS = {
+    "question_for_founder", "reentry_question_for_founder", *PRIVATE_ATTR_QUESTION_STEPS,
+}
 PRIVATE_ATTR_UNPREPARED_STEPS = {
     "private_attr_remediation_pending_review",
     "reentry_private_attr_remediation_pending_review",
@@ -2165,7 +2169,8 @@ RESUMABLE_STATE_STEPS = {
     "private_attr_remediation_pending_review",
     "needs_phase_b_reentry",
     "reentry_private_attr_remediation_pending_review",
-    *PRIVATE_ATTR_QUESTION_STEPS,
+    *QUESTION_TERMINAL_STEPS,
+    QUESTION_RECEIVED_STEP,
     *PRIVATE_ATTR_PREPARED_STEPS,
     REENTRY_PRIVATE_ATTR_FIX_COMPLETE,
 }
@@ -3559,7 +3564,7 @@ def _validate_resumable_state_shape(state_path: Path, state: dict[str, Any]) -> 
         mutation_issue = _bridge_fix_mutation_issue(state)
         if mutation_issue is not None:
             return _state_load_error("bridge_fix_mutation", _bridge_fix_mutation_error(mutation_issue)["errors"][0])
-    if completed_step in PRIVATE_ATTR_QUESTION_STEPS:
+    if completed_step in QUESTION_TERMINAL_STEPS or completed_step == QUESTION_RECEIVED_STEP:
         terminal_result = state.get("terminal_result")
         if not isinstance(terminal_result, dict) or terminal_result.get("status") != "question_for_founder":
             return _state_missing_fields_error(
@@ -3623,6 +3628,178 @@ def _private_attr_question_result_from_state(saved_state: dict[str, Any]) -> dic
     return result
 
 
+def _terminal_question_identity(
+    repo_root: Path, plan_path: str | None, routing_record: dict[str, Any],
+) -> dict[str, Any]:
+    """Canonicalize only terminal plan identity; mutator identity stays lexical."""
+    if not isinstance(routing_record, dict):
+        raise PhaseBExecutorError("Terminal recovery requires a routing object")
+    if routing_record.get("decision", "ROUTE_PHASE_B") != "ROUTE_PHASE_B":
+        raise PhaseBExecutorError("Terminal recovery requires ROUTE_PHASE_B")
+    routed_plan = _dispatcher_handoff_plan_path(routing_record)
+
+    def contained(path: str) -> str:
+        return (repo_root / path).resolve(strict=True).relative_to(repo_root.resolve()).as_posix()
+
+    if plan_path is None or plan_path.startswith("<planless:"):
+        if plan_path is None and routed_plan:
+            plan_path = routed_plan
+        else:
+            plan = _derive_planless_context(routing_record, repo_root)
+            if plan_path is not None and plan_path != plan["path"]:
+                raise PhaseBExecutorError("Terminal planless invocation does not match routing")
+            plan_path = plan["path"]
+    if not plan_path.startswith("<planless:"):
+        plan_path = contained(plan_path)
+        plan = load_plan_packet(repo_root, plan_path)
+    if routed_plan and contained(routed_plan) != plan_path:
+        raise PhaseBExecutorError("Terminal routing plan does not match invocation")
+    wave_id = normalize_wave_id(
+        plan.get("wave_id") or plan_path.replace("reports/control_plane/", "").replace(".md", "")
+    )
+    for key in ("wave_id", "wave_name"):
+        routed_wave = routing_record.get(key)
+        if routed_wave is None or (isinstance(routed_wave, str) and not routed_wave.strip()):
+            continue
+        if not isinstance(routed_wave, str) or normalize_wave_id(routed_wave) != wave_id:
+            raise PhaseBExecutorError("Terminal routing wave does not match plan")
+    identity, error = _bridge_fix_active_identity(
+        repo_root, routing_record=routing_record, plan=plan, plan_path=plan_path,
+        wave_id=wave_id, refresh_plan=False,
+    )
+    if error or identity is None:
+        raise PhaseBExecutorError(error or "Terminal invocation identity is unavailable")
+    # Retain launch/receipt context already supplied by the invocation, without
+    # inferring authority from the checkpoint being recovered.
+    identity["invocation_context"] = json.loads(json.dumps({
+        key: routing_record[key] for key in (
+            "job_id", "invocation_id", "session_id", "candidate_authority",
+            "launch_wave_override_authority",
+        ) if key in routing_record
+    }))
+    return identity
+
+
+def _parse_bridge_decision(stdout: str) -> str:
+    """Select the last recognized decision line, allowing trailing diagnostics."""
+    return next((
+        line.strip() for line in reversed(stdout.strip().splitlines())
+        if line.strip() in RECOGNIZED_BRIDGE_DECISIONS
+    ), "")
+
+
+def _accepted_question_review(review: Any, job_id: str) -> bool:
+    if not isinstance(review, dict) or not _valid_state_string(job_id):
+        return False
+    stdout = review.get("stdout")
+    return (
+        type(review.get("exit_code")) is int and review["exit_code"] in (0, 1)
+        and review.get("job_id") == job_id and review.get("decision") == "QUESTION"
+        # Root-exit output uses the returned review's parser, including a
+        # complete final verdict line without a terminating newline.
+        and isinstance(stdout, str) and _parse_bridge_decision(stdout) == "QUESTION"
+    )
+
+
+def _journal_received_question(
+    repo_root: Path, review: dict[str, Any], *, job_id: str, plan_path: str,
+    routing_record: dict[str, Any], result: dict[str, Any], round_num: int, reentry: bool,
+) -> dict[str, Any] | None:
+    """Save an accepted verdict before any fallible post-review operation."""
+    if not _accepted_question_review(review, job_id):
+        return None
+    previous = _load_state(repo_root) or {}
+    previous_step = previous.get("completed_step")
+    if isinstance(previous_step, str) and previous_step in QUESTION_TERMINAL_STEPS | {QUESTION_RECEIVED_STEP}:
+        if previous.get("bridge_job_id") != job_id:
+            raise PhaseBExecutorError("Another terminal review already owns founder authority")
+        return previous
+    identity = _terminal_question_identity(repo_root, plan_path, routing_record)
+    step = "reentry_question_for_founder" if reentry else "question_for_founder"
+    terminal_result = {
+        **result, "status": "question_for_founder", "bridge_rounds": round_num,
+        "bridge_job_id": job_id, "bridge_stdout_path": review.get("stdout_path"),
+        "bridge_stderr_path": review.get("stderr_path"),
+        "errors": [f"Bridge returned QUESTION (round {round_num}). Founder input required."],
+    }
+    state = {
+        "plan_path": identity["plan_path"], "wave_id": identity["wave_id"],
+        "completed_step": QUESTION_RECEIVED_STEP, "bridge_rounds": round_num,
+        "bridge_job_id": job_id, "question_step": step, "terminal_identity": identity,
+        "received_review": review, "terminal_result": terminal_result,
+    }
+    _save_state(repo_root, state)
+    return state
+
+
+def _promote_received_question(repo_root: Path, state: dict[str, Any]) -> dict[str, Any]:
+    if state["completed_step"] == QUESTION_RECEIVED_STEP:
+        state = {**state, "completed_step": state["question_step"]}
+        _save_state(repo_root, state)
+    return state
+
+
+def _save_terminal_question_render(
+    repo_root: Path, state: dict[str, Any], render: str,
+) -> dict[str, Any]:
+    """Enrich the durable founder question without changing verdict authority."""
+    if not render or state["terminal_result"].get("bridge_render") == render[:2000]:
+        return state
+    state = {
+        **state,
+        "terminal_result": {**state["terminal_result"], "bridge_render": render[:2000]},
+    }
+    _save_state(repo_root, state)
+    return state
+
+
+def _recover_terminal_question(
+    repo_root: Path, state: dict[str, Any], plan_path: str | None,
+    routing_record_override: dict[str, Any] | None,
+) -> dict[str, Any]:
+    try:
+        shape_error = _validate_resumable_state_shape(_state_file_path(repo_root), state)
+        if shape_error is not None:
+            return _state_load_error_result(shape_error)
+        route = routing_record_override
+        if route is None or (isinstance(route, dict) and "_merge_task_id" in route):
+            # Legacy invocations without a routing file can still match their
+            # plan/HEAD identity. A previously supplied context cannot disappear
+            # this way: the complete terminal identity must still compare equal.
+            active_route = (
+                load_routing_record(repo_root, bus_dir=_active_bus_dir())
+                if agent_bus_path(repo_root, _active_bus_dir(), "meta", "post_merge_routing.json").exists()
+                else {}
+            )
+            route = {**active_route, "task_id": route["_merge_task_id"]} if route is not None else active_route
+        identity = _terminal_question_identity(repo_root, plan_path, route)
+        if state.get("terminal_identity") != identity or state["wave_id"] != identity["wave_id"]:
+            raise PhaseBExecutorError("Terminal wave/plan/invocation identity does not match")
+        if state["completed_step"] not in PRIVATE_ATTR_QUESTION_STEPS:
+            job_id = state.get("bridge_job_id")
+            if (
+                not _accepted_question_review(state.get("received_review"), job_id)
+                or state["terminal_result"].get("bridge_job_id") != job_id
+                or state.get("question_step") not in {"question_for_founder", "reentry_question_for_founder"}
+            ):
+                raise PhaseBExecutorError("Terminal QUESTION lacks accepted invocation-bound verdict evidence")
+            if not state["terminal_result"].get("bridge_render"):
+                # Cleanup or rendering may have failed after the early journal.
+                # Read only the validated job's artifact; preserve founder wait
+                # if that display artifact is still unavailable.
+                try:
+                    render = _read_bridge_render(repo_root, job_id)
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    render = ""
+                state = _save_terminal_question_render(repo_root, state, render)
+        promoted = _promote_received_question(repo_root, state)
+        result = _private_attr_question_result_from_state(promoted)
+        result["resumed_from"] = state["completed_step"]
+        return result
+    except (ExecutorCommonError, PhaseBExecutorError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        return _state_load_error_result(_state_load_error("terminal_identity", str(exc)))
+
+
 def _load_state(repo_root: Path) -> dict[str, Any] | None:
     """Load persisted executor state, or None if not found."""
     state_path = _state_file_path(repo_root)
@@ -3655,6 +3832,9 @@ def _load_state(repo_root: Path) -> dict[str, Any] | None:
 
 def _clear_state(repo_root: Path, *, terminal_success: bool = False) -> None:
     """Remove persisted state file after successful completion."""
+    saved_step = (_load_state(repo_root) or {}).get("completed_step")
+    if isinstance(saved_step, str) and saved_step in QUESTION_TERMINAL_STEPS | {QUESTION_RECEIVED_STEP}:
+        return
     if not terminal_success and _has_reentry_private_attr_checkpoint(_load_state(repo_root) or {}):
         return
     if implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=_active_bus_dir()):
@@ -4772,6 +4952,7 @@ def _run_bridge_review_subprocess(
     verbose: bool,
     env: dict[str, str] | None = None,
     on_started: Callable[[], None] | None = None,
+    on_result: Callable[[dict[str, Any]], None] | None = None,
     poll_interval: float = BRIDGE_REVIEW_POLL_INTERVAL,
     stale_timeout: float = BRIDGE_REVIEW_STALE_TIMEOUT,
     aggregation_hang_timeout: float = BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT,
@@ -4844,6 +5025,19 @@ def _run_bridge_review_subprocess(
                 if exit_code is not None:
                     stdout_size, _ = artifact_size_mtime_ns(stdout_path)
                     stderr_size, _ = artifact_size_mtime_ns(stderr_path)
+                    if on_result is not None:
+                        # Freeze the root-exit byte boundary before descendant
+                        # cleanup or truncation can fail or append late output.
+                        with stdout_path.open("rb") as handle:
+                            received_stdout = handle.read(stdout_size).decode("utf-8")
+                        with stderr_path.open("rb") as handle:
+                            received_stderr = handle.read(stderr_size).decode("utf-8")
+                        on_result({
+                            "exit_code": exit_code, "stdout": received_stdout,
+                            "stderr": received_stderr,
+                            "stdout_path": str(stdout_path.relative_to(repo_root)),
+                            "stderr_path": str(stderr_path.relative_to(repo_root)),
+                        })
                     _terminate_bridge_subprocess(
                         proc,
                         child_pids=tuple(
@@ -4975,6 +5169,7 @@ def run_bridge_review(
     verbose: bool = False,
     timeout: int = 1200,
     on_started: Callable[[], None] | None = None,
+    on_result: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run bridge_supervisor.py review and return the result.
 
@@ -5023,6 +5218,10 @@ def run_bridge_review(
     if verbose:
         cmd.append("-v")
 
+    def bind_result(result: dict[str, Any]) -> dict[str, Any]:
+        decision = _parse_bridge_decision(result["stdout"])
+        return {**result, "decision": decision, "job_id": job_id or ""}
+
     result = _run_bridge_review_subprocess(
         repo_root,
         cmd,
@@ -5030,6 +5229,7 @@ def run_bridge_review(
         timeout=timeout,
         verbose=verbose,
         on_started=on_started,
+        on_result=(lambda received: on_result(bind_result(received))) if on_result is not None else None,
         stale_timeout=max(BRIDGE_REVIEW_STALE_TIMEOUT, bridge_turn_timeout),
         env={
             **os.environ,
@@ -5040,17 +5240,7 @@ def run_bridge_review(
             "RCX_BRIDGE_MAX_TURN_WALL_TIME_S": str(float(timeout)),
         },
     )
-    stdout_stripped = result["stdout"].strip()
-    decision = ""
-    if stdout_stripped:
-        for line in reversed(stdout_stripped.splitlines()):
-            line = line.strip()
-            if line in RECOGNIZED_BRIDGE_DECISIONS:
-                decision = line
-                break
-    result["decision"] = decision
-    result["job_id"] = job_id or ""
-    return result
+    return bind_result(result)
 
 
 def _read_bridge_render(repo_root: Path, job_id: str) -> str:
@@ -9741,6 +9931,8 @@ def run_phase_b(
     if _is_state_load_error(saved_state):
         return _state_load_error_result(saved_state)
     saved_step = saved_state.get("completed_step") if saved_state else None
+    if isinstance(saved_step, str) and saved_step in QUESTION_TERMINAL_STEPS | {QUESTION_RECEIVED_STEP}:
+        return _recover_terminal_question(repo_root, saved_state, plan_path, routing_record_override)
     if saved_step == "implementer_mutation":
         issue = _implementer_mutation_issue(saved_state)
         if issue:
@@ -11169,6 +11361,7 @@ def run_phase_b(
                 "bridge_stderr_path": bridge_result.get("stderr_path"),
                 "bridge_render": question_result.get("bridge_render", ""),
                 "question_step": step_name,
+                "terminal_identity": _terminal_question_identity(repo_root, plan_path, routing_record),
                 **_private_attr_reentry_fields(reentry=reentry),
                 "errors": list(question_result["errors"]),
                 "terminal_result": question_result,
@@ -11874,6 +12067,10 @@ def run_phase_b(
                 reader_agent=backend,
                 verbose=verbose,
                 timeout=timeout,
+                on_result=lambda review: _journal_received_question(
+                    repo_root, review, job_id=bridge_job_id, plan_path=plan_path,
+                    routing_record=routing_record, result=result, round_num=round_num, reentry=False,
+                ),
                 on_started=lambda: _emit_phase_b_event(
                     repo_root,
                     routing_record=routing_record,
@@ -11982,15 +12179,23 @@ def run_phase_b(
 
         if bridge_decision == "QUESTION":
             # QUESTION requires founder input, not code changes — fail closed
-            render = _read_bridge_render(repo_root, bridge_job_id)
+            received = _journal_received_question(
+                repo_root, bridge_result, job_id=bridge_job_id, plan_path=plan_path,
+                routing_record=routing_record, result=result, round_num=round_num, reentry=False,
+            )
+            if received is not None:
+                received = _promote_received_question(repo_root, received)
             result["status"] = "question_for_founder"
             result["errors"] = [
                 f"Bridge returned QUESTION (round {round_num}). "
                 "Founder input required — cannot resolve mechanically.",
             ]
-            if render:
-                result["bridge_render"] = render[:2000]
             try:
+                render = _read_bridge_render(repo_root, bridge_job_id)
+                if render:
+                    result["bridge_render"] = render[:2000]
+                    if received is not None:
+                        _save_terminal_question_render(repo_root, received, render)
                 _emit_phase_b_event(
                     repo_root,
                     routing_record=routing_record,
@@ -12005,7 +12210,6 @@ def run_phase_b(
                 result["status"] = "error"
                 result["step"] = "phase_b_pager"
                 result["errors"].append(f"Phase B pager emission failed on QUESTION verdict: {exc}")
-            _clear_state(repo_root)
             return result
 
         if bridge_result["exit_code"] == 0 and bridge_decision not in RECOGNIZED_BRIDGE_DECISIONS:
@@ -12938,6 +13142,10 @@ def run_phase_b(
                     reader_agent=backend,
                     verbose=verbose,
                     timeout=timeout,
+                    on_result=lambda review: _journal_received_question(
+                        repo_root, review, job_id=bridge_job_id, plan_path=plan_path,
+                        routing_record=routing_record, result=result, round_num=reentry_round, reentry=True,
+                    ),
                     on_started=lambda: _emit_phase_b_event(
                         repo_root,
                         routing_record=routing_record,
@@ -13043,15 +13251,26 @@ def run_phase_b(
 
             if bridge_decision == "QUESTION":
                 # QUESTION in re-entry = fail closed, same as initial loop
-                render = _read_bridge_render(repo_root, bridge_job_id)
+                received = _journal_received_question(
+                    repo_root, bridge_result, job_id=bridge_job_id, plan_path=plan_path,
+                    routing_record=routing_record, result=result, round_num=reentry_round, reentry=True,
+                )
+                if received is not None:
+                    received = _promote_received_question(repo_root, received)
                 result["status"] = "question_for_founder"
+                result["bridge_job_id"] = bridge_job_id
+                result["bridge_stdout_path"] = bridge_result.get("stdout_path")
+                result["bridge_stderr_path"] = bridge_result.get("stderr_path")
                 result["errors"] = [
                     f"Bridge returned QUESTION during re-entry (round {reentry_round}). "
                     "Founder input required.",
                 ]
-                if render:
-                    result["bridge_render"] = render[:2000]
                 try:
+                    render = _read_bridge_render(repo_root, bridge_job_id)
+                    if render:
+                        result["bridge_render"] = render[:2000]
+                        if received is not None:
+                            _save_terminal_question_render(repo_root, received, render)
                     _emit_phase_b_event(
                         repo_root,
                         routing_record=routing_record,
@@ -13071,7 +13290,6 @@ def run_phase_b(
                     result["errors"].append(
                         f"Phase B pager emission failed on re-entry QUESTION verdict: {exc}"
                     )
-                _clear_state(repo_root)
                 return result
 
             if bridge_result["exit_code"] == 0 and bridge_decision not in RECOGNIZED_BRIDGE_DECISIONS:

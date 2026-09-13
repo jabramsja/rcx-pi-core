@@ -752,6 +752,8 @@ class TestDispatcherConfig:
         monkeypatch.delenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
         monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", raising=False)
         committed = json.loads(
@@ -829,7 +831,10 @@ class TestDispatcherConfig:
         config = dispatch_mod.load_config(tmp_path / "nonexistent.json")
         assert config["bridge_loop_limits"]["phase_a"] == 15
 
-    def test_load_partial_custom_config_merges_shared_defaults(self, tmp_path):
+    def test_load_partial_custom_config_merges_shared_defaults(self, tmp_path, monkeypatch):
+        # Assert the file's timeout without an inherited recovery override.
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
         config_path = tmp_path / "executor_config.json"
         config_path.write_text(json.dumps({"timeouts": {"commit_executor": 999}}))
         config = dispatch_mod.load_config(config_path)
@@ -12315,9 +12320,13 @@ class TestBridgeR6Finding1NeedsPhaseBreentryPackage:
             verbose=False,
             timeout=1200,
             on_started=None,
+            on_result=None,
         ):
             captured_reader_agents.append(reader_agent)
-            return {"exit_code": 0, "stdout": "", "stderr": "", "decision": "GO", "job_id": job_id or ""}
+            review = {"exit_code": 0, "stdout": "", "stderr": "", "decision": "GO", "job_id": job_id or ""}
+            assert callable(on_result), "Re-entry bridge must supply the result journaling callback"
+            on_result(review)
+            return review
 
         def mock_collect_changed(repo):
             return ["mu/tools/executors/test.py"]
