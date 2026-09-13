@@ -45,6 +45,7 @@ import unicodedata
 import uuid
 from contextvars import ContextVar
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Callable
 from urllib.parse import unquote
 
@@ -18516,6 +18517,118 @@ def post_commit_pipeline_source() -> str:
     return inspect.getsource(_run_post_commit_pipeline)
 
 
+def _landed_commit_candidate_authority() -> tuple[Any, Any]:
+    """Load the running executor's committed builder, never candidate Python.
+
+    Keep this boundary limited to the shared builder and its canonical routing
+    reader. Compiling committed source also avoids candidate bytecode artifacts.
+    The returned modules retain their own globals after ambient imports restore.
+    """
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=SCRIPT_DIR,
+        capture_output=True, text=True, check=True, timeout=30,
+    ).stdout.strip()
+    names = ("executor_common", "candidate_authority")
+    previous = {name: sys.modules.get(name) for name in names}
+    loaded: dict[str, Any] = {}
+    try:
+        for name in names:
+            source = subprocess.run(
+                ["git", "show", f"{revision}:mu/tools/executors/{name}.py"],
+                cwd=SCRIPT_DIR, capture_output=True, check=True, timeout=30,
+            ).stdout
+            module = ModuleType(name)
+            module.__file__ = str(SCRIPT_DIR / f"{name}.py")
+            sys.modules[name] = module
+            exec(compile(source, module.__file__, "exec"), module.__dict__)
+            loaded[name] = module
+        return loaded["candidate_authority"], loaded["executor_common"]
+    finally:
+        for name, original in previous.items():
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
+
+
+def _prepare_commit_candidate_authority(
+    repo_root: Path,
+    handoff: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Bind the finalized native candidate to selected-bus launch authority."""
+    wave_id = handoff["wave_id"]
+    expected_path = agent_bus_path(
+        repo_root.resolve(), _active_bus_dir(), "meta", "candidate_authority",
+        f"{wave_id}.spec.json",
+    )
+    route_path = agent_bus_path(
+        repo_root, _active_bus_dir(), "meta", "post_merge_routing.json",
+    )
+    if not route_path.exists() and not expected_path.exists():
+        return None
+    authority, common = _landed_commit_candidate_authority()
+    route = common.load_routing_record(repo_root, _active_bus_dir()) if route_path.exists() else {}
+    if not isinstance(route, dict):
+        raise ValueError("candidate authority routing record is not an object")
+    required = route.get("candidate_authority_required")
+    # The same legacy optional semantics as recovery: an orphaned spec is not
+    # evidence that launch-required authority was disabled.
+    if (
+        "candidate_authority" not in route and not expected_path.exists()
+        and (required is False or "candidate_authority_required" not in route)
+    ):
+        return None
+    metadata = route.get("candidate_authority")
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("required"), bool):
+        raise ValueError("candidate authority requires launch metadata and a boolean requirement")
+    if "candidate_authority_required" in route and (
+        not isinstance(required, bool) or required is not metadata["required"]
+    ):
+        raise ValueError("candidate authority requirement disagrees with launch metadata")
+    identity = metadata.get("spec_identity")
+    if not isinstance(identity, dict) or identity.get("authority_required") is not metadata["required"]:
+        raise ValueError("candidate authority requires a paired launch-bound spec identity")
+    raw_path = metadata.get("spec_path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("candidate authority launch metadata is missing spec_path")
+    spec_path = Path(raw_path)
+    if not spec_path.is_absolute():
+        spec_path = repo_root / spec_path
+    if spec_path.resolve() != expected_path:
+        raise ValueError("candidate authority spec_path does not belong to the selected wave/bus")
+    launch_spec = authority.load_authority_spec(expected_path)
+    authority.verify_authority_spec_identity(repo_root, launch_spec, identity)
+    packet_path, packet_error = _commit_refresh_packet_path(handoff)
+    if (
+        packet_error or launch_spec.wave_id != wave_id
+        or launch_spec.plan_path != packet_path
+        or normalize_wave_id(str(route.get("wave_name") or route.get("wave_id") or "")) != wave_id
+    ):
+        raise ValueError("candidate authority wave/packet does not match the commit handoff")
+    spec = authority.CandidateAuthoritySpec.from_mapping({
+        **launch_spec.to_dict(), "phase": "commit", "review_round": "pre-supervisor",
+    })
+    receipt = authority.prepare_candidate_authority(repo_root, spec, bus_dir=_active_bus_dir())
+    receipt_path = Path(receipt["receipt_path"])
+    authority.verify_current_receipt(repo_root, receipt_path, trusted_spec=spec)
+    return {
+        "authority": authority,
+        "spec": spec,
+        "receipt_path": receipt_path,
+        "receipt_sha256": hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+    }
+
+
+def _verify_commit_candidate_authority(repo_root: Path, binding: dict[str, Any]) -> None:
+    """Verify the reviewed receipt and current index without preparing/staging."""
+    receipt_path = binding["receipt_path"]
+    binding["authority"].verify_current_receipt(
+        repo_root, receipt_path, trusted_spec=binding["spec"],
+    )
+    if hashlib.sha256(receipt_path.read_bytes()).hexdigest() != binding["receipt_sha256"]:
+        raise ValueError("candidate authority receipt changed after supervisor review")
+
+
 def _run_commit_pipeline_impl(
     handoff: dict[str, Any],
     *,
@@ -19414,6 +19527,47 @@ def _run_commit_pipeline_impl(
                 f"{len(generated_staged_paths)} file(s)"
             )
 
+    # Step 5f: canonical inventory follows ALL native mutation/settlement.
+    # An earlier Phase B receipt cannot describe this packet/tracker/cap state.
+    try:
+        candidate_authority_binding = _prepare_commit_candidate_authority(repo_root, handoff)
+        if candidate_authority_binding is not None:
+            # Canonical preparation can collect the indicator again. Retain
+            # native Step 5e provenance validation on the candidate it finalized.
+            if generated_paths:
+                _provenance, generated_error = _validate_commit_generated_governance_paths(
+                    repo_root, generated_paths, provenance=generated_provenance, wave_id=wave_id,
+                )
+                if generated_error:
+                    raise ValueError(generated_error)
+                if generated_provenance == "bumped":
+                    generated_error = _verify_growth_cap_generated_candidate(
+                        repo_root, wave_id=wave_id, base_branch=base_branch,
+                        allow_same_invocation_head_provenance=(
+                            growth_cap_outcome.get("bumped") is True
+                            and growth_cap_outcome.get("retry_settled") is not True
+                        ),
+                    )
+                    if generated_error:
+                        raise ValueError(generated_error)
+            authority_handle = str(candidate_authority_binding["receipt_path"].relative_to(repo_root.resolve()))
+            handoff = {
+                **handoff,
+                "evidence_handles": {
+                    **dict(handoff.get("evidence_handles") or {}),
+                    "candidate_authority_receipt": authority_handle,
+                },
+            }
+            result["candidate_authority_receipt"] = authority_handle
+            result["steps_completed"].append("prepare_commit_candidate_authority")
+            log("Step 5f: finalized exact-base candidate authority prepared and verified")
+    except Exception as exc:
+        return {
+            "status": "error", "step": "prepare_commit_candidate_authority",
+            "errors": [f"Commit candidate authority failed: {exc}"],
+            "steps_completed": result["steps_completed"],
+        }
+
     # ── Steps 6-7: supervisor review + receipt validation ───────────
     if not skip_supervisor:
         # ── Step 6: build_and_run_supervisor ──────────────────────────────
@@ -19811,6 +19965,16 @@ def _run_commit_pipeline_impl(
                     ),
                     "steps_completed": result["steps_completed"],
                 }
+        if candidate_authority_binding is not None:
+            try:
+                _verify_commit_candidate_authority(repo_root, candidate_authority_binding)
+            except Exception as exc:
+                return {
+                    **result,
+                    "status": "error", "step": "verify_commit_candidate_authority",
+                    "errors": [f"Commit candidate authority verification failed: {exc}"],
+                }
+            result["steps_completed"].append("verify_commit_candidate_authority")
         _commit_out, retry_detail = _run_git_commit_with_self_cleared_index_lock_retry(
             repo_root,
             handoff["commit_message"],
