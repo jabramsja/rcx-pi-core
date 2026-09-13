@@ -3587,12 +3587,21 @@ def fix_handoff_receipt_builder_refresh(repo_root: Path, **kw: Any) -> dict[str,
     )
 
 
-def _post_reentry_scope_files(repo_root: Path, result: dict[str, Any], plan_path: str) -> list[str]:
+def _post_reentry_scope_files(
+    repo_root: Path,
+    result: dict[str, Any],
+    plan_path: str,
+    *,
+    phase_b_readers: Any | None = None,
+) -> list[str]:
     explicit_files = _coerce_string_list(result.get("changed_files"))
     if explicit_files:
         return explicit_files
     try:
-        phase_b_mod = _load_executor_module_from_repo(repo_root, "phase_b_executor")
+        phase_b_mod = (
+            phase_b_readers if phase_b_readers is not None
+            else _load_executor_module_from_repo(repo_root, "phase_b_executor")
+        )
         plan_declared_files = _coerce_string_list(result.get("plan_declared_files"))
         if not plan_declared_files and plan_path:
             try:
@@ -3825,6 +3834,8 @@ def _post_reentry_resume_task_id(
     repo_root: Path,
     result_payload: dict[str, Any],
     plan_path: str,
+    *,
+    phase_b_readers: Any | None = None,
 ) -> str:
     """Resolve the task_id the resumed Phase B handoff will carry.
 
@@ -3847,7 +3858,10 @@ def _post_reentry_resume_task_id(
     # 1) Plan packet's authoritative Task header — the value validate_inputs and
     #    the Phase B handoff builder both resolve to.
     try:
-        phase_b_mod = _load_executor_module_from_repo(repo_root, "phase_b_executor")
+        phase_b_mod = (
+            phase_b_readers if phase_b_readers is not None
+            else _load_executor_module_from_repo(repo_root, "phase_b_executor")
+        )
         parsed = phase_b_mod.load_plan_packet(repo_root, plan_path)
         packet_task_id = str(parsed.get("task_id", "") or "").strip()
         if packet_task_id:
@@ -3919,13 +3933,87 @@ def _post_reentry_resume_state_sha(repo_root: Path) -> str:
         return ""
 
 
+def _landed_post_reentry_phase_b_readers(revision: str) -> ModuleType:
+    """Load only committed task/scope readers, without importing Phase B.
+
+    Use the authority builder's exact revision and checkout. Importing even a
+    committed Phase B module would bring in its working-tree dependencies;
+    select only the existing readers and their fixed dependencies instead.
+    Candidate plan contents and file inventories remain data for these readers.
+    """
+    filename = str(SCRIPT_DIR / "phase_b_executor.py")
+    source = subprocess.run(
+        ["git", "show", f"{revision}:mu/tools/executors/phase_b_executor.py"],
+        cwd=SCRIPT_DIR, capture_output=True, check=True, timeout=30,
+    ).stdout
+    definitions = {
+        "PhaseBExecutorError",
+        "_normalize_plan_metadata_line",
+        "_extract_plan_metadata_value",
+        "_iter_authoritative_plan_header_lines",
+        "_extract_authoritative_plan_header_metadata",
+        "load_plan_packet",
+        "_extract_founder_override_from_metadata_line",
+        "_collect_changed_files",
+        "_normalize_declared_path_token",
+        "_parse_plan_declared_files",
+        "_phase_b_broad_refresh_line_indices",
+        "_is_phase_b_indicator_scope_refresh_temp_path",
+        "_collect_wave_owned_files",
+    }
+    constants = {
+        "PHASE_B_INDICATOR_SCOPE_REFRESH_START",
+        "PHASE_B_INDICATOR_SCOPE_REFRESH_END",
+        "PHASE_B_INDICATOR_SCOPE_BROAD_SNAPSHOT_MARKER",
+        "_FOUNDER_OVERRIDE_TOKEN_RE",
+        "_FOUNDER_OVERRIDE_METADATA_PREFIXES",
+        "_WAVE_OWNED_PREFIXES",
+        "_DECLARED_PATH_EXTENSIONS",
+        "_DECLARED_ROOT_FILES",
+        "_LINE_REF_RE",
+        "_INLINE_PATH_RE",
+    }
+    tree = ast.parse(source, filename=filename)
+    selected: list[ast.stmt] = []
+    found: set[str] = set()
+    for node in tree.body:
+        name = ""
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in definitions:
+            name = node.name
+        elif (
+            isinstance(node, ast.Assign) and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name) and node.targets[0].id in constants
+        ):
+            name = node.targets[0].id
+        if not name:
+            continue
+        if name in found or any(
+            isinstance(child, (ast.Import, ast.ImportFrom)) for child in ast.walk(node)
+        ):
+            raise ValueError(f"committed Phase B recovery reader is not isolated: {name}")
+        selected.append(node)
+        found.add(name)
+    missing = (definitions | constants) - found
+    if missing:
+        raise ValueError(f"committed Phase B recovery readers are missing: {sorted(missing)}")
+    # The future import keeps annotations unevaluated without importing Phase B
+    # or its annotation dependencies. Compiling source creates no bytecode cache.
+    reader_tree = ast.parse("from __future__ import annotations\n", filename=filename)
+    reader_tree.body.extend(selected)
+    readers = ModuleType("_rcx_landed_post_reentry_phase_b_readers")
+    readers.__file__ = filename
+    readers.__dict__.update({"Path": Path, "re": re, "subprocess": subprocess})
+    exec(compile(reader_tree, filename, "exec"), readers.__dict__)
+    return readers
+
+
 @contextmanager
 def _landed_post_reentry_authority():
-    """Use the running executor's committed builder, never candidate Python.
+    """Use the running executor's committed builder and task/scope readers.
 
-    Both fixed modules come from one resolved HEAD of the executor checkout.
-    Keep their imports bound while the existing Phase B task/scope readers run:
-    those readers can otherwise indirectly import the edited authority module.
+    The builder and isolated readers come from one resolved HEAD of the
+    executor checkout. Candidate Phase B Python must never run in this context:
+    binding authority imports alone cannot prevent its module-level side effects.
     This is only the recovery authority boundary, not a general executor loader.
     """
     revision = subprocess.run(
@@ -3944,7 +4032,9 @@ def _landed_post_reentry_authority():
             module.__file__ = str(SCRIPT_DIR / f"{name}.py")
             sys.modules[name] = module
             exec(compile(source, module.__file__, "exec"), module.__dict__)
-        yield sys.modules["candidate_authority"]
+        authority = sys.modules["candidate_authority"]
+        authority.recovery_phase_b_readers = _landed_post_reentry_phase_b_readers(revision)
+        yield authority
     finally:
         for name, original in previous.items():
             if original is None:
@@ -4011,8 +4101,14 @@ def _prepare_post_reentry_candidate_authority(
         ):
             raise ValueError("candidate authority wave/packet does not match the recovery route")
         authority.guard_candidate_scope_before_mutation(repo_root, spec)
-        task_id = _post_reentry_resume_task_id(repo_root, result_payload, plan_path)
-        scope_files = _post_reentry_scope_files(repo_root, result_payload, plan_path)
+        task_id = _post_reentry_resume_task_id(
+            repo_root, result_payload, plan_path,
+            phase_b_readers=authority.recovery_phase_b_readers,
+        )
+        scope_files = _post_reentry_scope_files(
+            repo_root, result_payload, plan_path,
+            phase_b_readers=authority.recovery_phase_b_readers,
+        )
         recovery_spec = authority.CandidateAuthoritySpec.from_mapping({
             **spec.to_dict(), "phase": "phase_b", "review_round": "recovery-post-reentry",
         })
