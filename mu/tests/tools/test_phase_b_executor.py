@@ -7124,9 +7124,40 @@ class PrivateReviewCrash(BaseException):
     """Model process death without allowing executor exception handling to finish."""
 
 
+@pytest.mark.parametrize("decision", ["REQUEST_CHANGES", "NO_GO"])
+def test_reentry_private_findings_checkpoint_retains_context(private_review_checkpoint, decision):
+    fixture = private_review_checkpoint(reentry=True)
+    prior = fixture.state
+    impl = _make_mock_impl()
+
+    def review(repo_root, summary, **kwargs):
+        assert "re-entry private-attr" in summary
+        _retain_private_review_envelope(fixture, kwargs["job_id"], decision)
+        return {"decision": decision, "exit_code": 1, "stdout": decision,
+                "stderr": "", "job_id": kwargs["job_id"]}
+
+    def stop_before_actor(repo_root, **event):
+        if event.get("state") == "bridge_fix_started":
+            raise PrivateReviewCrash("pending correction")
+
+    with patch.dict(sys.modules, {"phase_b_implementer": impl}), \
+         patch.object(pb_mod, "run_bridge_review", side_effect=review), \
+         patch.object(pb_mod, "_emit_phase_b_event", side_effect=stop_before_actor):
+        with pytest.raises(PrivateReviewCrash, match="pending correction"):
+            pb_mod.run_phase_b(fixture.repo, fixture.plan_path, max_bridge_rounds=5,
+                               routing_record_override=_VALID_ROUTING_RECORD.copy())
+    state = json.loads(fixture.state_path.read_bytes())
+    assert state["completed_step"] == "bridge_fix_pending"
+    assert state.get("reentry_private_attr_review") is True
+    assert state["reentry_findings"] == prior["reentry_findings"]
+    assert state["runtime_pre_push_failure_reentry"] is prior["runtime_pre_push_failure_reentry"]
+    assert state["bridge_fix_mutation_context"]["next_step"] == "reentry_private_attr_bridge_fix_complete"
+    impl.invoke_implementer.assert_not_called()
+
+
 @pytest.fixture
 def private_review_checkpoint(tmp_path, real_pre_review_package):
-    def create(*, reentry=False, boundary="prepared", max_rounds=3):
+    def create(*, reentry=False, boundary="prepared", max_rounds=3, runtime_reentry=None):
         repo = tmp_path / "repo"
         repo.mkdir()
         wave = "private-review-resume"
@@ -7143,12 +7174,28 @@ def private_review_checkpoint(tmp_path, real_pre_review_package):
         material = "BEGIN_AGENT_ENVELOPE\n" + json.dumps({"findings": [finding]}) + "\nEND_AGENT_ENVELOPE"
         impl = _make_successful_impl_with_edits(test_path)
         state_path = repo / ".agent_bus/executors/phase_b_state.json"
+        if runtime_reentry is not None:
+            assert reentry
+            with (repo / plan_path).open("a") as plan:
+                plan.write("\nPurpose: L4_STRUCTURAL implementation wave.\n")
+            state_path.parent.mkdir(parents=True)
+            # The existing supervisor-reentry entrypoint supplies the incoming
+            # context. All private checkpoints below are real producer output.
+            state_path.write_text(json.dumps({
+                "plan_path": plan_path, "wave_id": wave,
+                "completed_step": "needs_phase_b_reentry", "bridge_rounds": 0,
+                "bridge_scope_fingerprint": getattr(pb_mod, "_bridge_scope_fingerprint")(repo, [plan_path]),
+                "implementer_changed": [], "executor_created": [], "baseline_wave_files": [plan_path],
+                "all_non_blocking": [], "finding_history": {}, "deferred_packet_path": None,
+                "reentry_findings": "  Current reentry Δ\n\nExact opaque findings with trailing spaces  \n",
+                "runtime_pre_push_failure_reentry": runtime_reentry,
+            }))
         gates = 0
         with ExitStack() as stack:
             def gate(*args, **kwargs):
                 nonlocal gates
                 gates += 1
-                failure_round = 2 if reentry else 1
+                failure_round = 2 if reentry and runtime_reentry is None else 1
                 if gates == failure_round + 1:
                     state = json.loads(state_path.read_text())
                     assert state["completed_step"].endswith("remediation_pending_review")
@@ -7208,6 +7255,436 @@ def _private_review_candidate_bytes(fixture):
         path: ((fixture.repo / path).read_bytes(), (fixture.repo / path).stat().st_mode)
         if (fixture.repo / path).exists() else None for path in paths
     } | {"index": (fixture.repo / ".git/index").read_bytes()}
+
+
+@pytest.fixture
+def reentry_private_bridge_lane(private_review_checkpoint):
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(pb_mod, "emit_pipeline_agent_event", return_value={"enabled": False}))
+        def create(*, runtime=True, decision="REQUEST_CHANGES", reentry=True):
+            fixture = private_review_checkpoint(
+                reentry=reentry, runtime_reentry=runtime if reentry else None,
+            )
+            lane = SimpleNamespace(
+                **vars(fixture), boundary=None, reviews=0, decisions=0, edits=0, snapshots=[],
+                reentry=reentry, runtime=runtime, decision=decision,
+            )
+            lane.route = {**_VALID_ROUTING_RECORD, "wave_name": fixture.state["wave_id"],
+                          "tracked_packet": fixture.plan_path, "task_id": "[PIPELINE-RECOVERY]"}
+            impl = _make_successful_impl_with_edits(fixture.test_path)
+            actor = impl.invoke_implementer.side_effect
+
+            def invoke(*args, **kwargs):
+                lane.edits += 1
+                lane.snapshots.append(json.loads(lane.state_path.read_bytes()))
+                if lane.boundary == "actor":
+                    raise PrivateReviewCrash("correction interrupted")
+                result = actor(*args, **kwargs)
+                if lane.boundary == "failure":
+                    result.update(status="error", exit_code=1)
+                return result
+
+            def review(repo_root, summary, **kwargs):
+                assert "private-attr remediation" in summary
+                assert ("re-entry" in summary) is reentry
+                lane.reviews += 1
+                lane.snapshots.append(json.loads(lane.state_path.read_bytes()))
+                if lane.boundary == "review" or (lane.boundary == "recursive" and lane.reviews == 2):
+                    raise PrivateReviewCrash("private review interrupted")
+                verdict = lane.decision if lane.decisions == 0 else "GO"
+                lane.decisions += 1
+                _retain_private_review_envelope(lane, kwargs["job_id"], verdict)
+                return {"decision": verdict, "exit_code": int(verdict in {"REQUEST_CHANGES", "NO_GO"}),
+                        "stdout": verdict, "stderr": "", "job_id": kwargs["job_id"]}
+
+            def event(repo_root, **event):
+                if lane.boundary == "before_reentry_actor" and event.get("state") == "reentry_started":
+                    raise OSError("reentry implementer notification interrupted")
+                if (lane.boundary, event.get("state")) in {
+                    ("pending", "bridge_fix_started"), ("success", "bridge_fix_success"),
+                }:
+                    raise PrivateReviewCrash("correction checkpoint interrupted")
+
+            real_save = getattr(pb_mod, "_save_state")
+
+            def save(repo_root, state):
+                result = real_save(repo_root, state)
+                if lane.boundary == "completed" and state["completed_step"] == "reentry_private_attr_bridge_fix_complete":
+                    raise PrivateReviewCrash("completed correction interrupted")
+                return result
+
+            impl.invoke_implementer.side_effect = invoke
+            lane.impl = impl
+            stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+            lane.bridge = stack.enter_context(patch.object(pb_mod, "run_bridge_review", side_effect=review))
+            stack.enter_context(patch.object(pb_mod, "_read_bridge_review_material", return_value=("", [])))
+            stack.enter_context(patch.object(pb_mod, "_emit_phase_b_event", side_effect=event))
+            stack.enter_context(patch.object(pb_mod, "_save_state", side_effect=save))
+            lane.gate = stack.enter_context(patch.object(pb_mod, "run_private_attr_gate", return_value={"passed": True, "test_files": [fixture.test_path]}))
+            stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}))
+            stack.enter_context(patch.object(pb_mod, "run_sdk_agents", side_effect=AssertionError("SDK replay")))
+            lane.supervisor = stack.enter_context(patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "Approved", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }))
+            lane.scope_guard = stack.enter_context(patch.object(
+                pb_mod, "_phase_b_scope_has_runtime_substrate_file",
+                wraps=getattr(pb_mod, "_phase_b_scope_has_runtime_substrate_file"),
+            ))
+            lane.run = lambda: pb_mod.run_phase_b(
+                lane.repo, lane.plan_path, max_bridge_rounds=6, routing_record_override=lane.route,
+            )
+            return lane
+        yield create
+
+
+@pytest.mark.parametrize("boundary", ["review", "pending", "success", "completed", "recursive"])
+@pytest.mark.parametrize("runtime", [False, True])
+def test_reentry_private_public_resume_preserves_owed_review_and_guard(reentry_private_bridge_lane, boundary, runtime):
+    lane = reentry_private_bridge_lane(runtime=runtime)
+    lane.boundary = boundary
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    state = json.loads(lane.state_path.read_bytes())
+    assert state["reentry_private_attr_review"] is True
+    assert state["reentry_findings"] == lane.state["reentry_findings"]
+    assert state["runtime_pre_push_failure_reentry"] is runtime
+    lane.boundary = None
+    result = lane.run()
+    if result["status"] == "continue_phase_b":
+        assert boundary == "success"
+        assert result["completed_step"] == "reentry_private_attr_bridge_fix_complete"
+        assert result["checkpoint_sha256"] == hashlib.sha256(lane.state_path.read_bytes()).hexdigest()
+        assert lane.edits == 1
+        result = lane.run()
+    assert lane.edits == 1
+    assert lane.reviews == (3 if boundary in {"review", "recursive"} else 2)
+    assert lane.gate.called
+    for snapshot in lane.snapshots:
+        assert snapshot["reentry_private_attr_review"] is True
+        assert snapshot["reentry_findings"] == lane.state["reentry_findings"]
+        assert snapshot["runtime_pre_push_failure_reentry"] is runtime
+    if runtime:
+        assert result["step"] == "reentry_runtime_pre_push_scope", result
+        lane.supervisor.assert_not_called()
+        assert lane.scope_guard.called
+        assert all(not path.startswith("mu/host/") for path in lane.scope_guard.call_args.args[0])
+        saved = json.loads(lane.state_path.read_bytes())
+        assert saved["reentry_findings"] == lane.state["reentry_findings"]
+        assert saved["runtime_pre_push_failure_reentry"] is True
+    else:
+        assert result["status"] == "commit_ready", result
+        assert lane.supervisor.called
+
+
+@pytest.mark.parametrize("boundary", ["actor", "failure"])
+def test_reentry_private_failed_correction_preserves_authority_without_replay(reentry_private_bridge_lane, boundary):
+    lane = reentry_private_bridge_lane()
+    lane.boundary = boundary
+    if boundary == "actor":
+        with pytest.raises(PrivateReviewCrash):
+            lane.run()
+    else:
+        assert lane.run()["step"] == "implementer_bridge_fix"
+    before = lane.state_path.read_bytes()
+    state = json.loads(before)
+    assert state["bridge_fix_mutation"]["state"] == "IN_FLIGHT"
+    assert state["reentry_findings"] == lane.state["reentry_findings"]
+    assert state["runtime_pre_push_failure_reentry"] is True
+    assert lane.run()["authority_error"] == "ambiguous_outcome"
+    assert lane.edits == lane.reviews == 1
+    assert lane.state_path.read_bytes() == before
+    lane.supervisor.assert_not_called()
+
+
+def test_reentry_private_finalizer_failure_retains_sealed_success(reentry_private_bridge_lane):
+    lane = reentry_private_bridge_lane()
+    lane.boundary = "success"
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    before = lane.state_path.read_bytes()
+    with patch.object(pb_mod, "_collect_wave_owned_files", side_effect=OSError("finalizer interrupted")):
+        assert lane.run()["step"] == "bridge_fix_finalize"
+    assert lane.state_path.read_bytes() == before
+    assert lane.edits == lane.reviews == 1
+    lane.boundary = None
+    assert lane.run()["status"] == "continue_phase_b"
+    assert lane.run()["step"] == "reentry_runtime_pre_push_scope"
+    assert lane.edits == 1
+    lane.supervisor.assert_not_called()
+
+
+@pytest.mark.parametrize("boundary", ["none", "actor", "success", "failure"])
+def test_reentry_private_gate_rerun_preserves_correction_context(reentry_private_bridge_lane, boundary):
+    lane = reentry_private_bridge_lane()
+    lane.boundary = "completed"
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    lane.boundary = None
+    lane.gate.side_effect = [
+        {"passed": False, "skipped": False, "test_files": [lane.test_path], "exit_code": 1, "stdout": "private gate failure", "stderr": ""},
+        {"passed": True, "test_files": [lane.test_path]},
+    ]
+    if boundary == "failure":
+        lane.boundary = "failure"
+        assert lane.run()["step"] == "reentry_private_attr_gate"
+        before = lane.state_path.read_bytes()
+        assert lane.run()["step"] == "reentry_private_attr_gate"
+        assert lane.state_path.read_bytes() == before
+    elif boundary == "actor":
+        lane.boundary = "actor"
+        with pytest.raises(PrivateReviewCrash):
+            lane.run()
+        assert lane.run()["authority_error"] == "ambiguous_outcome"
+    elif boundary == "success":
+        collect = getattr(pb_mod, "_collect_wave_owned_files")
+
+        def interrupt_finalizer(*args, **kwargs):
+            state = json.loads(lane.state_path.read_bytes())
+            if state["completed_step"] == "implementer_mutation":
+                assert state["implementer_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+                raise PrivateReviewCrash("private gate success interrupted")
+            return collect(*args, **kwargs)
+
+        with patch.object(pb_mod, "_collect_wave_owned_files", side_effect=interrupt_finalizer):
+            with pytest.raises(PrivateReviewCrash):
+                lane.run()
+        assert lane.run()["status"] == "continue_phase_b"
+        assert lane.run()["step"] == "reentry_runtime_pre_push_scope"
+    else:
+        assert lane.run()["step"] == "reentry_runtime_pre_push_scope"
+    assert lane.edits == 2  # One bridge correction and one owed private-gate correction.
+    owned = next(state for state in lane.snapshots if state["completed_step"] == "implementer_mutation")
+    context = owned["implementer_mutation_context"]["checkpoint"]
+    assert context["reentry_private_attr_review"] is True
+    assert context["reentry_findings"] == lane.state["reentry_findings"]
+    assert context["runtime_pre_push_failure_reentry"] is True
+    lane.supervisor.assert_not_called()
+
+
+def test_reentry_private_question_retains_context_and_refuses_correction(reentry_private_bridge_lane):
+    lane = reentry_private_bridge_lane(decision="QUESTION")
+    assert lane.run()["status"] == "question_for_founder"
+    before = lane.state_path.read_bytes()
+    state = json.loads(before)
+    assert state["reentry_private_attr_review"] is True
+    assert state["reentry_findings"] == lane.state["reentry_findings"]
+    assert state["runtime_pre_push_failure_reentry"] is True
+    assert lane.run()["status"] == "question_for_founder"
+    assert lane.state_path.read_bytes() == before
+    assert lane.reviews == 1
+    assert lane.edits == 0
+    lane.supervisor.assert_not_called()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("reentry_private_attr_review", None), ("reentry_private_attr_review", False),
+    ("reentry_findings", "stale findings"), ("runtime_pre_push_failure_reentry", False),
+    ("runtime_pre_push_failure_reentry", 1), ("completed_step", "bridge_round_2"),
+    ("completed_step", "needs_phase_b_reentry"), ("bridge_rounds", 5),
+])
+def test_reentry_private_completed_context_mismatch_refuses_before_actors(reentry_private_bridge_lane, field, value):
+    lane = reentry_private_bridge_lane()
+    lane.boundary = "completed"
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    state = json.loads(lane.state_path.read_bytes())
+    state[field] = value
+    lane.state_path.write_text(json.dumps(state))
+    before = lane.state_path.read_bytes()
+    assert lane.run()["status"] == "error"
+    assert lane.edits == lane.reviews == 1
+    assert lane.state_path.read_bytes() == before
+    lane.supervisor.assert_not_called()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("task_id", "[OTHER-TASK]"), ("wave_name", "other-wave"),
+    ("comparison_commit", "a" * 40), ("head_sha", "b" * 40),
+])
+def test_reentry_private_completed_resume_requires_current_invocation(reentry_private_bridge_lane, field, value):
+    lane = reentry_private_bridge_lane()
+    lane.boundary = "completed"
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    before = lane.state_path.read_bytes()
+    lane.route[field] = value
+    assert lane.run()["status"] == "error"
+    assert lane.edits == lane.reviews == 1
+    assert lane.state_path.read_bytes() == before
+    lane.gate.assert_not_called()
+    lane.supervisor.assert_not_called()
+
+
+@pytest.mark.parametrize("supervisor_step", ["post_reentry_supervisor", "commit_ready_status_supervisor"])
+@pytest.mark.parametrize("private_decision", ["GO", "REQUEST_CHANGES", "NO_GO"])
+def test_private_go_supervisor_reentry_resumes_fresh_findings(
+    reentry_private_bridge_lane, supervisor_step, private_decision,
+):
+    lane = reentry_private_bridge_lane(runtime=False, decision=private_decision)
+    fresh = "Fresh supervisor finding Δ\nRepair the current candidate."
+    approved = lane.supervisor.return_value
+    needs = {**approved, "parsed": {
+        "decision": "NEEDS_PHASE_B", "summary": fresh, "status": "success", "findings": [],
+    }}
+    lane.supervisor.side_effect = (
+        [needs] if supervisor_step == "post_reentry_supervisor" else [approved, needs]
+    )
+    result = lane.run()
+    assert result["status"] == "continue_phase_b", result
+    assert result["step"] == "private_attr_supervisor_reentry"
+    assert result["supervisor_step"] == supervisor_step
+    state = json.loads(lane.state_path.read_bytes())
+    assert state["completed_step"] == "needs_phase_b_reentry"
+    assert state["reentry_findings"] == fresh
+    assert state["runtime_pre_push_failure_reentry"] is False
+    assert state["bridge_rounds"] == 0
+    assert state["post_reentry_prior_bridge_rounds"] == result["bridge_rounds"]
+    assert result["checkpoint_sha256"] == hashlib.sha256(lane.state_path.read_bytes()).hexdigest()
+    assert not any(key.startswith(("private_attr_", "reentry_private_attr_", "bridge_fix_", "implementer_mutation")) for key in state)
+    assert state["all_non_blocking"] == result["all_non_blocking"]
+    assert state["finding_history"] == result["finding_history"]
+    for key in ("implementer_changed", "executor_created", "baseline_wave_files"):
+        assert state[key] == result[key]
+
+    prior_edits, prior_reviews = lane.edits, lane.reviews
+    lane.supervisor.side_effect = None
+    lane.impl.build_implementation_prompt.side_effect = lambda content, **kwargs: content
+
+    def fresh_review(repo_root, summary, **kwargs):
+        assert "private-attr" not in summary
+        assert lane.edits == prior_edits + 1
+        return {"decision": "GO", "exit_code": 0, "stdout": "GO", "stderr": "", "job_id": kwargs["job_id"]}
+
+    lane.bridge.side_effect = fresh_review
+    resumed = lane.run()
+    assert resumed["status"] == "commit_ready", resumed
+    assert resumed["resumed_from"] == "needs_phase_b_reentry"
+    assert lane.edits == prior_edits + 1
+    assert lane.reviews == prior_reviews
+    prompt = lane.impl.invoke_implementer.call_args.args[1]
+    assert f"## Re-entry Findings\n\n{fresh}" in prompt
+    assert lane.state["reentry_findings"] not in prompt
+
+
+@pytest.mark.parametrize("failure", ["before_save", "after_save", "changed_owner"])
+def test_private_go_supervisor_reentry_transition_preserves_ownership(reentry_private_bridge_lane, failure):
+    lane = reentry_private_bridge_lane(runtime=False)
+    lane.supervisor.return_value = {
+        "exit_code": 0, "parsed": {"decision": "NEEDS_PHASE_B", "summary": "Fresh findings"},
+        "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+    }
+    save = getattr(pb_mod, "_save_state")
+    before = []
+
+    def interrupt(repo_root, state):
+        if "supervisor_reentry_identity" not in state:
+            return save(repo_root, state)
+        before.append(lane.state_path.read_bytes())
+        if failure == "after_save":
+            save(repo_root, state)
+        raise OSError("supervisor checkpoint interrupted")
+
+    if failure == "changed_owner":
+        def supervisor(*args, **kwargs):
+            state = json.loads(lane.state_path.read_bytes())
+            state["reentry_findings"] = "Another owner changed this checkpoint"
+            lane.state_path.write_text(json.dumps(state))
+            before.append(lane.state_path.read_bytes())
+            return lane.supervisor.return_value
+        lane.supervisor.side_effect = supervisor
+
+    with patch.object(pb_mod, "_save_state", side_effect=interrupt):
+        result = lane.run()
+    assert result["status"] == "error", result
+    assert result["step"] == "private_attr_supervisor_reentry"
+    assert lane.edits == 1
+    if failure == "after_save":
+        assert json.loads(lane.state_path.read_bytes())["reentry_findings"] == "Fresh findings"
+        lane.supervisor.return_value["parsed"] = {"decision": "COMMIT_GO", "summary": "Approved"}
+        lane.bridge.side_effect = lambda *args, **kwargs: {
+            "decision": "GO", "exit_code": 0, "stdout": "GO", "stderr": "", "job_id": kwargs["job_id"],
+        }
+        assert lane.run()["status"] == "commit_ready"
+        assert lane.edits == 2
+        assert lane.reviews == 2
+    else:
+        assert lane.state_path.read_bytes() == before[-1]
+
+
+def test_private_go_supervisor_reentry_keeps_authority_until_next_actor(reentry_private_bridge_lane):
+    lane = reentry_private_bridge_lane(runtime=False)
+    approved = lane.supervisor.return_value
+    lane.supervisor.side_effect = [{
+        **approved, "parsed": {"decision": "NEEDS_PHASE_B", "summary": "Fresh findings before actor"},
+    }]
+    assert lane.run()["status"] == "continue_phase_b"
+    before = lane.state_path.read_bytes()
+    lane.boundary = "before_reentry_actor"
+    result = lane.run()
+    assert result["step"] == "phase_b_pager", result
+    assert lane.state_path.read_bytes() == before
+    assert lane.edits == 1
+    assert lane.reviews == 2
+
+    lane.boundary = None
+    lane.supervisor.side_effect = None
+    lane.impl.build_implementation_prompt.side_effect = lambda content, **kwargs: content
+    lane.bridge.side_effect = lambda *args, **kwargs: {
+        "decision": "GO", "exit_code": 0, "stdout": "GO", "stderr": "", "job_id": kwargs["job_id"],
+    }
+    assert lane.run()["status"] == "commit_ready"
+    assert lane.edits == 2
+    assert lane.reviews == 2
+    assert "Fresh findings before actor" in lane.impl.invoke_implementer.call_args.args[1]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("task_id", "[OTHER-TASK]"), ("wave_name", "other-wave"),
+    ("comparison_commit", "a" * 40), ("head_sha", "b" * 40),
+])
+def test_private_go_supervisor_reentry_resume_requires_current_invocation(reentry_private_bridge_lane, field, value):
+    lane = reentry_private_bridge_lane(runtime=False)
+    lane.supervisor.return_value = {
+        "exit_code": 0, "parsed": {"decision": "NEEDS_PHASE_B", "summary": "Fresh findings"},
+        "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+    }
+    assert lane.run()["status"] == "continue_phase_b"
+    before = lane.state_path.read_bytes()
+    lane.route[field] = value
+    result = lane.run()
+    assert result["status"] == "error", result
+    assert lane.state_path.read_bytes() == before
+    assert lane.edits == 1
+    assert lane.reviews == 2
+    lane.supervisor.assert_called_once()
+
+
+def test_private_go_supervisor_reentry_preserves_new_runtime_guard(reentry_private_bridge_lane):
+    lane = reentry_private_bridge_lane(runtime=False)
+    fresh = "run_pre_push_script failed in mu/tests/parity/test_current.py"
+    lane.supervisor.return_value = {
+        "exit_code": 0, "parsed": {"decision": "NEEDS_PHASE_B", "summary": fresh},
+        "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+    }
+    assert lane.run()["status"] == "continue_phase_b"
+    assert json.loads(lane.state_path.read_bytes())["runtime_pre_push_failure_reentry"] is True
+    lane.bridge.side_effect = lambda *args, **kwargs: {
+        "decision": "GO", "exit_code": 0, "stdout": "GO", "stderr": "", "job_id": kwargs["job_id"],
+    }
+    result = lane.run()
+    assert result["step"] == "reentry_runtime_pre_push_scope", result
+    assert lane.edits == 2
+    lane.supervisor.assert_called_once()
+
+
+@pytest.mark.parametrize("decision", ["QUESTION", "REQUEST_CHANGES", "NO_GO"])
+def test_private_nonreentry_control_acquires_no_reentry_context(reentry_private_bridge_lane, decision):
+    lane = reentry_private_bridge_lane(reentry=False, decision=decision)
+    result = lane.run()
+    assert result["status"] == ("question_for_founder" if decision == "QUESTION" else "commit_ready"), result
+    assert lane.edits == int(decision != "QUESTION")
+    assert all("reentry_private_attr_review" not in state and "reentry_findings" not in state for state in lane.snapshots)
 
 
 def _retain_private_review_envelope(fixture, job_id, decision, defect=None):

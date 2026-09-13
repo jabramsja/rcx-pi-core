@@ -87,7 +87,11 @@ except ImportError:
     terminate_process_tree = _mod.terminate_process_tree
 
 try:
-    from phase_b_executor import implementer_failure_blocks_recovery, ordinary_bridge_fix_failure_blocks_recovery
+    from phase_b_executor import (
+        implementer_failure_blocks_recovery, ordinary_bridge_fix_failure_blocks_recovery,
+        REENTRY_PRIVATE_ATTR_FIX_COMPLETE, reentry_private_attr_continuation_issue,
+        supervisor_reentry_continuation_issue,
+    )
 except ImportError:
     import importlib.util as _ilu
     _phase_b_spec = _ilu.spec_from_file_location("phase_b_executor", str(SCRIPT_DIR / "phase_b_executor.py"))
@@ -95,6 +99,9 @@ except ImportError:
     assert _phase_b_spec.loader is not None
     _phase_b_spec.loader.exec_module(_phase_b_mod)
     ordinary_bridge_fix_failure_blocks_recovery = _phase_b_mod.ordinary_bridge_fix_failure_blocks_recovery
+    REENTRY_PRIVATE_ATTR_FIX_COMPLETE = _phase_b_mod.REENTRY_PRIVATE_ATTR_FIX_COMPLETE
+    reentry_private_attr_continuation_issue = _phase_b_mod.reentry_private_attr_continuation_issue
+    supervisor_reentry_continuation_issue = _phase_b_mod.supervisor_reentry_continuation_issue
     implementer_failure_blocks_recovery = _phase_b_mod.implementer_failure_blocks_recovery
 
 try:
@@ -3028,10 +3035,8 @@ def _is_protected_ordinary_dispatch_error(
         result.get("executor") == "phase_b_executor"
         and (
             implementer_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
-            or (result.get("status") == "error" and (
-                result.get("step") == "ordinary_bridge_fix_continuation"
-                or ordinary_bridge_fix_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
-            ))
+            or (result.get("status") == "error" and result.get("step") == "ordinary_bridge_fix_continuation")
+            or ordinary_bridge_fix_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
         )
     )
 
@@ -3050,13 +3055,23 @@ def _ordinary_bridge_fix_error_result(
         return None
     payload = _extract_structured_stdout_payload(completed.stdout or "")
     if not isinstance(payload, dict) or not ordinary_bridge_fix_failure_blocks_recovery(repo_root, payload, bus_dir=bus_dir):
-        if implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir):
+        implementer_owned = implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir)
+        if implementer_owned or (
+            (not isinstance(payload, dict) or payload.get("status") in {"error", "failed", "timeout", "needs_phase_b"})
+            and ordinary_bridge_fix_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir)
+        ):
             # Timeout/abrupt-exit/embedded-recovery output cannot erase ownership.
             # A legitimate byte-bound finalization result is consumed below.
             if not (isinstance(payload, dict) and payload.get("status") == "continue_phase_b"):
                 payload = {
-                    "status": "error", "step": "implementer_mutation", "authority_error": "unresolved_outcome",
-                    "errors": ["Phase B exited with outstanding implementer ownership; checkpoint preserved."],
+                    "status": "error", "step": (
+                        "implementer_mutation" if implementer_owned else "bridge_fix_mutation"
+                    ), "authority_error": "unresolved_outcome",
+                    "errors": [
+                        "Phase B exited with outstanding implementer ownership; checkpoint preserved."
+                        if implementer_owned else
+                        "Phase B exited with outstanding reentry-private correction ownership; checkpoint preserved."
+                    ],
                 }
     if not isinstance(payload, dict) or not ordinary_bridge_fix_failure_blocks_recovery(
         repo_root, payload, bus_dir=bus_dir,
@@ -3076,15 +3091,25 @@ def _ordinary_bridge_fix_continuation_issue(
 ) -> str | None:
     """Check the producer's byte-bound nonterminal result without changing state."""
     implementer = payload.get("step") == "implementer_finalize" and payload.get("resumed_from") == "implementer_mutation"
-    if not implementer and (payload.get("step") != "bridge_fix_finalize" or payload.get("resumed_from") != "bridge_fix_pending"):
+    supervisor = payload.get("step") == "private_attr_supervisor_reentry"
+    if supervisor and (
+        not isinstance(payload.get("supervisor_step"), str)
+        or payload["supervisor_step"] not in {"post_reentry_supervisor", "commit_ready_status_supervisor"}
+    ):
+        return "continuation requires the supervisor-requested private-review transition"
+    if not (implementer or supervisor) and (payload.get("step") != "bridge_fix_finalize" or payload.get("resumed_from") != "bridge_fix_pending"):
         return "continuation requires recovered ordinary finalization"
     step = payload.get("completed_step")
-    if implementer:
+    if supervisor:
+        if step != "needs_phase_b_reentry":
+            return "supervisor continuation requires its reentry checkpoint"
+    elif implementer:
         if step not in ("implementer", "needs_phase_b_reentry", "private_attr_remediation_prepared_pending_review",
                         "reentry_private_attr_remediation_prepared_pending_review"):
             return "continuation requires the finalized implementer checkpoint"
     elif not isinstance(step, str) or (
-        step != "bridge_converged" and re.fullmatch(r"bridge_round_[1-9][0-9]*", step) is None
+        step not in {"bridge_converged", REENTRY_PRIVATE_ATTR_FIX_COMPLETE}
+        and re.fullmatch(r"bridge_round_[1-9][0-9]*", step) is None
     ):
         return "continuation requires an existing finalized bridge checkpoint"
     digest = payload.get("checkpoint_sha256")
@@ -3102,9 +3127,23 @@ def _ordinary_bridge_fix_continuation_issue(
     for field in ("plan_path", "wave_id", "completed_step"):
         if not isinstance(payload.get(field), str) or not payload[field] or state.get(field) != payload[field]:
             return f"continuation {field} does not match finalized checkpoint"
-    mutation = state.get("implementer_mutation" if implementer else "bridge_fix_mutation")
-    if not isinstance(mutation, dict) or mutation.get("state") != "SUCCESS_PENDING_FINALIZE":
-        return "continuation requires a sealed ordinary success"
+    if supervisor:
+        issue = supervisor_reentry_continuation_issue(state)
+        if issue:
+            return issue
+    else:
+        mutation = state.get("implementer_mutation" if implementer else "bridge_fix_mutation")
+        if not isinstance(mutation, dict) or mutation.get("state") != "SUCCESS_PENDING_FINALIZE":
+            return "continuation requires a sealed ordinary success"
+    context = state.get("bridge_fix_mutation_context")
+    source = context.get("checkpoint") if isinstance(context, dict) else None
+    if not (implementer or supervisor) and (
+        step == REENTRY_PRIVATE_ATTR_FIX_COMPLETE or "reentry_private_attr_review" in state
+        or (isinstance(source, dict) and "reentry_private_attr_review" in source)
+    ):
+        issue = reentry_private_attr_continuation_issue(state)
+        if issue:
+            return issue
     for field in ("wave_name", "wave_id"):
         if field in record and (not isinstance(record[field], str) or normalize_wave_id(record[field]) != state["wave_id"]):
             return "continuation does not match the routed wave"
@@ -3112,7 +3151,9 @@ def _ordinary_bridge_fix_continuation_issue(
     if routed_plan and routed_plan != state["plan_path"]:
         return "continuation does not match the routed plan"
     task_id = state.get("bridge_fix_task_id")
-    if implementer:
+    if supervisor:
+        task_id = state["supervisor_reentry_identity"]["task_id"]
+    elif implementer:
         context = state.get("implementer_mutation_context")
         if not isinstance(context, dict) or not isinstance(context.get("identity"), dict):
             return "continuation requires the sealed implementer invocation identity"
@@ -3399,6 +3440,20 @@ def _continue_successful_executor_chain(
                 }
             following = _extract_structured_stdout_payload(completed.stdout or "")
             if isinstance(following, dict) and following.get("status") == "continue_phase_b":
+                if (
+                    payload.get("step") in {"bridge_fix_finalize", "implementer_finalize"}
+                    and following.get("step") == "private_attr_supervisor_reentry"
+                    and following.get("checkpoint_sha256") != payload.get("checkpoint_sha256")
+                ):
+                    # Finalization can owe private review, whose GO can then
+                    # receive new supervisor findings. Validate that distinct
+                    # transition through the same bounded continuation path.
+                    return _continue_successful_executor_chain(
+                        executor_name, completed, repo_root=repo_root, config=config,
+                        record=record, verbose=verbose, emit_output=emit_output,
+                        chain_origin=chain_origin, bus_dir=bus_dir,
+                        script_repo_root=script_repo_root, max_bridge_rounds=max_bridge_rounds,
+                    )
                 return {
                     "status": "error", "step": "ordinary_bridge_fix_continuation",
                     "decision": "ROUTE_PHASE_B", "executor": executor_name,

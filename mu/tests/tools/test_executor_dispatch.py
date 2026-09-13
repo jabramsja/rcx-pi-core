@@ -20,6 +20,10 @@ import pytest
 
 from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
+from mu.tests.tools.test_phase_b_executor import (
+    PrivateReviewCrash, private_review_checkpoint, real_pre_review_package,
+    reentry_private_bridge_lane,
+)
 
 # Load executor_common first (dependency)
 common_mod = load_module(
@@ -53,6 +57,310 @@ recovery_mod = load_module(
 
 
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("supervisor_step", ["post_reentry_supervisor", "commit_ready_status_supervisor"])
+@pytest.mark.parametrize("boundary", ["prepared", "success"])
+@pytest.mark.parametrize("outcome", ["review_interrupted", "commit_ready", "before_actor"])
+def test_private_go_supervisor_reentry_dispatches_without_edit_replay(
+    reentry_private_bridge_lane, entry, supervisor_step, boundary, outcome,
+):
+    lane = reentry_private_bridge_lane(runtime=False)
+    if boundary == "success":
+        lane.boundary = "success"
+        with pytest.raises(PrivateReviewCrash):
+            lane.run()
+        lane.boundary = None
+    fresh = "Fresh supervisor continuation finding"
+    approved = lane.supervisor.return_value
+    needs = {**approved, "parsed": {"decision": "NEEDS_PHASE_B", "summary": fresh}}
+    lane.supervisor.side_effect = (
+        [needs] if supervisor_step == "post_reentry_supervisor" else [approved, needs]
+    )
+    lane.impl.build_implementation_prompt.side_effect = lambda content, **kwargs: content
+    commands, payloads, commit_commands, checkpoints = [], [], [], []
+
+    def process(command, *, cwd, timeout):
+        if Path(command[1]).name == "commit_executor.py":
+            assert outcome == "commit_ready"
+            assert payloads[-1]["status"] == "commit_ready"
+            handoff = json.loads(Path(payloads[-1]["handoff_path"]).read_bytes())
+            assert handoff["tracked_packet"] == lane.plan_path
+            commit_commands.append(command)
+            return subprocess.CompletedProcess(command, 0, '{"status":"success"}', "")
+        assert Path(command[1]).name == "phase_b_executor.py"
+        if commands:
+            assert command == commands[0]
+        if payloads and payloads[-1].get("step") == "private_attr_supervisor_reentry":
+            checkpoints.append(lane.state_path.read_bytes())
+            lane.supervisor.side_effect = None
+            if outcome == "before_actor":
+                lane.boundary = "before_reentry_actor"
+            lane.bridge.side_effect = lambda *args, **kwargs: {
+                "decision": "GO" if outcome == "commit_ready" else "",
+                "exit_code": 0 if outcome == "commit_ready" else -1,
+                "stdout": "", "stderr": "review interrupted" if outcome == "review_interrupted" else "",
+                "job_id": kwargs["job_id"],
+            }
+        commands.append(command)
+        result = lane.run()
+        payloads.append(result)
+        return subprocess.CompletedProcess(
+            command, 0 if result["status"] in {"continue_phase_b", "commit_ready"} else 1, json.dumps(result), "",
+        )
+
+    args = dispatch_mod.build_surface_parser().parse_args([
+        "phase-b", "--plan", lane.plan_path, "--routing-record-json", json.dumps(lane.route),
+    ])
+    with patch.dict(os.environ), \
+         patch.object(dispatch_mod, "_run_executor_in_group", side_effect=process), \
+         patch.object(dispatch_mod, "attempt_recovery") as recovery, \
+         patch.object(dispatch_mod, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_emit_executor_hard_fail_event"):
+        if entry == "surface":
+            assert dispatch_mod.run_recoverable_surface_command(args, repo_root=lane.repo, config={}) == (
+                0 if outcome == "commit_ready" else 1
+            )
+        else:
+            assert dispatch_mod.dispatch(lane.route, repo_root=lane.repo, skip_freshness=True)["status"] == (
+                "success" if outcome == "commit_ready" else "error"
+            )
+    assert len(commands) == (3 if boundary == "success" else 2)
+    assert payloads[0]["status"] == "continue_phase_b"
+    assert payloads[-2]["supervisor_step"] == supervisor_step
+    assert lane.edits == (1 if outcome == "before_actor" else 2)
+    assert lane.reviews == 2  # The successful private review is never repeated.
+    assert fresh in lane.impl.build_implementation_prompt.call_args.args[0]
+    assert len(commit_commands) == int(outcome == "commit_ready")
+    if outcome == "before_actor":
+        assert payloads[-1]["step"] == "phase_b_pager"
+        assert lane.state_path.read_bytes() == checkpoints[-1]
+    elif outcome == "review_interrupted":
+        checkpoint = json.loads(lane.state_path.read_bytes())
+        assert checkpoint["implementer_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+        assert checkpoint["reentry_findings"] == fresh
+    else:
+        assert not lane.state_path.exists()
+        assert fresh in lane.impl.invoke_implementer.call_args.args[1]
+    recovery.assert_not_called()
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("boundary", ["pending", "success", "completed", "recursive", "actor", "failure", "gate_failure"])
+def test_reentry_private_real_producer_dispatcher_resume(reentry_private_bridge_lane, entry, boundary):
+    lane = reentry_private_bridge_lane(decision="NO_GO")
+    lane.boundary = "completed" if boundary == "gate_failure" else boundary
+    if boundary == "failure":
+        assert lane.run()["step"] == "implementer_bridge_fix"
+    else:
+        with pytest.raises(PrivateReviewCrash):
+            lane.run()
+    if boundary == "gate_failure":
+        lane.boundary = "failure"
+        lane.gate.return_value = {
+            "passed": False, "skipped": False, "test_files": [lane.test_path],
+            "exit_code": 1, "stdout": "private gate failure", "stderr": "",
+        }
+        assert lane.run()["step"] == "reentry_private_attr_gate"
+    before = lane.state_path.read_bytes()
+    lane.boundary = None
+    payloads, commands = [], []
+
+    def process(command, *, cwd, timeout):
+        assert Path(command[1]).name == "phase_b_executor.py"
+        if commands:
+            assert command == commands[0]
+            assert payloads[-1]["status"] == "continue_phase_b"
+        commands.append(command)
+        result = lane.run()
+        payloads.append(result)
+        return subprocess.CompletedProcess(command, 0 if result["status"] == "continue_phase_b" else 1, json.dumps(result), "")
+
+    args = dispatch_mod.build_surface_parser().parse_args([
+        "phase-b", "--plan", lane.plan_path, "--routing-record-json", json.dumps(lane.route),
+    ])
+    with patch.dict(os.environ), \
+         patch.object(dispatch_mod, "_run_executor_in_group", side_effect=process), \
+         patch.object(dispatch_mod, "attempt_recovery") as recovery, \
+         patch.object(dispatch_mod, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_emit_executor_hard_fail_event"):
+        if entry == "surface":
+            assert dispatch_mod.run_recoverable_surface_command(args, repo_root=lane.repo, config={}) == 1
+        else:
+            assert dispatch_mod.dispatch(lane.route, repo_root=lane.repo, skip_freshness=True)["status"] == "error"
+    assert len(commands) == (2 if boundary == "success" else 1)
+    assert lane.edits == (2 if boundary == "gate_failure" else 1)
+    if boundary in {"actor", "failure", "gate_failure"}:
+        if boundary == "gate_failure":
+            assert payloads[-1]["step"] == "reentry_private_attr_gate"
+        else:
+            assert payloads[-1]["authority_error"] == "ambiguous_outcome"
+        assert lane.state_path.read_bytes() == before
+        assert lane.reviews == 1
+    else:
+        assert payloads[-1]["step"] == "reentry_runtime_pre_push_scope"
+        assert lane.reviews == (3 if boundary == "recursive" else 2)
+        assert lane.scope_guard.called
+    lane.supervisor.assert_not_called()
+    recovery.assert_not_called()
+    state = json.loads(lane.state_path.read_bytes())
+    if boundary == "gate_failure":
+        state = state["implementer_mutation_context"]["checkpoint"]
+    assert state["reentry_findings"] == lane.state["reentry_findings"]
+    assert state["runtime_pre_push_failure_reentry"] is True
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("invalid", ["findings", "runtime", "identity", "erased_identity", "step", "digest", "empty", "timeout", "needs_phase_b"])
+def test_reentry_private_dispatcher_rejects_substituted_or_unresolved_continuation(reentry_private_bridge_lane, entry, invalid):
+    import hashlib
+
+    lane = reentry_private_bridge_lane()
+    lane.boundary = "success"
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    lane.boundary = None
+    payload = lane.run()
+    assert payload["status"] == "continue_phase_b"
+    state = json.loads(lane.state_path.read_bytes())
+    if invalid in {"findings", "runtime", "identity", "erased_identity", "step"}:
+        key, value = {
+            "findings": ("reentry_findings", "different current findings"),
+            "runtime": ("runtime_pre_push_failure_reentry", False),
+            "identity": ("reentry_private_attr_review", False),
+            "erased_identity": ("completed_step", "bridge_round_2"),
+            "step": ("completed_step", "bridge_round_2"),
+        }[invalid]
+        state[key] = value
+        if invalid == "erased_identity":
+            del state["reentry_private_attr_review"]
+        lane.state_path.write_text(json.dumps(state))
+        payload["completed_step"] = state["completed_step"]
+        payload["checkpoint_sha256"] = hashlib.sha256(lane.state_path.read_bytes()).hexdigest()
+    elif invalid == "digest":
+        payload["checkpoint_sha256"] = "0" * 64
+    before = lane.state_path.read_bytes()
+
+    def process(command, *, cwd, timeout):
+        if invalid == "timeout":
+            raise subprocess.TimeoutExpired(command, timeout)
+        if invalid == "needs_phase_b":
+            return subprocess.CompletedProcess(command, 1, json.dumps({
+                "status": "needs_phase_b", "step": "post_reentry_supervisor",
+                "recovery": {"recovered": True},
+            }), "")
+        return subprocess.CompletedProcess(command, 1 if invalid == "empty" else 0,
+                                           "" if invalid == "empty" else json.dumps(payload), "")
+
+    route_path = lane.repo / "routing.json"
+    route_path.write_text(json.dumps(lane.route))
+    argv = (["phase-b", "--plan", lane.plan_path, "--routing-record-json", json.dumps(lane.route)]
+            if entry == "surface" else ["--routing-record", str(route_path), "--skip-freshness", "--retries", "2"])
+    real_run = subprocess.run
+
+    def isolated_git(command, *args, **kwargs):
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(lane.repo), "")
+        return real_run(command, *args, **kwargs)
+
+    with patch.dict(os.environ), \
+         patch.object(subprocess, "run", side_effect=isolated_git), \
+         patch.object(dispatch_mod, "_run_executor_in_group", side_effect=process) as child, \
+         patch.object(dispatch_mod, "attempt_recovery") as recovery, \
+         patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=lane.repo), \
+         patch.object(dispatch_mod, "load_config", return_value={}), \
+         patch.object(dispatch_mod, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_emit_executor_hard_fail_event"):
+        assert dispatch_mod.main([*argv, "--json"]) == 1
+    child.assert_called_once()
+    recovery.assert_not_called()
+    assert lane.state_path.read_bytes() == before
+    assert lane.edits == lane.reviews == 1
+    lane.supervisor.assert_not_called()
+
+
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("invalid", [
+    "findings", "runtime", "identity", "step", "digest", "ownership", "route", "empty", "timeout",
+    "supervisor_step", "supervisor_step_type",
+])
+def test_private_go_supervisor_reentry_dispatcher_preserves_invalid_checkpoint(
+    reentry_private_bridge_lane, entry, invalid,
+):
+    import hashlib
+
+    lane = reentry_private_bridge_lane(runtime=False)
+    lane.supervisor.return_value = {
+        "exit_code": 0, "parsed": {"decision": "NEEDS_PHASE_B", "summary": "Fresh supervisor findings"},
+        "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+    }
+    payload = lane.run()
+    assert payload["status"] == "continue_phase_b"
+    state = json.loads(lane.state_path.read_bytes())
+    if invalid in {"findings", "runtime", "identity", "step", "ownership"}:
+        key, value = {
+            "findings": ("reentry_findings", "Substituted findings"),
+            "runtime": ("runtime_pre_push_failure_reentry", 0),
+            "identity": ("supervisor_reentry_identity", {}),
+            "step": ("completed_step", "bridge_converged"),
+            "ownership": ("bridge_fix_mutation", {"state": "IN_FLIGHT"}),
+        }[invalid]
+        state[key] = value
+        lane.state_path.write_text(json.dumps(state))
+        payload["completed_step"] = state["completed_step"]
+        payload["checkpoint_sha256"] = hashlib.sha256(lane.state_path.read_bytes()).hexdigest()
+    elif invalid == "digest":
+        payload["checkpoint_sha256"] = "0" * 64
+    elif invalid == "route":
+        lane.route["task_id"] = "[DIFFERENT-TASK]"
+    elif invalid.startswith("supervisor_step"):
+        payload["supervisor_step"] = [] if invalid == "supervisor_step_type" else "pre_commit_supervisor"
+    before = lane.state_path.read_bytes()
+
+    def process(command, *, cwd, timeout):
+        if invalid == "timeout":
+            raise subprocess.TimeoutExpired(command, timeout)
+        return subprocess.CompletedProcess(command, 1 if invalid == "empty" else 0,
+                                           "" if invalid == "empty" else json.dumps(payload), "")
+
+    route_path = lane.repo / "routing.json"
+    route_path.write_text(json.dumps(lane.route))
+    argv = (["phase-b", "--plan", lane.plan_path, "--routing-record-json", json.dumps(lane.route)]
+            if entry == "surface" else ["--routing-record", str(route_path), "--skip-freshness", "--retries", "2"])
+    real_run = subprocess.run
+
+    def isolated_git(command, *args, **kwargs):
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(lane.repo), "")
+        return real_run(command, *args, **kwargs)
+
+    with patch.dict(os.environ), \
+         patch.object(subprocess, "run", side_effect=isolated_git), \
+         patch.object(dispatch_mod, "_run_executor_in_group", side_effect=process) as child, \
+         patch.object(dispatch_mod, "attempt_recovery") as recovery, \
+         patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=lane.repo), \
+         patch.object(dispatch_mod, "load_config", return_value={}), \
+         patch.object(dispatch_mod, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_emit_executor_hard_fail_event"):
+        assert dispatch_mod.main([*argv, "--json"]) == 1
+    child.assert_called_once()
+    recovery.assert_not_called()
+    assert lane.state_path.read_bytes() == before
+    assert lane.edits == 1
+    assert lane.reviews == 2
 
 
 @pytest.mark.parametrize("entry", ["surface", "routing"])

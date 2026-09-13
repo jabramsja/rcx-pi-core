@@ -879,6 +879,7 @@ def _checkpoint_bridge_fix_pending(
     finding_history: dict[str, int],
     bridge_fix_authority_fields: dict[str, Any],
     finalization_context: dict[str, Any],
+    reentry_context: dict[str, Any] | None = None,
 ) -> None:
     """Persist the exact pre-fix bridge state so crash-resume can continue honestly."""
     checkpoint = {
@@ -897,12 +898,15 @@ def _checkpoint_bridge_fix_pending(
         "all_non_blocking": all_non_blocking,
         "finding_history": finding_history,
     }
+    checkpoint.update(reentry_context or {})
     checkpoint.update(bridge_fix_authority_fields)
     checkpoint.update(_bridge_fix_mutation_fields({
         **finalization_context,
         "checkpoint": json.loads(json.dumps(checkpoint, allow_nan=False)),
         "pre_fix_files": None,
-        "next_step": f"bridge_round_{round_num}",
+        "next_step": (
+            REENTRY_PRIVATE_ATTR_FIX_COMPLETE if reentry_context else f"bridge_round_{round_num}"
+        ),
     }, "PENDING"))
     _save_state(repo_root, checkpoint)
 
@@ -2148,6 +2152,10 @@ PRIVATE_ATTR_PREPARED_STEPS = {
     "private_attr_remediation_prepared_pending_review",
     "reentry_private_attr_remediation_prepared_pending_review",
 }
+REENTRY_PRIVATE_ATTR_FIX_COMPLETE = "reentry_private_attr_bridge_fix_complete"
+REENTRY_PRIVATE_ATTR_CONTEXT_FIELDS = (
+    "reentry_private_attr_review", "reentry_findings", "runtime_pre_push_failure_reentry",
+)
 RESUMABLE_STATE_STEPS = {
     "implementer_mutation",
     "implementer",
@@ -2159,6 +2167,7 @@ RESUMABLE_STATE_STEPS = {
     "reentry_private_attr_remediation_pending_review",
     *PRIVATE_ATTR_QUESTION_STEPS,
     *PRIVATE_ATTR_PREPARED_STEPS,
+    REENTRY_PRIVATE_ATTR_FIX_COMPLETE,
 }
 
 
@@ -3114,7 +3123,26 @@ def _bridge_fix_mutation_issue(state: dict[str, Any]) -> tuple[str, str] | None:
             return "checkpoint_mismatch", "ordinary source differs from enclosing checkpoint"
     elif outcome != "SUCCESS_PENDING_FINALIZE":
         return "checkpoint_mismatch", "unfinished mutation requires bridge_fix_pending"
-    if context["next_step"] != f"bridge_round_{source['current_bridge_round']}":
+    reentry = "reentry_private_attr_review" in source
+    if reentry:
+        issue = _reentry_private_attr_context_issue(source)
+        if issue:
+            return "checkpoint_mismatch", issue
+        for field in REENTRY_PRIVATE_ATTR_CONTEXT_FIELDS:
+            if type(state.get(field)) is not type(source[field]) or state.get(field) != source[field]:
+                return "checkpoint_mismatch", f"reentry-private mutation {field} differs from sealed source"
+        step = state.get("completed_step")
+        if step != "bridge_fix_pending" and not str(step).startswith("reentry_private_attr_"):
+            return "checkpoint_mismatch", "reentry-private correction cannot finalize into ordinary review"
+        if step == REENTRY_PRIVATE_ATTR_FIX_COMPLETE and any(
+            type(state.get(field)) is not int or state[field] != source[field]
+            for field in ("bridge_rounds", "current_bridge_round")
+        ):
+            return "checkpoint_mismatch", "reentry-private correction round differs from sealed source"
+    elif "reentry_private_attr_review" in state and state.get("completed_step") in {"bridge_fix_pending", REENTRY_PRIVATE_ATTR_FIX_COMPLETE}:
+        return "checkpoint_mismatch", "ordinary correction cannot acquire reentry-private authority"
+    expected_next_step = REENTRY_PRIVATE_ATTR_FIX_COMPLETE if reentry else f"bridge_round_{source['current_bridge_round']}"
+    if context["next_step"] != expected_next_step:
         return "checkpoint_mismatch", "ordinary mutation next-state intent is invalid"
     plan = context["plan"]
     if not isinstance(plan, dict) or not isinstance(plan.get("content"), str):
@@ -3151,6 +3179,55 @@ def _bridge_fix_mutation_issue(state: dict[str, Any]) -> tuple[str, str] | None:
         return "checkpoint_mismatch", "ordinary mutation differs from independent context anchor"
     if state.get("bridge_fix_expected_mutation_sha256") != mutation_digest:
         return "checkpoint_mismatch", "ordinary mutation differs from independent outcome anchor"
+    return None
+
+
+def _reentry_private_attr_context_issue(state: dict[str, Any]) -> str | None:
+    if state.get("reentry_private_attr_review") is not True:
+        return "reentry-private review requires explicit identity"
+    if not isinstance(state.get("reentry_findings"), str):
+        return "reentry-private review requires exact findings text"
+    if type(state.get("runtime_pre_push_failure_reentry")) is not bool:
+        return "reentry-private review requires boolean runtime-pre-push authority"
+    return None
+
+
+def reentry_private_attr_continuation_issue(state: dict[str, Any]) -> str | None:
+    """Validate the directly affected dispatcher handoff using the producer seal."""
+    issue = _reentry_private_attr_context_issue(state)
+    if issue:
+        return issue
+    if state.get("completed_step") != REENTRY_PRIVATE_ATTR_FIX_COMPLETE:
+        return "reentry-private correction requires its owed gate/review continuation"
+    mutation_issue = _bridge_fix_mutation_issue(state)
+    return mutation_issue[1] if mutation_issue else None
+
+
+def supervisor_reentry_continuation_issue(state: dict[str, Any]) -> str | None:
+    """Validate the supervisor continuation which consumed a private-review GO."""
+    if state.get("completed_step") != "needs_phase_b_reentry" or type(state.get("bridge_rounds")) is not int or state["bridge_rounds"] != 0:
+        return "supervisor continuation requires a fresh reentry cycle"
+    if not _valid_state_string(state.get("reentry_findings")) or type(state.get("runtime_pre_push_failure_reentry")) is not bool:
+        return "supervisor continuation requires fresh findings and runtime authority"
+    if any(key.startswith(("private_attr_", "reentry_private_attr_", "bridge_fix_", "implementer_mutation")) for key in state):
+        return "supervisor continuation cannot retain consumed private-review authority"
+    identity = state.get("supervisor_reentry_identity")
+    if not isinstance(identity, dict) or set(identity) != BRIDGE_FIX_PLAN_IDENTITY_FIELDS:
+        return "supervisor continuation requires its invocation identity"
+    if any(identity.get(key) != state.get(key) for key in ("wave_id", "plan_path")):
+        return "supervisor continuation identity differs from its checkpoint"
+    if not _valid_state_string(identity.get("task_id")) or not _valid_sha256(identity.get("plan_sha256")):
+        return "supervisor continuation has invalid task or plan authority"
+    if any(not _valid_commit_id(identity.get(key)) for key in ("base_commit", "comparison_commit")):
+        return "supervisor continuation has invalid commit authority"
+    try:
+        digest = _canonical_json_sha256({
+            key: value for key, value in state.items() if key != "supervisor_reentry_sha256"
+        })
+    except (TypeError, ValueError, UnicodeError):
+        return "supervisor continuation requires finite canonical JSON"
+    if state.get("supervisor_reentry_sha256") != digest:
+        return "supervisor continuation differs from its sealed checkpoint"
     return None
 
 
@@ -3212,6 +3289,14 @@ def _implementer_mutation_issue(state: dict[str, Any]) -> str | None:
     }[context["kind"]]
     if checkpoint.get("completed_step") not in expected_steps:
         return "invalid sealed implementer continuation step"
+    if context["kind"] == "private" and checkpoint["completed_step"].startswith("reentry_"):
+        issue = _reentry_private_attr_context_issue(checkpoint)
+        if issue:
+            return issue
+        if state.get("completed_step") != "implementer_mutation":
+            for field in REENTRY_PRIVATE_ATTR_CONTEXT_FIELDS:
+                if type(state.get(field)) is not type(checkpoint[field]) or state.get(field) != checkpoint[field]:
+                    return f"reentry-private implementer {field} differs from sealed continuation"
     if not _valid_state_int(checkpoint.get("bridge_rounds")) or state.get("bridge_rounds") != checkpoint["bridge_rounds"]:
         return "implementer round differs from sealed continuation"
     for field in ("implementer_changed", "executor_created", "baseline_wave_files"):
@@ -3405,6 +3490,10 @@ def _validate_loaded_state_container(state_path: Path, state: dict[str, Any]) ->
 
 
 def _validate_resumable_state_shape(state_path: Path, state: dict[str, Any]) -> dict[str, Any] | None:
+    if "supervisor_reentry_identity" in state or "supervisor_reentry_sha256" in state:
+        issue = supervisor_reentry_continuation_issue(state)
+        if issue:
+            return _state_load_error("bridge_fix_mutation", issue)
     if state.get("completed_step") == "implementer_mutation" or any(key in state for key in IMPLEMENTER_MUTATION_CARRY_FIELDS):
         issue = _implementer_mutation_issue(state)
         if issue is not None:
@@ -3421,6 +3510,14 @@ def _validate_resumable_state_shape(state_path: Path, state: dict[str, Any]) -> 
         return _state_missing_fields_error(state_path, fields=missing)
 
     completed_step = str(completed_step).strip()
+    if "reentry_private_attr_review" in state or completed_step.startswith("reentry_private_attr_"):
+        context_issue = _reentry_private_attr_context_issue(state)
+        if context_issue:
+            return _state_load_error("bridge_fix_mutation", context_issue)
+    if completed_step == REENTRY_PRIVATE_ATTR_FIX_COMPLETE:
+        continuation_issue = reentry_private_attr_continuation_issue(state)
+        if continuation_issue:
+            return _state_load_error("bridge_fix_mutation", continuation_issue)
     bridge_round_step = completed_step.startswith("bridge_round_")
     if completed_step not in RESUMABLE_STATE_STEPS and not bridge_round_step:
         return _state_load_error(
@@ -3558,6 +3655,8 @@ def _load_state(repo_root: Path) -> dict[str, Any] | None:
 
 def _clear_state(repo_root: Path, *, terminal_success: bool = False) -> None:
     """Remove persisted state file after successful completion."""
+    if not terminal_success and _has_reentry_private_attr_checkpoint(_load_state(repo_root) or {}):
+        return
     if implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=_active_bus_dir()):
         state = _load_state(repo_root)
         if not (
@@ -9816,6 +9915,18 @@ def run_phase_b(
         or plan_path.replace("reports/control_plane/", "").replace(".md", "")
     )
     wave_id = normalize_wave_id(raw_wave_id)
+    if saved_state and "supervisor_reentry_identity" in saved_state:
+        invocation_issue = _bridge_fix_outcome_invocation_issue(saved_state, routing_record, plan_path)
+        if invocation_issue:
+            return _bridge_fix_mutation_error(invocation_issue)
+        identity, identity_error = _bridge_fix_active_identity(
+            repo_root, routing_record=routing_record, plan=plan, plan_path=plan_path,
+            wave_id=wave_id, refresh_plan=False,
+        )
+        if identity_error or identity != saved_state["supervisor_reentry_identity"]:
+            return _bridge_fix_mutation_error((
+                "invocation_mismatch", identity_error or "supervisor continuation invocation changed",
+            ))
     if private_attr_prepared_recovery:
         # Resolve reduced dispatcher metadata read-only. Capturing/restoring a
         # tracker note is forbidden until the prepared review has been consumed.
@@ -9839,15 +9950,20 @@ def run_phase_b(
         )
         if prepared_error is not None:
             return prepared_error
-    if resume_after == "bridge_fix_pending":
+    if resume_after in {"bridge_fix_pending", REENTRY_PRIVATE_ATTR_FIX_COMPLETE}:
         assert saved_state is not None
+        reentry_fix_complete = resume_after == REENTRY_PRIVATE_ATTR_FIX_COMPLETE
+        if reentry_fix_complete:
+            invocation_issue = _bridge_fix_outcome_invocation_issue(saved_state, routing_record, plan_path)
+            if invocation_issue:
+                return _state_load_error_result(_bridge_fix_authority_load_error(_state_file_path(repo_root), invocation_issue))
         active_identity, active_identity_error = _bridge_fix_active_identity(
             repo_root,
             routing_record=routing_record,
-            plan=plan,
+            plan=saved_state["bridge_fix_mutation_context"]["plan"] if reentry_fix_complete else plan,
             plan_path=plan_path,
             wave_id=wave_id,
-            refresh_plan=not ordinary_outcome_recovery,
+            refresh_plan=not (ordinary_outcome_recovery or reentry_fix_complete),
         )
         if active_identity_error is not None or active_identity is None:
             issue = (
@@ -10083,6 +10199,7 @@ def run_phase_b(
             result["private_attr_gate_test_files"] = saved_state["private_attr_gate_test_files"]
 
     bridge_fix_authority_fields: dict[str, Any] = {}
+    approved_private_attr_state: dict[str, Any] | None = None
     bridge_fix_outcome_fields = {
         field: saved_state[field] for field in BRIDGE_FIX_MUTATION_CARRY_FIELDS
         if saved_state and field in saved_state
@@ -10097,6 +10214,62 @@ def run_phase_b(
             state.update(bridge_fix_authority_fields)
         state.update(bridge_fix_outcome_fields)
         return state
+
+    def _private_attr_reentry_fields(*, reentry: bool) -> dict[str, Any]:
+        if not reentry:
+            return {}
+        previous = _load_state(repo_root) or {}
+        return {
+            "reentry_private_attr_review": True,
+            "reentry_findings": previous.get("reentry_findings"),
+            "runtime_pre_push_failure_reentry": previous.get("runtime_pre_push_failure_reentry"),
+        }
+
+    def _continue_private_attr_supervisor_reentry(supervisor_step: str) -> dict[str, Any] | None:
+        """Atomically exchange consumed private authority for the new findings."""
+        if approved_private_attr_state is None:
+            return None
+        try:
+            identity, identity_error = _bridge_fix_active_identity(
+                repo_root, routing_record=routing_record, plan=plan, plan_path=plan_path,
+                wave_id=wave_id,
+            )
+            if identity_error or identity is None:
+                raise PhaseBExecutorError(identity_error or "missing supervisor continuation identity")
+            findings = result.get("pre_commit_summary") or "Fix required"
+            checkpoint = {
+                "plan_path": plan_path, "wave_id": wave_id,
+                "completed_step": "needs_phase_b_reentry", "bridge_rounds": 0,
+                "post_reentry_prior_bridge_rounds": result["bridge_rounds"],
+                "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
+                "deferred_packet_path": deferred_packet_path,
+                "implementer_changed": sorted(implementer_changed),
+                "executor_created": sorted(executor_created),
+                "baseline_wave_files": sorted(baseline_wave_files),
+                "all_non_blocking": all_non_blocking, "finding_history": finding_history,
+                "reentry_findings": findings,
+                "runtime_pre_push_failure_reentry": (
+                    reentry_runtime_pre_push_failure
+                    or _reentry_findings_indicate_runtime_pre_push_failure(findings)
+                ),
+                "supervisor_reentry_identity": identity,
+            }
+            checkpoint["supervisor_reentry_sha256"] = _canonical_json_sha256(checkpoint)
+            _save_bridge_fix_transition(repo_root, approved_private_attr_state, checkpoint)
+            return {
+                **result, "status": "continue_phase_b", "step": "private_attr_supervisor_reentry",
+                "supervisor_step": supervisor_step, "wave_id": wave_id,
+                "completed_step": checkpoint["completed_step"], "resume_after": checkpoint["completed_step"],
+                "checkpoint_sha256": _sha256_bytes(_state_file_path(repo_root).read_bytes()),
+                **{key: checkpoint[key] for key in (
+                    "implementer_changed", "executor_created", "baseline_wave_files", "all_non_blocking", "finding_history",
+                )},
+            }
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {
+                "status": "error", "step": "private_attr_supervisor_reentry",
+                "authority_error": "continuation_save_failed", "errors": [str(exc)],
+            }
 
     @contextmanager
     def _owned_implementer(
@@ -10117,6 +10290,7 @@ def run_phase_b(
             **(continuation or {}),
         })
         if kind == "private":
+            checkpoint.update(_private_attr_reentry_fields(reentry=completed_step.startswith("reentry_")))
             checkpoint["private_attr_gate_test_files"] = sorted(set(result.get("private_attr_gate_test_files", [])))
             for field in (
                 "reentry_findings", "last_reentry_bridge_decision", "last_bridge_decision",
@@ -10423,6 +10597,7 @@ def run_phase_b(
         scope_files: list[str],
         *,
         review_transition_identity: str,
+        reentry: bool = False,
     ) -> dict[str, Any] | None:
         """Build one new prompt, seal it in PENDING, then consume that checkpoint."""
         nonlocal bridge_fix_authority_fields
@@ -10488,6 +10663,7 @@ def run_phase_b(
                 "exact_stage_scope_files": sorted(exact_stage_scope_files),
                 "pytest_gate_timeout": pytest_gate_timeout,
             },
+            reentry_context=_private_attr_reentry_fields(reentry=reentry),
         )
         return _apply_bridge_fix(round_num, bridge_decision, findings_for_impl)
 
@@ -10556,6 +10732,7 @@ def run_phase_b(
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
             "private_attr_gate_test_files": sorted(set(result.get("private_attr_gate_test_files", []))),
+            **_private_attr_reentry_fields(reentry=reentry),
         })
         prior_state = _load_state(repo_root) or {}
         for field in IMPLEMENTER_MUTATION_CARRY_FIELDS:
@@ -10681,7 +10858,7 @@ def run_phase_b(
         prepared_state: dict[str, Any] | None = None,
     ) -> tuple[list[str], dict[str, Any] | None]:
         """Freshly review implementer changes made by the private-attr gate."""
-        nonlocal all_non_blocking, deferred_packet_path, changed_files
+        nonlocal all_non_blocking, deferred_packet_path, changed_files, approved_private_attr_state
 
         current_files = (
             list(prepared_state["private_attr_review_files"]) if prepared_state is not None
@@ -10763,6 +10940,7 @@ def run_phase_b(
             f"(bridge budget={max_bridge_rounds}, "
             f"private-attr extra={private_attr_review_budget}, job={bridge_job_id})..."
         )
+        review_checkpoint = _load_state(repo_root)
         try:
             bridge_result = run_bridge_review(
                 repo_root,
@@ -10915,6 +11093,8 @@ def run_phase_b(
                         f"remediation bridge GO: {exc}"
                     ],
                 }
+            if reentry:
+                approved_private_attr_state = review_checkpoint
             changed_files = current_files
             return current_files, None
 
@@ -10951,6 +11131,7 @@ def run_phase_b(
                 "bridge_stderr_path": bridge_result.get("stderr_path"),
                 "bridge_render": question_result.get("bridge_render", ""),
                 "question_step": step_name,
+                **_private_attr_reentry_fields(reentry=reentry),
                 "errors": list(question_result["errors"]),
                 "terminal_result": question_result,
                 "deferred_packet_path": deferred_packet_path,
@@ -11033,6 +11214,7 @@ def run_phase_b(
                 findings_for_impl,
                 current_files,
                 review_transition_identity=transition_key,
+                reentry=reentry,
             )
             if bridge_fix_error is not None:
                 return current_files, bridge_fix_error
@@ -11068,6 +11250,35 @@ def run_phase_b(
             ],
         }
 
+    # A reentry-private correction owes its gate and fresh private review. It
+    # must not enter the ordinary bridge loop or replay a sealed successful edit.
+    reentry_private_fix_recovery = bool(
+        saved_state and saved_state.get("reentry_private_attr_review") is True
+        and resume_after in {"bridge_fix_pending", REENTRY_PRIVATE_ATTR_FIX_COMPLETE}
+    )
+    if reentry_private_fix_recovery:
+        if resume_after == "bridge_fix_pending":
+            bridge_fix_error = _apply_bridge_fix(
+                saved_state["current_bridge_round"], saved_state["bridge_decision"],
+                saved_state["bridge_fix_findings"],
+            )
+            if bridge_fix_error is not None:
+                return bridge_fix_error
+        else:
+            changed_files = _collect_wave_owned_files(
+                repo_root, plan_path, plan_declared_files, implementer_changed or None,
+                executor_created or None, baseline_wave_files or None,
+            )
+        changed_files, gate_error, _ = _run_private_attr_gate_with_remediation(
+            _bridge_review_scope_files(changed_files), reentry=True,
+        )
+        if gate_error is not None:
+            return gate_error
+        changed_files, review_error = _run_private_attr_remediation_bridge_review(changed_files, reentry=True)
+        if review_error is not None:
+            return review_error
+        resume_after = REENTRY_PRIVATE_ATTR_FIX_COMPLETE
+
     # Consume the owed prepared review before branch, packet, gate or packaging
     # work. A validated decision then follows the existing continuation below.
     if private_attr_prepared_recovery:
@@ -11100,12 +11311,14 @@ def run_phase_b(
     _resume_private_attr_review = resume_after == "private_attr_remediation_prepared_pending_review"
     _resume_reentry_private_attr_review = (
         resume_after == "reentry_private_attr_remediation_prepared_pending_review"
-    )
+    ) or reentry_private_fix_recovery
     _skip_to_reentry = resume_after == "needs_phase_b_reentry" or _resume_reentry_private_attr_review
-    reentry_runtime_pre_push_failure = bool(
-        (saved_state or {}).get("runtime_pre_push_failure_reentry")
-    ) or _reentry_findings_indicate_runtime_pre_push_failure(
-        (saved_state or {}).get("reentry_findings") if saved_state else ""
+    reentry_runtime_pre_push_failure = (
+        saved_state["runtime_pre_push_failure_reentry"] if _resume_reentry_private_attr_review else
+        bool((saved_state or {}).get("runtime_pre_push_failure_reentry"))
+        or _reentry_findings_indicate_runtime_pre_push_failure(
+            (saved_state or {}).get("reentry_findings") if saved_state else ""
+        )
     )
     _resume_bridge_fix_pending = resume_after == "bridge_fix_pending"
     _skip_through_bridge = (
@@ -11521,6 +11734,7 @@ def run_phase_b(
         "bridge_converged",
         "needs_phase_b_reentry",
         *PRIVATE_ATTR_PREPARED_STEPS,
+        REENTRY_PRIVATE_ATTR_FIX_COMPLETE,
     )
     deferred_packet_path: str | None = result.get("deferred_packet_path")
 
@@ -11963,9 +12177,9 @@ def run_phase_b(
         )
         current_scope_fingerprint = _bridge_scope_fingerprint(repo_root, changed_files)
         saved_scope_fingerprint = (saved_state or {}).get("bridge_scope_fingerprint")
-        refresh_reentry_findings = bool(
+        refresh_reentry_findings = not _resume_reentry_private_attr_review and (bool(
             (saved_state or {}).get("refresh_reentry_findings")
-        ) or saved_scope_fingerprint != current_scope_fingerprint
+        ) or saved_scope_fingerprint != current_scope_fingerprint)
         if refresh_reentry_findings:
             findings_for_impl = "Refresh bridge findings from the current worktree before re-invoking the implementer."
             log("NEEDS_PHASE_B resume checkpoint drifted or lacked scope fingerprint; refreshing bridge findings first")
@@ -12517,10 +12731,13 @@ def run_phase_b(
 
         # Persist needs_phase_b_reentry state so crash-resume re-enters here.
         # Do not overwrite pending-review checkpoints; those stricter states
-        # must survive until the fresh review runs.
+        # must survive until the fresh review runs. A sealed supervisor
+        # continuation already owns these findings; keep it until the next
+        # implementer takes ownership so pre-actor failures cannot permit replay.
         if not (
             _resume_reentry_private_attr_review
             or (_skip_to_reentry and skip_reentry_implementer_once)
+            or "supervisor_reentry_identity" in (saved_state or {})
         ):
             _save_state(repo_root, _carry_bridge_fix_authority({
                 "plan_path": plan_path,
@@ -13488,6 +13705,9 @@ def run_phase_b(
                 allowed_files=exact_stage_scope_files or None,
             )
             changed_files = _bridge_review_scope_files(changed_files)
+            continuation = _continue_private_attr_supervisor_reentry("post_reentry_supervisor")
+            if continuation is not None:
+                return continuation
             result["status"] = "needs_phase_b"
             result["step"] = "post_reentry_supervisor"
             detail = result.get("pre_commit_summary", "")
@@ -13713,6 +13933,9 @@ def run_phase_b(
             return result
         if decision == "NEEDS_PHASE_B":
             changed_files = _bridge_review_scope_files(changed_files)
+            continuation = _continue_private_attr_supervisor_reentry("commit_ready_status_supervisor")
+            if continuation is not None:
+                return continuation
             message = (
                 "Supervisor returned NEEDS_PHASE_B after commit-ready packet "
                 "status refresh. Manual intervention required."
@@ -14055,6 +14278,26 @@ def implementer_failure_blocks_recovery(
     return False
 
 
+def _has_reentry_private_attr_checkpoint(state: dict[str, Any]) -> bool:
+    """Recognize explicit private-reentry ownership for preservation only."""
+    if (
+        "reentry_private_attr_review" in state
+        or "supervisor_reentry_identity" in state or "supervisor_reentry_sha256" in state
+        or str(state.get("completed_step", "")).startswith("reentry_private_attr_")
+    ):
+        return True
+    # A failed gate actor may still carry a completed findings-driven correction.
+    # Preserve that earlier success without changing initial/private FAILED policy.
+    context = state.get("implementer_mutation_context")
+    checkpoint = context.get("checkpoint") if isinstance(context, dict) else None
+    correction = checkpoint.get("bridge_fix_mutation_context") if isinstance(checkpoint, dict) else None
+    source = correction.get("checkpoint") if isinstance(correction, dict) else None
+    return (
+        state.get("completed_step") == "implementer_mutation"
+        and isinstance(source, dict) and "reentry_private_attr_review" in source
+    )
+
+
 def ordinary_bridge_fix_failure_blocks_recovery(
     repo_root: Path,
     result: dict[str, Any],
@@ -14064,12 +14307,22 @@ def ordinary_bridge_fix_failure_blocks_recovery(
     """Shared native CLI/dispatcher refusal contract for ordinary outcomes."""
     if implementer_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir):
         return True
+    if result.get("status") in ("error", "failed", "timeout", "needs_phase_b"):
+        try:
+            state = json.loads(agent_bus_path(repo_root, bus_dir, "executors", STATE_FILE_NAME).read_bytes())
+        except (OSError, ValueError, UnicodeError, ExecutorCommonError):
+            state = None
+        if isinstance(state, dict) and _has_reentry_private_attr_checkpoint(state):
+            # The owed reentry-private review/guard is still authoritative on
+            # failure or interruption, including a child without result JSON.
+            return True
     if result.get("status") != "error":
         return False
     step = result.get("step")
     if step in (
         "bridge_fix_authority", "bridge_fix_mutation",
         "bridge_fix_finalize", "bridge_fix_finalize_pytest",
+        "private_attr_supervisor_reentry",
     ):
         return True
     if step == "load_state" and result.get("state_error") in (

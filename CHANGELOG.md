@@ -6,8 +6,46 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-12
 
-### Preserved P0IBRRCO Implementer Ownership R2 (Phase B, CURRENT)
+### Preserved P0IBRRC Reentry-Private Checkpoint Handoff R2 (Phase B, CURRENT)
 
+- reconstructs the two production and two test modules from the preserved R1
+  repair on exact PR #1294 merge
+  `cdf2e02507cde0a3f1909ed00177ab1c474155a9`; all four tested source hashes
+  match the archived 1720-test observation. The stopped second delta supplies
+  the same-handoff tests and two bounded corrections evaluated freshly here
+- retains explicit reentry-private identity, exact current findings and boolean
+  runtime-pre-push authority through correction, finalization and owed review.
+  A consumed private GO followed by supervisor NEEDS_PHASE_B atomically hands
+  off to the fresh supervisor continuation, retained until the next mutator
+  takes ownership. Both dispatcher routes preserve/refuse that authority,
+  including interrupted notification before the actor, without repeating the
+  successful private correction or review. Non-string supervisor steps refuse
+  before membership testing
+- fresh public baseline on unchanged PR1294 production reproduced both missing
+  context-marker failures in 2.63s. The preserved repair with the stopped
+  handoff tests reproduced 10 failures/51 passes in 29.51s: pre-actor checkpoint
+  loss and a non-string supervisor-step exception. After the two corrections,
+  all 134 focused regressions passed in 55.48s and all six control-surface
+  invariants passed. The unchanged complete two-module evidence command passed
+  all 1741 tests in 315.70s with four work-stealing workers; production and test
+  hashes remained unchanged throughout validation. Fresh independent reviews,
+  native governance generation and providerless landing remain
+  outer-executor-owned and pending
+- credits PR #1291 prepared review, PR #1292 ordinary ownership and PR #1294
+  general implementer ownership. R1 is STOPPED_NO_LANDING after actual
+  pre-validation scratch-audit rejection; its evidence and all held stashes
+  remain preserved. This run uses the ordinary external OS temporary directory
+- retains existing RRC row30 as CURRENT, RRT immediately NEXT, then
+  RR/IB1/IB2 and every later task in order, Mu production before optimization.
+  Both consumed fleet operations retain 1 MOVED/3 INCOMPLETE/407 prior HOLD
+
+### Preserved P0IBRRCO Implementer Ownership R2 (Landed)
+
+- landed through PR #1294 at exact merge
+  `cdf2e02507cde0a3f1909ed00177ab1c474155a9` on 2026-09-12T21:39:59Z,
+  from head `465e9d547e3d12d1577dccecd90b2702ad496bb9`; native
+  launcher/dispatcher exited 0 at 21:43:35Z and primary fast-forward reached
+  the exact merge. The bounded landing evidence is recorded in TASKS.md
 - ports exactly the two production and two test modules from the read-only
   R1 terminal `candidate_snapshot` under
   `reports/archive/control_plane/p0ibrrco-inflight-r1-evidence-2026-09-12/terminal_recovery_timeout_stop/`;
@@ -29,13 +67,14 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   commit or merge
 - the fresh R2 control-surface invariant check passes all six invariants,
   including INV-2; the exact full two-module command with four work-stealing
-  workers passed all 1613 tests in 268.41s. Current independent review,
-  native governance generation and providerless landing remain
-  outer-executor-owned and pending
-- retains this same CO queue position as CURRENT, with P0IBRRC immediately
-  NEXT, all later task identities in order, Mu production before optimization,
-  stopped evidence and the held TASKS stash preserved. No later RRC semantics,
-  recovery infrastructure, runtime, substrate or fleet behavior changes
+  workers passed all 1613 tests in 268.41s. Independent Phase B GO, native
+  final pytest PASS, three COMMIT_GO supervisors and all seven current-head
+  GitHub checks passed; no independent GitHub review clearance is claimed
+- retains this same CO queue position as LANDED, with P0IBRRC CURRENT and
+  P0IBRRT immediately NEXT, all later task identities in order, Mu production
+  before optimization, stopped evidence and the held TASKS stash preserved.
+  No later RRC semantics, recovery infrastructure, runtime, substrate or fleet
+  behavior changes
 
 ### Exact P0IBRRCP Landed-Evidence and Queue Closure (Landed)
 
@@ -59,9 +98,9 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   existing semantic position; the native selector returns this exact wave and
   canonical packet. The two inherited successor paragraphs retain their
   historical merge facts and now match current queue order
-- exact P0IBRRCP closure is LANDED; P0IBRRCO is CURRENT, then P0IBRRC
-  immediately NEXT, P0IBRRT, P0IBRR, P0IB1, P0IB2 and every later recorded item,
-  with Mu optimization last. Private-review R2, all aliases,
+- exact P0IBRRCP closure and P0IBRRCO ownership are LANDED; P0IBRRC is
+  CURRENT, then P0IBRRT immediately NEXT, P0IBRR, P0IB1, P0IB2 and every later
+  recorded item, with Mu optimization last. Private-review R2, all aliases,
   stopped evidence, immutable cleanup claims/backups and consumed outcomes
   1 MOVED/3 INCOMPLETE/407 prior HOLD remain preserved; no fleet replay or PR
   terminal action is added by this ownership implementation
@@ -117,9 +156,10 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   `reports/archive/control_plane/r3c6-r4-evidence-2026-09-12/terminal_closeout_observation.json`;
   no native exit 0, restored/replayed carrier or imported predecessor authority
   is claimed. The carrier is deregistered and no predecessor owner remains
-- R4 landed in the same slot; exact P0IBRRCP closure later LANDED in PR #1293,
-  P0IBRRCO is CURRENT with P0IBRRC immediately NEXT, and both consumed
-  fleet operations and every later independent obligation remain unchanged
+- R4 landed in the same slot; exact P0IBRRCP closure later LANDED in PR #1293
+  and P0IBRRCO in PR #1294; P0IBRRC is CURRENT with P0IBRRT immediately NEXT,
+  and both consumed fleet operations and every later independent obligation
+  remain unchanged
 
 ## 2026-09-11
 
