@@ -13522,8 +13522,8 @@ class TestStaleStateCleared:
         # State file must be cleared — next invocation must NOT auto-skip rounds
         assert pb_mod._load_state(repo) is None  # ANTICHEAT_OK: testing internal executor functions
 
-    def test_question_for_founder_clears_state(self, tmp_path):
-        """QUESTION decision must clear state so next invocation starts fresh."""
+    def test_question_for_founder_retains_state(self, tmp_path):
+        """Accepted QUESTION retains founder authority across redispatch."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -13549,7 +13549,321 @@ class TestStaleStateCleared:
             )
 
         assert result["status"] == "question_for_founder"
-        assert pb_mod._load_state(repo) is None  # ANTICHEAT_OK: testing internal executor functions
+        state = json.loads((repo / ".agent_bus/executors/phase_b_state.json").read_text())
+        assert state["terminal_result"]["status"] == "question_for_founder"
+
+
+@pytest.fixture
+def p0t1_terminal_lane(tmp_path):
+    """Public Phase B and real bridge subprocess; all artifacts use OS temp."""
+    def create(*, reentry=False, output="QUESTION\n", exit_code=1):
+        repo = tmp_path / "lane"
+        repo.mkdir()
+        plan_path, test_path, _ = _write_bridge_receipt_fixture_repo(repo, "p0t1")
+        bus = ".agent_bus-p0t1"
+        route_path = repo / bus / "meta/post_merge_routing.json"
+        route_path.parent.mkdir(parents=True)
+        route = {
+            "decision": "ROUTE_PHASE_B", "summary": "P0T1 terminal control",
+            "task_id": "[PIPELINE-RECOVERY]", "wave_id": "p0t1",
+            "head_sha": _git_stdout(repo, "rev-parse", "HEAD"),
+            "comparison_commit": _git_stdout(repo, "rev-parse", "HEAD"),
+        }
+        route_path.write_text(json.dumps(route))
+        script = repo / "tools/agents/bridge_supervisor.py"
+        script.parent.mkdir(parents=True)
+        script.write_text(
+            "import json, sys\nfrom pathlib import Path\n"
+            "job = sys.argv[sys.argv.index('--job-id') + 1]\n"
+            "with Path('review_calls.jsonl').open('a') as handle:\n"
+            "    handle.write(json.dumps({'job_id': job}) + '\\n')\n"
+            + ("if 'reentry' not in job:\n    print('GO', flush=True)\n    sys.exit(0)\n" if reentry else "")
+            + f"sys.stdout.write({output!r})\nsys.stdout.flush()\nsys.exit({exit_code})\n"
+        )
+        lane = SimpleNamespace(
+            repo=repo, plan_path=plan_path, bus=bus, route=route, route_path=route_path,
+            state_path=repo / bus / "executors/phase_b_state.json", reentry=reentry,
+        )
+        impl = _make_mock_impl()
+
+        def implement(repo_root, *_args, **_kwargs):
+            with (repo_root / "f.py").open("a") as handle:
+                handle.write("# bounded actor edit\n")
+            return {"status": "success", "exit_code": 0, "output": "done", "stderr": "",
+                    "job_id": "p0t1-implementer", "model_override_applied": False}
+
+        impl.invoke_implementer.side_effect = implement
+
+        def supervisor(*_args, **_kwargs):
+            return {"exit_code": 0, "parsed": {
+                "decision": "NEEDS_PHASE_B", "summary": "bounded correction", "findings": [],
+            }, "receipt_path": f"{bus}/meta/pre_commit_receipts/probe.json"}
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+            sdk = stack.enter_context(patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0}))
+            gate = stack.enter_context(patch.object(pb_mod, "run_private_attr_gate", return_value={
+                "passed": True, "exit_code": 0, "test_files": [test_path],
+            }))
+            validation = stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}))
+            supervision = stack.enter_context(patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor))
+            handoff = stack.enter_context(patch.object(pb_mod, "prepare_commit_handoff", side_effect=AssertionError("unexpected commit handoff")))
+            lane.actors = [impl.invoke_implementer, sdk, gate, validation, supervision, handoff]
+            lane.run = lambda **kwargs: pb_mod.run_phase_b(
+                repo, kwargs.pop("plan_path", plan_path), bus_dir=kwargs.pop("bus_dir", bus), **kwargs,
+            )
+            yield lane
+
+    return create
+
+
+def _p0t1_assert_no_replay(lane, **kwargs):
+    calls = [actor.call_count for actor in lane.actors]
+    reviews = (lane.repo / "review_calls.jsonl").read_bytes()
+    result = lane.run(**kwargs)
+    assert [actor.call_count for actor in lane.actors] == calls
+    assert (lane.repo / "review_calls.jsonl").read_bytes() == reviews
+    return result
+
+
+@pytest.mark.parametrize("reentry", [False, True])
+@pytest.mark.parametrize("alias", ["relative", "dotted", "absolute", "symlink"])
+def test_p0t1_terminal_alias_recovery(p0t1_terminal_lane, reentry, alias):
+    for lane in p0t1_terminal_lane(reentry=reentry):
+        first = lane.run()
+        assert first["status"] == "question_for_founder", first
+        assert lane.state_path.exists(), first
+        before = lane.state_path.read_bytes()
+        path = lane.plan_path
+        if alias == "dotted":
+            path = "./reports/control_plane/../control_plane/plan.md"
+        elif alias == "absolute":
+            path = str(lane.repo / path)
+        elif alias == "symlink":
+            path = "reports/control_plane/alias.md"
+            (lane.repo / path).symlink_to("plan.md")
+        recovered = _p0t1_assert_no_replay(lane, plan_path=path)
+        assert recovered["status"] == "question_for_founder", recovered
+        assert recovered["bridge_job_id"] == first["bridge_job_id"]
+        assert lane.state_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("reentry", [False, True])
+@pytest.mark.parametrize("output,exit_code", [
+    pytest.param("QUESTION\n", 1, id="plain"),
+    pytest.param("QUESTION\nbridge diagnostic\n", 0, id="trailing-diagnostic"),
+    pytest.param("QUESTION\nbridge diagnostic", 1, id="trailing-diagnostic-no-newline"),
+    pytest.param("QUESTION", 0, id="no-final-newline"),
+])
+@pytest.mark.parametrize("cleanup_fault", [False, True], ids=["terminal", "received"])
+def test_p0t1_accepted_question_survives_cleanup_and_redispatch(
+    p0t1_terminal_lane, reentry, output, exit_code, cleanup_fault,
+):
+    for lane in p0t1_terminal_lane(reentry=reentry, output=output, exit_code=exit_code):
+        # The reviewer has exited and flushed QUESTION before this existing
+        # cleanup boundary. No live test descendants are created.
+        cleanup = getattr(pb_mod, "_terminate_bridge_subprocess")
+
+        def fail_question_cleanup(proc, **kwargs):
+            calls = (lane.repo / "review_calls.jsonl").read_text().splitlines()
+            job = json.loads(calls[-1])["job_id"] if calls else ""
+            if proc.poll() is not None and (not reentry or "reentry" in job):
+                raise OSError("preserved owner-cleanup fault")
+            return cleanup(proc, **kwargs)
+
+        with ExitStack() as stack:
+            if cleanup_fault:
+                stack.enter_context(patch.object(
+                    pb_mod, "_terminate_bridge_subprocess", side_effect=fail_question_cleanup,
+                ))
+            first = lane.run()
+        assert first["status"] == ("error" if cleanup_fault else "question_for_founder"), first
+        logs = list((lane.repo / ".scratch").glob("phase_b_bridge_*.stdout.log"))
+        assert any(path.read_text() == output for path in logs)
+        assert len((lane.repo / "review_calls.jsonl").read_text().splitlines()) == 1 + int(reentry)
+        assert lane.state_path.exists(), first
+        received = json.loads(lane.state_path.read_bytes())
+        terminal_step = "reentry_question_for_founder" if reentry else "question_for_founder"
+        assert received["completed_step"] == (
+            "bridge_question_received" if cleanup_fault else terminal_step
+        ), received
+        assert received["received_review"]["stdout"] == output
+        assert received["received_review"]["exit_code"] == exit_code
+        assert received["received_review"]["decision"] == "QUESTION"
+        recovered = _p0t1_assert_no_replay(lane)
+        assert recovered["status"] == "question_for_founder", recovered
+        assert recovered["resumed_from"] == received["completed_step"]
+        assert recovered["bridge_job_id"] == received["bridge_job_id"]
+        assert json.loads(lane.state_path.read_bytes())["completed_step"] == terminal_step
+        terminal = lane.state_path.read_bytes()
+        assert _p0t1_assert_no_replay(lane)["status"] == "question_for_founder"
+        assert lane.state_path.read_bytes() == terminal
+
+
+@pytest.mark.parametrize("mismatch", ["wave", "plan", "invocation", "outside_bus"])
+def test_p0t1_foreign_terminal_authority_is_retained(p0t1_terminal_lane, mismatch):
+    for lane in p0t1_terminal_lane():
+        assert lane.run()["status"] == "question_for_founder"
+        assert lane.state_path.exists()
+        before = lane.state_path.read_bytes()
+        kwargs = {}
+        if mismatch == "wave":
+            lane.route["wave_id"] = "another-wave"
+        elif mismatch == "invocation":
+            lane.route["head_sha"] = "a" * 40
+        elif mismatch == "plan":
+            path = "reports/control_plane/other.md"
+            (lane.repo / path).write_bytes((lane.repo / lane.plan_path).read_bytes())
+            kwargs["plan_path"] = path
+        else:
+            outside = lane.repo.parent / "outside-bus"
+            (outside / "executors").mkdir(parents=True)
+            (outside / "executors/phase_b_state.json").write_bytes(before)
+            (lane.repo / ".agent_bus-foreign").symlink_to(outside, target_is_directory=True)
+            kwargs["bus_dir"] = ".agent_bus-foreign"
+        lane.route_path.write_text(json.dumps(lane.route))
+        result = _p0t1_assert_no_replay(lane, **kwargs)
+        assert result["status"] == "error", result
+        assert lane.state_path.read_bytes() == before
+        if mismatch == "outside_bus":
+            assert result["step"] == "bus_dir"
+            assert (outside / "executors/phase_b_state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("case", ["relative", "dotted", "absolute", "symlink", "wave", "plan", "invocation", "outside_bus"])
+def test_p0t1_existing_private_terminal_identity(private_review_checkpoint, case):
+    fixture = private_review_checkpoint()
+    route = {**_VALID_ROUTING_RECORD, "wave_id": fixture.state["wave_id"],
+             "head_sha": _git_stdout(fixture.repo, "rev-parse", "HEAD")}
+    route_path = fixture.repo / ".agent_bus/meta/post_merge_routing.json"
+    route_path.parent.mkdir(parents=True, exist_ok=True)
+    route_path.write_text(json.dumps(route))
+    impl = _make_mock_impl()
+
+    def reviewer(repo_root, summary, **kwargs):
+        _retain_private_review_envelope(fixture, kwargs["job_id"], "QUESTION")
+        return {"decision": "QUESTION", "job_id": kwargs["job_id"], "exit_code": 0,
+                "stdout": "QUESTION\n", "stderr": ""}
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+        forbidden = [stack.enter_context(patch.object(pb_mod, name)) for name in (
+            "_prepare_phase_b_pre_review_package", "run_private_attr_gate", "run_sdk_agents",
+            "_run_pytest_on_files", "run_pre_commit_supervisor", "prepare_commit_handoff",
+        )]
+        bridge = stack.enter_context(patch.object(pb_mod, "run_bridge_review", side_effect=reviewer))
+        first = pb_mod.run_phase_b(fixture.repo, fixture.plan_path, bus_dir=".agent_bus")
+        assert first["status"] == "question_for_founder", first
+        before = fixture.state_path.read_bytes()
+        path, bus = fixture.plan_path, ".agent_bus"
+        if case == "dotted":
+            path = "./reports/control_plane/../control_plane/plan.md"
+        elif case == "absolute":
+            path = str(fixture.repo / path)
+        elif case == "symlink":
+            path = "reports/control_plane/alias.md"
+            (fixture.repo / path).symlink_to("plan.md")
+        elif case == "wave":
+            route["wave_id"] = "foreign-wave"
+        elif case == "invocation":
+            route["head_sha"] = "a" * 40
+        elif case == "plan":
+            path = "reports/control_plane/other.md"
+            (fixture.repo / path).write_bytes((fixture.repo / fixture.plan_path).read_bytes())
+        elif case == "outside_bus":
+            outside = fixture.repo.parent / "foreign-bus"
+            (outside / "executors").mkdir(parents=True)
+            (outside / "executors/phase_b_state.json").write_bytes(before)
+            bus = ".agent_bus-foreign"
+            (fixture.repo / bus).symlink_to(outside, target_is_directory=True)
+        route_path.write_text(json.dumps(route))
+        second = pb_mod.run_phase_b(fixture.repo, path, bus_dir=bus)
+        assert fixture.state_path.read_bytes() == before
+        bridge.assert_called_once()
+        for actor in [impl.invoke_implementer, *forbidden]:
+            actor.assert_not_called()
+        expected = "error" if case in {"wave", "plan", "invocation", "outside_bus"} else "question_for_founder"
+        assert second["status"] == expected, second
+        if case == "outside_bus":
+            assert second["step"] == "bus_dir"
+            assert (outside / "executors/phase_b_state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("fault", ["truncate", "render", "pager"])
+def test_p0t1_question_precedes_remaining_cleanup(p0t1_terminal_lane, fault):
+    for lane in p0t1_terminal_lane(exit_code=0):
+        with ExitStack() as stack:
+            if fault == "truncate":
+                stack.enter_context(patch.object(os, "truncate", side_effect=OSError("log truncation failed")))
+            elif fault == "render":
+                stack.enter_context(patch.object(pb_mod, "_read_bridge_render", side_effect=OSError("render failed")))
+            else:
+                def pager(*args, **kwargs):
+                    if kwargs.get("state") == "question_for_founder":
+                        raise OSError("pager failed")
+                    return {"enabled": False}
+                stack.enter_context(patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=pager))
+            result = lane.run()
+        assert result["status"] == "error", result
+        checkpoint = json.loads(lane.state_path.read_bytes())
+        assert checkpoint["terminal_result"]["status"] == "question_for_founder"
+        assert _p0t1_assert_no_replay(lane)["status"] == "question_for_founder"
+
+
+@pytest.mark.parametrize("reentry", [False, True])
+@pytest.mark.parametrize("output,exit_code,foreign", [
+    ("QUEST", 1, False),
+    ('{"decision":"QUESTION","job_id":"foreign"}\n', 1, False),
+    ("QUESTION\n", 1, True),
+    ("QUESTION\n", 7, False),
+    ("QUESTION bridge diagnostic\n", 1, False),
+])
+def test_p0t1_unaccepted_output_is_not_journaled(
+    p0t1_terminal_lane, reentry, output, exit_code, foreign,
+):
+    for lane in p0t1_terminal_lane(reentry=reentry, output=output, exit_code=exit_code):
+        review = pb_mod.run_bridge_review
+        def supplied_reviewer(repo_root, summary, **kwargs):
+            if foreign and (not reentry or "reentry" in kwargs["job_id"]):
+                kwargs["job_id"] = "foreign-reentry-review" if reentry else "foreign-review"
+            return review(repo_root, summary, **kwargs)
+        with patch.object(pb_mod, "run_bridge_review", side_effect=supplied_reviewer):
+            result = lane.run()
+        assert result["status"] in {"error", "question_for_founder"}, result
+        state = json.loads(lane.state_path.read_bytes()) if lane.state_path.exists() else {}
+        assert "received_review" not in state
+        assert "terminal_result" not in state
+        assert len((lane.repo / "review_calls.jsonl").read_text().splitlines()) == 1 + int(reentry)
+        lane.actors[-1].assert_not_called()
+
+
+@pytest.mark.parametrize("reentry", [False, True])
+@pytest.mark.parametrize("defect", ["partial", "foreign", "exit", "later_decision"])
+def test_p0t1_invalid_received_evidence_refuses_recovery(p0t1_terminal_lane, reentry, defect):
+    for lane in p0t1_terminal_lane(reentry=reentry):
+        truncate = os.truncate
+
+        def fail_question_truncate(path, length):
+            if not reentry or "reentry" in str(path):
+                raise OSError("log truncation failed")
+            return truncate(path, length)
+
+        with patch.object(os, "truncate", side_effect=fail_question_truncate):
+            assert lane.run()["status"] == "error"
+        state = json.loads(lane.state_path.read_bytes())
+        assert state["completed_step"] == "bridge_question_received"
+        if defect == "partial":
+            state["received_review"]["stdout"] = "QUEST"
+        elif defect == "foreign":
+            state["received_review"]["job_id"] = "foreign-review"
+        elif defect == "exit":
+            state["received_review"]["exit_code"] = 7
+        else:
+            state["received_review"]["stdout"] = "QUESTION\nGO\nbridge diagnostic\n"
+        lane.state_path.write_text(json.dumps(state))
+        before = lane.state_path.read_bytes()
+        assert _p0t1_assert_no_replay(lane)["status"] == "error"
+        assert lane.state_path.read_bytes() == before
 
 
 class TestParseFindings:

@@ -6,7 +6,49 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-13
 
-### P0IB2 Commit-Time Candidate Inventory (Phase B, CURRENT)
+### P0T1 Terminal Identity and QUESTION Journaling R2 (Phase B, CURRENT)
+
+- reconstructs the three locked R1 source/test files on landed IB2/PR #1300
+  merge `3ed23cf38edc47eb13e23e5471016f810467b79f`. The Phase B executor,
+  its complete test module and the existing dispatch fixture exactly match
+  the preserved SHA256 values; no additional production repair is introduced
+- binds terminal recovery to the contained bus, canonical contained plan,
+  wave and existing invocation. Safe plan aliases retain founder authority;
+  foreign identity is refused without erasing the checkpoint. Accepted
+  QUESTION is journaled before existing cleanup, rendering or pager failures,
+  and redispatch returns founder-wait without new actors, validation or commit
+- preserves R1's shared accepted-decision parser for trailing diagnostics and
+  output without a final newline. On the same final Phase B test bytes, R1's
+  12 failed / 1200 passed became 1212 passed in 287.03s after native reentry
+  `3c97c9f1`; those results are historical evidence
+- includes only native `4bae8b05`'s required dispatch mock repair: accept,
+  assert callable and invoke `on_result`, retaining all 11 supervisor package
+  fields and Codex reader routing. Its historical target failed in 1.83s,
+  then the complete dispatch module passed 748 tests in 244.16s. R1 stopped
+  because its immutable allowlist excluded this fixture; commit
+  `723d0a865f860c98f48b0b41bfcc6e9ed373df46` remains preserved and unmerged,
+  with no PR. R2 includes the fixture in scope and complete-module validation
+- fresh R2 validation passed both complete modules: 1960 tests in 340.59s,
+  exit0, using the declared four-worker command with `PYTHONHASHSEED=0`,
+  bytecode writes disabled and ordinary external OS temporary fixtures.
+  All three source/test files retain their locked reconstruction hashes
+- retains existing P0T1 row34 as sole CURRENT and P0T2 NEXT with its
+  current-base coverage note crediting landed PR #1291/#1294/#1295 private
+  review protections. All queue/todo identities and order, stopped PR
+  #1284/#1298, held TASKS `0474aa283fac1d1346c57361fd47fafa10152146` and
+  older evidence remain preserved. The original eight PR closures remain
+  preservation/reconstruction dispositions; consumed fleet never replays,
+  and Mu production remains before optimization. Fresh R2 independent review
+  and landing remain outer-executor work
+
+### P0IB2 Commit-Time Candidate Inventory (Landed)
+
+- landed through PR #1300 at `3ed23cf38edc47eb13e23e5471016f810467b79f`
+  on 2026-09-13T11:56:37Z, from head
+  `523c1755e87210288cdfee92a74a45b9137fba5f`. The preserved predecessor
+  closeout records native exit0, exact PRIMARY/origin/dev/remote equality
+  and all seven current-head GitHub checks passing. No returned fresh
+  GitHub review clearance is claimed
 
 - binds the candidate after native Step 5/5e settlement to the existing shared
   authority builder before supervisor packaging, using the selected bus's
@@ -24,9 +66,9 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   scope, required authority, stale receipts, missing generated index artifacts,
   index drift, optional legacy paths and candidate/ambient-module nonexecution
   under both bytecode settings. The shared builder is unchanged
-- retains the existing unnumbered IB2 baton as sole CURRENT, P0T1 next, and
-  every other queue identity/order. No runtime/substrate changes or debt
-  reduction are claimed; native landing remains outer-executor work
+- completes the existing unnumbered IB2 baton, with P0T1 sole CURRENT,
+  P0T2 next and every other queue identity/order retained. No
+  runtime/substrate changes or debt reduction are attributed to this wave
 
 ### P0IB1 Recovery Authority R2 Preserved Bytecode Repair (Landed)
 

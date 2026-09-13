@@ -12315,9 +12315,13 @@ class TestBridgeR6Finding1NeedsPhaseBreentryPackage:
             verbose=False,
             timeout=1200,
             on_started=None,
+            on_result=None,
         ):
             captured_reader_agents.append(reader_agent)
-            return {"exit_code": 0, "stdout": "", "stderr": "", "decision": "GO", "job_id": job_id or ""}
+            review = {"exit_code": 0, "stdout": "", "stderr": "", "decision": "GO", "job_id": job_id or ""}
+            assert callable(on_result), "Re-entry bridge must supply the result journaling callback"
+            on_result(review)
+            return review
 
         def mock_collect_changed(repo):
             return ["mu/tools/executors/test.py"]
