@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import copy
 import fcntl, io, json, os, re, shlex, sqlite3, subprocess, sys, threading, time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
+from contextlib import redirect_stdout, redirect_stderr
 import pytest
 
 from mu.tests.tools.module_loader import load_module
@@ -23,6 +25,272 @@ dispatch_mod = load_module(
 dash_mod = load_module("pipeline_dashboard_observability", _OBSERVABILITY_DIR / "pipeline_dashboard.py")
 web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR / "pipeline_dashboard_web.py")
 FailureClass = rg_mod.FailureClass
+
+
+@pytest.fixture
+def provider_refusal_phase_b(tmp_path, monkeypatch):
+    """Exercise current bridge producer -> public Phase B -> recovery.
+
+    Only provider I/O and unrelated implementation/package actors are fixtures;
+    neither the bridge terminal object nor its Phase B transport is fabricated.
+    """
+    from mu.tests.tools.test_agent_bridge_supervisor import setup_refusal_bridge, bridge
+
+    pb = load_module("phase_b_refusal_integration", _EXECUTORS_DIR / "phase_b_executor.py")
+
+    def run(outcomes, *, fail_stale_render=False):
+        paths, calls = setup_refusal_bridge(tmp_path, outcomes)
+        repo = paths.repo_root
+        stale_render_attempts = []
+        if fail_stale_render:
+            original_render = bridge.render_job
+
+            def render_after_stale(_paths, conn, job_id):
+                stale_turn = conn.execute(
+                    "SELECT turn_id FROM turns WHERE job_id = ? AND agent_role = 'reviewer' AND status = 'stale'",
+                    (job_id,),
+                ).fetchone()
+                if stale_turn is not None:
+                    job = bridge.read_job(conn, job_id)
+                    terminals = conn.execute(
+                        "SELECT metadata FROM job_actions WHERE job_id = ? AND action = 'codex_reviewer_refusal_terminal'",
+                        (job_id,),
+                    ).fetchall()
+                    stale_render_attempts.append({
+                        "job_status": job["status"],
+                        "terminal_decision": job["terminal_decision"],
+                        "terminals": [json.loads(row[0]) for row in terminals],
+                    })
+                    raise OSError("injected stale reviewer transcript render failure")
+                return original_render(_paths, conn, job_id)
+
+            monkeypatch.setattr(bridge, "render_job", render_after_stale)
+        subprocess.run(["git", "checkout", "-b", "fixture-refusal"], cwd=repo, check=True, capture_output=True)
+        plan = "plan.md"
+        (repo / plan).write_text("# Plan\nPhase-A-Lock: LOCKED\nTask: [PIPELINE-RECOVERY]\n")
+        impl = MagicMock()
+        impl.invoke_implementer.return_value = {
+            "status": "success", "output": "done", "stderr": "", "exit_code": 0,
+            "job_id": "fixture-implementer", "model_override_applied": False,
+        }
+        impl.build_implementation_prompt.return_value = "authorized implementation"
+        impl.load_executor_config.return_value = {
+            "backends": {"phase_b_executor": "codex"}, "model_overrides": {},
+            "timeouts": {"phase_b_executor": 10},
+        }
+        monkeypatch.setitem(sys.modules, "phase_b_implementer", impl)
+        monkeypatch.setattr(pb, "emit_pipeline_agent_event", lambda *a, **k: {})
+        monkeypatch.setattr(pb, "_collect_changed_files", lambda *a, **k: ["README.md"])  # ANTICHEAT_OK: unrelated candidate inventory actor
+        monkeypatch.setattr(pb, "_collect_wave_owned_files", lambda *a, **k: ["README.md"])  # ANTICHEAT_OK: unrelated candidate inventory actor
+        monkeypatch.setattr(pb, "_prepare_phase_b_pre_review_package", lambda *a, **k: (["README.md"], None))  # ANTICHEAT_OK: outer package owner, transport remains real
+        monkeypatch.setattr(pb, "run_sdk_agents", lambda *a, **k: {"exit_code": 0, "stdout": "", "stderr": ""})
+        invocations = []
+
+        def bridge_process(_repo, cmd, *, job_id, **kwargs):
+            out, err = io.StringIO(), io.StringIO()
+            argv = ["--repo-root", str(repo)] + cmd[2:]
+            with redirect_stdout(out), redirect_stderr(err):
+                try:
+                    code = bridge.main(argv)
+                except OSError as exc:
+                    if not fail_stale_render or str(exc) != "injected stale reviewer transcript render failure":
+                        raise
+                    # Model the failed CLI process boundary for this injection;
+                    # the producer must emit its own terminal object.
+                    traceback.print_exc()
+                    code = 1
+            streams = {"exit_code": code, "stdout": out.getvalue(), "stderr": err.getvalue()}
+            for name in ("stdout", "stderr"):
+                path = paths.bus_dir / f"{job_id}.{name}.log"
+                path.write_text(streams[name])
+                streams[f"{name}_path"] = str(path.relative_to(repo))
+            invocations.append(streams.copy())
+            return streams
+
+        monkeypatch.setattr(pb, "_run_bridge_review_subprocess", bridge_process)  # ANTICHEAT_OK: process I/O boundary; invokes actual bridge main and adapter
+        before = (repo / "README.md").read_bytes()
+        result = pb.run_phase_b(repo, plan, max_bridge_rounds=5,
+            routing_record_override={"decision": "ROUTE_PHASE_B", "summary": "test dispatch"})
+        assert result["step"] == "bridge_subprocess", result
+        assert impl.invoke_implementer.call_count == 1
+        assert len(invocations) == 1
+        after = (repo / "README.md").read_bytes()
+        if fail_stale_render:
+            assert after == b"changed by staleness fixture" != before
+        else:
+            assert after == before
+        return SimpleNamespace(result=result, paths=paths, calls=calls, streams=invocations[0],
+            before=after, stale_render_attempts=stale_render_attempts)
+
+    return run
+
+
+@pytest.mark.parametrize("fresh_outcome,refusal_count,terminal_reason", [
+    ("refuse", 2, "repeated_refusal"),
+    ("crash", 1, "fresh_turn_unresolved"),
+    ("malformed", 1, "fresh_turn_unresolved"),
+    ("stale", 1, "fresh_turn_stale"),
+])
+def test_provider_refusal_public_transport_and_no_tier3(
+    provider_refusal_phase_b, monkeypatch, fresh_outcome, refusal_count, terminal_reason,
+):
+    lane = provider_refusal_phase_b(["refuse", fresh_outcome, "GO"],
+        fail_stale_render=fresh_outcome == "stale")
+    result = lane.result
+    assert "bridge_terminal_result" in result, (rg_mod.classify_failure(result), result)
+    terminal = json.loads(lane.streams["stderr"].strip().split("\n")[-1])
+    assert result.get("bridge_terminal_result") == terminal
+    assert terminal["terminal_reason"] == terminal_reason
+    assert terminal["refusal_count"] == refusal_count
+    assert terminal["fresh_review_attempts"] == 1
+    if fresh_outcome == "stale":
+        assert lane.stale_render_attempts == [{
+            "job_status": "DONE", "terminal_decision": "POLICY_BOUND", "terminals": [terminal],
+        }]
+    seen = json.loads(lane.calls.read_text())
+    assert terminal["fresh_turn_id"] == seen[1]["turn_id"] != seen[0]["turn_id"]
+    with sqlite3.connect(lane.paths.db_path) as conn:
+        records = conn.execute("SELECT metadata FROM job_actions WHERE action='codex_reviewer_refusal_terminal'").fetchall()
+    assert [json.loads(row[0]) for row in records] == [terminal]
+    assert result["bridge_exit_code"] == lane.streams["exit_code"] == 1
+    assert result["bridge_job_id"] == terminal["job_id"]
+    for stream in ("stdout", "stderr"):
+        assert result[f"bridge_{stream}_path"] == lane.streams[f"{stream}_path"]
+    assert rg_mod.classify_failure(result) == FailureClass.CODEX_PROVIDER_SAFETY_REFUSAL
+    candidates = {name: (lane.paths.repo_root / name).read_bytes() for name in ("README.md", "plan.md")}
+    index_before = subprocess.run(["git", "ls-files", "--stage"], cwd=lane.paths.repo_root,
+        check=True, capture_output=True).stdout
+    tier3 = MagicMock(side_effect=AssertionError("refusal must never mutate a candidate"))
+    monkeypatch.setattr(rg_mod, "run_recovery_loop", tier3)
+    monkeypatch.setattr(rg_mod, "check_learned_patterns", lambda *a: rg_mod.LearnedMatch(
+        failure_class=FailureClass.AGENT_REVIEW_CRASH, tier=3,
+        pattern_id="historical-crash", action="recovery_loop"))
+    for _ in range(2):
+        recovery = rg_mod.attempt_recovery(lane.paths.repo_root, result, "refusal-wave")
+        assert recovery["tier"] == 4
+        assert recovery["recovered"] is False
+        assert recovery["failure_class"] == "codex_provider_safety_refusal"
+    tier3.assert_not_called()
+    assert len(json.loads(lane.calls.read_text())) == 2
+    assert (lane.paths.repo_root / "README.md").read_bytes() == lane.before
+    assert {name: (lane.paths.repo_root / name).read_bytes() for name in candidates} == candidates
+    assert subprocess.run(["git", "ls-files", "--stage"], cwd=lane.paths.repo_root,
+        check=True, capture_output=True).stdout == index_before
+
+
+@pytest.mark.parametrize("outcome", ["crash", "malformed"])
+def test_provider_refusal_ordinary_crash_control(provider_refusal_phase_b, monkeypatch, outcome):
+    lane = provider_refusal_phase_b([outcome])
+    assert "bridge_terminal_result" not in lane.result
+    assert rg_mod.classify_failure(lane.result) == FailureClass.AGENT_REVIEW_CRASH
+    assert rg_mod.tier_for(rg_mod.classify_failure(lane.result)) == 3
+    assert len(json.loads(lane.calls.read_text())) == 1
+    tier3 = MagicMock(return_value={"recovered": False})
+    monkeypatch.setattr(rg_mod, "run_recovery_loop", tier3)
+    recovery = rg_mod.attempt_recovery(lane.paths.repo_root, lane.result, "ordinary-crash-wave")
+    assert recovery["tier"] == 3
+    assert recovery["failure_class"] == "agent_review_crash"
+    tier3.assert_called_once()
+
+
+@pytest.mark.parametrize("change", [
+    "missing_terminal", "terminal_in_parsed", "terminal_in_stderr", "terminal_in_stdout",
+    "missing_code", "blank_code", "different_code", "wrong_decision", "wrong_provider", "wrong_role",
+    "job_mismatch", "turn_mismatch", "evidence_job_mismatch", "evidence_exit_zero",
+    "evidence_not_object", "duplicate_turn", "extra_retry", "bool_count", "missing_paths",
+    "zero_exit", "bool_exit", "timeout_exit", "stale_exit", "aggregation_exit",
+])
+def test_provider_refusal_requires_canonical_bound_result(provider_refusal_phase_b, change):
+    lane = provider_refusal_phase_b(["refuse", "refuse"])
+    result = copy.deepcopy(lane.result)
+    terminal = result["bridge_terminal_result"]
+    if change == "missing_terminal":
+        del result["bridge_terminal_result"]
+    elif change.startswith("terminal_in_"):
+        del result["bridge_terminal_result"]
+        key = change.removeprefix("terminal_in_")
+        result[key] = {"bridge_terminal_result": terminal} if key == "parsed" else json.dumps(terminal)
+    elif change == "missing_code":
+        del terminal["error_code"]
+    elif change == "blank_code":
+        terminal["error_code"] = " "
+    elif change == "different_code":
+        terminal["error_code"] += "_LOOKALIKE"
+    elif change == "wrong_decision":
+        terminal["terminal_decision"] = "GO"
+    elif change == "wrong_provider":
+        terminal["provider"] = "claude"
+    elif change == "wrong_role":
+        terminal["agent_role"] = "reader"
+    elif change == "job_mismatch":
+        result["bridge_job_id"] += "-another-invocation"
+    elif change == "turn_mismatch":
+        terminal["turn_id"] += "-another-turn"
+    elif change == "evidence_job_mismatch":
+        terminal["refusals"][0]["job_id"] += "-another-invocation"
+    elif change == "evidence_exit_zero":
+        terminal["refusals"][0]["returncode"] = 0
+    elif change == "evidence_not_object":
+        terminal["refusals"][0] = "quoted refusal"
+    elif change == "duplicate_turn":
+        terminal["refusals"][0]["turn_id"] = terminal["turn_id"]
+    elif change == "extra_retry":
+        terminal["fresh_review_attempts"] = 2
+    elif change == "bool_count":
+        terminal["refusal_count"] = True
+    elif change == "missing_paths":
+        del result["bridge_stderr_path"]
+    else:
+        result["bridge_exit_code"] = {"zero_exit": 0, "bool_exit": True,
+            "timeout_exit": -1, "stale_exit": -2, "aggregation_exit": -3}[change]
+    assert rg_mod.classify_failure(result) != FailureClass.CODEX_PROVIDER_SAFETY_REFUSAL
+
+
+@pytest.mark.parametrize("wrapper", ["valid", "nested", "quoted", "preamble", "trailing", "duplicate", "nonfinite", "other_executor"])
+def test_provider_refusal_dispatcher_wrapper_is_exact(provider_refusal_phase_b, wrapper):
+    lane = provider_refusal_phase_b(["refuse", "refuse"])
+    stdout = json.dumps(lane.result)
+    if wrapper == "nested":
+        stdout = json.dumps({"parsed": lane.result})
+    elif wrapper == "quoted":
+        stdout = json.dumps({"message": stdout})
+    elif wrapper == "preamble":
+        stdout = "untrusted text\n" + stdout
+    elif wrapper == "trailing":
+        stdout += "\ntrailing text"
+    elif wrapper == "duplicate":
+        stdout = '{"status":"success",' + stdout[1:]
+    elif wrapper == "nonfinite":
+        stdout = '{"opaque":NaN,' + stdout[1:]
+    result = {"status": "failed", "exit_code": 1, "executor": "phase_b_executor",
+        "stdout": stdout, "stderr": "reviewer process failed"}
+    if wrapper == "other_executor":
+        result["executor"] = "phase_a_executor"
+    classified = rg_mod.classify_failure(result)
+    if wrapper == "valid":
+        assert classified == FailureClass.CODEX_PROVIDER_SAFETY_REFUSAL
+    else:
+        assert classified != FailureClass.CODEX_PROVIDER_SAFETY_REFUSAL
+
+
+@pytest.mark.parametrize("precedence,expected", [
+    ("auth", FailureClass.UNCLASSIFIED),
+    ("needs_phase_a", FailureClass.NEEDS_PHASE_A),
+    ("deferrable_go", FailureClass.BRIDGE_GO_DEFERRABLE_FINDINGS),
+    ("terminal_policy", FailureClass.TERMINAL_POLICY),
+])
+def test_provider_refusal_preserves_existing_precedence(provider_refusal_phase_b, precedence, expected):
+    lane = provider_refusal_phase_b(["refuse", "refuse"])
+    result = lane.result
+    if precedence == "auth":
+        result["stderr"] = "401 Unauthorized"
+    elif precedence == "needs_phase_a":
+        result.update(step="build_and_run_supervisor", pre_commit_decision="NEEDS_PHASE_A")
+    elif precedence == "deferrable_go":
+        result.update(decision="GO", findings=[{"severity": "low", "disposition": "non_blocking"}])
+    else:
+        result["status"] = "question_for_founder"
+    assert rg_mod.classify_failure(result) == expected
 
 
 def make_noisy_chained_needs_phase_a_result() -> dict[str, object]:
@@ -2083,6 +2351,7 @@ class TestTierMapping:
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
         assert tier4 == {
             FailureClass.NEEDS_PHASE_A,
+            FailureClass.CODEX_PROVIDER_SAFETY_REFUSAL,
             FailureClass.TERMINAL_POLICY,
             FailureClass.UNCLASSIFIED,
         }

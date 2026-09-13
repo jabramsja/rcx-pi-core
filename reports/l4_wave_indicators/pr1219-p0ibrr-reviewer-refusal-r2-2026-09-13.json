@@ -1,0 +1,25 @@
+{
+  "wave_id": "pr1219-p0ibrr-reviewer-refusal-r2-2026-09-13",
+  "repeat_run_speedup_ratio": 1.066447,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.332252,
+  "repeat_run_raw_seconds": [
+    0.354329,
+    0.332252
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.354329
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.686581
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-13T06:32:49Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "8aa09a6bde8b947ffe61810a0d616ce40d95b100"
+}

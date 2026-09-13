@@ -4,9 +4,40 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-13
+
+### P0IBRR Reviewer-Refusal R2 Bounded Reconstruction (Phase B, CURRENT)
+
+- reconstructs the six owned bridge/recovery paths from hash-verified R1
+  implementation evidence on exact PR #1296 merge
+  `8aa09a6bde8b947ffe61810a0d616ce40d95b100`. Only the observed terminal
+  nonzero Codex reviewer JSONL chronology produces invocation-bound refusal
+  evidence. One fresh review retains provider safety and the tightened
+  read-only prompt; repeated or unresolved refusal review stops durably
+- closes the recorded stale-fresh terminal-before-render defect by invoking
+  the existing `fresh_turn_stale` terminal producer before optional rendering.
+  The real bridge producer, public Phase B transport and recovery fixture
+  reproduced one missing-terminal/Tier3 classification failure in 2.50s before
+  repair. After repair it proves durable terminal emission despite injected
+  rendering failure, no extra refusal turn and no Tier3/candidate mutation
+- fresh R2 controls passed 22 tests in 2.23s; focused refusal/staleness tests
+  passed 78 in 9.64s; the complete declared two-module command passed 1625 in
+  45.14s with four workers and unchanged six-file hashes. R1's 1624 tests in
+  45.50s remain historical evidence; R1 is preserved STOPPED_NOT_LANDED
+- existing RR remains sole CURRENT, IB1 then IB2 immediately NEXT, with all
+  existing queue identities/order and held/stopped/consumed evidence retained.
+  Independent review, native governance, CI, merge and PRIMARY fast-forward
+  remain outer-executor work. No runtime/substrate or launcher change
+
 ## 2026-09-12
 
-### P0IBRRT Lossless Phase B Terminal-Result Transport (Phase B, CURRENT)
+### P0IBRRT Lossless Phase B Terminal-Result Transport (Landed)
+
+- landed in PR #1296 at exact merge
+  `8aa09a6bde8b947ffe61810a0d616ce40d95b100` on 2026-09-13T04:38:26Z.
+  Native launcher/dispatcher exit0 at 04:42:03Z and exact PRIMARY/dev
+  fast-forward were verified in the preserved terminal observation. The held
+  TASKS stash `594557af7a878a2693b6dc3c6126bd5064f844e9` remains retained
 
 - carries the complete final standalone reviewer terminal JSON object through
   ordinary, reentry, private-attribute and reentry-private-attribute review
@@ -25,10 +56,9 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   exact declared full Phase B module command passed all 1155 tests in 267.74s.
   Production and test SHA256 values remained unchanged throughout the full run
 - keeps the existing recognized verdict branches and PR #1291/#1292/#1294/#1295
-  lifecycle authority. RRT remains the sole CURRENT queue row and RR is
-  immediately NEXT as the policy consumer, followed by IB1/IB2 and every later
-  task in order, Mu production before optimization. Independent review and
-  native same-wave governance/landing remain pending
+  lifecycle authority. RRT is LANDED; existing RR is the sole CURRENT policy
+  consumer, followed by IB1/IB2 and every later task in order, Mu production
+  before optimization. Its transport remains unchanged in RR reconstruction
 
 ### Preserved P0IBRRC Reentry-Private Checkpoint Handoff R2 (Landed)
 

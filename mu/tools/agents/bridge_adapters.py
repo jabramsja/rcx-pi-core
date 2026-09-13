@@ -29,10 +29,74 @@ class BridgeAdapterError(RuntimeError):
         *,
         output: str | None = None,
         returncode: int | None = None,
+        raw_stdout: str | None = None,
+        raw_stderr: str | None = None,
     ) -> None:
         super().__init__(message)
         self.output = output
         self.returncode = returncode
+        self.raw_stdout = raw_stdout
+        self.raw_stderr = raw_stderr
+        self.provider_refusal: CodexProviderSafetyRefusal | None = None
+
+
+CODEX_PROVIDER_SAFETY_REFUSAL = "CODEX_PROVIDER_SAFETY_REFUSAL"
+_CODEX_SAFETY_REFUSAL_MESSAGE = (
+    "This content was flagged for possible cybersecurity risk. If this seems wrong, "
+    "try rephrasing your request. To get authorized for security work, join the "
+    "Trusted Access for Cyber program: https://chatgpt.com/cyber"
+)
+
+
+@dataclass(frozen=True)
+class CodexProviderSafetyRefusal:
+    """Producer-bound evidence from a failed Codex reviewer process, not prose."""
+
+    job_id: str
+    turn_id: str
+    agent_role: str
+    provider: str
+    returncode: int
+    raw_stdout: str
+    raw_stderr: str
+    error_line: int
+    failed_line: int
+
+
+def _codex_refusal_chronology(stdout: str) -> tuple[int, int] | None:
+    """Match only the observed final direct error / turn.failed JSONL pair."""
+    def strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"invalid JSON constant: {value}")
+
+    events: list[tuple[int, dict[str, Any]]] = []
+    try:
+        # Physical lines retain the original evidence coordinates.
+        for number, line in enumerate(stdout.split("\n"), 1):
+            if not line.strip():
+                continue
+            event = json.loads(line, object_pairs_hook=strict_object, parse_constant=reject_constant)
+            if not isinstance(event, dict):
+                return None
+            events.append((number, event))
+    except (ValueError, RecursionError):
+        return None
+    if len(events) < 2:
+        return None
+    error, failed = events[-2:]
+    if (
+        error[1] != {"type": "error", "message": _CODEX_SAFETY_REFUSAL_MESSAGE}
+        or failed[1] != {"type": "turn.failed", "error": {"message": _CODEX_SAFETY_REFUSAL_MESSAGE}}
+    ):
+        return None
+    return error[0], failed[0]
 
 
 @dataclass(frozen=True)
@@ -1108,6 +1172,8 @@ def _run_adapter_buffered(
             f"Adapter '{spec.name}' exited {proc.returncode}. Output tail:\n{snippet}",
             output=output,
             returncode=proc.returncode,
+            raw_stdout=stdout_buf.getvalue(),
+            raw_stderr=stderr_text,
         )
     return output
 
@@ -1367,6 +1433,8 @@ def _run_adapter_streaming(
             f"Adapter '{spec.name}' exited {proc.returncode}. Output tail:\n{snippet}",
             output=output,
             returncode=proc.returncode,
+            raw_stdout=stdout_buf.getvalue(),
+            raw_stderr=stderr_text,
         )
     return output
 
@@ -1408,8 +1476,9 @@ def run_adapter(
     }
     cmd, env = _prepare_adapter_env(spec, context)
 
-    if stream:
-        return _run_adapter_streaming(
+    runner = _run_adapter_streaming if stream else _run_adapter_buffered
+    try:
+        return runner(
             spec,
             cmd,
             env,
@@ -1421,15 +1490,18 @@ def run_adapter(
             stop_after_envelope,
             post_result_exit_timeout_s,
         )
-    return _run_adapter_buffered(
-        spec,
-        cmd,
-        env,
-        prompt_text,
-        repo_root,
-        raw_output_path,
-        zero_output_timeout_s,
-        stale_timeout_s,
-        stop_after_envelope,
-        post_result_exit_timeout_s,
-    )
+    except BridgeAdapterError as exc:
+        if (
+            spec.name == "codex" and "--json" in cmd and agent_role == "reviewer"
+            and type(exc.returncode) is int and exc.returncode != 0
+            and isinstance(exc.raw_stdout, str) and job_id and turn_id
+        ):
+            chronology = _codex_refusal_chronology(exc.raw_stdout)
+            if chronology is not None:
+                exc.provider_refusal = CodexProviderSafetyRefusal(
+                    job_id=job_id, turn_id=turn_id, agent_role=agent_role,
+                    provider=spec.name, returncode=exc.returncode,
+                    raw_stdout=exc.raw_stdout, raw_stderr=exc.raw_stderr or "",
+                    error_line=chronology[0], failed_line=chronology[1],
+                )
+        raise
