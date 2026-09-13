@@ -6,12 +6,56 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-13
 
-### P0T1 Terminal Identity and QUESTION Journaling R2 (Phase B, CURRENT)
+### P0T2 Landed Private-Review Durability Evidence (Phase B, CURRENT)
 
-- reconstructs the three locked R1 source/test files on landed IB2/PR #1300
+- documents existing P0L round-2 findings 5/6 and subsumed P0C on exact
+  PR #1301 merge `8e7c32a1438c21d47337ad16c77e9cec4bcb5ab6`. Implementation
+  credit belongs to ancestor PR #1291
+  (`fdfc58d52c717785a5696a8c3d36f9c934ee0030`) for prepared byte/mode/blob
+  review authority, PR #1294 (`cdf2e02507cde0a3f1909ed00177ab1c474155a9`)
+  for pre-actor ownership and sealed success, and PR #1295
+  (`e8bb22ee251c5bf81f7ca6d98651fd507e508257`) for reentry-private
+  findings/runtime context retention. This MAINTENANCE wave changes no
+  production or test bytes and adds no queue position
+- the declared existing focused command passed again during class reconciliation:
+  **28 tests, 1184 deselected in 53.70s, exit 0**, including all parametrizations. The
+  [closure report](reports/control_plane/pr1219-p0t2-private-review-closure-r1-2026-09-13_closure.md)
+  maps current guards/callers and tests to the retained requirements.
+  Ambiguous IN_FLIGHT fails closed without actor replay; sealed-success
+  continuation preserves owed fresh review. Historical inline fault scripts
+  and the old P0C max_bridge_rounds=2 transcript were not independently
+  replayed; no exhaustive crash or broader private-review proof is claimed
+- explicitly declares `MAINTENANCE` in the governing packet header and canonical
+  same-wave tracker note, including maintenance no-op/defer metadata. The native
+  package reader uses that header for regeneration, matching the launch-bound
+  specification, rich queue selector row and closure report
+- synchronizes the live queue owners and native tracker notes: P0T1 row 34
+  LANDED PR #1301, rich P0T2 row 35 CURRENT until native landing, P0T3
+  immediately NEXT, then P0T4/P0R2/P1-P5 and all remaining recorded work,
+  Mu production before optimization. Native indicator collection, independent
+  reviews and commit/CI/merge remain outer-executor work. Held TASKS
+  `8271020746511cb9a7917f584dc23766660072de`, older stashes/stopped carriers,
+  open stopped PR #1284/#1298 and consumed fleet 1 MOVED / 3 INCOMPLETE /
+  407 prior HOLDs remain preserved. The late P0T1 bootstrap-exception review
+  stays deferred/nonblocking; post-retirement pager fallback belongs to P0R2
+
+### P0T1 Terminal Identity and QUESTION Journaling R2 (Landed)
+
+- landed through PR #1301 at
+  `8e7c32a1438c21d47337ad16c77e9cec4bcb5ab6` on 2026-09-13T19:35:02Z,
+  from final head `0fe48c3a1754d396fb9ef70683b8dd8c4f83ef3f`. The preserved
+  terminal observation records native exit 0 at 19:38:37Z, exact
+  PRIMARY/origin/dev/remote equality, absent owners and retired carrier.
+  All seven final-head CI checks succeeded; green-gate run `34777230279`,
+  job `103777456749`, passed 11689 tests with 22 skipped and 6 warnings in
+  702.90s, plus separate 1/515/149 passing gates. These are historical results
+  for this exact head. The final review request returned no clearance within
+  59s before native clean-head/CI merge policy proceeded; the late 19:44:33Z
+  bootstrap-exception review is not premerge approval
+- initially reconstructed the three locked R1 source/test files on landed IB2/PR #1300
   merge `3ed23cf38edc47eb13e23e5471016f810467b79f`. The Phase B executor,
-  its complete test module and the existing dispatch fixture exactly match
-  the preserved SHA256 values; no additional production repair is introduced
+  its complete test module and the existing dispatch fixture exactly matched
+  the preserved SHA256 values at initial reconstruction
 - binds terminal recovery to the contained bus, canonical contained plan,
   wave and existing invocation. Safe plan aliases retain founder authority;
   foreign identity is refused without erasing the checkpoint. Accepted
@@ -21,25 +65,29 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   output without a final newline. On the same final Phase B test bytes, R1's
   12 failed / 1200 passed became 1212 passed in 287.03s after native reentry
   `3c97c9f1`; those results are historical evidence
-- includes only native `4bae8b05`'s required dispatch mock repair: accept,
+- initial reconstruction included native `4bae8b05`'s required dispatch mock repair: accept,
   assert callable and invoke `on_result`, retaining all 11 supervisor package
   fields and Codex reader routing. Its historical target failed in 1.83s,
   then the complete dispatch module passed 748 tests in 244.16s. R1 stopped
   because its immutable allowlist excluded this fixture; commit
   `723d0a865f860c98f48b0b41bfcc6e9ed373df46` remains preserved and unmerged,
   with no PR. R2 includes the fixture in scope and complete-module validation
-- fresh R2 validation passed both complete modules: 1960 tests in 340.59s,
+- initial fresh R2 validation passed both complete modules: 1960 tests in 340.59s,
   exit0, using the declared four-worker command with `PYTHONHASHSEED=0`,
   bytecode writes disabled and ordinary external OS temporary fixtures.
-  All three source/test files retain their locked reconstruction hashes
-- retains existing P0T1 row34 as sole CURRENT and P0T2 NEXT with its
-  current-base coverage note crediting landed PR #1291/#1294/#1295 private
-  review protections. All queue/todo identities and order, stopped PR
-  #1284/#1298, held TASKS `0474aa283fac1d1346c57361fd47fafa10152146` and
-  older evidence remain preserved. The original eight PR closures remain
-  preservation/reconstruction dispositions; consumed fleet never replays,
-  and Mu production remains before optimization. Fresh R2 independent review
-  and landing remain outer-executor work
+  That result binds the initial three-file reconstruction, not every later
+  follow-up. Same-PR changes normalized routing aliases, durably retained
+  rendered questions and isolated timeout fixtures after actual inherited
+  5400-second failures. Final-head native gates and CI above cover that final
+  candidate; no additional final local full-suite count is invented
+- completes existing P0T1 row 34. P0T2 row 35 remains CURRENT pending its
+  native closure merge, with P0T3 immediately NEXT and all later identities
+  and order retained. Held TASKS `8271020746511cb9a7917f584dc23766660072de`
+  and every older stash/stopped carrier remain preserved, including stopped
+  PR #1284/#1298. The original eight PR closures remain preservation and
+  reconstruction dispositions; consumed fleet never replays, and Mu production
+  remains before optimization. Predecessor evidence is in PRIMARY's
+  `reports/archive/control_plane/p0t1-terminal-identity-r2-evidence-2026-09-13/terminal_closeout_observation.json`
 
 ### P0IB2 Commit-Time Candidate Inventory (Landed)
 
@@ -66,8 +114,8 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   scope, required authority, stale receipts, missing generated index artifacts,
   index drift, optional legacy paths and candidate/ambient-module nonexecution
   under both bytecode settings. The shared builder is unchanged
-- completes the existing unnumbered IB2 baton, with P0T1 sole CURRENT,
-  P0T2 next and every other queue identity/order retained. No
+- completed the existing unnumbered IB2 baton; at that landing, P0T1 became
+  sole CURRENT with P0T2 next and every other queue identity/order retained. No
   runtime/substrate changes or debt reduction are attributed to this wave
 
 ### P0IB1 Recovery Authority R2 Preserved Bytecode Repair (Landed)
@@ -104,8 +152,9 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   streamed output. The retained tests force both bytecode settings, verify the
   producer receipt before the existing consumer can rebuild it, and retain
   required-authority, legacy, candidate-code nonexecution and receipt controls
-- existing IB1 row33 is LANDED, the retained unnumbered IB2 baton is sole
-  CURRENT, P0T1 is next, all114 queue identities/order retained and Mu before optimization.
+- at IB1's landing, existing row33 became LANDED, the retained unnumbered IB2
+  baton became sole CURRENT and P0T1 was next; all114 queue identities/order
+  were retained and Mu remained before optimization.
   PR #1298 remains OPEN stopped evidence; its branch/worktree/logs and held
   TASKS stash `c5c096f235692045998e37c36533e89c0b84220a` remain preserved.
   Held overlapping TASKS stash `2c5be99d4dfecac3cd9bcc75ad08ccbb0fcd03c1`
