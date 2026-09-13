@@ -6,7 +6,38 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-13
 
-### P0IB1 Recovery Authority R2 Preserved Bytecode Repair (Phase B, CURRENT)
+### P0IB2 Commit-Time Candidate Inventory (Phase B, CURRENT)
+
+- binds the candidate after native Step 5/5e settlement to the existing shared
+  authority builder before supervisor packaging, using the selected bus's
+  launch-bound spec and exact comparison commit. The builder and routing reader
+  load from committed executor source; candidate Python cannot approve itself
+- verifies the same reviewed receipt and current index without preparation or
+  restaging immediately before git commit. Existing receipt-chain validation,
+  hooks, private-review integrity, ownership and no-replay checks remain active;
+  legacy routes without configured authority retain their optional behavior
+- public-entry baseline on IB1 merge `56cb682c1d440b776496aa00d49f499dfcfa69b9`
+  reproduced the missing finalized-candidate receipt: 9 failed / 306 passed.
+  Current production/test postimages passed all 318 tests in 34.08s using the
+  declared complete two-module command, four workers and external OS temp
+  fixtures. Public controls cover finalized generated governance, exact-base
+  scope, required authority, stale receipts, missing generated index artifacts,
+  index drift, optional legacy paths and candidate/ambient-module nonexecution
+  under both bytecode settings. The shared builder is unchanged
+- retains the existing unnumbered IB2 baton as sole CURRENT, P0T1 next, and
+  every other queue identity/order. No runtime/substrate changes or debt
+  reduction are claimed; native landing remains outer-executor work
+
+### P0IB1 Recovery Authority R2 Preserved Bytecode Repair (Landed)
+
+- landed through PR #1299 at `56cb682c1d440b776496aa00d49f499dfcfa69b9`,
+  final head `eb525d891b9be3bfaf50f0b05e2e359c1b652d6e`. The predecessor
+  closeout records native success and exact PRIMARY/origin/dev/remote equality.
+  The original 900-second CI wait completed through the existing receipt-bound
+  native continuation; it added no wave or prerequisite. The same PR's final
+  repair replaced candidate Phase B imports with committed task/scope readers.
+  All seven final-head checks passed, including 11619 tests / 22 skipped and
+  the separate 1/515/149-test gates
 
 - restored only the preserved `recovery_gate.py` and `test_recovery_gate.py`
   postimages on exact PR #1297 merge
@@ -31,12 +62,14 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   streamed output. The retained tests force both bytecode settings, verify the
   producer receipt before the existing consumer can rebuild it, and retain
   required-authority, legacy, candidate-code nonexecution and receipt controls
-- existing IB1 row33 remains sole CURRENT under the R2 packet, IB2 immediately
-  NEXT, all114 queue identities/order retained and Mu before optimization.
+- existing IB1 row33 is LANDED, the retained unnumbered IB2 baton is sole
+  CURRENT, P0T1 is next, all114 queue identities/order retained and Mu before optimization.
   PR #1298 remains OPEN stopped evidence; its branch/worktree/logs and held
   TASKS stash `c5c096f235692045998e37c36533e89c0b84220a` remain preserved.
-  Native reviews, generated indicator, governance, CI, merge and PRIMARY
-  fast-forward remain outer-executor work
+  Held overlapping TASKS stash `2c5be99d4dfecac3cd9bcc75ad08ccbb0fcd03c1`
+  and all older stopped/held evidence remain preserved. The initial 1456-test
+  result above predates the final committed-reader repair; final-head native
+  and CI evidence is recorded in the predecessor closeout
 
 ### P0IBRR Reviewer-Refusal R2 Bounded Reconstruction (Landed)
 

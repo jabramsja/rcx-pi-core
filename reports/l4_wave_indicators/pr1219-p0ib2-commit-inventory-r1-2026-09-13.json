@@ -1,0 +1,25 @@
+{
+  "wave_id": "pr1219-p0ib2-commit-inventory-r1-2026-09-13",
+  "repeat_run_speedup_ratio": 0.993401,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.316397,
+  "repeat_run_raw_seconds": [
+    0.314309,
+    0.316397
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.314309
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.630706
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-13T11:25:13Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9"
+}

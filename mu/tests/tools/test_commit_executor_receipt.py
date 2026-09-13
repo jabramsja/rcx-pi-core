@@ -12,8 +12,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
+import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -37,6 +40,10 @@ pager_mod = load_module(
 recovery_gate_mod = load_module(
     "recovery_gate_for_commit_executor_receipt_tests",
     REPO_ROOT / "mu" / "tools" / "executors" / "recovery_gate.py",
+)
+candidate_authority_mod = load_module(
+    "candidate_authority_for_commit_receipt_tests",
+    REPO_ROOT / "mu" / "tools" / "executors" / "candidate_authority.py",
 )
 
 
@@ -1998,6 +2005,298 @@ class TestSupervisorReceiptIsAuthority:
         assert result["step"] == "review_mode_guard"
         assert any("agent review mode" in err for err in result["errors"])
         assert pager_calls == []
+
+
+def _commit_inventory_fixture(tmp_path, *, generated=True, authority_required=True):
+    """Native commit mutations in an external temp repo, with launch-owned truth.
+
+    Only the supervisor response is supplied. Git, packet/tracker settlement,
+    Step 5e, affected tests, private-attribute policy and receipt verification run.
+    The minimal repo has no L4 checker, an existing optional builder contract.
+    """
+    repo = _setup_repo(tmp_path)
+    bus = ".agent_bus-commit-inventory"
+    wave = "commit-inventory-wave"
+    packet = "reports/control_plane/commit_inventory.md"
+    indicator = f"reports/l4_wave_indicators/{wave}.json"
+    growth = "mu/tests/docs/test_growth_caps.py"
+    new_test = "mu/tests/generated/test_inventory_case.py"
+    candidate_module = "mu/tools/executors/candidate_authority.py"
+    (repo / ".gitignore").write_text(".agent_bus*/\n.scratch/\n__pycache__/\n.pytest_cache/\n")
+    (repo / candidate_module).parent.mkdir(parents=True, exist_ok=True)
+    (repo / candidate_module).write_text("# original candidate source\n")
+    collector = repo / "mu/tools/metrics/collect_l4_wave_indicators.py"
+    collector.write_text(
+        collector.read_text()
+        + f"counter = pathlib.Path({bus!r}) / 'collections'\n"
+        + "counter.parent.mkdir(parents=True, exist_ok=True)\n"
+        + "counter.write_text(str(int(counter.read_text()) + 1) if counter.exists() else '1')\n"
+        + "out.write_text(json.dumps({'wave_id': a.wave_id, 'collection': int(counter.read_text())}))\n"
+    )
+    _seed_growth_cap_repo_for_test(repo)
+    base = _inventory_git(repo, "rev-parse", "HEAD")
+    _write_governance_packet_for_test(repo, wave, packet)
+    (repo / "file.py").write_text("# candidate code\n")
+    # Neither a candidate copy nor an ambient module may approve this candidate.
+    (repo / candidate_module).write_text("raise AssertionError('candidate authority executed')\n")
+    changed = ["file.py", candidate_module, packet]
+    if generated:
+        (repo / new_test).parent.mkdir(parents=True, exist_ok=True)
+        (repo / new_test).write_text("def test_inventory_case():\n    assert 2 + 2 == 4\n")
+        changed.append(new_test)
+    spec = candidate_authority_mod.CandidateAuthoritySpec.from_mapping({
+        "wave_id": wave,
+        "comparison_commit": base,
+        "candidate_allowlist": [*changed, "TASKS.md", growth, indicator],
+        "plan_path": packet,
+        "phase": "phase_b",
+        "review_round": "prepare-review",
+        "indicator_artifact_ref": indicator,
+        "indicator_collection_command": (
+            "python3 mu/tools/metrics/collect_l4_wave_indicators.py "
+            f"--wave-id {wave} --output {indicator}"
+        ),
+        "reviewer_agent": "codex",
+    })
+    bus_root = repo / bus
+    bus_root.mkdir(exist_ok=True)
+    (bus_root / "bridge_config.json").write_text(json.dumps({
+        "agents": {"codex": {"display_name": "Codex", "cmd": [
+            "codex", "exec", "-", "--json", "-m", "gpt-6-astra",
+            "-c", 'model_reasoning_effort="max"',
+        ]}},
+    }))
+    spec_path = candidate_authority_mod.write_authority_spec(repo, spec, bus_dir=bus)
+    route = {
+        "decision": "ROUTE_PHASE_B", "summary": "locked commit inventory fixture",
+        "wave_name": wave,
+        "next_candidates": [{"tracked_packet": packet}],
+        "candidate_authority_required": authority_required,
+        "candidate_authority": {
+            "required": authority_required, "precommit_inventory": True,
+            "spec_path": str(spec_path),
+            "spec_identity": candidate_authority_mod.authority_spec_identity(
+                repo, spec, authority_required=authority_required,
+            ),
+        },
+    }
+    route_path = bus_root / "meta/post_merge_routing.json"
+    route_path.write_text(json.dumps(route))
+    initial = candidate_authority_mod.prepare_candidate_authority(repo, spec, bus_dir=bus)
+    initial_receipt = Path(initial["receipt_path"]).read_bytes()
+    handoff_receipt = f"{bus}/meta/phase_b_receipt.json"
+    (repo / handoff_receipt).write_text(json.dumps({"decision": "COMMIT_GO"}))
+    handoff = _make_new_schema_handoff(
+        wave_id=wave, files_to_stage=changed, tracked_packet=packet,
+        scope_items=changed, pre_commit_receipt_path=handoff_receipt,
+        evidence_handles={"indicator": indicator, "pre_commit_receipt": handoff_receipt},
+        tracker_note_text=_with_founder_override(
+            _make_new_schema_handoff(wave_id=wave)["tracker_note_text"], wave,
+        ),
+    )
+    return SimpleNamespace(
+        repo=repo, bus=bus, wave=wave, packet=packet, indicator=indicator,
+        growth=growth, spec=spec, spec_path=spec_path, route_path=route_path,
+        handoff=handoff, initial_receipt=initial_receipt, base=base,
+        generated=generated,
+    )
+
+
+def _inventory_git(repo, *args):
+    return subprocess.run(
+        ["git", *args], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
+def _run_inventory_commit(case, monkeypatch, tmp_path, *, drift="", expect_authority=True):
+    """Supply a supervisor and exercise the public entry through a real commit."""
+    import types
+    from datetime import datetime, timezone
+
+    captured = {}
+    snapshot = tmp_path / "after_hook.json"
+    receipt_rel = f"{case.bus}/meta/pre_commit_receipt.json"
+    authority_path = candidate_authority_mod.receipt_path_for(
+        case.repo, bus_dir=case.bus, wave_id=case.wave,
+        phase="commit", review_round="pre-supervisor",
+    )
+    # Run the shipped receipt verifier at Step 8 and as the real git hook.
+    verifier = REPO_ROOT / "mu/tools/agents/verify_pre_commit_receipt.py"
+    verify_command = f"python3 {shlex.quote(str(verifier))}\n"
+    git_hook = case.repo / ".git/hooks/pre-commit"
+    git_hook.write_text("#!/bin/bash\nset -e\n" + verify_command)
+    git_hook.chmod(0o755)
+    hook = case.repo / "mu/tools/hooks/pre-commit-doc-check"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    # Keep fixture policy scripts ignored; they are external test seams, not
+    # part of the exact-base candidate or a relaxation of its launch allowlist.
+    exclude = case.repo / ".git/info/exclude"
+    exclude.write_text(exclude.read_text() + "\n/mu/tools/hooks/pre-commit-doc-check\n")
+    mutation = {
+        "stale_receipt": f"Path({str(authority_path)!r}).write_bytes({case.initial_receipt!r})",
+        "outside_allowlist": "Path('outside.txt').write_text('unreviewed residue\\n')",
+        "missing_generated": (
+            f"subprocess.run(['git', 'rm', '--cached', '--', {case.growth!r}], check=True)"
+        ),
+        "index_drift": (
+            "Path('file.py').write_text('# post-review change\\n')\n"
+            "subprocess.run(['git', 'add', '--', 'file.py'], check=True)"
+        ),
+    }.get(drift, "pass")
+    hook.write_text(
+        "#!/bin/bash\nset -e\n" + verify_command + "python3 - <<'PY'\n"
+        "import hashlib, json, subprocess\nfrom pathlib import Path\n"
+        + mutation + "\n"
+        + "state = {'diff': subprocess.check_output(['git', 'diff', '--cached', '--binary']).hex(), "
+        + f"'collections': Path({case.bus + '/collections'!r}).read_text(), "
+        + "'files': {p.as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() "
+        + "for p in [Path('file.py'), Path('outside.txt'), "
+        + f"Path({case.growth!r}), Path({case.indicator!r}), Path({str(authority_path)!r})] "
+        + "if p.is_file()}}\n"
+        + f"Path({str(snapshot)!r}).write_text(json.dumps(state))\nPY\n"
+    )
+
+    def supervisor(package_path, **kwargs):
+        package = json.loads(Path(package_path).read_text())
+        captured.update(package)
+        assert str(kwargs["bus_dir"]) == case.bus
+        assert "## Commit Path Truth Refresh" in (case.repo / case.packet).read_text()
+        assert case.indicator in package["changed_files"]
+        assert "TASKS.md" in package["changed_files"]
+        if case.generated:
+            assert case.growth in package["changed_files"]
+            assert case.growth in package["scope_items"]
+            assert f"FOUNDER_OVERRIDE:{case.wave}" in (case.repo / case.growth).read_text()
+        if expect_authority:
+            phase_b_receipt = candidate_authority_mod.receipt_path_for(
+                case.repo, bus_dir=case.bus, wave_id=case.wave,
+                phase="phase_b", review_round="prepare-review",
+            )
+            with pytest.raises(candidate_authority_mod.CandidateAuthorityError, match="stale"):
+                candidate_authority_mod.verify_current_receipt(
+                    case.repo, phase_b_receipt, trusted_spec=case.spec,
+                )
+            handle = package["evidence_handles"].get("candidate_authority_receipt")
+            assert handle, "finalized Step 5/5e candidate has no shared authority receipt"
+            verified = candidate_authority_mod.verify_current_receipt(
+                case.repo, case.repo / handle, trusted_spec=case.spec,
+                phase="commit", review_round="pre-supervisor",
+            )
+            receipt = verified["receipt"]
+            assert receipt["comparison_commit"] == case.base
+            assert receipt["index_tree_hash"] == _inventory_git(case.repo, "write-tree")
+            assert receipt["reviewer_agent"] == "codex"
+            assert receipt["staged_literal_base_inventory"] == (
+                candidate_authority_mod.collect_staged_literal_base_inventory(case.repo, case.base)
+            )
+            if case.generated:
+                assert case.growth in {e["path"] for e in receipt["staged_literal_base_inventory"]}
+            captured["authority_bytes"] = (case.repo / handle).read_bytes()
+        else:
+            assert "candidate_authority_receipt" not in package["evidence_handles"]
+        (case.repo / receipt_rel).write_text(json.dumps({
+            "decision": "COMMIT_GO_HOLD_PUSH",
+            "staged_sha": meta_bridge_mod.compute_staged_sha(case.repo),
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        }))
+        return SimpleNamespace(
+            decision="COMMIT_GO_HOLD_PUSH", summary="reviewed fixture", receipt_path=receipt_rel,
+        )
+
+    client = types.ModuleType("meta_bridge_client")
+    client.run_meta_bridge_package = supervisor
+    client.MetaBridgeClientError = Exception
+    monkeypatch.setitem(sys.modules, "meta_bridge_client", client)
+    result = commit_mod.run_commit_pipeline(
+        case.handoff, repo_root=case.repo, bus_dir=case.bus,
+    )
+    return result, captured, snapshot
+
+
+class TestCommitCandidateInventory:
+    @pytest.mark.parametrize("generated", [False, True])
+    @pytest.mark.parametrize("bytecode_enabled", [False, True])
+    def test_finalized_candidate_is_bound_before_supervisor(
+        self, tmp_path, monkeypatch, generated, bytecode_enabled,
+    ):
+        case = _commit_inventory_fixture(tmp_path, generated=generated)
+        monkeypatch.setattr(sys, "dont_write_bytecode", not bytecode_enabled)
+        ambient_authority = SimpleNamespace(
+            prepare_candidate_authority=lambda *a, **kw: pytest.fail("ambient authority executed"),
+            verify_current_receipt=lambda *a, **kw: pytest.fail("ambient authority executed"),
+        )
+        monkeypatch.setitem(sys.modules, "candidate_authority", ambient_authority)
+        result, package, snapshot = _run_inventory_commit(case, monkeypatch, tmp_path)
+        assert result["status"] == "held", result
+        assert "git_commit" in result["steps_completed"]
+        assert "validate_receipt" in result["steps_completed"]
+        assert "verify_commit_candidate_authority" in result["steps_completed"]
+        assert _inventory_git(case.repo, "show", "HEAD:file.py") == "# candidate code"
+        assert json.loads(snapshot.read_text())["collections"] == (case.repo / case.bus / "collections").read_text()
+        assert (case.repo / package["evidence_handles"]["candidate_authority_receipt"]).read_bytes() == package["authority_bytes"]
+        assert sys.dont_write_bytecode is not bytecode_enabled
+        assert sys.modules["candidate_authority"] is ambient_authority
+        assert not list((case.repo / "mu/tools/executors").rglob("*.pyc"))
+
+    @pytest.mark.parametrize("drift, diagnostic", [
+        ("stale_receipt", "receipt"),
+        ("outside_allowlist", "outside allowlist"),
+        ("missing_generated", "receipt"),
+        ("index_drift", "receipt"),
+    ])
+    def test_final_gate_rejects_drift_without_repair(self, tmp_path, monkeypatch, drift, diagnostic):
+        case = _commit_inventory_fixture(tmp_path)
+        result, _package, snapshot = _run_inventory_commit(case, monkeypatch, tmp_path, drift=drift)
+        assert result["status"] == "error", result
+        assert result["step"] == "verify_commit_candidate_authority", result
+        assert diagnostic in " ".join(result["errors"])
+        assert "run_pre_commit_script" in result["steps_completed"]
+        assert "git_commit" not in result["steps_completed"]
+        state = json.loads(snapshot.read_text())
+        assert _inventory_git(case.repo, "rev-parse", "HEAD") == case.base
+        assert subprocess.check_output(
+            ["git", "diff", "--cached", "--binary"], cwd=case.repo,
+        ).hex() == state["diff"]
+        assert (case.repo / case.bus / "collections").read_text() == state["collections"]
+        for path, digest in state["files"].items():
+            assert hashlib.sha256((case.repo / path).read_bytes()).hexdigest() == digest
+        if drift == "missing_generated":
+            assert (case.repo / case.growth).exists()
+            assert not _inventory_git(case.repo, "ls-files", "--", case.growth)
+
+    @pytest.mark.parametrize("committed", [False, True])
+    def test_exact_base_scope_failure_precedes_supervisor(self, tmp_path, monkeypatch, committed):
+        case = _commit_inventory_fixture(tmp_path, generated=False)
+        (case.repo / "outside.txt").write_text("unallowlisted candidate\n")
+        if committed:
+            _inventory_git(case.repo, "add", "--", "outside.txt")
+            _inventory_git(case.repo, "commit", "--only", "-m", "outside launch scope", "--", "outside.txt")
+            assert "outside.txt" not in _inventory_git(case.repo, "diff", "--cached", "--name-only")
+        result, package, _snapshot = _run_inventory_commit(case, monkeypatch, tmp_path)
+        assert result["step"] == "prepare_commit_candidate_authority", result
+        assert "outside allowlist" in " ".join(result["errors"])
+        assert not package
+
+    def test_required_authority_cannot_fall_back_to_handoff_evidence(self, tmp_path, monkeypatch):
+        case = _commit_inventory_fixture(tmp_path, generated=False)
+        case.spec_path.unlink()
+        result, package, _snapshot = _run_inventory_commit(case, monkeypatch, tmp_path)
+        assert result["step"] == "prepare_commit_candidate_authority", result
+        assert not package
+
+    @pytest.mark.parametrize("configured", [False, True])
+    def test_optional_authority_preserves_legacy_semantics(self, tmp_path, monkeypatch, configured):
+        case = _commit_inventory_fixture(tmp_path, generated=False, authority_required=False)
+        if not configured:
+            case.spec_path.unlink()
+            route = json.loads(case.route_path.read_text())
+            route.pop("candidate_authority")
+            case.route_path.write_text(json.dumps(route))
+        result, _package, _snapshot = _run_inventory_commit(
+            case, monkeypatch, tmp_path, expect_authority=configured,
+        )
+        assert result["status"] == "held", result
+        assert "git_commit" in result["steps_completed"]
 
 
 class TestReceiptChainEndToEnd:
