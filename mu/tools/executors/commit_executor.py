@@ -15857,16 +15857,82 @@ def _refresh_post_merge_package_for_next_open_queue(
                 f"{recorded_merge_sha or '<empty>'} != {exact_queue_commit}"
             )
         merge_sha = exact_queue_commit
-    entry = _next_open_founder_ordered_queue_entry(
-        repo_root,
-        queue_commit_sha=exact_queue_commit,
-    )
-    queue_task_id = "[NEXT-CODEX-POST-REDTEAM]"
     pr_number_raw = result.get("pr_number")
     try:
         merged_pr = int(pr_number_raw)
     except (TypeError, ValueError):
         merged_pr = 0
+
+    lifecycle_pending = result.get("pr_replacement_ownership")
+    lifecycle_hold = result.get("pr_replacement_ownership_hold")
+    if lifecycle_pending or lifecycle_hold:
+        # Landing this CLI/manifest does not complete its live dispositions.
+        # The supervisor carries next_candidates into the routing record, but
+        # drops package-only lifecycle fields. Keep the owner and commands in
+        # that candidate and in the request consumed by Phase A.
+        lifecycle_wave = f"{handoff['wave_id']}-live-disposition"
+        owner_packet = handoff.get("plan_path") or handoff.get("tracked_packet")
+        lifecycle_context = {
+            "owner": {
+                "task_id": handoff.get("task_id"),
+                "wave_id": handoff["wave_id"],
+                "packet": owner_packet,
+            },
+            "repo_root": str(repo_root),
+            "authority_commit": merge_sha,
+            "manifest_path": f"reports/control_plane/{handoff['wave_id']}_coverage.json",
+            "pr_lifecycle_dispositions": copy.deepcopy(lifecycle_pending or []),
+            "pr_lifecycle_hold": lifecycle_hold,
+        }
+        summary = (
+            "Keep live PR dispositions CURRENT under their recorded owners; "
+            "implementation landing did not complete these outcomes."
+        )
+        request = (
+            "Continue only the recorded live PR dispositions from the surviving "
+            "repository and committed authority below. Reconcile ownership HOLDs "
+            "before applying affected dispositions; retain each target's owner, "
+            "errors, and exact lifecycle-plan/apply/verify commands. Never replay "
+            "consumed mutations or relaunch the landed implementation packet. "
+            "Keep this task CURRENT and Fleet queued until live outcomes are "
+            "verified. Lifecycle context:\n"
+            + json.dumps(lifecycle_context, indent=2)
+        )
+        candidate = {
+            "candidate": lifecycle_wave,
+            "bounded": True,
+            # The landed implementation packet may be LOCKED or completed;
+            # it is owner context, not a routable implementation candidate.
+            "tracked_packet": None,
+            "summary": summary,
+            "request_for_agent": request,
+            "request_for_claude": request,
+            **lifecycle_context,
+        }
+        package = {
+            "task_id": handoff.get("task_id"), "merged_pr": merged_pr,
+            "merge_sha": merge_sha, "wave_name": lifecycle_wave,
+            "lane": "committed native PR disposition pending",
+            "next_candidates": [candidate], "deferred_items": [], "blocker_report_paths": [],
+            "rollout_packet_path": owner_packet,
+            "tracker_state_summary": "Implementation landed; live PR outcomes remain incomplete under the current task owner.",
+            "pr_lifecycle_dispositions": lifecycle_pending or [],
+            "pr_lifecycle_hold": lifecycle_hold,
+        }
+        package_path = agent_bus_path(repo_root, _active_bus_dir(), "meta", "post_merge_package.json")
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+        result.update(post_merge_package_path=str(package_path.relative_to(repo_root)),
+                      post_merge_next_wave=lifecycle_wave,
+                      post_merge_next_hard_stop=True, post_merge_queue_empty=False)
+        log("Live PR disposition remains CURRENT; committed commands and target owners retained")
+        return package
+
+    entry = _next_open_founder_ordered_queue_entry(
+        repo_root,
+        queue_commit_sha=exact_queue_commit,
+    )
+    queue_task_id = "[NEXT-CODEX-POST-REDTEAM]"
 
     package_path = agent_bus_path(
         repo_root,
@@ -16024,7 +16090,95 @@ def _refresh_post_merge_package_for_next_open_queue(
     return package
 
 
+def record_commit_pr_lifecycle(
+    repo_root: Path, *, handoff: dict[str, Any], result: dict[str, Any],
+    target_branch: str, state: str, detail: str,
+) -> dict[str, Any] | None:
+    """Keep an ensured PR owned even when commit stops or its lane is retired."""
+    number = str(result.get("pr_number") or "")
+    if not number:
+        return None
+    if not number.isdigit():
+        raise ValueError("native lifecycle PR number is invalid")
+    binding = result.get("pr_lifecycle")
+    if not isinstance(binding, dict):
+        common_dir = _git_common_dir(repo_root)
+        if common_dir is None:
+            raise ValueError("native PR lifecycle common directory is unresolved")
+        head = str(result.get("commit_sha") or "")
+        if not re.fullmatch(r"[0-9a-f]{40}", head):
+            head = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+        binding = {
+            "common_dir": str(common_dir), "head": head, "branch": target_branch,
+            "owner": {"task_id": str(handoff.get("task_id") or handoff["wave_id"]),
+                      "wave_id": handoff["wave_id"], "packet": str(handoff.get("plan_path") or handoff.get("tracked_packet") or "")},
+        }
+        result["pr_lifecycle"] = binding
+    # Retain each prior head's observation when native conflict/bot work advances
+    # this same PR. An owner is not a claim of remote identity or coverage.
+    head = str(result.get("commit_sha") or binding["head"])
+    observed = _load_pr_disposition_executor_module().record_native_pr_lifecycle(
+        Path(binding["common_dir"]), number=int(number), head=head,
+        branch=binding["branch"], owner=binding["owner"], state=state, detail=detail,
+    )
+    binding.update(head=head, path=observed["path"], state=state)
+    return observed
+
+
 def _run_post_commit_pipeline(
+    *, handoff: dict[str, Any], repo_root: Path, result: dict[str, Any],
+    target_branch: str, base_branch: str, continuation_path: Path, log: Any,
+) -> dict[str, Any]:
+    """Record the ensured PR's terminal ownership on every native return."""
+    returned: dict[str, Any] | None = None
+    try:
+        if result.get("pr_number") and not result.get("pr_lifecycle"):
+            record_commit_pr_lifecycle(
+                repo_root, handoff=handoff, result=result, target_branch=target_branch,
+                state="PENDING", detail="native continuation retains this PR owner",
+            )
+        returned = _run_post_commit_pipeline_impl(
+            handoff=handoff, repo_root=repo_root, result=result,
+            target_branch=target_branch, base_branch=base_branch,
+            continuation_path=continuation_path, log=log,
+        )
+        return returned
+    finally:
+        if result.get("pr_lifecycle"):
+            merge_sha = (returned or {}).get("merge_sha") or result.get("merge_sha")
+            merged = bool(
+                result.get("remote_pr_merged")
+                or (returned or {}).get("remote_pr_merged")
+                or merge_sha
+            )
+            if merged:
+                detail = (
+                    f"merge={merge_sha}" if merge_sha
+                    else "merge_pr.sh succeeded; post-merge verification did not complete"
+                )
+                if returned is not None:
+                    returned["remote_pr_merged"] = True
+            else:
+                detail = str((returned or {}).get("step") or "native commit unwound")
+            try:
+                record_commit_pr_lifecycle(
+                    repo_root, handoff=handoff, result=result, target_branch=target_branch,
+                    state="MERGED" if merged else "STOPPED",
+                    detail=detail,
+                )
+                if returned is not None:
+                    returned["pr_lifecycle"] = result["pr_lifecycle"]
+                    returned.setdefault("pr_number", result.get("pr_number"))
+            except Exception as exc:
+                # The already-durable PENDING owner remains usable. Never report
+                # successful ownership publication if its terminal write failed.
+                if returned is not None:
+                    returned["pr_lifecycle_hold"] = str(exc)
+                    returned.setdefault("warnings", []).append(f"PR lifecycle observation HOLD: {exc}")
+                log(f"PR lifecycle observation HOLD: {exc}")
+
+
+def _run_post_commit_pipeline_impl(
     *,
     handoff: dict[str, Any],
     repo_root: Path,
@@ -16304,6 +16458,15 @@ def _run_post_commit_pipeline(
     else:
         pr_number = str(result.get("pr_number") or pr_number)
         log(f"Step 13: PR #{pr_number or 'unknown'} already ensured, skipping")
+
+    try:
+        record_commit_pr_lifecycle(
+            repo_root, handoff=handoff, result=result, target_branch=target_branch,
+            state="PENDING", detail="native PR ensured; owner retained until verified terminal outcome",
+        )
+    except Exception as exc:
+        return {"status": "error", "step": "pr_lifecycle_owner", "errors": [str(exc)],
+                "pr_number": pr_number, "steps_completed": result["steps_completed"]}
 
     # ── Step 14: wait_ci ──────────────────────────────────────────────
     if "wait_ci" not in result["steps_completed"]:
@@ -16611,6 +16774,11 @@ def _run_post_commit_pipeline(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
+    # Remote merge success precedes local verification. Preserve that fact for
+    # lifecycle finalization even if root resolution, fetch, or ff-only sync
+    # fails before merge_sha can be populated.
+    result["remote_pr_merged"] = True
+
     queue_commit_sha = ""
     terminal_required = _is_pr_disposition_terminal_sweep_wave(
         str(handoff.get("wave_id") or "")
@@ -16687,6 +16855,15 @@ def _run_post_commit_pipeline(
     result["primary_worktree_sync"] = _sync_primary_worktree_to_base(
         repo_root, base_branch, log=log,
     )
+
+    try:
+        result["pr_replacement_ownership"] = _load_pr_disposition_executor_module().record_lifecycle_replacements(
+            verify_root, wave_id=str(handoff.get("wave_id") or ""),
+            authority_commit=str(result.get("merge_sha") or ""),
+        )
+    except Exception as exc:
+        result["pr_replacement_ownership_hold"] = str(exc)
+        log(f"Explicit PR replacement ownership HOLD: {exc}")
 
     terminal_prepared: dict[str, Any] | None = None
     terminal_binding: dict[str, Any] | None = None
@@ -18514,7 +18691,7 @@ def commit_pipeline_impl_source() -> str:
 
 def post_commit_pipeline_source() -> str:
     """Return post-merge source so regressions can pin cleanup/sweep ordering."""
-    return inspect.getsource(_run_post_commit_pipeline)
+    return inspect.getsource(_run_post_commit_pipeline) + inspect.getsource(_run_post_commit_pipeline_impl)
 
 
 def _landed_commit_candidate_authority() -> tuple[Any, Any]:
@@ -18549,6 +18726,112 @@ def _landed_commit_candidate_authority() -> tuple[Any, Any]:
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = original
+
+
+def _committed_auto_deferred_candidate_paths(
+    repo_root: Path,
+    handoff: dict[str, Any],
+    launch_spec: Any,
+) -> list[str]:
+    """Retain an unchanged report authorized by this PR's native child commit.
+
+    Step 15 can add a bot report after the launch allowlist was frozen. A later
+    repair still inventories that clean report against the original base. Only
+    an exact report-only commit, bound to a same-wave bot receipt in the selected
+    bus, supplies continuation authority; packet wording and filenames do not.
+    Missing proof leaves the ordinary outside-allowlist rejection in force.
+    """
+    wave_id = launch_spec.wave_id
+    continuation = _read_continuation_record(_continuation_record_path(repo_root, wave_id))
+    if not continuation:
+        return []
+    pr_number = str(continuation.get("pr_number") or "")
+    target_branch = handoff.get("target_branch")
+    steps = continuation.get("steps_completed")
+    if (
+        continuation.get("version") != COMMIT_CONTINUATION_VERSION
+        or continuation.get("status") != CONTINUATION_ACTIVE_STATUS
+        or continuation.get("receipt_decision") != "COMMIT_GO"
+        or not isinstance(steps, list) or "git_commit" not in steps
+        or not target_branch or continuation.get("target_branch") != target_branch
+        or not re.fullmatch(r"[1-9][0-9]*", pr_number)
+    ):
+        return []
+    report_rel = f"reports/deferred/non_blocking/pr{pr_number}_bot_auto_deferred_{wave_id}.md"
+    if report_rel in launch_spec.candidate_allowlist:
+        return []
+    report = repo_root / report_rel
+    if not report.is_file() or report.resolve() != repo_root.resolve() / report_rel:
+        return []
+    head = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root).stdout.strip()
+    if continuation.get("commit_sha") != head or branch != target_branch:
+        return []
+    # Check index and worktree separately: their edits can cancel against HEAD.
+    for args in (
+        ["git", "diff", "--cached", "--quiet", head, "--", report_rel],
+        ["git", "diff", "--quiet", "--", report_rel],
+    ):
+        if _run(args, cwd=repo_root, check=False).returncode != 0:
+            return []
+    head_entry = _run(["git", "ls-tree", head, "--", report_rel], cwd=repo_root).stdout
+    if not head_entry.startswith("100644 blob ") or report.stat().st_mode & 0o111:
+        return []
+    committed_bytes = subprocess.run(
+        ["git", "show", f"{head}:{report_rel}"], cwd=repo_root,
+        capture_output=True, check=True, timeout=30,
+    ).stdout
+    if report.read_bytes() != committed_bytes:
+        return []
+
+    receipt_hashes: set[str] = set()
+    receipts_dir = agent_bus_path(repo_root, _active_bus_dir(), "meta", "pre_commit_receipts")
+    for receipt_path in receipts_dir.glob("receipt_*.json"):
+        if receipt_path.is_symlink():
+            continue
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (
+            isinstance(receipt, dict)
+            and receipt.get("receipt_type") == "bot_remediation"
+            and receipt.get("decision") == "COMMIT_GO"
+            and receipt.get("wave_id") == wave_id
+            and receipt.get("scoped_files") == [report_rel]
+            and isinstance(receipt.get("staged_sha"), str)
+            and re.fullmatch(r"[0-9a-f]{64}", receipt["staged_sha"])
+        ):
+            receipt_hashes.add(receipt["staged_sha"])
+    if not receipt_hashes:
+        return []
+
+    added_commits = _run(
+        ["git", "log", "--ancestry-path", "--format=%H", "--diff-filter=A",
+         f"{launch_spec.comparison_commit}..{head}", "--", report_rel],
+        cwd=repo_root,
+    ).stdout.splitlines()
+    for commit in added_commits:
+        parents = _run(["git", "rev-list", "--parents", "-n", "1", commit], cwd=repo_root).stdout.split()
+        if len(parents) != 2:
+            continue
+        changes = _run(
+            ["git", "diff", "--name-status", "--no-renames", parents[1], commit, "--"],
+            cwd=repo_root,
+        ).stdout.splitlines()
+        if changes != [f"A\t{report_rel}"]:
+            continue
+        if _run(["git", "ls-tree", commit, "--", report_rel], cwd=repo_root).stdout != head_entry:
+            continue
+        # Match the complete binary diff minted by _mint_bot_remediation_receipt,
+        # never a path-filtered digest that could hide other committed changes.
+        committed_diff = subprocess.run(
+            ["git", "diff", "--binary", parents[1], commit, "--"], cwd=repo_root,
+            capture_output=True, check=True, timeout=30,
+        ).stdout
+        if hashlib.sha256(committed_diff).hexdigest() in receipt_hashes:
+            return [report_rel]
+    return []
 
 
 def _prepare_commit_candidate_authority(
@@ -18607,6 +18890,10 @@ def _prepare_commit_candidate_authority(
         raise ValueError("candidate authority wave/packet does not match the commit handoff")
     spec = authority.CandidateAuthoritySpec.from_mapping({
         **launch_spec.to_dict(), "phase": "commit", "review_round": "pre-supervisor",
+        "candidate_allowlist": [
+            *launch_spec.candidate_allowlist,
+            *_committed_auto_deferred_candidate_paths(repo_root, handoff, launch_spec),
+        ],
     })
     receipt = authority.prepare_candidate_authority(repo_root, spec, bus_dir=_active_bus_dir())
     receipt_path = Path(receipt["receipt_path"])

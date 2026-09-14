@@ -490,6 +490,8 @@ def test_post_merge_pipeline_cleans_then_routes_exactly_one_non_apply_successor(
     carrier.mkdir()
     survivor = tmp_path / "survivor"
     survivor.mkdir()
+    common_dir = tmp_path / "common-git"
+    common_dir.mkdir()
     operator_scratch = survivor / "operator-scratch"
     operator_scratch.write_text("preserve operator dirt\n", encoding="utf-8")
     landed_evidence = survivor / "landed-finalization-evidence"
@@ -531,6 +533,7 @@ def test_post_merge_pipeline_cleans_then_routes_exactly_one_non_apply_successor(
         "wave_id": disposition.TERMINAL_SWEEP_WAVE_ID,
     }
     events: list[str] = []
+    common_dir_lookups: list[Path] = []
     apply_calls = 0
     survivor_head = "d" * 40
 
@@ -556,6 +559,12 @@ def test_post_merge_pipeline_cleans_then_routes_exactly_one_non_apply_successor(
         assert kwargs["cleanup_root"] == survivor
         assert kwargs["repo_root"] == carrier
         events.append("cleanup")
+        records = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (common_dir / disposition.LIFECYCLE_ROOT_NAME / "pr-1282").glob("*.json")
+        ]
+        assert {record["state"] for record in records} == {"PENDING"}
+        shutil.rmtree(carrier)
         return {
             "branch_deleted": True,
             "status": "success",
@@ -602,6 +611,13 @@ def test_post_merge_pipeline_cleans_then_routes_exactly_one_non_apply_successor(
         nonlocal survivor_head
         del check, timeout, env, input_text
         command = list(command)
+        if command == ["git", "rev-parse", "--git-common-dir"]:
+            assert Path(cwd) == carrier
+            assert carrier.is_dir()
+            common_dir_lookups.append(Path(cwd))
+            return subprocess.CompletedProcess(
+                command, 0, stdout=f"{common_dir}\n", stderr="",
+            )
         if command == ["git", "rev-parse", "HEAD"]:
             sha = carrier_commit_sha if Path(cwd) == carrier else survivor_head
             return subprocess.CompletedProcess(
@@ -610,7 +626,8 @@ def test_post_merge_pipeline_cleans_then_routes_exactly_one_non_apply_successor(
                 stdout=f"{sha}\n",
                 stderr="",
             )
-        if command[:1] == ["bash"]:
+        if command == ["bash", str(merge_script), "1282", "--sweep"]:
+            assert Path(cwd) == carrier.parent
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         if command == ["git", "fetch", "origin", "dev"]:
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -635,6 +652,17 @@ def test_post_merge_pipeline_cleans_then_routes_exactly_one_non_apply_successor(
                 stderr="",
             )
         raise AssertionError(f"unexpected post-merge command: {command!r}")
+
+    def lifecycle_git_command(command, *, cwd, binary=False):
+        # This finalization wave has no replacement coverage manifest. Keep the
+        # real replacement lookup, but model its one exact read from the survivor.
+        assert Path(cwd) == survivor
+        assert binary is True
+        assert list(command) == [
+            "git", "ls-tree", merge_sha, "--",
+            f"reports/control_plane/{disposition.TERMINAL_SWEEP_WAVE_ID}_coverage.json",
+        ]
+        return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
     real_publish = getattr(commit, "_refresh_post_merge_package_for_next_open_queue")
 
@@ -741,10 +769,31 @@ def test_post_merge_pipeline_cleans_then_routes_exactly_one_non_apply_successor(
         publish,
     )
     monkeypatch.setattr(commit, "_run", run_command)
+    monkeypatch.setattr(disposition, "_default_git_run", lifecycle_git_command)
 
     result = commit.run_commit_pipeline(handoff, repo_root=carrier)
 
     assert result["status"] == "success", result
+    assert not carrier.exists()
+    assert common_dir_lookups == [carrier]
+    assert result["pr_lifecycle"]["state"] == "MERGED"
+    assert result["pr_lifecycle"]["head"] == carrier_commit_sha
+    assert result["pr_lifecycle"]["common_dir"] == str(common_dir.resolve())
+    assert "pr_lifecycle_hold" not in result
+    records = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (common_dir / disposition.LIFECYCLE_ROOT_NAME / "pr-1282").glob("*.json")
+    ]
+    assert {record["state"] for record in records} == {"PENDING", "MERGED"}
+    assert all(record["number"] == 1282 and record["head"] == carrier_commit_sha for record in records)
+    assert all(record["branch"] == target_branch for record in records)
+    assert all(record["owner"] == {
+        "task_id": handoff["wave_id"], "wave_id": handoff["wave_id"], "packet": "",
+    } for record in records)
+    assert all(record["replacement"] is None for record in records)
+    assert all(record["authority"] == "ownership_only_not_terminal_authority" for record in records)
+    assert result["pr_replacement_ownership"] == []
+    assert "pr_replacement_ownership_hold" not in result
     assert result["post_merge_terminal_decision"] == decision
     assert result["post_merge_next_wave"] == expected_candidate
     assert events == ["ff-only", "prepare", "cleanup", "finalize", "publish"]

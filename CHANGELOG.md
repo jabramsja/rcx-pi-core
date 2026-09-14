@@ -6,6 +6,39 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-13
 
+### Hanging PR Lifecycle Completion R4 (Phase B; live outcomes incomplete)
+
+- reconstructs the two production files and six regression modules from the
+  content-addressed stopped R3 snapshot. All 85 preserved files match their
+  recorded sizes and SHA256 hashes. Seven reconstructed files are byte-exact;
+  `test_pr_disposition_executor.py` changes only its current-wave coverage path
+  to R4. This retains manifest-bound one-time disposition, append-only ownership
+  in the common Git directory, fresh per-target terminal authority, no replay,
+  independent target HOLDs and the post-merge stop while live outcomes are owed
+- rebinds the [coverage ledger](reports/control_plane/pr-open-lifecycle-completion-r4-2026-09-13_coverage.json)
+  by changing only wave/owner/path identity and its canonical self-hash to
+  `9cdc90d7471ce2b446a5833ecb446c415c96594fd6040e8dd3c9fe1043760603`.
+  Local Git checks retain both exact source branches/heads, replacement
+  PR1286/1299 ancestry, all 13 per-PR changed paths and 41 hunks, and all
+  124 cited ranges (100 unique) against comparison commit
+  `eb92c2e404addd69c2eb7dd54e808929bcff86a4`. These checks establish retained
+  references and bytes; independent native review remains pending
+- the declared six-module, four-worker evidence command passed **1232 tests in
+  117.16s, exit 0**. No additional implementation/fixture repair or growth-cap
+  adjustment was required. TASKS was synchronized mechanically from PRIMARY,
+  preserving PR1303 landed history, all 142 task identities, 39 parked pipeline
+  obligations, and the dirty-dev-checkout obligation under the next fleet owner.
+  The same-wave tracker note remains the packet's L4 metadata authority
+- R3 commit `1ed7b24e6b80488006b55ef83a0c7f39013e73ca` remains stopped and
+  unpushed. R4 reviews, indicator collection, commit/pre-push/CI/merge and
+  post-merge authority remain outer-executor work. PIPELINE-FIX-53 stays CURRENT
+  until actual PR1284/1298 outcomes are verified or retain exact incomplete
+  owners. After landing, committed lifecycle-plan/apply/verify must use surviving
+  synchronized PRIMARY and the actual landed authority commit. Preserve any
+  stale dirty-dev adoption HOLD and use the authorized committed CLI from
+  verified PRIMARY. Fleet cleanup remains NEXT, then Mu production; code landing
+  alone does not complete this task
+
 ### P0T3 Retained Fast-Root Process Ownership Closure R2 (Phase B, CURRENT)
 
 - addresses only retained finding8 and subsumed P0A/P0B on exact PR #1302

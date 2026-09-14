@@ -25,6 +25,7 @@ import shutil
 import stat
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1314,6 +1315,8 @@ def test_step14_behind_refresh_rebinds_terminal_carrier_commit(
     carrier.mkdir()
     survivor = tmp_path / "survivor"
     survivor.mkdir()
+    common = tmp_path / "common.git"
+    common.mkdir()
     merge_script = carrier / "mu" / "tools" / "hooks" / "merge_pr.sh"
     merge_script.parent.mkdir(parents=True)
     merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
@@ -1372,6 +1375,8 @@ def test_step14_behind_refresh_rebinds_terminal_carrier_commit(
         return None
 
     def run_command(cmd, cwd=None, timeout=None, check=True, env=None):
+        if cmd == ["git", "rev-parse", "--git-common-dir"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{common}\n", stderr="")
         if cmd == ["git", "rev-parse", "HEAD"]:
             head = carrier_state["head"] if Path(cwd) == carrier else merge_sha
             return subprocess.CompletedProcess(cmd, 0, stdout=f"{head}\n", stderr="")
@@ -1386,6 +1391,15 @@ def test_step14_behind_refresh_rebinds_terminal_carrier_commit(
         raise AssertionError(f"unexpected command {cmd!r} in {cwd}")
 
     class FakeTerminalAuthority:
+        @staticmethod
+        def record_native_pr_lifecycle(common_dir, **kwargs):
+            assert common_dir == common
+            return {"path": str(common / "ownership.json")}
+
+        @staticmethod
+        def record_lifecycle_replacements(*args, **kwargs):
+            return []
+
         @staticmethod
         def requires_terminal_sweep(candidate_wave_id):
             return candidate_wave_id == wave_id
@@ -4751,3 +4765,390 @@ def test_commit_generated_governance_growth_cap_invalid_retry_stops_before_super
     assert result["step"] == "settle_commit_generated_governance", result
     assert "retry authority rejected candidate" in result["errors"][0]
     assert supervisor_called is False
+
+def test_ensured_pr_is_owned_before_ci_stop(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    wave = "native-pr-owner-2026-09-13"
+    handoff = {"wave_id": wave, "task_id": "[PIPELINE-FIX-53]",
+               "tracked_packet": f"reports/control_plane/{wave}_2026-09-13.md",
+               "pr_title": "Fixture", "pr_body": "Fixture"}
+    result = {"commit_sha": head, "steps_completed": ["run_pre_push_script", "git_push"]}
+    original_run = commit_mod._run  # ANTICHEAT_OK: keep local Git real; mock GitHub only.
+    def command(args, **kwargs):
+        if args[:3] == ["gh", "pr", "list"]:
+            return subprocess.CompletedProcess(args, 0, "[]", "")
+        if args[:3] == ["gh", "pr", "create"]:
+            return subprocess.CompletedProcess(args, 0, "https://github.com/jabramsja/rcx-pi-core/pull/2301", "")
+        return original_run(args, **kwargs)
+    def ci_stop(*args, **kwargs):
+        records = [json.loads(p.read_text()) for p in (repo / ".git/rcx_pr_lifecycle/pr-2301").glob("*.json")]
+        assert records and records[0]["state"] == "PENDING"
+        assert records[0]["owner"]["task_id"] == "[PIPELINE-FIX-53]"
+        return {"status": "error", "step": "wait_ci", "errors": ["fixture CI failure"]}
+    monkeypatch.setattr(commit_mod, "_run", command)
+    monkeypatch.setattr(commit_mod, "_try_auto_resolve_pr_conflict", lambda *a, **k: {"resolved": True, "action": "no_action"})
+    monkeypatch.setattr(commit_mod, "_wait_for_pr_ci", ci_stop)
+    outcome = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercise native ensured-PR/CI-stop ownership path.
+        handoff=handoff, repo_root=repo, result=result, target_branch="fixture-feature",
+        base_branch="dev", continuation_path=repo / ".agent_bus/continuation.json", log=_noop_log,
+    )
+    assert outcome["status"] == "error" and outcome["pr_number"] == "2301"
+    records = [json.loads(p.read_text()) for p in (repo / ".git/rcx_pr_lifecycle/pr-2301").glob("*.json")]
+    assert {r["state"] for r in records} == {"PENDING", "STOPPED"}
+    assert all(r["head"] == head and r["owner"]["wave_id"] == wave for r in records)
+    assert all(r["replacement"] is None for r in records)
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_native_stopped_owner_survives_return_or_unwind(tmp_path, monkeypatch, raises):
+    repo = _init_repo(tmp_path)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    handoff = {"wave_id": "owned-stop-2026-09-13", "task_id": "[PIPELINE-FIX-53]"}
+    result = {"pr_number": "2302", "commit_sha": head, "steps_completed": []}
+    def native_impl(**kwargs):
+        assert list((repo / ".git/rcx_pr_lifecycle/pr-2302").glob("*.json"))
+        if raises:
+            raise RuntimeError("native stop")
+        return {"status": "needs_phase_a", "step": "supervisor", "errors": ["scope change"]}
+    monkeypatch.setattr(commit_mod, "_run_post_commit_pipeline_impl", native_impl)
+    def run():
+        return commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: native wrapper must own failures after a PR exists.
+            handoff=handoff, repo_root=repo, result=result, target_branch="fixture-feature",
+            base_branch="dev", continuation_path=repo / ".agent_bus/continuation.json", log=_noop_log,
+        )
+    if raises:
+        with pytest.raises(RuntimeError, match="native stop"):
+            run()
+    else:
+        outcome = run()
+        assert outcome["pr_lifecycle"]["state"] == "STOPPED"
+    records = [json.loads(p.read_text()) for p in (repo / ".git/rcx_pr_lifecycle/pr-2302").glob("*.json")]
+    assert {r["state"] for r in records} == {"PENDING", "STOPPED"}
+    assert all(r["owner"]["task_id"] == "[PIPELINE-FIX-53]" for r in records)
+
+
+def test_native_merge_owner_survives_lane_retirement_without_closing_predecessor(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    carrier = tmp_path / "carrier"
+    _git(["worktree", "add", "-b", "fixture-feature", str(carrier), "dev"], cwd=repo)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    handoff = {"wave_id": "owned-merge-2026-09-13", "task_id": "[PIPELINE-FIX-53]"}
+    result = {"pr_number": "2303", "commit_sha": head, "steps_completed": []}
+    def native_impl(**kwargs):
+        # Native cleanup really removes this temporary worktree. The wrapper's
+        # final record must use the common directory captured before retirement.
+        commit_mod._post_merge_cleanup(  # ANTICHEAT_OK: real cleanup is the lifetime boundary under test.
+            cleanup_root=repo, repo_root=carrier, target_branch="fixture-feature",
+            base_branch="dev", wave_id=handoff["wave_id"], log=_noop_log,
+        )
+        assert not carrier.exists()
+        result["merge_sha"] = head
+        return {"status": "success", "merge_sha": head}
+    monkeypatch.setattr(commit_mod, "_run_post_commit_pipeline_impl", native_impl)
+    outcome = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: verify native lifecycle finalization after actual retirement.
+        handoff=handoff, repo_root=carrier, result=result, target_branch="fixture-feature",
+        base_branch="dev", continuation_path=carrier / ".agent_bus/continuation.json", log=_noop_log,
+    )
+    assert outcome["pr_lifecycle"]["state"] == "MERGED"
+    assert not carrier.exists()
+    records = [json.loads(p.read_text()) for p in (repo / ".git/rcx_pr_lifecycle/pr-2303").glob("*.json")]
+    assert {r["state"] for r in records} == {"PENDING", "MERGED"}
+    assert all(r["replacement"] is None for r in records)
+
+
+@pytest.mark.parametrize(
+    ("has_pending", "ownership_hold"),
+    [(True, None), (False, "ownership unresolved"), (True, "ownership unresolved")],
+    ids=["pending", "hold", "pending-and-hold"],
+)
+def test_implementation_merge_keeps_live_disposition_current_before_fleet_selection(
+    tmp_path, monkeypatch, has_pending, ownership_hold,
+):
+    repo = _init_repo(tmp_path)
+    wave = "owned-live-disposition-2026-09-13"
+    owner_packet = f"reports/control_plane/{wave}.md"
+    _write_queue_packet(repo, owner_packet, "COMPLETED")
+    _git(["add", owner_packet], cwd=repo)
+    _git(["commit", "-m", "land implementation packet"], cwd=repo)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    handoff = {
+        "wave_id": wave,
+        "task_id": "[PIPELINE-FIX-53]",
+        "tracked_packet": owner_packet,
+    }
+    pending = [{"number": 1284, "status": "LIVE_DISPOSITION_PENDING",
+                "owner": {"task_id": "[PIPELINE-FIX-53]"},
+                "errors": ["target ownership requires reconciliation"],
+                "commands": {
+                    action: f"committed exact lifecycle-{action} command"
+                    for action in ("plan", "apply", "verify")
+                }}] if has_pending else []
+    result = {
+        "pr_number": "2304",
+        "pr_replacement_ownership": pending,
+        "pr_replacement_ownership_hold": ownership_hold,
+    }
+
+    def no_successor(*args, **kwargs):
+        raise AssertionError("code merge cannot select fleet before live disposition")
+
+    monkeypatch.setattr(commit_mod, "_next_open_founder_ordered_queue_entry", no_successor)
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: native post-merge ownership must precede successor selection.
+        repo_root=repo, handoff=handoff, result=result, merge_sha=head,
+        queue_commit_sha=head, log=_noop_log,
+    )
+
+    # The routing writer carries next_candidates, not package-only lifecycle
+    # fields. Continue this owner's live work without rerouting the landed packet.
+    assert len(package["next_candidates"]) == 1
+    candidate = package["next_candidates"][0]
+    lifecycle_wave = f"{wave}-live-disposition"
+    assert candidate["candidate"] == lifecycle_wave
+    assert candidate["bounded"] is True
+    assert candidate["tracked_packet"] is None
+    assert candidate["owner"] == {
+        "task_id": "[PIPELINE-FIX-53]", "wave_id": wave, "packet": owner_packet,
+    }
+    assert candidate["repo_root"] == str(repo)
+    assert candidate["authority_commit"] == head
+    assert candidate["manifest_path"] == f"reports/control_plane/{wave}_coverage.json"
+    assert candidate["pr_lifecycle_dispositions"] == pending
+    assert candidate["pr_lifecycle_hold"] == ownership_hold
+    request = candidate["request_for_agent"]
+    assert candidate["request_for_claude"] == request
+    for context in (owner_packet, str(repo), head, candidate["manifest_path"]):
+        assert context in request
+    for disposition in pending:
+        for detail in (*disposition["errors"], *disposition["commands"].values()):
+            assert detail in request
+    if ownership_hold:
+        assert ownership_hold in request
+
+    assert package["merged_pr"] == 2304
+    assert type(package["merged_pr"]) is int
+    assert package["merge_sha"] == head
+    assert package["wave_name"] == lifecycle_wave
+    assert package["rollout_packet_path"] == owner_packet
+    assert package["pr_lifecycle_dispositions"] == pending
+    assert package["pr_lifecycle_hold"] == ownership_hold
+    assert package["task_id"] == "[PIPELINE-FIX-53]"
+    assert result["post_merge_next_wave"] == lifecycle_wave
+    assert result["post_merge_next_hard_stop"] is True
+    assert result["post_merge_queue_empty"] is False
+    package_path = repo / result["post_merge_package_path"]
+    assert json.loads(package_path.read_text(encoding="utf-8")) == package
+
+    meta_mod = load_module(
+        "meta_bridge_supervisor",
+        REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
+    )
+    valid, errors = meta_mod.validate_post_merge_package_schema(package, repo)
+    assert valid, errors
+
+
+@pytest.fixture
+def committed_auto_deferred_candidate(tmp_path, monkeypatch, request):
+    """Keep a receipted report in HEAD while staging a later same-wave repair."""
+    repo = _init_repo(tmp_path)
+    bus = Path(".agent_bus-auto-deferred-candidate")
+    wave = "auto-deferred-candidate-2026-09-14"
+    branch = f"jabramsja/{wave}"
+    packet = f"reports/control_plane/{wave}.md"
+    (repo / ".gitignore").write_text(".agent_bus*/\n", encoding="utf-8")
+    _write_program_queue_packet(repo, packet, wave_id=wave, status="IMPLEMENTED")
+    _git(["add", ".gitignore", packet], cwd=repo)
+    _git(["commit", "-m", "seed launch inputs"], cwd=repo)
+    base = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    _git(["checkout", "-b", branch], cwd=repo)
+    monkeypatch.setattr(commit_mod, "_active_bus_dir", lambda: bus)
+    authority, _common = commit_mod._landed_commit_candidate_authority()  # ANTICHEAT_OK: exercise the committed builder used by native candidate preparation.
+    spec = authority.CandidateAuthoritySpec.from_mapping({
+        "wave_id": wave,
+        "comparison_commit": base,
+        "candidate_allowlist": ["seed.txt", packet],
+        "plan_path": packet,
+        "require_l4_staged": False,
+    })
+    spec_path = authority.write_authority_spec(repo, spec, bus_dir=bus)
+    route_path = repo / bus / "meta/post_merge_routing.json"
+    route_path.write_text(json.dumps({
+        "decision": "ROUTE_PHASE_B",
+        "summary": "same-wave repair after a receipted bot report commit",
+        "wave_name": wave,
+        "candidate_authority_required": True,
+        "candidate_authority": {
+            "required": True,
+            "spec_path": str(spec_path),
+            "spec_identity": authority.authority_spec_identity(
+                repo, spec, authority_required=True,
+            ),
+        },
+    }), encoding="utf-8")
+    findings = [{"path": "seed.txt", "body": "Retained non-blocking finding."}]
+    report = commit_mod._write_auto_deferred_bot_findings_report(  # ANTICHEAT_OK: reproduce the native report producer without running the commit pipeline.
+        repo, findings, wave, "1304", _noop_log,
+    )
+    report_rel = report.relative_to(repo).as_posix()
+    _git(["add", report_rel], cwd=repo)
+    if getattr(request, "param", "report-only") == "mixed-child-commit":
+        (repo / "seed.txt").write_text("extra child-commit change\n", encoding="utf-8")
+        _git(["add", "seed.txt"], cwd=repo)
+    bot_receipt = commit_mod._mint_bot_remediation_receipt(  # ANTICHEAT_OK: bind a real staged report diff using the native receipt producer.
+        repo_root=repo, findings_addressed=findings,
+        scoped_files=[report_rel], round_num=1, wave_id=wave,
+    )
+    _git(["commit", "-m", "record auto-deferred findings"], cwd=repo)
+    report_commit = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    (repo / "seed.txt").write_text("committed implementation\n", encoding="utf-8")
+    _git(["add", "seed.txt"], cwd=repo)
+    _git(["commit", "-m", "same-wave remediation"], cwd=repo)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    continuation_path = repo / bus / "executors" / f"commit_executor_{wave}.json"
+    commit_mod._write_continuation_record(  # ANTICHEAT_OK: seed native same-wave/PR continuation authority in the isolated repository.
+        continuation_path, handoff_sha="fixture-handoff", target_branch=branch,
+        commit_sha=head, receipt_decision="COMMIT_GO", steps_completed=["git_commit"],
+        pr_number="1304",
+    )
+    (repo / "seed.txt").write_text("pending staged repair\n", encoding="utf-8")
+    _git(["add", "seed.txt"], cwd=repo)
+    return SimpleNamespace(
+        repo=repo, bus=bus, wave=wave, base=base, head=head, spec=spec,
+        authority=authority, spec_path=spec_path, route_path=route_path,
+        report=report, report_rel=report_rel, report_commit=report_commit,
+        bot_receipt=bot_receipt, continuation_path=continuation_path,
+        handoff={"wave_id": wave, "tracked_packet": packet, "target_branch": branch},
+    )
+
+
+def test_commit_candidate_retains_receipted_clean_auto_deferred_report(
+    committed_auto_deferred_candidate,
+):
+    case = committed_auto_deferred_candidate
+    before = {p: p.read_bytes() for p in (case.spec_path, case.route_path, case.report)}
+    staged = _git(["diff", "--cached", "--binary"], cwd=case.repo).stdout
+    assert not _git(["status", "--short", "--", case.report_rel], cwd=case.repo).stdout
+    assert case.report_rel in {
+        entry["path"] for entry in case.authority.collect_literal_base_inventory(case.repo, case.base)
+    }
+
+    binding = commit_mod._prepare_commit_candidate_authority(  # ANTICHEAT_OK: run native preparation with real inventory, launch identity and receipts.
+        case.repo, case.handoff,
+    )
+
+    assert set(binding["spec"].candidate_allowlist) == {*case.spec.candidate_allowlist, case.report_rel}
+    assert binding["spec"].comparison_commit == case.base
+    receipt = json.loads(binding["receipt_path"].read_text(encoding="utf-8"))
+    assert case.report_rel in {entry["path"] for entry in receipt["literal_base_inventory"]}
+    assert case.report_rel in {entry["path"] for entry in receipt["staged_literal_base_inventory"]}
+    commit_mod._verify_commit_candidate_authority(case.repo, binding)  # ANTICHEAT_OK: retained generated authority must survive the native final receipt check.
+    assert _git(["diff", "--cached", "--binary"], cwd=case.repo).stdout == staged
+    assert _git(["rev-parse", "HEAD"], cwd=case.repo).stdout.strip() == case.head
+    assert all(p.read_bytes() == content for p, content in before.items())
+
+
+@pytest.mark.parametrize("fault", [
+    "missing-receipt", "wrong-wave", "wrong-path", "wrong-digest", "wrong-type",
+    "rejected-receipt", "missing-continuation", "wrong-pr", "wrong-branch", "stale-head",
+    "uncommitted-continuation", "worktree-report-edit", "staged-report-edit",
+    "cancelled-index-edit", "committed-report-edit", "tampered-launch-spec",
+])
+def test_commit_candidate_rejects_unproven_auto_deferred_report_before_staging(
+    committed_auto_deferred_candidate, fault,
+):
+    case = committed_auto_deferred_candidate
+    if fault == "missing-receipt":
+        case.bot_receipt.unlink()
+    elif fault in {"wrong-wave", "wrong-path", "wrong-digest", "wrong-type", "rejected-receipt"}:
+        receipt = json.loads(case.bot_receipt.read_text(encoding="utf-8"))
+        key, value = {
+            "wrong-wave": ("wave_id", "another-wave"),
+            "wrong-path": ("scoped_files", ["seed.txt"]),
+            "wrong-digest": ("staged_sha", "0" * 64),
+            "wrong-type": ("receipt_type", "supervisor"),
+            "rejected-receipt": ("decision", "NO_GO"),
+        }[fault]
+        receipt[key] = value
+        case.bot_receipt.write_text(json.dumps(receipt), encoding="utf-8")
+    elif fault == "missing-continuation":
+        case.continuation_path.unlink()
+    elif fault in {"wrong-pr", "wrong-branch", "stale-head", "uncommitted-continuation"}:
+        continuation = json.loads(case.continuation_path.read_text(encoding="utf-8"))
+        key, value = {
+            "wrong-pr": ("pr_number", "9999"),
+            "wrong-branch": ("target_branch", "another-branch"),
+            "stale-head": ("commit_sha", case.report_commit),
+            "uncommitted-continuation": ("steps_completed", []),
+        }[fault]
+        continuation[key] = value
+        case.continuation_path.write_text(json.dumps(continuation), encoding="utf-8")
+    elif fault == "tampered-launch-spec":
+        spec = json.loads(case.spec_path.read_text(encoding="utf-8"))
+        spec["candidate_allowlist"].append(case.report_rel)
+        case.spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    else:
+        original = case.report.read_bytes()
+        case.report.write_bytes(original + b"unreceipted report edit\n")
+        if fault != "worktree-report-edit":
+            _git(["add", case.report_rel], cwd=case.repo)
+        if fault == "cancelled-index-edit":
+            case.report.write_bytes(original)
+        if fault == "committed-report-edit":
+            _git(["commit", "--only", "-m", "unreceipted edit", "--", case.report_rel], cwd=case.repo)
+            continuation = json.loads(case.continuation_path.read_text(encoding="utf-8"))
+            continuation["commit_sha"] = _git(["rev-parse", "HEAD"], cwd=case.repo).stdout.strip()
+            case.continuation_path.write_text(json.dumps(continuation), encoding="utf-8")
+    staged = _git(["diff", "--cached", "--binary"], cwd=case.repo).stdout
+    report_bytes = case.report.read_bytes()
+    diagnostic = "launch-bound identity" if fault == "tampered-launch-spec" else "outside allowlist"
+
+    with pytest.raises(RuntimeError, match=diagnostic):
+        commit_mod._prepare_commit_candidate_authority(case.repo, case.handoff)  # ANTICHEAT_OK: invalid provenance must fail in native preparation before any staging.
+
+    assert _git(["diff", "--cached", "--binary"], cwd=case.repo).stdout == staged
+    assert case.report.read_bytes() == report_bytes
+    receipt_path = case.repo / case.bus / "meta/candidate_authority_receipts" / case.wave / "commit-pre-supervisor.json"
+    assert not receipt_path.exists()
+
+
+@pytest.mark.parametrize("state", ["untracked", "staged", "committed"])
+def test_commit_candidate_auto_deferred_authority_rejects_unrelated_paths(
+    committed_auto_deferred_candidate, state,
+):
+    case = committed_auto_deferred_candidate
+    outsider = "reports/deferred/non_blocking/unrelated.md"
+    (case.repo / outsider).write_text("unrelated report\n", encoding="utf-8")
+    if state != "untracked":
+        _git(["add", outsider], cwd=case.repo)
+    if state == "committed":
+        _git(["commit", "--only", "-m", "unrelated report", "--", outsider], cwd=case.repo)
+        continuation = json.loads(case.continuation_path.read_text(encoding="utf-8"))
+        continuation["commit_sha"] = _git(["rev-parse", "HEAD"], cwd=case.repo).stdout.strip()
+        case.continuation_path.write_text(json.dumps(continuation), encoding="utf-8")
+    staged = _git(["diff", "--cached", "--binary"], cwd=case.repo).stdout
+
+    with pytest.raises(RuntimeError, match=f"outside allowlist: {outsider}$"):
+        commit_mod._prepare_commit_candidate_authority(case.repo, case.handoff)  # ANTICHEAT_OK: the real literal-base validator must retain unrelated-path rejection.
+
+    assert _git(["diff", "--cached", "--binary"], cwd=case.repo).stdout == staged
+    assert (case.repo / outsider).read_text(encoding="utf-8") == "unrelated report\n"
+
+
+@pytest.mark.parametrize("committed_auto_deferred_candidate", ["mixed-child-commit"], indirect=True)
+def test_commit_candidate_rejects_report_receipt_for_commit_with_other_changes(
+    committed_auto_deferred_candidate,
+):
+    case = committed_auto_deferred_candidate
+    staged = _git(["diff", "--cached", "--binary"], cwd=case.repo).stdout
+    receipt = json.loads(case.bot_receipt.read_text(encoding="utf-8"))
+    child_diff = subprocess.check_output(
+        ["git", "diff", "--binary", f"{case.report_commit}^", case.report_commit, "--"],
+        cwd=case.repo,
+    )
+    assert hashlib.sha256(child_diff).hexdigest() == receipt["staged_sha"]
+    assert receipt["scoped_files"] == [case.report_rel]
+
+    with pytest.raises(RuntimeError, match="outside allowlist"):
+        commit_mod._prepare_commit_candidate_authority(case.repo, case.handoff)  # ANTICHEAT_OK: a matching full-diff hash cannot authorize a mis-scoped native report receipt.
+
+    assert _git(["diff", "--cached", "--binary"], cwd=case.repo).stdout == staged

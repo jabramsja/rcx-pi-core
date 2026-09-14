@@ -1,0 +1,1389 @@
+{
+  "comparison_commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+  "manifest_sha256": "9cdc90d7471ce2b446a5833ecb446c415c96594fd6040e8dd3c9fe1043760603",
+  "repository": {
+    "id": "R_kgDOQvy8bg",
+    "nameWithOwner": "jabramsja/rcx-pi-core",
+    "url": "https://github.com/jabramsja/rcx-pi-core"
+  },
+  "schema_version": 2,
+  "targets": [
+    {
+      "coverage": [
+        {
+          "hunks": [
+            {
+              "header": "@@ -6,6 +6,24 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "bbb4da8f325cf5356a31cc16d839167ef99cc84a99dff030466cd353e9b1062f"
+            },
+            {
+              "header": "@@ -23,8 +41,9 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "b3fe888c1bd51528765a6643f0cc07bf0b8e2b304bfab4e9de22408bf83bfe4d"
+            }
+          ],
+          "patch_sha256": "99da7e081200e5bcbbc81178047bfe6be523dc4e32cd340def30e6b631331334",
+          "path": "CHANGELOG.md",
+          "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -5,11 +5,11 @@ If a task is not listed here, it is NOT to be implemented.",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "d6c72e28aec5f74118bd3437c2454b6a17faa1eaf98c1caee344c5b89031ff7c"
+            },
+            {
+              "header": "@@ -376,17 +376,17 @@ Wave `commit-generated-governance-retry-idempotency-r1-2026-09-10` reached Phase",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "794c928ecd8ba8d2490a272729cf603d18df89a32b5b49397bb3468a18584c2d"
+            },
+            {
+              "header": "@@ -620,7 +620,7 @@ After P0IB1, retain and execute P0IB2 from a fresh narrow builder input and exac",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "2d91d1e4ef4d9870eeb58d21eb51e25dc73a7c696ab2d0eab9328c77eacb2dc8"
+            },
+            {
+              "header": "@@ -1422,6 +1422,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "a6e6542d090baad906d761024acf36d86d17f165475b506e40df3db19d0a94b2"
+            }
+          ],
+          "patch_sha256": "759636d1ec429b9d240a5eaea2f205e412f122338235f9bd2f7ff94d4711a657",
+          "path": "TASKS.md",
+          "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -139,6 +139,41 @@ def _phase_b_packet_content(config):",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: _phase_b_packet_content, _r2_phase_b_packet_content, _same_wave_deferred_non_blocking_path. Landed definitions: _phase_b_packet_content, _phase_b_locked_implementing_packet_content, _same_wave_deferred_non_blocking_path",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 141,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "27a85f318cf1676dade15a6336bb5b25b7e47ebfe30d599afc9af2625ed3bd7f",
+                  "start": 122
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 863,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "93b709df7c628565d2ab06a28213315803914c7afaea5c7a6ac9b49ec1725e5b",
+                  "start": 833
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 148,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "fddc7ca3999ac8901a1cf3242e556afdf8663f4d86f822b33d4bc12302f02b33",
+                  "start": 144
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 141,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "27a85f318cf1676dade15a6336bb5b25b7e47ebfe30d599afc9af2625ed3bd7f",
+                  "start": 122
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 863,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "93b709df7c628565d2ab06a28213315803914c7afaea5c7a6ac9b49ec1725e5b",
+                  "start": 833
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 148,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "fddc7ca3999ac8901a1cf3242e556afdf8663f4d86f822b33d4bc12302f02b33",
+                  "start": 144
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "7d91815108cd740a42758f78bf88c2b175b96244ee23211535e77afee43c035b"
+            },
+            {
+              "header": "@@ -302,6 +337,34 @@ def _post_commit_authority_config_for_repo(repo):",
+              "reason": "Exact source definitions retained in replacement and current dev: _post_commit_authority_config_for_repo, _expanded_post_commit_packet_content",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 365,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "f5cb8b78fad2d7946016371feacfcfd71deb1611cf242e76d7ed9ac036542eac",
+                  "start": 347
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 370,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "6b94da99a49468835da23980f5ef33a279f4445264ea6620a0662e5bac5347ee",
+                  "start": 368
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 365,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "f5cb8b78fad2d7946016371feacfcfd71deb1611cf242e76d7ed9ac036542eac",
+                  "start": 347
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 370,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "6b94da99a49468835da23980f5ef33a279f4445264ea6620a0662e5bac5347ee",
+                  "start": 368
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "07670842cc50371a1845301dda2fc3353a2a6204d8f32d4a13ee14717a82a24e"
+            },
+            {
+              "header": "@@ -421,6 +484,72 @@ def _prepare_post_commit_resume_state(",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: _prepare_post_commit_resume_state, _prepare_phase_b_resume_state, _post_commit_resume_snapshot. Landed definitions: _prepare_post_commit_resume_state, _prepare_native_phase_b_terminal_state, _post_commit_resume_snapshot",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 484,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "de3cc98ab33a99c763596039b89fa809601310c2494ce0cb7ce846743b79f292",
+                  "start": 373
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 947,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "bad8c995ef302185a337b0ad94c1fe7e7a3dabe722abd52de56ab9165cd4034e",
+                  "start": 887
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 541,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "8731e48f3c7e8d93188335a34fa5f0d6214c146de2bcdb879fcdbf7b789086ab",
+                  "start": 487
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 484,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "de3cc98ab33a99c763596039b89fa809601310c2494ce0cb7ce846743b79f292",
+                  "start": 373
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 947,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "bad8c995ef302185a337b0ad94c1fe7e7a3dabe722abd52de56ab9165cd4034e",
+                  "start": 887
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 541,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "8731e48f3c7e8d93188335a34fa5f0d6214c146de2bcdb879fcdbf7b789086ab",
+                  "start": 487
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "bdd14df3a27413e8af7808ccd3e0a9a2cbce52cf12be5288e44ad06cc150cc54"
+            },
+            {
+              "header": "@@ -757,6 +886,197 @@ def _assert_post_commit_resume_refused(",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: _assert_post_commit_resume_refused, _mutate_phase_b_resume_proof, _assert_phase_b_resume_refused, _assert_no_setup_artifacts. Landed definitions: _assert_post_commit_resume_refused, test_phase_b_resume_rejects_each_immutable_authority_mismatch_before_bridge_mutation, test_phase_b_resume_forbidden_lifecycle_evidence_is_read_only_and_preclaim, _forbid_phase_b_resume_producers, _assert_no_setup_artifacts",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 824,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "73b9da8f7d05f3142030e142edffe775dd7c54d384db4c270381c5cbf45adc79",
+                  "start": 795
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 5054,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "e58b6a0950402bb28da5375daad848eb8f75fc99bf1b702c689e785289318479",
+                  "start": 4932
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 5130,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "82c952e0fb83a949e4261b90adc8580c98be3d9bee50dd729534e96dd5b429d1",
+                  "start": 5057
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 996,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "33b43211e11aa6a8a62efe8a3879081d83280f00176bcbb5b897fc69cc8b6db1",
+                  "start": 985
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 830,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "2aea137f21fd2f1a7672aac4c20345fa90a0b4561bd53d088e80b08f50475396",
+                  "start": 827
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 824,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "73b9da8f7d05f3142030e142edffe775dd7c54d384db4c270381c5cbf45adc79",
+                  "start": 795
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 5054,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "e58b6a0950402bb28da5375daad848eb8f75fc99bf1b702c689e785289318479",
+                  "start": 4932
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 5130,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "82c952e0fb83a949e4261b90adc8580c98be3d9bee50dd729534e96dd5b429d1",
+                  "start": 5057
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 996,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "33b43211e11aa6a8a62efe8a3879081d83280f00176bcbb5b897fc69cc8b6db1",
+                  "start": 985
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 830,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "2aea137f21fd2f1a7672aac4c20345fa90a0b4561bd53d088e80b08f50475396",
+                  "start": 827
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "448c3461dae87ef85eeab1b254bfe0a2e4bd89c6d3f2b70a025075d43c6331d7"
+            },
+            {
+              "header": "@@ -1424,6 +1744,196 @@ def test_native_locked_precommit_packet_for_historical_simple_config_still_dispa",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: test_native_locked_precommit_packet_for_historical_simple_config_still_dispatches, test_native_phase_b_same_config_relaunch_dispatches_phase_b_before_setup_mutation, test_phase_b_continuation_command_leaves_task_identity_to_canonical_route, test_native_unlocked_same_config_launch_still_dispatches_phase_a, test_native_phase_b_same_config_relaunch_authority_mismatch_refuses_before_setup. Landed definitions: test_native_locked_precommit_packet_for_historical_simple_config_still_dispatches, test_exact_phase_b_terminal_receipt_resumes_once_without_phase_a_or_producers, test_phase_b_resume_preserves_live_bridge_fields_and_reconciles_only_defaults, test_same_config_unlocked_phase_a_failure_then_success_keeps_setup_retry, test_phase_b_resume_rejects_each_immutable_authority_mismatch_before_bridge_mutation, test_phase_b_resume_rejects_every_noncanonical_status_or_machine_block_before_claim, test_phase_b_resume_forbidden_lifecycle_evidence_is_read_only_and_preclaim",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 1693,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "9ea8facbc0bf064f1b1b36799fd8072e81b0133c20b6f612a6688db5cf7d1dd2",
+                  "start": 1661
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 4509,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "2bcbb235df1550db38a916051ad2949ca54589d0406e0e3a0fff65ae08d123ed",
+                  "start": 4409
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 5525,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "72d40360163d106a979d445bdd0a9a1bc49230d416689367be09cc4d0d5460a2",
+                  "start": 5350
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 4176,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "5c90c9532232cdb6c01c21036dee1e7d35284f3d7f1b09449aeeed7ae644b3bb",
+                  "start": 4114
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 5054,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "e58b6a0950402bb28da5375daad848eb8f75fc99bf1b702c689e785289318479",
+                  "start": 4932
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 4929,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "aa1d21d4ef182d90a92a649e69d98fb22e8d1aafc0c8a01ff86c49291d721d57",
+                  "start": 4858
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 5130,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "82c952e0fb83a949e4261b90adc8580c98be3d9bee50dd729534e96dd5b429d1",
+                  "start": 5057
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 1693,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "9ea8facbc0bf064f1b1b36799fd8072e81b0133c20b6f612a6688db5cf7d1dd2",
+                  "start": 1661
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4509,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "2bcbb235df1550db38a916051ad2949ca54589d0406e0e3a0fff65ae08d123ed",
+                  "start": 4409
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 5525,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "72d40360163d106a979d445bdd0a9a1bc49230d416689367be09cc4d0d5460a2",
+                  "start": 5350
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4176,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "5c90c9532232cdb6c01c21036dee1e7d35284f3d7f1b09449aeeed7ae644b3bb",
+                  "start": 4114
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 5054,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "e58b6a0950402bb28da5375daad848eb8f75fc99bf1b702c689e785289318479",
+                  "start": 4932
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4929,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "aa1d21d4ef182d90a92a649e69d98fb22e8d1aafc0c8a01ff86c49291d721d57",
+                  "start": 4858
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 5130,
+                  "path": "mu/tests/tools/test_launch_wave.py",
+                  "sha256": "82c952e0fb83a949e4261b90adc8580c98be3d9bee50dd729534e96dd5b429d1",
+                  "start": 5057
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "68d8daa92eab4ed8352000278168b9d6dee540f504016c503ed08bea9c120282"
+            }
+          ],
+          "patch_sha256": "8cbca9f2a7e6e068a8b28661b7ff9aec2d6351b4671525374539b49e150431c0",
+          "path": "mu/tests/tools/test_launch_wave.py",
+          "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior.",
+          "references": [
+            {
+              "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+              "end": 120,
+              "path": "mu/tests/tools/test_launch_wave.py",
+              "sha256": "d81ebe457bbf1683a2c499daf0753bcbcd46fec2dd96a0664fd28dfbeafd23ce",
+              "start": 1
+            },
+            {
+              "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+              "end": 120,
+              "path": "mu/tests/tools/test_launch_wave.py",
+              "sha256": "d81ebe457bbf1683a2c499daf0753bcbcd46fec2dd96a0664fd28dfbeafd23ce",
+              "start": 1
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -27,17 +27,23 @@ Sequential chain (seven steps, in order):",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: module imports/documentation. Landed definitions: module imports/documentation",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 120,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "feba202bd08560170faf6dd1197485253ab26e972d9f81e8c1720a8253d3b05f",
+                  "start": 1
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 120,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "feba202bd08560170faf6dd1197485253ab26e972d9f81e8c1720a8253d3b05f",
+                  "start": 1
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "849510bfbf4c176b6a9b839e04bfb40d84ad8f4e5e9113e154780934d80d4639"
+            },
+            {
+              "header": "@@ -221,6 +227,10 @@ _POST_LOCK_RECOVERY_PROGRESS_MARKERS = (",
+              "reason": "Exact source definitions retained in replacement and current dev: _git_probe_environment",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 266,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "2422b96aba422a6f3dd6bcb8d36e1f8b3f2ad13dfeeab8b9849d949c44b8788f",
+                  "start": 262
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 266,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "2422b96aba422a6f3dd6bcb8d36e1f8b3f2ad13dfeeab8b9849d949c44b8788f",
+                  "start": 262
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "1ced94d5c123ffb380a815132b62c7c59724b502d6a4680bf60b4c0ba7709df1"
+            },
+            {
+              "header": "@@ -1580,6 +1590,54 @@ def _native_post_commit_route_matches_config(",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: _native_post_commit_route_matches_config, _native_phase_b_route_matches_config, _native_post_commit_packet_matches_config. Landed definitions: _native_post_commit_route_matches_config, _native_phase_b_route_matches_config, _native_post_commit_packet_matches_config",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 1875,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "6e10b6b9f0144d371266a562ad861307fe65c73ee1e098b801c71946cefd61ab",
+                  "start": 1806
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 1935,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "3329976dadd91816ac46ed151f1ddf9f4027dad23c668b811a93af47da742ac5",
+                  "start": 1878
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 2156,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "62d1c89270a5748dd0e404beeee9f04d9e9a0480ff7cd730b996279ba6b2cbda",
+                  "start": 2130
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 1875,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "6e10b6b9f0144d371266a562ad861307fe65c73ee1e098b801c71946cefd61ab",
+                  "start": 1806
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 1935,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "3329976dadd91816ac46ed151f1ddf9f4027dad23c668b811a93af47da742ac5",
+                  "start": 1878
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 2156,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "62d1c89270a5748dd0e404beeee9f04d9e9a0480ff7cd730b996279ba6b2cbda",
+                  "start": 2130
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "0e201eeba0134dbde3c66ce93701c5530de59de37e402460b78ee57d854b34f7"
+            },
+            {
+              "header": "@@ -1721,6 +1779,232 @@ def _post_commit_candidate_authority_matches(",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: _post_commit_candidate_authority_matches, _native_packet_locked_phase_b_lifecycle, _native_phase_b_tracker_matches_config, _native_packet_has_phase_b_reentry_evidence, _phase_b_resume_authority, _phase_b_reentry_evidence_present, _post_commit_git_authority_matches. Landed definitions: _post_commit_candidate_authority_matches, _native_phase_b_packet_matches_config, _native_phase_b_packet_sources_match, _native_phase_b_tracker_matches_config, _native_phase_b_reentry_evidence_present, _native_phase_b_resume_authority, post_commit_git_authority_matches",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 2268,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "1061063b6b394f8767a0fbed87586287e3dcead3c561dcc08560742e5a7aed81",
+                  "start": 2159
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 2006,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "090b572754108733775a1fabdddd1aa8cc7f20a79c972b5f702af85293f1509f",
+                  "start": 1938
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 2066,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "ed936a4bb03a0a73a459d9a20465840104053a938cb8d371f735b8150e2f81c1",
+                  "start": 2041
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 2038,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "f9c0866a9f4f762a489d5cd775c725a2419c965f6126ae5cb077a0cf1cffd35e",
+                  "start": 2009
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 3863,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "3e74b306260ebdc25e7fdf0aaa4329ca869962c7948d8f50b057ee3a63a5975a",
+                  "start": 3790
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 3961,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "352f451988fbc2de9a527ada492e6ef18ca70b11ad45a2cb22fbebf4f21a0d66",
+                  "start": 3866
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 2346,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "fa15be97db18a9008bf46f8593df16ea2104e0fc01c8e2d45669a73364c15e47",
+                  "start": 2271
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 2268,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "1061063b6b394f8767a0fbed87586287e3dcead3c561dcc08560742e5a7aed81",
+                  "start": 2159
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 2006,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "090b572754108733775a1fabdddd1aa8cc7f20a79c972b5f702af85293f1509f",
+                  "start": 1938
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 2066,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "ed936a4bb03a0a73a459d9a20465840104053a938cb8d371f735b8150e2f81c1",
+                  "start": 2041
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 2038,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "f9c0866a9f4f762a489d5cd775c725a2419c965f6126ae5cb077a0cf1cffd35e",
+                  "start": 2009
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 3863,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "3e74b306260ebdc25e7fdf0aaa4329ca869962c7948d8f50b057ee3a63a5975a",
+                  "start": 3790
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 3961,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "352f451988fbc2de9a527ada492e6ef18ca70b11ad45a2cb22fbebf4f21a0d66",
+                  "start": 3866
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 2346,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "fa15be97db18a9008bf46f8593df16ea2104e0fc01c8e2d45669a73364c15e47",
+                  "start": 2271
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "d0ed86fd788bef879604e6c3bdc5bc6b2207cad3f71a419411f9146a83ac77ce"
+            },
+            {
+              "header": "@@ -2921,6 +3205,29 @@ def build_dispatch_command(",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: build_dispatch_command, build_phase_b_continuation_command, dispatcher_environment_overrides. Landed definitions: build_dispatch_command, build_phase_b_dispatch_command, dispatcher_environment_overrides",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 3488,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "358b8c28e9a7eae1afd4ca45a315db93672099387958e4e28854ab1a6104f078",
+                  "start": 3459
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 3512,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "1c43fa0d62fb7b7eb56412c782dbe34567cffb6fb0955866ce8f7bb5eca1a170",
+                  "start": 3491
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 3524,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "f2479c1bb95ea1e1e5652dee1fde6a4a95f2e1a7c017b82422bcdb584b17ece0",
+                  "start": 3515
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 3488,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "358b8c28e9a7eae1afd4ca45a315db93672099387958e4e28854ab1a6104f078",
+                  "start": 3459
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 3512,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "1c43fa0d62fb7b7eb56412c782dbe34567cffb6fb0955866ce8f7bb5eca1a170",
+                  "start": 3491
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 3524,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "f2479c1bb95ea1e1e5652dee1fde6a4a95f2e1a7c017b82422bcdb584b17ece0",
+                  "start": 3515
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "12967525e658b5cffed654199494844d8bf105af4ade850454e9dc3a12b7237c"
+            },
+            {
+              "header": "@@ -3000,6 +3307,47 @@ def maybe_launch_dispatcher(",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: maybe_launch_dispatcher, maybe_launch_phase_b_continuation, _maybe_launch_dispatcher_command. Landed definitions: maybe_launch_dispatcher, _maybe_launch_dispatcher_command, run_wave_setup",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 3712,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "c0504a699e5ed0212c77a37aacdc627d9bee75adb719a85d3f1f86b08a47ad08",
+                  "start": 3686
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 3655,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "15c5d38f9cade904a68b5a5c0aa79719c9d3798afd92b63394b574b1f9ed5270",
+                  "start": 3574
+                },
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 4376,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "0825536a35d6ca13cdf327821b784fe6a122cfc0222e3cadf1b3254a7ad57bff",
+                  "start": 4104
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 3712,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "c0504a699e5ed0212c77a37aacdc627d9bee75adb719a85d3f1f86b08a47ad08",
+                  "start": 3686
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 3655,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "15c5d38f9cade904a68b5a5c0aa79719c9d3798afd92b63394b574b1f9ed5270",
+                  "start": 3574
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4376,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "0825536a35d6ca13cdf327821b784fe6a122cfc0222e3cadf1b3254a7ad57bff",
+                  "start": 4104
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "a2d6368b78db1780540af875c349a663c8f05bb8fc94be5d3c95f45c25f0beed"
+            },
+            {
+              "header": "@@ -3203,7 +3551,7 @@ def run_wave_setup(",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: run_wave_setup. Landed definitions: run_wave_setup",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 4376,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "0825536a35d6ca13cdf327821b784fe6a122cfc0222e3cadf1b3254a7ad57bff",
+                  "start": 4104
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4376,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "0825536a35d6ca13cdf327821b784fe6a122cfc0222e3cadf1b3254a7ad57bff",
+                  "start": 4104
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "eca770e630043eda0225a225e5e5576fe729ea998292d6c796a186b6c93fc271"
+            },
+            {
+              "header": "@@ -3219,10 +3567,10 @@ def run_wave_setup(",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: run_wave_setup. Landed definitions: run_wave_setup",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 4376,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "0825536a35d6ca13cdf327821b784fe6a122cfc0222e3cadf1b3254a7ad57bff",
+                  "start": 4104
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4376,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "0825536a35d6ca13cdf327821b784fe6a122cfc0222e3cadf1b3254a7ad57bff",
+                  "start": 4104
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "e8d8dc486812a36864f4d30c26aef6bb37027e1d76ed2a9e9b4ec2bd1d7f6a02"
+            },
+            {
+              "header": "@@ -3265,6 +3613,53 @@ def run_wave_setup(",
+              "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior. Source definitions: run_wave_setup. Landed definitions: run_wave_setup",
+              "references": [
+                {
+                  "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+                  "end": 4376,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "0825536a35d6ca13cdf327821b784fe6a122cfc0222e3cadf1b3254a7ad57bff",
+                  "start": 4104
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4376,
+                  "path": "mu/tools/executors/launch_wave.py",
+                  "sha256": "0825536a35d6ca13cdf327821b784fe6a122cfc0222e3cadf1b3254a7ad57bff",
+                  "start": 4104
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "db9c96e7dc912e7cd6d13926eaa14b8299076a83459b82e6fc0ef3a9bcef01a0"
+            }
+          ],
+          "patch_sha256": "201f2625c3c41a8d3182bd806c5ecb7624652f56f3415648b55a68e305e8cb3f",
+          "path": "mu/tools/executors/launch_wave.py",
+          "reason": "R4 supersedes the stopped R1 selector with exact terminal receipt/one-shot claim, the same explicit Phase B route and task identity, strict packet/tracker/candidate validation, and immutable snapshot checks around the two now-authorized bridge builders. Unlocked Phase A setup remains separate. R1 no-bridge-mutation expectations were the rejected contract, not useful missing behavior.",
+          "references": [
+            {
+              "commit": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+              "end": 120,
+              "path": "mu/tools/executors/launch_wave.py",
+              "sha256": "feba202bd08560170faf6dd1197485253ab26e972d9f81e8c1720a8253d3b05f",
+              "start": 1
+            },
+            {
+              "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+              "end": 120,
+              "path": "mu/tools/executors/launch_wave.py",
+              "sha256": "feba202bd08560170faf6dd1197485253ab26e972d9f81e8c1720a8253d3b05f",
+              "start": 1
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,145 @@",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "523790bb68bab924ae9dc983a0e6cafbeb9e52b8073855bf5b1951bf5a25786f"
+            }
+          ],
+          "patch_sha256": "a9ef2ffad9748fea9a259abe0ee2efe15d8c0c56bf4b148b88689997c60683fd",
+          "path": "reports/control_plane/native-stub-phase-b-same-config-relaunch-repair-r1-2026-09-10_2026-09-10.md",
+          "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,14 @@",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "a79943a43f8986e5cc5dfef230ca23adbe92a4b9af40aa2b4b16d39a2b3b5c53"
+            }
+          ],
+          "patch_sha256": "64fa7aa10fc7ff8c5a79a0828f558d34827310789a6da5e287176da57e7e828c",
+          "path": "reports/deferred/non_blocking/native-stub-phase-b-same-config-relaunch-repair-r1-2026-09-10_bridge_nonblockers.md",
+          "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "a10e414af702da1e479fcdb9c8806d5dabfe6cac6eaac98cc180ea1ff15cfef1"
+            }
+          ],
+          "patch_sha256": "89927d4c9d5b37e4b929fa8570b1a51c05fa0094b555c1e0637be42e44c0e8bb",
+          "path": "reports/l4_wave_indicators/native-stub-phase-b-same-config-relaunch-repair-r1-2026-09-10.json",
+          "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+          "references": [],
+          "resolution": "evidence_only"
+        }
+      ],
+      "evidence_refs": [
+        "git:7add3eac29bba70e3bd533aa8301e44b3dbedcb8 (complete stopped candidate tree and parent diff retained by exact source branch)",
+        "https://github.com/jabramsja/rcx-pi-core/pull/1284",
+        "https://github.com/jabramsja/rcx-pi-core/pull/1286",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/pr-fleet-production-priority-2026-09-13/priority_and_open_obligations.json (historical OPEN/stop observation only; fresh CLI reads required)"
+      ],
+      "owner": {
+        "packet": "reports/control_plane/pr-open-lifecycle-completion-r4-2026-09-13_2026-09-13.md",
+        "task_id": "[PIPELINE-FIX-53]",
+        "wave_id": "pr-open-lifecycle-completion-r4-2026-09-13"
+      },
+      "preservation_ref": "refs/heads/jabramsja/native-stub-phase-b-same-config-relaunch-repair-r1-2026-09-10",
+      "replacement": {
+        "head": "b3223b0502a793d05758bbc447b5108c182b1577",
+        "id": "PR_kwDOQvy8bs8AAAABDLT3Yw",
+        "merge": "8bc47cfa28965fc629fc4e1eb113a7a6adc7427c",
+        "number": 1286
+      },
+      "source_base": "0e5ccb244f504aad5dc0f5c80513ab461843a5ea",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/native-stub-phase-b-same-config-relaunch-repair-r1-2026-09-10",
+        "headRefOid": "7add3eac29bba70e3bd533aa8301e44b3dbedcb8",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABDHcYOw",
+        "mergedAt": null,
+        "number": 1284,
+        "state": "OPEN"
+      }
+    },
+    {
+      "coverage": [
+        {
+          "hunks": [
+            {
+              "header": "@@ -6,7 +6,42 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "3a6b970f19ee87ab937ef8c97aada5c503751520f0126702933c1e58c257b120"
+            },
+            {
+              "header": "@@ -24,10 +59,9 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "a1f242413b924040da28e2dd0c472cfd45affdc179926cfd5ff5eca6879c48b8"
+            }
+          ],
+          "patch_sha256": "6ad1e37e30329be8df6bc05b8399a05d9237e6b036c2fea1b30f47d54d22cc47",
+          "path": "CHANGELOG.md",
+          "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -7,11 +7,11 @@ Founder model selection (2026-09-11): every selected local model-bearing pipelin",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "9a96a47e64ed5020a8a786fa9dc57a54c8941c03c9c909e8a260bcd1264b7c3a"
+            },
+            {
+              "header": "@@ -151,7 +151,7 @@ Wave: `pr1219-p0ibrrcp-provider-neutral-r4-2026-09-01`. Landed through PR #1255",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "66902cefd991cf5ee3ec64a9836763c2353bde269cce153a1785a5514a7e4a15"
+            },
+            {
+              "header": "@@ -204,7 +204,7 @@ Wave: `pr1219-p0ibrrcp-bridge-envelope-validation-prereq-r3-2026-08-25`. Reconst",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "fadeb4124c57a0dd9126e5c325c72e912e1e6049270ebe2b241cbc9ce75d95fa"
+            },
+            {
+              "header": "@@ -473,7 +473,7 @@ Separate nonblocking post-retirement observation: native postmerge closeout exit",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "0682c0088f5fb2102d97ccb20fd414eaabbee51f1628c3a870d86d4e22c4141c"
+            },
+            {
+              "header": "@@ -481,213 +481,213 @@ LANDED: P0IBRRCO in-flight mutating implementer ownership, wave `pr1219-p0ibrrco",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "07ecc6baa03c82ae9e9128b7187953b11b1e248d183129b90e8338a63f8a609d"
+            },
+            {
+              "header": "@@ -1504,6 +1504,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "0b6013957d00b51435d4d8c45fd502e89ceca5c57310a18fdedbe8d09944c7f2"
+            }
+          ],
+          "patch_sha256": "ec2151368f1eed405a2582dea507c587ab2d482936ddc9eaeed5bfefacd9e5ce",
+          "path": "TASKS.md",
+          "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone",
+              "reason": "PR1299 retains the required/optional authority split, landed builder loading, scope guard, verified recovery receipt and retry propagation. Committed isolated task/scope readers replace candidate Phase B imports; bytecode-setting parametrization fixes the observed CI import failure without dropping the R1 negative controls. Source definitions: module imports/documentation. Landed definitions: module imports/documentation",
+              "references": [
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 120,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "85e2f511906dc7c29159b06b04282b180e39a1bb501925dff64d5639c8ced999",
+                  "start": 1
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 120,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "85e2f511906dc7c29159b06b04282b180e39a1bb501925dff64d5639c8ced999",
+                  "start": 1
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "2e793a6037b65b975e4ab58a056c3bab4751ef9641c45dd2953aaf2e63853e2d"
+            },
+            {
+              "header": "@@ -15272,6 +15272,328 @@ fi",
+              "reason": "PR1299 retains the required/optional authority split, landed builder loading, scope guard, verified recovery receipt and retry propagation. Committed isolated task/scope readers replace candidate Phase B imports; bytecode-setting parametrization fixes the observed CI import failure without dropping the R1 negative controls. Source definitions: post_reentry_authority, test_post_reentry_required_authority_reaches_existing_consumer, test_post_reentry_required_authority_fails_closed, test_post_reentry_candidate_authority_python_cannot_authorize_itself, test_post_reentry_verifies_rebuilt_receipt_before_success, test_post_reentry_explicit_optional_authority_remains_optional, TestNeedsPhaseB_Tier3. Landed definitions: post_reentry_authority, test_post_reentry_required_authority_reaches_existing_consumer, test_post_reentry_required_authority_fails_closed, test_post_reentry_candidate_authority_python_cannot_authorize_itself, test_post_reentry_verifies_rebuilt_receipt_before_success, test_post_reentry_explicit_optional_authority_remains_optional, TestNeedsPhaseB_Tier3",
+              "references": [
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 15416,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "d8e6fc18e080ad1ca2be2dcbd4a8b08913f3a68c3b99154210280810f32d2307",
+                  "start": 15275
+                },
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 15459,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "ed51f9582376e6208f526f6f00964d61fa0444317517c5e3639b11e5fc6a1e64",
+                  "start": 15419
+                },
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 15514,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "3754302d093800fa6403ad9273bb2aa67459589f01fbf2873f96459ec2aac8c0",
+                  "start": 15462
+                },
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 15534,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "cc7f726943691445eb00c080205c0a6532ef5fabf2185dcb5a542d21c990b790",
+                  "start": 15517
+                },
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 15574,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "af3427752bcc3089f00b8e07556e4d13e0870619f1e673af5803e1e3b67c6acb",
+                  "start": 15537
+                },
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 15601,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "8fd14890a72258c594f6097f5df45b5508b1cf19d57476eea59098a55e879c0b",
+                  "start": 15577
+                },
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 16252,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "fb30c1253ed061fd498976fdedb00bf4ac9a93d2b81797d2aec0b71fda0ece56",
+                  "start": 15604
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 15416,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "d8e6fc18e080ad1ca2be2dcbd4a8b08913f3a68c3b99154210280810f32d2307",
+                  "start": 15275
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 15459,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "ed51f9582376e6208f526f6f00964d61fa0444317517c5e3639b11e5fc6a1e64",
+                  "start": 15419
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 15514,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "3754302d093800fa6403ad9273bb2aa67459589f01fbf2873f96459ec2aac8c0",
+                  "start": 15462
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 15534,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "cc7f726943691445eb00c080205c0a6532ef5fabf2185dcb5a542d21c990b790",
+                  "start": 15517
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 15574,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "af3427752bcc3089f00b8e07556e4d13e0870619f1e673af5803e1e3b67c6acb",
+                  "start": 15537
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 15601,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "8fd14890a72258c594f6097f5df45b5508b1cf19d57476eea59098a55e879c0b",
+                  "start": 15577
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 16252,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "fb30c1253ed061fd498976fdedb00bf4ac9a93d2b81797d2aec0b71fda0ece56",
+                  "start": 15604
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "fe0789ce5b91ec75649ef921f69a6f681b8db99b433ffc86c1eca013ef9f1388"
+            }
+          ],
+          "patch_sha256": "e2c31b43cad0fedf17adbecc4198d42c2d64806831980a99b0d852897af26ace",
+          "path": "mu/tests/tools/test_recovery_gate.py",
+          "reason": "PR1299 retains the required/optional authority split, landed builder loading, scope guard, verified recovery receipt and retry propagation. Committed isolated task/scope readers replace candidate Phase B imports; bytecode-setting parametrization fixes the observed CI import failure without dropping the R1 negative controls.",
+          "references": [
+            {
+              "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+              "end": 120,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "85e2f511906dc7c29159b06b04282b180e39a1bb501925dff64d5639c8ced999",
+              "start": 1
+            },
+            {
+              "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+              "end": 120,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "85e2f511906dc7c29159b06b04282b180e39a1bb501925dff64d5639c8ced999",
+              "start": 1
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -26,11 +26,13 @@ import sys",
+              "reason": "PR1299 retains the required/optional authority split, landed builder loading, scope guard, verified recovery receipt and retry propagation. Committed isolated task/scope readers replace candidate Phase B imports; bytecode-setting parametrization fixes the observed CI import failure without dropping the R1 negative controls. Source definitions: module imports/documentation. Landed definitions: module imports/documentation",
+              "references": [
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 120,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "bd7e83f8384378b7c43c0fcb49f71be17aa4ef26ffd0b885fa8ac7e63abb14e6",
+                  "start": 1
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 120,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "bd7e83f8384378b7c43c0fcb49f71be17aa4ef26ffd0b885fa8ac7e63abb14e6",
+                  "start": 1
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "046668bd1c438f9d9b819d61c76b9ec835171859248a837dab28bb789b811830"
+            },
+            {
+              "header": "@@ -3912,6 +3914,117 @@ def _post_reentry_resume_state_sha(repo_root: Path) -> str:",
+              "reason": "PR1299 retains the required/optional authority split, landed builder loading, scope guard, verified recovery receipt and retry propagation. Committed isolated task/scope readers replace candidate Phase B imports; bytecode-setting parametrization fixes the observed CI import failure without dropping the R1 negative controls. Source definitions: _post_reentry_resume_state_sha, _landed_post_reentry_authority, _prepare_post_reentry_candidate_authority, fix_post_reentry_needs_phase_b. Landed definitions: _post_reentry_resume_state_sha, _landed_post_reentry_authority, _prepare_post_reentry_candidate_authority, fix_post_reentry_needs_phase_b",
+              "references": [
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 3933,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "06480f9ee034bd9685652718d7d0f7febd9734d576d5779a77d181299a411c65",
+                  "start": 3885
+                },
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 4043,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "0c6f5802f4b1d17ca5e7e14a92bf72892b873214f969eed827030d8e42561200",
+                  "start": 4010
+                },
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 4126,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "684acc281840b8e9ff9e640c4c8f4a8b80957ee86a41bc454df1cede7ac83a6a",
+                  "start": 4046
+                },
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 3933,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "06480f9ee034bd9685652718d7d0f7febd9734d576d5779a77d181299a411c65",
+                  "start": 3885
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4043,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "0c6f5802f4b1d17ca5e7e14a92bf72892b873214f969eed827030d8e42561200",
+                  "start": 4010
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4126,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "684acc281840b8e9ff9e640c4c8f4a8b80957ee86a41bc454df1cede7ac83a6a",
+                  "start": 4046
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "0f7f98f5744b5aad1eea277ef2e9f835d5e9ee12365ff7ea83c7b0ad6ad6c2fc"
+            },
+            {
+              "header": "@@ -3950,6 +4063,19 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]",
+              "reason": "Exact source definitions retained in replacement and current dev: fix_post_reentry_needs_phase_b",
+              "references": [
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "3c8014864aa8aa212e9dd8e1baba3e197e4cacfed13acbbb3a9e0dd6a2eb1f28"
+            },
+            {
+              "header": "@@ -3967,7 +4093,10 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]",
+              "reason": "Exact source definitions retained in replacement and current dev: fix_post_reentry_needs_phase_b",
+              "references": [
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "c6fdf86e6ef1dce0f977b2954d35400b4da7b1e8c4e6c29eb307eede9ce83382"
+            },
+            {
+              "header": "@@ -4013,6 +4142,7 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]",
+              "reason": "Exact source definitions retained in replacement and current dev: fix_post_reentry_needs_phase_b",
+              "references": [
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "2b4a501f49962085dc4fb64b7692ae17b030418624361b798cc5c05ad891e0a6"
+            },
+            {
+              "header": "@@ -4031,7 +4161,10 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]",
+              "reason": "Exact source definitions retained in replacement and current dev: fix_post_reentry_needs_phase_b",
+              "references": [
+                {
+                  "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                },
+                {
+                  "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+                  "end": 4286,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "72c72da6347a36633eb2125779f5337d1eeef00694142aea08a830e2365f4f73",
+                  "start": 4129
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "19c355d045274e89df0d88cc4894e30ee6fb507bbc66bffaf131b57390ed1bbc"
+            }
+          ],
+          "patch_sha256": "5cb2bd14bcb795da58b590e394b7aeca14df4e3a25ab0c4bbdac2f7e0923dad0",
+          "path": "mu/tools/executors/recovery_gate.py",
+          "reason": "PR1299 retains the required/optional authority split, landed builder loading, scope guard, verified recovery receipt and retry propagation. Committed isolated task/scope readers replace candidate Phase B imports; bytecode-setting parametrization fixes the observed CI import failure without dropping the R1 negative controls.",
+          "references": [
+            {
+              "commit": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+              "end": 120,
+              "path": "mu/tools/executors/recovery_gate.py",
+              "sha256": "bd7e83f8384378b7c43c0fcb49f71be17aa4ef26ffd0b885fa8ac7e63abb14e6",
+              "start": 1
+            },
+            {
+              "commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4",
+              "end": 120,
+              "path": "mu/tools/executors/recovery_gate.py",
+              "sha256": "bd7e83f8384378b7c43c0fcb49f71be17aa4ef26ffd0b885fa8ac7e63abb14e6",
+              "start": 1
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,124 @@",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "b88d292bb9c5ba7085a2cbae89368ec532e5090592372ae980c59a6e87406a6d"
+            }
+          ],
+          "patch_sha256": "144658d6bbc704d04eca89719fe744437cde19a1edb0eb3d1aec3e95df37ab84",
+          "path": "reports/control_plane/pr1219-p0ib1-recovery-authority-r1-2026-09-13_2026-09-13.md",
+          "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "db937f3a9966001c86b3f0dfd165d3bf8c1b162f2c4c53de91104d0ce52ae18c"
+            }
+          ],
+          "patch_sha256": "a3ba50ac3c2a0d90ec78779306fb4d95ecf37f7b7bb71d9d22482e1c6840c032",
+          "path": "reports/l4_wave_indicators/pr1219-p0ib1-recovery-authority-r1-2026-09-13.json",
+          "reason": "Historical tracker/changelog, packet, indicator or review evidence remains in the exact stopped commit; stale lifecycle/model/queue wording is not current execution authority. Useful behavior is accounted for by the code/test path mappings.",
+          "references": [],
+          "resolution": "evidence_only"
+        }
+      ],
+      "evidence_refs": [
+        "git:3aeac850bf42e0d8d0331afe593be8f62ba055ab (complete stopped candidate tree and parent diff retained by exact source branch)",
+        "https://github.com/jabramsja/rcx-pi-core/pull/1298",
+        "https://github.com/jabramsja/rcx-pi-core/pull/1299",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/pr-fleet-production-priority-2026-09-13/priority_and_open_obligations.json (historical OPEN/stop observation only; fresh CLI reads required)"
+      ],
+      "owner": {
+        "packet": "reports/control_plane/pr-open-lifecycle-completion-r4-2026-09-13_2026-09-13.md",
+        "task_id": "[PIPELINE-FIX-53]",
+        "wave_id": "pr-open-lifecycle-completion-r4-2026-09-13"
+      },
+      "preservation_ref": "refs/heads/jabramsja/pr1219-p0ib1-recovery-authority-r1-2026-09-13",
+      "replacement": {
+        "head": "eb525d891b9be3bfaf50f0b05e2e359c1b652d6e",
+        "id": "PR_kwDOQvy8bs8AAAABDUzctg",
+        "merge": "56cb682c1d440b776496aa00d49f499dfcfa69b9",
+        "number": 1299
+      },
+      "source_base": "5d852e20bd73ff75147c8fb6b117c195c0ec4855",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/pr1219-p0ib1-recovery-authority-r1-2026-09-13",
+        "headRefOid": "3aeac850bf42e0d8d0331afe593be8f62ba055ab",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABDUmiqA",
+        "mergedAt": null,
+        "number": 1298,
+        "state": "OPEN"
+      }
+    }
+  ],
+  "wave_id": "pr-open-lifecycle-completion-r4-2026-09-13"
+}
