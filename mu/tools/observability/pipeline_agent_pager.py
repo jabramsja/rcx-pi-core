@@ -146,6 +146,8 @@ def _active_bus_dir(bus_dir: str | Path | None = None) -> str | Path | None:
 
 
 def _observability_path(repo_root: Path, *parts: str, bus_dir: str | Path | None = None) -> Path:
+    if not repo_root.is_dir():
+        raise PipelineAgentPagerError(f"Pager root no longer exists: {repo_root}")
     return agent_bus_path(repo_root, _active_bus_dir(bus_dir), "observability", *parts)
 
 
@@ -306,8 +308,8 @@ class _PagerLock:
         self._fp = None
 
     def __enter__(self) -> "_PagerLock":
-        self._thread_lock.acquire()
         lock_path = _observability_path(self._repo_root, "pipeline_agent_pager.lock")
+        self._thread_lock.acquire()
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._fp = open(lock_path, "a+", encoding="utf-8")
         fcntl.flock(self._fp.fileno(), fcntl.LOCK_EX)
@@ -2413,6 +2415,23 @@ def dispatch_pending_events(
             }
     finally:
         _ACTIVE_BUS_DIR.reset(token)
+
+
+def bind_terminal_event_authority(
+    repo_root: Path, surviving_root: Path, *,
+    bus_dir: str | Path | None = None, route: str | None = None,
+) -> dict[str, Any]:
+    """Capture the selected route and surviving filesystem before retirement."""
+    surviving_root = surviving_root.resolve(strict=True)
+    info = surviving_root.stat()
+    token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+    try:
+        selected_route = _resolve_route(repo_root, load_executor_config(repo_root), route)
+    finally:
+        _ACTIVE_BUS_DIR.reset(token)
+    return {"root": str(surviving_root), "device": info.st_dev, "inode": info.st_ino,
+            "route": selected_route, "source_root": str(repo_root),
+            "source_bus": agent_bus_relpath(bus_dir).as_posix()}
 
 
 def emit_transition_event(

@@ -8468,7 +8468,7 @@ class TestCommitContinuationAndBotFreshness:
                 poll_interval=0,
             )
 
-    def test_post_commit_ignores_prior_cycle_unresolved_bot_threads(
+    def test_post_commit_ignores_outdated_prior_cycle_bot_threads(
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
@@ -8532,7 +8532,7 @@ class TestCommitContinuationAndBotFreshness:
                                     "nodes": [
                                         {
                                             "isResolved": False,
-                                            "isOutdated": False,
+                                            "isOutdated": True,  # Older timestamp alone cannot clear a finding.
                                             "comments": {
                                                 "nodes": [
                                                     {
@@ -8608,7 +8608,7 @@ class TestCommitContinuationAndBotFreshness:
         assert "pr_replacement_ownership_hold" not in result
         assert "step" not in post_commit, post_commit
 
-    def test_post_commit_reports_only_current_cycle_bot_threads(
+    def test_post_commit_reports_nonoutdated_current_cycle_bot_threads(
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
@@ -8665,7 +8665,7 @@ class TestCommitContinuationAndBotFreshness:
                                     "nodes": [
                                         {
                                             "isResolved": False,
-                                            "isOutdated": False,
+                                            "isOutdated": True,  # Older timestamp alone cannot clear a finding.
                                             "comments": {
                                                 "nodes": [
                                                     {

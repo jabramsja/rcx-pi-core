@@ -2254,3 +2254,127 @@ class TestStep15RemediationMidPollSurfaceConflictRecheck:
         )
         assert rev_parse_calls["count"] == 2    # remediation commit head + post-CI-wait refresh
         assert consumed_heads["request"] == autoresolve_head
+
+
+def _residual_review_thread(tid, body="P2 doc nit", *, author=None, created="2026-09-14T15:00:00Z"):
+    return {
+        "id": tid, "isResolved": False, "isOutdated": False,
+        "comments": {"nodes": [{
+            "id": tid + "-comment", "author": {"login": author or commit_mod.BOT_REVIEW_LOGIN},
+            "body": body, "path": "docs/note.md", "line": 1, "createdAt": created,
+        }], "pageInfo": {"hasPreviousPage": False}},
+    }
+
+
+def _residual_review_state(threads, *, activity="Completed"):
+    return {
+        "headRefOid": "b" * 40, "headRefName": "fixture/fleet", "reviewDecision": "",
+        "latestReviews": {"nodes": [{
+            "author": {"login": commit_mod.BOT_REVIEW_LOGIN}, "commit": {"oid": "b" * 40},
+            "submittedAt": "2026-09-14T16:00:00Z", "body": "", "state": "COMMENTED",
+        }]},
+        "comments": {"nodes": [{
+            "author": {"login": commit_mod.BOT_REVIEW_LOGIN}, "createdAt": "2026-09-14T16:05:00Z",
+            "body": "<!-- codex-pull-request-review-summary -->\n## Codex Review Summary\n"
+                    f"| Code Review | **{activity}** | `bbbbbbb` | Manual request |",
+        }]},
+        "reviewThreads": {"nodes": threads, "pageInfo": {"hasNextPage": False}},
+    }
+
+
+def test_pr1304_activity_metadata_does_not_mask_older_unresolved_p1():
+    for activity in ("Running", "Completed"):
+        thread = _residual_review_thread("older-p1", "P1 retained verified defect")
+        data = _residual_review_state([thread], activity=activity)
+        extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: production review classifier
+            data, "b" * 40, result={"steps_completed": []}, pr_number="1304")
+        assert extracted["outcome"] == "bot_findings"
+        assert len(extracted["bot_findings"]) == 1
+        finding = extracted["bot_findings"][0]
+        assert finding["body"] == "P1 retained verified defect"
+        assert finding["thread_id"] == "older-p1"
+        assert finding["comment_id"] == "older-p1-comment"
+        assert finding["reviewed_head"] == "b" * 40
+        assert commit_mod._current_head_connector_issue_comment_outcome(  # ANTICHEAT_OK: exact observed metadata marker
+            data, "b" * 40) is None
+
+
+def test_pr1304_new_review_does_not_clear_human_or_retained_nonoutdated_thread():
+    human = _residual_review_thread("human", author="maintainer")
+    extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: human review preservation
+        _residual_review_state([human]), "b" * 40, result={"steps_completed": []}, pr_number="1304")
+    assert extracted["outcome"] == "error"
+    assert "human" in extracted["response"]["errors"][0]
+    outdated = _residual_review_thread("obsolete", "P1 old defect")
+    outdated["isOutdated"] = True
+    extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: retain outdated policy
+        _residual_review_state([outdated]), "b" * 40, result={"steps_completed": []}, pr_number="1304")
+    assert extracted["outcome"] == "clean"
+
+
+def test_auto_defer_resolves_only_exact_snapshot_after_child_commit(monkeypatch):
+    from copy import deepcopy
+    snapshot = _residual_review_thread("reviewed")
+    edited = _residual_review_thread("edited")
+    replied = _residual_review_thread("replied")
+    missing = _residual_review_thread("missing")
+    data = _residual_review_state([snapshot, edited, replied, missing])
+    findings = commit_mod._extract_review_findings(  # ANTICHEAT_OK: preserve production finding identities
+        data, "b" * 40, result={"steps_completed": []}, pr_number="1304")["bot_findings"]
+    late = deepcopy(data)
+    late["headRefOid"] = "c" * 40  # report-only child, after the reviewed snapshot
+    edited_after = deepcopy(edited)
+    edited_after["comments"]["nodes"][0]["body"] = "P1 edited after review"
+    replied_after = deepcopy(replied)
+    replied_after["comments"]["nodes"].append({
+        "id": "human-reply", "author": {"login": "maintainer"}, "body": "still broken"})
+    late["reviewThreads"]["nodes"] = [snapshot, edited_after, replied_after,
+        _residual_review_thread("late-p1", "P1 late finding"),
+        _residual_review_thread("late-p2", "P2 late finding"),
+        _residual_review_thread("late-human", author="maintainer")]
+    mutations = []
+    def graphql(args, **kwargs):
+        payload = json.loads(kwargs["input"])
+        if payload["query"].startswith("mutation"):
+            mutations.append(payload["variables"]["id"])
+            response = {"data": {"resolveReviewThread": {"thread": {"isResolved": True}}}}
+        else:
+            response = {"data": {"repository": {"pullRequest": late}}}
+        return subprocess.CompletedProcess(args, 0, json.dumps(response), "")
+    monkeypatch.setattr(commit_mod.subprocess, "run", graphql)
+    commit_mod._resolve_auto_deferred_bot_threads(  # ANTICHEAT_OK: exact post-child thread resolver
+        repo_owner="fixture", repo_name="repo", pr_number="1304", log=lambda _: None,
+        findings=findings, expected_head="c" * 40)
+    assert mutations == ["reviewed"]
+    mutations.clear()
+    late["headRefOid"] = "d" * 40
+    commit_mod._resolve_auto_deferred_bot_threads(  # ANTICHEAT_OK: head-movement refusal
+        repo_owner="fixture", repo_name="repo", pr_number="1304", log=lambda _: None,
+        findings=findings, expected_head="c" * 40)
+    assert mutations == []
+
+
+def test_report_child_cannot_clear_late_unresolved_p1_before_merge(tmp_path, monkeypatch):
+    initial = _residual_review_state([_residual_review_thread("deferred")])
+    child = _residual_review_state([_residual_review_thread("late", "P1 late critical defect")])
+    child["headRefOid"] = "c" * 40
+    child["latestReviews"]["nodes"][0]["commit"]["oid"] = "c" * 40
+    result = {"pr_number": "1304", "commit_sha": "b" * 40,
+              "steps_completed": ["git_commit", "run_pre_push_script", "git_push", "ensure_pr", "wait_ci"]}
+    monkeypatch.setattr(commit_mod, "record_commit_pr_lifecycle", lambda *a, **kw: None)
+    monkeypatch.setattr(commit_mod, "_parse_origin_owner_repo", lambda *a: ("fixture", "repo"))
+    monkeypatch.setattr(commit_mod, "_query_pr_review_state", lambda *a, **kw: initial)
+    monkeypatch.setattr(commit_mod, "_attempt_bot_finding_remediation", lambda *a, **kw: None)
+    monkeypatch.setattr(commit_mod, "_refresh_pr_head_after_executor_update", lambda *a, **kw: ("c" * 40, child))
+    def only_head(args, **kwargs):
+        assert args == ["git", "rev-parse", "HEAD"], "unresolved finding reached a later command"
+        return subprocess.CompletedProcess(args, 0, "b" * 40 + "\n", "")
+    monkeypatch.setattr(commit_mod, "_run", only_head)
+    outcome = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: real merge owner after asynchronous report child
+        repo_root=tmp_path, handoff={"wave_id": "fleet-test"}, result=result,
+        target_branch="fixture/fleet", base_branch="dev", continuation_path=tmp_path / "continuation.json",
+        log=lambda _: None)
+    assert outcome["status"] == "bot_findings_pending"
+    assert outcome["bot_findings"][0]["thread_id"] == "late"
+    assert "P1" in outcome["bot_findings"][0]["body"]
+    assert "ensure_review_clear_and_merge" not in result["steps_completed"]

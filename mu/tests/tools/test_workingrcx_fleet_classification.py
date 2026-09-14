@@ -539,3 +539,42 @@ def test_cli_accounts_for_all_recorded_categories_in_remapped_disposable_invento
                if r["source"]["availability_status"] == "missing"
                or r["source"]["git"]["dirty_status"] != "clean")
     assert snapshot(f.fleet) == before
+
+
+def test_residual_cli_reassesses_full_manifest_with_bounded_batches_and_owned_holds(fixture):
+    f = fixture
+    rows = [row(f, f"WorkingRCX-fresh-{index:02d}",
+                filesystem_identity={"device": 1, "inode": index + 1, "mode": 16877})
+            for index in range(26)]
+    shell = row(f, "WorkingRCX-retired-bus", filesystem_identity={"device": 1, "inode": 99, "mode": 16877})
+    shell.update(sources=["fleet_root"], registered_worktrees=[], registration_status="not_registered",
+                 repository_kind="non_repository", inspection_status="not_repository",
+                 bus_only_shell=True, shell_entries=[".agent_bus-retired"],
+                 git={key: None for key in shell["git"]})
+    rows.append(shell)
+    dev = row(f, "workingrcx_clarolesfull_20260627", filesystem_identity={"device": 1, "inode": 100, "mode": 16877})
+    dev["git"].update(branch="refs/heads/dev", dirty_status="dirty",
+                      dirty_counts={**ZERO_COUNTS, "entries": 2, "tracked": 1, "unstaged": 1, "untracked": 1})
+    dev["registered_worktrees"][0]["branch"] = "refs/heads/dev"
+    rows.append(dev)
+    uncertain = row(f, "WorkingRCX-unknown-identity")
+    rows.append(uncertain)
+    rows.append(row(f, "workingrcx_pr_preservation_20260630",
+                    filesystem_identity={"device": 1, "inode": 101, "mode": 16877}))
+    data = inventory(f, rows)
+    output = f.carrier / "reports/control_plane/workingrcx-fleet-residual-completion-r1-2026-09-13_classification.json"
+    output.parent.mkdir(parents=True)
+    result = run_cli(f, data, extra=("--residual",), output=output)
+    assert result.returncode == 0, result.stderr
+    report = json.loads(output.read_text())
+    assert report["decision_counts"] == {"CONDITIONAL_RETIRE_CANDIDATE": 28, "HOLD": 2}
+    assert list(map(len, report["batches"])) == [12, 12, 4]
+    assert [index for batch in report["batches"] for index in batch] == list(range(28))
+    assert report["entries"][26]["proposed_action"] == "PRESERVE_BUS_SHELL"
+    assert report["entries"][27]["proposed_action"] == "SYNC_LOCAL_DEV"
+    assert report["entries"][29]["decision"] == "HOLD"
+    assert "protected_evidence" in [r["code"] for r in report["entries"][29]["reasons"]]
+    assert report["entries"][28]["owner"] == "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]"
+    assert all(r["source"] == rows[i] and r["mutation_authorized"] is False for i, r in enumerate(report["entries"]))
+    # None of these recorded fresh names were in the old fourteen-name policy.
+    assert all("outside_bounded_candidate_set" not in [v["code"] for v in r["reasons"]] for r in report["entries"])

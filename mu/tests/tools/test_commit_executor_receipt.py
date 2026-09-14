@@ -8358,6 +8358,14 @@ class TestBotRemediationValidation:
             "author": commit_mod.BOT_REVIEW_LOGIN,
             "line": 1,
         }]
+        reviewed_thread = {
+            "id": "eligible-bot-thread", "isResolved": False, "isOutdated": False,
+            "comments": {"nodes": [{"id": "eligible-comment",
+                "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                "body": "P2 minor doc nit", "path": "docs/nit.md", "line": 1}]},
+        }
+        findings[0].update(thread_id="eligible-bot-thread", comment_id="eligible-comment",
+                           reviewed_head=baseline_head, thread_snapshot=reviewed_thread)
         result = self._base_result()
         result.update({
             "commit_sha": baseline_head,
@@ -8539,6 +8547,7 @@ class TestBotRemediationValidation:
                         "data": {
                             "repository": {
                                 "pullRequest": {
+                                    "headRefOid": guard_heads[-1],
                                     "reviewThreads": {
                                         "nodes": [
                                             {
@@ -8555,13 +8564,7 @@ class TestBotRemediationValidation:
                                                     "author": {"login": commit_mod.BOT_REVIEW_LOGIN}
                                                 }]},
                                             },
-                                            {
-                                                "id": "eligible-bot-thread",
-                                                "isResolved": False,
-                                                "comments": {"nodes": [{
-                                                    "author": {"login": commit_mod.BOT_REVIEW_LOGIN}
-                                                }]},
-                                            },
+                                            reviewed_thread,
                                         ]
                                     }
                                 }

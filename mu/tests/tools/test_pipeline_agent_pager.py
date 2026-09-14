@@ -972,6 +972,9 @@ def test_receiver_loader_loads_repo_receiver_with_circular_pager_link(
         pytest.skip("claude_pager_receiver uses the POSIX fcntl queue lock")
     canonical_receiver = _TOOLS_DIR / "session" / "claude_pager_receiver.py"
     monkeypatch.setattr(pager_mod, "SCRIPT_DIR", _TOOLS_DIR / "observability")
+    # Other declared modules load this file under the same public import name.
+    # Bind this test's caller before exercising its circular receiver import.
+    monkeypatch.setitem(sys.modules, "pipeline_agent_pager", pager_mod)
     monkeypatch.delitem(sys.modules, "claude_pager_receiver", raising=False)
 
     receiver_cls = _REAL_LOAD_CLAUDE_PAGER_RECEIVER_CLS()
@@ -4231,3 +4234,16 @@ def test_claude_quick_ack_is_replay_safe_and_legacy_skip_receipt_ignored(tmp_pat
     assert set(entry2["delivered_targets"]) == {"codex", "claude"}
     assert entry2["pending_targets"] == []
     assert "claude" not in entry2.get("skipped_targets", {})
+
+
+def test_stale_terminal_writer_and_drainer_do_not_recreate_retired_root(tmp_path):
+    retired = tmp_path / "retired"
+    retired.mkdir()
+    _write_config(retired)
+    retired.rename(tmp_path / "preserved")
+    with pytest.raises(pager_mod.PipelineAgentPagerError, match="no longer exists"):
+        pager_mod.emit_transition_event(retired, **_event_kwargs(event_type="commit_succeeded"))
+    assert not retired.exists()
+    with pytest.raises(pager_mod.PipelineAgentPagerError, match="no longer exists"):
+        pager_mod.dispatch_pending_events(retired)
+    assert not retired.exists()

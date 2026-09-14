@@ -24,6 +24,8 @@ import sys
 
 
 WAVE_ID = "workingrcx-fleet-classification-r1-2026-09-11"
+RESIDUAL_WAVE_ID = "workingrcx-fleet-residual-completion-r1-2026-09-13"
+RESIDUAL_BATCH_SIZE = 12
 LANDED_CENSUS = "workingrcx-fleet-census-r3-2026-09-11_census.json"
 LANDED_SHA256 = "ac6f61337081c9adb7c100bac061270f6c7864aaed55d48912f50b8473d0cd81"
 LANDED_BASE = "c209bf29841425305003eeceddfd567a93874742"
@@ -219,9 +221,11 @@ def _ancestry(carrier: str, head: str, base: str) -> dict:
 
 
 def classify(census: dict, *, source_sha256: str, base_commit: str,
-             carrier: str, landed: bool) -> dict:
+             carrier: str, landed: bool, residual: bool = False) -> dict:
     """Return one decision per validated row using only carrier-local objects."""
     _validate_inventory(census)
+    if residual and landed:
+        raise ValueError("Historical and residual classification authorities cannot be mixed")
     if not _oid(base_commit):
         raise ValueError("base-commit must be an exact 40-character commit ID")
     if not _success(_git(carrier, "rev-parse", "--show-toplevel"), carrier + "\n"):
@@ -246,6 +250,9 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                 or not _success(_git(carrier, "rev-parse", "--path-format=absolute", "--git-common-dir"), common + "\n")):
             raise ValueError("Landed census, exact predecessor or fresh carrier binding is wrong")
     protected_paths = [census["fleet_root"] + "/" + name for name in PROTECTED_NAMES]
+    if residual:
+        protected_paths = [census["fleet_root"] + "/" + name for name in (
+            "WorkingRCX", "WorkingRCX-preservation", "workingrcx_pr_preservation_20260630")]
     protected_paths += [census["anchor_repo"], carrier]
     rows, cache = [], {}
     for index, source in enumerate(census["entries"]):
@@ -255,11 +262,17 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
         def hold(code: str, detail: str) -> None:
             reasons.append({"code": code, "detail": detail})
         name = os.path.basename(path)
+        shell = (residual and source.get("bus_only_shell") is True
+                 and source.get("repository_kind") == "non_repository"
+                 and source.get("inspection_status") == "not_repository"
+                 and source.get("registration_status") == "not_registered" and not registrations)
+        sync_dev = (residual and name == "workingrcx_clarolesfull_20260627"
+                    and git.get("branch") == "refs/heads/dev")
         if (any(path == p or path.startswith(p + "/") for p in protected_paths)
                 or re.match(r"workingrcx[-_](audit|admin|source)([-_]|$)", name, re.I)
                 or any(h in PROTECTED_HEADS for h in [git.get("HEAD"), *(r.get("HEAD") for r in registrations)])):
             hold("protected_evidence", "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected.")
-        if any(branch in ("refs/heads/dev", "refs/heads/main", "refs/heads/master")
+        if not sync_dev and any(branch in ("refs/heads/dev", "refs/heads/main", "refs/heads/master")
                for branch in [git.get("branch"), *(r.get("branch") for r in registrations)]):
             hold("protected_branch", "dev/main/master worktrees cannot be selected.")
         if os.path.dirname(path) != census["fleet_root"] or not name.lower().startswith("workingrcx"):
@@ -289,8 +302,24 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
             hold("dirty_or_unknown", "Recorded dirty status/counts must be known and entirely clean; ignored evidence is still unproved.")
         if source.get("classification") != "UNCLASSIFIED" or not _observation_valid(source, census):
             hold("observation_uncertain", "Missing original unclassified observation identity or timing.")
-        ancestry = {"status": "NOT_PROBED", "probes": []}
-        if not reasons:
+        if residual:
+            fs_identity = source.get("filesystem_identity", {})
+            if (set(fs_identity) != {"device", "inode", "mode"}
+                    or any(type(v) is not int for v in fs_identity.values())):
+                hold("filesystem_identity_uncertain", "Fresh exact filesystem identity is required.")
+            if shell and source.get("errors") == []:
+                shell_exclusions = {"inspection_uncertain", "not_linked_worktree",
+                                    "repository_identity_uncertain", "head_or_branch_uncertain",
+                                    "registration_uncertain", "dirty_or_unknown"}
+                reasons = [r for r in reasons if r["code"] not in shell_exclusions]
+            elif (git.get("dirty_status") in {"clean", "dirty"} and isinstance(counts, dict)
+                  and set(counts) == set(DIRTY_KEYS)
+                  and all(type(v) is int and v >= 0 for v in counts.values())
+                  and counts["unmerged"] == 0):
+                # Full bytes/index/history are archived before native safe sync.
+                reasons = [r for r in reasons if r["code"] != "dirty_or_unknown"]
+        ancestry = {"status": "NOT_APPLICABLE" if shell else "NOT_PROBED", "probes": []}
+        if not reasons and not shell:
             head = git["HEAD"]
             if head not in cache:
                 cache[head] = _ancestry(carrier, head, base_commit)
@@ -299,14 +328,26 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                 hold("unmerged_history" if ancestry["status"] == "NOT_ANCESTOR" else "ancestry_unknown",
                      "Local objects do not prove this recorded HEAD is an ancestor of the exact comparison commit.")
         decision = "HOLD" if reasons else "CONDITIONAL_RETIRE_CANDIDATE"
-        if not reasons:
+        if not reasons and residual:
+            reasons.append({"code": "recorded_bus_shell" if shell else "recorded_eligible_ancestor",
+                            "detail": "Fresh exact identity is conditionally eligible; liveness, byte preservation, safe preparation and the consumed terminal boundary remain required."})
+        elif not reasons:
             reasons.append({"code": "recorded_eligible_ancestor", "detail": "Recorded clean symbolic canonical linked worktree satisfies the finite policy and local exact-base ancestry proof; apply prerequisites remain unmet."})
         rows.append({"source_index": index, "path": path, "source": source,
                      "decision": decision, "reasons": reasons, "ancestry": ancestry,
                      "apply_prerequisites": list(APPLY_PREREQUISITES) if decision != "HOLD" else [],
                      "mutation_authorized": False})
+        if residual:
+            rows[-1].update(
+                owner=("native landing of retained " + str(git.get("branch"))
+                       if any(r["code"] == "unmerged_history" for r in reasons)
+                       else "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]"),
+                proposed_action=("UNTOUCHED_HOLD" if decision == "HOLD" else
+                                 "PRESERVE_BUS_SHELL" if shell else
+                                 "SYNC_LOCAL_DEV" if sync_dev else "PRESERVE_WORKTREE"),
+            )
     counts = Counter(r["decision"] for r in rows)
-    return {
+    report = {
         "schema_version": 1, "observation_kind": "read_only_fleet_classification",
         "wave_id": WAVE_ID, "source_sha256": source_sha256, "comparison_commit": base_commit,
         "object_query_carrier": carrier, "source_metadata": {k: v for k, v in census.items() if k != "entries"},
@@ -325,6 +366,20 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                         "Every HOLD remains unresolved; apply is immediate next only after classification lands."],
         "mutation_authorized": False, "entries": rows,
     }
+
+    if residual:
+        selected = [r["source_index"] for r in rows if r["decision"] != "HOLD"]
+        report.update(wave_id=RESIDUAL_WAVE_ID,
+                      batch_size=RESIDUAL_BATCH_SIZE,
+                      batches=[selected[i:i + RESIDUAL_BATCH_SIZE]
+                               for i in range(0, len(selected), RESIDUAL_BATCH_SIZE)])
+        report["policy"].update(
+            authority="TASKS.md: 2026-09-13 " + RESIDUAL_WAVE_ID + " tracker note",
+            bounded_candidate_paths=[r["path"] for r in rows if r["decision"] != "HOLD"],
+            unlisted_targets="HOLD individually; historical HOLDs were freshly reassessed",
+        )
+        report["limitations"][-1] = "Committed foreground plan/apply/verify remains required for every bounded operation."
+    return report
 
 
 def _write_or_verify(path: str, payload: bytes) -> None:
@@ -365,6 +420,7 @@ def _output_path(output: str, census: dict, carrier: str, landed: bool) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--residual", action="store_true", help="Fresh manifest-bound residual batches; historical authority is unchanged")
     parser.add_argument("--census", required=True)
     parser.add_argument("--base-commit", required=True)
     parser.add_argument("--output", required=True)
@@ -376,15 +432,23 @@ def main(argv: list[str] | None = None) -> int:
         census = json.loads(raw, object_pairs_hook=_unique_object,
                             parse_constant=lambda value: (_ for _ in ()).throw(ValueError("Nonfinite JSON: " + value)))
         _validate_inventory(census)
-        landed = (Path(args.census).name == LANDED_CENSUS or census["fleet_root"] == LANDED_FLEET
-                  or digest == LANDED_SHA256)
+        historical = Path(args.census).name == LANDED_CENSUS or digest == LANDED_SHA256
+        if args.residual and historical:
+            raise ValueError("Residual operations require a fresh census, never historical authority")
+        landed = not args.residual and (historical or census["fleet_root"] == LANDED_FLEET)
         expected = LANDED_SHA256 if landed else args.expected_census_sha256
         if (not expected or digest != expected
                 or args.expected_census_sha256 not in (None, expected)):
             raise ValueError("Raw census SHA-256 binding mismatch or missing fixture hash")
-        output = _output_path(args.output, census, os.getcwd(), landed)
+        if args.residual:
+            output = os.path.abspath(args.output)
+            expected_output = os.getcwd() + "/reports/control_plane/" + RESIDUAL_WAVE_ID + "_classification.json"
+            if output != expected_output or str(Path(output).parent.resolve(strict=True)) != os.path.dirname(output):
+                raise ValueError("Residual classification may write only its wave-owned report")
+        else:
+            output = _output_path(args.output, census, os.getcwd(), landed)
         report = classify(census, source_sha256=digest, base_commit=args.base_commit,
-                          carrier=os.getcwd(), landed=landed)
+                          carrier=os.getcwd(), landed=landed, residual=args.residual)
         payload = (json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii")
         _write_or_verify(output, payload)
         print(json.dumps({"entry_count": report["entry_count"], "decision_counts": report["decision_counts"],

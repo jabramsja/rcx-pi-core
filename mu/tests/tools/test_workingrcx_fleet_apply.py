@@ -46,6 +46,10 @@ def commit(f, message):
 
 @pytest.fixture
 def fleet(monkeypatch):
+    # The declared dependency modules also load commit_executor at collection.
+    # Keep callback/fetch spies attached to the module dynamically imported by
+    # this CLI, preserving the real-boundary assertions in the combined gate.
+    monkeypatch.setitem(sys.modules, "commit_executor", boundary)
     # Explicit /tmp avoids inherited pytest basetemp/.scratch routing. All
     # commits, pushes, hooks, and worktree operations below are disposable.
     with tempfile.TemporaryDirectory(prefix="rcx-fleet-apply-", dir="/tmp") as directory:
@@ -55,6 +59,16 @@ def fleet(monkeypatch):
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         env.update(HOME=str(home), XDG_CONFIG_HOME=str(home), GIT_CONFIG_NOSYSTEM="1",
                    GIT_CONFIG_GLOBAL=os.devnull, PYTHONDONTWRITEBYTECODE="1", LC_ALL="C")
+        real_git = shutil.which("git", path=env["PATH"])
+        assert real_git
+        bindir = root / "bin"
+        bindir.mkdir()
+        wrapper = bindir / "git"
+        # Census drops GIT_* overrides before probing effective config. Keep
+        # runner system filters out of disposable repos at the exec boundary.
+        wrapper.write_text(f'#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 exec {shlex.quote(real_git)} "$@"\n')
+        wrapper.chmod(0o700)
+        env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
         for key in tuple(os.environ):
             if key.startswith("GIT_"):
                 monkeypatch.delenv(key)
@@ -998,3 +1012,130 @@ def test_reconciliation_requires_merged_authority_exact_mode_and_destination(rec
     with pytest.raises(apply.Hold, match="Unlanded|modified"):
         run_reconciliation(f)
     assert not f.reconcile_operation.exists()
+
+
+def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False):
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    git(f, f.repo, "checkout", "-qb", "founder/primary")
+    shells = []
+    for index in range(shell_count):
+        shell = f.root / f"WorkingRCX-retired-shell-{index:02d}"
+        bus = shell / ".agent_bus-retired/observability"
+        bus.mkdir(parents=True)
+        (bus / "events.jsonl").write_bytes(b'{"terminal":true}\n')
+        shells.append(shell)
+    if dev:
+        target = f.root / "workingrcx_clarolesfull_20260627"
+        git(f, f.repo, "worktree", "add", str(target), "dev")
+        (target / "tracked").write_bytes(b"held dev work\n")
+        git(f, target, "stash", "push", "-m", "held TASKS history")
+        f.held_stash = git(f, target, "rev-parse", "refs/stash")
+        (target / "tracked").write_bytes(b"current dev WIP\n")
+        (target / "new-evidence").write_bytes(b"\xffuntracked dev\n")
+        f.local_dev = target
+    census = census_tool.census(str(f.root), str(f.repo))
+    census_path = f.repo / apply.RESIDUAL_CENSUS_PATH
+    census_path.write_bytes(apply.encoded(census))
+    classification = classifier.classify(census, source_sha256=apply.digest(census_path.read_bytes()),
+        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True)
+    expected_actions = {str(f.repo): "UNTOUCHED_HOLD",
+                        **{str(t): "PRESERVE_WORKTREE" for t in f.targets},
+                        **{str(s): "PRESERVE_BUS_SHELL" for s in shells}}
+    if dev:
+        expected_actions[str(f.local_dev)] = "SYNC_LOCAL_DEV"
+    assert {r["path"]: r["proposed_action"] for r in classification["entries"]} == expected_actions, json.dumps([
+        dict(path=r["path"], action=r["proposed_action"], reasons=r["reasons"], errors=r["source"]["errors"])
+        for r in classification["entries"]
+    ], indent=2)
+    classification_path = f.repo / apply.RESIDUAL_CLASSIFICATION_PATH
+    classification_path.write_bytes(apply.encoded(classification))
+    plan = apply.build_residual_plan(f.repo, classification_path, apply.digest(classification_path.read_bytes()))
+    (f.repo / apply.RESIDUAL_PLAN_PATH).write_bytes(apply.encoded(plan))
+    for rel in ("mu/tools/executors/workingrcx_fleet_census.py",
+                "mu/tools/executors/workingrcx_fleet_classification.py",
+                "mu/tools/observability/pipeline_agent_pager.py"):
+        path = f.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((REPO_ROOT / rel).read_bytes())
+    (f.repo / "tracked").write_bytes(b"new authority dev revision\n")
+    f.residual_authority = commit(f, "reviewed residual classification/tool/plan")
+    git(f, f.repo, "push", "-q", "origin", "HEAD:dev")
+    f.residual_plan, f.shells = plan, shells
+    return plan
+
+
+def test_residual_bounded_operations_preserve_bytes_registration_and_no_replay(fleet, monkeypatch):
+    f = fleet
+    plan = residual_fixture(f, monkeypatch, shell_count=13)
+    assert len(plan["operations"]) == 2
+    assert all(len(o["source_indices"]) <= 12 for o in plan["operations"])
+    original_branches = [git(f, t, "symbolic-ref", "HEAD") for t in f.targets]
+    for operation in plan["operations"]:
+        kwargs = dict(authority_commit=f.residual_authority, batch=operation["batch"],
+                      operation_root=Path(operation["operation_root"]))
+        result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+        assert result["outcome_counts"] == {"MOVED": len(operation["source_indices"])}, json.dumps(result, indent=2)
+        verified = apply.verify_residual_plan(f.repo, plan, **kwargs)
+        assert verified["batch_complete"] is True
+        assert verified["recorded_before"] - verified["recorded_after"] == len(operation["source_indices"])
+        with pytest.raises(apply.Hold, match="consumed"):
+            apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert all(not t.exists() for t in [*f.targets, *f.shells])
+    for branch in original_branches:
+        assert git(f, f.repo, "rev-parse", branch) == f.residual_authority
+    registrations = git(f, f.repo, "worktree", "list", "--porcelain")
+    for entry in plan["entries"]:
+        if entry["action"] == "PRESERVE_WORKTREE":
+            assert entry["destination"] in registrations
+            assert (Path(entry["destination"]) / "ignored-evidence/private.bin").read_bytes() == b"\x00private evidence\xff\n"
+    # Tampered preserved bytes cannot verify even with a recorded success.
+    shell_entry = next(e for e in plan["entries"] if e["action"] == "PRESERVE_BUS_SHELL")
+    (Path(shell_entry["destination"]) / ".agent_bus-retired/observability/events.jsonl").write_bytes(b"changed")
+    operation = next(o for o in plan["operations"] if shell_entry["source_index"] in o["source_indices"])
+    with pytest.raises(apply.Hold, match="destination bytes"):
+        apply.verify_residual_plan(f.repo, plan, authority_commit=f.residual_authority,
+            batch=operation["batch"], operation_root=Path(operation["operation_root"]))
+
+
+def test_residual_dirty_dev_sync_and_independent_changed_shell_hold(fleet, monkeypatch):
+    f = fleet
+    plan = residual_fixture(f, monkeypatch, dev=True)
+    # A new file invalidates this shell's exact shape. Eligible peers still run.
+    (f.shells[0] / "unexpected").write_bytes(b"valuable new WIP")
+    operation = plan["operations"][0]
+    kwargs = dict(authority_commit=f.residual_authority, batch=1,
+                  operation_root=Path(operation["operation_root"]))
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"MOVED": 4, "HOLD": 1, "SYNCED_LOCAL_DEV": 1}, json.dumps(result, indent=2)
+    held = next(o for o in result["outcomes"] if o["status"] == "HOLD")
+    assert held["source_identity"]["path"] == str(f.shells[0])
+    assert held["reason"] == "Residual shell shape changed"
+    assert (f.shells[0] / "unexpected").read_bytes() == b"valuable new WIP"
+    assert f.local_dev.is_dir() and f.shells[0].is_dir()
+    assert git(f, f.local_dev, "rev-parse", "HEAD") == f.residual_authority
+    assert git(f, f.local_dev, "symbolic-ref", "HEAD") == "refs/heads/dev"
+    assert f.held_stash in git(f, f.repo, "stash", "list", "--format=%H").splitlines()
+    assert (f.local_dev / "new-evidence").read_bytes() == b"\xffuntracked dev\n"
+    outcome = next(o for o in result["outcomes"] if o["status"] == "SYNCED_LOCAL_DEV")
+    stash = outcome["checkout_sync"]["tracked_wip_stash_oid"]
+    assert git(f, f.repo, "show", stash + ":tracked") == "current dev WIP"
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"] is False
+
+
+def test_residual_refuses_unlanded_authority_and_modified_manifest(fleet, monkeypatch):
+    f = fleet
+    plan = residual_fixture(f, monkeypatch)
+    operation = plan["operations"][0]
+    root = Path(operation["operation_root"])
+    (f.repo / apply.TOOL_PATH).write_bytes(b"unreviewed tool")
+    with pytest.raises(apply.Hold, match="uncommitted or modified"):
+        apply.apply_residual_plan(f.repo, plan, authority_commit=f.residual_authority,
+                                  batch=1, operation_root=root)
+    assert not root.exists()
+    forged = deepcopy(plan)
+    forged["entries"][operation["source_indices"][0]]["destination"] = str(f.repo)
+    with pytest.raises(apply.Hold, match="fresh classification"):
+        apply.apply_residual_plan(f.repo, forged, authority_commit=f.residual_authority,
+                                  batch=1, operation_root=root)
+    assert all(t.exists() for t in f.targets)
