@@ -1,0 +1,25 @@
+{
+  "wave_id": "pr-open-lifecycle-completion-r4-2026-09-13",
+  "repeat_run_speedup_ratio": 1.018,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.340562,
+  "repeat_run_raw_seconds": [
+    0.346692,
+    0.340562
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.346692
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.687254
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-14T04:10:33Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "eb92c2e404addd69c2eb7dd54e808929bcff86a4"
+}

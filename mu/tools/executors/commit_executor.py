@@ -15857,6 +15857,31 @@ def _refresh_post_merge_package_for_next_open_queue(
                 f"{recorded_merge_sha or '<empty>'} != {exact_queue_commit}"
             )
         merge_sha = exact_queue_commit
+    lifecycle_pending = result.get("pr_replacement_ownership")
+    lifecycle_hold = result.get("pr_replacement_ownership_hold")
+    if lifecycle_pending or lifecycle_hold:
+        # Landing this CLI/manifest does not complete its live dispositions.
+        # Keep the current owner and its concrete committed commands visible;
+        # never relaunch the consumed implementation or silently select Fleet.
+        package = {
+            "task_id": handoff.get("task_id"), "merged_pr": result.get("pr_number"),
+            "merge_sha": merge_sha, "wave_name": handoff.get("wave_id"),
+            "lane": "committed native PR disposition pending",
+            "next_candidates": [], "deferred_items": [], "blocker_report_paths": [],
+            "rollout_packet_path": handoff.get("plan_path") or handoff.get("tracked_packet"),
+            "tracker_state_summary": "Implementation landed; live PR outcomes remain incomplete under the current task owner.",
+            "pr_lifecycle_dispositions": lifecycle_pending or [],
+            "pr_lifecycle_hold": lifecycle_hold,
+        }
+        package_path = agent_bus_path(repo_root, _active_bus_dir(), "meta", "post_merge_package.json")
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+        result.update(post_merge_package_path=str(package_path.relative_to(repo_root)),
+                      post_merge_next_wave=handoff.get("wave_id"),
+                      post_merge_next_hard_stop=True, post_merge_queue_empty=False)
+        log("Live PR disposition remains CURRENT; committed commands and target owners retained")
+        return package
+
     entry = _next_open_founder_ordered_queue_entry(
         repo_root,
         queue_commit_sha=exact_queue_commit,
@@ -16024,7 +16049,82 @@ def _refresh_post_merge_package_for_next_open_queue(
     return package
 
 
+def record_commit_pr_lifecycle(
+    repo_root: Path, *, handoff: dict[str, Any], result: dict[str, Any],
+    target_branch: str, state: str, detail: str,
+) -> dict[str, Any] | None:
+    """Keep an ensured PR owned even when commit stops or its lane is retired."""
+    number = str(result.get("pr_number") or "")
+    if not number:
+        return None
+    if not number.isdigit():
+        raise ValueError("native lifecycle PR number is invalid")
+    binding = result.get("pr_lifecycle")
+    if not isinstance(binding, dict):
+        common_dir = _git_common_dir(repo_root)
+        if common_dir is None:
+            raise ValueError("native PR lifecycle common directory is unresolved")
+        head = str(result.get("commit_sha") or "")
+        if not re.fullmatch(r"[0-9a-f]{40}", head):
+            head = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+        binding = {
+            "common_dir": str(common_dir), "head": head, "branch": target_branch,
+            "owner": {"task_id": str(handoff.get("task_id") or handoff["wave_id"]),
+                      "wave_id": handoff["wave_id"], "packet": str(handoff.get("plan_path") or handoff.get("tracked_packet") or "")},
+        }
+        result["pr_lifecycle"] = binding
+    # Retain each prior head's observation when native conflict/bot work advances
+    # this same PR. An owner is not a claim of remote identity or coverage.
+    head = str(result.get("commit_sha") or binding["head"])
+    observed = _load_pr_disposition_executor_module().record_native_pr_lifecycle(
+        Path(binding["common_dir"]), number=int(number), head=head,
+        branch=binding["branch"], owner=binding["owner"], state=state, detail=detail,
+    )
+    binding.update(head=head, path=observed["path"], state=state)
+    return observed
+
+
 def _run_post_commit_pipeline(
+    *, handoff: dict[str, Any], repo_root: Path, result: dict[str, Any],
+    target_branch: str, base_branch: str, continuation_path: Path, log: Any,
+) -> dict[str, Any]:
+    """Record the ensured PR's terminal ownership on every native return."""
+    returned: dict[str, Any] | None = None
+    try:
+        if result.get("pr_number") and not result.get("pr_lifecycle"):
+            record_commit_pr_lifecycle(
+                repo_root, handoff=handoff, result=result, target_branch=target_branch,
+                state="PENDING", detail="native continuation retains this PR owner",
+            )
+        returned = _run_post_commit_pipeline_impl(
+            handoff=handoff, repo_root=repo_root, result=result,
+            target_branch=target_branch, base_branch=base_branch,
+            continuation_path=continuation_path, log=log,
+        )
+        return returned
+    finally:
+        if result.get("pr_lifecycle"):
+            merged = bool(result.get("merge_sha") or (returned or {}).get("merge_sha"))
+            try:
+                record_commit_pr_lifecycle(
+                    repo_root, handoff=handoff, result=result, target_branch=target_branch,
+                    state="MERGED" if merged else "STOPPED",
+                    detail=(f"merge={(returned or {}).get('merge_sha') or result.get('merge_sha')}"
+                            if merged else str((returned or {}).get("step") or "native commit unwound")),
+                )
+                if returned is not None:
+                    returned["pr_lifecycle"] = result["pr_lifecycle"]
+                    returned.setdefault("pr_number", result.get("pr_number"))
+            except Exception as exc:
+                # The already-durable PENDING owner remains usable. Never report
+                # successful ownership publication if its terminal write failed.
+                if returned is not None:
+                    returned["pr_lifecycle_hold"] = str(exc)
+                    returned.setdefault("warnings", []).append(f"PR lifecycle observation HOLD: {exc}")
+                log(f"PR lifecycle observation HOLD: {exc}")
+
+
+def _run_post_commit_pipeline_impl(
     *,
     handoff: dict[str, Any],
     repo_root: Path,
@@ -16304,6 +16404,15 @@ def _run_post_commit_pipeline(
     else:
         pr_number = str(result.get("pr_number") or pr_number)
         log(f"Step 13: PR #{pr_number or 'unknown'} already ensured, skipping")
+
+    try:
+        record_commit_pr_lifecycle(
+            repo_root, handoff=handoff, result=result, target_branch=target_branch,
+            state="PENDING", detail="native PR ensured; owner retained until verified terminal outcome",
+        )
+    except Exception as exc:
+        return {"status": "error", "step": "pr_lifecycle_owner", "errors": [str(exc)],
+                "pr_number": pr_number, "steps_completed": result["steps_completed"]}
 
     # ── Step 14: wait_ci ──────────────────────────────────────────────
     if "wait_ci" not in result["steps_completed"]:
@@ -16687,6 +16796,15 @@ def _run_post_commit_pipeline(
     result["primary_worktree_sync"] = _sync_primary_worktree_to_base(
         repo_root, base_branch, log=log,
     )
+
+    try:
+        result["pr_replacement_ownership"] = _load_pr_disposition_executor_module().record_lifecycle_replacements(
+            verify_root, wave_id=str(handoff.get("wave_id") or ""),
+            authority_commit=str(result.get("merge_sha") or ""),
+        )
+    except Exception as exc:
+        result["pr_replacement_ownership_hold"] = str(exc)
+        log(f"Explicit PR replacement ownership HOLD: {exc}")
 
     terminal_prepared: dict[str, Any] | None = None
     terminal_binding: dict[str, Any] | None = None
@@ -18514,7 +18632,7 @@ def commit_pipeline_impl_source() -> str:
 
 def post_commit_pipeline_source() -> str:
     """Return post-merge source so regressions can pin cleanup/sweep ordering."""
-    return inspect.getsource(_run_post_commit_pipeline)
+    return inspect.getsource(_run_post_commit_pipeline) + inspect.getsource(_run_post_commit_pipeline_impl)
 
 
 def _landed_commit_candidate_authority() -> tuple[Any, Any]:

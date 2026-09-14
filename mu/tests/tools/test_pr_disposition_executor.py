@@ -1,4 +1,4 @@
-"""Focused, fully mocked GitHub tests for the fixed PR disposition executor."""
+"""Mocked GitHub tests for legacy and reviewed-manifest PR disposition."""
 
 from __future__ import annotations
 
@@ -1242,3 +1242,385 @@ def test_terminal_receipt_authority_rejects_missing_receipt_and_binding_mismatch
     )
     assert mismatch["valid"] is False
     assert "merge SHA mismatch" in mismatch["error"]
+
+# The successor uses unrelated fixture PR numbers: no new literal production set.
+def _lifecycle_fixture(tmp_path):
+    repo = tmp_path / "lifecycle"
+    repo.mkdir()
+    _git(["init", "-b", "dev"], cwd=repo)
+    _git(["config", "user.email", "tests@example.invalid"], cwd=repo)
+    _git(["config", "user.name", "Lifecycle Tests"], cwd=repo)
+    for name in ("pr_disposition_executor.py", "commit_executor.py"):
+        path = repo / "mu/tools/executors" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((EXECUTOR_PATH.parent / name).read_bytes())
+    (repo / "seed.txt").write_text("base\n")
+    _git(["add", "."], cwd=repo)
+    _git(["commit", "-m", "base"], cwd=repo)
+    base = _git(["rev-parse", "HEAD"], cwd=repo)
+    heads = []
+    for number in (2201, 2202):
+        _git(["checkout", "-b", f"stopped-{number}", base], cwd=repo)
+        (repo / f"feature-{number}.py").write_text(f"VALUE = {number}\n")
+        _git(["add", "."], cwd=repo)
+        _git(["commit", "-m", f"source {number}"], cwd=repo)
+        heads.append(_git(["rev-parse", "HEAD"], cwd=repo))
+    _git(["checkout", "dev"], cwd=repo)
+    for number in (2201, 2202):
+        (repo / f"feature-{number}.py").write_text(f"VALUE = {number}\n")
+    _git(["add", "."], cwd=repo)
+    _git(["commit", "-m", "landed replacements"], cwd=repo)
+    comparison = _git(["rev-parse", "HEAD"], cwd=repo)
+    wave = "fresh-pr-lifecycle-2026-09-13"
+    manifest = {"schema_version": 2, "wave_id": wave, "repository": GOLDEN_REPOSITORY,
+                "comparison_commit": comparison, "targets": []}
+    for number, head in zip((2201, 2202), heads):
+        coverage = disposition.lifecycle_coverage_inventory(repo, base, head)
+        for item in coverage:
+            ref = {"commit": comparison, "path": item["path"], "start": 1, "end": 1,
+                   "sha256": hashlib.sha256((repo / item["path"]).read_bytes()).hexdigest()}
+            for part in [item, *item["hunks"]]:
+                part.update(resolution="landed", reason="Exact source behavior is present.",
+                            references=[ref])
+        manifest["targets"].append({
+            "target": {"number": number, "id": f"PR_fixture_{number}", "baseRefName": "dev",
+                       "headRefName": f"stopped-{number}", "headRefOid": head,
+                       "headRepository": GOLDEN_HEAD_REPOSITORY, "state": "OPEN", "mergedAt": None},
+            "owner": {"task_id": "[PIPELINE-FIX-53]", "wave_id": wave,
+                      "packet": f"reports/control_plane/{wave}_2026-09-13.md"},
+            "source_base": base, "preservation_ref": f"refs/heads/stopped-{number}",
+            "evidence_refs": [f"git:{head}"],
+            "replacement": {"number": number + 1000, "id": f"PR_replacement_{number}",
+                            "head": comparison, "merge": comparison},
+            "coverage": coverage,
+        })
+    path = repo / f"reports/control_plane/{wave}_coverage.json"
+    _write_canonical(path, _seal(manifest, "manifest_sha256"))
+    _git(["add", "."], cwd=repo)
+    _git(["commit", "-m", "reviewed lifecycle authority"], cwd=repo)
+    authority = _git(["rev-parse", "HEAD"], cwd=repo)
+    _git(["update-ref", "refs/remotes/origin/dev", authority], cwd=repo)
+    common = repo / ".git"
+    return repo, path, authority, common
+
+
+class LifecycleGh:
+    def __init__(self, manifest):
+        self.targets = {e["target"]["number"]: copy.deepcopy(e["target"]) for e in manifest["targets"]}
+        self.replacements = {e["replacement"]["number"]: e["replacement"] for e in manifest["targets"]}
+        self.closed = set()
+        self.closes = []
+        self.reads = []
+        self.drift = set()
+        self.fail_close = set()
+        self.inside_boundary = False
+
+    def __call__(self, args, cwd):
+        del cwd
+        args = list(args)
+        self.reads.append(args)
+        if args[:3] == ["gh", "repo", "view"]:
+            value = GOLDEN_REPOSITORY
+        elif args[:3] == ["gh", "pr", "view"]:
+            value = self.raw_pr(int(args[3]))
+        elif args[:2] == ["gh", "api"] and args[2].startswith("repos/"):
+            replacement = self.replacements[int(args[2].split("/")[-1])]
+            value = {"number": replacement["number"], "node_id": replacement["id"],
+                     "state": "closed", "merged_at": "2026-09-13T00:00:00Z",
+                     "merge_commit_sha": replacement["merge"],
+                     "head": {"sha": replacement["head"]},
+                     "base": {"ref": "dev", "repo": {"node_id": GOLDEN_REPOSITORY["id"]}}}
+        else:
+            assert args[:3] == ["gh", "api", "graphql"], args
+            node_id = next(x[3:] for x in args if x.startswith("id="))
+            number = next(n for n, t in self.targets.items() if t["id"] == node_id)
+            close = any("mutation" in x and "closePullRequest" in x for x in args)
+            if close:
+                assert self.inside_boundary
+                self.closes.append(number)
+                if number in self.fail_close:
+                    return subprocess.CompletedProcess(args, 1, "", "ambiguous provider response")
+                self.closed.add(number)
+            node = {**self.raw_pr(number), "__typename": "PullRequest", "repository": GOLDEN_REPOSITORY}
+            value = {"data": {"closePullRequest": {"pullRequest": node}}} if close else {"data": {"node": node}}
+        return subprocess.CompletedProcess(args, 0, json.dumps(value), "")
+
+    def raw_pr(self, number):
+        value = copy.deepcopy(self.targets[number])
+        value["state"] = "CLOSED" if number in self.closed else "OPEN"
+        value["headRepositoryOwner"] = GOLDEN_HEAD_REPOSITORY["owner"]
+        value["headRepository"]["nameWithOwner"] = GOLDEN_REPOSITORY["nameWithOwner"]
+        value["headRepository"]["ref"] = {
+            "name": value["headRefName"], "prefix": "refs/heads/",
+            "target": {"oid": value["headRefOid"], "__typename": "Commit"},
+        }
+        if number in self.drift:
+            value["id"] = "PR_CHANGED"
+        return value
+
+
+def _lifecycle_run(fixture, *, mode="apply", github=None, boundary_hook=None):
+    repo, path, authority, common = fixture
+    manifest = disposition.validate_lifecycle_manifest(path)
+    github = github or LifecycleGh(manifest)
+    binder = FakeBind(common=common, comparison=authority, events=[])
+
+    def boundary(root, identity, *, terminal_action, log):
+        del root, log
+        intents = list((common / disposition.INTENT_ROOT_NAME / "lifecycle").rglob("*.json"))
+        assert any(json.loads(p.read_text())["identity"] == identity for p in intents)
+        if boundary_hook:
+            boundary_hook(github)
+        github.inside_boundary = True
+        try:
+            value = terminal_action()
+            return {"action_succeeded": True, "action_outcome": value,
+                    "operation_id": identity["operation_id"], "authority_consumed": True}
+        except RuntimeError as exc:
+            return {"action_succeeded": False, "action_error": str(exc),
+                    "operation_id": identity["operation_id"], "authority_consumed": True}
+        finally:
+            github.inside_boundary = False
+
+    result = disposition.run_lifecycle_dispositions(
+        path, repo_root=repo, authority_commit=authority, mode=mode, gh_runner=github,
+        bind_target_identity=binder, execute_terminal_once=boundary,
+    )
+    return result, github, binder
+
+
+def _commit_lifecycle_manifest(fixture, mutate):
+    repo, path, _, common = fixture
+    manifest = json.loads(path.read_text())
+    mutate(manifest)
+    _write_canonical(path, _seal(manifest, "manifest_sha256"))
+    _git(["add", "."], cwd=repo)
+    _git(["commit", "-m", "reviewed fixture change"], cwd=repo)
+    authority = _git(["rev-parse", "HEAD"], cwd=repo)
+    _git(["update-ref", "refs/remotes/origin/dev", authority], cwd=repo)
+    return repo, path, authority, common
+
+
+def test_fresh_lifecycle_plan_and_verify_are_read_only_and_apply_is_one_shot(tmp_path):
+    fixture = _lifecycle_fixture(tmp_path)
+    before = set(fixture[3].rglob("*"))
+    planned, github, binder = _lifecycle_run(fixture, mode="plan")
+    assert [o["status"] for o in planned["targets"]] == ["ELIGIBLE", "ELIGIBLE"]
+    verified, _, _ = _lifecycle_run(fixture, mode="verify", github=github)
+    assert not verified["complete"]
+    assert binder.calls == 0 and not github.closes
+    assert set(fixture[3].rglob("*")) == before
+    applied, github, binder = _lifecycle_run(fixture, github=github)
+    assert applied["complete"] and github.closes == [2201, 2202]
+    retained = {p: p.read_bytes() for p in fixture[3].rglob("*.json")}
+    replay, _, replay_binder = _lifecycle_run(fixture, github=github)
+    assert replay["complete"] and replay_binder.calls == 0
+    assert github.closes == [2201, 2202]
+    assert {p: p.read_bytes() for p in retained} == retained
+
+
+@pytest.mark.parametrize("case", ["legacy", "duplicate", "owner", "repository", "replacement-target"])
+def test_fresh_manifest_rejects_legacy_or_unowned_authority(tmp_path, case):
+    fixture = _lifecycle_fixture(tmp_path)
+    manifest = json.loads(fixture[1].read_text())
+    if case == "legacy":
+        manifest["targets"][0]["target"] = _golden_targets()[0]
+    elif case == "duplicate":
+        manifest["targets"].append(copy.deepcopy(manifest["targets"][0]))
+    elif case == "owner":
+        manifest["targets"][0]["owner"]["task_id"] = ""
+    elif case == "repository":
+        manifest["repository"]["id"] = "R_OTHER"
+    else:
+        manifest["targets"][0]["replacement"]["number"] = 2202
+    _write_canonical(fixture[1], _seal(manifest, "manifest_sha256"))
+    with pytest.raises(disposition.ContractError):
+        disposition.validate_lifecycle_manifest(fixture[1])
+
+
+@pytest.mark.parametrize("case", ["omit-path", "omit-hunk", "wrong-proof", "missing-work"])
+def test_coverage_hold_is_target_specific_and_retains_owner(tmp_path, case):
+    fixture = _lifecycle_fixture(tmp_path)
+    def mutate(manifest):
+        coverage = manifest["targets"][0]["coverage"]
+        if case == "omit-path":
+            coverage[0]["path"] = "different.py"
+        elif case == "omit-hunk":
+            coverage[0]["hunks"].clear()
+        elif case == "wrong-proof":
+            coverage[0]["references"][0]["sha256"] = "0" * 64
+        else:
+            coverage[0].update(resolution="missing", followup="Retain feature-2201.py under PIPELINE-FIX-53.")
+    fixture = _commit_lifecycle_manifest(fixture, mutate)
+    result, github, _ = _lifecycle_run(fixture)
+    assert result["targets"][0]["status"] == "HOLD_COVERAGE_OR_PRESERVATION"
+    assert result["targets"][0]["owner"]["task_id"] == "[PIPELINE-FIX-53]"
+    assert result["targets"][1]["status"] == "CLOSED"
+    assert github.closes == [2202]
+
+
+@pytest.mark.parametrize("when", ["before", "under-boundary"])
+def test_changed_remote_identity_holds_only_that_target(tmp_path, when):
+    fixture = _lifecycle_fixture(tmp_path)
+    github = LifecycleGh(disposition.validate_lifecycle_manifest(fixture[1]))
+    hook = None
+    if when == "before":
+        github.drift.add(2201)
+    else:
+        hook = lambda gh: gh.drift.add(2201)
+    result, _, _ = _lifecycle_run(fixture, github=github, boundary_hook=hook)
+    assert result["targets"][0]["status"].startswith("HOLD")
+    assert result["targets"][1]["status"] == "CLOSED"
+    assert github.closes == [2202]
+
+
+def test_ambiguous_terminal_operation_never_replays_and_peer_can_complete(tmp_path):
+    fixture = _lifecycle_fixture(tmp_path)
+    github = LifecycleGh(disposition.validate_lifecycle_manifest(fixture[1]))
+    github.fail_close.add(2201)
+    first, _, _ = _lifecycle_run(fixture, github=github)
+    assert first["targets"][0]["status"] == "HOLD_TERMINAL_BOUNDARY"
+    second, _, binder = _lifecycle_run(fixture, github=github)
+    assert second["targets"][0]["status"] == "HOLD_CONSUMED_OPERATION"
+    assert second["targets"][1]["status"] == "CLOSED_VERIFIED"
+    assert binder.calls == 0 and github.closes == [2201, 2202]
+
+
+def test_new_manifest_wave_cannot_rearm_consumed_target(tmp_path):
+    fixture = _lifecycle_fixture(tmp_path)
+    github = LifecycleGh(disposition.validate_lifecycle_manifest(fixture[1]))
+    github.fail_close.add(2201)
+    _lifecycle_run(fixture, github=github)
+    repo, old_path, _, common = fixture
+    manifest = json.loads(old_path.read_text())
+    wave = "different-lifecycle-2026-09-13"
+    manifest["wave_id"] = wave
+    for entry in manifest["targets"]:
+        entry["owner"].update(wave_id=wave, packet=f"reports/control_plane/{wave}_2026-09-13.md")
+    path = old_path.with_name(f"{wave}_coverage.json")
+    _write_canonical(path, _seal(manifest, "manifest_sha256"))
+    _git(["add", "."], cwd=repo)
+    _git(["commit", "-m", "fresh wave cannot reset prior claims"], cwd=repo)
+    authority = _git(["rev-parse", "HEAD"], cwd=repo)
+    result, _, binder = _lifecycle_run((repo, path, authority, common), github=github)
+    assert result["targets"][0]["status"] == "HOLD"
+    assert "intent authority mismatch" in result["targets"][0]["errors"][0]
+    assert not binder.calls and github.closes == [2201, 2202]
+
+
+@pytest.mark.parametrize("dirty", ["manifest", "code", "preservation"])
+def test_commit_anchor_and_preservation_are_required(tmp_path, dirty):
+    fixture = _lifecycle_fixture(tmp_path)
+    repo, path, _, _ = fixture
+    if dirty == "preservation":
+        _git(["update-ref", "refs/heads/stopped-2201", "HEAD"], cwd=repo)
+        result, github, _ = _lifecycle_run(fixture)
+        assert result["targets"][0]["status"] == "HOLD_COVERAGE_OR_PRESERVATION"
+        assert github.closes == [2202]
+    else:
+        changed = path if dirty == "manifest" else repo / "mu/tools/executors/commit_executor.py"
+        changed.write_bytes(changed.read_bytes() + b"\n")
+        with pytest.raises(disposition.ContractError):
+            _lifecycle_run(fixture)
+
+
+def test_actual_reviewed_manifest_covers_every_stopped_path_and_hunk():
+    path = REPO_ROOT / "reports/control_plane/pr-open-lifecycle-completion-r4-2026-09-13_coverage.json"
+    manifest = disposition.validate_lifecycle_manifest(path)
+    assert [(e["target"]["number"], e["target"]["headRefOid"]) for e in manifest["targets"]] == [
+        (1284, "7add3eac29bba70e3bd533aa8301e44b3dbedcb8"),
+        (1298, "3aeac850bf42e0d8d0331afe593be8f62ba055ab"),
+    ]
+    for entry, paths, hunks in zip(manifest["targets"], (7, 6), (23, 18)):
+        inventory = disposition.lifecycle_coverage_inventory(REPO_ROOT, entry["source_base"], entry["target"]["headRefOid"])
+        assert len(inventory) == paths
+        assert sum(len(p["hunks"]) for p in inventory) == hunks
+        assert inventory == [
+            {"path": p["path"], "patch_sha256": p["patch_sha256"],
+             "hunks": [{k: h[k] for k in ("header", "sha256")} for h in p["hunks"]]}
+            for p in entry["coverage"]
+        ]
+        for covered in entry["coverage"]:
+            for item in [covered, *covered["hunks"]]:
+                assert item["resolution"] in {"landed", "superseded", "evidence_only"}
+                for ref in item["references"]:
+                    raw = subprocess.check_output(["git", "show", f"{ref['commit']}:{ref['path']}"], cwd=REPO_ROOT)
+                    lines = raw.splitlines(keepends=True)[ref["start"]-1:ref["end"]]
+                    assert hashlib.sha256(b"".join(lines)).hexdigest() == ref["sha256"]
+
+def test_landed_manifest_registers_explicit_replacement_owners_without_github(tmp_path):
+    fixture = _lifecycle_fixture(tmp_path)
+    repo, path, authority, common = fixture
+    outcomes = disposition.record_lifecycle_replacements(
+        repo, wave_id=json.loads(path.read_text())["wave_id"], authority_commit=authority,
+    )
+    assert [o["status"] for o in outcomes] == ["LIVE_DISPOSITION_PENDING"] * 2
+    for outcome in outcomes:
+        record = json.loads(Path(outcome["path"]).read_text())
+        assert record["state"] == "REPLACEMENT_REVIEWED"
+        assert record["owner"]["task_id"] == "[PIPELINE-FIX-53]"
+        assert record["replacement"]["number"] == record["number"] + 1000
+        assert record["authority"] == "ownership_only_not_terminal_authority"
+        for mode, command in outcome["commands"].items():
+            assert f"lifecycle-{mode}" in command and authority in command and str(path) in command
+    assert not (common / disposition.INTENT_ROOT_NAME).exists()
+
+
+def test_lifecycle_verify_refuses_tampered_receipt_without_replaying(tmp_path):
+    fixture = _lifecycle_fixture(tmp_path)
+    result, github, _ = _lifecycle_run(fixture)
+    receipt_path = Path(result["targets"][0]["receipt_path"])
+    receipt = json.loads(receipt_path.read_text())
+    receipt["boundary"]["operation_id"] = "f" * 32
+    _write_canonical(receipt_path, receipt)
+    result, _, binder = _lifecycle_run(fixture, mode="verify", github=github)
+    assert result["targets"][0]["status"] == "HOLD"
+    assert "receipt operation mismatch" in result["targets"][0]["errors"][0]
+    assert result["targets"][1]["status"] == "CLOSED_VERIFIED"
+    assert not binder.calls and github.closes == [2201, 2202]
+
+
+def test_lifecycle_apply_uses_real_fresh_terminal_boundary(tmp_path):
+    fixture = _lifecycle_fixture(tmp_path)
+    repo, path, authority, common = fixture
+    origin = tmp_path / "origin.git"
+    _git(["clone", "--bare", str(repo), str(origin)], cwd=tmp_path)
+    _git(["remote", "add", "origin", str(origin)], cwd=repo)
+    github = LifecycleGh(disposition.validate_lifecycle_manifest(path))
+    # Only the external GitHub provider is fake; bind, fetch, behind-zero, lock,
+    # durable consumption and the callback are the actual commit primitives.
+    def gh_with_consumption_check(args, cwd):
+        close = any("mutation" in x and "closePullRequest" in x for x in args)
+        if close:
+            claims = list((common / "rcx_terminal_mutation_attempts").glob("*.json"))
+            assert len(claims) == len(github.closes) + 1
+            assert all(json.loads(p.read_text())["state"] == "AUTHORITY_CONSUMED_OUTCOME_UNKNOWN" for p in claims)
+        github.inside_boundary = close
+        return github(args, cwd)
+    result = disposition.run_lifecycle_dispositions(
+        path, repo_root=repo, authority_commit=authority, mode="apply", gh_runner=gh_with_consumption_check,
+    )
+    assert result["complete"], result
+    for outcome in result["targets"]:
+        assert outcome["boundary"]["fresh_fetch"] is True
+        assert outcome["boundary"]["behind_count"] == 0
+        assert outcome["boundary"]["authority_consumed"] is True
+    assert github.closes == [2201, 2202]
+    verified = disposition.run_lifecycle_dispositions(
+        path, repo_root=repo, authority_commit=authority, mode="verify", gh_runner=gh_with_consumption_check,
+    )
+    assert verified["complete"] and github.closes == [2201, 2202]
+
+
+def test_newer_dev_coverage_change_holds_only_the_affected_target(tmp_path):
+    fixture = _lifecycle_fixture(tmp_path)
+    repo, path, authority, common = fixture
+    (repo / "feature-2201.py").write_text("VALUE = None\n")
+    _git(["add", "."], cwd=repo)
+    _git(["commit", "-m", "newer dev removed useful behavior"], cwd=repo)
+    _git(["update-ref", "refs/remotes/origin/dev", "HEAD"], cwd=repo)
+    result, github, _ = _lifecycle_run(fixture)
+    assert result["targets"][0]["status"] == "HOLD_COVERAGE_OR_PRESERVATION"
+    assert "current dev coverage changed" in result["targets"][0]["errors"][0]
+    assert result["targets"][1]["status"] == "CLOSED"
+    assert github.closes == [2202]

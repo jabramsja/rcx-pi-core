@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Fixed-set, restart-conservative executor for eight stale pull requests.
+"""Reviewed PR lifecycle ownership and restart-conservative disposition.
 
 ``contract-check`` and ``verify`` are read-only.  ``apply`` is intentionally
 bounded to the literal manifest below.  It composes the public one-shot
 terminal boundary in :mod:`commit_executor`; it does not expose an arbitrary
 repository or pull-request mutation surface.
+
+``lifecycle-plan/verify/apply`` consume a separate version-2 coverage manifest
+from a committed authority SHA. They never extend or rewrite the legacy set.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import importlib
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -3767,11 +3771,438 @@ def apply_dispositions(
         )
 
 
+# Version 2 is deliberately separate from the consumed fixed-eight contract.
+# Its authority is a reviewed, landed coverage manifest, never a self-hash alone.
+LIFECYCLE_SCHEMA_VERSION = 2
+LIFECYCLE_ROOT_NAME = "rcx_pr_lifecycle"
+_LIFECYCLE_WAVE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,159}$")
+_LIFECYCLE_CODE_PATHS = (
+    "mu/tools/executors/pr_disposition_executor.py",
+    "mu/tools/executors/commit_executor.py",
+)
+
+
+def _lifecycle_git(root: Path, *args: str) -> bytes:
+    proc = _default_git_run(["git", *args], cwd=root, binary=True)
+    if proc.returncode:
+        raise ContractError(f"lifecycle git read failed: {args!r}")
+    return proc.stdout
+
+
+def _lifecycle_ancestor(root: Path, ancestor: str, descendant: str) -> None:
+    _lifecycle_git(root, "merge-base", "--is-ancestor", ancestor, descendant)
+
+
+def _lifecycle_path(value: Any) -> str:
+    if (
+        not isinstance(value, str) or not value or value.startswith("-")
+        or Path(value).is_absolute() or ".." in Path(value).parts
+        or Path(value).as_posix() != value or "\x00" in value
+    ):
+        raise ContractError("invalid lifecycle repository path")
+    return value
+
+
+def _lifecycle_sha(value: Any) -> str:
+    if not isinstance(value, str) or not _SHA_RE.fullmatch(value):
+        raise ContractError("lifecycle commit must be an exact 40-hex SHA")
+    return value
+
+
+def lifecycle_coverage_inventory(
+    repo_root: Path, source_base: str, source_head: str,
+) -> list[dict[str, Any]]:
+    """Read the complete source diff; reviewers attach one disposition per hunk."""
+    _lifecycle_sha(source_base)
+    _lifecycle_sha(source_head)
+    _lifecycle_ancestor(repo_root, source_base, source_head)
+    paths = _lifecycle_git(
+        repo_root, "diff", "--no-renames", "--name-only", "-z", source_base, source_head,
+    ).decode("utf-8").split("\0")
+    inventory = []
+    for path in filter(None, paths):
+        _lifecycle_path(path)
+        patch = _lifecycle_git(
+            repo_root, "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+            "--unified=3", source_base, source_head, "--", path,
+        )
+        starts = list(re.finditer(rb"^@@ .*?@@[^\n]*", patch, re.M))
+        hunks = [
+            {"header": match.group().decode("utf-8"),
+             "sha256": hashlib.sha256(patch[match.start():
+                 starts[i + 1].start() if i + 1 < len(starts) else len(patch)]).hexdigest()}
+            for i, match in enumerate(starts)
+        ]
+        inventory.append({"path": path, "patch_sha256": hashlib.sha256(patch).hexdigest(),
+                          "hunks": hunks})
+    return inventory
+
+
+def validate_lifecycle_manifest(manifest_path: Path | str) -> dict[str, Any]:
+    """Validate reviewed data shape, without granting live action authority."""
+    manifest, _raw = _read_canonical_json(Path(manifest_path), label="lifecycle manifest")
+    if set(manifest) != {"schema_version", "wave_id", "repository", "comparison_commit",
+                         "targets", "manifest_sha256"}:
+        raise ContractError("lifecycle manifest schema mismatch")
+    payload = {k: v for k, v in manifest.items() if k != "manifest_sha256"}
+    if (type(manifest["schema_version"]) is not int
+            or manifest["schema_version"] != LIFECYCLE_SCHEMA_VERSION
+            or manifest["manifest_sha256"] != _canonical_sha256(payload)):
+        raise ContractError("lifecycle manifest version/hash mismatch")
+    wave = manifest["wave_id"]
+    if (not isinstance(wave, str) or not _LIFECYCLE_WAVE_RE.fullmatch(wave)
+            or wave in {WAVE_ID, TERMINAL_SWEEP_SOURCE_WAVE_ID, TERMINAL_SWEEP_WAVE_ID}):
+        raise ContractError("legacy or invalid lifecycle wave identity")
+    if not _json_exact_equal(manifest["repository"], EXPECTED_REPOSITORY):
+        raise ContractError("lifecycle repository identity mismatch")
+    _lifecycle_sha(manifest["comparison_commit"])
+    targets = manifest["targets"]
+    if not isinstance(targets, list) or not targets:
+        raise ContractError("lifecycle targets must be a nonempty explicit list")
+    numbers: set[int] = set()
+    nodes: set[str] = set()
+    for entry in targets:
+        if not isinstance(entry, dict) or set(entry) != {
+            "target", "owner", "source_base", "preservation_ref", "evidence_refs",
+            "replacement", "coverage",
+        }:
+            raise ContractError("lifecycle target entry schema mismatch")
+        target = entry["target"]
+        if not isinstance(target, dict) or set(target) != set(EXPECTED_TARGETS[0]):
+            raise ContractError("lifecycle target identity schema mismatch")
+        number, node = target["number"], target["id"]
+        if (type(number) is not int or number <= 0 or number in numbers
+                or number in TARGET_BY_NUMBER or not isinstance(node, str)
+                or not node.startswith("PR_") or node in nodes or node in TARGET_BY_NODE):
+            raise ContractError("duplicate, legacy, or invalid lifecycle PR identity")
+        numbers.add(number)
+        nodes.add(node)
+        _lifecycle_sha(target["headRefOid"])
+        if (target["baseRefName"] != "dev" or target["state"] != "OPEN"
+                or target["mergedAt"] is not None
+                or not _json_exact_equal(target["headRepository"], EXPECTED_HEAD_REPOSITORY)):
+            raise ContractError("lifecycle target must bind an exact same-repository OPEN PR")
+        _lifecycle_path(target["headRefName"])
+        _lifecycle_sha(entry["source_base"])
+        if entry["preservation_ref"] != f"refs/heads/{target['headRefName']}":
+            raise ContractError("lifecycle preservation must name the retained exact source branch")
+        owner = entry["owner"]
+        if (not isinstance(owner, dict) or set(owner) != {"task_id", "wave_id", "packet"}
+                or owner["wave_id"] != wave or not isinstance(owner["task_id"], str)
+                or not re.fullmatch(r"\[[A-Z0-9-]+\]", owner["task_id"])):
+            raise ContractError("lifecycle target requires an exact task/wave owner")
+        if _lifecycle_path(owner["packet"]) != f"reports/control_plane/{wave}_{wave[-10:]}.md":
+            raise ContractError("lifecycle owner packet does not match the wave")
+        if (not isinstance(entry["evidence_refs"], list) or not entry["evidence_refs"]
+                or any(not isinstance(ref, str) or not ref.strip() for ref in entry["evidence_refs"])):
+            raise ContractError("lifecycle preservation evidence references are required")
+        replacement = entry["replacement"]
+        if (not isinstance(replacement, dict)
+                or set(replacement) != {"number", "id", "head", "merge"}
+                or type(replacement["number"]) is not int or replacement["number"] <= 0
+                or replacement["number"] == number
+                or not isinstance(replacement["id"], str) or not replacement["id"].startswith("PR_")):
+            raise ContractError("explicit replacement lineage is required")
+        _lifecycle_sha(replacement["head"])
+        _lifecycle_sha(replacement["merge"])
+        if not isinstance(entry["coverage"], list) or not entry["coverage"]:
+            raise ContractError("per-path/hunk coverage is required")
+    if numbers & {entry["replacement"]["number"] for entry in targets}:
+        raise ContractError("an active replacement cannot also be a disposition target")
+    return manifest
+
+
+def _require_lifecycle_authority(root: Path, path: Path, authority_commit: str) -> dict[str, Any]:
+    _lifecycle_sha(authority_commit)
+    manifest = validate_lifecycle_manifest(path)
+    relative = Path(f"reports/control_plane/{manifest['wave_id']}_coverage.json")
+    if path.resolve(strict=True) != (root / relative).resolve(strict=True):
+        raise ContractError("lifecycle requires the declared same-wave coverage artifact")
+    _lifecycle_ancestor(root, authority_commit, "HEAD")
+    _lifecycle_ancestor(root, manifest["comparison_commit"], authority_commit)
+    for name in (relative.as_posix(), *_LIFECYCLE_CODE_PATHS):
+        current = _read_regular_bytes(root / name, label="committed lifecycle input")
+        if current != _lifecycle_git(root, "show", f"{authority_commit}:{name}"):
+            raise ContractError(f"lifecycle input differs from committed authority: {name}")
+        if current != _lifecycle_git(root, "show", f"HEAD:{name}"):
+            raise ContractError(f"lifecycle input differs from current committed HEAD: {name}")
+    if Path(__file__).read_bytes() != (root / _LIFECYCLE_CODE_PATHS[0]).read_bytes():
+        raise ContractError("running lifecycle CLI differs from committed source")
+    return manifest
+
+
+def _lifecycle_coverage_errors(root: Path, manifest: dict, entry: dict) -> list[str]:
+    """Check bounded evidence, not semantic equivalence (which requires review)."""
+    try:
+        target, replacement = entry["target"], entry["replacement"]
+        if _lifecycle_git(root, "rev-parse", "--verify", entry["preservation_ref"]).decode().strip() != target["headRefOid"]:
+            raise ContractError("retained source branch is missing or changed")
+        _lifecycle_ancestor(root, replacement["head"], replacement["merge"])
+        _lifecycle_ancestor(root, replacement["merge"], manifest["comparison_commit"])
+        actual = lifecycle_coverage_inventory(root, entry["source_base"], target["headRefOid"])
+        recorded = [{"path": p["path"], "patch_sha256": p["patch_sha256"],
+                     "hunks": [{k: h[k] for k in ("header", "sha256")} for h in p["hunks"]]}
+                    for p in entry["coverage"]]
+        if not _json_exact_equal(actual, recorded):
+            raise ContractError("coverage omits or changes source paths/hunks")
+        for path in entry["coverage"]:
+            # Mode-only/binary changes require an explicit path disposition too.
+            for item in [path, *path["hunks"]]:
+                resolution = item["resolution"]
+                if resolution == "missing":
+                    raise ContractError(f"missing useful work in {path['path']}: {item['followup']}; owner={entry['owner']}")
+                if resolution not in {"landed", "superseded", "evidence_only"} or not item["reason"].strip():
+                    raise ContractError("coverage resolution/reason is invalid")
+                if resolution == "evidence_only":
+                    if path["path"].endswith((".py", ".js", ".sh")):
+                        raise ContractError("code/test hunks cannot be dismissed as evidence only")
+                    continue
+                refs = item["references"]
+                if {r["commit"] for r in refs} != {replacement["merge"], manifest["comparison_commit"]}:
+                    raise ContractError("useful coverage must cite replacement and current-dev bytes")
+                for ref in refs:
+                    _lifecycle_path(ref["path"])
+                    cited = _lifecycle_git(root, "show", f"{ref['commit']}:{ref['path']}")
+                    if ref["commit"] == manifest["comparison_commit"]:
+                        if cited != _lifecycle_git(root, "show", f"HEAD:{ref['path']}"):
+                            raise ContractError(f"current dev coverage changed: {ref['path']}; fresh review required")
+                    lines = cited.splitlines(keepends=True)
+                    start, end = ref["start"], ref["end"]
+                    if type(start) is not int or type(end) is not int or not 1 <= start <= end <= len(lines):
+                        raise ContractError("coverage reference range is invalid")
+                    if hashlib.sha256(b"".join(lines[start - 1:end])).hexdigest() != ref["sha256"]:
+                        raise ContractError("coverage reference bytes changed")
+        return []
+    except (ContractError, KeyError, TypeError, AttributeError, ValueError) as exc:
+        return [str(exc)]
+
+
+def record_native_pr_lifecycle(
+    common_dir: Path, *, number: int, head: str, branch: str, owner: dict[str, str],
+    state: str, detail: str, replacement: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist native ownership outside a removable lane; grants no PR mutation."""
+    _lifecycle_sha(head)
+    if type(number) is not int or number <= 0 or state not in {"PENDING", "STOPPED", "MERGED", "REPLACEMENT_REVIEWED", "CLOSED"}:
+        raise ContractError("invalid native PR lifecycle observation")
+    if not owner.get("task_id") or not _LIFECYCLE_WAVE_RE.fullmatch(owner.get("wave_id", "")):
+        raise ContractError("native PR lifecycle requires its task/wave owner")
+    record = {"schema_version": LIFECYCLE_SCHEMA_VERSION, "number": number, "head": head,
+              "branch": branch, "owner": owner, "state": state, "detail": detail,
+              "replacement": replacement, "authority": "ownership_only_not_terminal_authority"}
+    path = common_dir / LIFECYCLE_ROOT_NAME / f"pr-{number}" / f"{_canonical_sha256(record)}.json"
+    try:
+        _write_json_exclusive(path, record)
+    except FileExistsError:
+        existing, _ = _read_canonical_json(path, label="native PR lifecycle")
+        if not _json_exact_equal(existing, record):
+            raise ContractError("native PR lifecycle record changed")
+    return {"path": str(path), "record": record}
+
+
+def _lifecycle_replacement_errors(root: Path, replacement: dict, gh_runner: GhRunner) -> list[str]:
+    value = _gh_json(
+        ["gh", "api", f"repos/{REPOSITORY_NAME}/pulls/{replacement['number']}"],
+        cwd=root, gh_runner=gh_runner, label="replacement lineage read",
+    )
+    expected = (replacement["number"], replacement["id"], "closed", replacement["merge"],
+                replacement["head"], "dev", EXPECTED_REPOSITORY["id"])
+    actual = (value.get("number"), value.get("node_id"), value.get("state"), value.get("merge_commit_sha"),
+              value.get("head", {}).get("sha"), value.get("base", {}).get("ref"),
+              value.get("base", {}).get("repo", {}).get("node_id"))
+    return [] if _json_exact_equal(actual, expected) and value.get("merged_at") else ["replacement remote lineage drift"]
+
+
+def record_lifecycle_replacements(
+    repo_root: Path, *, wave_id: str, authority_commit: str,
+) -> list[dict[str, Any]]:
+    """Adopt only explicit landed lineage at native merge, without GitHub writes."""
+    if not _LIFECYCLE_WAVE_RE.fullmatch(wave_id):
+        raise ContractError("invalid replacement owner wave")
+    path = repo_root / f"reports/control_plane/{wave_id}_coverage.json"
+    if not _lifecycle_git(repo_root, "ls-tree", authority_commit, "--", str(path.relative_to(repo_root))).strip():
+        return []
+    manifest = _require_lifecycle_authority(repo_root, path, authority_commit)
+    common = _resolve_common_git_dir(repo_root)
+    outcomes = []
+    for entry in manifest["targets"]:
+        target = entry["target"]
+        errors = _lifecycle_coverage_errors(repo_root, manifest, entry)
+        observation = record_native_pr_lifecycle(
+            common, number=target["number"], head=target["headRefOid"],
+            branch=target["headRefName"], owner=entry["owner"],
+            state="STOPPED" if errors else "REPLACEMENT_REVIEWED",
+            detail="; ".join(errors) if errors else f"{authority_commit}:{path.name}; live disposition pending",
+            replacement=entry["replacement"],
+        )
+        outcomes.append({"number": target["number"], "owner": entry["owner"],
+                         "status": "HOLD" if errors else "LIVE_DISPOSITION_PENDING",
+                         "errors": errors, "path": observation["path"],
+                         "commands": lifecycle_commands(repo_root, path, authority_commit)})
+    return outcomes
+
+
+def lifecycle_commands(root: Path, manifest_path: Path, authority_commit: str) -> dict[str, str]:
+    """Render exact post-landing commands; apply still revalidates under lock."""
+    return {
+        mode: shlex.join([
+            "python3", str(root / _LIFECYCLE_CODE_PATHS[0]), f"lifecycle-{mode}",
+            "--repo-root", str(root), "--manifest", str(manifest_path),
+            "--authority-commit", authority_commit,
+        ]) for mode in ("plan", "verify", "apply")
+    }
+
+
+def _validate_lifecycle_prior_attempt(intent: dict, receipt_path: Path, target: dict) -> None:
+    if set(intent) != {"schema_version", "authority_commit", "manifest_sha256", "target", "owner", "identity"}:
+        raise ContractError("existing lifecycle intent schema mismatch")
+    if intent["schema_version"] != LIFECYCLE_SCHEMA_VERSION or _validate_terminal_identity(intent["identity"]):
+        raise ContractError("existing lifecycle terminal identity is invalid")
+    if not os.path.lexists(receipt_path):
+        return  # Ambiguous outcome: fresh remote reads may reconcile, never retry.
+    receipt, _ = _read_canonical_json(receipt_path, label="lifecycle receipt")
+    if set(receipt) != {*intent, "boundary", "status"} or any(
+        not _json_exact_equal(receipt.get(key), value) for key, value in intent.items()
+    ):
+        raise ContractError("existing lifecycle receipt authority mismatch")
+    boundary = receipt["boundary"]
+    if not isinstance(boundary, dict) or boundary.get("operation_id") != intent["identity"]["operation_id"]:
+        raise ContractError("existing lifecycle receipt operation mismatch")
+    expected_status = "CLOSED" if boundary.get("action_succeeded") is True else "HOLD_TERMINAL_BOUNDARY"
+    if receipt["status"] != expected_status:
+        raise ContractError("existing lifecycle receipt contradicts its terminal outcome")
+    if expected_status == "CLOSED":
+        proof = boundary.get("action_outcome", {})
+        errors = _snapshot_errors(proof.get("before"), target, state="OPEN")
+        errors += _node_errors(proof.get("response"), target, state="CLOSED")
+        errors += _snapshot_errors(proof.get("after"), target, state="CLOSED")
+        if errors:
+            raise ContractError("existing lifecycle receipt terminal proof is invalid: " + "; ".join(errors))
+
+
+def run_lifecycle_dispositions(
+    manifest_path: Path | str, *, repo_root: Path, authority_commit: str,
+    mode: str = "plan", gh_runner: GhRunner | None = None,
+    bind_target_identity: Callable[..., Any] | None = None,
+    execute_terminal_once: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Plan/verify read-only; apply once per reviewed target, preserving peer HOLDs."""
+    if mode not in {"plan", "verify", "apply"}:
+        raise ContractError("unknown lifecycle mode")
+    root, path = Path(repo_root).resolve(strict=True), Path(manifest_path)
+    if not path.is_absolute():
+        path = root / path
+    manifest = _require_lifecycle_authority(root, path, authority_commit)
+    common = _resolve_common_git_dir(root)
+    gh_runner = gh_runner or _default_gh_runner
+    outcomes = []
+    for entry in manifest["targets"]:
+        target = entry["target"]
+        # A newly named manifest cannot rearm this exact PR/head after ambiguity.
+        intent_path = (common / INTENT_ROOT_NAME / "lifecycle"
+                       / f"pr-{target['number']}" / f"{target['headRefOid']}.json")
+        receipt_path = common / RECEIPT_ROOT_NAME / manifest["wave_id"] / f"pr-{target['number']}.json"
+        outcome: dict[str, Any] = {"number": target["number"], "head": target["headRefOid"],
+                                   "owner": entry["owner"], "status": "HOLD", "errors": []}
+        outcomes.append(outcome)
+        try:
+            errors = _lifecycle_coverage_errors(root, manifest, entry)
+            if errors:
+                outcome.update(status="HOLD_COVERAGE_OR_PRESERVATION", errors=errors)
+                continue
+            before = _read_remote_snapshot(target, repo_root=root, gh_runner=gh_runner)
+            closed = not _snapshot_errors(before, target, state="CLOSED")
+            errors = _snapshot_errors(before, target, state="CLOSED" if closed else "OPEN")
+            errors += _lifecycle_replacement_errors(root, entry["replacement"], gh_runner)
+            if errors:
+                outcome.update(status="HOLD_REMOTE_DRIFT", errors=errors)
+                continue
+            outcome["observation"] = before
+            # Never reset an intent, including pre-callback HOLD or missing receipt.
+            if os.path.lexists(intent_path):
+                intent, _ = _read_canonical_json(intent_path, label="lifecycle intent")
+                if (intent.get("manifest_sha256") != manifest["manifest_sha256"]
+                        or intent.get("authority_commit") != authority_commit
+                        or not _json_exact_equal(intent.get("owner"), entry["owner"])
+                        or not _json_exact_equal(intent.get("target"), target)):
+                    raise ContractError("existing lifecycle intent authority mismatch")
+                _validate_lifecycle_prior_attempt(intent, receipt_path, target)
+                outcome.update(status="CLOSED_VERIFIED" if closed else "HOLD_CONSUMED_OPERATION",
+                               operation_id=intent["identity"]["operation_id"], intent_path=str(intent_path),
+                               receipt_path=str(receipt_path) if receipt_path.exists() else None)
+                continue
+            if closed:
+                outcome["status"] = "CLOSED_VERIFIED_EXTERNAL"
+                continue
+            if mode != "apply":
+                outcome["status"] = "ELIGIBLE" if mode == "plan" else "INCOMPLETE_OPEN"
+                continue
+            if bind_target_identity is None or execute_terminal_once is None:
+                bind_target_identity, execute_terminal_once = _load_commit_executor_seams()
+            identity = bind_target_identity(root, base_branch="dev")
+            identity_errors = _validate_terminal_identity(identity, repo_root=root, common_dir=common)
+            if identity_errors or identity["operation_id"] in TERMINAL_SWEEP_OPERATION_IDS.values():
+                raise ContractError("terminal identity invalid or legacy operation reused: " + "; ".join(identity_errors))
+            intent = {"schema_version": LIFECYCLE_SCHEMA_VERSION, "authority_commit": authority_commit,
+                      "manifest_sha256": manifest["manifest_sha256"], "target": target,
+                      "owner": entry["owner"], "identity": identity}
+            # O_EXCL also excludes another process for this exact wave/target.
+            _write_json_exclusive(intent_path, intent)
+            outcome.update(intent_path=str(intent_path), operation_id=identity["operation_id"])
+            record_native_pr_lifecycle(common, number=target["number"], head=target["headRefOid"],
+                branch=target["headRefName"], owner=entry["owner"], state="REPLACEMENT_REVIEWED",
+                detail=f"{authority_commit}:{path.name}", replacement=entry["replacement"])
+
+            def close_under_boundary() -> dict[str, Any]:
+                # The existing boundary freshly fetches origin/dev and consumes
+                # its one-shot authority under lock before entering this callback.
+                current = _require_lifecycle_authority(root, path, authority_commit)
+                _lifecycle_ancestor(root, authority_commit, "origin/dev")
+                if current != manifest:
+                    raise ContractError("reviewed lifecycle manifest changed")
+                problems = _lifecycle_coverage_errors(root, manifest, entry)
+                problems += _lifecycle_replacement_errors(root, entry["replacement"], gh_runner)
+                fresh = _read_remote_snapshot(target, repo_root=root, gh_runner=gh_runner)
+                problems += _snapshot_errors(fresh, target, state="OPEN")
+                if problems:
+                    raise ContractError("; ".join(problems))
+                response = _close_exact_node(target, repo_root=root, gh_runner=gh_runner)
+                after = _read_remote_snapshot(target, repo_root=root, gh_runner=gh_runner)
+                problems = _snapshot_errors(after, target, state="CLOSED")
+                if problems:
+                    raise ContractError("; ".join(problems))
+                return {"before": fresh, "response": response, "after": after}
+
+            boundary = execute_terminal_once(root, identity, terminal_action=close_under_boundary, log=lambda _msg: None)
+            status = "CLOSED" if boundary.get("action_succeeded") is True else "HOLD_TERMINAL_BOUNDARY"
+            receipt = {**intent, "boundary": boundary, "status": status}
+            _write_json_exclusive(receipt_path, receipt)
+            outcome.update(status=status, boundary=boundary, receipt_path=str(receipt_path))
+            if status == "CLOSED":
+                record_native_pr_lifecycle(common, number=target["number"], head=target["headRefOid"],
+                    branch=target["headRefName"], owner=entry["owner"], state="CLOSED",
+                    detail=str(receipt_path), replacement=entry["replacement"])
+        except (ContractError, OSError, ValueError, TypeError) as exc:
+            outcome.update(status="HOLD", errors=[str(exc)])
+    return {"wave_id": manifest["wave_id"], "manifest_sha256": manifest["manifest_sha256"],
+            "authority_commit": authority_commit, "mode": mode, "targets": outcomes,
+            "commands": lifecycle_commands(root, path, authority_commit),
+            "proof_limit": "Plan checks coverage and remote identity only; apply requires fresh behind-zero authority. Semantic equivalence requires review of the committed hunk mappings.",
+            "complete": all(o["status"].startswith("CLOSED") for o in outcomes),
+            "has_hold": any(o["status"].startswith("HOLD") for o in outcomes)}
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Fixed-set executor for the eight governed PR disposition targets"
     )
     subparsers = parser.add_subparsers(dest="mode", required=True)
+
+    for mode in ("lifecycle-plan", "lifecycle-verify", "lifecycle-apply"):
+        lifecycle_parser = subparsers.add_parser(mode)
+        lifecycle_parser.add_argument("--manifest", type=Path, required=True)
+        lifecycle_parser.add_argument("--authority-commit", required=True)
+        lifecycle_parser.add_argument("--repo-root", type=Path, default=Path.cwd())
 
     contract_parser = subparsers.add_parser(
         "contract-check", help="validate only the exact self-hashed target manifest"
@@ -3793,7 +4224,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
-        if args.mode == "contract-check":
+        if args.mode.startswith("lifecycle-"):
+            result = run_lifecycle_dispositions(
+                args.manifest, repo_root=args.repo_root, authority_commit=args.authority_commit,
+                mode=args.mode.removeprefix("lifecycle-"),
+            )
+        elif args.mode == "contract-check":
             result = contract_check(args.manifest, repository=args.repository)
         elif args.mode == "verify":
             result = verify_receipts(
@@ -3814,6 +4250,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"decision": "HOLD", "error": str(exc)}, sort_keys=True), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
+    if args.mode.startswith("lifecycle-"):
+        return 3 if result["has_hold"] or (args.mode != "lifecycle-plan" and not result["complete"]) else 0
     if args.mode == "apply" and result.get("has_hold"):
         return 3
     return 0

@@ -1314,6 +1314,8 @@ def test_step14_behind_refresh_rebinds_terminal_carrier_commit(
     carrier.mkdir()
     survivor = tmp_path / "survivor"
     survivor.mkdir()
+    common = tmp_path / "common.git"
+    common.mkdir()
     merge_script = carrier / "mu" / "tools" / "hooks" / "merge_pr.sh"
     merge_script.parent.mkdir(parents=True)
     merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
@@ -1372,6 +1374,8 @@ def test_step14_behind_refresh_rebinds_terminal_carrier_commit(
         return None
 
     def run_command(cmd, cwd=None, timeout=None, check=True, env=None):
+        if cmd == ["git", "rev-parse", "--git-common-dir"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{common}\n", stderr="")
         if cmd == ["git", "rev-parse", "HEAD"]:
             head = carrier_state["head"] if Path(cwd) == carrier else merge_sha
             return subprocess.CompletedProcess(cmd, 0, stdout=f"{head}\n", stderr="")
@@ -1386,6 +1390,15 @@ def test_step14_behind_refresh_rebinds_terminal_carrier_commit(
         raise AssertionError(f"unexpected command {cmd!r} in {cwd}")
 
     class FakeTerminalAuthority:
+        @staticmethod
+        def record_native_pr_lifecycle(common_dir, **kwargs):
+            assert common_dir == common
+            return {"path": str(common / "ownership.json")}
+
+        @staticmethod
+        def record_lifecycle_replacements(*args, **kwargs):
+            return []
+
         @staticmethod
         def requires_terminal_sweep(candidate_wave_id):
             return candidate_wave_id == wave_id
@@ -4751,3 +4764,115 @@ def test_commit_generated_governance_growth_cap_invalid_retry_stops_before_super
     assert result["step"] == "settle_commit_generated_governance", result
     assert "retry authority rejected candidate" in result["errors"][0]
     assert supervisor_called is False
+
+def test_ensured_pr_is_owned_before_ci_stop(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    wave = "native-pr-owner-2026-09-13"
+    handoff = {"wave_id": wave, "task_id": "[PIPELINE-FIX-53]",
+               "tracked_packet": f"reports/control_plane/{wave}_2026-09-13.md",
+               "pr_title": "Fixture", "pr_body": "Fixture"}
+    result = {"commit_sha": head, "steps_completed": ["run_pre_push_script", "git_push"]}
+    original_run = commit_mod._run  # ANTICHEAT_OK: keep local Git real; mock GitHub only.
+    def command(args, **kwargs):
+        if args[:3] == ["gh", "pr", "list"]:
+            return subprocess.CompletedProcess(args, 0, "[]", "")
+        if args[:3] == ["gh", "pr", "create"]:
+            return subprocess.CompletedProcess(args, 0, "https://github.com/jabramsja/rcx-pi-core/pull/2301", "")
+        return original_run(args, **kwargs)
+    def ci_stop(*args, **kwargs):
+        records = [json.loads(p.read_text()) for p in (repo / ".git/rcx_pr_lifecycle/pr-2301").glob("*.json")]
+        assert records and records[0]["state"] == "PENDING"
+        assert records[0]["owner"]["task_id"] == "[PIPELINE-FIX-53]"
+        return {"status": "error", "step": "wait_ci", "errors": ["fixture CI failure"]}
+    monkeypatch.setattr(commit_mod, "_run", command)
+    monkeypatch.setattr(commit_mod, "_try_auto_resolve_pr_conflict", lambda *a, **k: {"resolved": True, "action": "no_action"})
+    monkeypatch.setattr(commit_mod, "_wait_for_pr_ci", ci_stop)
+    outcome = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercise native ensured-PR/CI-stop ownership path.
+        handoff=handoff, repo_root=repo, result=result, target_branch="fixture-feature",
+        base_branch="dev", continuation_path=repo / ".agent_bus/continuation.json", log=_noop_log,
+    )
+    assert outcome["status"] == "error" and outcome["pr_number"] == "2301"
+    records = [json.loads(p.read_text()) for p in (repo / ".git/rcx_pr_lifecycle/pr-2301").glob("*.json")]
+    assert {r["state"] for r in records} == {"PENDING", "STOPPED"}
+    assert all(r["head"] == head and r["owner"]["wave_id"] == wave for r in records)
+    assert all(r["replacement"] is None for r in records)
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_native_stopped_owner_survives_return_or_unwind(tmp_path, monkeypatch, raises):
+    repo = _init_repo(tmp_path)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    handoff = {"wave_id": "owned-stop-2026-09-13", "task_id": "[PIPELINE-FIX-53]"}
+    result = {"pr_number": "2302", "commit_sha": head, "steps_completed": []}
+    def native_impl(**kwargs):
+        assert list((repo / ".git/rcx_pr_lifecycle/pr-2302").glob("*.json"))
+        if raises:
+            raise RuntimeError("native stop")
+        return {"status": "needs_phase_a", "step": "supervisor", "errors": ["scope change"]}
+    monkeypatch.setattr(commit_mod, "_run_post_commit_pipeline_impl", native_impl)
+    def run():
+        return commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: native wrapper must own failures after a PR exists.
+            handoff=handoff, repo_root=repo, result=result, target_branch="fixture-feature",
+            base_branch="dev", continuation_path=repo / ".agent_bus/continuation.json", log=_noop_log,
+        )
+    if raises:
+        with pytest.raises(RuntimeError, match="native stop"):
+            run()
+    else:
+        outcome = run()
+        assert outcome["pr_lifecycle"]["state"] == "STOPPED"
+    records = [json.loads(p.read_text()) for p in (repo / ".git/rcx_pr_lifecycle/pr-2302").glob("*.json")]
+    assert {r["state"] for r in records} == {"PENDING", "STOPPED"}
+    assert all(r["owner"]["task_id"] == "[PIPELINE-FIX-53]" for r in records)
+
+
+def test_native_merge_owner_survives_lane_retirement_without_closing_predecessor(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    carrier = tmp_path / "carrier"
+    _git(["worktree", "add", "-b", "fixture-feature", str(carrier), "dev"], cwd=repo)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    handoff = {"wave_id": "owned-merge-2026-09-13", "task_id": "[PIPELINE-FIX-53]"}
+    result = {"pr_number": "2303", "commit_sha": head, "steps_completed": []}
+    def native_impl(**kwargs):
+        # Native cleanup really removes this temporary worktree. The wrapper's
+        # final record must use the common directory captured before retirement.
+        commit_mod._post_merge_cleanup(  # ANTICHEAT_OK: real cleanup is the lifetime boundary under test.
+            cleanup_root=repo, repo_root=carrier, target_branch="fixture-feature",
+            base_branch="dev", wave_id=handoff["wave_id"], log=_noop_log,
+        )
+        assert not carrier.exists()
+        result["merge_sha"] = head
+        return {"status": "success", "merge_sha": head}
+    monkeypatch.setattr(commit_mod, "_run_post_commit_pipeline_impl", native_impl)
+    outcome = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: verify native lifecycle finalization after actual retirement.
+        handoff=handoff, repo_root=carrier, result=result, target_branch="fixture-feature",
+        base_branch="dev", continuation_path=carrier / ".agent_bus/continuation.json", log=_noop_log,
+    )
+    assert outcome["pr_lifecycle"]["state"] == "MERGED"
+    assert not carrier.exists()
+    records = [json.loads(p.read_text()) for p in (repo / ".git/rcx_pr_lifecycle/pr-2303").glob("*.json")]
+    assert {r["state"] for r in records} == {"PENDING", "MERGED"}
+    assert all(r["replacement"] is None for r in records)
+
+
+def test_implementation_merge_keeps_live_disposition_current_before_fleet_selection(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    handoff = {"wave_id": "owned-live-disposition-2026-09-13", "task_id": "[PIPELINE-FIX-53]"}
+    pending = [{"number": 1284, "status": "LIVE_DISPOSITION_PENDING",
+                "owner": {"task_id": "[PIPELINE-FIX-53]"},
+                "commands": {"apply": "committed exact command"}}]
+    result = {"pr_number": "2304", "pr_replacement_ownership": pending}
+    def no_successor(*args, **kwargs):
+        raise AssertionError("code merge cannot select fleet before live disposition")
+    monkeypatch.setattr(commit_mod, "_next_open_founder_ordered_queue_entry", no_successor)
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: native post-merge ownership must precede successor selection.
+        repo_root=repo, handoff=handoff, result=result, merge_sha=head,
+        queue_commit_sha=head, log=_noop_log,
+    )
+    assert package["next_candidates"] == []
+    assert package["pr_lifecycle_dispositions"] == pending
+    assert package["task_id"] == "[PIPELINE-FIX-53]"
+    assert result["post_merge_next_hard_stop"] is True
+    assert result["post_merge_queue_empty"] is False

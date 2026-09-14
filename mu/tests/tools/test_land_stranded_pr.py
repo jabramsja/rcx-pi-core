@@ -681,6 +681,8 @@ class TestMergePhaseReuseAndReConflict:
         assert '"--admin"' not in module_src
         assert "'--admin'" not in module_src
         phase_src = inspect.getsource(commit_mod._run_post_commit_pipeline)  # ANTICHEAT_OK: source verify
+        assert "_run_post_commit_pipeline_impl(" in phase_src
+        phase_src += inspect.getsource(commit_mod._run_post_commit_pipeline_impl)  # ANTICHEAT_OK: merge steps live behind the lifecycle wrapper
         assert "merge_pr.sh" in phase_src
         assert '"--sweep"' in phase_src
         assert "--admin" not in phase_src
@@ -718,6 +720,8 @@ class TestMergePhaseReuseAndReConflict:
         # midpoll auto-resolve context — so a mid-gate re-conflict on the
         # growth-cap file is covered by the same (now-extended) code path.
         phase_src = inspect.getsource(commit_mod._run_post_commit_pipeline)  # ANTICHEAT_OK: source verify
+        assert "_run_post_commit_pipeline_impl(" in phase_src
+        phase_src += inspect.getsource(commit_mod._run_post_commit_pipeline_impl)  # ANTICHEAT_OK: shared conflict routing lives behind the lifecycle wrapper
         assert phase_src.count("_try_auto_resolve_pr_conflict(") >= 2
         assert "midpoll_autoresolve" in phase_src
 

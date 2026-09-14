@@ -9818,7 +9818,10 @@ class TestDraftPRReadyBeforeMerge:
             ],
             "pr_number": "1189",
         }
-        with patch.object(commit_mod, "_parse_origin_owner_repo", return_value=("owner", "repo")), \
+        # Isolate lifecycle persistence from this draft-readiness fixture; real
+        # ownership is exercised in test_commit_executor_post_merge_cleanup.py.
+        with patch.object(commit_mod, "record_commit_pr_lifecycle", autospec=True, return_value=None), \
+             patch.object(commit_mod, "_parse_origin_owner_repo", return_value=("owner", "repo")), \
              patch.object(commit_mod, "_query_pr_review_state", side_effect=fake_query), \
              patch.object(commit_mod, "_wait_for_pr_ci", side_effect=fake_wait_for_ci), \
              patch.object(

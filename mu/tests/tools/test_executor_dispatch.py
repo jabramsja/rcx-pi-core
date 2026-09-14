@@ -2643,10 +2643,13 @@ def _compute_staged_sha(repo):
 def _commit_post_commit_source() -> str:
     """Return combined source for the commit pipeline and extracted helpers."""
     import inspect
+    post_commit_source = inspect.getsource(commit_mod._run_post_commit_pipeline)  # ANTICHEAT_OK: verify lifecycle wrapper delegates to the merge implementation
+    assert "_run_post_commit_pipeline_impl(" in post_commit_source
     parts = [
         inspect.getsource(commit_mod.run_commit_pipeline),
         inspect.getsource(commit_mod._run_commit_pipeline_impl),  # ANTICHEAT_OK: testing extracted commit pipeline implementation
-        inspect.getsource(commit_mod._run_post_commit_pipeline),  # ANTICHEAT_OK: testing extracted post-commit helper source
+        post_commit_source,
+        inspect.getsource(commit_mod._run_post_commit_pipeline_impl),  # ANTICHEAT_OK: post-commit steps live behind the lifecycle wrapper
     ]
     for helper in ("_extract_review_findings", "_attempt_bot_finding_remediation"):
         if hasattr(commit_mod, helper):
@@ -7611,6 +7614,62 @@ class TestIntegrationScenarios:
 class TestCommitContinuationAndBotFreshness:
     """Regression coverage for bounded post-commit continuation and bot freshness."""
 
+    @pytest.fixture
+    def isolated_pr_lifecycle(self, tmp_path, monkeypatch):
+        # Keep ownership validation and persistence real, including the wrapper's
+        # terminal observation. These CI/review fixtures have no replacement
+        # manifest or committed PROGRAM QUEUE objects to publish a successor from.
+        common_dir = tmp_path / "common-git"
+        common_dir.mkdir()
+        disposition_mod = commit_mod._load_pr_disposition_executor_module()  # ANTICHEAT_OK: isolate external Git reads while exercising real ownership persistence
+
+        def lifecycle_git_command(command, *, cwd, binary=False):
+            assert Path(cwd).is_relative_to(tmp_path)
+            assert binary is True
+            assert len(command) == 5
+            assert list(command[:2]) == ["git", "ls-tree"]
+            assert len(command[2]) == 40
+            assert list(command[3:]) == [
+                "--", "reports/control_plane/test-wave-id_coverage.json",
+            ]
+            return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+        def refresh_queue(
+            *, repo_root, handoff, result, merge_sha, log,
+            queue_commit_sha="", terminal_receipt=None,
+        ):
+            # Check the publication boundary; linked-root tests below supply
+            # their own publisher, and no-replay tests exercise the real one.
+            assert Path(repo_root).is_relative_to(tmp_path)
+            assert handoff["wave_id"] == "test-wave-id"
+            assert queue_commit_sha == merge_sha == result["merge_sha"]
+            assert terminal_receipt is None
+            assert "post_merge_cleanup" in result["steps_completed"]
+            assert result["pr_replacement_ownership"] == []
+            assert result["pr_lifecycle"]["state"] == "PENDING"
+            return {}
+
+        monkeypatch.setattr(disposition_mod, "_default_git_run", lifecycle_git_command)
+        monkeypatch.setattr(commit_mod, "_refresh_post_merge_package_for_next_open_queue", refresh_queue)
+        yield common_dir
+
+        records = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (common_dir / disposition_mod.LIFECYCLE_ROOT_NAME).glob("pr-*/*.json")
+        ]
+        assert {record["state"] for record in records} in (
+            {"PENDING", "STOPPED"}, {"PENDING", "MERGED"},
+        )
+        assert all(record["owner"] == {
+            "task_id": "[TEST-1]", "wave_id": "test-wave-id", "packet": "",
+        } for record in records)
+        assert all(record["branch"] == "jabramsja/test-wave-id" for record in records)
+        assert all(record["replacement"] is None for record in records)
+        assert all(
+            record["authority"] == "ownership_only_not_terminal_authority"
+            for record in records
+        )
+
     @pytest.fixture(autouse=True)
     def _green_expected_pr_check_surface(self, monkeypatch):
         monkeypatch.setattr(
@@ -8215,7 +8274,10 @@ class TestCommitContinuationAndBotFreshness:
 
         assert calls["count"] == 2
 
-    def test_post_commit_ignores_outdated_connector_threads(self, tmp_path, monkeypatch):
+    def test_post_commit_ignores_outdated_connector_threads(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {"steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"]}
@@ -8229,8 +8291,11 @@ class TestCommitContinuationAndBotFreshness:
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -8253,13 +8318,13 @@ class TestCommitContinuationAndBotFreshness:
                         "repository": {
                             "pullRequest": {
                                 "reviewDecision": "",
-                                "headRefOid": "abc123",
+                                "headRefOid": head_sha,
                                 "latestReviews": {
                                     "nodes": [
                                         {
                                             "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
                                             "state": "COMMENTED",
-                                            "commit": {"oid": "abc123"},
+                                            "commit": {"oid": head_sha},
                                         }
                                     ]
                                 },
@@ -8288,7 +8353,7 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=json.dumps(payload))
             if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
                 return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
@@ -8323,6 +8388,13 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["pr_number"] == "673"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert "merge_sha" in post_commit
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
+        assert "step" not in post_commit, post_commit
 
     def test_wait_for_bot_review_freshness_times_out_fail_closed(self):
         with patch.object(commit_mod.time, "sleep", return_value=None):
@@ -8396,7 +8468,10 @@ class TestCommitContinuationAndBotFreshness:
                 poll_interval=0,
             )
 
-    def test_post_commit_ignores_prior_cycle_unresolved_bot_threads(self, tmp_path, monkeypatch):
+    def test_post_commit_ignores_prior_cycle_unresolved_bot_threads(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
@@ -8411,7 +8486,7 @@ class TestCommitContinuationAndBotFreshness:
                 "wait_ci",
             ],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
             "pr_number": "673",
         }
@@ -8425,8 +8500,11 @@ class TestCommitContinuationAndBotFreshness:
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -8438,7 +8516,7 @@ class TestCommitContinuationAndBotFreshness:
                     "data": {
                         "repository": {
                             "pullRequest": {
-                                "headRefOid": "abc123",
+                                "headRefOid": head_sha,
                                 "reviewDecision": "",
                                 "latestReviews": {
                                     "nodes": [
@@ -8446,7 +8524,7 @@ class TestCommitContinuationAndBotFreshness:
                                             "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
                                             "state": "COMMENTED",
                                             "submittedAt": "2026-03-27T07:40:00Z",
-                                            "commit": {"oid": "abc123"},
+                                            "commit": {"oid": head_sha},
                                         }
                                     ]
                                 },
@@ -8489,7 +8567,7 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
                 return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
@@ -8522,8 +8600,18 @@ class TestCommitContinuationAndBotFreshness:
 
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert "merge_sha" in post_commit
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
+        assert "step" not in post_commit, post_commit
 
-    def test_post_commit_reports_only_current_cycle_bot_threads(self, tmp_path, monkeypatch):
+    def test_post_commit_reports_only_current_cycle_bot_threads(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
@@ -8538,7 +8626,7 @@ class TestCommitContinuationAndBotFreshness:
                 "wait_ci",
             ],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
             "pr_number": "673",
         }
@@ -8549,8 +8637,11 @@ class TestCommitContinuationAndBotFreshness:
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:3] == ["gh", "api", "graphql"]:
@@ -8558,7 +8649,7 @@ class TestCommitContinuationAndBotFreshness:
                     "data": {
                         "repository": {
                             "pullRequest": {
-                                "headRefOid": "abc123",
+                                "headRefOid": head_sha,
                                 "reviewDecision": "",
                                 "latestReviews": {
                                     "nodes": [
@@ -8566,7 +8657,7 @@ class TestCommitContinuationAndBotFreshness:
                                             "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
                                             "state": "COMMENTED",
                                             "submittedAt": "2026-03-27T07:40:00Z",
-                                            "commit": {"oid": "abc123"},
+                                            "commit": {"oid": head_sha},
                                         }
                                     ]
                                 },
@@ -8644,6 +8735,10 @@ class TestCommitContinuationAndBotFreshness:
                 "line": 9,
             }
         ]
+        assert post_commit["pr_lifecycle"]["state"] == "STOPPED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
 
     def test_current_head_connector_issue_comment_outcome_ignores_pre_review_clear_comment(self):
         pr_data = {
@@ -8752,13 +8847,16 @@ class TestCommitContinuationAndBotFreshness:
             pr_data=pr_data,
         )
 
-    def test_post_commit_requests_current_head_bot_review_once(self, tmp_path, monkeypatch):
+    def test_post_commit_requests_current_head_bot_review_once(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
             "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
         }
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
@@ -8770,7 +8868,7 @@ class TestCommitContinuationAndBotFreshness:
                     "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
                     "handoff_sha": "handoff-sha",
                     "target_branch": "jabramsja/test-wave-id",
-                    "commit_sha": "abc123",
+                    "commit_sha": head_sha,
                     "receipt_decision": "COMMIT_GO",
                     "steps_completed": list(result["steps_completed"]),
                     "pr_number": "673",
@@ -8789,8 +8887,11 @@ class TestCommitContinuationAndBotFreshness:
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -8817,7 +8918,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
-                                    "headRefOid": "abc123",
+                                    "headRefOid": head_sha,
                                     "reviewDecision": "",
                                     "latestReviews": {"nodes": []},
                                     "reviewThreads": {"nodes": []},
@@ -8830,14 +8931,14 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
-                                    "headRefOid": "abc123",
+                                    "headRefOid": head_sha,
                                     "reviewDecision": "",
                                     "latestReviews": {
                                         "nodes": [
                                             {
                                                 "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
                                                 "state": "COMMENTED",
-                                                "commit": {"oid": "abc123"},
+                                                "commit": {"oid": head_sha},
                                             }
                                         ]
                                     },
@@ -8847,7 +8948,7 @@ class TestCommitContinuationAndBotFreshness:
                         }
                     }
                 return completed(cmd, stdout=json.dumps(payload))
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
@@ -8882,14 +8983,24 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["pr_number"] == "673"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 1
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
+        assert "step" not in post_commit, post_commit
 
-    def test_post_commit_accepts_current_head_no_issues_issue_comment_without_review_object(self, tmp_path, monkeypatch):
+    def test_post_commit_accepts_current_head_no_issues_issue_comment_without_review_object(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
             "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
         }
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
@@ -8901,7 +9012,7 @@ class TestCommitContinuationAndBotFreshness:
                     "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
                     "handoff_sha": "handoff-sha",
                     "target_branch": "jabramsja/test-wave-id",
-                    "commit_sha": "abc123",
+                    "commit_sha": head_sha,
                     "receipt_decision": "COMMIT_GO",
                     "steps_completed": list(result["steps_completed"]),
                     "pr_number": "673",
@@ -8920,8 +9031,11 @@ class TestCommitContinuationAndBotFreshness:
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -8948,7 +9062,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
-                                    "headRefOid": "abc123",
+                                    "headRefOid": head_sha,
                                     "reviewDecision": "",
                                     "latestReviews": {"nodes": []},
                                     "reviewThreads": {"nodes": []},
@@ -8962,7 +9076,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
-                                    "headRefOid": "abc123",
+                                    "headRefOid": head_sha,
                                     "reviewDecision": "",
                                     "latestReviews": {"nodes": []},
                                     "reviewThreads": {"nodes": []},
@@ -8985,7 +9099,7 @@ class TestCommitContinuationAndBotFreshness:
                         }
                     }
                 return completed(cmd, stdout=json.dumps(payload))
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
@@ -9020,14 +9134,24 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["pr_number"] == "673"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 1
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
+        assert "step" not in post_commit, post_commit
 
-    def test_post_commit_does_not_request_review_when_current_head_clear_issue_comment_and_request_binding_exist(self, tmp_path, monkeypatch):
+    def test_post_commit_does_not_request_review_when_current_head_clear_issue_comment_and_request_binding_exist(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
             "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
         }
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
@@ -9039,11 +9163,11 @@ class TestCommitContinuationAndBotFreshness:
                     "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
                     "handoff_sha": "handoff-sha",
                     "target_branch": "jabramsja/test-wave-id",
-                    "commit_sha": "abc123",
+                    "commit_sha": head_sha,
                     "receipt_decision": "COMMIT_GO",
                     "steps_completed": list(result["steps_completed"]),
                     "pr_number": "673",
-                    "bot_review_request_sha": "abc123",
+                    "bot_review_request_sha": head_sha,
                     "updated_at_unix": 0,
                 }
             ),
@@ -9058,8 +9182,11 @@ class TestCommitContinuationAndBotFreshness:
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -9084,7 +9211,7 @@ class TestCommitContinuationAndBotFreshness:
                     "data": {
                         "repository": {
                             "pullRequest": {
-                                "headRefOid": "abc123",
+                                "headRefOid": head_sha,
                                 "reviewDecision": "",
                                 "latestReviews": {"nodes": []},
                                 "reviewThreads": {"nodes": []},
@@ -9107,7 +9234,7 @@ class TestCommitContinuationAndBotFreshness:
                     }
                 }
                 return completed(cmd, stdout=json.dumps(payload))
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
@@ -9142,14 +9269,24 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["pr_number"] == "673"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 0
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
+        assert "step" not in post_commit, post_commit
 
-    def test_post_commit_requests_review_when_clear_issue_comment_lacks_current_head_request_binding(self, tmp_path, monkeypatch):
+    def test_post_commit_requests_review_when_clear_issue_comment_lacks_current_head_request_binding(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
             "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
         }
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
@@ -9161,7 +9298,7 @@ class TestCommitContinuationAndBotFreshness:
                     "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
                     "handoff_sha": "handoff-sha",
                     "target_branch": "jabramsja/test-wave-id",
-                    "commit_sha": "abc123",
+                    "commit_sha": head_sha,
                     "receipt_decision": "COMMIT_GO",
                     "steps_completed": list(result["steps_completed"]),
                     "pr_number": "673",
@@ -9180,8 +9317,11 @@ class TestCommitContinuationAndBotFreshness:
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -9208,7 +9348,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
-                                    "headRefOid": "abc123",
+                                    "headRefOid": head_sha,
                                     "reviewDecision": "",
                                     "latestReviews": {"nodes": []},
                                     "reviewThreads": {"nodes": []},
@@ -9235,14 +9375,14 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
-                                    "headRefOid": "abc123",
+                                    "headRefOid": head_sha,
                                     "reviewDecision": "",
                                     "latestReviews": {
                                         "nodes": [
                                             {
                                                 "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
                                                 "state": "COMMENTED",
-                                                "commit": {"oid": "abc123"},
+                                                "commit": {"oid": head_sha},
                                             }
                                         ]
                                     },
@@ -9266,7 +9406,7 @@ class TestCommitContinuationAndBotFreshness:
                         }
                     }
                 return completed(cmd, stdout=json.dumps(payload))
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
@@ -9301,14 +9441,24 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["pr_number"] == "673"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 1
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
+        assert "step" not in post_commit, post_commit
 
-    def test_post_commit_wait_ci_retries_until_checks_register(self, tmp_path, monkeypatch):
+    def test_post_commit_wait_ci_retries_until_checks_register(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
             "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
         }
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
@@ -9320,7 +9470,7 @@ class TestCommitContinuationAndBotFreshness:
                     "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
                     "handoff_sha": "handoff-sha",
                     "target_branch": "jabramsja/test-wave-id",
-                    "commit_sha": "abc123",
+                    "commit_sha": head_sha,
                     "receipt_decision": "COMMIT_GO",
                     "steps_completed": list(result["steps_completed"]),
                     "pr_number": "673",
@@ -9338,8 +9488,11 @@ class TestCommitContinuationAndBotFreshness:
             return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, check=True, timeout=None, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -9374,14 +9527,14 @@ class TestCommitContinuationAndBotFreshness:
                     "data": {
                         "repository": {
                             "pullRequest": {
-                                "headRefOid": "abc123",
+                                "headRefOid": head_sha,
                                 "reviewDecision": "",
                                 "latestReviews": {
                                     "nodes": [
                                         {
                                             "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
                                             "state": "COMMENTED",
-                                            "commit": {"oid": "abc123"},
+                                            "commit": {"oid": head_sha},
                                         }
                                     ]
                                 },
@@ -9392,7 +9545,7 @@ class TestCommitContinuationAndBotFreshness:
                     }
                 }
                 return completed(cmd, stdout=json.dumps(payload))
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
@@ -9428,6 +9581,13 @@ class TestCommitContinuationAndBotFreshness:
         assert "wait_ci" in post_commit["steps_completed"]
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert required_checks_calls["count"] == 3
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
+        assert "step" not in post_commit, post_commit
 
     def test_post_commit_resume_skips_checkpointed_pre_push_and_checkpoints_git_push(self, tmp_path, monkeypatch):
         repo = tmp_path
@@ -9505,13 +9665,16 @@ class TestCommitContinuationAndBotFreshness:
         assert "run_pre_push_script" in continuation["steps_completed"]
         assert "git_push" in continuation["steps_completed"]
 
-    def test_post_commit_does_not_recomment_same_head_bot_review_request(self, tmp_path, monkeypatch):
+    def test_post_commit_does_not_recomment_same_head_bot_review_request(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
             "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
         }
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
@@ -9523,11 +9686,11 @@ class TestCommitContinuationAndBotFreshness:
                     "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
                     "handoff_sha": "handoff-sha",
                     "target_branch": "jabramsja/test-wave-id",
-                    "commit_sha": "abc123",
+                    "commit_sha": head_sha,
                     "receipt_decision": "COMMIT_GO",
                     "steps_completed": list(result["steps_completed"]),
                     "pr_number": "673",
-                    "bot_review_request_sha": "abc123",
+                    "bot_review_request_sha": head_sha,
                     "updated_at_unix": 0,
                 }
             ),
@@ -9543,8 +9706,11 @@ class TestCommitContinuationAndBotFreshness:
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -9571,7 +9737,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
-                                    "headRefOid": "abc123",
+                                    "headRefOid": head_sha,
                                     "reviewDecision": "",
                                     "latestReviews": {"nodes": []},
                                     "reviewThreads": {"nodes": []},
@@ -9584,14 +9750,14 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
-                                    "headRefOid": "abc123",
+                                    "headRefOid": head_sha,
                                     "reviewDecision": "",
                                     "latestReviews": {
                                         "nodes": [
                                             {
                                                 "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
                                                 "state": "COMMENTED",
-                                                "commit": {"oid": "abc123"},
+                                                "commit": {"oid": head_sha},
                                             }
                                         ]
                                     },
@@ -9601,7 +9767,7 @@ class TestCommitContinuationAndBotFreshness:
                         }
                     }
                 return completed(cmd, stdout=json.dumps(payload))
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
@@ -9636,8 +9802,18 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["pr_number"] == "673"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert comment_calls == []
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
+        assert "step" not in post_commit, post_commit
 
-    def test_post_commit_pipeline_returns_structured_error_on_review_query_timeout(self, tmp_path):
+    def test_post_commit_pipeline_returns_structured_error_on_review_query_timeout(
+        self, tmp_path, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo, _ = _init_git_repo(tmp_path)
         handoff = _make_new_handoff()
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
@@ -9654,12 +9830,15 @@ class TestCommitContinuationAndBotFreshness:
                 "git_commit",
                 "hold_check",
             ],
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "handoff_sha": commit_mod._handoff_sha(handoff),  # ANTICHEAT_OK: testing continuation binding helper
             "receipt_decision": "COMMIT_GO",
         }
 
         def fake_run(args, *, cwd, check=True, timeout=120, env=None):
+            if args == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return subprocess.CompletedProcess(args, 0, f"{isolated_pr_lifecycle}\n", "")
             if args[:4] == ["git", "push", "--no-verify", "-u"]:
                 return subprocess.CompletedProcess(args, 0, "", "")
             if args[:3] == ["gh", "pr", "list"]:
@@ -9675,7 +9854,7 @@ class TestCommitContinuationAndBotFreshness:
             if args[:3] == ["gh", "pr", "checks"]:
                 return subprocess.CompletedProcess(args, 0, "", "")
             if args[:3] == ["git", "rev-parse", "HEAD"]:
-                return subprocess.CompletedProcess(args, 0, "abc123\n", "")
+                return subprocess.CompletedProcess(args, 0, f"{head_sha}\n", "")
             if args[:3] == ["gh", "api", "graphql"]:
                 raise subprocess.TimeoutExpired(cmd=args, timeout=30)
             raise AssertionError(f"Unexpected command: {args}")
@@ -9697,8 +9876,17 @@ class TestCommitContinuationAndBotFreshness:
         assert "Review query failed" in post_commit["errors"][0]
         assert "timed out" in post_commit["errors"][0]
         assert "wait_ci" in post_commit["steps_completed"]
+        assert post_commit["pr_lifecycle"]["state"] == "STOPPED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
 
-    def test_post_commit_late_auto_resolve_retries_ci_and_merge(self, tmp_path, monkeypatch):
+    def test_post_commit_late_auto_resolve_retries_ci_and_merge(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
+        resolved_head_sha = "b" * 40
+        merge_sha = "c" * 40
         repo, _ = _init_git_repo(tmp_path)
         handoff = _make_new_handoff()
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
@@ -9718,7 +9906,7 @@ class TestCommitContinuationAndBotFreshness:
                 "wait_ci",
             ],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
             "pr_number": "673",
         }
@@ -9726,12 +9914,15 @@ class TestCommitContinuationAndBotFreshness:
         merge_attempts = {"count": 0}
         ci_watch_calls = []
         auto_resolve_calls = []
-        head_reads = iter(["abc123\n", "def456\n", "def456\n", "merge789\n"])
+        head_reads = iter([f"{head_sha}\n", f"{resolved_head_sha}\n", f"{resolved_head_sha}\n", f"{merge_sha}\n"])
 
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                assert Path(cwd) == repo
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=next(head_reads))
             if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
@@ -9740,7 +9931,7 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:4] == ["gh", "pr", "checks", "673"]:
                 ci_watch_calls.append(cmd)
                 return completed(cmd)
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 merge_attempts["count"] += 1
                 if merge_attempts["count"] == 1:
                     raise subprocess.CalledProcessError(
@@ -9803,11 +9994,26 @@ class TestCommitContinuationAndBotFreshness:
         assert auto_resolve_calls == [(repo, "673", "dev", "jabramsja/test-wave-id", "test-wave-id")]
         assert len(ci_watch_calls) == 6
         assert merge_attempts["count"] == 2
-        assert post_commit["merge_sha"] == "merge789"
+        assert post_commit["merge_sha"] == merge_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert continuation_path.exists() is False
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == resolved_head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
+        records = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (isolated_pr_lifecycle / "rcx_pr_lifecycle" / "pr-673").glob("*.json")
+        ]
+        assert {record["head"] for record in records} == {head_sha, resolved_head_sha}
+        assert "step" not in post_commit, post_commit
 
-    def test_post_commit_uses_linked_base_worktree_for_merge_verification(self, tmp_path, monkeypatch):
+    def test_post_commit_uses_linked_base_worktree_for_merge_verification(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path / "feature-worktree"
         repo.mkdir()
         dev_worktree = tmp_path / "dev-worktree"
@@ -9831,7 +10037,7 @@ class TestCommitContinuationAndBotFreshness:
                 "wait_ci",
             ],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
             "pr_number": "673",
         }
@@ -9849,7 +10055,7 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 if cwd == dev_worktree:
                     return completed(cmd, stdout=f"{merged_sha}\n")
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 # The linked dev worktree is on 'dev'; the feature worktree
                 # (repo) is on its own branch. _resolve_post_merge_verify_root's
@@ -9860,13 +10066,14 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:3] == ["git", "rev-parse", "--show-toplevel"]:
                 # _is_usable_worktree probes the linked worktree's own root.
                 return completed(cmd, stdout=f"{dev_worktree}\n")
-            if cmd[:3] == ["git", "rev-parse", "--git-common-dir"]:
-                # repo and dev_worktree are worktrees of one repo: same common dir.
-                return completed(cmd, stdout=f"{tmp_path}/.git\n")
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                # Both linked worktrees share the same ownership store.
+                assert Path(cwd) in (repo, dev_worktree)
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:4] == ["git", "worktree", "list", "--porcelain"]:
                 stdout = (
                     f"worktree {repo}\n"
-                    "HEAD abc123\n"
+                    f"HEAD {head_sha}\n"
                     "branch refs/heads/jabramsja/test-wave-id\n\n"
                     f"worktree {dev_worktree}\n"
                     f"HEAD {merged_sha}\n"
@@ -9884,14 +10091,14 @@ class TestCommitContinuationAndBotFreshness:
                     "data": {
                         "repository": {
                             "pullRequest": {
-                                "headRefOid": "abc123",
+                                "headRefOid": head_sha,
                                 "reviewDecision": "",
                                 "latestReviews": {
                                     "nodes": [
                                         {
                                             "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
                                             "state": "COMMENTED",
-                                            "commit": {"oid": "abc123"},
+                                            "commit": {"oid": head_sha},
                                         }
                                     ]
                                 },
@@ -9902,7 +10109,7 @@ class TestCommitContinuationAndBotFreshness:
                     }
                 }
                 return completed(cmd, stdout=json.dumps(payload))
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "673", "--sweep"]:
                 merge_cwds.append(cwd)
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
@@ -9954,8 +10161,17 @@ class TestCommitContinuationAndBotFreshness:
         assert merge_cmds == [["git", "merge", "--ff-only", "origin/dev"]]
         assert len(package_refresh_calls) == 1
         assert package_refresh_calls[0]["queue_commit_sha"] == merged_sha
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
 
-    def test_post_commit_warns_when_linked_base_worktree_is_already_dirty(self, tmp_path, monkeypatch):
+    def test_post_commit_warns_when_linked_base_worktree_is_already_dirty(
+        self, tmp_path, monkeypatch, isolated_pr_lifecycle,
+    ):
+        head_sha = "a" * 40
         repo = tmp_path / "feature-worktree"
         repo.mkdir()
         dev_worktree = tmp_path / "dev-worktree"
@@ -9984,7 +10200,7 @@ class TestCommitContinuationAndBotFreshness:
                 "wait_ci",
             ],
             "handoff_sha": "handoff-sha",
-            "commit_sha": "abc123",
+            "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
             "pr_number": "674",
         }
@@ -10000,7 +10216,7 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
-                return completed(cmd, stdout="abc123\n")
+                return completed(cmd, stdout=f"{head_sha}\n")
             if cmd[:3] == ["git", "rev-parse", "origin/dev"]:
                 origin_dev_rev_parse_calls.append((list(cmd), cwd))
                 return completed(cmd, stdout=f"{fetched_sha}\n")
@@ -10014,13 +10230,14 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:3] == ["git", "rev-parse", "--show-toplevel"]:
                 # _is_usable_worktree probes the linked worktree's own root.
                 return completed(cmd, stdout=f"{dev_worktree}\n")
-            if cmd[:3] == ["git", "rev-parse", "--git-common-dir"]:
-                # repo and dev_worktree are worktrees of one repo: same common dir.
-                return completed(cmd, stdout=f"{tmp_path}/.git\n")
+            if cmd == ["git", "rev-parse", "--git-common-dir"]:
+                # Both linked worktrees share the same ownership store.
+                assert Path(cwd) in (repo, dev_worktree)
+                return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:4] == ["git", "worktree", "list", "--porcelain"]:
                 stdout = (
                     f"worktree {repo}\n"
-                    "HEAD abc123\n"
+                    f"HEAD {head_sha}\n"
                     "branch refs/heads/jabramsja/test-wave-id\n\n"
                     f"worktree {dev_worktree}\n"
                     "HEAD merge456\n"
@@ -10038,14 +10255,14 @@ class TestCommitContinuationAndBotFreshness:
                     "data": {
                         "repository": {
                             "pullRequest": {
-                                "headRefOid": "abc123",
+                                "headRefOid": head_sha,
                                 "reviewDecision": "",
                                 "latestReviews": {
                                     "nodes": [
                                         {
                                             "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
                                             "state": "COMMENTED",
-                                            "commit": {"oid": "abc123"},
+                                            "commit": {"oid": head_sha},
                                         }
                                     ]
                                 },
@@ -10056,7 +10273,7 @@ class TestCommitContinuationAndBotFreshness:
                     }
                 }
                 return completed(cmd, stdout=json.dumps(payload))
-            if cmd[:2] == ["bash", str(merge_script)]:
+            if cmd == ["bash", str(merge_script), "674", "--sweep"]:
                 merge_cwds.append(cwd)
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
@@ -10125,6 +10342,12 @@ class TestCommitContinuationAndBotFreshness:
         assert package_refresh_calls[0]["repo_root"] == dev_worktree
         assert package_refresh_calls[0]["merge_sha"] == fetched_sha
         assert package_refresh_calls[0]["queue_commit_sha"] == fetched_sha
+        assert post_commit["pr_lifecycle"]["state"] == "MERGED"
+        assert post_commit["pr_lifecycle"]["head"] == head_sha
+        assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
+        assert "pr_lifecycle_hold" not in post_commit
+        assert result["pr_replacement_ownership"] == []
+        assert "pr_replacement_ownership_hold" not in result
 
 
 class TestModularSurfaceEntrypoints:
