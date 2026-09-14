@@ -18728,6 +18728,112 @@ def _landed_commit_candidate_authority() -> tuple[Any, Any]:
                 sys.modules[name] = original
 
 
+def _committed_auto_deferred_candidate_paths(
+    repo_root: Path,
+    handoff: dict[str, Any],
+    launch_spec: Any,
+) -> list[str]:
+    """Retain an unchanged report authorized by this PR's native child commit.
+
+    Step 15 can add a bot report after the launch allowlist was frozen. A later
+    repair still inventories that clean report against the original base. Only
+    an exact report-only commit, bound to a same-wave bot receipt in the selected
+    bus, supplies continuation authority; packet wording and filenames do not.
+    Missing proof leaves the ordinary outside-allowlist rejection in force.
+    """
+    wave_id = launch_spec.wave_id
+    continuation = _read_continuation_record(_continuation_record_path(repo_root, wave_id))
+    if not continuation:
+        return []
+    pr_number = str(continuation.get("pr_number") or "")
+    target_branch = handoff.get("target_branch")
+    steps = continuation.get("steps_completed")
+    if (
+        continuation.get("version") != COMMIT_CONTINUATION_VERSION
+        or continuation.get("status") != CONTINUATION_ACTIVE_STATUS
+        or continuation.get("receipt_decision") != "COMMIT_GO"
+        or not isinstance(steps, list) or "git_commit" not in steps
+        or not target_branch or continuation.get("target_branch") != target_branch
+        or not re.fullmatch(r"[1-9][0-9]*", pr_number)
+    ):
+        return []
+    report_rel = f"reports/deferred/non_blocking/pr{pr_number}_bot_auto_deferred_{wave_id}.md"
+    if report_rel in launch_spec.candidate_allowlist:
+        return []
+    report = repo_root / report_rel
+    if not report.is_file() or report.resolve() != repo_root.resolve() / report_rel:
+        return []
+    head = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root).stdout.strip()
+    if continuation.get("commit_sha") != head or branch != target_branch:
+        return []
+    # Check index and worktree separately: their edits can cancel against HEAD.
+    for args in (
+        ["git", "diff", "--cached", "--quiet", head, "--", report_rel],
+        ["git", "diff", "--quiet", "--", report_rel],
+    ):
+        if _run(args, cwd=repo_root, check=False).returncode != 0:
+            return []
+    head_entry = _run(["git", "ls-tree", head, "--", report_rel], cwd=repo_root).stdout
+    if not head_entry.startswith("100644 blob ") or report.stat().st_mode & 0o111:
+        return []
+    committed_bytes = subprocess.run(
+        ["git", "show", f"{head}:{report_rel}"], cwd=repo_root,
+        capture_output=True, check=True, timeout=30,
+    ).stdout
+    if report.read_bytes() != committed_bytes:
+        return []
+
+    receipt_hashes: set[str] = set()
+    receipts_dir = agent_bus_path(repo_root, _active_bus_dir(), "meta", "pre_commit_receipts")
+    for receipt_path in receipts_dir.glob("receipt_*.json"):
+        if receipt_path.is_symlink():
+            continue
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (
+            isinstance(receipt, dict)
+            and receipt.get("receipt_type") == "bot_remediation"
+            and receipt.get("decision") == "COMMIT_GO"
+            and receipt.get("wave_id") == wave_id
+            and receipt.get("scoped_files") == [report_rel]
+            and isinstance(receipt.get("staged_sha"), str)
+            and re.fullmatch(r"[0-9a-f]{64}", receipt["staged_sha"])
+        ):
+            receipt_hashes.add(receipt["staged_sha"])
+    if not receipt_hashes:
+        return []
+
+    added_commits = _run(
+        ["git", "log", "--ancestry-path", "--format=%H", "--diff-filter=A",
+         f"{launch_spec.comparison_commit}..{head}", "--", report_rel],
+        cwd=repo_root,
+    ).stdout.splitlines()
+    for commit in added_commits:
+        parents = _run(["git", "rev-list", "--parents", "-n", "1", commit], cwd=repo_root).stdout.split()
+        if len(parents) != 2:
+            continue
+        changes = _run(
+            ["git", "diff", "--name-status", "--no-renames", parents[1], commit, "--"],
+            cwd=repo_root,
+        ).stdout.splitlines()
+        if changes != [f"A\t{report_rel}"]:
+            continue
+        if _run(["git", "ls-tree", commit, "--", report_rel], cwd=repo_root).stdout != head_entry:
+            continue
+        # Match the complete binary diff minted by _mint_bot_remediation_receipt,
+        # never a path-filtered digest that could hide other committed changes.
+        committed_diff = subprocess.run(
+            ["git", "diff", "--binary", parents[1], commit, "--"], cwd=repo_root,
+            capture_output=True, check=True, timeout=30,
+        ).stdout
+        if hashlib.sha256(committed_diff).hexdigest() in receipt_hashes:
+            return [report_rel]
+    return []
+
+
 def _prepare_commit_candidate_authority(
     repo_root: Path,
     handoff: dict[str, Any],
@@ -18784,6 +18890,10 @@ def _prepare_commit_candidate_authority(
         raise ValueError("candidate authority wave/packet does not match the commit handoff")
     spec = authority.CandidateAuthoritySpec.from_mapping({
         **launch_spec.to_dict(), "phase": "commit", "review_round": "pre-supervisor",
+        "candidate_allowlist": [
+            *launch_spec.candidate_allowlist,
+            *_committed_auto_deferred_candidate_paths(repo_root, handoff, launch_spec),
+        ],
     })
     receipt = authority.prepare_candidate_authority(repo_root, spec, bus_dir=_active_bus_dir())
     receipt_path = Path(receipt["receipt_path"])
