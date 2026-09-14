@@ -59,6 +59,16 @@ def fleet(monkeypatch):
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         env.update(HOME=str(home), XDG_CONFIG_HOME=str(home), GIT_CONFIG_NOSYSTEM="1",
                    GIT_CONFIG_GLOBAL=os.devnull, PYTHONDONTWRITEBYTECODE="1", LC_ALL="C")
+        real_git = shutil.which("git", path=env["PATH"])
+        assert real_git
+        bindir = root / "bin"
+        bindir.mkdir()
+        wrapper = bindir / "git"
+        # Census drops GIT_* overrides before probing effective config. Keep
+        # runner system filters out of disposable repos at the exec boundary.
+        wrapper.write_text(f'#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 exec {shlex.quote(real_git)} "$@"\n')
+        wrapper.chmod(0o700)
+        env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
         for key in tuple(os.environ):
             if key.startswith("GIT_"):
                 monkeypatch.delenv(key)
@@ -1029,6 +1039,15 @@ def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False):
     census_path.write_bytes(apply.encoded(census))
     classification = classifier.classify(census, source_sha256=apply.digest(census_path.read_bytes()),
         base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True)
+    expected_actions = {str(f.repo): "UNTOUCHED_HOLD",
+                        **{str(t): "PRESERVE_WORKTREE" for t in f.targets},
+                        **{str(s): "PRESERVE_BUS_SHELL" for s in shells}}
+    if dev:
+        expected_actions[str(f.local_dev)] = "SYNC_LOCAL_DEV"
+    assert {r["path"]: r["proposed_action"] for r in classification["entries"]} == expected_actions, json.dumps([
+        dict(path=r["path"], action=r["proposed_action"], reasons=r["reasons"], errors=r["source"]["errors"])
+        for r in classification["entries"]
+    ], indent=2)
     classification_path = f.repo / apply.RESIDUAL_CLASSIFICATION_PATH
     classification_path.write_bytes(apply.encoded(classification))
     plan = apply.build_residual_plan(f.repo, classification_path, apply.digest(classification_path.read_bytes()))
@@ -1056,7 +1075,7 @@ def test_residual_bounded_operations_preserve_bytes_registration_and_no_replay(f
         kwargs = dict(authority_commit=f.residual_authority, batch=operation["batch"],
                       operation_root=Path(operation["operation_root"]))
         result = apply.apply_residual_plan(f.repo, plan, **kwargs)
-        assert result["outcome_counts"] == {"MOVED": len(operation["source_indices"])}, result
+        assert result["outcome_counts"] == {"MOVED": len(operation["source_indices"])}, json.dumps(result, indent=2)
         verified = apply.verify_residual_plan(f.repo, plan, **kwargs)
         assert verified["batch_complete"] is True
         assert verified["recorded_before"] - verified["recorded_after"] == len(operation["source_indices"])
@@ -1088,7 +1107,11 @@ def test_residual_dirty_dev_sync_and_independent_changed_shell_hold(fleet, monke
     kwargs = dict(authority_commit=f.residual_authority, batch=1,
                   operation_root=Path(operation["operation_root"]))
     result = apply.apply_residual_plan(f.repo, plan, **kwargs)
-    assert result["outcome_counts"] == {"MOVED": 4, "HOLD": 1, "SYNCED_LOCAL_DEV": 1}, result
+    assert result["outcome_counts"] == {"MOVED": 4, "HOLD": 1, "SYNCED_LOCAL_DEV": 1}, json.dumps(result, indent=2)
+    held = next(o for o in result["outcomes"] if o["status"] == "HOLD")
+    assert held["source_identity"]["path"] == str(f.shells[0])
+    assert held["reason"] == "Residual shell shape changed"
+    assert (f.shells[0] / "unexpected").read_bytes() == b"valuable new WIP"
     assert f.local_dev.is_dir() and f.shells[0].is_dir()
     assert git(f, f.local_dev, "rev-parse", "HEAD") == f.residual_authority
     assert git(f, f.local_dev, "symbolic-ref", "HEAD") == "refs/heads/dev"

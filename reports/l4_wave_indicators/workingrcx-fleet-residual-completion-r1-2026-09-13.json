@@ -1,25 +1,25 @@
 {
   "wave_id": "workingrcx-fleet-residual-completion-r1-2026-09-13",
-  "repeat_run_speedup_ratio": 1.036915,
+  "repeat_run_speedup_ratio": 1.035025,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.363456,
+  "step_growth_slope": 0.32323,
   "repeat_run_raw_seconds": [
-    0.376873,
-    0.363456
+    0.334551,
+    0.32323
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.376873
+      "elapsed_seconds": 0.334551
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.740329
+      "elapsed_seconds": 0.657781
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-09-14T19:55:56Z",
+  "collection_timestamp_utc": "2026-09-14T21:00:13Z",
   "collector_version": "2.3.0",
-  "comparison_commit": "ec14a25d44c3f70d9c7307b71ed863f36c1feafb"
+  "comparison_commit": "ee6ea3b700fc2a248decc2d25a69ca8c8b6c1953"
 }
