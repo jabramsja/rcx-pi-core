@@ -15857,18 +15857,64 @@ def _refresh_post_merge_package_for_next_open_queue(
                 f"{recorded_merge_sha or '<empty>'} != {exact_queue_commit}"
             )
         merge_sha = exact_queue_commit
+    pr_number_raw = result.get("pr_number")
+    try:
+        merged_pr = int(pr_number_raw)
+    except (TypeError, ValueError):
+        merged_pr = 0
+
     lifecycle_pending = result.get("pr_replacement_ownership")
     lifecycle_hold = result.get("pr_replacement_ownership_hold")
     if lifecycle_pending or lifecycle_hold:
         # Landing this CLI/manifest does not complete its live dispositions.
-        # Keep the current owner and its concrete committed commands visible;
-        # never relaunch the consumed implementation or silently select Fleet.
+        # The supervisor carries next_candidates into the routing record, but
+        # drops package-only lifecycle fields. Keep the owner and commands in
+        # that candidate and in the request consumed by Phase A.
+        lifecycle_wave = f"{handoff['wave_id']}-live-disposition"
+        owner_packet = handoff.get("plan_path") or handoff.get("tracked_packet")
+        lifecycle_context = {
+            "owner": {
+                "task_id": handoff.get("task_id"),
+                "wave_id": handoff["wave_id"],
+                "packet": owner_packet,
+            },
+            "repo_root": str(repo_root),
+            "authority_commit": merge_sha,
+            "manifest_path": f"reports/control_plane/{handoff['wave_id']}_coverage.json",
+            "pr_lifecycle_dispositions": copy.deepcopy(lifecycle_pending or []),
+            "pr_lifecycle_hold": lifecycle_hold,
+        }
+        summary = (
+            "Keep live PR dispositions CURRENT under their recorded owners; "
+            "implementation landing did not complete these outcomes."
+        )
+        request = (
+            "Continue only the recorded live PR dispositions from the surviving "
+            "repository and committed authority below. Reconcile ownership HOLDs "
+            "before applying affected dispositions; retain each target's owner, "
+            "errors, and exact lifecycle-plan/apply/verify commands. Never replay "
+            "consumed mutations or relaunch the landed implementation packet. "
+            "Keep this task CURRENT and Fleet queued until live outcomes are "
+            "verified. Lifecycle context:\n"
+            + json.dumps(lifecycle_context, indent=2)
+        )
+        candidate = {
+            "candidate": lifecycle_wave,
+            "bounded": True,
+            # The landed implementation packet may be LOCKED or completed;
+            # it is owner context, not a routable implementation candidate.
+            "tracked_packet": None,
+            "summary": summary,
+            "request_for_agent": request,
+            "request_for_claude": request,
+            **lifecycle_context,
+        }
         package = {
-            "task_id": handoff.get("task_id"), "merged_pr": result.get("pr_number"),
-            "merge_sha": merge_sha, "wave_name": handoff.get("wave_id"),
+            "task_id": handoff.get("task_id"), "merged_pr": merged_pr,
+            "merge_sha": merge_sha, "wave_name": lifecycle_wave,
             "lane": "committed native PR disposition pending",
-            "next_candidates": [], "deferred_items": [], "blocker_report_paths": [],
-            "rollout_packet_path": handoff.get("plan_path") or handoff.get("tracked_packet"),
+            "next_candidates": [candidate], "deferred_items": [], "blocker_report_paths": [],
+            "rollout_packet_path": owner_packet,
             "tracker_state_summary": "Implementation landed; live PR outcomes remain incomplete under the current task owner.",
             "pr_lifecycle_dispositions": lifecycle_pending or [],
             "pr_lifecycle_hold": lifecycle_hold,
@@ -15877,7 +15923,7 @@ def _refresh_post_merge_package_for_next_open_queue(
         package_path.parent.mkdir(parents=True, exist_ok=True)
         package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
         result.update(post_merge_package_path=str(package_path.relative_to(repo_root)),
-                      post_merge_next_wave=handoff.get("wave_id"),
+                      post_merge_next_wave=lifecycle_wave,
                       post_merge_next_hard_stop=True, post_merge_queue_empty=False)
         log("Live PR disposition remains CURRENT; committed commands and target owners retained")
         return package
@@ -15887,11 +15933,6 @@ def _refresh_post_merge_package_for_next_open_queue(
         queue_commit_sha=exact_queue_commit,
     )
     queue_task_id = "[NEXT-CODEX-POST-REDTEAM]"
-    pr_number_raw = result.get("pr_number")
-    try:
-        merged_pr = int(pr_number_raw)
-    except (TypeError, ValueError):
-        merged_pr = 0
 
     package_path = agent_bus_path(
         repo_root,
@@ -16104,13 +16145,26 @@ def _run_post_commit_pipeline(
         return returned
     finally:
         if result.get("pr_lifecycle"):
-            merged = bool(result.get("merge_sha") or (returned or {}).get("merge_sha"))
+            merge_sha = (returned or {}).get("merge_sha") or result.get("merge_sha")
+            merged = bool(
+                result.get("remote_pr_merged")
+                or (returned or {}).get("remote_pr_merged")
+                or merge_sha
+            )
+            if merged:
+                detail = (
+                    f"merge={merge_sha}" if merge_sha
+                    else "merge_pr.sh succeeded; post-merge verification did not complete"
+                )
+                if returned is not None:
+                    returned["remote_pr_merged"] = True
+            else:
+                detail = str((returned or {}).get("step") or "native commit unwound")
             try:
                 record_commit_pr_lifecycle(
                     repo_root, handoff=handoff, result=result, target_branch=target_branch,
                     state="MERGED" if merged else "STOPPED",
-                    detail=(f"merge={(returned or {}).get('merge_sha') or result.get('merge_sha')}"
-                            if merged else str((returned or {}).get("step") or "native commit unwound")),
+                    detail=detail,
                 )
                 if returned is not None:
                     returned["pr_lifecycle"] = result["pr_lifecycle"]
@@ -16719,6 +16773,11 @@ def _run_post_commit_pipeline_impl(
                 "errors": [f"merge_pr.sh failed: {exc.stderr.strip()}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
+
+    # Remote merge success precedes local verification. Preserve that fact for
+    # lifecycle finalization even if root resolution, fetch, or ff-only sync
+    # fails before merge_sha can be populated.
+    result["remote_pr_merged"] = True
 
     queue_commit_sha = ""
     terminal_required = _is_pr_disposition_terminal_sweep_wave(
