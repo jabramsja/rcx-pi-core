@@ -201,3 +201,56 @@ def test_outcome_pager_failure_still_flips_non_terminal_success(tmp_path):
     )
     # Original pipeline failure context is preserved alongside the pager error.
     assert "routing record stale" in result.get("errors", [])
+
+
+@pytest.mark.parametrize("terminal_status", ["success", "error"])
+def test_terminal_delivery_uses_surviving_primary_and_keeps_retired_source_absent(
+    tmp_path, monkeypatch, terminal_status,
+):
+    import subprocess
+    pager = load_module("pipeline_agent_pager", REPO_ROOT / "mu/tools/observability/pipeline_agent_pager.py")
+    monkeypatch.setitem(sys.modules, "pipeline_agent_pager", pager)
+    primary, source, preserved = (tmp_path / n for n in ("primary", "lane", "preserved"))
+    primary.mkdir()
+    def git(*args):
+        return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+            "-c", "user.name=Pager Test", "-c", "user.email=pager@example.invalid", "-C", str(primary), *args],
+            check=True, capture_output=True, text=True)
+    git("init", "-q")
+    config = primary / "mu/tools/executors/executor_config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"pipeline_agent_pager": {"enabled": True, "route": "claude"}}))
+    git("add", ".")
+    git("commit", "-qm", "pager fixture")
+    git("worktree", "add", "-qb", "lane", str(source))
+    bus = ".agent_bus-wave"
+    mode = source / bus / "observability/orchestrator_mode.json"
+    mode.parent.mkdir(parents=True)
+    mode.write_text(json.dumps({"mode": "codex"}))
+    monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
+    calls = []
+    def dispatch(root, event, state, **kwargs):
+        calls.append((root, event["event_type"]))
+        return {"acknowledged": True, "codex_thread_id": "founder-codex",
+                "ack": {"thread_id": "founder-codex", "turn_id": "fixture-turn"}}
+    monkeypatch.setattr(pager, "_dispatch_codex", dispatch)
+    monkeypatch.setattr(commit_mod, "emit_pipeline_agent_event", pager.emit_transition_event)
+    def retire(*args, **kwargs):
+        git("worktree", "move", str(source), str(preserved))
+        assert not source.exists()
+        return {"status": terminal_status, "step": "post_merge_cleanup", "steps_completed": []}
+    monkeypatch.setattr(commit_mod, "_run_commit_pipeline_impl", retire)
+    result = commit_mod.run_commit_pipeline(_minimal_handoff(), repo_root=source, bus_dir=bus)
+    assert result["status"] == terminal_status, result
+    assert not source.exists(), result
+    event_type = "commit_succeeded" if terminal_status == "success" else "commit_failed"
+    assert (primary, event_type) in calls
+    event_log = primary / ".agent_bus/observability/pipeline_agent_events.jsonl"
+    events = [json.loads(line) for line in event_log.read_text().splitlines()]
+    assert events[-1]["event_type"] == event_type
+    assert events[-1]["route"] == "codex"
+    assert events[-1]["artifact_paths"]["source_root"] == str(source)
+    receipts = primary / ".agent_bus/observability/pipeline_agent_delivery_receipts.jsonl"
+    assert event_type in event_log.read_text() and receipts.exists()
+    pager.dispatch_pending_events(primary)
+    assert not source.exists()

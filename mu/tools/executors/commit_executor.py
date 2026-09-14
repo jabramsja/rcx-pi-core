@@ -273,11 +273,15 @@ query($owner: String!, $repo: String!, $number: Int!) {
         }
       }
       reviewThreads(first: 100) {
+        pageInfo { hasNextPage }
         nodes {
+          id
           isResolved
           isOutdated
           comments(last: 20) {
+            pageInfo { hasPreviousPage }
             nodes {
+              id
               author { login }
               body
               path
@@ -4094,10 +4098,23 @@ def _emit_commit_lifecycle_event(
     transition_key: str,
     summary: str,
     artifact_paths: dict[str, str] | None = None,
+    event_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    event_bus = _active_bus_dir()
+    route = _handoff_pager_route(handoff)
+    if event_authority is not None:
+        repo_root = Path(event_authority["root"])
+        info = repo_root.stat()
+        if (info.st_dev, info.st_ino) != (event_authority["device"], event_authority["inode"]):
+            raise ValueError("Surviving terminal pager root identity changed")
+        event_bus = None
+        route = event_authority["route"]
+        artifact_paths = {**(artifact_paths or {}),
+                          "source_root": event_authority["source_root"],
+                          "source_bus": event_authority["source_bus"]}
     return emit_pipeline_agent_event(
         repo_root,
-        bus_dir=_active_bus_dir(),
+        bus_dir=event_bus,
         event_type=event_type,
         # normalize_wave_id keeps emission resilient if a handoff lacks a wave_id now
         # that the pager defaults ON: normalize_wave_id("") -> "wave-unknown" instead of
@@ -4111,7 +4128,7 @@ def _emit_commit_lifecycle_event(
         summary=summary,
         reason=summary,
         artifact_paths=artifact_paths,
-        route=_handoff_pager_route(handoff),
+        route=route,
     )
 
 
@@ -6540,6 +6557,7 @@ def _sync_primary_worktree_to_base(
     *,
     log: Any,
     checkpoint: Any | None = None,
+    target_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fast-forward a clean founder PRIMARY working copy up to origin/base_branch.
 
@@ -6574,6 +6592,11 @@ def _sync_primary_worktree_to_base(
               fast-forward; divergent local commits are landed via a PR).
       GUARD-D a NON-BLOCKING file lock under the common git dir is acquired
               (concurrent lanes do not race on the primary's index).
+
+    A committed fleet operation may pass an explicit native target_identity to
+    reuse this transaction for the checked-out local dev owner. PRIMARY remains
+    the default; an explicit target must match its Git and filesystem identity
+    under the same lock. No ref is changed underneath another checkout.
 
     Returns an outcome dict (for observability / test assertions).
     """
@@ -6731,26 +6754,43 @@ def _sync_primary_worktree_to_base(
             return _skip(f"git worktree list unavailable: {exc}")
         if worktree_proc.returncode != 0:
             return _skip("git worktree list failed")
-        primary_entry = next(
-            (
-                entry
-                for entry in _parse_worktree_list(worktree_proc.stdout)
-                if entry.get("worktree") and entry.get("bare") != "true"
-            ),
-            None,
-        )
-        if primary_entry is None:
-            return _skip("no non-bare primary worktree found")
-        primary = Path(primary_entry["worktree"])
+        if target_identity is None:
+            primary_entry = next(
+                (
+                    entry
+                    for entry in _parse_worktree_list(worktree_proc.stdout)
+                    if entry.get("worktree") and entry.get("bare") != "true"
+                ),
+                None,
+            )
+            if primary_entry is None:
+                return _skip("no non-bare primary worktree found")
+            primary = Path(primary_entry["worktree"])
 
-        # Confirm primary identity: its git dir IS the common dir
-        # (`<primary>/.git`). A linked worktree reports the SAME common dir but
-        # lives elsewhere, so only the primary's parent-of-common-dir equals
-        # itself. This makes "we only ever ff the primary" independent of the
-        # verify-root resolver's internals: a DIFFERENT worktree than repo_root.
-        common_dir = _git_common_dir(primary)
-        if common_dir is None or common_dir.parent.resolve() != primary.resolve():
-            return _skip(f"could not confirm primary worktree at {primary}")
+            # Confirm primary identity: its git dir IS the common dir
+            # (`<primary>/.git`). A linked worktree reports the SAME common dir but
+            # lives elsewhere, so only the primary's parent-of-common-dir equals
+            # itself. This makes "we only ever ff the primary" independent of the
+            # verify-root resolver's internals: a DIFFERENT worktree than repo_root.
+            common_dir = _git_common_dir(primary)
+            if common_dir is None or common_dir.parent.resolve() != primary.resolve():
+                return _skip(f"could not confirm primary worktree at {primary}")
+
+        else:
+            if target_identity.get("bound") is not True:
+                return _skip("explicit sync target is not bound")
+            primary = Path(target_identity.get("worktree_identity", {}).get("path", ""))
+            common_dir = _git_common_dir(repo_root)
+            if (common_dir is None or _git_common_dir(primary) != common_dir
+                    or not _filesystem_identity_matches(primary, target_identity.get("worktree_identity"))
+                    or not _filesystem_identity_matches(common_dir, target_identity.get("common_dir_identity"))):
+                return _skip("explicit sync target/common directory identity changed")
+            entries = [e for e in _parse_worktree_list(worktree_proc.stdout)
+                       if e.get("worktree") == str(primary)]
+            if (len(entries) != 1 or entries[0].get("HEAD") != target_identity.get("expected_head")
+                    or entries[0].get("branch") != "refs/heads/" + target_identity.get("expected_branch", "")
+                    or any(k in entries[0] for k in ("locked", "prunable", "bare", "detached"))):
+                return _skip("explicit sync target registration changed")
 
         # Read the primary's ON-DISK HEAD branch (not just git's metadata).
         primary_branch = _worktree_head_branch(primary)
@@ -6773,6 +6813,13 @@ def _sync_primary_worktree_to_base(
                 return _skip(
                     "primary worktree sync lock held (another lane is syncing)"
                 )
+
+            if target_identity is not None:
+                if (not _filesystem_identity_matches(primary, target_identity.get("worktree_identity"))
+                        or _worktree_head_branch(primary) != target_identity.get("expected_branch")
+                        or _run(["git", "rev-parse", "HEAD"], cwd=primary).stdout.strip()
+                        != target_identity.get("expected_head")):
+                    return _skip("explicit sync target drifted before locked preparation")
 
             # A transaction is durable before its first destructive operation.
             # Reconcile EVERY nonterminal journal under the shared common dir
@@ -6799,7 +6846,7 @@ def _sync_primary_worktree_to_base(
             primary_branch = _worktree_head_branch(primary)
             if primary_branch is None:
                 return _skip("primary worktree HEAD branch unresolved (detached?)")
-            if primary_branch in {base_branch, "main", "master"}:
+            if primary_branch in {base_branch, "main", "master"} and target_identity is None:
                 remote_ref = f"origin/{base_branch}"
                 old_sha = _run(
                     ["git", "rev-parse", "HEAD"],
@@ -9882,6 +9929,12 @@ def _current_head_connector_issue_comment_outcome(
         created_at = comment.get("createdAt", "")
         if not _is_connector_review_author(author):
             continue
+        # The editable activity table describes running/completed jobs. It is
+        # neither a finding nor current-head clearance (PR1304 recurrence).
+        if str(comment.get("body") or "").lstrip().startswith(
+            "<!-- codex-pull-request-review-summary -->"
+        ):
+            continue
         if not isinstance(created_at, str) or not created_at or created_at <= floor_timestamp:
             continue
         if latest_bot_comment is None or created_at > latest_bot_comment.get("createdAt", ""):
@@ -10185,12 +10238,6 @@ def _extract_review_findings(
                 "errors": [f"{BOT_REVIEW_LOGIN} issue comment reported usage-limit exhaustion"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}}
-        if issue_comment_outcome["kind"] == "other":
-            return {"outcome": "bot_findings", "bot_findings": [{
-                "author": issue_comment_outcome["author"],
-                "body": issue_comment_outcome["body"][:500],
-                "path": "", "line": None,
-            }]}
 
     review_decision = pr_data.get("reviewDecision", "")
     if review_decision == "CHANGES_REQUESTED":
@@ -10220,19 +10267,13 @@ def _extract_review_findings(
                 "errors": [f"Human reviewer {author} requested changes"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}}
-    if bot_review_findings:
-        return {"outcome": "bot_findings", "bot_findings": bot_review_findings}
-
     threads = pr_data.get("reviewThreads", {}).get("nodes", [])
-    current_review_cycle_floor = _current_review_cycle_floor_timestamp(
-        pr_data, head_sha,
-    )
-    bot_findings: list[dict[str, Any]] = []
+    bot_findings: list[dict[str, Any]] = list(bot_review_findings)
     for thread in threads:
         if thread.get("isResolved"):
             continue
         latest_comment = _latest_relevant_thread_comment(
-            thread, floor_timestamp=current_review_cycle_floor,
+            thread, floor_timestamp=None,
         )
         if latest_comment is None:
             continue
@@ -10246,13 +10287,23 @@ def _extract_review_findings(
                 "pr_number": pr_number}}
         if thread.get("isOutdated"):
             continue
-        bot_findings.append({
+        finding = {
             "author": author,
             "body": latest_comment.get("body", "")[:500],
             "path": latest_comment.get("path", ""),
             "line": latest_comment.get("line"),
-        })
+        }
+        if thread.get("id") and latest_comment.get("id"):
+            finding.update(thread_id=thread["id"], comment_id=latest_comment["id"],
+                           reviewed_head=head_sha, thread_snapshot=thread)
+        bot_findings.append(finding)
 
+    if issue_comment_outcome is not None and issue_comment_outcome["kind"] == "other":
+        bot_findings.append({
+            "author": issue_comment_outcome["author"],
+            "body": issue_comment_outcome["body"][:500],
+            "path": "", "line": None,
+        })
     if bot_findings:
         return {"outcome": "bot_findings", "bot_findings": bot_findings}
     return {"outcome": "clean"}
@@ -12598,48 +12649,62 @@ def _resolve_auto_deferred_bot_threads(
     repo_name: str,
     pr_number: str,
     log: Any,
+    findings: list[dict[str, Any]],
+    expected_head: str,
 ) -> None:
-    """Resolve eligible bot-authored threads after the report commit is pushed."""
+    """Resolve only unchanged, explicitly deferred thread/comment snapshots."""
+    snapshots = {}
+    critical = (".claude/hooks/", ".claude/skills/preflight/", "mu/tools/executors/",
+                "mu/tools/checks/", "tools/checks/", "mu/tools/hooks/")
+    for finding in findings:
+        thread = finding.get("thread_snapshot")
+        if not isinstance(thread, dict) or not finding.get("reviewed_head"):
+            continue
+        tid, cid = finding.get("thread_id"), finding.get("comment_id")
+        comments = thread.get("comments", {})
+        nodes = comments.get("nodes", [])
+        if (not tid or not cid or thread.get("id") != tid or not nodes
+                or thread.get("isResolved") or thread.get("isOutdated")
+                or comments.get("pageInfo", {}).get("hasPreviousPage")
+                or not any(c.get("id") == cid for c in nodes)):
+            continue
+        if any(not _is_bot_review_author(c.get("author", {}).get("login", ""))
+               or any(sev in str(c.get("body") or "") for sev in ("P0", "P1"))
+               or str(c.get("path") or "").startswith(critical) for c in nodes):
+            continue
+        snapshots[tid] = comments
+    if not snapshots:
+        log("Step 15: no exact eligible deferred thread snapshot; threads retained")
+        return
     try:
-        query = (
-            f'{{"query":"query{{repository(owner:\\"{repo_owner}\\",name:\\"{repo_name}\\")'
-            f'{{pullRequest(number:{pr_number}){{reviewThreads(first:50){{nodes{{id isResolved comments(first:1){{nodes{{author{{login}}}}}}}}}}}}}}}}"}}'
-        )
+        query = json.dumps({"query": PR_REVIEW_QUERY, "variables": {
+            "owner": repo_owner, "repo": repo_name, "number": int(pr_number)}})
         query_result = subprocess.run(
             ["gh", "api", "graphql", "--input", "-"],
             input=query, capture_output=True, text=True, timeout=30,
         )
-        if query_result.returncode == 0:
-            data = json.loads(query_result.stdout)
-            threads = (
-                data.get("data", {})
-                .get("repository", {})
-                .get("pullRequest", {})
-                .get("reviewThreads", {})
-                .get("nodes", [])
+        if query_result.returncode != 0:
+            return
+        pr = json.loads(query_result.stdout)["data"]["repository"]["pullRequest"]
+        _assert_expected_pr_head(pr, expected_head)
+        resolved_count = 0
+        for thread in pr.get("reviewThreads", {}).get("nodes", []):
+            tid = thread.get("id")
+            if (tid not in snapshots or thread.get("isResolved") or thread.get("isOutdated")
+                    or thread.get("comments") != snapshots[tid]):
+                continue
+            mutation = json.dumps({"query": "mutation($id:ID!){resolveReviewThread("
+                                   "input:{threadId:$id}){thread{isResolved}}}",
+                                   "variables": {"id": tid}})
+            response = subprocess.run(
+                ["gh", "api", "graphql", "--input", "-"],
+                input=mutation, capture_output=True, text=True, timeout=30,
             )
-            resolved_count = 0
-            for thread in threads:
-                if not thread.get("isResolved"):
-                    # Only resolve bot-authored threads — human threads must
-                    # remain unresolved for manual review.
-                    first_comments = thread.get("comments", {}).get("nodes", [])
-                    if first_comments:
-                        thread_author = first_comments[0].get("author", {}).get("login", "")
-                        if not _is_bot_review_author(thread_author):
-                            continue
-                    tid = thread["id"]
-                    mutation = (
-                        f'{{"query":"mutation{{resolveReviewThread(input:{{threadId:\\"{tid}\\"}})'
-                        f'{{thread{{isResolved}}}}}}"}}'
-                    )
-                    subprocess.run(
-                        ["gh", "api", "graphql", "--input", "-"],
-                        input=mutation, capture_output=True, text=True, timeout=30,
-                    )
-                    resolved_count += 1
-            if resolved_count:
-                log(f"Step 15: resolved {resolved_count} PR comment thread(s)")
+            if response.returncode == 0 and json.loads(response.stdout).get(
+                "data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved") is True:
+                resolved_count += 1
+        if resolved_count:
+            log(f"Step 15: resolved {resolved_count} exact deferred PR thread(s)")
     except Exception as exc:
         log(f"Step 15: failed to resolve comment threads (non-fatal): {exc}")
 
@@ -12665,6 +12730,8 @@ def _auto_defer_bot_findings(
     explicit guard, the ordinary push has succeeded, and ``git_push`` has been
     checkpointed for that exact continuation head.
     """
+    # Freeze the reviewed identities before the asynchronous child commit/push.
+    deferred_snapshot = json.loads(json.dumps(findings))
     try:
         report_path = _write_auto_deferred_bot_findings_report(
             repo_root,
@@ -12824,6 +12891,8 @@ def _auto_defer_bot_findings(
         repo_name=repo_name,
         pr_number=pr_number,
         log=log,
+        findings=deferred_snapshot,
+        expected_head=current_head,
     )
     log(
         f"Step 15: deferred report committed and pushed on {current_head[:8]} "
@@ -15863,6 +15932,50 @@ def _refresh_post_merge_package_for_next_open_queue(
     except (TypeError, ValueError):
         merged_pr = 0
 
+    residual_wave = "workingrcx-fleet-residual-completion-r1-2026-09-13"
+    if handoff.get("wave_id") == residual_wave:
+        # This code merge cannot witness future foreground directory outcomes.
+        # Carry the same task's committed operations through the existing stop.
+        plan_path = f"reports/control_plane/{residual_wave}_apply_plan.json"
+        if not _FULL_QUEUE_COMMIT_SHA_RE.fullmatch(str(merge_sha or "")):
+            raise QueueCommitAuthorityError("Fleet live-action handoff requires exact merge authority")
+        try:
+            raw_plan = _run(["git", "show", f"{merge_sha}:{plan_path}"], cwd=repo_root).stdout
+            fleet_plan = json.loads(raw_plan)
+            if fleet_plan["wave_id"] != residual_wave or fleet_plan["schema_version"] != 2:
+                raise ValueError("wrong residual plan identity")
+        except (subprocess.SubprocessError, ValueError, KeyError) as exc:
+            raise QueueCommitAuthorityError(f"Committed residual action plan unavailable: {exc}") from exc
+        request = (
+            "Fleet remains CURRENT under [FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]. "
+            "From synchronized surviving PRIMARY, foreground runs each committed "
+            "bounded plan/apply/verify operation once. Keep exact HOLD owners and "
+            "preservation evidence; verify actual directory deltas before advancing "
+            "to Mu. Do not relaunch the landed implementation or old operations. "
+            f"Authority commit: {merge_sha}. Plan: {plan_path}. "
+            + str(fleet_plan["command_template"])
+        )
+        next_wave = residual_wave + "-live-retirement"
+        candidate = dict(candidate=next_wave, bounded=True, tracked_packet=None,
+                         owner={"task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+                                "wave_id": residual_wave, "packet": _handoff_plan_path(handoff)},
+                         authority_commit=merge_sha, manifest_path=plan_path,
+                         repo_root=str(repo_root), summary="Committed fleet actions remain CURRENT",
+                         request_for_agent=request, request_for_claude=request)
+        package = dict(task_id=handoff.get("task_id"), merged_pr=merged_pr, merge_sha=merge_sha,
+                       wave_name=next_wave, lane="committed native fleet actions pending",
+                       next_candidates=[candidate], deferred_items=[], blocker_report_paths=[],
+                       rollout_packet_path=_handoff_plan_path(handoff),
+                       tracker_state_summary="Implementation landed; fleet live outcomes remain CURRENT under their existing owner.")
+        package_path = agent_bus_path(repo_root, _active_bus_dir(), "meta", "post_merge_package.json")
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+        result.update(post_merge_package_path=str(package_path.relative_to(repo_root)),
+                      post_merge_next_wave=next_wave, post_merge_next_hard_stop=True,
+                      post_merge_queue_empty=False)
+        log("Fleet remains CURRENT until committed foreground outcomes are verified")
+        return package
+
     lifecycle_pending = result.get("pr_replacement_ownership")
     lifecycle_hold = result.get("pr_replacement_ownership_hold")
     if lifecycle_pending or lifecycle_hold:
@@ -16673,6 +16786,15 @@ def _run_post_commit_pipeline_impl(
                 log=log,
             )
             result["commit_sha"] = head_sha_before_merge
+            remaining = _extract_review_findings(
+                pr_data, head_sha_before_merge, result=result, pr_number=pr_number)
+            if remaining["outcome"] == "error":
+                return remaining["response"]
+            if remaining["outcome"] == "bot_findings":
+                return {"status": "bot_findings_pending", "step": "ensure_review_clear_and_merge",
+                        "bot_findings": remaining["bot_findings"], "pr_number": pr_number,
+                        "steps_completed": result["steps_completed"],
+                        "errors": ["Unresolved findings remain after the remediation/report child commit"]}
         except (
             subprocess.CalledProcessError,
             subprocess.TimeoutExpired,
@@ -20711,8 +20833,10 @@ def run_commit_pipeline(
     wave_id = str(handoff.get("wave_id") or "unknown").strip() or "unknown"
     handoff_sha = _handoff_sha(handoff) if isinstance(handoff, dict) else "invalid"
     lifecycle_pager_enabled = _commit_lifecycle_pager_enabled(repo_root)
+    terminal_event_authority = None
     if lifecycle_pager_enabled:
         try:
+            # Cache the pager module and source routing while the lane exists.
             _emit_commit_lifecycle_event(
                 repo_root,
                 handoff=handoff,
@@ -20722,6 +20846,13 @@ def run_commit_pipeline(
                 summary=f"Commit executor started for {wave_id}",
                 artifact_paths={"handoff_sha": handoff_sha},
             )
+            common = _git_common_dir(repo_root)
+            if common is not None and common.parent.is_dir() and common.parent != repo_root:
+                from pipeline_agent_pager import bind_terminal_event_authority
+                terminal_event_authority = bind_terminal_event_authority(
+                    repo_root, common.parent, bus_dir=_active_bus_dir(),
+                    route=_handoff_pager_route(handoff),
+                )
         except Exception as exc:
             return {
                 "status": "error",
@@ -20751,6 +20882,7 @@ def run_commit_pipeline(
                 repo_root,
                 handoff=handoff,
                 event_type=event_type,
+                event_authority=terminal_event_authority,
                 state=status,
                 transition_key=transition_key,
                 summary=f"Commit executor finished with {status}",

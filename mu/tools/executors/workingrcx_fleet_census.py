@@ -161,6 +161,8 @@ def _inspect(row: dict) -> None:
     try:
         info = os.lstat(path)
         row["entry_kind"] = _kind(info.st_mode)
+        row["filesystem_identity"] = {"device": info.st_dev, "inode": info.st_ino,
+                                      "mode": info.st_mode}
         if stat.S_ISLNK(info.st_mode):
             row["symlink_target"] = os.readlink(path)
             info = os.stat(path)
@@ -198,6 +200,7 @@ def _inspect(row: dict) -> None:
             markers = ["unknown"]
         if not markers and error.get("stderr", "").startswith("fatal: not a git repository"):
             row.update(repository_kind="non_repository", inspection_status="not_repository")
+
         else:
             errors.append(error)
         return
@@ -315,6 +318,20 @@ def census(fleet_root: str, anchor_repo: str) -> dict:
                      branch_status="unknown", dirty_status="unknown", dirty_counts=None),
         )
         _inspect(row)
+        if row["repository_kind"] == "non_repository" and row["entry_kind"] == "directory":
+            # Includes shells inside a containing Git checkout: rev-parse can
+            # succeed there without this directory owning any Git registration.
+            try:
+                with os.scandir(path) as children:
+                    children = list(children)
+                row["bus_only_shell"] = bool(children) and all(
+                    child.name.startswith(".agent_bus") and child.is_dir(follow_symlinks=False)
+                    for child in children
+                )
+                row["shell_entries"] = sorted(child.name for child in children)
+            except OSError as exc:
+                row["errors"].append({"operation": "shell inventory", "message": str(exc)})
+                row["inspection_status"] = "partial"
         row["observed_finished_at"] = _now()
         rows.append(row)
     return {

@@ -5152,3 +5152,63 @@ def test_commit_candidate_rejects_report_receipt_for_commit_with_other_changes(
         commit_mod._prepare_commit_candidate_authority(case.repo, case.handoff)  # ANTICHEAT_OK: a matching full-diff hash cannot authorize a mis-scoped native report receipt.
 
     assert _git(["diff", "--cached", "--binary"], cwd=case.repo).stdout == staged
+
+
+def test_explicit_dirty_local_dev_sync_preserves_primary_stashes_and_evidence(tmp_path):
+    upstream, primary, c0, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "founder/primary"], cwd=primary, env=env)
+    local_dev = tmp_path / "workingrcx_clarolesfull_20260627"
+    _git(["worktree", "add", str(local_dev), "dev"], cwd=primary, env=env)
+    (local_dev / "seed.txt").write_text("held earlier WIP")
+    _git(["stash", "push", "-m", "held founder TASKS"], cwd=local_dev, env=env)
+    held_oid = _git(["rev-parse", "refs/stash"], cwd=local_dev).stdout.strip()
+    (local_dev / "seed.txt").write_text("current TASKS-like WIP")
+    (local_dev / "untracked-evidence").write_bytes(b"\x00founder\xff")
+    c1 = _advance_origin_dev(upstream, env)
+    binding = commit_mod.bind_terminal_target_identity(local_dev, base_branch="dev")
+    outcome = commit_mod.sync_primary_worktree_to_base(
+        primary, "dev", target_identity=binding, log=lambda _: None)
+    assert outcome["synced"] is True, outcome
+    assert outcome["primary"] == str(local_dev)
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == c0
+    assert _git(["rev-parse", "HEAD"], cwd=local_dev).stdout.strip() == c1
+    assert _git(["symbolic-ref", "HEAD"], cwd=local_dev).stdout.strip() == "refs/heads/dev"
+    assert (local_dev / "untracked-evidence").read_bytes() == b"\x00founder\xff"
+    assert outcome["tracked_wip_left_stashed"] is True
+    stashes = _git(["stash", "list", "--format=%H"], cwd=local_dev).stdout.splitlines()
+    assert held_oid in stashes
+    assert outcome["tracked_wip_stash_oid"] in stashes
+    assert "current TASKS-like WIP" in _git(
+        ["show", outcome["tracked_wip_stash_oid"] + ":seed.txt"], cwd=local_dev).stdout
+    # Reusing stale preparation identity cannot mutate the now-advanced checkout.
+    refused = commit_mod.sync_primary_worktree_to_base(
+        primary, "dev", target_identity=binding, log=lambda _: None)
+    assert refused["synced"] is False
+    assert _git(["stash", "list", "--format=%H"], cwd=local_dev).stdout.splitlines() == stashes
+
+
+def test_residual_code_merge_keeps_same_live_fleet_owner_before_mu(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    wave = "workingrcx-fleet-residual-completion-r1-2026-09-13"
+    plan_path = f"reports/control_plane/{wave}_apply_plan.json"
+    (repo / plan_path).parent.mkdir(parents=True, exist_ok=True)
+    (repo / plan_path).write_text(json.dumps({"schema_version": 2, "wave_id": wave,
+                                            "command_template": "committed plan/apply/verify"}))
+    _git(["add", plan_path], cwd=repo)
+    _git(["commit", "-m", "committed residual plan"], cwd=repo)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    def no_successor(*args, **kwargs):
+        raise AssertionError("Code merge cannot advance to Mu before foreground actions")
+    monkeypatch.setattr(commit_mod, "_next_open_founder_ordered_queue_entry", no_successor)
+    result = {"pr_number": "1305"}
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: same-task live action ownership
+        repo_root=repo, handoff={"wave_id": wave, "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]"},
+        result=result, merge_sha=head, queue_commit_sha=head, log=_noop_log)
+    assert result["post_merge_next_hard_stop"] is True
+    candidate = package["next_candidates"][0]
+    assert candidate["owner"]["wave_id"] == wave
+    assert candidate["manifest_path"] == plan_path
+    assert candidate["authority_commit"] == head
+    assert "CURRENT" in candidate["request_for_agent"]
+    assert candidate["tracked_packet"] is None
+    assert type(package["merged_pr"]) is int

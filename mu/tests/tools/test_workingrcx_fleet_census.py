@@ -642,3 +642,25 @@ def test_cli_refuses_to_overwrite_unrelated_existing_output(tmp_path, contents):
     assert result.returncode == 1
     assert b"Cannot write census artifact" in result.stderr
     assert _snapshot(tmp_path) == before
+
+
+def test_bus_shell_inside_containing_repository_has_fresh_filesystem_identity(tmp_path):
+    containing = _repo(tmp_path / "containing")
+    fleet = containing / "fleet"
+    fleet.mkdir()
+    anchor = _repo(fleet / "WorkingRCX")
+    shell = fleet / "WorkingRCX-retired"
+    (shell / ".agent_bus-retired/observability").mkdir(parents=True)
+    evidence = shell / ".agent_bus-retired/observability/events.jsonl"
+    evidence.write_bytes(b'{"terminal":true}\n')
+    before = _snapshot(shell)
+    result, report = _cli(fleet, anchor, tmp_path / "census.json")
+    assert result.returncode == 0
+    row = _rows(report)[str(shell)]
+    assert row["repository_kind"] == "non_repository"
+    assert row["bus_only_shell"] is True
+    assert row["shell_entries"] == [".agent_bus-retired"]
+    info = shell.stat()
+    assert row["filesystem_identity"] == {"device": info.st_dev, "inode": info.st_ino, "mode": info.st_mode}
+    assert row["registered_worktrees"] == []
+    assert _snapshot(shell) == before

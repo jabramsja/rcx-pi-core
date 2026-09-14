@@ -4,6 +4,34 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-14
+
+### Fleet residual completion (Phase B; landing and live actions pending)
+
+- Retains PR1304's landed scalar `merged_pr` and native deferred-report
+  provenance fixes at `ec14a25d44c3f70d9c7307b71ed863f36c1feafb`.
+  The residual work does not reimplement those fixes or claim live retirement.
+- Generates a fresh 440-row identity ledger, including 324 present direct
+  prefix directories, and 23 bounded operations: 189 worktrees, 85 bus shells,
+  one explicit local-dev synchronization candidate, and 165 owned HOLDs.
+  The prior three incomplete targets are reassessed; canonical preservation,
+  PRIMARY and the active lane remain protected. Old manifests and receipts
+  are unchanged. Every candidate still needs committed action-time checks.
+- Adds recoverable plan/apply/verify with byte archives, history bundles,
+  retained Git registrations, native WIP-preserving checkout synchronization,
+  separate local-dev outcomes and consumed-once terminal boundaries.
+  Terminal pager events bind surviving PRIMARY and the selected route before
+  lane retirement. Review activity metadata cannot mask unresolved findings;
+  deferred resolution uses exact thread/comment snapshots and rechecks review
+  after the asynchronous child commit.
+- The exact declared eleven-module evidence command passed **1597 tests,
+  1 skipped in 196.84s, exit 0**. Temporary repositories cover recoverable
+  moves, registration retention, dirty local-dev WIP/stashes, no replay,
+  terminal pager delivery after retirement and the demonstrated review races.
+  The same fleet owner remains CURRENT after code merge until foreground
+  outcomes and preservation are verified. Native landing, L4 collection and
+  real directory retirement belong to the outer executor and foreground.
+
 ## 2026-09-13
 
 ### Hanging PR Lifecycle Completion R4 (Phase B; live outcomes incomplete)
