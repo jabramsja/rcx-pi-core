@@ -87,6 +87,90 @@ def _rows(report: dict) -> dict[str, dict]:
     return {row["path"]: row for row in report["entries"]}
 
 
+def test_useful_inventory_retains_clone_local_branches_and_exact_index_wip(tmp_path):
+    fleet = tmp_path / "fleet"
+    clone = _repo(fleet / "WorkingRCX-clone")
+    base = _git(clone, "rev-parse", "HEAD")
+    _git(clone, "checkout", "-b", "unlanded-history")
+    (clone / "valuable.py").write_text("value = 42\n")
+    _git(clone, "add", "valuable.py")
+    _git(clone, "commit", "-m", "missing implementation")
+    local = _git(clone, "rev-parse", "HEAD")
+    _git(clone, "checkout", "main")
+    (clone / "tracked.txt").write_text("staged implementation\n")
+    _git(clone, "add", "tracked.txt")
+    (clone / "tracked.txt").write_text("unstaged follow-up\n")
+    before = _snapshot(fleet)
+    output = tmp_path / "useful-census.json"
+    with _fixture_git_env() as env:
+        result = subprocess.run([sys.executable, str(CLI), "--fleet-root", str(fleet),
+            "--anchor-repo", str(clone), "--comparison-commit", base, "--output", str(output)],
+            env=env, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    work = json.loads(output.read_text())["entries"][0]["useful_work"]
+    assert work["status"] == "NEEDS_LANDING"
+    assert work["local_commits"] == [local]
+    assert any("refs/heads/unlanded-history" in ref for ref in work["local_refs"])
+    change = work["changes"][0]
+    assert change["path"] == "tracked.txt" and change["dev_covered"] is False
+    assert change["index"] != change["worktree"] != change["comparison"]
+    assert _snapshot(fleet) == before
+
+
+@pytest.mark.parametrize("state", ["covered", "wip", "local_history"])
+def test_useful_inventory_reads_detached_head_history_and_wip_without_writes(tmp_path, state):
+    fleet = tmp_path / "fleet"
+    anchor = _repo(fleet / "WorkingRCX")
+    base = _git(anchor, "rev-parse", "HEAD")
+    detached = fleet / "WorkingRCX-detached"
+    _git(anchor, "worktree", "add", "--detach", str(detached), base)
+    if state == "local_history":
+        (detached / "valuable.py").write_text("value = 42\n")
+        _git(detached, "add", "valuable.py")
+        _git(detached, "commit", "-qm", "detached implementation")
+    head = _git(detached, "rev-parse", "HEAD")
+    if state == "wip":
+        (detached / "tracked.txt").write_text("staged implementation\n")
+        _git(detached, "add", "tracked.txt")
+        (detached / "tracked.txt").write_text("unstaged follow-up\n")
+        (detached / "untracked.txt").write_bytes(b"valuable untracked bytes\x00\xff")
+    staged_patch = _git(detached, "diff", "--cached", "--binary")
+    unstaged_patch = _git(detached, "diff", "--binary")
+    before = _snapshot(fleet)
+    output = tmp_path / "detached-census.json"
+    with _fixture_git_env() as env:
+        result = subprocess.run([sys.executable, str(CLI), "--fleet-root", str(fleet),
+            "--anchor-repo", str(anchor), "--comparison-commit", base, "--output", str(output)],
+            env=env, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    row = _rows(json.loads(output.read_text()))[str(detached)]
+    assert row["inspection_status"] == "ok" and row["errors"] == []
+    assert row["git"]["branch_status"] == "detached" and row["git"]["HEAD"] == head
+    work = row["useful_work"]
+    assert work["errors"] == []
+    assert work["status"] == ("COVERED" if state == "covered" else "NEEDS_LANDING")
+    assert work["local_refs"] == []  # Never enumerate other lanes' shared branch refs.
+    assert work["local_commits"] == ([head] if state == "local_history" else [])
+    for label, patch in (("staged", staged_patch), ("unstaged", unstaged_patch)):
+        raw = os.fsencode(patch + "\n") if patch else b""
+        assert work[label + "_patch_sha256"] == hashlib.sha256(raw).hexdigest()
+    if state == "wip":
+        changes = {change["path"]: change for change in work["changes"]}
+        assert set(changes) == {"tracked.txt", "untracked.txt"}
+        tracked = changes["tracked.txt"]
+        assert tracked["index"] != tracked["worktree"] != tracked["comparison"]
+        assert not tracked["dev_covered"]
+        assert changes["untracked.txt"]["content_sha256"] == hashlib.sha256(
+            (detached / "untracked.txt").read_bytes()).hexdigest()
+    else:
+        assert work["changes"] == []
+    if state == "local_history":
+        assert work["local_commit_changes"][0]["commit"] == head
+        assert work["local_commit_changes"][0]["paths"] == ["valuable.py"]
+        assert len(work["local_commit_changes"][0]["patch_sha256"]) == 64
+    assert _snapshot(fleet) == before
+
+
 def _snapshot(root: Path) -> dict:
     """Check both bytes and mtimes, including Git indexes, refs and directory entries."""
     result = {}

@@ -842,6 +842,205 @@ def test_reconciliation_holds_missing_or_conflicting_native_state(native_evidenc
         apply.native_idle(target, apply.tree_manifest(target), reconcile_r1=True)
 
 
+def test_saved_pytest_bus_is_preserved_without_becoming_native_owner(native_evidence):
+    target, status = native_evidence
+    status.write_bytes(apply.encoded(finished_recovery("tier3_exhausted")))
+    saved = target / ".scratch/phase-b/tmp/pytest-4/repo/.agent_bus-test/recovery/recovery_status.json"
+    saved.parent.mkdir(parents=True)
+    saved.write_text('{"active":true,"wave_id":"saved-fixture"}')
+    before = apply.tree_manifest(target)
+    apply.native_idle(target, before, reconcile_r1=True)
+    assert apply.tree_manifest(target) == before
+
+
+@pytest.mark.parametrize("lock_name, holder", (
+    ("bridge.lock", "bridge_supervisor"), ("meta_bridge.lock", "meta_bridge_supervisor"),
+))
+def test_available_lock_reconciles_exact_dead_native_metadata(native_evidence, lock_name, holder):
+    target, status = native_evidence
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=10)
+    lock = status.parent.parent / lock_name
+    lock.write_bytes(apply.encoded(dict(pid=child.pid, holder=holder,
+        acquired_at_utc="2026-07-22T03:30:03.376325+00:00", lock_path=str(lock))))
+    before = apply.tree_manifest(target)
+    apply.native_idle(target, before, reconcile_r1=True)
+    with pytest.raises(apply.Hold, match="metadata remains ambiguous or live"):
+        apply.native_idle(target, before)
+    assert apply.tree_manifest(target) == before
+
+
+@pytest.mark.parametrize("change, reason", (
+    (dict(acquired_at_utc=None), "timestamp"),
+    (dict(acquired_at_utc=123), "timestamp"),
+    (dict(acquired_at_utc=False), "timestamp"),
+    (dict(acquired_at_utc=[]), "timestamp"),
+    (dict(acquired_at_utc={}), "timestamp"),
+    (dict(acquired_at_utc=""), "timestamp"),
+    (dict(acquired_at_utc="not-a-timestamp"), "timestamp"),
+    (dict(acquired_at_utc="2026-07-22T03:30:03"), "timestamp"),
+    (dict(holder=[]), "metadata"),
+    (dict(holder={}), "metadata"),
+    (dict(lock_path=None), "metadata"),
+    (dict(pid=True), "metadata"),
+    (dict(pid=os.getpid()), "metadata"),
+))
+def test_malformed_stale_lock_metadata_holds_without_changing_evidence(native_evidence, change, reason):
+    target, status = native_evidence
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=10)
+    lock = status.parent.parent / "bridge.lock"
+    value = dict(pid=child.pid, holder="bridge_supervisor",
+                 acquired_at_utc="2026-07-22T03:30:03.376325+00:00", lock_path=str(lock))
+    value.update(change)
+    lock.write_bytes(apply.encoded(value))
+    before = apply.tree_manifest(target)
+    with pytest.raises(apply.Hold, match="Native owner lock " + reason):
+        apply.native_idle(target, before, reconcile_r1=True)
+    assert apply.tree_manifest(target) == before
+
+
+@pytest.mark.parametrize("raw", (b'{"pid":', b"\xff", b"[]", b"null"))
+def test_malformed_stale_lock_document_is_a_hold(native_evidence, raw):
+    target, status = native_evidence
+    lock = status.parent.parent / "bridge.lock"
+    lock.write_bytes(raw)
+    before = apply.tree_manifest(target)
+    with pytest.raises(apply.Hold, match="Native owner lock metadata"):
+        apply.native_idle(target, before, reconcile_r1=True)
+    assert apply.tree_manifest(target) == before
+
+
+@pytest.mark.parametrize("mode, trusted, allowed", [("r", True, True), ("w", True, False),
+                                                    ("cwd", True, False), ("r", False, False)])
+def test_real_open_descriptors_distinguish_readers_writers_and_cwd(native_evidence, monkeypatch, mode, trusted, allowed):
+    if not shutil.which("lsof"):
+        pytest.skip("lsof unavailable; production holds when OS evidence is unavailable")
+    target, _ = native_evidence
+    source = target / "content.bin"
+    source.write_bytes(b"stable captured bytes")
+    code = ("import os,sys; p=sys.stdin.readline().strip(); m=sys.argv[1]; "
+            "fd=os.chdir(p) if m=='cwd' else os.open(p,os.O_RDONLY if m=='r' else os.O_WRONLY); "
+            "print('ready',flush=True); sys.stdin.read()")
+    child = subprocess.Popen([sys.executable, "-c", code, mode], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, text=True)
+    try:
+        child.stdin.write(str(target if mode == "cwd" else source) + "\n")
+        child.stdin.flush()
+        assert child.stdout.readline().strip() == "ready"
+        # Simulate only OS executable identity; descriptor/access/inode/device
+        # discovery and byte verification use the real kernel and filesystem.
+        monkeypatch.setattr(apply, "_indexer_executable", lambda pid: trusted and pid == child.pid)
+        ident = dict(path=str(target), git_dir=None, branch="")
+        if allowed:
+            try:
+                result = apply.process_idle(ident)
+            except apply.Hold as exc:
+                pytest.fail(json.dumps(exc.diagnostic))
+            readers = result["verified_read_only_indexers"]
+            assert readers[0]["inode"] == source.stat().st_ino
+            assert readers[0]["sha256"] == apply.file_hash(source)
+        else:
+            with pytest.raises(apply.Hold):
+                apply.process_idle(ident)
+        assert source.read_bytes() == b"stable captured bytes"
+    finally:
+        child.terminate()
+        child.wait(timeout=10)
+        child.stdin.close()
+        child.stdout.close()
+
+
+@pytest.mark.parametrize("returncode", (0, 1))
+@pytest.mark.parametrize("shape,allowed", (
+    ("complete_reader", True), ("complete_readers", True),
+    ("trailing_pid", False), ("unterminated_pid", False),
+    ("trailing_process", False), ("unterminated_command", False),
+    ("leading_process_without_descriptor", False),
+    ("intermediate_process_without_descriptor", False),
+    ("trailing_descriptor", False), ("unterminated_descriptor", False),
+    ("missing_access", False), ("missing_type", False),
+    ("missing_device", False), ("missing_inode", False), ("missing_path", False),
+    ("orphan_command", False), ("missing_command", False),
+    ("duplicate_command", False), ("unknown_field", False),
+    ("writer", False), ("cwd", False), ("unknown_reader", False),
+))
+def test_indexing_exception_requires_complete_lsof_records(native_evidence, monkeypatch,
+                                                          returncode, shape, allowed):
+    target, _ = native_evidence
+    source = target / "content.bin"
+    source.write_bytes(b"stable captured bytes\x00\xff")
+    before = apply.tree_manifest(target)
+    info = source.stat()
+
+    def record(pid, *, command="mdworker_shared", fd="4", access="r", kind="REG", path=source):
+        return (f"p{pid}\nc{command}\nf{fd}\na{access}\nt{kind}\n"
+                f"D{info.st_dev:x}\ni{info.st_ino}\nn{path}\n").encode()
+
+    first, second = record(12345), record(23456)
+    incomplete_process = b"p43434\ncunknown\n"
+    output = {
+        "complete_reader": first,
+        "complete_readers": first + second,
+        "trailing_pid": first + b"p43434\n",
+        "unterminated_pid": first + b"p43434",
+        "trailing_process": first + incomplete_process,
+        "unterminated_command": first + incomplete_process.rstrip(b"\n"),
+        "leading_process_without_descriptor": incomplete_process + first,
+        "intermediate_process_without_descriptor": first + incomplete_process + second,
+        "trailing_descriptor": first + incomplete_process + b"f5\n",
+        "unterminated_descriptor": first + second.rstrip(b"\n"),
+        "orphan_command": b"cunknown\n" + first,
+        "missing_command": first + second.replace(b"cmdworker_shared\n", b""),
+        "duplicate_command": first + second.replace(b"cmdworker_shared\n", b"cmdworker_shared\ncunknown\n"),
+        "unknown_field": first + b"?unresolved\n",
+        "writer": first + record(23456, access="w"),
+        "cwd": first + record(23456, fd="cwd", access=" ", kind="DIR", path=target),
+        "unknown_reader": first + record(43434, command="unknown"),
+    }
+    for name, key in (("access", b"a"), ("type", b"t"), ("device", b"D"),
+                      ("inode", b"i"), ("path", b"n")):
+        output["missing_" + name] = first + b"".join(
+            field for field in second.splitlines(keepends=True) if not field.startswith(key))
+    stdout = output[shape]
+
+    def probe(command, **kwargs):
+        if command == ["ps", "-A", "-ww", "-o", "pid=,command="]:
+            return SimpleNamespace(returncode=0, stdout=f"{os.getpid()} test\n".encode(), stderr=b"")
+        assert command == ["lsof", "-nP", "+D", str(target), "-FpcfatDin"]
+        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=b"")
+
+    monkeypatch.setattr(apply.subprocess, "run", probe)
+    monkeypatch.setattr(apply, "_indexer_executable", lambda pid: pid in {12345, 23456})
+    ident = dict(path=str(target), git_dir=None, branch="")
+    if allowed:
+        diagnostic = apply.process_idle(ident)
+        readers = diagnostic["verified_read_only_indexers"]
+        assert [reader["pid"] for reader in readers] == (
+            [12345, 23456] if shape == "complete_readers" else [12345])
+        assert all(reader["inode"] == info.st_ino and reader["device"] == info.st_dev
+                   and reader["sha256"] == apply.file_hash(source) for reader in readers)
+    else:
+        with pytest.raises(apply.Hold, match="uncertain lsof") as raised:
+            apply.process_idle(ident)
+        diagnostic = raised.value.diagnostic
+        assert "verified_read_only_indexers" not in diagnostic
+    assert diagnostic["returncode"] == returncode
+    assert diagnostic["stdout"] == stdout.decode() and diagnostic["stderr"] == ""
+    assert apply.tree_manifest(target) == before
+
+
+def test_actual_later_success_recovery_schema_is_historical(native_evidence):
+    target, status = native_evidence
+    value = finished_recovery("tier3_exhausted")
+    value.update(state="resolved_by_later_success", outcome="cleared", recovered=True,
+                 exhausted=False, last_action="later_success")
+    status.write_bytes(apply.encoded(value))
+    before = apply.tree_manifest(target)
+    apply.native_idle(target, before, reconcile_r1=True)
+    assert apply.tree_manifest(target) == before
+
+
 @pytest.mark.parametrize("returncode,stdout,stderr", (
     (0, b"p123\nnopen-file\n", b""), (1, b"", b"lsof: warning: cannot stat"),
     (1, b"unresolved handle", b""), (2, b"", b""), (1, b"", b""),
@@ -856,7 +1055,7 @@ def test_lsof_requires_clear_fresh_evidence_and_retains_diagnostics(native_evide
         calls.append(command)
         if command[0] == "ps":
             return SimpleNamespace(returncode=0, stdout=f"{os.getpid()} test\n".encode(), stderr=b"")
-        assert command == ["lsof", "-nP", "+D", str(target), "-Fpn"]
+        assert command == ["lsof", "-nP", "+D", str(target), "-FpcfatDin"]
         return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
 
     monkeypatch.setattr(apply.subprocess, "run", probe)
@@ -1014,7 +1213,7 @@ def test_reconciliation_requires_merged_authority_exact_mode_and_destination(rec
     assert not f.reconcile_operation.exists()
 
 
-def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False):
+def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False, wave_id=None):
     import workingrcx_fleet_census as census_tool
     import workingrcx_fleet_classification as classifier
     git(f, f.repo, "checkout", "-qb", "founder/primary")
@@ -1034,11 +1233,12 @@ def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False):
         (target / "tracked").write_bytes(b"current dev WIP\n")
         (target / "new-evidence").write_bytes(b"\xffuntracked dev\n")
         f.local_dev = target
-    census = census_tool.census(str(f.root), str(f.repo))
-    census_path = f.repo / apply.RESIDUAL_CENSUS_PATH
+    classification_rel, census_rel, plan_rel = apply.residual_paths(wave_id or apply.RESIDUAL_WAVE_ID)
+    census = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed if wave_id else None)
+    census_path = f.repo / census_rel
     census_path.write_bytes(apply.encoded(census))
     classification = classifier.classify(census, source_sha256=apply.digest(census_path.read_bytes()),
-        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True)
+        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True, wave_id=wave_id)
     expected_actions = {str(f.repo): "UNTOUCHED_HOLD",
                         **{str(t): "PRESERVE_WORKTREE" for t in f.targets},
                         **{str(s): "PRESERVE_BUS_SHELL" for s in shells}}
@@ -1048,10 +1248,14 @@ def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False):
         dict(path=r["path"], action=r["proposed_action"], reasons=r["reasons"], errors=r["source"]["errors"])
         for r in classification["entries"]
     ], indent=2)
-    classification_path = f.repo / apply.RESIDUAL_CLASSIFICATION_PATH
+    classification_path = f.repo / classification_rel
     classification_path.write_bytes(apply.encoded(classification))
-    plan = apply.build_residual_plan(f.repo, classification_path, apply.digest(classification_path.read_bytes()))
-    (f.repo / apply.RESIDUAL_PLAN_PATH).write_bytes(apply.encoded(plan))
+    sha = apply.digest(classification_path.read_bytes())
+    if wave_id:
+        (f.repo / f"reports/control_plane/{wave_id}_useful_work.json").write_bytes(
+            apply.encoded(classifier.useful_work_report(classification, sha)))
+    plan = apply.build_residual_plan(f.repo, classification_path, sha, wave_id=wave_id or apply.RESIDUAL_WAVE_ID)
+    (f.repo / plan_rel).write_bytes(apply.encoded(plan))
     for rel in ("mu/tools/executors/workingrcx_fleet_census.py",
                 "mu/tools/executors/workingrcx_fleet_classification.py",
                 "mu/tools/observability/pipeline_agent_pager.py"):
@@ -1063,6 +1267,26 @@ def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False):
     git(f, f.repo, "push", "-q", "origin", "HEAD:dev")
     f.residual_plan, f.shells = plan, shells
     return plan
+
+
+def test_fresh_wave_authority_is_isolated_and_keeps_prior_operations_immutable(fleet, monkeypatch):
+    f = fleet
+    prior = {name: (f.repo / name).read_bytes() for name in (
+        apply.PLAN_PATH, apply.CLASSIFICATION_PATH)}
+    wave = "fresh-native-lifecycle-2026-09-14"
+    plan = residual_fixture(f, monkeypatch, wave_id=wave)
+    assert not (f.repo / "mu/tools/executors/worktree_lifecycle.py").exists()
+    assert plan["wave_id"] == wave
+    operation = plan["operations"][0]
+    assert operation["operation_id"].startswith(wave + "-")
+    kwargs = dict(authority_commit=f.residual_authority, batch=1,
+                  operation_root=Path(operation["operation_root"]))
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"MOVED": 5}, result
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"] is True
+    with pytest.raises(apply.Hold, match="consumed"):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert {name: (f.repo / name).read_bytes() for name in prior} == prior
 
 
 def test_residual_bounded_operations_preserve_bytes_registration_and_no_replay(fleet, monkeypatch):
@@ -1139,3 +1363,459 @@ def test_residual_refuses_unlanded_authority_and_modified_manifest(fleet, monkey
         apply.apply_residual_plan(f.repo, forged, authority_commit=f.residual_authority,
                                   batch=1, operation_root=root)
     assert all(t.exists() for t in f.targets)
+
+
+def transaction_case(f, *, current=True, wip="clean"):
+    import workingrcx_fleet_census as census_tool
+    target = f.targets[0]
+    if current:
+        git(f, target, "merge", "--ff-only", f.landed)
+    if wip == "mixed":
+        (target / "wip.txt").write_bytes(b"staged useful bytes\n")
+        git(f, target, "add", "wip.txt")
+        (target / "wip.txt").write_bytes(b"unstaged useful bytes\n")
+    elif wip == "deletion":
+        git(f, target, "rm", "--", ".gitignore")
+    elif wip == "overlap":
+        (target / "tracked").write_bytes(b"staged overlapping bytes\n")
+        git(f, target, "add", "tracked")
+        (target / "tracked").write_bytes(b"unstaged overlapping bytes\n")
+    directory = f.root / "transaction-evidence"
+    directory.mkdir()
+    useful = census_tool.useful_work(str(target), f.landed)
+    entry = dict(source_identity={**f.candidates[0]["source_identity"], "HEAD": f.landed if current else f.original},
+        path=str(target), destination=str(directory / "worktree"), action="PRESERVE_WORKTREE",
+        owner="[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]", comparison_commit=f.landed,
+        useful_work=useful, landing_owner=None if useful["status"] == "COVERED" else dict(
+            task="FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION", wave_id="transaction-fixture-missing-work",
+            source_path=str(target), source_branch=git(f, target, "symbolic-ref", "HEAD"),
+            scope=[c["path"] for c in useful["changes"]], status="PENDING_NATIVE_LANDING_REVIEW"))
+    return target, entry, directory
+
+
+def stage_index_only(f, target):
+    blob = subprocess.run([f.git, "-C", str(target), "hash-object", "-w", "--stdin"],
+        input=b"late index-only useful work\n", env=f.env, capture_output=True, check=True).stdout.decode().strip()
+    git(f, target, "update-index", "--cacheinfo", "100644," + blob + ",tracked")
+    return blob
+
+
+def test_late_index_only_drift_after_before_tar_cannot_retire_without_owner(fleet, monkeypatch):
+    """Reproduce the stopped R2 race with real objects/index and the real boundary."""
+    f = fleet
+    target, entry, directory = transaction_case(f)
+    assert entry["useful_work"]["status"] == "COVERED"
+    assert entry["landing_owner"] is None
+    original_archive = apply.preserve_archive
+    injected = []
+
+    def archive_then_stage(root, output, manifest):
+        original_archive(root, output, manifest)
+        if root == target and output.name == "before.tar":
+            injected.append(stage_index_only(f, target))
+
+    monkeypatch.setattr(apply, "preserve_archive", archive_then_stage)
+    with apply.safe_git_environment(network=True):
+        outcome = apply.apply_target(f.repo, entry, directory, boundary, residual=True)
+    assert injected
+    assert outcome["status"] in {"HOLD", "INCOMPLETE"}, outcome
+    assert outcome.get("landing_owner", {}).get("status") == "UNRESOLVED_TRANSACTION_DRIFT", outcome
+    assert "tracked" in outcome["landing_owner"]["scope"]
+    assert target.is_dir()
+    assert git(f, target, "show", ":tracked") == "late index-only useful work"
+    assert (target / "tracked").read_bytes() == b"landed tracked revision\n"
+
+
+@pytest.mark.parametrize("kind", ["index", "content"])
+@pytest.mark.parametrize("current", [False, True])
+@pytest.mark.parametrize("stage", ["gitdir-before.tar", "history.bundle", "before-sync", "after-sync",
+                                   "prepared.json", "move-started.json", "after-move", "after-boundary"])
+def test_transaction_drift_at_subsequent_boundaries_stays_owned(fleet, monkeypatch, stage, kind, current):
+    f = fleet
+    target, entry, directory = transaction_case(f, current=current)
+    injected = []
+
+    def inject(path):
+        if injected:
+            return
+        if kind == "index":
+            injected.append(stage_index_only(f, path))
+        else:
+            (path / "tracked").write_bytes(b"late useful worktree bytes\n")
+            injected.append(True)
+
+    original_archive, original_git = apply.preserve_archive, apply.git
+    original_write = apply.write_new
+    original_sync, original_boundary = boundary.sync_primary_worktree_to_base, boundary.execute_terminal_mutation_once
+
+    def archive(root, output, manifest):
+        original_archive(root, output, manifest)
+        if stage == output.name:
+            inject(target)
+
+    def git_action(root, *args, **kwargs):
+        result = original_git(root, *args, **kwargs)
+        if stage == "history.bundle" and args[:2] == ("bundle", "verify"):
+            inject(target)
+        if stage == "after-move" and args[:2] == ("worktree", "move"):
+            inject(Path(entry["destination"]))
+        return result
+
+    def write(path, data, **kwargs):
+        original_write(path, data, **kwargs)
+        if path.name == stage:
+            inject(target)
+
+    def sync(*args, **kwargs):
+        if stage == "before-sync":
+            inject(target)
+        result = original_sync(*args, **kwargs)
+        if stage == "after-sync":
+            inject(target)
+        return result
+
+    def terminal(*args, **kwargs):
+        result = original_boundary(*args, **kwargs)
+        if stage == "after-boundary":
+            inject(Path(entry["destination"]))
+        return result
+
+    monkeypatch.setattr(apply, "preserve_archive", archive)
+    monkeypatch.setattr(apply, "git", git_action)
+    monkeypatch.setattr(apply, "write_new", write)
+    monkeypatch.setattr(boundary, "sync_primary_worktree_to_base", sync)
+    monkeypatch.setattr(boundary, "execute_terminal_mutation_once", terminal)
+    with apply.safe_git_environment(network=True):
+        outcome = apply.apply_target(f.repo, entry, directory, boundary, residual=True)
+    assert injected
+    assert outcome["status"] in {"HOLD", "INCOMPLETE"}, outcome
+    owner = outcome["landing_owner"]
+    assert owner["status"] == "UNRESOLVED_TRANSACTION_DRIFT"
+    assert "tracked" in owner["scope"], outcome
+    retained = Path(owner["retained_path"])
+    assert retained.is_dir()
+    if kind == "index":
+        assert git(f, retained, "show", ":tracked") == "late index-only useful work"
+    else:
+        assert (retained / "tracked").read_bytes() == b"late useful worktree bytes\n"
+    before = json.loads((directory / "before.json").read_text())
+    apply.verify_archive(directory / "before.tar", before)
+    assert json.loads((directory / "outcome.json").read_text()) == outcome
+
+
+@pytest.mark.parametrize("current", [False, True])
+@pytest.mark.parametrize("wip", ["clean", "mixed", "deletion", "overlap"])
+def test_transaction_allows_exact_fast_forward_and_preserved_wip(fleet, current, wip):
+    f = fleet
+    target, entry, directory = transaction_case(f, current=current, wip=wip)
+    original = apply.transaction_state(target)
+    with apply.safe_git_environment(network=True):
+        outcome = apply.apply_target(f.repo, entry, directory, boundary, residual=True)
+    assert outcome["status"] == "MOVED", json.dumps({k: outcome.get(k) for k in ("reason", "checkout_sync")}, indent=2)
+    destination = Path(entry["destination"])
+    assert not target.exists()
+    assert git(f, destination, "rev-parse", "HEAD") == f.landed
+    assert (destination / "ignored-evidence/private.bin").read_bytes() == b"\x00private evidence\xff\n"
+    retired = json.loads((directory / "retired-state.json").read_text())
+    assert apply.transaction_state(destination) == retired
+    assert {c["phase"] for c in outcome["transaction_checks"]} >= {
+        "after-before.tar", "after-gitdir-before.tar", "after-checkout-sync",
+        "before-terminal-move", "after-terminal-move", "after-terminal-boundary"}
+    if wip != "clean":
+        assert outcome["landing_owner"]["wave_id"] == entry["landing_owner"]["wave_id"]
+    if wip == "mixed":
+        assert git(f, destination, "show", ":wip.txt") == "staged useful bytes"
+        assert (destination / "wip.txt").read_bytes() == b"unstaged useful bytes\n"
+        with tarfile.open(directory / "index-blobs.tar") as archive:
+            assert archive.extractfile(original["index"]["wip.txt"][1]).read() == b"staged useful bytes\n"
+    if wip == "deletion":
+        assert not (destination / ".gitignore").exists()
+        assert ".gitignore" not in retired["index"]
+    if wip == "overlap" and not current:
+        stash = outcome["checkout_sync"]["tracked_wip_stash_oid"]
+        assert git(f, destination, "show", stash + "^2:tracked") == "staged overlapping bytes"
+        assert git(f, destination, "show", stash + ":tracked") == "unstaged overlapping bytes"
+        assert (destination / "tracked").read_bytes() == b"landed tracked revision\n"
+
+
+@pytest.mark.parametrize("stage", ["after_prepared", "after_stash_before_publish", "after_fast_forward_before_publish"])
+@pytest.mark.parametrize("kind", ["index", "content"])
+def test_native_preparation_drift_preserves_new_work_and_retains_owner(fleet, monkeypatch, stage, kind):
+    f = fleet
+    target, entry, directory = transaction_case(f, current=False, wip="mixed")
+    original_sync = boundary.sync_primary_worktree_to_base
+    injected = []
+
+    def sync(*args, **kwargs):
+        original_checkpoint = kwargs["checkpoint"]
+
+        def checkpoint(observed_stage, manifest):
+            original_checkpoint(observed_stage, manifest)
+            if observed_stage == stage:
+                if kind == "index":
+                    injected.append(stage_index_only(f, target))
+                else:
+                    (target / "tracked").write_bytes(b"late useful worktree bytes\n")
+                    injected.append(True)
+
+        return original_sync(*args, **{**kwargs, "checkpoint": checkpoint})
+
+    monkeypatch.setattr(boundary, "sync_primary_worktree_to_base", sync)
+    with apply.safe_git_environment(network=True):
+        outcome = apply.apply_target(f.repo, entry, directory, boundary, residual=True)
+    assert injected
+    assert outcome["status"] in {"HOLD", "INCOMPLETE"}, outcome
+    assert target.exists()
+    assert "tracked" in outcome["landing_owner"]["scope"]
+    if kind == "index":
+        assert git(f, target, "show", ":tracked") == "late index-only useful work"
+    else:
+        assert (target / "tracked").read_bytes() == b"late useful worktree bytes\n"
+    assert outcome["landing_owner"]["admitted_landing_owner"] == entry["landing_owner"]
+    assert outcome["preservation_sha256"]["before.tar"] == apply.file_hash(directory / "before.tar")
+
+
+def test_transaction_ignores_git_index_stat_cache_refresh(fleet, monkeypatch):
+    f = fleet
+    target, entry, directory = transaction_case(f)
+    original_archive = apply.preserve_archive
+    index_path = Path(entry["source_identity"]["git_dir"]) / "index"
+    refreshed = []
+
+    def archive(root, output, manifest):
+        original_archive(root, output, manifest)
+        if root == target and output.name == "before.tar":
+            before = index_path.read_bytes()
+            info = (target / "tracked").stat()
+            os.utime(target / "tracked", ns=(info.st_atime_ns, info.st_mtime_ns - 2_000_000_000))
+            git(f, target, "update-index", "--refresh")
+            refreshed.append(before != index_path.read_bytes())
+
+    monkeypatch.setattr(apply, "preserve_archive", archive)
+    with apply.safe_git_environment(network=True):
+        outcome = apply.apply_target(f.repo, entry, directory, boundary, residual=True)
+    assert refreshed == [True]
+    assert outcome["status"] == "MOVED", outcome
+
+
+def test_transaction_never_repins_an_earlier_corrupted_archive(fleet, monkeypatch):
+    f = fleet
+    target, entry, directory = transaction_case(f)
+    original_archive = apply.preserve_archive
+    original_hashes = []
+
+    def archive(root, output, manifest):
+        original_archive(root, output, manifest)
+        if output.name == "gitdir-before.tar":
+            original_hashes.append(apply.file_hash(directory / "before.tar"))
+            with (directory / "before.tar").open("ab") as stream:
+                stream.write(b"late artifact corruption")
+
+    monkeypatch.setattr(apply, "preserve_archive", archive)
+    with apply.safe_git_environment(network=True):
+        outcome = apply.apply_target(f.repo, entry, directory, boundary, residual=True)
+    assert outcome["status"] == "HOLD", outcome
+    assert target.exists()
+    assert outcome["preservation_sha256"]["before.tar"] == original_hashes[0]
+    assert outcome["preservation_sha256"]["before.tar"] != apply.file_hash(directory / "before.tar")
+    assert "preservation changed" in outcome["reason"]
+
+
+def test_bulk_late_drift_holds_one_target_and_verification_never_replays(fleet, monkeypatch):
+    f = fleet
+    plan = residual_fixture(f, monkeypatch, wave_id="transaction-peer-drift-2026-09-15")
+    target = f.targets[0]
+    original_archive = apply.preserve_archive
+
+    def archive(root, output, manifest):
+        original_archive(root, output, manifest)
+        if root == target and output.name == "before.tar":
+            stage_index_only(f, target)
+
+    monkeypatch.setattr(apply, "preserve_archive", archive)
+    operation = plan["operations"][0]
+    kwargs = dict(authority_commit=f.residual_authority, batch=1,
+                  operation_root=Path(operation["operation_root"]))
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"MOVED": 4, "HOLD": 1}, result
+    held = next(o for o in result["outcomes"] if o["status"] == "HOLD")
+    assert held["landing_owner"]["retained_path"] == str(target)
+    assert "tracked" in held["landing_owner"]["scope"]
+    claim = f.common / ("rcx_fleet_apply_" + operation["operation_id"] + ".json")
+    evidence = {p: p.read_bytes() for p in (claim, Path(operation["operation_root"]) / "summary.json")}
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"] is False
+    with pytest.raises(apply.Hold, match="consumed"):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert {p: p.read_bytes() for p in evidence} == evidence
+
+
+class OwnershipObservationFault(Exception):
+    """An ordinary observation failure outside the existing exception lists."""
+
+
+@pytest.mark.parametrize("change, fault, reason", (
+    (dict(acquired_at_utc=None), None, "Native owner lock timestamp"),
+    (dict(acquired_at_utc=[]), None, "Native owner lock timestamp"),
+    (dict(acquired_at_utc="not-a-timestamp"), None, "Native owner lock timestamp"),
+    (dict(holder=[]), None, "Native owner lock metadata"),
+    (dict(pid=2**128), None, "Native ownership evidence is uncertain (OverflowError)"),
+    ({}, OwnershipObservationFault, "Native ownership evidence is uncertain (OwnershipObservationFault)"),
+    ({}, PermissionError, "Native owner lock metadata remains ambiguous or live"),
+))
+def test_bulk_malformed_stale_lock_records_hold_continues_peers_and_never_replays(
+        fleet, monkeypatch, change, fault, reason):
+    f = fleet
+    target = f.targets[0]
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=10)
+    lock = target / ".agent_bus/meta/bridge.lock"
+    lock.parent.mkdir(parents=True)
+    value = dict(pid=child.pid, holder="bridge_supervisor",
+                 acquired_at_utc="2026-07-22T03:30:03.376325+00:00", lock_path=str(lock))
+    value.update(change)
+    lock.write_bytes(apply.encoded(value))
+    plan = residual_fixture(f, monkeypatch, wave_id="transaction-malformed-lock-2026-09-15")
+    entry = next(e for e in plan["entries"] if e["path"] == str(target))
+    operation = plan["operations"][0]
+    assert operation["source_indices"][0] == entry["source_index"]
+    operation_root = Path(operation["operation_root"])
+    kwargs = dict(authority_commit=f.residual_authority, batch=operation["batch"],
+                  operation_root=operation_root)
+    before = apply.tree_manifest(target)
+    index = Path(entry["source_identity"]["git_dir"]) / "index"
+    before_index = index.read_bytes()
+    observed = []
+    if fault is not None:
+        original_kill = os.kill
+
+        def observe_pid(pid, signal):
+            if pid == child.pid and signal == 0:
+                observed.append(pid)
+                raise fault("disposable read-only PID observation failure")
+            return original_kill(pid, signal)
+
+        monkeypatch.setattr(os, "kill", observe_pid)
+
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+
+    if fault is not None:
+        assert observed == [child.pid]
+    assert result["outcome_counts"] == {"HOLD": 1, "MOVED": 4}, result
+    held, *peers = result["outcomes"]
+    assert held["status"] == "HOLD"
+    assert held["reason"].startswith(reason)
+    assert held["source_identity"] == entry["source_identity"]
+    assert held["owner"] == entry["owner"]
+    assert str(target) in held["next_action"] and "cannot be replayed" in held["next_action"]
+    assert held["prepared_head"] is None and held["boundary"] is None
+    assert apply.tree_manifest(target) == before
+    assert index.read_bytes() == before_index
+    assert git(f, target, "rev-parse", "HEAD") == entry["source_identity"]["HEAD"]
+    assert not Path(entry["destination"]).exists()
+    assert all(o["status"] == "MOVED" and Path(o["destination"]).is_dir()
+               and not Path(o["source_identity"]["path"]).exists() for o in peers)
+    receipt = operation_root / str(entry["source_index"]) / "outcome.json"
+    assert json.loads(receipt.read_bytes()) == held
+    assert json.loads((operation_root / "summary.json").read_bytes()) == result
+    evidence = apply.tree_manifest(operation_root)
+    claim = f.common / ("rcx_fleet_apply_" + operation["operation_id"] + ".json")
+    claim_bytes = claim.read_bytes()
+    verified = apply.verify_residual_plan(f.repo, plan, **kwargs)
+    assert verified["verified_outcomes"] == result["outcome_counts"]
+    assert verified["batch_complete"] is False
+    assert verified["recorded_before"] - verified["recorded_after"] == 4
+    with pytest.raises(apply.Hold, match="consumed"):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert claim.read_bytes() == claim_bytes
+    assert apply.tree_manifest(operation_root) == evidence
+    assert apply.tree_manifest(target) == before and index.read_bytes() == before_index
+
+
+@pytest.mark.parametrize("filename", ["bridge.lock", "status.json"])
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_native_ownership_observation_preserves_operator_interruptions(
+        native_evidence, monkeypatch, filename, interruption):
+    target, status = native_evidence
+    path = status.parent / filename
+    path.write_bytes(apply.encoded(dict(pid=os.getpid(), holder="bridge_supervisor",
+        acquired_at_utc="2026-07-22T03:30:03.376325+00:00", lock_path=str(path),
+        active=False, state="completed")))
+    before = apply.tree_manifest(target)
+    stop = interruption("operator stopped ownership observation")
+
+    def observe_pid(pid, signal):
+        assert pid == os.getpid() and signal == 0
+        raise stop
+
+    monkeypatch.setattr(os, "kill", observe_pid)
+    with pytest.raises(interruption) as caught:
+        apply.native_idle(target, before, reconcile_r1=True)
+    assert caught.value is stop
+    assert apply.tree_manifest(target) == before
+
+
+def test_fresh_verification_detects_index_only_drift_at_retired_destination(fleet, monkeypatch):
+    f = fleet
+    plan = residual_fixture(f, monkeypatch, wave_id="transaction-verify-index-2026-09-15")
+    operation = plan["operations"][0]
+    kwargs = dict(authority_commit=f.residual_authority, batch=1,
+                  operation_root=Path(operation["operation_root"]))
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"MOVED": 5}, result
+    entry = next(e for e in plan["entries"] if e["action"] == "PRESERVE_WORKTREE")
+    destination = Path(entry["destination"])
+    before = apply.tree_manifest(destination)
+    stage_index_only(f, destination)
+    assert apply.tree_manifest(destination) == before
+    with pytest.raises(apply.Hold, match="transaction drift at verification"):
+        apply.verify_residual_plan(f.repo, plan, **kwargs)
+
+
+def test_fresh_restored_wip_keeps_recoverable_stash_history_and_verifies(fleet, monkeypatch):
+    f = fleet
+    target = f.targets[0]
+    (target / "wip.txt").write_bytes(b"staged useful bytes\n")
+    git(f, target, "add", "wip.txt")
+    (target / "wip.txt").write_bytes(b"unstaged useful bytes\n")
+    plan = residual_fixture(f, monkeypatch, wave_id="transaction-restored-wip-2026-09-15")
+    operation = plan["operations"][0]
+    kwargs = dict(authority_commit=f.residual_authority, batch=1,
+                  operation_root=Path(operation["operation_root"]))
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"MOVED": 5}, json.dumps(result, indent=2)
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"] is True
+    entry = next(e for e in plan["entries"] if e["path"] == str(target))
+    directory = Path(operation["operation_root"]) / str(entry["source_index"])
+    proof = json.loads((directory / "sync-stash.json").read_text())
+    recovered = f.root / "restored-stash-history"
+    recovered.mkdir()
+    git(f, recovered, "init", "-q")
+    git(f, recovered, "fetch", str(directory / "sync-stash.bundle"), "refs/stash:refs/heads/recovered")
+    assert git(f, recovered, "rev-parse", "recovered") == proof["oid"]
+    assert git(f, recovered, "show", "recovered^2:wip.txt") == "staged useful bytes"
+    assert git(f, recovered, "show", "recovered:wip.txt") == "unstaged useful bytes"
+    assert entry["landing_owner"]["status"] == "PENDING_NATIVE_LANDING_REVIEW"
+    with (directory / "sync-stash.bundle").open("ab") as stream:
+        stream.write(b"tampered")
+    with pytest.raises(apply.Hold, match="preservation artifact changed"):
+        apply.verify_residual_plan(f.repo, plan, **kwargs)
+
+
+@pytest.mark.parametrize("dependency", ["mu/tools/executors/workingrcx_fleet_census.py",
+    "mu/tools/executors/workingrcx_fleet_classification.py", "mu/tools/executors/commit_executor.py",
+    "mu/tools/executors/executor_common.py", "mu/tools/observability/pipeline_agent_pager.py",
+    "reports/control_plane/transaction-dependency-2026-09-15_useful_work.json"])
+def test_fresh_bulk_dependency_index_drift_refuses_before_claim(fleet, monkeypatch, dependency):
+    f = fleet
+    plan = residual_fixture(f, monkeypatch, wave_id="transaction-dependency-2026-09-15")
+    operation = plan["operations"][0]
+    original = (f.repo / dependency).read_bytes()
+    blob = subprocess.run([f.git, "-C", str(f.repo), "hash-object", "-w", "--stdin"],
+        input=b"unreviewed index-only dependency\n", env=f.env, capture_output=True, check=True).stdout.decode().strip()
+    git(f, f.repo, "update-index", "--cacheinfo", "100644," + blob + "," + dependency)
+    assert (f.repo / dependency).read_bytes() == original
+    with pytest.raises(apply.Hold, match="authority index/mode identity"):
+        apply.apply_residual_plan(f.repo, plan, authority_commit=f.residual_authority,
+            batch=1, operation_root=Path(operation["operation_root"]))
+    assert not Path(operation["operation_root"]).exists()
+    assert not (f.common / ("rcx_fleet_apply_" + operation["operation_id"] + ".json")).exists()

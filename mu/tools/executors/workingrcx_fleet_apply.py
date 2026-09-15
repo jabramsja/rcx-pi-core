@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
 import hashlib
+import io
 import json
 import os
 import re
@@ -102,7 +103,7 @@ def stable_stat(info: os.stat_result) -> tuple:
 
 
 def file_hash(path: Path) -> str:
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode):
@@ -427,7 +428,7 @@ def tree_manifest(root: Path) -> dict:
                     raise Hold("Content changed during accounting")
             record.update(kind="file", size=info.st_size, sha256=h.hexdigest())
         else:
-            raise Hold(f"Unreadable or special content: {rel}")
+            raise Hold(f"Unreadable or special content: {root / rel}; owner must resolve this exact entry before a fresh preservation operation")
         result[rel] = record
 
     visit(root, ".")
@@ -609,7 +610,7 @@ def process_idle(ident: dict) -> dict:
                 tuple(v for v in (str(target), ident.get("git_dir"), branch_token) if v)):
             raise Hold("Active process references target identity")
     # +D is limited to this exact target, and includes open descendants/cwds.
-    command = ["lsof", "-nP", "+D", str(target), "-Fpn"]
+    command = ["lsof", "-nP", "+D", str(target), "-FpcfatDin"]
     diagnostic = dict(probe="lsof", command=command,
                       observed_at=datetime.now(timezone.utc).isoformat())
     try:
@@ -622,14 +623,128 @@ def process_idle(ident: dict) -> dict:
                    diagnostic=diagnostic) from exc
     diagnostic.update(returncode=proc.returncode, stdout=os.fsdecode(proc.stdout),
                       stderr=os.fsdecode(proc.stderr))
-    if proc.stdout or proc.stderr or proc.returncode != 1:
+    # The captured macOS probe returns 1 even with complete descriptor output.
+    # Such output still needs every reader identity/content proof below; empty
+    # or malformed partial records never release ownership.
+    if proc.stderr or proc.returncode not in (0, 1):
+        raise Hold("Open target files/processes or uncertain lsof evidence", diagnostic=diagnostic)
+    if proc.stdout:
+        readers = _verified_indexing_readers(proc.stdout, target)
+        if not readers:
+            raise Hold("Open target files/processes or uncertain lsof evidence", diagnostic=diagnostic)
+        diagnostic["verified_read_only_indexers"] = readers
+    elif proc.returncode != 1:
         raise Hold("Open target files/processes or uncertain lsof evidence", diagnostic=diagnostic)
     return diagnostic
 
 
+def _indexer_executable(pid: int) -> bool:
+    """Only the observed system indexer, from its OS executable identity."""
+    proc = subprocess.run(["ps", "-p", str(pid), "-o", "comm="], capture_output=True, timeout=10)
+    executable = os.fsdecode(proc.stdout).strip()
+    return (proc.returncode == 0 and not proc.stderr and executable ==
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared")
+
+
+def _verified_indexing_readers(raw: bytes, target: Path) -> list[dict]:
+    """Require numeric read-only regular FDs, exact inode/device and stable bytes.
+
+    cwd/root/mappings/writers/unknown processes remain fences. A command name
+    alone grants no exception. Each subsequent mutation probe repeats this.
+    """
+    # -F without 0 emits newline-terminated fields. Validate the whole stream
+    # before accepting any reader: a process without a descriptor is incomplete
+    # ownership evidence even when earlier processes have verified read-only FDs.
+    if not raw.endswith(b"\n"):
+        return []
+    records, pid, command, current = [], None, None, None
+    try:
+        for field in os.fsdecode(raw).split("\n")[:-1]:
+            if not field:
+                return []
+            key, value = field[0], field[1:]
+            if key == "p":
+                if ((pid is not None and current is None)
+                        or not value.isascii() or not value.isdigit() or int(value) <= 0):
+                    return []
+                pid, command, current = int(value), None, None
+            elif key == "c":
+                if pid is None or command is not None or current is not None or not value:
+                    return []
+                command = value
+            elif key == "f":
+                if command is None:
+                    return []
+                current = dict(pid=pid, f=value)
+                records.append(current)
+            elif key in "atDin":
+                if current is None or key in current or not value:
+                    return []
+                current[key] = value
+            else:
+                return []
+        if current is None or any(set(record) != {"pid", "f", "a", "t", "D", "i", "n"}
+                                  for record in records):
+            return []
+        trusted = {}
+        verified = []
+        for record in records:
+            pid = record["pid"]
+            if pid not in trusted:
+                trusted[pid] = bool(pid and _indexer_executable(pid))
+            path = Path(record["n"])
+            if (not trusted[pid] or not record["f"].isdigit() or record["a"] != "r"
+                    or record["t"] != "REG" or not path.is_relative_to(target)
+                    or path.resolve(strict=True) != path):
+                return []
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or int(record["i"]) != info.st_ino
+                    or int(record["D"], 16) != info.st_dev):
+                return []
+            sha256 = file_hash(path)
+            if stable_stat(path.lstat()) != stable_stat(info):
+                return []
+            verified.append(dict(pid=pid, path=str(path), device=info.st_dev,
+                                 inode=info.st_ino, sha256=sha256, access="read_only"))
+        return verified
+    except (KeyError, TypeError, ValueError, OSError, Hold, subprocess.SubprocessError):
+        return []
+
+
+def _absent_pid(pid: object) -> bool:
+    if type(pid) is not int or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        pass
+    return False
+
+
 def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> None:
+    """Contain uncertain read-only ownership evidence before target admission."""
+    try:
+        _read_native_ownership(target, manifest, reconcile_r1=reconcile_r1)
+    except Hold:
+        # Preserve specific active/ambiguous ownership reasons and diagnostics.
+        raise
+    except Exception as exc:
+        # Metadata and OS observation are untrusted. A failed read/probe never
+        # proves absence; only this read-only boundary converts ordinary faults.
+        # BaseException interruptions and errors in mutation code still escape.
+        raise Hold(
+            f"Native ownership evidence is uncertain ({type(exc).__name__}) at {target}: {exc}"
+        ) from exc
+
+
+def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) -> None:
     for name, entry in manifest.items():
-        if not any(part.startswith(".agent_bus") for part in Path(name).parts):
+        # Native buses are direct lane children. A saved pytest repository or
+        # archived bus is evidence, even when it contains active:true fixtures.
+        # Process/file checks still cover the entire tree, including saved data.
+        if not Path(name).parts or not Path(name).parts[0].startswith(".agent_bus"):
             continue
         if entry["kind"] == "symlink":
             raise Hold("Native ownership evidence points outside its recorded tree")
@@ -638,8 +753,26 @@ def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> 
             with path.open("rb") as stream:
                 try:
                     fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    if stream.read().strip():
-                        raise Hold("Native owner lock metadata remains")
+                    raw = stream.read().strip()
+                    if raw:
+                        try:
+                            value = json.loads(raw)
+                        except ValueError:
+                            raise Hold("Native owner lock metadata is malformed") from None
+                        if (not reconcile_r1 or not isinstance(value, dict)
+                                or not isinstance(value.get("holder"), str)
+                                or value.get("holder") not in {"bridge_supervisor", "meta_bridge_supervisor"}
+                                or value.get("lock_path") != str(path)
+                                or not _absent_pid(value.get("pid"))):
+                            raise Hold("Native owner lock metadata remains ambiguous or live")
+                        try:
+                            acquired = datetime.fromisoformat(value.get("acquired_at_utc", ""))
+                        except (TypeError, ValueError):
+                            # Malformed persisted evidence must reach this
+                            # target's HOLD receipt without aborting its peers.
+                            raise Hold("Native owner lock timestamp is uncertain") from None
+                        if acquired.tzinfo is None:
+                            raise Hold("Native owner lock timestamp is uncertain")
                 except BlockingIOError as exc:
                     raise Hold("Native owner lock is active") from exc
         if path.name == "status.json" or path.name.endswith("_status.json"):
@@ -659,6 +792,35 @@ def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> 
                         raise Hold("Native process identity remains live")
             state = str(value.get("state", value.get("status", ""))).lower()
             terminal_states = {"idle", "done", "complete", "completed", "failed", "stopped"}
+            finished_schemas = {
+                **{f"tier{tier}_fixed": ("success", True, False) for tier in (1, 2)},
+                **{f"tier{tier}_failed": ("failed", False, False) for tier in (1, 2)},
+                **{f"tier{tier}_unhandled": ("failed", False, False) for tier in (1, 2)},
+                **{f"tier{tier}_exhausted": ("exhausted", False, True) for tier in (1, 2, 4)},
+                "tier4_escalated": ("escalated", False, False),
+                "tier3_escalated": ("escalated", False, True),
+                "tier3_skipped": ("skipped", False, False),
+                "tier3_no_durable_edits": ("no_durable_edits", False, True),
+                "tier3_verify_pass": ("success", True, False),
+                "tier3_upstream_connectivity_retryable": ("success", True, False),
+                "tier3_retry_requested": ("retry_requested", True, False),
+                "resolved_by_later_success": ("cleared", True, False),
+            }
+            if reconcile_r1 and state in finished_schemas:
+                try:
+                    finished = datetime.fromisoformat(value.get("finished_at", ""))
+                except (TypeError, ValueError):
+                    raise Hold("Native recovery finish evidence is uncertain") from None
+                expected = finished_schemas[state]
+                if (path.name != "recovery_status.json" or value.get("active") is not False
+                        or finished.tzinfo is None or value.get("child_pid") != 0
+                        or value.get("child_role") != "" or value.get("current_command") != ""
+                        or value.get("outcome") != expected[0]
+                        or value.get("recovered") is not expected[1]
+                        or value.get("exhausted") is not expected[2]
+                        or not value.get("last_action")):
+                    raise Hold("Native ownership status is active or uncertain")
+                terminal_states.add(state)
             if reconcile_r1 and (not state or ("state" in value and "status" in value
                                                and value["state"] != value["status"])):
                 raise Hold("Native ownership status is active or uncertain")
@@ -746,6 +908,159 @@ def preparation_lock(common: Path):
         yield
 
 
+def git_entries(target: Path, revision: str | None = None) -> dict:
+    """Semantic index/tree entries; stat-cache and index extensions are not WIP."""
+    raw = (git(target, "ls-files", "--stage", "-z") if revision is None else
+           git(target, "ls-tree", "-r", "-z", revision))
+    entries = {}
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        metadata, path = record.split(b"\t", 1)
+        mode, middle, last = metadata.split()
+        if (revision is None and last != b"0") or (revision is not None and middle != b"blob"):
+            raise Hold("Transaction index/tree contains an unmerged or non-blob entry")
+        entries[os.fsdecode(path)] = [mode.decode(), (middle if revision is None else last).decode()]
+    return entries
+
+
+def transaction_state(target: Path) -> dict:
+    """Bind the full semantic index to the bytes read between two index probes."""
+    head = line(git(target, "rev-parse", "HEAD"))
+    index = git_entries(target)
+    flags = os.fsdecode(git(target, "ls-files", "-v", "-z"))
+    content = tree_manifest(target)
+    wip = set()
+    for options in (("--cached",), ()):
+        wip.update(os.fsdecode(p) for p in git(target, "diff", *options, "--no-renames",
+                                              "--name-only", "-z").split(b"\0") if p)
+    if (index != git_entries(target) or flags != os.fsdecode(git(target, "ls-files", "-v", "-z"))
+            or head != line(git(target, "rev-parse", "HEAD"))):
+        raise Hold("Transaction index/HEAD changed during content accounting")
+    return dict(head=head, index=index, index_flags=flags, content=content, tracked_wip=sorted(wip))
+
+
+def transaction_drift(phase: str, scope, detail: str) -> None:
+    raise Hold(f"Preservation transaction drift at {phase}: {detail}",
+               diagnostic=dict(kind="transaction_drift", phase=phase, scope=sorted(set(scope))))
+
+
+def require_transaction_state(target: Path, expected: dict, phase: str) -> dict:
+    observed = transaction_state(target)
+    if observed != expected:
+        scope = {p for field in ("index", "content")
+                 for p in set(expected[field]) | set(observed[field])
+                 if expected[field].get(p) != observed[field].get(p)}
+        transaction_drift(phase, scope, "admitted index/content no longer matches")
+    return observed
+
+
+def blob_record(target: Path, entry: list) -> tuple[dict, bytes]:
+    mode, oid = entry
+    content = git(target, "cat-file", "blob", oid)
+    if mode == "120000":
+        return dict(kind="symlink", mode=0o777, target=os.fsdecode(content)), content
+    if mode not in {"100644", "100755"}:
+        raise Hold("Unsupported transaction blob mode")
+    return dict(kind="file", mode=int(mode, 8) & 0o777,
+                size=len(content), sha256=digest(content)), content
+
+
+def preserve_index_blobs(target: Path, directory: Path, admitted: dict) -> None:
+    """Index-only objects need bytes of their own; a history bundle omits them."""
+    head = git_entries(target, admitted["head"])
+    objects = {entry[1] for path, entry in admitted["index"].items() if head.get(path) != entry}
+    manifest = {}
+    with (directory / "index-blobs.tar").open("xb") as stream:
+        with tarfile.open(fileobj=stream, mode="w") as archive:
+            for oid in sorted(objects):
+                content = git(target, "cat-file", "blob", oid)
+                member = tarfile.TarInfo(oid)
+                member.mode, member.size = 0o600, len(content)
+                archive.addfile(member, io.BytesIO(content))
+                manifest[oid] = dict(kind="file", mode=0o600, size=len(content), sha256=digest(content))
+        stream.flush()
+        os.fsync(stream.fileno())
+    write_new(directory / "index-blobs.json", encoded(manifest))
+    verify_archive(directory / "index-blobs.tar", manifest)
+
+
+def require_stash_binding(admitted: dict, evidence: dict) -> None:
+    scope = set(admitted["tracked_wip"]) | set(evidence["content"])
+    if evidence["base"] != admitted["head"] or evidence["index"] != admitted["index"]:
+        scope.update(p for p in set(evidence["index"]) | set(admitted["index"])
+                     if evidence["index"].get(p) != admitted["index"].get(p))
+        transaction_drift("checkout-sync-stashed", scope, "native stash index differs from admission")
+    if evidence["content"] != {p: admitted["content"].get(p) for p in admitted["tracked_wip"]}:
+        transaction_drift("checkout-sync-stashed", scope, "native stash content differs from admission")
+
+
+def prepared_transaction_state(target: Path, admitted: dict, prepared: str, sync: dict,
+                               *, source_path: Path | None = None, stash_evidence: dict | None = None) -> dict:
+    """Derive the permitted ff/WIP transition from admission, never from its result.
+
+    Changed base paths take their new committed values. Non-overlapping staged
+    and unstaged WIP keeps its admitted values; overlapping WIP must match the
+    retained native stash, and untracked collisions must match native backups.
+    """
+    old_tree = git_entries(target, admitted["head"])
+    new_tree = git_entries(target, prepared)
+    changed = {p for p in set(old_tree) | set(new_tree) if old_tree.get(p) != new_tree.get(p)}
+    wip = set(admitted["tracked_wip"])
+    if prepared != admitted["head"]:
+        sync_wip = set(sync.get("tracked_wip_paths", []))
+        if sync_wip != wip or set(sync.get("tracked_wip_held_paths", [])) != wip & changed:
+            transaction_drift("checkout-sync", wip | sync_wip, "native WIP partition changed")
+        if wip:
+            stash = sync.get("tracked_wip_stash_oid")
+            if not stash_evidence or stash_evidence["oid"] != stash:
+                transaction_drift("checkout-sync", wip, "native stash preservation evidence missing")
+            require_stash_binding(admitted, stash_evidence)
+            # Native sync may finish its own temporary stash after restoration.
+            # Overlapping WIP remains held; its live stash must still be present.
+            if wip & changed and stash.encode() not in git(target, "stash", "list", "--format=%H").splitlines():
+                transaction_drift("checkout-sync", wip & changed, "held overlap stash is no longer retained")
+        collisions = set(sync.get("untracked_collision_paths", []))
+        for path in collisions:
+            if path in old_tree or path in admitted["index"] or path not in changed:
+                transaction_drift("checkout-sync", [path], "unadmitted collision")
+        backups = sync.get("untracked_wip_backup_paths", [])
+        if len(backups) != len(collisions):
+            transaction_drift("checkout-sync", collisions, "collision backup evidence missing")
+        for path in collisions:
+            matches = [Path(p) for p in backups if str(p).endswith("/backup/" + path)]
+            if len(matches) != 1 or tree_manifest(matches[0].parent).get(matches[0].name) != admitted["content"].get(path):
+                transaction_drift("checkout-sync", [path], "collision backup differs from admission")
+
+    expected = json.loads(encoded(admitted))
+    expected["head"] = prepared
+    expected["tracked_wip"] = sorted(wip - changed)
+    for path in changed:
+        if path in new_tree:
+            expected["index"][path] = new_tree[path]
+            expected["content"][path] = blob_record(target, new_tree[path])[0]
+        else:
+            expected["index"].pop(path, None)
+            expected["content"].pop(path, None)
+    expected["index_flags"] = "".join("H " + p + "\0" for p in sorted(expected["index"], key=os.fsencode))
+    # Git creates/removes parents of changed tracked paths. Every surviving
+    # original directory retains its mode; unrelated empty directories remain.
+    parents = {str(parent) for p in changed for parent in Path(p).parents if str(parent) != "."}
+    for path in sorted(parents, key=lambda p: len(Path(p).parts), reverse=True):
+        children = any(p.startswith(path + "/") for p in expected["content"])
+        if children:
+            expected["content"].setdefault(path, dict(kind="directory", mode=0o755))
+        elif expected["content"].get(path, {}).get("kind") == "directory":
+            expected["content"].pop(path)
+    if sync.get("behind_dev_signal_cleared"):
+        signal = Path(sync["behind_dev_signal_path"])
+        relative = signal.relative_to(source_path or target).as_posix()
+        if len(Path(relative).parts) != 2 or not relative.startswith(".agent_bus") or signal.name != "behind_dev.json":
+            transaction_drift("checkout-sync", [relative], "unexpected native signal removal")
+        expected["content"].pop(relative, None)
+    return expected
+
+
 def apply_target(repo: Path, entry: dict, directory: Path, boundary,
                  *, r1_preservation: dict | None = None, residual: bool = False) -> dict:
     ident = entry["source_identity"]
@@ -761,9 +1076,25 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
                        process_checks=process_checks, residual=residual)
     if residual:
         outcome.update(owner=entry["owner"], process_checks=process_checks, residual=residual)
+        if entry.get("landing_owner"):
+            outcome["landing_owner"] = {**entry["landing_owner"], "retained_path": str(target)}
     preparation_started = False
     move_started = False
     preserved = {}
+    admitted = None
+    prepared_state = None
+    stash_evidence = None
+    phase = "admission"
+    if residual:
+        outcome["transaction_checks"] = []
+        outcome["preservation_sha256"] = preserved
+
+    def check_transaction(expected: dict, stage: str, path: Path = target):
+        nonlocal phase
+        phase = stage
+        observed = require_transaction_state(path, expected, stage)
+        outcome["transaction_checks"].append(dict(phase=stage, state_sha256=digest(encoded(observed))))
+        return observed
 
     def check_preservation():
         if reconcile_r1:
@@ -772,11 +1103,42 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
             if any(file_hash(directory / name) != expected for name, expected in preserved.items()):
                 raise Hold("Current preservation changed before mutation")
 
+    def pin_preservation(*names):
+        for name in names:
+            actual = file_hash(directory / name)
+            if name in preserved and preserved[name] != actual:
+                raise Hold("Current preservation changed before mutation")
+            preserved[name] = actual
+
     try:
         with preparation_lock(Path(ident["common_dir"])):
             check_preservation()
             tracked, before = inspect_target(repo, ident, head=starting_head,
                                              reconcile_r1=reconcile_r1, process_checks=process_checks, residual=residual)
+            if residual:
+                admitted = transaction_state(target)
+                if admitted["head"] != starting_head or admitted["content"] != before:
+                    transaction_drift(phase, admitted["index"], "source changed during admission")
+            if entry.get("useful_work") is not None:
+                try:
+                    from .workingrcx_fleet_census import useful_work
+                except ImportError:
+                    from workingrcx_fleet_census import useful_work
+                observed_useful = useful_work(str(target), entry["comparison_commit"])
+                # JSON normalizes tuple-valued blob identities to arrays.
+                if encoded(observed_useful) != encoded(entry["useful_work"]):
+                    transaction_drift(phase, [c["path"] for c in observed_useful.get("changes", [])],
+                                      "useful-work/index identity changed since the committed inventory")
+                if entry.get("landing_owner"):
+                    outcome["landing_owner"] = {**entry["landing_owner"],
+                        "preserved_at": str(directory), "destination": str(destination),
+                        "original_index_archive": str(directory / "gitdir-before.tar"),
+                        "original_bytes_archive": str(directory / "before.tar"),
+                        "history_bundle": str(directory / "history.bundle")}
+            if residual:
+                check_transaction(admitted, "admission")
+                write_new(directory / "admitted-state.json", encoded(admitted))
+                pin_preservation("admitted-state.json")
             if r1_preservation is not None and entry["source_index"] == 292:
                 verify_r1_prepared_target(ident, before)
             if target.stat().st_dev != directory.stat().st_dev:
@@ -785,10 +1147,19 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
                 entry["comparison_commit"] if residual else CLASSIFICATION_COMMIT)
             write_new(directory / "before.json", encoded(before))
             preserve_archive(target, directory / "before.tar", before)
+            if residual:
+                pin_preservation("before.json", "before.tar")
+                check_transaction(admitted, "after-before.tar")
             admin = Path(ident["git_dir"])
             admin_before = tree_manifest(admin)
             write_new(directory / "gitdir-before.json", encoded(admin_before))
             preserve_archive(admin, directory / "gitdir-before.tar", admin_before)
+            if residual:
+                pin_preservation("gitdir-before.json", "gitdir-before.tar")
+                check_transaction(admitted, "after-gitdir-before.tar")
+                preserve_index_blobs(target, directory, admitted)
+                pin_preservation("index-blobs.json", "index-blobs.tar")
+                check_transaction(admitted, "after-index-blobs.tar")
             bundle = directory / "history.bundle"
             if residual:
                 refs_before = git(target, "show-ref")
@@ -806,8 +1177,11 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
                     starting_head + " " + ident["branch"]):
                 raise Hold("Original branch history was not preserved")
             if reconcile_r1 or residual:
-                preserved = {name: file_hash(directory / name) for name in (
-                    "before.json", "before.tar", "gitdir-before.json", "gitdir-before.tar", "history.bundle")}
+                pin_preservation("before.json", "before.tar", "gitdir-before.json", "gitdir-before.tar", "history.bundle")
+                if residual:
+                    pin_preservation("admitted-state.json", "index-blobs.json", "index-blobs.tar",
+                                     "refs-before.txt", "stashes-before.json")
+                    check_transaction(admitted, "after-history.bundle")
                 outcome["preservation_sha256"] = preserved
             # Preserve admin evidence (including any old FETCH_HEAD) before
             # the first target fetch, as well as before the fast-forward.
@@ -818,6 +1192,8 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
                                       reconcile_r1=reconcile_r1, process_checks=process_checks, residual=residual)
             if check != before:
                 raise Hold("Source changed while preservation was being verified")
+            if residual:
+                check_transaction(admitted, "before-preparation")
             check_preservation()
             preparation = dict(
                 state="PREPARATION_STARTED_OUTCOME_UNKNOWN", original=ident,
@@ -835,8 +1211,38 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
             if (preparation_binding.get("expected_head") != starting_head
                     or preparation_binding.get("expected_branch") != ident["branch"].removeprefix("refs/heads/")):
                 raise Hold("Original checkout identity changed before safe preparation")
+            check_transaction(admitted, "before-checkout-sync")
+
+            def preparation_checkpoint(stage, _manifest):
+                nonlocal stash_evidence, phase
+                # This existing callback runs under the native sync lock before
+                # stash creation, closing the lock handoff admission window.
+                if stage == "after_prepared":
+                    check_transaction(admitted, "checkout-sync-prepared")
+                elif stage == "after_stash_before_publish":
+                    phase = "checkout-sync-stashed"
+                    oid = _manifest["stash_oid"]
+                    stash_tree = git_entries(target, oid)
+                    stash_evidence = dict(oid=oid, base=line(git(target, "rev-parse", oid + "^1")),
+                        index=git_entries(target, oid + "^2"),
+                        content={p: blob_record(target, stash_tree[p])[0] if p in stash_tree else None
+                                 for p in _manifest["tracked_paths"]})
+                    write_new(directory / "sync-stash.json", encoded(stash_evidence))
+                    bundle = directory / "sync-stash.bundle"
+                    git(target, "bundle", "create", str(bundle), "refs/stash")
+                    with bundle.open("rb") as stream:
+                        os.fsync(stream.fileno())
+                    sync_directory(directory)
+                    git(target, "bundle", "verify", str(bundle))
+                    if line(git(target, "bundle", "list-heads", str(bundle))) != oid + " refs/stash":
+                        transaction_drift(phase, _manifest["tracked_paths"], "native stash history changed during preservation")
+                    pin_preservation("sync-stash.json", "sync-stash.bundle")
+                    check_preservation()
+                    require_stash_binding(admitted, stash_evidence)
+
             sync = boundary.sync_primary_worktree_to_base(
-                repo, "dev", target_identity=preparation_binding, log=lambda _message: None)
+                repo, "dev", target_identity=preparation_binding, log=lambda _message: None,
+                checkpoint=preparation_checkpoint)
             outcome["checkout_sync"] = sync
             write_new(directory / "checkout-sync.json", encoded(sync))
             if (line(git(target, "rev-parse", "HEAD")) != prepared or sync.get("recovery_hold")
@@ -845,6 +1251,9 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
                 raise Hold("Preservation-safe checkout sync did not reach a verified outcome")
             if not set(stashes_before).issubset(git(target, "stash", "list", "--format=%H").splitlines()):
                 raise Hold("An existing held stash is no longer retained")
+            phase = "checkout-sync"
+            prepared_state = prepared_transaction_state(target, admitted, prepared, sync, stash_evidence=stash_evidence)
+            check_transaction(prepared_state, "after-checkout-sync")
         with preparation_lock(Path(ident["common_dir"])):
             _, after = inspect_target(repo, ident, head=prepared,
                                       reconcile_r1=reconcile_r1, process_checks=process_checks, residual=residual)
@@ -853,6 +1262,10 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
             git(target, "merge-base", "--is-ancestor", ident["HEAD"], prepared)
             write_new(directory / "prepared.json", encoded(after))
             outcome["prepared_head"] = prepared
+            if residual:
+                check_transaction(prepared_state, "prepared")
+                write_new(directory / "prepared-state.json", encoded(prepared_state))
+                pin_preservation("prepared-state.json")
         binding = boundary.bind_terminal_target_identity(target, base_branch="dev")
         write_new(directory / "terminal-identity.json", encoded(binding))
         if (binding.get("bound") is not True or binding.get("expected_head") != prepared
@@ -869,8 +1282,12 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
                                       reconcile_r1=reconcile_r1, process_checks=process_checks, residual=residual)
             if fresh != after or os.path.lexists(destination):
                 raise Hold("Prepared content or destination drifted before move")
+            if residual:
+                check_transaction(prepared_state, "before-terminal-move")
             write_new(directory / "move-started.json", encoded(dict(
                 state="TERMINAL_MOVE_STARTED_OUTCOME_UNKNOWN", target_identity=binding)))
+            if residual:
+                check_transaction(prepared_state, "terminal-move-started")
             move_started = True
             sync_only = residual and entry["action"] == "SYNC_LOCAL_DEV"
             if not sync_only:
@@ -884,12 +1301,20 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
                 raise Hold("Moved worktree preservation verification incomplete")
             git(final_path, "merge-base", "--is-ancestor", ident["HEAD"], "HEAD")
             write_new(directory / "after.json", encoded(observed))
+            if residual:
+                retired = check_transaction(prepared_state, "after-terminal-move", final_path)
+                write_new(directory / "retired-state.json", encoded(retired))
+                pin_preservation("retired-state.json")
             return dict(destination=str(final_path), manifest_sha256=digest(encoded(observed)))
 
         result = boundary.execute_terminal_mutation_once(
             repo, binding, terminal_action=move_once, log=lambda _message: None)
         outcome["boundary"] = result
         if result.get("action_succeeded") is True:
+            if residual:
+                check_preservation()
+                check_transaction(prepared_state, "after-terminal-boundary",
+                                  target if entry["action"] == "SYNC_LOCAL_DEV" else destination)
             outcome["status"] = "SYNCED_LOCAL_DEV" if residual and entry["action"] == "SYNC_LOCAL_DEV" else "MOVED"
         elif move_started:
             outcome.update(status="INCOMPLETE", reason=result.get("reason"))
@@ -898,6 +1323,43 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
     except (Hold, OSError, ValueError, tarfile.TarError, subprocess.SubprocessError) as exc:
         incomplete = move_started or (preparation_started and outcome["prepared_head"] is None)
         outcome.update(status="INCOMPLETE" if incomplete else "HOLD", reason=str(exc))
+    if residual and outcome["status"] in {"HOLD", "INCOMPLETE"}:
+        if admitted is not None:
+            # The boundary may catch our callback exception. Always retain an
+            # explicit landing obligation once an admitted transaction stops,
+            # including drift discovered after the directory was moved.
+            retained = destination if move_started and destination.is_dir() else target
+            try:
+                observed = transaction_state(retained)
+                expected = prepared_state or admitted
+                scope = {p for field in ("index", "content")
+                         for p in set(expected[field]) | set(observed[field])
+                         if expected[field].get(p) != observed[field].get(p)}
+                write_new(directory / "unresolved-state.json", encoded(observed))
+            except (Hold, OSError, ValueError, subprocess.SubprocessError) as exc:
+                scope = set()
+                outcome["unresolved_inventory_error"] = str(exc)
+            scope.update(admitted["tracked_wip"])
+            scope.update(outcome.get("checkout_sync", {}).get("tracked_wip_paths", []))
+            if stash_evidence:
+                scope.update(p for p in set(stash_evidence["index"]) | set(admitted["index"])
+                             if stash_evidence["index"].get(p) != admitted["index"].get(p))
+            original_owner = entry.get("landing_owner") or {}
+            outcome["landing_owner"] = {**original_owner,
+                "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+                "wave_id": original_owner.get("wave_id") or "fleet-transaction-drift-" + digest(os.fsencode(directory))[:20],
+                "status": "UNRESOLVED_TRANSACTION_DRIFT", "phase": phase,
+                "source_path": str(target), "retained_path": str(retained),
+                "source_head": starting_head, "source_branch": ident["branch"],
+                "comparison_commit": entry["comparison_commit"],
+                "scope": sorted(scope | set(original_owner.get("scope", []))),
+                "admitted_landing_owner": entry.get("landing_owner"),
+                "preserved_at": str(directory), "live_index": ident["git_dir"] + "/index",
+                "next_action": "Compare admitted, preserved, native stash/backup and retained index/content to dev; land missing hunks through fresh native authority before resolving this owner."}
+        outcome["next_action"] = (
+            f"Owner {outcome.get('owner', '[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]')} must resolve "
+            f"the exact target {target}: {outcome.get('reason')}. Verify {directory} before "
+            "preparing fresh committed operation authority; this operation cannot be replayed.")
     write_new(directory / "outcome.json", encoded(outcome))
     return outcome
 
@@ -954,22 +1416,38 @@ RESIDUAL_PLAN_PATH = Path(f"reports/control_plane/{RESIDUAL_WAVE_ID}_apply_plan.
 RESIDUAL_ACTIONS = {"PRESERVE_WORKTREE", "PRESERVE_BUS_SHELL", "SYNC_LOCAL_DEV"}
 
 
-def build_residual_plan(repo: Path, classification: Path, sha256: str) -> dict:
+def residual_paths(wave_id: str) -> tuple[Path, Path, Path]:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,160}", wave_id or ""):
+        raise Hold("Invalid residual wave identity")
+    if wave_id in {WAVE_ID, RECONCILE_WAVE_ID, "workingrcx-fleet-classification-r1-2026-09-11"}:
+        raise Hold("Historical operation authority cannot be rebound as a fresh residual wave")
+    return tuple(Path(f"reports/control_plane/{wave_id}_{suffix}.json")
+                 for suffix in ("classification", "census", "apply_plan"))
+
+
+def build_residual_plan(repo: Path, classification: Path, sha256: str,
+                        *, wave_id: str = RESIDUAL_WAVE_ID) -> dict:
     """Pure manifest planning; all actions remain behind committed authority."""
-    if classification.absolute() != repo / RESIDUAL_CLASSIFICATION_PATH:
+    classification_path, census_path, plan_path = residual_paths(wave_id)
+    fresh_wave = wave_id != RESIDUAL_WAVE_ID
+    if classification.absolute() != repo / classification_path:
         raise Hold("Residual classification must use its exact wave-owned path")
     raw = read_plain(classification)
     if digest(raw) != sha256:
         raise Hold("Residual classification hash mismatch")
     data = json.loads(raw)
-    census_raw = read_plain(repo / RESIDUAL_CENSUS_PATH)
+    census_raw = read_plain(repo / census_path)
     census = json.loads(census_raw)
     try:
         from . import workingrcx_fleet_classification as classifier
     except ImportError:
         import workingrcx_fleet_classification as classifier
     classifier._validate_inventory(census)
-    if (data.get("wave_id") != RESIDUAL_WAVE_ID or data.get("schema_version") != 1
+    if fresh_wave:
+        useful_path = repo / f"reports/control_plane/{wave_id}_useful_work.json"
+        if json.loads(read_plain(useful_path)) != classifier.useful_work_report(data, sha256):
+            raise Hold("Fresh useful-work/landing authority does not match classification")
+    if (data.get("wave_id") != wave_id or data.get("schema_version") != 1
             or data.get("coverage_complete") is not True or data.get("mutation_authorized") is not False
             or data.get("source_sha256") != digest(census_raw)
             or data.get("source_metadata") != {k: v for k, v in census.items() if k != "entries"}
@@ -1000,6 +1478,13 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str) -> dict:
         entry = dict(source_index=index, path=str(path), source_identity=ident,
                      action=action, owner=row["owner"], comparison_commit=data["comparison_commit"],
                      reason_codes=[r["code"] for r in row["reasons"]])
+        if fresh_wave:
+            useful = source.get("useful_work")
+            entry.update(useful_work=useful, landing_owner=row.get("landing_owner"))
+            if action not in {"UNTOUCHED_HOLD", "PRESERVE_BUS_SHELL"} and (
+                    not isinstance(useful, dict) or useful.get("status") == "UNKNOWN"
+                    or (useful.get("status") != "COVERED" and not row.get("landing_owner"))):
+                raise Hold("Fresh residual lacks exact useful-work coverage or native landing owner")
         if action != "UNTOUCHED_HOLD":
             if (action not in RESIDUAL_ACTIONS or path.parent != root
                     or not path.name.casefold().startswith("workingrcx")
@@ -1022,7 +1507,7 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str) -> dict:
                         or ident["branch"] in {"refs/heads/main", "refs/heads/master"}
                         or (ident["branch"] == "refs/heads/dev") != (action == "SYNC_LOCAL_DEV")):
                     raise Hold("Residual candidate Git/history authority mismatch")
-                if action == "SYNC_LOCAL_DEV" and path.name != "workingrcx_clarolesfull_20260627":
+                if not fresh_wave and action == "SYNC_LOCAL_DEV" and path.name != "workingrcx_clarolesfull_20260627":
                     raise Hold("Only the explicit dev owner may use preservation-safe dev sync")
             selected.append(index)
         rows.append(entry)
@@ -1031,26 +1516,28 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str) -> dict:
         raise Hold("Residual batches do not account for every candidate exactly once")
     operations = []
     for number, indices in enumerate(batches, 1):
-        operation_id = f"{RESIDUAL_WAVE_ID}-{sha256[:16]}-{number:03d}"
+        operation_id = f"{wave_id}-{sha256[:16]}-{number:03d}"
         operation_root = root / ("fleet-apply-preserved-" + operation_id)
         operations.append(dict(batch=number, operation_id=operation_id,
                                operation_root=str(operation_root), source_indices=indices))
         for index in indices:
             rows[index]["destination"] = str(operation_root / str(index) / "worktree")
-    return dict(schema_version=2, wave_id=RESIDUAL_WAVE_ID, mutation_authorized=False,
-                classification_path=str(RESIDUAL_CLASSIFICATION_PATH), classification_sha256=sha256,
-                census_path=str(RESIDUAL_CENSUS_PATH), census_sha256=digest(census_raw),
+    return dict(schema_version=2, wave_id=wave_id, mutation_authorized=False,
+                classification_path=str(classification_path), classification_sha256=sha256,
+                census_path=str(census_path), census_sha256=digest(census_raw),
                 comparison_commit=data["comparison_commit"], fleet_root=str(root), common_dir=str(common),
                 entry_count=len(rows), conditional_candidates=len(selected), untouched_holds=counts["HOLD"],
                 operations=operations, entries=rows,
                 completion="PENDING_COMMITTED_FOREGROUND_APPLY_AND_VERIFY",
                 command_template=(f"PYTHONDONTWRITEBYTECODE=1 python3 {TOOL_PATH} --residual"
-                                  f" --classification {RESIDUAL_CLASSIFICATION_PATH} --classification-sha256 {sha256}"
-                                  f" --plan-output {RESIDUAL_PLAN_PATH} --authority-commit <landed-commit>"
+                                  + (f" --wave-id {wave_id}" if fresh_wave else "")
+                                  + f" --classification {classification_path} --classification-sha256 {sha256}"
+                                  f" --plan-output {plan_path} --authority-commit <landed-commit>"
                                   " --batch <batch> --operation-root <exact-operation-root> --apply (then --verify)"))
 
 
 def require_residual_authority(repo: Path, plan: dict, commit: str, *, fetch: bool) -> None:
+    classification_path, census_path, plan_path = residual_paths(plan["wave_id"])
     if SCRIPT_PATH != repo / TOOL_PATH or re.fullmatch(r"[0-9a-f]{40}", commit or "") is None:
         raise Hold("Residual operation requires the committed native tool and exact authority commit")
     if (repo / line(git(repo, "rev-parse", "--git-common-dir"))).resolve() != Path(plan["common_dir"]):
@@ -1059,15 +1546,26 @@ def require_residual_authority(repo: Path, plan: dict, commit: str, *, fetch: bo
         git(repo, "fetch", "origin", "dev")
     git(repo, "merge-base", "--is-ancestor", commit, "origin/dev")
     git(repo, "merge-base", "--is-ancestor", plan["comparison_commit"], commit)
-    paths = (TOOL_PATH, TEST_PATH, RESIDUAL_PLAN_PATH, RESIDUAL_CLASSIFICATION_PATH, RESIDUAL_CENSUS_PATH,
+    paths = (TOOL_PATH, TEST_PATH, plan_path, classification_path, census_path,
              Path("mu/tools/executors/workingrcx_fleet_census.py"),
              Path("mu/tools/executors/workingrcx_fleet_classification.py"),
              Path("mu/tools/executors/commit_executor.py"), Path("mu/tools/executors/executor_common.py"),
              Path("mu/tools/observability/pipeline_agent_pager.py"))
+    if plan["wave_id"] != RESIDUAL_WAVE_ID:
+        paths += (Path(f"reports/control_plane/{plan['wave_id']}_useful_work.json"),)
     for path in paths:
-        if read_plain(repo / path) != git(repo, "show", f"{commit}:{path}"):
+        committed = git(repo, "show", f"{commit}:{path}")
+        if read_plain(repo / path) != committed:
             raise Hold(f"Residual authority is uncommitted or modified: {path}")
-    if read_plain(repo / RESIDUAL_PLAN_PATH) != encoded(plan):
+        tree = git(repo, "ls-tree", "-z", commit, "--", str(path))
+        mode, _kind, rest = tree.split(b" ", 2)
+        oid, name = rest.split(b"\t", 1)
+        index = git(repo, "ls-files", "--stage", "-z", "--", str(path))
+        if (index != mode + b" " + oid + b" 0\t" + name
+                or bool((repo / path).stat().st_mode & 0o111) != (mode == b"100755")
+                or git(repo, "ls-files", "-v", "-z", "--", str(path)) != b"H " + os.fsencode(path) + b"\0"):
+            raise Hold(f"Residual authority index/mode identity differs from commit: {path}")
+    if read_plain(repo / plan_path) != encoded(plan):
         raise Hold("Residual plan differs from committed authority")
     if fetch and (repo != Path(plan["common_dir"]).parent
                   or line(git(repo, "rev-parse", "HEAD")) != line(git(repo, "rev-parse", "origin/dev"))):
@@ -1159,7 +1657,8 @@ def prefix_directory_count(root: Path) -> int:
 
 def apply_residual_plan(repo: Path, plan: dict, *, authority_commit: str,
                         batch: int, operation_root: Path) -> dict:
-    expected = build_residual_plan(repo, repo / RESIDUAL_CLASSIFICATION_PATH, plan["classification_sha256"])
+    classification_path, _, _ = residual_paths(plan["wave_id"])
+    expected = build_residual_plan(repo, repo / classification_path, plan["classification_sha256"], wave_id=plan["wave_id"])
     if expected != plan:
         raise Hold("Residual plan does not match fresh classification")
     operation = residual_operation(plan, batch, operation_root)
@@ -1189,7 +1688,7 @@ def apply_residual_plan(repo: Path, plan: dict, *, authority_commit: str,
             action = apply_shell if entry["action"] == "PRESERVE_BUS_SHELL" else apply_target
             kwargs = {} if action is apply_shell else {"residual": True}
             outcomes.append(action(repo, entry, directory, boundary, **kwargs))
-        summary = dict(wave_id=RESIDUAL_WAVE_ID, operation=operation, outcomes=outcomes,
+        summary = dict(wave_id=plan["wave_id"], operation=operation, outcomes=outcomes,
                        outcome_counts=dict(Counter(o["status"] for o in outcomes)),
                        before_prefix_directories=before_count,
                        after_prefix_directories=prefix_directory_count(Path(plan["fleet_root"])),
@@ -1244,6 +1743,34 @@ def verify_residual_plan(repo: Path, plan: dict, *, authority_commit: str,
                     held = json.loads(read_plain(directory / "stashes-before.json"))
                     if not set(held).issubset(git(repo, "stash", "list", "--format=%H").decode().splitlines()):
                         raise Hold("Previously held stash is no longer retained")
+                    if entry.get("useful_work") is not None:
+                        required = {"admitted-state.json", "prepared-state.json", "retired-state.json",
+                                    "index-blobs.json", "index-blobs.tar"}
+                        if not required <= outcome["preservation_sha256"].keys():
+                            raise Hold("Residual success lacks preservation transaction binding")
+                        admitted = json.loads(read_plain(directory / "admitted-state.json"))
+                        prepared_state = json.loads(read_plain(directory / "prepared-state.json"))
+                        retired_state = json.loads(read_plain(directory / "retired-state.json"))
+                        stash_evidence = None
+                        if admitted["tracked_wip"] and admitted["head"] != outcome["prepared_head"]:
+                            if not {"sync-stash.json", "sync-stash.bundle"} <= outcome["preservation_sha256"].keys():
+                                raise Hold("Residual success lacks native stash preservation")
+                            stash_evidence = json.loads(read_plain(directory / "sync-stash.json"))
+                            bundle = directory / "sync-stash.bundle"
+                            git(repo, "bundle", "verify", str(bundle))
+                            if line(git(repo, "bundle", "list-heads", str(bundle))) != stash_evidence["oid"] + " refs/stash":
+                                raise Hold("Residual native stash history differs from its receipt")
+                        expected = prepared_transaction_state(destination, admitted, outcome["prepared_head"],
+                            outcome["checkout_sync"], source_path=target, stash_evidence=stash_evidence)
+                        if (admitted["content"] != before or admitted["head"] != entry["source_identity"]["HEAD"]
+                                or prepared_state != expected or retired_state != expected
+                                or retired_state["content"] != after):
+                            raise Hold("Residual preservation transaction receipts disagree")
+                        require_transaction_state(destination, retired_state, "verification")
+                        verify_archive(directory / "index-blobs.tar", json.loads(read_plain(directory / "index-blobs.json")))
+                        if any(outcome.get("landing_owner", {}).get(k) != v
+                               for k, v in (entry.get("landing_owner") or {}).items()):
+                            raise Hold("Residual useful-work landing ownership changed")
             verified.append(outcome)
         if summary.get("operation") != operation or summary.get("outcomes") != verified:
             raise Hold("Residual summary does not match per-target receipts")
@@ -1263,6 +1790,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--classification-sha256", required=True)
     parser.add_argument("--classification-commit")
     parser.add_argument("--residual", action="store_true")
+    parser.add_argument("--wave-id", help="Fresh residual owner; no rebinding of a consumed operation")
     parser.add_argument("--authority-commit")
     parser.add_argument("--batch", type=int)
     parser.add_argument("--verify", action="store_true")
@@ -1277,8 +1805,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.residual:
             if args.reconcile_r1 or args.classification_commit or (args.apply and args.verify):
                 raise Hold("Residual, legacy and verification modes cannot be mixed")
-            plan = build_residual_plan(repo, args.classification, args.classification_sha256)
-            if args.plan_output.absolute() != repo / RESIDUAL_PLAN_PATH:
+            wave_id = args.wave_id or RESIDUAL_WAVE_ID
+            plan = build_residual_plan(repo, args.classification, args.classification_sha256, wave_id=wave_id)
+            if args.plan_output.absolute() != repo / residual_paths(wave_id)[2]:
                 raise Hold("Residual plan may write only its wave-owned output")
             if args.apply or args.verify:
                 action = apply_residual_plan if args.apply else verify_residual_plan
@@ -1293,7 +1822,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({k: plan[k] for k in ("entry_count", "conditional_candidates", "untouched_holds")}
                              | {"bounded_operations": len(plan["operations"])}))
             return 0
-        if args.verify or args.batch is not None or args.authority_commit is not None:
+        if args.verify or args.batch is not None or args.authority_commit is not None or args.wave_id:
             raise Hold("Fresh verification/batch authority requires --residual")
         plan = build_plan(repo, args.classification, args.classification_sha256,
                           args.classification_commit, reconcile_r1=args.reconcile_r1)
