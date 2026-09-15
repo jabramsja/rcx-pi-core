@@ -97,6 +97,95 @@ def fixture(tmp_path):
     return f
 
 
+def test_fresh_disposition_accounts_for_real_divergent_work_and_standalone_clone(fixture):
+    from mu.tools.executors import workingrcx_fleet_classification as classifier
+    from mu.tests.tools.test_workingrcx_fleet_census import _fixture_git_env
+    f = fixture
+    (f.target / "tracked.txt").write_text("unlanded useful change\n")
+    git(f, f.target, "add", "tracked.txt")
+    git(f, f.target, "commit", "-m", "retained useful branch")
+    head = git(f, f.target, "rev-parse", "HEAD")
+    clone = f.fleet / "WorkingRCX-standalone"
+    git(f, f.primary, "clone", str(f.primary), str(clone))
+    (clone / "tracked.txt").write_text("standalone dirty useful work\n")
+    source = f.root / "fresh-census.json"
+    with _fixture_git_env() as env:
+        result = subprocess.run([sys.executable, str(REPO_ROOT / "mu/tools/executors/workingrcx_fleet_census.py"),
+            "--fleet-root", str(f.fleet), "--anchor-repo", str(f.primary),
+            "--comparison-commit", f.base, "--output", str(source)], capture_output=True, env=env)
+    assert result.returncode == 0, result.stderr
+    census = json.loads(source.read_text())
+    report = classifier.classify(census, source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        base_commit=f.base, carrier=str(f.carrier), landed=False, residual=True,
+        wave_id="fresh-classification-2026-09-14")
+    rows = {r["path"]: r for r in report["entries"]}
+    assert len(rows) == census["entry_count"]
+    divergent = rows[str(f.target)]
+    assert divergent["decision"] == "HOLD"
+    assert divergent["landing_owner"]["local_commits"] == [head]
+    assert divergent["landing_owner"]["source_branch"] == "refs/heads/fixture/WorkingRCX-merged"
+    standalone = rows[str(clone)]
+    assert standalone["decision"] == "HOLD"
+    assert "tracked.txt" in standalone["landing_owner"]["scope"]
+    assert standalone["source"]["repository_kind"] == "standalone_repository"
+    assert divergent["landing_owner"]["wave_id"] != standalone["landing_owner"]["wave_id"]
+    assert git(f, f.target, "rev-parse", "HEAD") == head
+    assert (clone / "tracked.txt").read_text() == "standalone dirty useful work\n"
+
+
+@pytest.mark.parametrize("staged_count,local_history", [(0, False), (6, False), (7, False), (0, True)])
+def test_fresh_detached_disposition_keeps_landing_ownership_and_retirement_hold(
+        fixture, staged_count, local_history):
+    from mu.tools.executors import workingrcx_fleet_classification as classifier
+    from mu.tests.tools.test_workingrcx_fleet_census import _fixture_git_env
+    f = fixture
+    git(f, f.target, "checkout", "--detach", f.base)
+    if local_history:
+        (f.target / "valuable.py").write_text("value = 42\n")
+        git(f, f.target, "add", "valuable.py")
+        git(f, f.target, "commit", "-qm", "detached useful history")
+    head = git(f, f.target, "rev-parse", "HEAD")
+    paths = [f"retained-{index}.txt" for index in range(staged_count)]
+    for name in paths:
+        (f.target / name).write_text("retained staged work\n")
+    if paths:
+        git(f, f.target, "add", "--", *paths)
+    before = snapshot(f.fleet), snapshot(f.carrier)
+    source = f.root / "detached-census.json"
+    with _fixture_git_env() as env:
+        result = subprocess.run([sys.executable, str(REPO_ROOT / "mu/tools/executors/workingrcx_fleet_census.py"),
+            "--fleet-root", str(f.fleet), "--anchor-repo", str(f.primary),
+            "--comparison-commit", f.base, "--output", str(source)], capture_output=True, env=env)
+    assert result.returncode == 0, result.stderr
+    census = json.loads(source.read_bytes())
+    report = classifier.classify(census, source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        base_commit=f.base, carrier=str(f.carrier), landed=False, residual=True,
+        wave_id="fresh-detached-classification-2026-09-14")
+    target = next(row for row in report["entries"] if row["path"] == str(f.target))
+    assert target["decision"] == "HOLD" and target["proposed_action"] == "UNTOUCHED_HOLD"
+    assert target["mutation_authorized"] is False and target["apply_prerequisites"] == []
+    assert {reason["code"] for reason in target["reasons"]} == {
+        "head_or_branch_uncertain", "registration_uncertain"}
+    assert target["source"]["git"]["dirty_counts"]["staged"] == staged_count
+    work, owner = target["useful_work"], target["landing_owner"]
+    assert work["errors"] == []
+    assert {change["path"] for change in work["changes"]} == set(paths)
+    if staged_count or local_history:
+        assert work["status"] == "NEEDS_LANDING"
+        assert owner["source_head"] == head and owner["source_branch"] is None
+        assert owner["source_path"] == str(f.target) and owner["comparison_commit"] == f.base
+        assert owner["scope"] == (["valuable.py"] if local_history else paths)
+        assert owner["local_commits"] == ([head] if local_history else [])
+        assert owner["staged_patch_sha256"] == work["staged_patch_sha256"]
+        assert owner["status"] == "PENDING_NATIVE_LANDING_REVIEW" and owner["next_action"]
+    else:
+        assert work["status"] == "COVERED" and owner is None
+    useful = classifier.useful_work_report(report, "f" * 64)
+    retained = next(row for row in useful["entries"] if row["path"] == str(f.target))
+    assert retained["inventory"] == work and retained["landing_owner"] == owner
+    assert (snapshot(f.fleet), snapshot(f.carrier)) == before
+
+
 @pytest.fixture
 def legacy_git_env(fixture):
     f = fixture

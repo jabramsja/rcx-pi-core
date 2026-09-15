@@ -5187,9 +5187,45 @@ def test_explicit_dirty_local_dev_sync_preserves_primary_stashes_and_evidence(tm
     assert _git(["stash", "list", "--format=%H"], cwd=local_dev).stdout.splitlines() == stashes
 
 
-def test_residual_code_merge_keeps_same_live_fleet_owner_before_mu(tmp_path, monkeypatch):
+@pytest.mark.parametrize("deleted", [
+    ["mu/tests/l4_gates/test_stage0_vm_performance.py"],
+    ["mu/tests/l4_gates/test_stage0_vm_performance.py", "old-name.txt"],
+    ["mu/docs/core/SurrealNumbers.v0.md", "mu/tests/docs/test_surreal_numbers_foundation_gate.py"],
+])
+def test_sync_preserves_observed_staged_deletions_with_mixed_wip(tmp_path, deleted):
+    """The three retained failures have HEAD entries absent from the index."""
+    upstream, primary, _, env = _init_origin_and_primary(tmp_path)
+    for name in deleted:
+        path = upstream / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("retained old content\n")
+    _git(["add", "."], cwd=upstream, env=env)
+    _git(["commit", "-m", "old candidate paths"], cwd=upstream, env=env)
+    _git(["pull", "--ff-only"], cwd=primary, env=env)
+    _git(["checkout", "-b", "founder/wip"], cwd=primary, env=env)
+    _git(["rm", "--", *deleted], cwd=primary, env=env)
+    (primary / "added.txt").write_text("index addition\n")
+    _git(["add", "added.txt"], cwd=primary, env=env)
+    (primary / "added.txt").write_text("unstaged second version\n")
+    (primary / "untracked.bin").write_bytes(b"\xff\x00private")
+    staged = _git(["diff", "--cached", "--binary", "--no-renames"], cwd=primary).stdout
+    unstaged = _git(["diff", "--binary", "--no-renames"], cwd=primary).stdout
+    new_head = _advance_origin_dev_add_file(upstream, env)
+    result = commit_mod.sync_primary_worktree_to_base(primary, "dev", log=_noop_log)
+    assert result["synced"] is True, result
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == new_head
+    assert _git(["diff", "--cached", "--binary", "--no-renames"], cwd=primary).stdout == staged
+    assert _git(["diff", "--binary", "--no-renames"], cwd=primary).stdout == unstaged
+    assert (primary / "untracked.bin").read_bytes() == b"\xff\x00private"
+    assert all(not (primary / name).exists() for name in deleted)
+
+
+
+@pytest.mark.parametrize("wave", ["workingrcx-fleet-residual-completion-r1-2026-09-13",
+                                 "workingrcx-fleet-transaction-landing-r1-2026-09-15",
+                                 "workingrcx-fleet-transaction-landing-r2-2026-09-15"])
+def test_residual_code_merge_keeps_same_live_fleet_owner_before_mu(tmp_path, monkeypatch, wave):
     repo = _init_repo(tmp_path)
-    wave = "workingrcx-fleet-residual-completion-r1-2026-09-13"
     plan_path = f"reports/control_plane/{wave}_apply_plan.json"
     (repo / plan_path).parent.mkdir(parents=True, exist_ok=True)
     (repo / plan_path).write_text(json.dumps({"schema_version": 2, "wave_id": wave,

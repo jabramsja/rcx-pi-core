@@ -5861,8 +5861,22 @@ def _stash_primary_sync_tracked_wip(
             + ", ".join(missing_paths)
         )
 
+    # Git validates stash pathspecs against the index. A staged deletion is
+    # present only in HEAD and therefore fails that validation. Whole-index
+    # stash handles deletions, but is safe only when the declared transaction
+    # owns *all* current tracked WIP. Untracked/ignored bytes are never included.
+    deleted = _run(
+        ["git", "diff", "--cached", "--no-renames", "--diff-filter=D", "--name-only", "-z"],
+        cwd=repo_root, check=False,
+    )
+    if deleted.returncode:
+        return None, "cannot establish staged-deletion identity before stash"
+    has_deleted = bool(set(deleted.stdout.split("\0")) & set(paths))
+    if has_deleted and set(paths) != current_tracked:
+        return None, "staged-deletion stash requires exact ownership of all tracked WIP"
+    pathspec = [] if has_deleted else ["--", *[":(top,literal)" + p for p in paths]]
     result = _run(
-        ["git", "stash", "push", "-m", marker, "--", *paths],
+        ["git", "stash", "push", "-m", marker, *pathspec],
         cwd=repo_root,
         check=False,
         timeout=120,
@@ -15933,6 +15947,11 @@ def _refresh_post_merge_package_for_next_open_queue(
         merged_pr = 0
 
     residual_wave = "workingrcx-fleet-residual-completion-r1-2026-09-13"
+    if str(handoff.get("task_id") or "").strip("[]") == "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION":
+        fresh_wave = str(handoff.get("wave_id") or "")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,160}", fresh_wave):
+            raise QueueCommitAuthorityError("Fleet live-action handoff requires an exact safe wave identity")
+        residual_wave = fresh_wave
     if handoff.get("wave_id") == residual_wave:
         # This code merge cannot witness future foreground directory outcomes.
         # Carry the same task's committed operations through the existing stop.

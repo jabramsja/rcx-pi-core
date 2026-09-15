@@ -15,6 +15,7 @@ when the existing file is a census for the same fleet root and anchor.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from datetime import datetime, timezone
 import json
 import os
@@ -27,10 +28,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _git(path: str, *args: str) -> tuple[bytes, dict | None]:
+def _git(path: str, *args: str, alternate_objects: str | None = None) -> tuple[bytes, dict | None]:
     # An inherited GIT_DIR / index / config override must not redirect a probe.
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_NO_LAZY_FETCH="1", GIT_TERMINAL_PROMPT="0", LC_ALL="C")
+    env["GIT_ALLOW_PROTOCOL"] = ""  # Object probes cannot trigger an implicit promisor fetch.
+    if alternate_objects:
+        env["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = alternate_objects
     operation = "git " + " ".join(args)
     try:
         result = subprocess.run(
@@ -266,7 +270,133 @@ def _inspect(row: dict) -> None:
     row["inspection_status"] = "partial" if errors else "ok"
 
 
-def census(fleet_root: str, anchor_repo: str) -> dict:
+def useful_work(path: str, comparison_commit: str, *, comparison_repo: str | None = None) -> dict:
+    """Inventory local history and WIP without filters, fetching or index writes.
+
+    Equality is conservative: changed bytes not identical to the comparison
+    tree need a native landing owner. A backup is never an integration proof.
+    Patch hashes bind the complete staged/unstaged diffs retained at the source.
+    """
+    result = dict(comparison_commit=comparison_commit, status="UNKNOWN", errors=[],
+                  changes=[], local_commits=[], local_refs=[])
+    alternate_objects = None
+    if comparison_repo:
+        raw_common, error = _git(comparison_repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        local_common, local_error = _git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        if error or local_error:
+            result["errors"].append(error or local_error)
+            return result
+        if raw_common != local_common:
+            # Ephemeral read-only object lookup, never an alternates file, fetch
+            # or object import into a retained clone. Local-only objects remain
+            # visible alongside the exact canonical comparison commit.
+            alternate_objects = os.path.join(_line(raw_common), "objects")
+
+    def probe(*args):
+        raw, error = _git(path, *args, alternate_objects=alternate_objects)
+        if error:
+            result["errors"].append(error)
+            raise ValueError("useful-work probe failed")
+        return raw
+
+    try:
+        probe("cat-file", "-e", comparison_commit + "^{commit}")
+        ahead, behind = map(int, probe("rev-list", "--left-right", "--count",
+                                     "HEAD..." + comparison_commit).split())
+        result.update(ahead=ahead, behind=behind)
+        admin = _line(probe("rev-parse", "--absolute-git-dir"))
+        common = _line(probe("rev-parse", "--path-format=absolute", "--git-common-dir"))
+        result["local_commits"] = probe("rev-list", "--all" if admin == common else "HEAD",
+                                        "--not", comparison_commit).decode().splitlines()
+        refs = ["refs/heads", "refs/stash"]
+        if admin != common:
+            branch, error = _git(path, "symbolic-ref", "--quiet", "HEAD",
+                                 alternate_objects=alternate_objects)
+            if error:
+                if (error.get("returncode") != 1 or branch or error.get("stderr")
+                        or error.get("stderr_truncated") is not False):
+                    result["errors"].append(error)
+                    return result
+                # A detached HEAD still owns its commits and index/WIP. Do not
+                # pass an empty ref filter to for-each-ref: it means all lanes.
+                refs = []
+            else:
+                refs = [_line(branch)]
+        if refs:
+            result["local_refs"] = os.fsdecode(probe("for-each-ref", "--format=%(refname) %(objectname)", *refs)).splitlines()
+        result["local_commit_changes"] = []
+        for commit in result["local_commits"]:
+            paths = probe("diff-tree", "--root", "--no-commit-id", "--name-only", "--no-renames",
+                          "-r", "-m", "--first-parent", "-z", commit)
+            patch = probe("diff-tree", "--root", "--binary", "--no-ext-diff", "--no-textconv",
+                          "--no-renames", "-r", "-m", "--first-parent", commit)
+            result["local_commit_changes"].append(dict(commit=commit,
+                paths=sorted({os.fsdecode(p) for p in paths.split(b"\0") if p}, key=os.fsencode),
+                patch_sha256=hashlib.sha256(patch).hexdigest()))
+        _, error = _status(path)
+        if error:
+            result["errors"].append(error)
+            return result
+        base_tree = {}
+        for entry in probe("ls-tree", "-r", "-z", comparison_commit).split(b"\0"):
+            if entry:
+                metadata, name = entry.split(b"\t", 1)
+                mode, _, oid = metadata.split()
+                base_tree[os.fsdecode(name)] = (mode.decode(), oid.decode())
+        index_tree = {}
+        for entry in probe("ls-files", "--stage", "-z").split(b"\0"):
+            if entry:
+                metadata, name = entry.split(b"\t", 1)
+                mode, oid, stage = metadata.split()
+                if stage != b"0":
+                    raise ValueError("Unmerged useful-work index")
+                index_tree[os.fsdecode(name)] = (mode.decode(), oid.decode())
+        changed = set()
+        for args in (("diff", "--cached", "--no-renames", "--name-only", "-z"),
+                     ("diff", "--no-renames", "--name-only", "-z"),
+                     ("ls-files", "--others", "--exclude-standard", "-z")):
+            changed.update(os.fsdecode(p) for p in probe(*args).split(b"\0") if p)
+        for label, args in (("staged", ("--cached",)), ("unstaged", ())):
+            patch = probe("diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", *args)
+            result[label + "_patch_sha256"] = hashlib.sha256(patch).hexdigest()
+        for name in sorted(changed, key=os.fsencode):
+            file = os.path.join(path, name)
+            try:
+                info = os.lstat(file)
+                if stat.S_ISLNK(info.st_mode):
+                    content, mode = os.fsencode(os.readlink(file)), "120000"
+                elif stat.S_ISREG(info.st_mode):
+                    if os.path.realpath(os.path.dirname(file)) != os.path.dirname(file):
+                        raise ValueError("Useful-work parent alias requires exact preservation review: " + name)
+                    fd = os.open(file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    with os.fdopen(fd, "rb") as stream:
+                        before = os.fstat(stream.fileno())
+                        content = stream.read()
+                        after = os.fstat(stream.fileno())
+                    if (before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                            after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                        raise ValueError("Useful-work content changed during inventory")
+                    mode = "100755" if info.st_mode & 0o111 else "100644"
+                else:
+                    raise ValueError("Useful-work special entry requires preservation owner: " + name)
+                oid = hashlib.sha1(b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
+                worktree = (mode, oid)
+                content_sha = hashlib.sha256(content).hexdigest()
+            except FileNotFoundError:
+                worktree, content_sha = None, None
+            index = index_tree.get(name)
+            base = base_tree.get(name)
+            result["changes"].append(dict(path=name, index=index, worktree=worktree,
+                comparison=base, content_sha256=content_sha,
+                dev_covered=index == base and worktree == base))
+        result["status"] = "COVERED" if not result["local_commits"] and all(
+            change["dev_covered"] for change in result["changes"]) else "NEEDS_LANDING"
+    except (OSError, ValueError) as exc:
+        result["errors"].append(dict(operation="useful_work", message=str(exc)))
+    return result
+
+
+def census(fleet_root: str, anchor_repo: str, *, comparison_commit: str | None = None) -> dict:
     """Return fresh metadata; only main() writes the explicitly named output."""
     started = _now()
     # Resolve the input directories once (e.g. /var -> /private/var on macOS).
@@ -318,6 +448,8 @@ def census(fleet_root: str, anchor_repo: str) -> dict:
                      branch_status="unknown", dirty_status="unknown", dirty_counts=None),
         )
         _inspect(row)
+        if comparison_commit and row["repository_kind"] in ("linked_worktree", "standalone_repository"):
+            row["useful_work"] = useful_work(path, comparison_commit, comparison_repo=anchor)
         if row["repository_kind"] == "non_repository" and row["entry_kind"] == "directory":
             # Includes shells inside a containing Git checkout: rev-parse can
             # succeed there without this directory owning any Git registration.
@@ -389,12 +521,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fleet-root", required=True)
     parser.add_argument("--anchor-repo", required=True)
+    parser.add_argument("--comparison-commit", help="Exact local comparison commit for useful-work inventory")
     parser.add_argument(
         "--output", required=True,
         help="JSON artifact; a census for the same fleet root and anchor may be refreshed",
     )
     args = parser.parse_args(argv)
-    report = census(args.fleet_root, args.anchor_repo)
+    report = census(args.fleet_root, args.anchor_repo, comparison_commit=args.comparison_commit)
     try:
         _write_report(args.output, report)
     except (OSError, ValueError) as exc:

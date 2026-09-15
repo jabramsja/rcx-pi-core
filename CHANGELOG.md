@@ -4,6 +4,79 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-15
+
+### Fleet transaction R2 ownership admission (Phase B; native landing and live actions pending)
+
+- Verifies the newest stopped R1 manifest against SHA256
+  `0257cefcc93dfed220c72047d3783446ec0343067e55f1e293b2999224a0e23f`
+  and all 27 stored file sizes and hashes, then carries its eight source/test
+  files. Complete transaction, index-blob, stash, safe-sync and committed
+  authority repairs remain intact. The commit executor remains byte-exact
+  to that snapshot; its baton regression additionally covers transaction R2.
+- Contains ordinary exceptions at the existing read-only native ownership
+  admission boundary as explicit uncertain-ownership HOLDs. Existing HOLD
+  reasons and permission uncertainty remain protected, and operator
+  interruptions propagate. No PID range allowlist or mutation-error catch is
+  added.
+- Extends the real disposable-Git batch regression with the synthetic oversized
+  PID and a custom ordinary observation failure. Both retain the affected
+  source, files, index and HEAD, record its HOLD, complete four eligible peers,
+  verify outcomes and retain unchanged claims/receipts after rejected replay.
+  Permission uncertainty and KeyboardInterrupt/SystemExit cases also pass.
+- The declared eight-module command first reproduced **2 failed, 1533 passed,
+  1 skipped in 281.73 seconds, exit 1**. With containment, the same command passed
+  **1535 tests, 1 skipped in 277.79 seconds, exit 0**. The four witness modules
+  remain unchanged; the earlier 1527 passing cases retain their coverage.
+- Generates fresh R2 census/classification/useful-work/plan artifacts: 359
+  entries, 218 direct directories, 140 behind-dev linked roots, and 14
+  unconsumed operations for 164 worktree preservations and one local-dev sync.
+  There are 194 HOLDs and 209 direct-source useful-work landing owners.
+  PRIMARY, the current lane, preservation roots and all four stopped candidates
+  remain protected. Historical consumed operations and stopped plans are
+  unchanged. These artifacts record preparation, not physical cleanup.
+- Preserves PRIMARY tracker history and all 39 parked obligations. Transaction
+  R2 remains CURRENT at row 39, permanent native prevention and actual resume
+  repair remain NEXT at row 40, then Mu. The locked Ra note retains L4
+  authority; packet evidence uses the reserved non-normative clarification.
+  Indicator collection, staged packet gates, independent native review/merge,
+  PRIMARY synchronization and committed foreground apply/verify remain pending.
+
+### Stopped fleet transaction R1 (historical; not landed)
+
+Preserved from the hash-verified stopped R1 snapshot. Counts and validation
+results in this section describe R1; its operations remain unconsumed.
+
+- Carries the hash-verified R2 fleet inventory, detached-source, classification,
+  complete lsof-reader, native-idle and saved-fixture repairs. The commit helper
+  changes are limited to staged-deletion safe sync and the fresh task-keyed
+  committed-action baton; baseline post-merge cleanup remains in place.
+- Binds admitted semantic index entries and file content across preservation,
+  native fast-forward/WIP preparation and retirement. Preserves index-only blob
+  bytes and native temporary-stash history; later verification checks the
+  retired index. Drift retains unresolved landing ownership and immutable
+  evidence. Incidental Git stat-cache refreshes remain valid.
+- Fresh bulk authority binds executing dependencies and wave artifacts to exact
+  committed bytes, index entries and modes without the excluded lifecycle
+  worker. Consumed operations cannot be replayed.
+- Malformed stale native lock documents, holder types and timestamps produce
+  explicit per-target HOLD receipts. Real Git regressions verify the held
+  source's files, index and HEAD remain intact, eligible peers continue, and
+  verification and rejected replay leave operation claims and receipts unchanged.
+- Generates a complete 358-entry census with 217 present direct-prefix
+  directories, including five standalone repositories and 140 behind-dev direct
+  linked roots. The new plan contains 14 unconsumed operations for 164 worktree
+  retirements and one separate local-dev synchronization; 193 rows remain HOLD
+  and 208 direct sources retain useful-work landing owners. PRIMARY, live and
+  stopped lanes, and preservation roots remain protected.
+- Reproduces the original false-MOVED index race before the fix. Earlier Phase B
+  evidence: 1505 passed, 1 skipped in 248.59 seconds (exit 0). Stale-lock re-entry
+  reproduced 15 failures with 1512 passed and 1 skipped in 261.41 seconds (exit 1).
+  After the repair, the same declared gate passed: 1527 passed, 1 skipped in
+  268.04 seconds (exit 0). All fleet mutation in tests uses disposable
+  repositories. Native merge, committed foreground apply/verify and the required
+  NEXT permanent-prevention child remain outstanding.
+
 ## 2026-09-14
 
 ### Fleet residual completion (Phase B; landing and live actions pending)

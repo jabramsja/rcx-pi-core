@@ -221,11 +221,16 @@ def _ancestry(carrier: str, head: str, base: str) -> dict:
 
 
 def classify(census: dict, *, source_sha256: str, base_commit: str,
-             carrier: str, landed: bool, residual: bool = False) -> dict:
+             carrier: str, landed: bool, residual: bool = False,
+             wave_id: str | None = None, protected: tuple[str, ...] = ()) -> dict:
     """Return one decision per validated row using only carrier-local objects."""
     _validate_inventory(census)
     if residual and landed:
         raise ValueError("Historical and residual classification authorities cannot be mixed")
+    if wave_id is not None and (not residual or not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,160}", wave_id)):
+        raise ValueError("Fresh wave identity requires residual mode and a safe wave ID")
+    fresh_wave = wave_id is not None and wave_id != RESIDUAL_WAVE_ID
+    selected_wave = wave_id or RESIDUAL_WAVE_ID
     if not _oid(base_commit):
         raise ValueError("base-commit must be an exact 40-character commit ID")
     if not _success(_git(carrier, "rev-parse", "--show-toplevel"), carrier + "\n"):
@@ -254,6 +259,9 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
         protected_paths = [census["fleet_root"] + "/" + name for name in (
             "WorkingRCX", "WorkingRCX-preservation", "workingrcx_pr_preservation_20260630")]
     protected_paths += [census["anchor_repo"], carrier]
+    if any(not _absolute(p) for p in protected):
+        raise ValueError("Protected owners require exact absolute paths")
+    protected_paths += list(protected)
     rows, cache = [], {}
     for index, source in enumerate(census["entries"]):
         path, reasons = source["path"], []
@@ -266,7 +274,7 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                  and source.get("repository_kind") == "non_repository"
                  and source.get("inspection_status") == "not_repository"
                  and source.get("registration_status") == "not_registered" and not registrations)
-        sync_dev = (residual and name == "workingrcx_clarolesfull_20260627"
+        sync_dev = (residual and (fresh_wave or name == "workingrcx_clarolesfull_20260627")
                     and git.get("branch") == "refs/heads/dev")
         if (any(path == p or path.startswith(p + "/") for p in protected_paths)
                 or re.match(r"workingrcx[-_](audit|admin|source)([-_]|$)", name, re.I)
@@ -346,6 +354,31 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                                  "PRESERVE_BUS_SHELL" if shell else
                                  "SYNC_LOCAL_DEV" if sync_dev else "PRESERVE_WORKTREE"),
             )
+        if fresh_wave:
+            useful = source.get("useful_work", {})
+            owner_id = selected_wave + "-useful-" + hashlib.sha256(path.encode("utf-8", "surrogateescape")).hexdigest()[:12]
+            rows[-1]["useful_work"] = useful
+            needs_landing = (useful.get("status") == "NEEDS_LANDING"
+                and source.get("availability_status") == "present"
+                and source.get("repository_kind") in {"linked_worktree", "standalone_repository"}
+                and os.path.dirname(path) == census["fleet_root"])
+            rows[-1]["landing_owner"] = (
+                None if not needs_landing else dict(
+                    task="FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION", wave_id=owner_id,
+                    source_path=path, source_head=git.get("HEAD"), source_branch=git.get("branch"),
+                    comparison_commit=base_commit, status="PENDING_NATIVE_LANDING_REVIEW",
+                    scope=sorted({c["path"] for c in useful.get("changes", [])}
+                        | {p for commit in useful.get("local_commit_changes", []) for p in commit["paths"]}),
+                    local_commits=useful.get("local_commits", []),
+                    local_commit_changes=useful.get("local_commit_changes", []),
+                    staged_patch_sha256=useful.get("staged_patch_sha256"),
+                    unstaged_patch_sha256=useful.get("unstaged_patch_sha256"),
+                    next_action="Native Phase A must compare the retained index/worktree and local commits to dev; land missing hunks before marking this owner complete."))
+            if not shell and (not useful or useful.get("status") == "UNKNOWN"):
+                # Inventory uncertainty never becomes preservation permission.
+                if rows[-1]["decision"] != "HOLD":
+                    rows[-1].update(decision="HOLD", proposed_action="UNTOUCHED_HOLD", apply_prerequisites=[])
+                rows[-1]["reasons"].append(dict(code="useful_work_unknown", detail="Exact useful-work inventory requires the recorded native owner."))
     counts = Counter(r["decision"] for r in rows)
     report = {
         "schema_version": 1, "observation_kind": "read_only_fleet_classification",
@@ -369,17 +402,31 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
 
     if residual:
         selected = [r["source_index"] for r in rows if r["decision"] != "HOLD"]
-        report.update(wave_id=RESIDUAL_WAVE_ID,
+        report.update(wave_id=selected_wave,
                       batch_size=RESIDUAL_BATCH_SIZE,
                       batches=[selected[i:i + RESIDUAL_BATCH_SIZE]
                                for i in range(0, len(selected), RESIDUAL_BATCH_SIZE)])
         report["policy"].update(
-            authority="TASKS.md: 2026-09-13 " + RESIDUAL_WAVE_ID + " tracker note",
+            authority="TASKS.md: " + selected_wave + " tracker note",
             bounded_candidate_paths=[r["path"] for r in rows if r["decision"] != "HOLD"],
             unlisted_targets="HOLD individually; historical HOLDs were freshly reassessed",
         )
         report["limitations"][-1] = "Committed foreground plan/apply/verify remains required for every bounded operation."
     return report
+
+
+def useful_work_report(classification: dict, classification_sha256: str) -> dict:
+    """Full per-target landing stubs, bound to this immutable classification."""
+    rows = [dict(path=row["path"], source_index=row["source_index"],
+                 repository_kind=row["source"]["repository_kind"],
+                 disposition=row["proposed_action"], owner=row["owner"],
+                 inventory=row.get("useful_work"), landing_owner=row.get("landing_owner"))
+            for row in classification["entries"]]
+    return dict(schema_version=1, wave_id=classification["wave_id"],
+        census_sha256=classification["source_sha256"], classification_sha256=classification_sha256,
+        comparison_commit=classification["comparison_commit"], entries=rows, entry_count=len(rows),
+        landing_owners=sum(row["landing_owner"] is not None for row in rows),
+        completion="PENDING_NATIVE_LANDINGS_AND_COMMITTED_LIVE_ACTIONS")
 
 
 def _write_or_verify(path: str, payload: bytes) -> None:
@@ -421,6 +468,8 @@ def _output_path(output: str, census: dict, carrier: str, landed: bool) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--residual", action="store_true", help="Fresh manifest-bound residual batches; historical authority is unchanged")
+    parser.add_argument("--wave-id", help="Fresh residual owner; omitted retains the legacy authority")
+    parser.add_argument("--protect", action="append", default=[], help="Exact additional active/preserved source path")
     parser.add_argument("--census", required=True)
     parser.add_argument("--base-commit", required=True)
     parser.add_argument("--output", required=True)
@@ -442,15 +491,20 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("Raw census SHA-256 binding mismatch or missing fixture hash")
         if args.residual:
             output = os.path.abspath(args.output)
-            expected_output = os.getcwd() + "/reports/control_plane/" + RESIDUAL_WAVE_ID + "_classification.json"
+            expected_output = os.getcwd() + "/reports/control_plane/" + (args.wave_id or RESIDUAL_WAVE_ID) + "_classification.json"
             if output != expected_output or str(Path(output).parent.resolve(strict=True)) != os.path.dirname(output):
                 raise ValueError("Residual classification may write only its wave-owned report")
         else:
             output = _output_path(args.output, census, os.getcwd(), landed)
         report = classify(census, source_sha256=digest, base_commit=args.base_commit,
-                          carrier=os.getcwd(), landed=landed, residual=args.residual)
+                          carrier=os.getcwd(), landed=landed, residual=args.residual,
+                          wave_id=args.wave_id, protected=tuple(args.protect))
         payload = (json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii")
         _write_or_verify(output, payload)
+        if args.wave_id and args.wave_id != RESIDUAL_WAVE_ID:
+            useful = useful_work_report(report, hashlib.sha256(payload).hexdigest())
+            _write_or_verify(os.getcwd() + "/reports/control_plane/" + args.wave_id + "_useful_work.json",
+                             (json.dumps(useful, indent=2, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii"))
         print(json.dumps({"entry_count": report["entry_count"], "decision_counts": report["decision_counts"],
                           "source_sha256": digest, "comparison_commit": args.base_commit}, sort_keys=True))
         return 0
