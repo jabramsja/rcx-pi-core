@@ -1,0 +1,25 @@
+{
+  "wave_id": "pr1307-landed-coverage-closeout-r1-2026-09-16",
+  "repeat_run_speedup_ratio": 1.014454,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.243469,
+  "repeat_run_raw_seconds": [
+    0.246988,
+    0.243469
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.246988
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.490457
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-16T09:32:54Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "d774fbe711529e9bb9591f67fac5a8313941428a"
+}

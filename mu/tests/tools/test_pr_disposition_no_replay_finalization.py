@@ -334,6 +334,12 @@ def test_only_exact_finalization_wave_uses_terminal_sweep() -> None:
     assert not disposition.requires_terminal_sweep(
         disposition.TERMINAL_SWEEP_WAVE_ID + "-replay"
     )
+    current = disposition.validate_lifecycle_manifest(
+        REPO_ROOT / "reports/control_plane/pr1307-landed-coverage-closeout-r1-2026-09-16_coverage.json"
+    )
+    assert not disposition.requires_terminal_sweep(current["wave_id"])
+    assert {entry["target"]["number"] for entry in current["targets"]} == {1307}
+    assert all(target["number"] != 1307 for target in disposition.EXPECTED_TARGETS)
 
 
 def test_finalization_evidence_passes_with_distinct_fresh_digest(
