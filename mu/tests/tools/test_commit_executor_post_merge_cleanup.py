@@ -68,6 +68,93 @@ def _noop_log(msg: str) -> None:
     pass
 
 
+@pytest.mark.parametrize("selectors, caller_timeout, expected_budget", [
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 120, 900),
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 1800, 1800),
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_commit_executor_receipt.py"], 120, 1140),
+    (["mu/tests/tools/test_commit_executor_receipt.py"], 120, 240),
+    (["mu/tests/tools/test_commit_executor_receipt.py",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py"], 120, 480),
+    (["mu/tests/tools/test_commit_executor_receipt.py"], 1800, 1800),
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py::test_original_owner_cli_rejects_each_uncommitted_dependency_before_claim"],
+     120, 240),
+])
+def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
+    tmp_path, monkeypatch, selectors, caller_timeout, expected_budget,
+):
+    """Exercise the real runner through its subprocess boundary without waiting."""
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=0, stdout="selected tests passed\n", stderr="")
+
+    monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: observe the real shared runner's deadline and complete subprocess selection.
+        tmp_path, selectors, timeout=caller_timeout,
+    )
+
+    assert result == {"exit_code": 0, "stdout": "selected tests passed\n",
+                      "stderr": "", "passed": True}
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args == [commit_mod.sys.executable, "-m", "pytest", "-x", "--tb=short",
+                    "--import-mode=importlib", "-m", "not slow and not fuzzer", *selectors]
+    assert kwargs["cwd"] == tmp_path
+    assert kwargs["timeout"] == expected_budget
+    assert kwargs["check"] is False
+    assert kwargs["env"]["PYTHONHASHSEED"] == "0"
+    assert kwargs["env"]["RCX_CI"] == "1"
+    assert kwargs["env"]["HYPOTHESIS_PROFILE"] == "ci_fast"
+    if selectors == ["mu/tests/tools/test_workingrcx_fleet_apply.py"] and caller_timeout == 120:
+        assert 574.48 < kwargs["timeout"] <= 900
+
+
+@pytest.mark.parametrize("returncode, stdout, stderr", [
+    (1, "1 failed\n", "assertion diagnostic\n"),
+    (5, "no tests ran\n", ""),
+])
+def test_fleet_pytest_budget_keeps_nonzero_failure_output(
+    tmp_path, monkeypatch, returncode, stdout, stderr,
+):
+    def run(args, **kwargs):
+        assert kwargs["timeout"] == 900
+        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: a larger fleet budget must not turn failed or empty collection into success.
+        tmp_path, ["mu/tests/tools/test_workingrcx_fleet_apply.py"],
+    )
+    assert result == {"exit_code": returncode, "stdout": stdout,
+                      "stderr": stderr, "passed": False}
+
+
+@pytest.mark.parametrize("caller_timeout, expected_budget", [(120, 900), (1800, 1800)])
+def test_fleet_pytest_timeout_reports_selected_budget(
+    tmp_path, monkeypatch, caller_timeout, expected_budget,
+):
+    def run(args, **kwargs):
+        assert kwargs["timeout"] == expected_budget
+        raise subprocess.TimeoutExpired(args, timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: the real runner must still fail closed at its selected finite deadline.
+        tmp_path, ["mu/tests/tools/test_workingrcx_fleet_apply.py"], timeout=caller_timeout,
+    )
+    assert result == {"exit_code": -1, "stdout": "",
+                      "stderr": f"pytest timed out after {expected_budget}s", "passed": False}
+
+
+def test_targeted_pytest_empty_selection_starts_no_process(tmp_path, monkeypatch):
+    def run(*args, **kwargs):
+        raise AssertionError("Empty test selection must not start a subprocess")
+
+    monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    result = commit_mod._run_pytest_on_files(tmp_path, [])  # ANTICHEAT_OK: preserve the existing empty-selection contract.
+    assert result == {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
+
+
 def _write_queue_packet(repo: Path, relpath: str, status: str) -> None:
     path = repo / relpath
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2975,6 +3062,102 @@ def test_sync_primary_restart_recovers_pre_ff_tracked_checkpoints_idempotently(
     )
     assert retry["skipped"] is True and "already current" in retry["reason"], retry
     assert len(_primary_sync_transaction_manifests(primary)) == manifest_count
+
+
+@pytest.mark.parametrize("legacy_hold", [False, True])
+def test_pending_0600_owner_cannot_poison_five_other_worktrees(tmp_path, legacy_hold):
+    """Real source23 stash-before-publication state, followed by five peers."""
+    upstream, primary, old_head, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "retained-source23"], cwd=primary)
+    peers = []
+    for number in range(5):
+        peer = tmp_path / f"eligible-peer-{number}"
+        _git(["worktree", "add", "-b", f"eligible-{number}", str(peer)], cwd=primary)
+        peers.append(peer)
+    original = primary / "seed.txt"
+    original.write_text("staged source23 implementation\n")
+    _git(["add", "seed.txt"], cwd=primary)
+    original.write_text("unstaged source23 implementation\n")
+    original.chmod(0o600)
+    new_head = _advance_origin_dev_add_file(upstream, env)
+
+    def stopped_after_native_stash(stage, manifest):
+        if stage == "after_stash_before_publish":
+            raise _SimulatedPrimarySyncCrash("source23 admission rejected Git's 0644")
+
+    with pytest.raises(_SimulatedPrimarySyncCrash):
+        commit_mod.sync_primary_worktree_to_base(primary, "dev", log=_noop_log,
+                                                checkpoint=stopped_after_native_stash)
+    journal = _primary_sync_transaction_manifests(primary)[0]
+    pending = json.loads(journal.read_bytes())
+    assert pending["state"] == "PREPARED" and pending["stash_oid"] is None
+    assert pending["tracked_snapshots"]["seed.txt"]["worktree"]["mode"] == 0o600
+    stash = _git(["stash", "list", "--format=%H"], cwd=primary).stdout
+    assert stash.strip()
+    stash_oid = stash.strip()
+    stash_bytes = {
+        ref: _git(["cat-file", "-p", ref], cwd=primary).stdout
+        for ref in (stash_oid, stash_oid + ":seed.txt", stash_oid + "^2:seed.txt")
+    }
+    if legacy_hold:
+        # Reproduce the archived damage in this disposable fixture only.
+        pending.update(state="HOLD", hold_reason="transaction worktree identity mismatch")
+        journal.write_text(json.dumps(pending))
+    retained = journal.read_bytes()
+    for peer in peers:
+        binding = commit_mod.bind_terminal_target_identity(peer, base_branch="dev")
+        synced = commit_mod.sync_primary_worktree_to_base(primary, "dev", log=_noop_log, target_identity=binding)
+        assert synced["synced"] is True, synced
+        assert _git(["rev-parse", "HEAD"], cwd=peer).stdout.strip() == new_head
+        assert journal.read_bytes() == retained
+        assert _git(["stash", "list", "--format=%H"], cwd=primary).stdout == stash
+        assert {ref: _git(["cat-file", "-p", ref], cwd=primary).stdout
+                for ref in stash_bytes} == stash_bytes
+    recovered = commit_mod.sync_primary_worktree_to_base(primary, "dev", log=_noop_log)
+    assert recovered["synced"] is True, recovered
+    assert json.loads(journal.read_bytes())["state"] == "RECOVERED"
+    assert original.read_text() == "unstaged source23 implementation\n"
+    assert original.stat().st_mode & 0o777 == 0o600
+    assert _git(["show", ":seed.txt"], cwd=primary).stdout == "staged source23 implementation\n"
+    assert _git(["rev-parse", "HEAD"], cwd=primary).stdout.strip() == new_head
+
+
+@pytest.mark.parametrize("drift", ["bytes", "index", "mode", "executable", "identity"])
+def test_pending_owner_recovery_rejects_content_index_permission_and_identity_drift(tmp_path, drift):
+    upstream, primary, _, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "pending-owner"], cwd=primary)
+    target = primary / "seed.txt"
+    target.write_text("exact staged bytes\n")
+    _git(["add", "seed.txt"], cwd=primary)
+    target.write_text("exact final bytes\n")
+    target.chmod(0o600)
+    _advance_origin_dev_add_file(upstream, env)
+
+    def crash(stage, manifest):
+        if stage == "after_stash_before_publish":
+            raise _SimulatedPrimarySyncCrash(stage)
+
+    with pytest.raises(_SimulatedPrimarySyncCrash):
+        commit_mod.sync_primary_worktree_to_base(primary, "dev", log=_noop_log, checkpoint=crash)
+    journal = _primary_sync_transaction_manifests(primary)[0]
+    stash = _git(["stash", "list", "--format=%H"], cwd=primary).stdout
+    if drift == "bytes":
+        target.write_text("unknown writer\n")
+    elif drift == "index":
+        target.write_text("unknown staged writer\n")
+        _git(["add", "seed.txt"], cwd=primary)
+    elif drift in {"mode", "executable"}:
+        # Already restored bytes/index with unauthorized permissions must HOLD.
+        _git(["stash", "apply", "--index"], cwd=primary)
+        target.chmod(0o666 if drift == "mode" else 0o755)
+    else:
+        data = json.loads(journal.read_bytes())
+        data["worktree_identity"]["inode"] += 1
+        journal.write_text(json.dumps(data))
+    result = commit_mod.sync_primary_worktree_to_base(primary, "dev", log=_noop_log)
+    assert result["synced"] is False and result["recovery_hold"], result
+    assert json.loads(journal.read_bytes())["state"] == "HOLD"
+    assert _git(["stash", "list", "--format=%H"], cwd=primary).stdout == stash
 
 
 def test_sync_primary_restart_recovers_move_before_publication(tmp_path):

@@ -4,6 +4,41 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-16
+
+### Fleet live recovery R3 measured pytest deadline (Phase B; landing and live cleanup pending)
+
+- Verified the stopped R2 manifest SHA256
+  `076b4e34cfdcaacfe989e07cabebb1e554c03edd7a54ec12f3f12a7c1b46933c`
+  and all 48 archived file sizes/hashes. Restored only its four scoped source/test
+  files, including the staged P1 correction. Original stopped sources, raw index,
+  PR1307, claims and stashes remain preserved; no old bookkeeping or wider R4
+  source was copied.
+- Retains recorded-owner journal isolation, Git-representable stash modes,
+  exact saved filesystem permissions, authorized native behind-dev-marker
+  removal, and the committed original-owner recovery CLI with single-use claims
+  and no replay. Saved success remains checked against bound native completion
+  and held-WIP evidence. Both eager imports, `bridge_adapters.py` and
+  `tracker_sync_note.py`, are admitted before import/claim; all eight dependency
+  rejection cases and prior recovery regressions remain intact.
+- The shared targeted pytest runner grants 900 seconds to the exact full fleet
+  module, retaining 240 seconds for each other selector and any larger explicit
+  caller timeout. Twelve deterministic cases preserve selection, command flags,
+  nonzero output, empty-selection behavior and finite timeout reporting. The
+  preserved 293-test/574.48-second serial diagnostic is separate evidence from
+  the failed 240-second gate; the interrupted 250.80-second run is not a pass.
+- Both declared collection checks passed. The exact chained command passed
+  **714 tool/receipt tests in 215.11 seconds**, then **351 documentation tests in
+  1.65 seconds**, exit 0, with two existing freshness warnings. Post-bookkeeping
+  full docs also passed **351 tests**, with the same two warnings. No module,
+  counted file, cap or queue row was added.
+- All 268 unique task IDs and useful-work owners remain. Row39 stays CURRENT:
+  native review/final/receipt/commit/merge gates and PRIMARY sync precede committed
+  original-owner recovery and unconsumed cleanup batches3-14. PR1307 remains
+  STOPPED/PRESERVED until landed replacement coverage supports native disposition.
+  Row40 retains broader lifecycle/PR/lost-feedback and wrong-scope recurrence
+  ownership after actual eligible cleanup, before Mu. No live cleanup occurred.
+
 ## 2026-09-15
 
 ### Fleet transaction R2 ownership admission (Phase B; native landing and live actions pending)

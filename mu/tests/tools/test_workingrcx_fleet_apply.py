@@ -89,7 +89,10 @@ def fleet(monkeypatch):
         f.targets, identities = [], []
         for real in REAL_CANDIDATES:
             target = root / Path(real["path"]).name
-            git(f, f.repo, "worktree", "add", "-qb", real["branch"].removeprefix("refs/heads/"),
+            # The real process probe matches branch tokens. Parallel fixtures
+            # must not mistake each other's Git commands for a target owner.
+            branch = real["branch"] + "-" + root.name
+            git(f, f.repo, "worktree", "add", "-qb", branch.removeprefix("refs/heads/"),
                 str(target), f.original)
             evidence = target / "ignored-evidence"
             evidence.mkdir()
@@ -99,14 +102,17 @@ def fleet(monkeypatch):
             (f.repo / ".git/worktrees" / target.name / "FETCH_HEAD").write_text(
                 f.original + "\t\toriginal fetch evidence\n")
             f.targets.append(target)
-            identities.append(dict(path=str(target), HEAD=f.original, branch=real["branch"],
+            identities.append(dict(path=str(target), HEAD=f.original, branch=branch,
                                    common_dir=str(f.repo / ".git"),
                                    git_dir=str(f.repo / ".git/worktrees" / target.name)))
         f.common = f.repo / ".git"
         f.operation = root / ("fleet-apply-preserved-" + apply.WAVE_ID)
         f.reconcile_operation = root / ("fleet-apply-preserved-" + apply.RECONCILE_WAVE_ID)
         old_root = str(apply.FLEET_ROOT)
-        data = json.loads(SOURCE.read_text().replace(old_root, str(root)))
+        fixture_data = SOURCE.read_text().replace(old_root, str(root))
+        for real, identity in zip(REAL_CANDIDATES, identities):
+            fixture_data = fixture_data.replace(json.dumps(real["branch"]), json.dumps(identity["branch"]))
+        data = json.loads(fixture_data)
         for row in data["entries"]:
             if row["decision"] == "CONDITIONAL_RETIRE_CANDIDATE":
                 row["source"]["git"]["HEAD"] = f.original
@@ -232,7 +238,7 @@ def test_complete_four_candidate_flow_preserves_evidence_and_uses_real_boundary(
 
     monkeypatch.setattr(boundary, "execute_terminal_mutation_once", observed_execute)
     result = run(f)
-    assert result["outcome_counts"] == {"MOVED": 4}, result
+    assert result["outcome_counts"] == {"MOVED": 4}, json.dumps(result, sort_keys=True, indent=2)
     assert result["untouched_holds"] == 407 and result["fleet_clean"] is False
     assert len(calls) == 4
     for result, entry, old in zip(calls, f.candidates, before):
@@ -1398,6 +1404,361 @@ def stage_index_only(f, target):
         input=b"late index-only useful work\n", env=f.env, capture_output=True, check=True).stdout.decode().strip()
     git(f, target, "update-index", "--cacheinfo", "100644," + blob + ",tracked")
     return blob
+
+
+@pytest.mark.parametrize("mode", [0o600, 0o640, 0o700])
+def test_native_stash_keeps_git_identity_and_restores_filesystem_permissions(fleet, mode):
+    f = fleet
+    target, entry, directory = transaction_case(f, current=False, wip="mixed")
+    (target / "wip.txt").chmod(mode)
+    # Rebind the fresh fixture admission after its deliberate permission edit.
+    import workingrcx_fleet_census as census_tool
+    entry["useful_work"] = census_tool.useful_work(str(target), f.landed)
+    original = apply.transaction_state(target)
+    with apply.safe_git_environment(network=True):
+        outcome = apply.apply_target(f.repo, entry, directory, boundary, residual=True)
+    assert outcome["status"] == "MOVED", outcome
+    admitted = json.loads((directory / "admitted-state.json").read_text())
+    stash = json.loads((directory / "sync-stash.json").read_text())
+    assert stash["base"] == admitted["head"]
+    assert stash["index"] == admitted["index"]
+    assert admitted["content"]["wip.txt"]["mode"] == mode
+    assert stash["content"]["wip.txt"] == {
+        **original["content"]["wip.txt"], "mode": 0o755 if mode & 0o100 else 0o644,
+    }
+    destination = Path(entry["destination"])
+    assert destination.joinpath("wip.txt").stat().st_mode & 0o777 == mode
+    assert apply.transaction_state(destination)["index"]["wip.txt"] == original["index"]["wip.txt"]
+    apply.verify_archive(directory / "before.tar", json.loads((directory / "before.json").read_text()))
+
+
+@pytest.mark.parametrize("drift", [None, "untracked", "index", "permissions", "signal", "stash"])
+def test_native_signal_removal_uses_prepared_authority_and_other_drift_stays_owned(fleet, monkeypatch, drift):
+    f = fleet
+    target, entry, directory = transaction_case(f, current=False)
+    bus = target / ".agent_bus"
+    bus.mkdir()
+    signal = bus / "behind_dev.json"
+    signal.write_text(json.dumps({"behind": 1, "primary": str(target)}))
+    signal.chmod(0o600)
+    (target / "untracked-evidence").write_bytes(b"retained evidence\n")
+    import workingrcx_fleet_census as census_tool
+    entry["useful_work"] = census_tool.useful_work(str(target), f.landed)
+    original_sync = boundary.sync_primary_worktree_to_base
+
+    def sync(*args, **kwargs):
+        result = original_sync(*args, **kwargs)
+        assert result["synced"] is True, result
+        assert result["behind_dev_signal_cleared"] is True
+        assert not signal.exists()
+        if drift == "untracked":
+            (target / "untracked-evidence").write_bytes(b"changed\n")
+        elif drift == "index":
+            stage_index_only(f, target)
+        elif drift == "permissions":
+            (target / "tracked").chmod(0o600)
+        elif drift == "signal":
+            signal.write_text("unrelated later owner\n")
+        elif drift == "stash":
+            (target / "tracked").write_text("held owner\n")
+            git(f, target, "stash", "push", "-m", "new foreign stash")
+        return result
+
+    if drift == "stash":
+        # The native transaction must also retain every preexisting held stash.
+        (target / "tracked").write_text("earlier held owner\n")
+        git(f, target, "stash", "push", "-m", "earlier held stash")
+        saved_sync = original_sync
+        def original_sync(*args, **kwargs):
+            result = saved_sync(*args, **kwargs)
+            git(f, target, "stash", "drop", "stash@{0}")
+            return result
+    monkeypatch.setattr(boundary, "sync_primary_worktree_to_base", sync)
+    with apply.safe_git_environment(network=True):
+        outcome = apply.apply_target(f.repo, entry, directory, boundary, residual=True)
+    if drift is None:
+        assert outcome["status"] == "MOVED", outcome
+        assert not target.exists()
+        assert not (Path(entry["destination"]) / ".agent_bus/behind_dev.json").exists()
+        assert json.loads((directory / "before.json").read_text())[".agent_bus/behind_dev.json"]["mode"] == 0o600
+    else:
+        assert outcome["status"] == "INCOMPLETE", outcome
+        assert target.exists()
+
+
+def pending_sync_case(f, *, legacy_hold=True, overlap=False):
+    """Prepare source23's actual crash shape with committed disposable authority."""
+    for rel in apply.SYNC_RECOVERY_DEPENDENCIES:
+        path = f.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((REPO_ROOT / rel).read_bytes())
+    authority = commit(f, "land original-owner recovery dependencies")
+    git(f, f.repo, "push", "-q", "origin", "dev")
+    target, peer = f.targets[:2]
+    (peer / "tracked").write_text("unrelated held stash bytes\n")
+    git(f, peer, "stash", "push", "-m", "retained foreign owner")
+    foreign_oid = git(f, peer, "rev-parse", "refs/stash")
+    rel = "tracked" if overlap else "original-owner-wip.txt"
+    (target / rel).write_text("distinct staged owner bytes\n")
+    git(f, target, "add", rel)
+    (target / rel).write_text("distinct unstaged owner bytes\n")
+    (target / rel).chmod(0o600)
+
+    class PendingOwnerStash(BaseException):
+        pass
+
+    def stop(stage, manifest):
+        if stage == "after_stash_before_publish":
+            raise PendingOwnerStash()
+
+    with pytest.raises(PendingOwnerStash), apply.safe_git_environment(network=True):
+        binding = boundary.bind_terminal_target_identity(target, base_branch="dev")
+        boundary.sync_primary_worktree_to_base(f.repo, "dev", target_identity=binding,
+                                               checkpoint=stop, log=lambda _: None)
+    journal = next((f.common / "rcx_primary_worktree_sync_transactions").glob("*/manifest.json"))
+    manifest = json.loads(journal.read_bytes())
+    assert manifest["state"] == "PREPARED" and manifest["stash_oid"] is None
+    assert manifest["tracked_snapshots"][rel]["worktree"]["mode"] == 0o600
+    if legacy_hold:
+        manifest.update(state="HOLD", hold_reason="transaction worktree identity mismatch")
+        journal.write_bytes(apply.encoded(manifest))
+    return SimpleNamespace(target=target, rel=rel, journal=journal, authority=authority,
+                           foreign_oid=foreign_oid, manifest=manifest,
+                           claim=journal.parent / "fleet-recovery-claim.json",
+                           result=journal.parent / "fleet-recovery-result.json")
+
+
+def recovery_cli(f, case, *extra, script=None, manifest=None, authority=None):
+    # Exercise the installed public CLI and its real committed imports, not a
+    # private recovery helper or an in-process authority-check replacement.
+    return subprocess.run([sys.executable, str(script or f.repo / apply.TOOL_PATH),
+        "--recover-sync", str(manifest or case.journal), "--authority-commit", authority or case.authority,
+        *extra], cwd=f.repo, env=f.env, capture_output=True, text=True, timeout=60)
+
+
+@pytest.mark.parametrize("legacy_hold", [False, True])
+def test_supported_original_owner_cli_restores_0600_wip_and_only_observes_repeated_results(fleet, legacy_hold):
+    f = fleet
+    case = pending_sync_case(f, legacy_hold=legacy_hold)
+    foreign_bytes = git(f, f.repo, "cat-file", "-p", case.foreign_oid)
+    first = recovery_cli(f, case)
+    assert first.returncode == 0, (first.stdout, first.stderr)
+    value = json.loads(first.stdout)
+    assert value["state"] == "RECOVERED"
+    assert case.target.exists() and git(f, case.target, "rev-parse", "HEAD") == case.authority
+    assert (case.target / case.rel).read_text() == "distinct unstaged owner bytes\n"
+    assert (case.target / case.rel).stat().st_mode & 0o777 == 0o600
+    assert git(f, case.target, "show", ":" + case.rel) == "distinct staged owner bytes"
+    assert git(f, f.repo, "stash", "list", "--format=%H") == case.foreign_oid
+    assert git(f, f.repo, "cat-file", "-p", case.foreign_oid) == foreign_bytes
+    native_root = case.journal.parent.parent
+    saved = {str(p): p.read_bytes() for p in native_root.glob("*/*.json")}
+    index = (f.common / "worktrees" / case.target.name / "index").read_bytes()
+    repeated = recovery_cli(f, case)
+    assert repeated.returncode == 0, repeated.stderr
+    assert json.loads(repeated.stdout) == value
+    assert {str(p): p.read_bytes() for p in native_root.glob("*/*.json")} == saved
+    assert (f.common / "worktrees" / case.target.name / "index").read_bytes() == index
+    assert not (f.common / "rcx_fleet_apply_operations").exists()
+
+
+@pytest.mark.parametrize("dependency", apply.SYNC_RECOVERY_DEPENDENCIES)
+def test_original_owner_cli_rejects_each_uncommitted_dependency_before_claim(fleet, dependency):
+    f = fleet
+    case = pending_sync_case(f)
+    path = f.repo / dependency
+    path.write_bytes(path.read_bytes() + b"\n# uncommitted recovery authority\n")
+    git(f, f.repo, "add", str(dependency))
+    original = case.journal.read_bytes()
+    stashes = git(f, f.repo, "stash", "list", "--format=%H")
+    result = recovery_cli(f, case)
+    assert result.returncode == 2 and "dependency differs from committed authority" in result.stderr, result.stderr
+    assert not case.claim.exists() and not case.result.exists()
+    assert case.journal.read_bytes() == original
+    assert git(f, f.repo, "stash", "list", "--format=%H") == stashes
+
+
+@pytest.mark.parametrize("fault", [
+    "index", "mode", "flags", "unlanded", "primary-behind", "executing-copy",
+    "manifest-copy", "manifest-symlink", "common-identity", "owner-identity",
+    "branch", "head", "active", "interrupted", "terminal", "duplicate-owner",
+])
+def test_original_owner_cli_refuses_ambiguous_admission_and_replay(fleet, fault):
+    f = fleet
+    case = pending_sync_case(f)
+    options = {}
+    if fault == "index":
+        git(f, f.repo, "update-index", "--chmod=+x", str(apply.SYNC_RECOVERY_DEPENDENCIES[1]))
+    elif fault == "mode":
+        (f.repo / apply.SYNC_RECOVERY_DEPENDENCIES[1]).chmod(0o755)
+    elif fault == "flags":
+        git(f, f.repo, "update-index", "--assume-unchanged", str(apply.SYNC_RECOVERY_DEPENDENCIES[1]))
+    elif fault == "unlanded":
+        git(f, f.repo, "commit", "--allow-empty", "-qm", "not on origin dev")
+        options["authority"] = git(f, f.repo, "rev-parse", "HEAD")
+    elif fault == "primary-behind":
+        git(f, f.repo, "checkout", "--detach", f.landed)
+    elif fault == "executing-copy":
+        copied = f.root / "unlanded-recovery.py"
+        copied.write_bytes((f.repo / apply.TOOL_PATH).read_bytes())
+        options["script"] = copied
+    elif fault.startswith("manifest-"):
+        copied = f.root / "manifest.json"
+        if fault == "manifest-copy":
+            copied.write_bytes(case.journal.read_bytes())
+        else:
+            copied.symlink_to(case.journal)
+        options["manifest"] = copied
+    elif fault in {"common-identity", "owner-identity"}:
+        key = "common_dir_identity" if fault == "common-identity" else "worktree_identity"
+        case.manifest[key]["inode"] += 1
+        case.journal.write_bytes(apply.encoded(case.manifest))
+    elif fault == "branch":
+        git(f, case.target, "checkout", "-qb", "changed-original-owner")
+    elif fault == "head":
+        git(f, case.target, "commit", "--allow-empty", "-qm", "unrelated owner head")
+    elif fault == "active":
+        bus = case.target / ".agent_bus"
+        bus.mkdir()
+        (bus / "status.json").write_bytes(apply.encoded(dict(active=True, state="running", pid=os.getpid())))
+    elif fault == "interrupted":
+        case.claim.write_text('{"state":"unknown interrupted outcome"}\n')
+    elif fault == "terminal":
+        case.manifest["state"] = "RECOVERED"
+        case.journal.write_bytes(apply.encoded(case.manifest))
+    else:
+        duplicate = case.journal.parent.parent / ("f" * 32)
+        duplicate.mkdir()
+        (duplicate / "manifest.json").write_bytes(case.journal.read_bytes())
+    original = case.journal.read_bytes()
+    before = apply.transaction_state(case.target)
+    stash = git(f, f.repo, "stash", "list", "--format=%H")
+    result = recovery_cli(f, case, **options)
+    assert result.returncode == 2 and "HOLD:" in result.stderr, (result.stdout, result.stderr)
+    assert not case.result.exists()
+    assert case.claim.exists() is (fault == "interrupted")
+    assert case.journal.read_bytes() == original
+    assert apply.transaction_state(case.target) == before
+    assert git(f, f.repo, "stash", "list", "--format=%H") == stash
+
+
+@pytest.mark.parametrize("fault", ["content", "index", "overlap"])
+def test_original_owner_cli_records_native_hold_without_losing_wip_or_replaying(fleet, fault):
+    f = fleet
+    case = pending_sync_case(f, overlap=fault == "overlap")
+    original_stashes = git(f, f.repo, "stash", "list", "--format=%H")
+    if fault != "overlap":
+        (case.target / case.rel).write_text("later owner bytes\n")
+        if fault == "index":
+            git(f, case.target, "add", case.rel)
+    first = recovery_cli(f, case)
+    assert first.returncode == 3, (first.stdout, first.stderr)
+    assert json.loads(first.stdout)["state"] == "INCOMPLETE"
+    assert case.target.exists()
+    if fault == "overlap":
+        stashes = git(f, f.repo, "stash", "list", "--format=%H").splitlines()
+        assert case.foreign_oid in stashes and len(stashes) == 2
+        assert git(f, f.repo, "show", stashes[0] + ":tracked") == "distinct unstaged owner bytes"
+        assert git(f, f.repo, "show", stashes[0] + "^2:tracked") == "distinct staged owner bytes"
+    else:
+        assert (case.target / case.rel).read_text() == "later owner bytes\n"
+        assert git(f, f.repo, "stash", "list", "--format=%H") == original_stashes
+    saved = {str(p): p.read_bytes() for p in case.journal.parent.parent.glob("*/*.json")}
+    repeated = recovery_cli(f, case)
+    assert repeated.returncode == 3, repeated.stderr
+    assert repeated.stdout == first.stdout
+    assert {str(p): p.read_bytes() for p in case.journal.parent.parent.glob("*/*.json")} == saved
+
+
+def test_original_owner_cli_rejects_saved_recovered_state_with_native_held_wip(fleet):
+    """Changing only the saved state cannot turn the native overlap HOLD into success."""
+    f = fleet
+    case = pending_sync_case(f, overlap=True)
+    # Observe the real CLI's native calls without editing committed authority.
+    probe = f.root / "recovery-observer"
+    probe.mkdir()
+    calls = probe / "native-sync-calls"
+    (probe / "sitecustomize.py").write_text(
+        "import sys\n"
+        "def observe(frame, event, arg):\n"
+        "    native = frame.f_globals.get('sync_primary_worktree_to_base')\n"
+        "    if event == 'call' and getattr(native, '__code__', None) is frame.f_code:\n"
+        f"        with open({str(calls)!r}, 'a') as stream:\n"
+        "            stream.write('native sync\\n')\n"
+        "sys.setprofile(observe)\n"
+    )
+    f.env["PYTHONPATH"] = str(probe)
+    first = recovery_cli(f, case)
+    assert first.returncode == 3, (first.stdout, first.stderr)
+    value = json.loads(first.stdout)
+    assert value["state"] == "INCOMPLETE"
+    assert value["checkout_sync"]["tracked_wip_held_paths"] == ["tracked"]
+    assert calls.read_text() == "native sync\n"
+
+    saved = json.loads(case.result.read_bytes())
+    assert saved == value
+    saved["state"] = "RECOVERED"
+    case.result.write_bytes(apply.encoded(saved))
+    # This is the sole state change after recovery, exactly as in the veto.
+    native_root = case.journal.parent.parent
+    journals = apply.tree_manifest(native_root)
+    claim, result = case.claim.read_bytes(), case.result.read_bytes()
+    checkout = apply.transaction_state(case.target)
+    index_path = f.common / "worktrees" / case.target.name / "index"
+    index = index_path.read_bytes()
+    stashes = git(f, f.repo, "stash", "list", "--format=%H%x00%gs")
+    stash_oids = git(f, f.repo, "stash", "list", "--format=%H").splitlines()
+    stash_bytes = {ref: git(f, f.repo, "cat-file", "-p", ref)
+                   for oid in stash_oids for ref in (oid, oid + ":tracked", oid + "^2:tracked")}
+
+    repeated = recovery_cli(f, case)
+    assert repeated.returncode == 2 and "HOLD:" in repeated.stderr, (repeated.stdout, repeated.stderr)
+    assert "saved recovery result contradicts native outcome" in repeated.stderr
+    assert calls.read_text() == "native sync\n"
+    assert case.claim.read_bytes() == claim and case.result.read_bytes() == result
+    assert apply.tree_manifest(native_root) == journals
+    assert apply.transaction_state(case.target) == checkout
+    assert index_path.read_bytes() == index
+    assert git(f, f.repo, "stash", "list", "--format=%H%x00%gs") == stashes
+    assert {ref: git(f, f.repo, "cat-file", "-p", ref) for ref in stash_bytes} == stash_bytes
+
+
+@pytest.mark.parametrize("drift", ["content", "index", "permissions", "journal", "stash", "authority"])
+def test_original_owner_cli_rechecks_exact_retained_state_before_repeated_observation(fleet, drift):
+    f = fleet
+    case = pending_sync_case(f)
+    first = recovery_cli(f, case)
+    assert first.returncode == 0, (first.stdout, first.stderr)
+    claim, result = case.claim.read_bytes(), case.result.read_bytes()
+    options = {}
+    if drift == "content":
+        (case.target / case.rel).write_text("new retained work\n")
+    elif drift == "index":
+        git(f, case.target, "update-index", "--chmod=+x", case.rel)
+    elif drift == "permissions":
+        (case.target / case.rel).chmod(0o644)
+    elif drift == "journal":
+        case.journal.write_bytes(case.journal.read_bytes() + b"\n")
+    elif drift == "stash":
+        git(f, f.repo, "stash", "drop", "stash@{0}")
+    else:
+        git(f, f.repo, "commit", "--allow-empty", "-qm", "new landed observation authority")
+        git(f, f.repo, "push", "-q", "origin", "dev")
+        options["authority"] = git(f, f.repo, "rev-parse", "HEAD")
+    before = apply.transaction_state(case.target)
+    repeated = recovery_cli(f, case, **options)
+    assert repeated.returncode == 2 and "no replay" in repeated.stderr, repeated.stderr
+    assert case.claim.read_bytes() == claim and case.result.read_bytes() == result
+    assert apply.transaction_state(case.target) == before
+
+
+@pytest.mark.parametrize("extra", [["--apply"], ["--verify"], ["--residual"], ["--batch", "3"]])
+def test_original_owner_cli_does_not_mix_fleet_operation_authority(fleet, extra):
+    f = fleet
+    case = pending_sync_case(f)
+    result = recovery_cli(f, case, *extra)
+    assert result.returncode == 2 and "excludes fleet plan/apply/verify" in result.stderr
+    assert not case.claim.exists()
 
 
 def test_late_index_only_drift_after_before_tar_cannot_retire_without_owner(fleet, monkeypatch):
