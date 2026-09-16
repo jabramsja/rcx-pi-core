@@ -6,6 +6,35 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-15
 
+### Fleet live recovery R2 saved-result truth (Phase B; native landing and live actions pending)
+
+- Verifies the stopped narrow R1 manifest SHA256
+  `d21b8c0f3cc6856720196b7becf808ce24ef9db75f8024f9330a84558c8a09d4`,
+  all 29 archived file sizes/hashes, and the original retained raw index.
+  Reuses only its four existing code/test files; stopped evidence and wider
+  lifecycle candidates remain preserved.
+- Retains original-owner journal discovery, Git-representable stash modes,
+  exact filesystem-permission restoration, and the authorized native
+  behind-dev-marker transition. The public `--recover-sync` command retains
+  committed dependency admission, canonical owner identity and single-use claims.
+- Validates saved successful recovery against the bound native journals,
+  held-WIP outcome, retained checkout and preexisting stashes. Changing only
+  saved `state` from `INCOMPLETE` to `RECOVERED` now returns HOLD without native
+  sync replay or changes to the claim, journals, stashes, checkout/index or result.
+  Existing successful and incomplete repeat observations remain supported.
+- Reproduces the supervisor's exact disposable overlap case: 1 failed and
+  699 passed before the correction. The real four-target regression also exposed
+  shared branch tokens between parallel disposable fixtures; unique fixture
+  branches preserve its real process-ownership checks and complete transaction
+  assertions. No production admission guard was relaxed.
+- The exact declared chained command passed **700 tool/receipt tests in
+  213.40 seconds**, then **351 documentation tests in 1.68 seconds**, exit 0.
+  Both collection checks passed; docs ran separately with two existing freshness
+  warnings. No new counted file or growth-cap change is needed. Row39 remains
+  CURRENT through supported recovery and unconsumed batches3-14; preserved
+  row40 lifecycle/PR/late-stage work follows actual eligible cleanup. Native
+  review/final gates/commit/merge, PRIMARY sync and live outcomes remain pending.
+
 ### Fleet transaction R2 ownership admission (Phase B; native landing and live actions pending)
 
 - Verifies the newest stopped R1 manifest against SHA256

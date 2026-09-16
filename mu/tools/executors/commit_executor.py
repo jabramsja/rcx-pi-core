@@ -6009,6 +6009,46 @@ def _primary_sync_restore_patch(
     return None
 
 
+def _restore_primary_sync_permissions(
+    repo_root: Path, expected: dict[str, Any], paths: list[str],
+) -> str | None:
+    """Restore saved permissions only on exactly restored Git content/index.
+
+    A stash represents 0600 as 0644. Only that exact Git-created mode may be
+    replaced with the preserved filesystem mode; arbitrary permission, byte,
+    executable-mode or index drift is never normalized into a match.
+    """
+    for relpath in paths:
+        wanted = expected[relpath]
+        actual, error = _primary_sync_path_snapshot(repo_root, relpath)
+        if error or actual is None:
+            return error or f"cannot inspect restored permissions for {relpath}"
+        saved = wanted.get("worktree", {})
+        current = actual.get("worktree", {})
+        if (actual.get("index") != wanted.get("index") or saved.get("kind") != "file"
+                or current.get("kind") != "file" or current == saved):
+            continue
+        git_mode = 0o755 if saved["mode"] & 0o100 else 0o644
+        if {**current, "mode": saved["mode"]} != saved:
+            continue  # The unstaged patch may still need restoration.
+        if current["mode"] != git_mode:
+            return f"primary-sync permission drift for {relpath}"
+        try:
+            fd = os.open(repo_root / relpath, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                        or stat.S_IMODE(info.st_mode) != git_mode
+                        or hashlib.sha256(stream.read()).hexdigest() != saved["sha256"]
+                        or info.st_size != saved["size"]):
+                    return f"primary-sync permission restoration identity drift for {relpath}"
+                os.fchmod(stream.fileno(), saved["mode"])
+                os.fsync(stream.fileno())
+        except OSError as exc:
+            return f"primary-sync permission restoration failed for {relpath}: {exc}"
+    return None
+
+
 def _restore_primary_sync_tracked_paths_idempotently(
     repo_root: Path,
     manifest: dict[str, Any],
@@ -6058,6 +6098,9 @@ def _restore_primary_sync_tracked_paths_idempotently(
         if not index_exact:
             return index_error or "staged tracked WIP did not verify after recovery"
 
+    permission_error = _restore_primary_sync_permissions(repo_root, expected, restore_paths)
+    if permission_error:
+        return permission_error
     exact, error = _primary_sync_snapshots_match(repo_root, expected, restore_paths)
     if exact:
         log(
@@ -6089,6 +6132,9 @@ def _restore_primary_sync_tracked_paths_idempotently(
     )
     if restore_error:
         return restore_error
+    permission_error = _restore_primary_sync_permissions(repo_root, expected, restore_paths)
+    if permission_error:
+        return permission_error
     exact, error = _primary_sync_snapshots_match(repo_root, expected, restore_paths)
     if not exact:
         return error or "tracked WIP bytes/index did not verify after recovery"
@@ -6549,6 +6595,18 @@ def _discover_and_recover_primary_sync_transactions(
             return recovered, f"primary-sync journal is not an object: {manifest_path}"
         if raw.get("state") in _PRIMARY_SYNC_TRANSACTION_TERMINAL_STATES:
             continue
+        # The journal store is shared, but each transaction owns one exact
+        # worktree. Never reconcile or publish HOLD into a foreign journal using
+        # this call's unrelated target identity. The recorded owner validates
+        # its device/inode, branch, HEAD and stash when it resumes through sync.
+        owner = raw.get("worktree_identity")
+        owner_path = owner.get("path") if isinstance(owner, dict) else None
+        if (not isinstance(owner_path, str) or not Path(owner_path).is_absolute()
+                or str(Path(owner_path)) != owner_path or ".." in Path(owner_path).parts):
+            return recovered, f"primary-sync journal owner is uncertain: {manifest_path}"
+        if owner_path != str(primary):
+            log(f"Step 15b: retained foreign primary-sync journal for {owner_path}: {manifest_path}")
+            continue
         terminal, summary, error = _reconcile_primary_sync_transaction(
             manifest_path,
             raw,
@@ -6836,7 +6894,7 @@ def _sync_primary_worktree_to_base(
                     return _skip("explicit sync target drifted before locked preparation")
 
             # A transaction is durable before its first destructive operation.
-            # Reconcile EVERY nonterminal journal under the shared common dir
+            # Reconcile this worktree's nonterminal journals under the common dir
             # before fetching or allocating a new transaction.  This covers a
             # restart after PREPARED, stash/move-before-publication, and
             # fast-forward-before-publication without relying on a candidate

@@ -4,6 +4,9 @@
 --residual plans fresh bounded worktree/shell retirement and explicit local-dev
 sync. Apply is foreground, postmerge only; verify is read-only and never resumes
 an interrupted operation. Immutable intent and receipts retain exact owners.
+--recover-sync MANIFEST --authority-commit SHA recovers the recorded native
+sync owner once, from synchronized PRIMARY using landed code. Repeating it only
+verifies the retained result; an interrupted claim cannot authorize another sync.
 The legacy four-target and --reconcile-r1 authorities remain unchanged.
 Exit 3 means an owned HOLD/INCOMPLETE outcome, never fleet-wide completion.
 """
@@ -991,7 +994,16 @@ def require_stash_binding(admitted: dict, evidence: dict) -> None:
         scope.update(p for p in set(evidence["index"]) | set(admitted["index"])
                      if evidence["index"].get(p) != admitted["index"].get(p))
         transaction_drift("checkout-sync-stashed", scope, "native stash index differs from admission")
-    if evidence["content"] != {p: admitted["content"].get(p) for p in admitted["tracked_wip"]}:
+    # Git records only regular-file executable mode, not filesystem permissions
+    # such as 0600. Keep the original records in admitted-state/before.tar; the
+    # native sync restores those permissions before full transaction equality.
+    expected = {}
+    for path in admitted["tracked_wip"]:
+        record = admitted["content"].get(path)
+        if record is not None and record.get("kind") == "file":
+            record = {**record, "mode": 0o755 if record["mode"] & 0o100 else 0o644}
+        expected[path] = record
+    if evidence["content"] != expected:
         transaction_drift("checkout-sync-stashed", scope, "native stash content differs from admission")
 
 
@@ -1258,7 +1270,11 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
             _, after = inspect_target(repo, ident, head=prepared,
                                       reconcile_r1=reconcile_r1, process_checks=process_checks, residual=residual)
             held_collisions = set(outcome.get("checkout_sync", {}).get("untracked_collision_paths", []))
-            verify_untracked_preserved(tracked | held_collisions, before, after)
+            # Residual preparation has already derived exact producer-authorized
+            # changes (including the bound native behind-dev signal removal).
+            # Comparing to raw admission here contradicted that stronger check.
+            verify_untracked_preserved(tracked | held_collisions,
+                                       prepared_state["content"] if residual else before, after)
             git(target, "merge-base", "--is-ancestor", ident["HEAD"], prepared)
             write_new(directory / "prepared.json", encoded(after))
             outcome["prepared_head"] = prepared
@@ -1784,23 +1800,246 @@ def verify_residual_plan(repo: Path, plan: dict, *, authority_commit: str,
                     recorded_after=summary["after_prefix_directories"], fleet_clean=False)
 
 
+SYNC_RECOVERY_DEPENDENCIES = (
+    TOOL_PATH,
+    Path("mu/tools/executors/commit_executor.py"),
+    Path("mu/tools/executors/executor_common.py"),
+    Path("mu/tools/executors/workingrcx_fleet_census.py"),
+    Path("mu/tools/executors/workingrcx_fleet_classification.py"),
+    Path("mu/tools/observability/pipeline_agent_pager.py"),
+)
+SYNC_RECOVERY_OWNER = "workingrcx_fleet_apply:original_owner_sync"
+
+
+def require_sync_recovery_authority(primary: Path, authority_commit: str) -> str:
+    """Admit only the landed tool and dependencies in surviving PRIMARY."""
+    if (SCRIPT_PATH != primary / TOOL_PATH
+            or re.fullmatch(r"[0-9a-f]{40}", authority_commit or "") is None):
+        raise Hold("Recovery requires the committed native tool in PRIMARY and exact authority commit")
+    plain_directory(primary)
+    common = primary / ".git"
+    plain_directory(common)
+    if ((primary / line(git(primary, "rev-parse", "--git-common-dir"))).resolve() != common
+            or line(git(primary, "rev-parse", "--show-toplevel")) != str(primary)):
+        raise Hold("Recovery PRIMARY/common-dir identity mismatch")
+    git(primary, "fetch", "origin", "dev")
+    git(primary, "merge-base", "--is-ancestor", authority_commit, "origin/dev")
+    landed = line(git(primary, "rev-parse", "origin/dev"))
+    if line(git(primary, "rev-parse", "HEAD")) != landed:
+        raise Hold("Recovery requires synchronized surviving PRIMARY")
+    committed_tree, index = git_entries(primary, authority_commit), git_entries(primary)
+    for rel in SYNC_RECOVERY_DEPENDENCIES:
+        source = primary / rel
+        if read_plain(source) != git(primary, "show", f"{authority_commit}:{rel}"):
+            raise Hold(f"Native recovery executing dependency differs from committed authority: {rel}")
+        entry = committed_tree.get(str(rel))
+        if (entry is None or index.get(str(rel)) != entry
+                or bool(source.stat().st_mode & 0o111) != (entry[0] == "100755")
+                or git(primary, "ls-files", "-v", "-z", "--", str(rel)) != b"H " + os.fsencode(rel) + b"\0"):
+            raise Hold(f"Native recovery dependency index/mode drift: {rel}")
+    return landed
+
+
+def sync_recovery_retained_state(target: Path, manifests: list[Path]) -> dict:
+    """Bind native journals/backups and the full retained checkout and stash list."""
+    journals = {}
+    for path in manifests:
+        journals[str(path)] = dict(manifest_sha256=file_hash(path), **{
+            name: tree_manifest(path.parent / name) if (path.parent / name).exists() else None
+            for name in ("backup", "restore")
+        })
+    return dict(checkout=transaction_state(target), journals=journals,
+                stashes=git(target, "stash", "list", "--format=%H%x00%gs").hex())
+
+
+def sync_recovery_completed(manifest_path: Path, sync: dict, retained: dict,
+                            stashes_before: list[str]) -> bool:
+    """Derive completion from the bound native outcomes and retained WIP."""
+    paths = {str(manifest_path)}
+    current = sync.get("primary_sync_transaction_path")
+    if current:
+        paths.add(current)
+    if set(retained["journals"]) != paths:
+        raise Hold("Native recovery journal binding changed; no replay")
+    journals = {}
+    for path in paths:
+        raw = read_plain(Path(path))
+        if digest(raw) != retained["journals"][path]["manifest_sha256"]:
+            raise Hold("Native recovery journal drift; no replay")
+        journal = json.loads(raw)
+        if not isinstance(journal, dict):
+            raise Hold("Native recovery journal is ambiguous; no replay")
+        journals[path] = journal
+    terminal = journals[str(manifest_path)]
+    final = journals[current] if current else terminal
+    if current and sync.get("primary_sync_transaction_state") != final.get("state"):
+        raise Hold("Saved recovery outcome disagrees with native journal; no replay")
+    # Native sync may finish its own temporary stash after exact restoration.
+    # Every other preexisting stash must remain in the retained observation.
+    completed_oid = terminal.get("stash_oid") if terminal.get("state") == "RECOVERED" else None
+    required_stashes = set(stashes_before) - ({completed_oid} if completed_oid else set())
+    retained_stashes = {line(row.split(b"\0", 1)[0])
+                        for row in bytes.fromhex(retained["stashes"]).splitlines()}
+    return (all(journal.get("state") == "RECOVERED"
+                and not journal.get("held_tracked_paths") and not journal.get("held_untracked_paths")
+                for journal in journals.values())
+            and not sync.get("recovery_hold") and not sync.get("tracked_wip_held_paths")
+            and not sync.get("untracked_collision_paths")
+            and retained["checkout"]["head"] == sync.get("new_sha")
+            and (not current or retained["checkout"]["head"] == final.get("target_sha"))
+            and required_stashes <= retained_stashes)
+
+
+def recover_pending_sync(manifest_path: Path, *, authority_commit: str) -> dict:
+    """Delegate one exact original-owner recovery to native sync; never replay."""
+    original = read_plain(manifest_path)
+    manifest = json.loads(original)
+    if not isinstance(manifest, dict):
+        raise Hold("Recovery requires a native transaction object")
+    common_identity, owner_identity = (manifest.get(name) for name in
+                                       ("common_dir_identity", "worktree_identity"))
+    if any(not isinstance(value, dict) or not isinstance(value.get("path"), str)
+           for value in (common_identity, owner_identity)):
+        raise Hold("Native recovery owner/common-dir identity is uncertain")
+    common, target = Path(common_identity["path"]), Path(owner_identity["path"])
+    transaction_id = manifest.get("transaction_id")
+    if (not isinstance(transaction_id, str) or re.fullmatch(r"[0-9a-f]{32}", transaction_id) is None
+            or manifest.get("owner") != "commit_executor:primary_worktree_sync"
+            or manifest.get("version") != 1
+            or manifest_path != common / "rcx_primary_worktree_sync_transactions" / transaction_id / "manifest.json"
+            or manifest.get("manifest_path") != str(manifest_path)
+            or manifest.get("target_ref") != "origin/dev"
+            or manifest.get("stash_marker") != "commit_executor:primary_ffsync_transaction:" + transaction_id):
+        raise Hold("Recovery requires the exact canonical native manifest")
+    for path, expected in ((common, common_identity), (target, owner_identity)):
+        plain_directory(path)
+        info = path.stat()
+        if expected != dict(path=str(path), device=info.st_dev, inode=info.st_ino):
+            raise Hold("Pending recovery owner/common-dir identity changed")
+    primary = common.parent
+    with safe_git_environment(network=True):
+        landed = require_sync_recovery_authority(primary, authority_commit)
+        # Import the native mutation boundary only after verifying its bytes.
+        import commit_executor as boundary
+        if (Path(boundary.__file__).resolve() != primary / "mu/tools/executors/commit_executor.py"
+                or Path(boundary.agent_bus_path.__code__.co_filename).resolve()
+                != primary / "mu/tools/executors/executor_common.py"):
+            raise Hold("Recovery imported dependencies outside committed PRIMARY")
+        binding = boundary.bind_terminal_target_identity(target, base_branch="dev")
+        if (not binding.get("bound") or binding.get("worktree_identity") != owner_identity
+                or binding.get("common_dir_identity") != common_identity
+                or binding.get("expected_branch") != manifest.get("branch")):
+            raise Hold("Pending recovery recorded worktree/branch identity changed")
+        ident = dict(path=str(target), common_dir=str(common),
+                     git_dir=line(git(target, "rev-parse", "--absolute-git-dir")),
+                     branch="refs/heads/" + binding["expected_branch"], HEAD=binding["expected_head"])
+        if target != primary:
+            inspect_identity(ident)
+        clean_state(target, allow_wip=True)
+        directory = manifest_path.parent
+        claim_path, result_path = (directory / name for name in
+                                   ("fleet-recovery-claim.json", "fleet-recovery-result.json"))
+        # An observed result has no mutation path, including no native sync.
+        if os.path.lexists(result_path):
+            claim_bytes = read_plain(claim_path)
+            claim, value = json.loads(claim_bytes), json.loads(read_plain(result_path))
+            if (not isinstance(claim, dict) or not isinstance(value, dict)
+                    or claim.get("owner") != SYNC_RECOVERY_OWNER
+                    or claim.get("authority_commit") != authority_commit
+                    or claim.get("manifest_path") != str(manifest_path)
+                    or claim.get("worktree_identity") != owner_identity
+                    or claim.get("common_dir_identity") != common_identity
+                    or value.get("claim_sha256") != digest(claim_bytes)):
+                raise Hold("Consumed recovery authority/result binding changed; no replay")
+            try:
+                observed = sync_recovery_retained_state(target, [Path(p) for p in value["retained_state"]["journals"]])
+                if observed != value["retained_state"]:
+                    raise Hold("Native recovery retained state drift; no replay")
+                recovered = sync_recovery_completed(manifest_path, value["checkout_sync"], observed,
+                                                     claim["stashes_before"])
+            except (AttributeError, KeyError, TypeError) as exc:
+                raise Hold("Saved native recovery evidence is incomplete; no replay") from exc
+            if (value.get("state") not in ("RECOVERED", "INCOMPLETE")
+                    or (value["state"] == "RECOVERED" and not recovered)):
+                raise Hold("saved recovery result contradicts native outcome; no replay")
+            return value
+        if os.path.lexists(claim_path):
+            raise Hold("Interrupted native sync recovery claim; preserve evidence, no replay")
+        if (manifest.get("state") not in {"PREPARED", "STASHED", "ISOLATED", "FF_APPLIED", "HOLD"}
+                or binding["expected_head"] not in {manifest.get("old_head"), manifest.get("target_sha")}):
+            raise Hold("Native recovery is terminal or has ambiguous HEAD/state; no replay")
+        # The native discovery path can resume all journals for an owner. More
+        # than this one pending transaction is not this command's authority.
+        for other in directory.parent.glob("*/manifest.json"):
+            if other == manifest_path:
+                continue
+            pending = json.loads(read_plain(other))
+            if (not isinstance(pending, dict)
+                    or (pending.get("state") not in {"HELD", "RECOVERED"}
+                        and pending.get("worktree_identity") == owner_identity)):
+                raise Hold("Additional or ambiguous native owner journal; preserve evidence")
+        process_idle(ident)
+        native_idle(target, tree_manifest(target), reconcile_r1=True)
+        if read_plain(manifest_path) != original:
+            raise Hold("Native recovery manifest changed before admission")
+        before = transaction_state(target)
+        stashes_before = git(target, "stash", "list", "--format=%H").splitlines()
+        claim = dict(owner=SYNC_RECOVERY_OWNER, authority_commit=authority_commit,
+                     manifest_path=str(manifest_path), manifest_sha256=digest(original),
+                     worktree_identity=owner_identity, common_dir_identity=common_identity,
+                     identity=ident, admitted_state=before,
+                     stashes_before=[line(oid) for oid in stashes_before])
+        # Exclusive durable publication is the single-use boundary. A crash at
+        # any later point leaves this claim consumed, including before sync.
+        claim_bytes = encoded(claim)
+        write_new(claim_path, claim_bytes)
+        sync = boundary.sync_primary_worktree_to_base(primary, "dev", target_identity=binding, log=lambda _: None)
+        journals = [manifest_path]
+        if sync.get("primary_sync_transaction_path"):
+            current = Path(sync["primary_sync_transaction_path"])
+            if current not in journals:
+                journals.append(current)
+        retained = sync_recovery_retained_state(target, journals)
+        recovered = (sync_recovery_completed(manifest_path, sync, retained, claim["stashes_before"])
+                     and retained["checkout"]["head"] == landed)
+        value = dict(state="RECOVERED" if recovered else "INCOMPLETE", owner=SYNC_RECOVERY_OWNER,
+                     source=str(target), claim_sha256=digest(claim_bytes), checkout_sync=sync,
+                     retained_state=retained,
+                     next_action="Verify retained work and continue compatible unconsumed batches under committed fleet authority; consumed operations remain immutable.")
+        write_new(result_path, encoded(value))
+        return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--classification", type=Path, required=True)
-    parser.add_argument("--classification-sha256", required=True)
+    parser.add_argument("--classification", type=Path)
+    parser.add_argument("--classification-sha256")
     parser.add_argument("--classification-commit")
     parser.add_argument("--residual", action="store_true")
     parser.add_argument("--wave-id", help="Fresh residual owner; no rebinding of a consumed operation")
     parser.add_argument("--authority-commit")
     parser.add_argument("--batch", type=int)
     parser.add_argument("--verify", action="store_true")
-    parser.add_argument("--plan-output", type=Path, required=True)
+    parser.add_argument("--plan-output", type=Path)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--reconcile-r1", action="store_true",
                         help="Plan the fixed follow-up to the four pinned R1 zero-move outcomes")
     parser.add_argument("--operation-root", type=Path)
+    parser.add_argument("--recover-sync", type=Path, metavar="MANIFEST",
+                        help="Recover the exact native journal owner once using landed PRIMARY authority")
     args = parser.parse_args(argv)
+    if args.recover_sync is not None:
+        if (not args.authority_commit or any((args.classification, args.classification_sha256,
+                args.classification_commit, args.residual, args.wave_id, args.batch is not None,
+                args.verify, args.plan_output, args.apply, args.reconcile_r1, args.operation_root))):
+            parser.error("--recover-sync requires --authority-commit and excludes fleet plan/apply/verify options")
+    elif args.classification is None or args.classification_sha256 is None or args.plan_output is None:
+        parser.error("--classification, --classification-sha256 and --plan-output are required")
     try:
+        if args.recover_sync is not None:
+            result = recover_pending_sync(args.recover_sync, authority_commit=args.authority_commit)
+            print(json.dumps(result, sort_keys=True))
+            return 0 if result["state"] == "RECOVERED" else 3
         repo = Path.cwd().resolve()
         if args.residual:
             if args.reconcile_r1 or args.classification_commit or (args.apply and args.verify):
