@@ -1,0 +1,501 @@
+{
+  "comparison_commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+  "manifest_sha256": "12457690a8aec13d067368614862a82083da7f21391f0995ddda0f3e8daf68a6",
+  "repository": {
+    "id": "R_kgDOQvy8bg",
+    "nameWithOwner": "jabramsja/rcx-pi-core",
+    "url": "https://github.com/jabramsja/rcx-pi-core"
+  },
+  "schema_version": 2,
+  "targets": [
+    {
+      "coverage": [
+        {
+          "hunks": [
+            {
+              "header": "@@ -6,6 +6,35 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus",
+              "reason": "Historical R2 implementation/validation chronology is preserved at the original PR1307 source commit and retained branch. It is evidence of that stopped attempt, not current PR closure or fleet completion; current reviewed coverage bookkeeping supersedes its pending-work wording.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "cbc2ed3db4f401206506056916fdb124fc0f1c7f2a462e8f7311cb4ad9d68d07"
+            }
+          ],
+          "patch_sha256": "d57f0c6f519da7fefb6a1c0cc5c3f072542c95a6be33c5580c683e31ae31cbcb",
+          "path": "CHANGELOG.md",
+          "reason": "Historical R2 implementation/validation chronology is preserved at the original PR1307 source commit and retained branch. It is evidence of that stopped attempt, not current PR closure or fleet completion; current reviewed coverage bookkeeping supersedes its pending-work wording.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -7,11 +7,11 @@ Founder model selection (2026-09-11): every selected local model-bearing pipelin",
+              "reason": "Historical R2 queue, owner, stopped-attempt and tracker-sync evidence is preserved at the original PR1307 source commit and retained branch. Current PRIMARY TASKS retains all 268 task IDs, 39 parked obligations and remaining owners; stale pre-PR1308 pending-cleanup claims are not replayed as current authority.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "2c6bcb8c91deecd2798ceaa7d0769bc3e47223c727e3b65c7a6653d4faa5bedd"
+            },
+            {
+              "header": "@@ -523,9 +523,9 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Historical R2 queue, owner, stopped-attempt and tracker-sync evidence is preserved at the original PR1307 source commit and retained branch. Current PRIMARY TASKS retains all 268 task IDs, 39 parked obligations and remaining owners; stale pre-PR1308 pending-cleanup claims are not replayed as current authority.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "6049e7d2778881c2629a691ee17444568887e1240a5cc5ce8a66806ec3a7dcbc"
+            },
+            {
+              "header": "@@ -551,9 +551,17 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Historical R2 queue, owner, stopped-attempt and tracker-sync evidence is preserved at the original PR1307 source commit and retained branch. Current PRIMARY TASKS retains all 268 task IDs, 39 parked obligations and remaining owners; stale pre-PR1308 pending-cleanup claims are not replayed as current authority.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "9650f05ac8c2067e7ed698c9b6174c6ed329bd991d0b286a94247e525d6566db"
+            },
+            {
+              "header": "@@ -567,9 +575,33 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Historical R2 queue, owner, stopped-attempt and tracker-sync evidence is preserved at the original PR1307 source commit and retained branch. Current PRIMARY TASKS retains all 268 task IDs, 39 parked obligations and remaining owners; stale pre-PR1308 pending-cleanup claims are not replayed as current authority.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "18e1458bae2953e71c32fb995fe675324a62cbce370501a93f7a22521ff1e188"
+            },
+            {
+              "header": "@@ -587,7 +619,7 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Historical R2 queue, owner, stopped-attempt and tracker-sync evidence is preserved at the original PR1307 source commit and retained branch. Current PRIMARY TASKS retains all 268 task IDs, 39 parked obligations and remaining owners; stale pre-PR1308 pending-cleanup claims are not replayed as current authority.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "85796fe22c9c8b629bbfc4e8207bd51f616d677e2dbc5ebcf440688c71d426f4"
+            },
+            {
+              "header": "@@ -1582,6 +1614,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "Historical R2 queue, owner, stopped-attempt and tracker-sync evidence is preserved at the original PR1307 source commit and retained branch. Current PRIMARY TASKS retains all 268 task IDs, 39 parked obligations and remaining owners; stale pre-PR1308 pending-cleanup claims are not replayed as current authority.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "f9081a052b1d961a73bede542e0725778474d62d67a5b3f6130b80cade8aa817"
+            }
+          ],
+          "patch_sha256": "71aab431205ebe84eabdc152a133947ba8397383d5f48ad0646fc3f5cf9306a4",
+          "path": "TASKS.md",
+          "reason": "Historical R2 queue, owner, stopped-attempt and tracker-sync evidence is preserved at the original PR1307 source commit and retained branch. Current PRIMARY TASKS retains all 268 task IDs, 39 parked obligations and remaining owners; stale pre-PR1308 pending-cleanup claims are not replayed as current authority.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -2977,6 +2977,102 @@ def test_sync_primary_restart_recovers_pre_ff_tracked_checkpoints_idempotently(",
+              "reason": "Exact two parametrized regressions retained: a PREPARED/legacy-HOLD 0600 owner cannot poison five peer worktrees or alter its journal/stash; original-owner recovery restores staged/unstaged bytes and 0600 permissions. Bytes, index, permission, executable-mode and owner-identity drift still HOLD with the stash retained. Original source lines 2977-3078; cited replacement/current-dev lines 3064-3165. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 3165,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "0c5938fa59710e4fcae55e65fbac23dbda6a32d70338b51c4fa1ec6968a8b30e",
+                  "start": 3064
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "2f43ff6c45ad9172bad2284094ccbf1fe156a0b24914d28c5c99a7b33496fb6d"
+            }
+          ],
+          "patch_sha256": "d56a63109c9a06697480b083ab8dae930a72f6b0b23f2a2387ce109aa9c507ff",
+          "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+          "reason": "Exact two parametrized regressions retained: a PREPARED/legacy-HOLD 0600 owner cannot poison five peer worktrees or alter its journal/stash; original-owner recovery restores staged/unstaged bytes and 0600 permissions. Bytes, index, permission, executable-mode and owner-identity drift still HOLD with the stash retained. PR1308 also adds the separately measured pytest deadline repair and its tests outside these original PR1307 hunks; those later additions are not attributed to the stopped source.",
+          "references": [
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 3165,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "0c5938fa59710e4fcae55e65fbac23dbda6a32d70338b51c4fa1ec6968a8b30e",
+              "start": 3064
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -89,7 +89,10 @@ def fleet(monkeypatch):",
+              "reason": "Exact fixture branch isolation retained: each disposable branch includes the fixture root token so the real process guard does not confuse concurrent Git commands with another fixture owner. Original source lines 89-98; cited replacement/current-dev lines 89-98. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 98,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_apply.py",
+                  "sha256": "56b60c5d1882cdee185614a6ee84fcaea8bfea69ee4c2f2ccd9062ded2fedd99",
+                  "start": 89
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "1e299d2de91d77c495ea1fff3e60c72bb65f17802033cfca1153ac8b2684c287"
+            },
+            {
+              "header": "@@ -99,14 +102,17 @@ def fleet(monkeypatch):",
+              "reason": "Exact fixture identity/classification rebinding retained: the unique branch is recorded in target identities and substituted into the preserved classification before constructing the fixture. Original source lines 102-118; cited replacement/current-dev lines 102-118. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 118,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_apply.py",
+                  "sha256": "91c74d0e7cacd0a0e067209121343a7c004d7d099e59998d0798b26f6b572e0d",
+                  "start": 102
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "7146115877f66546199b6fa10322818b5e0d484eeed5a8890304197b156bdc7b"
+            },
+            {
+              "header": "@@ -232,7 +238,7 @@ def test_complete_four_candidate_flow_preserves_evidence_and_uses_real_boundary(",
+              "reason": "Exact four-target MOVED assertion and all checks retained; the failure diagnostic remains complete sorted, indented JSON. Original source lines 238-244; cited replacement/current-dev lines 238-244. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 244,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_apply.py",
+                  "sha256": "b835cef62d8b7ee591072dbd7e67ff85dd9c99915e954cb059ad0bcf073e2be5",
+                  "start": 238
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "dfa3a9bf792b42620c26a3a8bf091a01f9791b464d559e7a4c2f726ae2f785e9"
+            },
+            {
+              "header": "@@ -1400,6 +1406,361 @@ def stage_index_only(f, target):",
+              "reason": "Exact recovery tests/helpers retained byte-for-byte: Git-mode versus filesystem-permission restoration; authorized behind-dev marker removal with unrelated drift held; real installed original-owner CLI, exact committed dependency admission, 16 ambiguous-admission/replay cases, held-WIP retention, saved-success/native-HOLD contradiction, repeated-state checks and mutually exclusive CLI authority. The unchanged dependency parametrization covers six original modules at the PR1307 source and eight only after PR1308 adds the separately preserved import correction. Original source lines 1406-1766; cited replacement/current-dev lines 1406-1766. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 1766,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_apply.py",
+                  "sha256": "420be32c9d4b795ffd5639ca74bd477b6bc0b99f81c0e4cbfcdd2b466908e774",
+                  "start": 1406
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "3fe36e29b0b2ff47a4059fd47083922723bc2f29b488dc7039f20cd683a04e82"
+            }
+          ],
+          "patch_sha256": "3ae6496ce43e1cdfe723376a23177c6ecff5ee4aa856c611492b15ecfc29eaf5",
+          "path": "mu/tests/tools/test_workingrcx_fleet_apply.py",
+          "reason": "Exact fixture branch isolation retained: each disposable branch includes the fixture root token so the real process guard does not confuse concurrent Git commands with another fixture owner. Exact fixture identity/classification rebinding retained: the unique branch is recorded in target identities and substituted into the preserved classification before constructing the fixture. Exact four-target MOVED assertion and all checks retained; the failure diagnostic remains complete sorted, indented JSON. Exact recovery tests/helpers retained byte-for-byte: Git-mode versus filesystem-permission restoration; authorized behind-dev marker removal with unrelated drift held; real installed original-owner CLI, exact committed dependency admission, 16 ambiguous-admission/replay cases, held-WIP retention, saved-success/native-HOLD contradiction, repeated-state checks and mutually exclusive CLI authority. The unchanged dependency parametrization covers six original modules at the PR1307 source and eight only after PR1308 adds the separately preserved import correction.",
+          "references": [
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 98,
+              "path": "mu/tests/tools/test_workingrcx_fleet_apply.py",
+              "sha256": "56b60c5d1882cdee185614a6ee84fcaea8bfea69ee4c2f2ccd9062ded2fedd99",
+              "start": 89
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 118,
+              "path": "mu/tests/tools/test_workingrcx_fleet_apply.py",
+              "sha256": "91c74d0e7cacd0a0e067209121343a7c004d7d099e59998d0798b26f6b572e0d",
+              "start": 102
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 244,
+              "path": "mu/tests/tools/test_workingrcx_fleet_apply.py",
+              "sha256": "b835cef62d8b7ee591072dbd7e67ff85dd9c99915e954cb059ad0bcf073e2be5",
+              "start": 238
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 1766,
+              "path": "mu/tests/tools/test_workingrcx_fleet_apply.py",
+              "sha256": "420be32c9d4b795ffd5639ca74bd477b6bc0b99f81c0e4cbfcdd2b466908e774",
+              "start": 1406
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -6009,6 +6009,46 @@ def _primary_sync_restore_patch(",
+              "reason": "Exact saved-permission restoration retained: only matching Git content/index with Git-created 0644/0755 permissions is eligible; no-follow file access, regular-file/single-link identity, byte hash and size are rechecked before fchmod/fsync. Arbitrary permission or content drift is not normalized. Original source lines 6009-6054; cited replacement/current-dev lines 6016-6061. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 6061,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "f710353cbba9147730d35a826d6cc8bde83819cd01eaa7275623f0a3d3bcc06c",
+                  "start": 6016
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "9a0e1d876e84ed1c46c96351b03cfb039dc2fa6ee7ea71743626d3b1add7ca9a"
+            },
+            {
+              "header": "@@ -6058,6 +6098,9 @@ def _restore_primary_sync_tracked_paths_idempotently(",
+              "reason": "Exact permission-restoration call and error propagation retained after index recovery and before the first full tracked snapshot comparison. Original source lines 6098-6106; cited replacement/current-dev lines 6105-6113. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 6113,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "60980719ab64bac68e8e7518a6ad8383073e23cfff44b71c01199a91c76b88b3",
+                  "start": 6105
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d07eade2db773137bab73bdacc2854a7953367fed09393e4786b2c8786f2987d"
+            },
+            {
+              "header": "@@ -6089,6 +6132,9 @@ def _restore_primary_sync_tracked_paths_idempotently(",
+              "reason": "Exact permission-restoration call and error propagation retained after the unstaged restoration patch and before final tracked snapshot verification. Original source lines 6132-6140; cited replacement/current-dev lines 6139-6147. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 6147,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "7c540eafcd2180b644fca28c18b236a90cc88a650efe9ef92517ac941717d5d9",
+                  "start": 6139
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "531f0489620d5668dabb0f0ca14a82f7e50eec7131bfcddc387d966f9beb6a1a"
+            },
+            {
+              "header": "@@ -6549,6 +6595,18 @@ def _discover_and_recover_primary_sync_transactions(",
+              "reason": "Exact journal owner admission retained: invalid/noncanonical owner paths HOLD, foreign worktree journals are left untouched, and only this worktree owner reaches reconciliation. Original source lines 6595-6612; cited replacement/current-dev lines 6602-6619. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 6619,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "d8bb69b979434fde2e0d13e577d11a34b7d0ca5a193bbeb9062c2bd0af40ab1e",
+                  "start": 6602
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "ea04afeb7056fab1e340a2d54c6de2afdff90747cbef3eb121b0fcae6158d5c1"
+            },
+            {
+              "header": "@@ -6836,7 +6894,7 @@ def _sync_primary_worktree_to_base(",
+              "reason": "Exact discovery contract comment retained: reconciliation covers this worktree's nonterminal journals, preserving restart recovery without claiming authority over every foreign journal. Original source lines 6894-6900; cited replacement/current-dev lines 6901-6907. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 6907,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "c87c9e5e8f7e1d4d74f9343d62a278cc46b6e2f0ece465384593fc85be665db0",
+                  "start": 6901
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "e96bbc01eaa4db5e9731384bd0bac44f2e87b5191c8c4786705b23c683266ee2"
+            }
+          ],
+          "patch_sha256": "6878abb88b331f19766b34a584e0f840b30bc0156d7f8638bc5038629ca0fec0",
+          "path": "mu/tools/executors/commit_executor.py",
+          "reason": "Exact saved-permission restoration retained: only matching Git content/index with Git-created 0644/0755 permissions is eligible; no-follow file access, regular-file/single-link identity, byte hash and size are rechecked before fchmod/fsync. Arbitrary permission or content drift is not normalized. Exact permission-restoration call and error propagation retained after index recovery and before the first full tracked snapshot comparison. Exact permission-restoration call and error propagation retained after the unstaged restoration patch and before final tracked snapshot verification. Exact journal owner admission retained: invalid/noncanonical owner paths HOLD, foreign worktree journals are left untouched, and only this worktree owner reaches reconciliation. Exact discovery contract comment retained: reconciliation covers this worktree's nonterminal journals, preserving restart recovery without claiming authority over every foreign journal. PR1308 also adds the separately measured pytest deadline repair and its tests outside these original PR1307 hunks; those later additions are not attributed to the stopped source.",
+          "references": [
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 6061,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "f710353cbba9147730d35a826d6cc8bde83819cd01eaa7275623f0a3d3bcc06c",
+              "start": 6016
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 6113,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "60980719ab64bac68e8e7518a6ad8383073e23cfff44b71c01199a91c76b88b3",
+              "start": 6105
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 6147,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "7c540eafcd2180b644fca28c18b236a90cc88a650efe9ef92517ac941717d5d9",
+              "start": 6139
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 6619,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "d8bb69b979434fde2e0d13e577d11a34b7d0ca5a193bbeb9062c2bd0af40ab1e",
+              "start": 6602
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 6907,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "c87c9e5e8f7e1d4d74f9343d62a278cc46b6e2f0ece465384593fc85be665db0",
+              "start": 6901
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -4,6 +4,9 @@",
+              "reason": "Exact public CLI documentation retained: --recover-sync uses landed PRIMARY authority for the recorded owner once, repeated calls verify retained results, and interrupted claims cannot authorize another sync. Original source lines 4-12; cited replacement/current-dev lines 4-12. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 12,
+                  "path": "mu/tools/executors/workingrcx_fleet_apply.py",
+                  "sha256": "61412880c9880d9743d23d15c8acfecdd73fd54f418143574ba26ec585d259b4",
+                  "start": 4
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "3b439b75f607391db40b3306abb79d5db1002674fb9c7ed61ff14babc8fd0a14"
+            },
+            {
+              "header": "@@ -991,7 +994,16 @@ def require_stash_binding(admitted: dict, evidence: dict) -> None:",
+              "reason": "Exact stash-content binding retained: regular file permissions are projected to Git 0644/0755 for stash comparison while original permission records remain in admitted-state/before.tar for native restoration and full equality. Other content/index drift still rejects. Original source lines 994-1009; cited replacement/current-dev lines 994-1009. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 1009,
+                  "path": "mu/tools/executors/workingrcx_fleet_apply.py",
+                  "sha256": "a11ea07c9f50033ae871a750c415aec7becbe022a27610cf5ff8718b06e14926",
+                  "start": 994
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "5ba48e214dd12a29bb03d8fea0fe3d7ecdf50ace8314fa0e56797aad1393a14d"
+            },
+            {
+              "header": "@@ -1258,7 +1270,11 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,",
+              "reason": "Exact residual preservation comparison retained: producer-authorized prepared_state content, including bound behind-dev marker removal, is compared for residual preparation; legacy flow still uses before content. Original source lines 1270-1280; cited replacement/current-dev lines 1270-1280. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 1280,
+                  "path": "mu/tools/executors/workingrcx_fleet_apply.py",
+                  "sha256": "7b84e705832d168552c573a16bd67427e9e619fbc346e0dc04601e97e676fcc6",
+                  "start": 1270
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "626cdf31c0ed26eb90f850bf6cea2f792db49d9d3a085d8b72c5a19904e7db74"
+            },
+            {
+              "header": "@@ -1784,23 +1800,246 @@ def verify_residual_plan(repo: Path, plan: dict, *, authority_commit: str,",
+              "reason": "PR1308 supersedes the incomplete six-module dependency list with eight modules by adding bridge_adapters.py and tracker_sync_note.py before the eager commit_executor import. That correction was staged separately in stopped R2, not committed in PR1307. All original recovery behavior is retained: landed PRIMARY/tool/dependency admission, exact owner/common-dir/branch/HEAD/journal identity, retained journals/backups/checkout/stashes, native held-WIP completion checks, exclusive single-use claims, conservative repeated-result verification and public mutually exclusive --recover-sync dispatch. Apart from those two dependency entries and their explanatory comments, this source range is byte-identical in PR1308/current dev. Original source lines 1800-2045; cited replacement/current-dev lines 1800-2048. PR1308 merge and comparison dev are the same exact d774fbe711529e9bb9591f67fac5a8313941428a commit.",
+              "references": [
+                {
+                  "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+                  "end": 2048,
+                  "path": "mu/tools/executors/workingrcx_fleet_apply.py",
+                  "sha256": "48ce3701089d6426ad34a619447ce1011df988c67819bfbe554b26e0c236a1a6",
+                  "start": 1800
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "bb3ac1816eee95d6f2160381bc13f0dd0e7dae27ab60bf1fae039eb627eebc9f"
+            }
+          ],
+          "patch_sha256": "e958613fadc2bc5714fcba5cb6a3bfe618eb3deb3efa45d2dba685f1fb660769",
+          "path": "mu/tools/executors/workingrcx_fleet_apply.py",
+          "reason": "Exact public CLI documentation retained: --recover-sync uses landed PRIMARY authority for the recorded owner once, repeated calls verify retained results, and interrupted claims cannot authorize another sync. Exact stash-content binding retained: regular file permissions are projected to Git 0644/0755 for stash comparison while original permission records remain in admitted-state/before.tar for native restoration and full equality. Other content/index drift still rejects. Exact residual preservation comparison retained: producer-authorized prepared_state content, including bound behind-dev marker removal, is compared for residual preparation; legacy flow still uses before content. PR1308 supersedes the incomplete six-module dependency list with eight modules by adding bridge_adapters.py and tracker_sync_note.py before the eager commit_executor import. That correction was staged separately in stopped R2, not committed in PR1307. All original recovery behavior is retained: landed PRIMARY/tool/dependency admission, exact owner/common-dir/branch/HEAD/journal identity, retained journals/backups/checkout/stashes, native held-WIP completion checks, exclusive single-use claims, conservative repeated-result verification and public mutually exclusive --recover-sync dispatch. Apart from those two dependency entries and their explanatory comments, this source range is byte-identical in PR1308/current dev.",
+          "references": [
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 12,
+              "path": "mu/tools/executors/workingrcx_fleet_apply.py",
+              "sha256": "61412880c9880d9743d23d15c8acfecdd73fd54f418143574ba26ec585d259b4",
+              "start": 4
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 1009,
+              "path": "mu/tools/executors/workingrcx_fleet_apply.py",
+              "sha256": "a11ea07c9f50033ae871a750c415aec7becbe022a27610cf5ff8718b06e14926",
+              "start": 994
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 1280,
+              "path": "mu/tools/executors/workingrcx_fleet_apply.py",
+              "sha256": "7b84e705832d168552c573a16bd67427e9e619fbc346e0dc04601e97e676fcc6",
+              "start": 1270
+            },
+            {
+              "commit": "d774fbe711529e9bb9591f67fac5a8313941428a",
+              "end": 2048,
+              "path": "mu/tools/executors/workingrcx_fleet_apply.py",
+              "sha256": "48ce3701089d6426ad34a619447ce1011df988c67819bfbe554b26e0c236a1a6",
+              "start": 1800
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,132 @@",
+              "reason": "The complete locked R2 packet remains preserved at the original PR1307 source commit and retained branch as historical scope/review evidence. Its old executable plan is not replay authority; this wave accounts separately for every useful code/test hunk.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "3e4a8cccff9cb69532320037dd47dc25f06912e9a3f955a464eb55e1f476cb2f"
+            }
+          ],
+          "patch_sha256": "5e9db58a26f3b16a985cc604569c4e6c34a778cdf7d8d4ae9a85c0b96d55f65b",
+          "path": "reports/control_plane/workingrcx-fleet-live-recovery-r2-2026-09-15_2026-09-15.md",
+          "reason": "The complete locked R2 packet remains preserved at the original PR1307 source commit and retained branch as historical scope/review evidence. Its old executable plan is not replay authority; this wave accounts separately for every useful code/test hunk.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "The original R2 indicator/provenance remains preserved at the original PR1307 source commit and retained branch. Historical timing/metrics are not current-wave measurements, completion, or authority to replay an old operation.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "a04e204a9ec26ce6439669099c7a17882ef5c15bb67e2110d5972d2f7834f450"
+            }
+          ],
+          "patch_sha256": "3440a4fc588e0bed8db68038a3dbbfbdca7a5949b72e224d74eca1fcefe457ec",
+          "path": "reports/l4_wave_indicators/workingrcx-fleet-live-recovery-r2-2026-09-15.json",
+          "reason": "The original R2 indicator/provenance remains preserved at the original PR1307 source commit and retained branch. Historical timing/metrics are not current-wave measurements, completion, or authority to replay an old operation.",
+          "references": [],
+          "resolution": "evidence_only"
+        }
+      ],
+      "evidence_refs": [
+        "git:2be3fbfcde1dca0e409e9059fc52d9406f6ef750 (original committed PR1307 source; complete eight-path/23-hunk parent diff from 9e595b2bd8518e6debb4e88a51dca8412221db49, retained by exact source branch)",
+        "https://github.com/jabramsja/rcx-pi-core/pull/1307 (OPEN source identity independently read by PR number and node and checked with the native snapshot shape/identity contract at 2026-09-16T09:13:14.916370+00:00; no live mutation)",
+        "https://github.com/jabramsja/rcx-pi-core/pull/1308 (replacement head 9579952a825b0d7a7da5c0ade2825d6dc7db9dab, merged 2026-09-16T07:27:14Z as d774fbe711529e9bb9591f67fac5a8313941428a; native replacement identity contract passed at 2026-09-16T09:13:14.916370+00:00; live dev matched)",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-live-recovery-r2-evidence-2026-09-15/terminal_stopped_candidate/manifest.json (supporting frozen evidence only; SHA256 076b4e34cfdcaacfe989e07cabebb1e554c03edd7a54ec12f3f12a7c1b46933c and all 48 stored file sizes/hashes verified at 2026-09-16T09:13:14.916370+00:00; includes separately staged import-authority correction, not part of the original PR1307 commit)",
+        "git:d774fbe711529e9bb9591f67fac5a8313941428a:mu/tools/executors/workingrcx_fleet_apply.py (the separately preserved bridge_adapters.py/tracker_sync_note.py admission fix actually landed in PR1308; original-source coverage is bound to 2be3fbfcde1dca0e409e9059fc52d9406f6ef750, never the frozen staged tree)",
+        "TASKS.md row40 [FLEET-NATIVE-LIFECYCLE-PREVENTION] retains permanent recurrence, source196 deletion/stash-key mismatch, held journals/stashes and useful-work owners. This artifact does not replay any of the 23 historical or 14 newly consumed fleet operations and does not assert PR closure or completion of the 87 retained directories."
+      ],
+      "owner": {
+        "packet": "reports/control_plane/pr1307-landed-coverage-closeout-r1-2026-09-16_2026-09-16.md",
+        "task_id": "[FLEET-NATIVE-LIFECYCLE-PREVENTION]",
+        "wave_id": "pr1307-landed-coverage-closeout-r1-2026-09-16"
+      },
+      "preservation_ref": "refs/heads/jabramsja/workingrcx-fleet-live-recovery-r2-2026-09-15",
+      "replacement": {
+        "head": "9579952a825b0d7a7da5c0ade2825d6dc7db9dab",
+        "id": "PR_kwDOQvy8bs8AAAABDuZxXQ",
+        "merge": "d774fbe711529e9bb9591f67fac5a8313941428a",
+        "number": 1308
+      },
+      "source_base": "9e595b2bd8518e6debb4e88a51dca8412221db49",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/workingrcx-fleet-live-recovery-r2-2026-09-15",
+        "headRefOid": "2be3fbfcde1dca0e409e9059fc52d9406f6ef750",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABDtdHRA",
+        "mergedAt": null,
+        "number": 1307,
+        "state": "OPEN"
+      }
+    }
+  ],
+  "wave_id": "pr1307-landed-coverage-closeout-r1-2026-09-16"
+}

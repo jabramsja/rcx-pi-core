@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -1547,6 +1548,93 @@ def test_actual_reviewed_manifest_covers_every_stopped_path_and_hunk():
                     raw = subprocess.check_output(["git", "show", f"{ref['commit']}:{ref['path']}"], cwd=REPO_ROOT)
                     lines = raw.splitlines(keepends=True)[ref["start"]-1:ref["end"]]
                     assert hashlib.sha256(b"".join(lines)).hexdigest() == ref["sha256"]
+
+def test_pr1307_manifest_binds_complete_original_diff_to_landed_pr1308_bytes():
+    wave = "pr1307-landed-coverage-closeout-r1-2026-09-16"
+    manifest = disposition.validate_lifecycle_manifest(
+        REPO_ROOT / f"reports/control_plane/{wave}_coverage.json"
+    )
+    assert manifest["manifest_sha256"] == "12457690a8aec13d067368614862a82083da7f21391f0995ddda0f3e8daf68a6"
+    assert manifest["wave_id"] == wave
+    assert manifest["repository"] == GOLDEN_REPOSITORY
+    assert len(manifest["targets"]) == 1
+    entry = manifest["targets"][0]
+    source = "2be3fbfcde1dca0e409e9059fc52d9406f6ef750"
+    landed = "d774fbe711529e9bb9591f67fac5a8313941428a"
+    branch = "jabramsja/workingrcx-fleet-live-recovery-r2-2026-09-15"
+    assert entry["target"] == {
+        "baseRefName": "dev", "headRefName": branch, "headRefOid": source,
+        "headRepository": GOLDEN_HEAD_REPOSITORY, "id": "PR_kwDOQvy8bs8AAAABDtdHRA",
+        "mergedAt": None, "number": 1307, "state": "OPEN",
+    }
+    assert entry["source_base"] == "9e595b2bd8518e6debb4e88a51dca8412221db49"
+    assert entry["preservation_ref"] == f"refs/heads/{branch}"
+    assert entry["owner"] == {
+        "task_id": "[FLEET-NATIVE-LIFECYCLE-PREVENTION]", "wave_id": wave,
+        "packet": f"reports/control_plane/{wave}_2026-09-16.md",
+    }
+    assert entry["replacement"] == {
+        "number": 1308, "id": "PR_kwDOQvy8bs8AAAABDuZxXQ",
+        "head": "9579952a825b0d7a7da5c0ade2825d6dc7db9dab", "merge": landed,
+    }
+    assert manifest["comparison_commit"] == landed
+    _git(["merge-base", "--is-ancestor", entry["replacement"]["head"], landed], cwd=REPO_ROOT)
+    inventory = disposition.lifecycle_coverage_inventory(REPO_ROOT, entry["source_base"], source)
+    assert {p["path"]: len(p["hunks"]) for p in inventory} == {
+        "CHANGELOG.md": 1, "TASKS.md": 6,
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": 1,
+        "mu/tests/tools/test_workingrcx_fleet_apply.py": 4,
+        "mu/tools/executors/commit_executor.py": 5,
+        "mu/tools/executors/workingrcx_fleet_apply.py": 4,
+        "reports/control_plane/workingrcx-fleet-live-recovery-r2-2026-09-15_2026-09-15.md": 1,
+        "reports/l4_wave_indicators/workingrcx-fleet-live-recovery-r2-2026-09-15.json": 1,
+    }
+    assert inventory == [
+        {"path": p["path"], "patch_sha256": p["patch_sha256"],
+         "hunks": [{k: h[k] for k in ("header", "sha256")} for h in p["hunks"]]}
+        for p in entry["coverage"]
+    ]
+    for covered in entry["coverage"]:
+        path = covered["path"]
+        original = subprocess.check_output(["git", "show", f"{source}:{path}"], cwd=REPO_ROOT)
+        for item in [covered, *covered["hunks"]]:
+            assert item["reason"].strip()
+            if not path.endswith(".py"):
+                assert item["resolution"] == "evidence_only"
+                assert item["references"] == []
+                continue
+            assert item["resolution"] in {"landed", "superseded"}
+            assert {ref["commit"] for ref in item["references"]} == {landed}
+            for ref in item["references"]:
+                assert ref["path"] == path
+                raw = subprocess.check_output(["git", "show", f"{landed}:{path}"], cwd=REPO_ROOT)
+                lines = raw.splitlines(keepends=True)
+                assert 1 <= ref["start"] <= ref["end"] <= len(lines)
+                cited = b"".join(lines[ref["start"] - 1:ref["end"]])
+                assert hashlib.sha256(cited).hexdigest() == ref["sha256"]
+                if "header" not in item:
+                    continue
+                match = re.search(r"\+(\d+),(\d+) @@", item["header"])
+                assert match is not None
+                start, count = map(int, match.groups())
+                source_hunk = b"".join(original.splitlines(keepends=True)[start - 1:start - 1 + count])
+                if item["resolution"] == "superseded":
+                    assert path == "mu/tools/executors/workingrcx_fleet_apply.py"
+                    assert (start, count) == (1800, 246)
+                    # These separately staged R2 corrections landed only in PR1308.
+                    for addition in (
+                        b"    # commit_executor eagerly imports both, even when only native sync is used.\n",
+                        b'    Path("mu/tools/agents/bridge_adapters.py"),\n',
+                        b'    Path("mu/tools/executors/tracker_sync_note.py"),\n',
+                    ):
+                        assert addition not in source_hunk and cited.count(addition) == 1
+                        cited = cited.replace(addition, b"")
+                    cited = cited.replace(
+                        b"# Import the native mutation boundary only after verifying all dependencies.",
+                        b"# Import the native mutation boundary only after verifying its bytes.",
+                    )
+                assert cited == source_hunk
+
 
 def test_landed_manifest_registers_explicit_replacement_owners_without_github(tmp_path):
     fixture = _lifecycle_fixture(tmp_path)

@@ -6,6 +6,34 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-16
 
+### PR1307 landed replacement coverage (Phase B; native review and disposition pending)
+
+- Adds the same-wave schema-version2 coverage manifest for PR1307 only: all
+  eight source paths and 23 hunks from `9e595b2bd8518e6debb4e88a51dca8412221db49`
+  to `2be3fbfcde1dca0e409e9059fc52d9406f6ef750`. Canonical manifest digest:
+  `12457690a8aec13d067368614862a82083da7f21391f0995ddda0f3e8daf68a6`.
+  Thirteen useful hunks landed byte-exact; one is superseded by PR1308's two
+  added eager-import dependencies and explanatory comments. Nine historical
+  bookkeeping hunks remain preserved evidence, with current PRIMARY tracker
+  facts authoritative. All four cited source/test files remain unchanged.
+- Fresh native identity checks at 09:13:14Z confirm PR1307 OPEN at its retained
+  source branch, PR1308 MERGED as `d774fbe711529e9bb9591f67fac5a8313941428a`,
+  and live dev at that merge. The frozen R2 manifest SHA256
+  `076b4e34cfdcaacfe989e07cabebb1e554c03edd7a54ec12f3f12a7c1b46933c`
+  and all 48 stored sizes/hashes verify. Its separately staged import correction
+  is credited to PR1308, not to the original PR1307 commit.
+- Adds exact artifact identity, complete inventory, ancestry and byte-range
+  proofs to the existing disposition tests, retaining all lifecycle/no-replay
+  protections. The exact chained command passed **55 tool tests in 6.45 seconds**,
+  then **351 full-docs tests in 1.60 seconds**, exit 0, with two existing
+  documentation freshness warnings.
+- Preserves all 268 task IDs, 39 parked obligations and existing row40 ownership.
+  All 14 fleet batches have executed and been verified; 87 retained directories
+  and held/useful-work obligations remain incomplete. Native staged indicator
+  collection, review, commit, merge and PRIMARY sync precede foreground lifecycle
+  plan/apply/verify with the actual landed authority. PR closure and permanent
+  recurrence repairs remain pending under the same row40.
+
 ### Fleet live recovery R3 measured pytest deadline (Phase B; landing and live cleanup pending)
 
 - Verified the stopped R2 manifest SHA256
