@@ -17616,8 +17616,8 @@ def land_stranded_pr(
 
 
 # ── Growth-cap auto-bump (FOUNDER_OVERRIDE-gated) ─────────────────────────
-# A wave that adds a NEW test file or tool script can push the repo over the
-# CAP_TEST_FILES / CAP_TOOL_SCRIPTS gates (mu/tests/docs/test_growth_caps.py),
+# A wave that adds a NEW test file, tool script or core doc can exceed the
+# corresponding CAP_* gate (mu/tests/docs/test_growth_caps.py),
 # stranding the commit at Step 8 (pre-commit-doc-check). This automates the
 # founder-authorized recovery — bump the relevant CAP_* value by exactly the cap
 # shortfall the COMMITTED set implies (the git index, never untracked working-tree
@@ -17635,6 +17635,9 @@ _GROWTH_CAP_TEST_BASELINE_RE = re.compile(
 _GROWTH_CAP_TOOL_BASELINE_RE = re.compile(
     r"^BASELINE_TOOL_SCRIPTS\s*=\s*(\d+)", re.MULTILINE
 )
+_GROWTH_CAP_DOC_BASELINE_RE = re.compile(
+    r"^BASELINE_CORE_DOCS\s*=\s*(\d+)", re.MULTILINE
+)
 _GROWTH_CAP_TEST_VALUE_RE = re.compile(
     r"^(?P<prefix>CAP_TEST_FILES\s*=\s*)(?P<value>\d+)(?P<rest>[^\n]*)$",
     re.MULTILINE,
@@ -17643,8 +17646,12 @@ _GROWTH_CAP_TOOL_VALUE_RE = re.compile(
     r"^(?P<prefix>CAP_TOOL_SCRIPTS\s*=\s*)(?P<value>\d+)(?P<rest>[^\n]*)$",
     re.MULTILINE,
 )
+_GROWTH_CAP_DOC_VALUE_RE = re.compile(
+    r"^(?P<prefix>CAP_CORE_DOCS\s*=\s*)(?P<value>\d+)(?P<rest>[^\n]*)$",
+    re.MULTILINE,
+)
 _GROWTH_CAP_RETRY_AUTHORITY_SCHEMA = "RetryAuthorityV1"
-_GROWTH_CAP_SETTLEMENT_ALGORITHM_VERSION = 1
+_GROWTH_CAP_SETTLEMENT_ALGORITHM_VERSION = 2
 _GIT_OBJECT_OID_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _GIT_BLOB_INDEX_MODES = frozenset({"100644", "100755", "120000"})
 _GIT_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
@@ -17921,6 +17928,12 @@ def _is_mu_tool_script_path(relpath: str) -> bool:
     return normalized.endswith((".py", ".sh"))
 
 
+def _is_mu_core_doc_path(relpath: str) -> bool:
+    """Mirror the growth gate's mu/docs/**/*.md count, including all subdirs."""
+    normalized = _normalize_repo_relpath(relpath)
+    return normalized.startswith("mu/docs/") and normalized.endswith(".md")
+
+
 def _count_tracked_mu_test_files(repo_root: Path) -> int:
     """Count TRACKED (committed + staged) mu/tests/**/test_*.py via the git index.
 
@@ -18037,6 +18050,20 @@ def _cap_provenance_records_wave(cap_comment: str, wave_id: str) -> bool:
     return bool(_extract_same_wave_founder_override_token(cap_comment, wave_id))
 
 
+def _new_mu_core_docs_vs_merge_base(repo_root: Path, base_branch: str) -> list[str]:
+    """Index docs absent from the merge base, including committed same-wave retry."""
+    merge_base = _resolve_base_merge_base_sha(repo_root, base_branch)
+    if not merge_base:
+        return []
+    proc = _run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=A", "-z", merge_base],
+        cwd=repo_root, check=False, timeout=30,
+    )
+    if proc.returncode != 0:
+        return []
+    return sorted({path for path in proc.stdout.split("\0") if _is_mu_core_doc_path(path)})
+
+
 def _unique_growth_cap_match(
     pattern: re.Pattern[str],
     text: str,
@@ -18055,8 +18082,10 @@ def _growth_cap_plan_from_head_preimage(
     wave_id: str,
     new_test_files: list[str],
     new_tool_scripts: list[str],
+    new_core_docs: list[str],
     projected_test_count: int,
     projected_tool_count: int,
+    projected_doc_count: int,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Compute the sole canonical postimage from immutable HEAD bytes."""
     plan: dict[str, Any] = {
@@ -18085,6 +18114,14 @@ def _growth_cap_plan_from_head_preimage(
             "new_paths": new_tool_scripts,
             "projected_count": projected_tool_count,
             "noun": "tool script(s)",
+        },
+        {
+            "cap_name": "CAP_CORE_DOCS",
+            "baseline_re": _GROWTH_CAP_DOC_BASELINE_RE,
+            "cap_re": _GROWTH_CAP_DOC_VALUE_RE,
+            "new_paths": new_core_docs,
+            "projected_count": projected_doc_count,
+            "noun": "core doc(s)",
         },
     ]
 
@@ -18229,6 +18266,7 @@ def _capture_growth_cap_retry_authority(
     if head_records_same_wave:
         new_test_files = _new_mu_test_files_vs_merge_base(repo_root, base_branch)
         new_tool_scripts = _new_mu_tool_scripts_vs_merge_base(repo_root, base_branch)
+        new_core_docs = _new_mu_core_docs_vs_merge_base(repo_root, base_branch)
     else:
         head_paths = set(head_by_path)
         new_test_files = sorted(
@@ -18241,12 +18279,18 @@ def _capture_growth_cap_retry_authority(
             for entry in index_entries
             if entry["path"] not in head_paths and _is_mu_tool_script_path(entry["path"])
         )
+        new_core_docs = sorted(
+            entry["path"]
+            for entry in index_entries
+            if entry["path"] not in head_paths and _is_mu_core_doc_path(entry["path"])
+        )
 
     snapshot: dict[str, Any] = {
         "head_oid": head_oid,
         "head_records_same_wave": head_records_same_wave,
         "new_test_files": new_test_files,
         "new_tool_scripts": new_tool_scripts,
+        "new_core_docs": new_core_docs,
         "index_entries": index_entries,
     }
     target_path = repo_root / GROWTH_CAP_TEST_RELPATH
@@ -18262,7 +18306,7 @@ def _capture_growth_cap_retry_authority(
         # stage-0 index, and the worktree.  Any partial presence continues into
         # the fail-closed checks below.
         return snapshot, None
-    if not new_test_files and not new_tool_scripts:
+    if not new_test_files and not new_tool_scripts and not new_core_docs:
         # A retry handoff can still carry the generated target after HEAD has
         # moved far enough that the governed addition is no longer new.  Do
         # not let the legacy no-new-files no-op turn that stale staged delta
@@ -18336,13 +18380,18 @@ def _capture_growth_cap_retry_authority(
     projected_tool_count = sum(
         1 for entry in pre_step5e_entries if _is_mu_tool_script_path(entry["path"])
     )
+    projected_doc_count = sum(
+        1 for entry in pre_step5e_entries if _is_mu_core_doc_path(entry["path"])
+    )
     plan, plan_error = _growth_cap_plan_from_head_preimage(
         head_text=head_text,
         wave_id=wave_id,
         new_test_files=new_test_files,
         new_tool_scripts=new_tool_scripts,
+        new_core_docs=new_core_docs,
         projected_test_count=projected_test_count,
         projected_tool_count=projected_tool_count,
+        projected_doc_count=projected_doc_count,
     )
     if plan_error or plan is None:
         return None, plan_error or "could not compute growth-cap postimage"
@@ -18538,6 +18587,7 @@ def _maybe_autobump_growth_cap_for_founder_override(
         "bump_amount": 0,
         "new_test_files": [],
         "new_tool_scripts": [],
+        "new_core_docs": [],
         "previous_cap": None,
         "new_cap": None,
         "cap_bumps": {},
@@ -18599,7 +18649,8 @@ def _maybe_autobump_growth_cap_for_founder_override(
         return outcome
     outcome["new_test_files"] = list(captured.get("new_test_files") or [])
     outcome["new_tool_scripts"] = list(captured.get("new_tool_scripts") or [])
-    if not outcome["new_test_files"] and not outcome["new_tool_scripts"]:
+    outcome["new_core_docs"] = list(captured.get("new_core_docs") or [])
+    if not any(outcome[key] for key in ("new_test_files", "new_tool_scripts", "new_core_docs")):
         outcome["reason"] = "no_new_test_files"
         return outcome
 

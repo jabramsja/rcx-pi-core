@@ -2277,6 +2277,51 @@ class TestCommitCandidateInventory:
         assert "outside allowlist" in " ".join(result["errors"])
         assert not package
 
+    @pytest.mark.parametrize("staged", [False, True], ids=["untracked", "staged"])
+    @pytest.mark.parametrize("path_kind", ["same_wave_report", "other_wave_report", "source"])
+    def test_scope_guard_rejects_unlisted_non_blocking_paths_without_mutation(
+        self, tmp_path, staged, path_kind,
+    ):
+        case = _commit_inventory_fixture(tmp_path, generated=False)
+        assert candidate_authority_mod.guard_candidate_scope_before_mutation(
+            case.repo, case.spec,
+        )["status"] == "scope-current"
+        unexpected = {
+            "same_wave_report": f"reports/deferred/non_blocking/{case.wave}_bridge_nonblockers.md",
+            "other_wave_report": "reports/deferred/non_blocking/other-wave_bridge_nonblockers.md",
+            "source": "outside.py",
+        }[path_kind]
+        report = case.repo / unexpected
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(
+            f"# Deferred Non-Blocking Findings: {case.wave}\n\n"
+            f"Wave: {case.wave}\nStatus: DEFERRED_NON_BLOCKING\n"
+            "# Disposition: non_blocking\n",
+            encoding="utf-8",
+        )
+        if staged:
+            _inventory_git(case.repo, "add", "--", unexpected)
+        preserved = {
+            path: path.read_bytes()
+            for path in (
+                report, case.repo / "file.py", case.repo / "TASKS.md",
+                case.repo / case.packet, case.repo / case.indicator,
+                case.repo / ".git/index", case.spec_path, case.route_path,
+                case.repo / case.bus / "collections",
+            )
+        }
+        spec_before = case.spec.to_dict()
+
+        with pytest.raises(candidate_authority_mod.CandidateAuthorityError) as exc:
+            candidate_authority_mod.guard_candidate_scope_before_mutation(
+                case.repo, case.spec,
+            )
+
+        assert str(exc.value) == f"candidate inventory contains path(s) outside allowlist: {unexpected}"
+        assert case.spec.to_dict() == spec_before
+        assert {path: path.read_bytes() for path in preserved} == preserved
+        assert _inventory_git(case.repo, "rev-parse", "HEAD") == case.base
+
     def test_required_authority_cannot_fall_back_to_handoff_evidence(self, tmp_path, monkeypatch):
         case = _commit_inventory_fixture(tmp_path, generated=False)
         case.spec_path.unlink()
@@ -2607,6 +2652,186 @@ class TestReceiptChainEndToEnd:
         assert packet_text.count("## Commit-Time Generated Governance Authorization") == 1
         assert packet_text.count(f"`{growth_path}`") >= 1
         assert cap_file.read_text(encoding="utf-8").count(f"FOUNDER_OVERRIDE:{wave_id}") == 1
+
+    @pytest.mark.parametrize(
+        "retry_target",
+        [
+            "postimage",
+            "preimage",
+            "legacy_two_cap_postimage",
+            "inflated_doc_cap",
+            "different_doc_provenance",
+            "authored_edit",
+        ],
+    )
+    def test_commit_generated_growth_caps_after_failed_commit_retry(
+        self, tmp_path, retry_target,
+    ):
+        """Retry restoration preserves exact three-cap authority and failed state.
+
+        The first real hook failure leaves an uncommitted generated postimage.
+        The retry must restore packet/TASKS before settlement and review, reuse
+        or regenerate only exact bytes, and demote again on either failure.
+        A legacy producer's two-cap postimage is not v2 authority for core docs.
+        """
+        repo = _setup_repo(tmp_path)
+        wave_id = "commit-generated-three-cap-retry"
+        packet_path = "reports/control_plane/three_cap_retry.md"
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        cap_file = repo / growth_path
+        cap_file.parent.mkdir(parents=True, exist_ok=True)
+        head_text = (
+            "BASELINE_TEST_FILES = 1\nCAP_TEST_FILES = 0\n"
+            "BASELINE_TOOL_SCRIPTS = 1\nCAP_TOOL_SCRIPTS = 0\n"
+            "BASELINE_CORE_DOCS = 0\nCAP_CORE_DOCS = 0\n"
+        )
+        cap_file.write_text(head_text, encoding="utf-8")
+        hook = repo / "mu/tools/hooks/pre-commit-doc-check"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/bash\necho retry-fixture-hook-failure >&2\nexit 1\n")
+        _commit_all_for_test(repo, "three-cap retry baseline")
+        head_before = _inventory_git(repo, "rev-parse", "HEAD")
+
+        pre_review_block = _write_governance_packet_for_test(repo, wave_id, packet_path)
+        packet_file = repo / packet_path
+        packet_file.write_text(packet_file.read_text().replace(
+            "Status: Phase B ready", f"Status: {commit_mod.COMMIT_RETRY_PENDING_STATUS}",
+        ))
+        pending_queue_line = (
+            "1. **[FOUNDER-ORDERED-REDTEAM-GOVERNANCE-RETRY] "
+            "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT / LOCAL EVIDENCE.** "
+            f"Wave ID: `{wave_id}`. Packet: `{packet_path}`.\n"
+        )
+        (repo / "TASKS.md").write_text("## Ra\n" + pending_queue_line)
+        authored_files = {
+            "file.py": b"# authored retry candidate\n",
+            "mu/tests/generated/test_three_cap_retry.py": (
+                b"def test_retry_candidate():\n    assert 2 + 2 == 4\n"
+            ),
+            "mu/tools/generated_retry_probe.sh": b"#!/bin/sh\nexit 0\n",
+            "mu/docs/agents/RetryGovernance.v0.md": b"# Authored governance doc\n",
+        }
+        for path, data in authored_files.items():
+            (repo / path).parent.mkdir(parents=True, exist_ok=True)
+            (repo / path).write_bytes(data)
+        expected_text = head_text
+        for cap, filename in (
+            ("CAP_TEST_FILES", "test_three_cap_retry.py"),
+            ("CAP_TOOL_SCRIPTS", "generated_retry_probe.sh"),
+            ("CAP_CORE_DOCS", "RetryGovernance.v0.md"),
+        ):
+            expected_text = expected_text.replace(
+                f"{cap} = 0\n",
+                f"{cap} = 1  # +1 for {filename} "
+                f"({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})\n",
+            )
+        expected_bytes = expected_text.encode("utf-8")
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=[*authored_files, packet_path, "TASKS.md"],
+            tracked_packet=packet_path,
+            scope_items=[*authored_files, packet_path],
+            tracker_note_text=_with_founder_override(
+                _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"], wave_id,
+            ),
+        )
+        supervisor_packages = []
+
+        def supervisor(package_path, *args, **kwargs):
+            package = json.loads(Path(package_path).read_text())
+            supervisor_packages.append(package)
+            assert cap_file.read_bytes() == expected_bytes
+            assert subprocess.check_output(
+                ["git", "show", f":{growth_path}"], cwd=repo,
+            ) == expected_bytes
+            assert commit_mod.COMMIT_RETRY_RESTORED_STATUS in packet_file.read_text()
+            assert "PIPELINE REPAIR PENDING COMMIT" not in (repo / "TASKS.md").read_text()
+            assert growth_path in package["changed_files"]
+            assert package["scope_items"].count(growth_path) == 1
+            receipt = ".scratch/three_cap_retry_receipt.json"
+            (repo / receipt).write_text(json.dumps({
+                "decision": "COMMIT_GO",
+                "staged_sha": meta_bridge_mod.compute_staged_sha(repo),
+            }))
+            return SimpleNamespace(decision="COMMIT_GO", summary="test", receipt_path=receipt)
+
+        client = SimpleNamespace(run_meta_bridge_package=supervisor, MetaBridgeClientError=Exception)
+        with patch.dict(sys.modules, {"meta_bridge_client": client}):
+            first = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+            assert first["status"] == "error", first
+            assert first["step"] == "run_pre_commit_script", first
+            assert first["errors"] == [
+                "pre-commit-doc-check failed: retry-fixture-hook-failure"
+            ]
+            assert "settle_commit_generated_governance" in first["steps_completed"]
+            assert set(first["commit_retry_state_demotion"]["changed"]) == {packet_path, "TASKS.md"}
+            assert first["commit_retry_state_demotion"]["handoff_receipt_invalidated"] is True
+            assert cap_file.read_bytes() == expected_bytes
+            durable_path = repo / ".agent_bus/executors/phase_b_handoff.json"
+            retry_handoff = json.loads(durable_path.read_text())
+            assert growth_path in retry_handoff["files_to_stage"]
+            assert "pre_commit_receipt" not in retry_handoff["evidence_handles"]
+            assert pending_queue_line in (repo / "TASKS.md").read_text()
+            assert commit_mod.COMMIT_RETRY_PENDING_STATUS in packet_file.read_text()
+
+            retry_text = expected_text
+            if retry_target == "preimage":
+                retry_text = head_text
+            elif retry_target == "legacy_two_cap_postimage":
+                retry_text = "\n".join(
+                    "CAP_CORE_DOCS = 0" if line.startswith("CAP_CORE_DOCS =") else line
+                    for line in expected_text.splitlines()
+                ) + "\n"
+            elif retry_target == "inflated_doc_cap":
+                retry_text = expected_text.replace("CAP_CORE_DOCS = 1", "CAP_CORE_DOCS = 2")
+            elif retry_target == "different_doc_provenance":
+                retry_text = expected_text.replace("RetryGovernance.v0.md", "DifferentDoc.v0.md")
+            elif retry_target == "authored_edit":
+                retry_text += "\n# Authored change must survive rejected settlement.\n"
+            cap_file.write_text(retry_text, encoding="utf-8")
+            subprocess.run(["git", "add", "--", growth_path], cwd=repo, check=True)
+            second = commit_mod.run_commit_pipeline(retry_handoff, repo_root=repo)
+
+        assert second["status"] == "error", second
+        completed = second["steps_completed"]
+        assert "restore_commit_retry_state" in completed
+        assert "git_commit" not in completed
+        if retry_target in {"postimage", "preimage"}:
+            assert second["step"] == "run_pre_commit_script", second
+            assert second["errors"] == [
+                "pre-commit-doc-check failed: retry-fixture-hook-failure"
+            ]
+            assert completed.index("restore_commit_retry_state") < completed.index(
+                "settle_commit_generated_governance"
+            ) < completed.index("build_and_run_supervisor") < completed.index("validate_receipt")
+            assert len(supervisor_packages) == 2
+            surviving_cap = expected_bytes
+        else:
+            assert second["step"] == "settle_commit_generated_governance", second
+            assert second["errors"] == [
+                "growth-cap retry authority rejected candidate: target must be the exact "
+                "HEAD preimage or exact recomputed postimage in both index and worktree"
+            ]
+            assert "settle_commit_generated_governance" not in completed
+            assert "build_and_run_supervisor" not in completed
+            assert "validate_receipt" not in completed
+            assert len(supervisor_packages) == 1
+            surviving_cap = retry_text.encode("utf-8")
+        assert set(second["commit_retry_state_demotion"]["changed"]) == {packet_path, "TASKS.md"}
+        assert second["commit_retry_state_demotion"]["errors"] == []
+        for path, data in {**authored_files, growth_path: surviving_cap}.items():
+            assert (repo / path).read_bytes() == data
+            assert subprocess.check_output(["git", "show", f":{path}"], cwd=repo) == data
+        assert _inventory_git(repo, "rev-parse", "HEAD") == head_before
+        assert subprocess.check_output(
+            ["git", "show", f"HEAD:{growth_path}"], cwd=repo,
+        ) == head_text.encode("utf-8")
+        assert pre_review_block in packet_file.read_text()
+        assert commit_mod.COMMIT_RETRY_PENDING_STATUS in packet_file.read_text()
+        assert commit_mod.COMMIT_RETRY_PENDING_STATUS in _inventory_git(repo, "show", f":{packet_path}")
+        assert pending_queue_line in (repo / "TASKS.md").read_text()
+        assert pending_queue_line in _inventory_git(repo, "show", ":TASKS.md") + "\n"
+        assert "pre_commit_receipt" not in json.loads(durable_path.read_text())["evidence_handles"]
 
     def test_commit_generated_growth_cap_mixed_retry_preserves_scope(self, tmp_path):
         from collections import namedtuple

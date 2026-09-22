@@ -3686,18 +3686,19 @@ def test_growth_cap_autobump_no_founder_override_does_not_bump(tmp_path):
 
 
 def test_growth_cap_autobump_no_new_test_files_does_not_bump(tmp_path):
-    """(c) No new test files (only a non-test addition) -> no bump."""
+    """(c) No new governed files (only an ungoverned addition) -> no bump."""
     primary, env = _init_growth_cap_repo(
         tmp_path, baseline=3, cap=0,
         existing_test_files=[
             "mu/tests/test_existing_1.py", "mu/tests/test_existing_2.py",
         ],
     )
-    # A non-test file addition must NOT trip the test-file detector.
-    note = primary / "mu" / "docs" / "note.md"
-    note.parent.mkdir(parents=True, exist_ok=True)
+    # mu/docs/*.md additions require CAP_CORE_DOCS authority; this fixture
+    # exercises the no-growth path outside the governed test/tool/doc surfaces.
+    note = primary / "note.txt"
     note.write_text("note", encoding="utf-8")
-    _git(["add", "--", "mu/docs/note.md"], cwd=primary, env=env)
+    _git(["add", "--", "note.txt"], cwd=primary, env=env)
+    before = _raw_growth_cap_repo_state(primary)
     lines, log = _make_capture_log()
 
     outcome = commit_mod.maybe_autobump_growth_cap_for_founder_override(
@@ -3707,10 +3708,15 @@ def test_growth_cap_autobump_no_new_test_files_does_not_bump(tmp_path):
 
     assert outcome["bumped"] is False, outcome
     assert outcome["reason"] == "no_new_test_files", outcome
+    assert outcome["retry_authority_error"] == "", outcome
     assert outcome["new_test_files"] == [], outcome
+    assert outcome["new_tool_scripts"] == [], outcome
+    assert outcome["new_core_docs"] == [], outcome
+    assert outcome["commit_generated_governance_paths"] == [], outcome
     _, _, cap = _read_growth_cap_values(primary)
     assert cap == 0
     assert not _growth_cap_staged(primary)
+    assert _raw_growth_cap_repo_state(primary) == before
 
 
 def test_growth_cap_autobump_tool_script_bumps_by_exact_shortfall_with_founder_override(tmp_path):
