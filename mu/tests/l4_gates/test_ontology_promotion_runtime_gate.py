@@ -144,6 +144,14 @@ class TestPythonValidRecord:
         record = _make_valid_record()
         _validate_ontology_promotion_record(record, "test")
 
+        # The same validator must reject the record once required evidence is lost.
+        del record["witness_traces"]
+        with pytest.raises(
+            RcxEngineError, match="INV_OPROMO_4 missing required field 'witness_traces'",
+        ) as exc_info:
+            _validate_ontology_promotion_record(record, "test")
+        assert exc_info.value.error_code == "input.shape_mismatch"
+
     @pytest.mark.parametrize("missing_field", [
         "witness_traces", "seed_configs", "closure_structure",
         "perturbation_log", "derivation_timestamp", "substrate_versions",
@@ -294,6 +302,16 @@ class TestINV_OPROMO_3:
         record = _make_valid_record()
         # rcx_engine.v1.json with engine.init is valid
         _validate_ontology_promotion_record(record, "test")
+
+        # Keep the seed fixed and replace only the projection authority.
+        record["authority"]["projection_ids"] = ["fake.nonexistent"]
+        with pytest.raises(
+            RcxEngineError, match="INV_OPROMO_3 projection_ids not found in seed",
+        ) as exc_info:
+            _validate_ontology_promotion_record(record, "test")
+        assert exc_info.value.error_code == "input.shape_mismatch"
+        assert "rcx_engine.v1.json" in str(exc_info.value)
+        assert "fake.nonexistent" in str(exc_info.value)
 
     def test_seed_resolution_failure_is_typed(self):
         """Seed resolution failure must produce RcxEngineError, not raw ValueError."""
@@ -888,7 +906,20 @@ class TestBuilderPython:
     def test_builder_output_passes_a12_validator(self):
         evidence = _make_valid_evidence()
         record = _build_ontology_promotion_candidate(evidence, "test")
+        checksum = SEED_CHECKSUMS["rcx_engine.v1.json"]
+        assert record == {
+            **_make_valid_record(),
+            "derivation_timestamp": "derived:" + checksum,
+            "substrate_versions": {"python": checksum, "js": checksum},
+        }
         _validate_ontology_promotion_record(record, "test")
+
+        del record["derivation_timestamp"]
+        with pytest.raises(
+            RcxEngineError, match="INV_OPROMO_4 missing required field 'derivation_timestamp'",
+        ) as exc_info:
+            _validate_ontology_promotion_record(record, "test")
+        assert exc_info.value.error_code == "input.shape_mismatch"
 
     def test_unknown_seed_file_raises_typed(self):
         """C1: Unknown seed_file → typed input.shape_mismatch (no raw KeyError)."""
@@ -1318,6 +1349,13 @@ class TestEmissionEdgeCases:
         result = {"some_key": "some_value", "ontology_promotion": record}
         # Must not raise — ontology_promotion is not a reserved field
         validate_no_kernel_reserved_fields(result, context="test.post_producer")
+
+        # A forged kernel field inside the otherwise accepted record must be found.
+        record["closure_structure"]["_mode"] = "forged"
+        with pytest.raises(
+            ValueError, match=r"test\.post_producer cannot contain kernel-reserved field: _mode",
+        ):
+            validate_no_kernel_reserved_fields(result, context="test.post_producer")
 
     def test_insufficient_evidence_with_flag_raises_typed(self):
         """Evidence missing required key + flag → typed error."""

@@ -17,15 +17,25 @@ class TestValidationDepthAlignment:
     """Verify validation depth covers full MAX_MU_DEPTH in both substrates."""
 
     def test_python_validation_covers_max_mu_depth(self):
-        """Validation accepts structures at MAX_MU_DEPTH-1 (proves limit >= MAX_MU_DEPTH)."""
+        """Accept through MAX_MU_DEPTH and still validate the innermost field."""
         from rcx_pi.selfhost.mu_type import MAX_MU_DEPTH
         from rcx_pi.selfhost.step_mu import validate_algorithm_runtime_fields
 
         # Build structure at MAX_MU_DEPTH - 1 levels — must be accepted
-        value = "leaf"
-        for _ in range(MAX_MU_DEPTH - 1):
+        leaf = {"safe_key": "leaf"}
+        value = leaf
+        for _ in range(MAX_MU_DEPTH - 2):
             value = {"safe_key": value}
         validate_algorithm_runtime_fields(value, "test")
+
+        # The exact boundary is accepted too; validation cannot stop short of it.
+        value = {"safe_key": value}
+        validate_algorithm_runtime_fields(value, "test")
+        leaf["_forged_runtime_field"] = leaf.pop("safe_key")
+        with pytest.raises(
+            ValueError, match="unsupported algorithm underscore field: _forged_runtime_field",
+        ):
+            validate_algorithm_runtime_fields(value, "test")
 
     def test_python_rejects_beyond_max_mu_depth(self):
         """Structures deeper than MAX_MU_DEPTH are rejected by validator."""
@@ -42,11 +52,19 @@ class TestValidationDepthAlignment:
         """Structures at depth 200 are accepted (regression: old limit was 100)."""
         from rcx_pi.selfhost.step_mu import validate_algorithm_runtime_fields
 
-        value = "leaf"
-        for _ in range(200):
+        leaf = {"safe_key": "leaf"}
+        value = leaf
+        for _ in range(199):
             value = {"safe_key": value}
         # This would fail with the old hardcoded limit of 100
         validate_algorithm_runtime_fields(value, "test")
+
+        # Preserve depth 200 while replacing only the deepest field's name.
+        leaf["_forged_runtime_field"] = leaf.pop("safe_key")
+        with pytest.raises(
+            ValueError, match="unsupported algorithm underscore field: _forged_runtime_field",
+        ):
+            validate_algorithm_runtime_fields(value, "test")
 
     def test_js_validation_depth_equals_max_depth(self):
         """JS MAX_VALIDATION_DEPTH must equal MAX_DEPTH (not a smaller constant)."""

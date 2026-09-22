@@ -4,6 +4,42 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-21
+
+### Preserved cap producer R4 with complete native report authority (Phase B; native review and landing pending)
+
+- Verified terminal R3 manifest SHA256
+  `5a655745550b4c93a2af20479db6e3be092efc5ec97fbfeefd6ff1575fb051a6`
+  and all 52 archived destination sizes/hashes. Restored exactly its seven
+  scoped product files byte-for-byte onto fresh dev `59ddd15b`; old trackers,
+  packets, indicators, reports, bus, receipts, claims and indexes remain history.
+- Retains canonical three-cap producer algorithm v2, exact HEAD/index/worktree
+  authority, finite shortfall, same-wave override and authored-content guards.
+  Includes all six cap receipt regressions and six native recovery cases proving
+  unlisted same-wave reports, other-wave reports and source paths are rejected
+  before mutation. Diagnostics use actual errors without unlanded R5 fields.
+- Preserves the ungoverned `note.txt` no-growth fixture with strict
+  `no_new_test_files` and authority/cap/index/worktree assertions. All nine L4
+  behavioral proof repairs retain route arguments, validator calls, depth 200,
+  MAX_MU_DEPTH and JS/parity checks. The exception registry is empty; classifier,
+  runtime/seed semantics and numeric cap bytes are unchanged. No governed file
+  was added.
+- The unchanged launch-owned 12-path authority admits only this wave's exact
+  optional native `bridge_nonblockers.md` report. It remains absent without
+  findings; this implementer creates no substitute artifact or new authority.
+- Fresh local evidence at 2026-09-22T03:37:21Z: separate collections found
+  **608 targeted cases and 351 docs cases**. The exact anti-theater-first chain
+  exited 0: **current 0 / allowlist 0 / new 0 / expired 0 / real 0**, then
+  **608 tests passed in 80.73 seconds** and **351 docs tests passed in 1.73 seconds**
+  with two existing freshness warnings. Native final/review/precommit/prepush,
+  CI, merge and PRIMARY sync remain pending with the outer executor.
+- Keeps existing row40, all 268 task IDs, 39 parked obligations and useful-work
+  owners. R1/R2 unpushed commits, stopped/uncommitted R3 and retained R5 remain
+  distinct from current approval. Historical fleet results remain 14 consumed
+  and verified operations, 137 MOVED / 1 SYNCED_LOCAL_DEV / 19 HOLD / 8 INCOMPLETE.
+  After verified merge/sync, retained R5 lifecycle controls and deterministic
+  optional-report admission precede eligible retained work, Mu and optimization.
+
 ## 2026-09-16
 
 ### PR1307 landed replacement coverage (Phase B; native review and disposition pending)

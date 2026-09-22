@@ -61,14 +61,24 @@ class TestPythonBoot1Default:
              patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = _fake_engine_result()
             mock_routing.return_value = _local_default_hemispheres()
-            mock_metab.return_value = _local_default_hemispheres()
+            metabolized = {
+                **_local_default_hemispheres(),
+                "r_a": {"head": "metabolized", "tail": None},
+            }
+            mock_metab.return_value = metabolized
 
-            run_engine_with_routing(["proj1"], "input_val")
+            result = run_engine_with_routing(["proj1"], "input_val")
 
             mock_pipeline.assert_called_once_with(
                 ["proj1"], "input_val", use_boot1_recursive=True
             )
+            mock_routing.assert_called_once_with(
+                _fake_engine_result(), _local_default_hemispheres()
+            )
             mock_metab.assert_called_once_with(_local_default_hemispheres())
+            assert result == {
+                "engine_result": _fake_engine_result(), "hemispheres": metabolized,
+            }
 
     def test_explicit_false_routes_trampoline(self):
         """Explicit use_boot1_recursive=False routes trampoline path."""
@@ -77,14 +87,24 @@ class TestPythonBoot1Default:
              patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = _fake_engine_result()
             mock_routing.return_value = _local_default_hemispheres()
-            mock_metab.return_value = _local_default_hemispheres()
+            metabolized = {
+                **_local_default_hemispheres(),
+                "r_a": {"head": "metabolized", "tail": None},
+            }
+            mock_metab.return_value = metabolized
 
-            run_engine_with_routing(["proj1"], "input_val", use_boot1_recursive=False)
+            result = run_engine_with_routing(["proj1"], "input_val", use_boot1_recursive=False)
 
             mock_pipeline.assert_called_once_with(
                 ["proj1"], "input_val", use_boot1_recursive=False
             )
+            mock_routing.assert_called_once_with(
+                _fake_engine_result(), _local_default_hemispheres()
+            )
             mock_metab.assert_called_once_with(_local_default_hemispheres())
+            assert result == {
+                "engine_result": _fake_engine_result(), "hemispheres": metabolized,
+            }
 
     def test_explicit_true_matches_default(self):
         """Explicit use_boot1_recursive=True matches omitted-flag behavior."""
@@ -93,12 +113,35 @@ class TestPythonBoot1Default:
              patch("rcx_pi.selfhost.engine_pipeline.run_metabolization_cycle") as mock_metab:
             mock_pipeline.return_value = _fake_engine_result()
             mock_routing.return_value = _local_default_hemispheres()
-            mock_metab.return_value = _local_default_hemispheres()
+            metabolized = {
+                **_local_default_hemispheres(),
+                "r_a": {"head": "metabolized", "tail": None},
+            }
+            mock_metab.return_value = metabolized
 
-            run_engine_with_routing(["proj1"], "input_val", use_boot1_recursive=True)
+            result = run_engine_with_routing(["proj1"], "input_val", use_boot1_recursive=True)
 
             mock_pipeline.assert_called_once_with(
                 ["proj1"], "input_val", use_boot1_recursive=True
+            )
+            mock_routing.assert_called_once_with(
+                _fake_engine_result(), _local_default_hemispheres()
+            )
+            mock_metab.assert_called_once_with(_local_default_hemispheres())
+            assert result == {
+                "engine_result": _fake_engine_result(), "hemispheres": metabolized,
+            }
+
+            mock_pipeline.reset_mock()
+            mock_routing.reset_mock()
+            mock_metab.reset_mock()
+            default_result = run_engine_with_routing(["proj1"], "input_val")
+            assert default_result == result
+            mock_pipeline.assert_called_once_with(
+                ["proj1"], "input_val", use_boot1_recursive=True
+            )
+            mock_routing.assert_called_once_with(
+                _fake_engine_result(), _local_default_hemispheres()
             )
             mock_metab.assert_called_once_with(_local_default_hemispheres())
 
