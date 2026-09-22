@@ -20520,6 +20520,23 @@ def _run_commit_pipeline_impl(
             "errors": [f"Commit candidate authority verification failed: {exc}"],
         }
 
+    # The initial receipt authorizes the mechanical hook only. Revoke its
+    # canonical hook authority before final review: rejection or an error may
+    # never reach the receipt writer, even when staged bytes are unchanged.
+    # Keep per-invocation receipts intact for handoff provenance.
+    try:
+        agent_bus_path(
+            repo_root, _active_bus_dir(), "meta", "pre_commit_receipt.json",
+        ).unlink(missing_ok=True)
+    except (OSError, ExecutorCommonError) as exc:
+        return {
+            "status": "error", "step": "build_and_run_supervisor",
+            "errors": [
+                f"Cannot revoke initial pre-commit receipt before final approval: {exc}"
+            ],
+            "steps_completed": result["steps_completed"],
+        }
+
     log("Step 8d: requesting fresh final approval after mechanical validation")
     review_error = review_and_validate_receipt(final_approval=True)
     if review_error is not None:
