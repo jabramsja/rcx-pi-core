@@ -5,6 +5,7 @@ Covers:
 2. Step 7 preserves the Phase B handoff receipt chain before reading the fresh supervisor receipt
 3. Authority chain: Phase B handoff receipt → step 6 supervisor receipt → step 7 decision → step 9 hook verifies staged state
 4. Handoff pre_commit_receipt_path is continuity proof, not the final decision source for step 7
+5. Mechanical checks finish before fresh final approval and the real Git hook
 """
 
 from __future__ import annotations
@@ -2159,6 +2160,7 @@ def _run_inventory_commit(case, monkeypatch, tmp_path, *, drift="", expect_autho
     def supervisor(package_path, **kwargs):
         package = json.loads(Path(package_path).read_text())
         captured.update(package)
+        captured["review_count"] = captured.get("review_count", 0) + 1
         assert str(kwargs["bus_dir"]) == case.bus
         assert "## Commit Path Truth Refresh" in (case.repo / case.packet).read_text()
         assert case.indicator in package["changed_files"]
@@ -2199,6 +2201,9 @@ def _run_inventory_commit(case, monkeypatch, tmp_path, *, drift="", expect_autho
             "staged_sha": meta_bridge_mod.compute_staged_sha(case.repo),
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         }))
+        if drift == "final_index_drift" and captured["review_count"] == 2:
+            (case.repo / "file.py").write_text("# changed after final review\n")
+            _inventory_git(case.repo, "add", "--", "file.py")
         return SimpleNamespace(
             decision="COMMIT_GO_HOLD_PUSH", summary="reviewed fixture", receipt_path=receipt_rel,
         )
@@ -2231,6 +2236,7 @@ class TestCommitCandidateInventory:
         assert "git_commit" in result["steps_completed"]
         assert "validate_receipt" in result["steps_completed"]
         assert "verify_commit_candidate_authority" in result["steps_completed"]
+        assert package["review_count"] == 2
         assert _inventory_git(case.repo, "show", "HEAD:file.py") == "# candidate code"
         assert json.loads(snapshot.read_text())["collections"] == (case.repo / case.bus / "collections").read_text()
         assert (case.repo / package["evidence_handles"]["candidate_authority_receipt"]).read_bytes() == package["authority_bytes"]
@@ -2263,6 +2269,18 @@ class TestCommitCandidateInventory:
         if drift == "missing_generated":
             assert (case.repo / case.growth).exists()
             assert not _inventory_git(case.repo, "ls-files", "--", case.growth)
+
+    def test_final_review_cannot_replace_the_validated_candidate(self, tmp_path, monkeypatch):
+        case = _commit_inventory_fixture(tmp_path, generated=False)
+        result, package, _snapshot = _run_inventory_commit(
+            case, monkeypatch, tmp_path, drift="final_index_drift",
+        )
+        assert result["status"] == "error", result
+        assert result["step"] == "verify_commit_candidate_authority", result
+        assert package["review_count"] == 2
+        assert "git_commit" not in result["steps_completed"]
+        assert _inventory_git(case.repo, "rev-parse", "HEAD") == case.base
+        assert _inventory_git(case.repo, "show", ":file.py") == "# changed after final review"
 
     @pytest.mark.parametrize("committed", [False, True])
     def test_exact_base_scope_failure_precedes_supervisor(self, tmp_path, monkeypatch, committed):
@@ -2342,6 +2360,265 @@ class TestCommitCandidateInventory:
         )
         assert result["status"] == "held", result
         assert "git_commit" in result["steps_completed"]
+
+    @pytest.mark.parametrize("drift, reviews", [("index_drift", 1), ("final_index_drift", 2)])
+    def test_legacy_handoff_rejects_drift_across_validation_and_final_review(
+        self, tmp_path, monkeypatch, drift, reviews,
+    ):
+        case = _commit_inventory_fixture(tmp_path, generated=False, authority_required=False)
+        case.spec_path.unlink()
+        route = json.loads(case.route_path.read_text())
+        route.pop("candidate_authority")
+        case.route_path.write_text(json.dumps(route))
+        result, package, _snapshot = _run_inventory_commit(
+            case, monkeypatch, tmp_path, drift=drift, expect_authority=False,
+        )
+        assert result["status"] == "error", result
+        assert result["step"] == "verify_commit_candidate_authority", result
+        assert "staged content changed" in " ".join(result["errors"])
+        assert package["review_count"] == reviews
+        assert "git_commit" not in result["steps_completed"]
+        assert _inventory_git(case.repo, "rev-parse", "HEAD") == case.base
+
+
+@pytest.fixture
+def receipt_clock_pipeline(tmp_path, monkeypatch):
+    """Real receipt writer, verifier and Git hook with a shared controlled clock."""
+    from datetime import datetime, timedelta, timezone
+
+    repo = _setup_repo(tmp_path)
+    base = _inventory_git(repo, "rev-parse", "HEAD")
+    bus = ".agent_bus-receipt-clock"
+    clock = tmp_path / "clock.txt"
+    clock.write_text("2026-09-22T00:00:00+00:00")
+
+    class ClockDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromisoformat(clock.read_text()).astimezone(tz)
+
+    monkeypatch.setattr(meta_bridge_mod, "datetime", ClockDatetime)
+    # The child executes the shipped verifier entrypoint. Only its clock is
+    # controlled; decision, staged hash, default TTL and bus lookup stay real.
+    verifier = tmp_path / "verify_at_clock.py"
+    verifier.write_text(
+        "import sys\nfrom pathlib import Path\nfrom datetime import datetime\n"
+        f"sys.path.insert(0, {str(REPO_ROOT / 'mu/tools/agents')!r})\n"
+        "import meta_bridge_supervisor\nimport verify_pre_commit_receipt\n"
+        "class ClockDatetime(datetime):\n"
+        "    @classmethod\n"
+        "    def now(cls, tz=None):\n"
+        f"        return cls.fromisoformat(Path({str(clock)!r}).read_text()).astimezone(tz)\n"
+        "meta_bridge_supervisor.datetime = ClockDatetime\n"
+        "raise SystemExit(verify_pre_commit_receipt.main())\n"
+    )
+    verify_command = f"{shlex.quote(sys.executable)} {shlex.quote(str(verifier))}\n"
+    hook = repo / "mu/tools/hooks/pre-commit-doc-check"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\nset -e\n" + verify_command)
+    git_hook = repo / ".git/hooks/pre-commit"
+    git_hook.write_text("#!/bin/sh\nset -e\n" + verify_command)
+    git_hook.chmod(0o755)
+    test_path = "tests/test_file.py"
+    (repo / "tests").mkdir()
+    (repo / test_path).write_text("def test_sum():\n    assert sum([1, 2]) == 3\n")
+    handoff = _make_new_schema_handoff(files_to_stage=["file.py", test_path])
+    handoff_receipt = repo / handoff["pre_commit_receipt_path"]
+    handoff_bytes = handoff_receipt.read_bytes()
+    canonical = repo / bus / "meta/pre_commit_receipt.json"
+    events, receipts, packages = [], [], []
+    observation = SimpleNamespace(
+        repo=repo, base=base, bus=bus, handoff=handoff, events=events,
+        receipts=receipts, packages=packages, canonical=canonical,
+        handoff_receipt=handoff_receipt, handoff_bytes=handoff_bytes,
+        expired_initial=None, hook_output="", exact_at_git=None,
+    )
+    real_run = commit_mod._run  # ANTICHEAT_OK: observe real hook/commit at the public execution seam
+
+    def run(*, slow_gate="pytest", fail_gate="", final_fault="", decision="COMMIT_GO_HOLD_PUSH"):
+        def complete_gate(name):
+            events.append(name)
+            if name == slow_gate:
+                clock.write_text((ClockDatetime.now(timezone.utc) + timedelta(seconds=2426)).isoformat())
+            return name != fail_gate
+
+        def supervisor(package_path, **kwargs):
+            packages.append(json.loads(Path(package_path).read_text()))
+            final = len(packages) == 2
+            events.append("final_review" if final else "initial_review")
+            assert str(kwargs["bus_dir"]) == bus
+            assert {"TASKS.md", "reports/l4_wave_indicators/test-wave.json", test_path} <= set(
+                packages[-1]["changed_files"]
+            )
+            if final:
+                observation.expired_initial = meta_bridge_mod.verify_pre_commit_receipt(
+                    repo, receipt_path=receipts[0],
+                )
+                assert handoff_receipt.read_bytes() == handoff_bytes
+                if final_fault == "supervisor_reject":
+                    return SimpleNamespace(decision="NEEDS_PHASE_B", summary="final review rejected")
+            response = meta_bridge_mod.MetaBridgeResponse(
+                status="success", decision=decision if final else "COMMIT_GO",
+                summary="controlled-clock review",
+                reviewed_staged_sha=meta_bridge_mod.compute_staged_sha(repo),
+            )
+            receipt = meta_bridge_mod.write_pre_commit_receipt(
+                response, Path(package_path), repo_root=repo, bus_dir=bus,
+            )
+            receipts.append(receipt)
+            if final:
+                if final_fault == "missing_receipt":
+                    receipt.unlink()
+                elif final_fault == "handoff_decision":
+                    handoff_receipt.write_text(json.dumps({"decision": "NEEDS_PHASE_B"}))
+                elif final_fault == "old_receipt":
+                    canonical.write_bytes(receipts[0].read_bytes())
+                    receipt = receipts[0]
+                elif final_fault in {"decision", "hash", "future"}:
+                    data = json.loads(receipt.read_text())
+                    if final_fault == "decision":
+                        data["decision"] = "NEEDS_PHASE_B"
+                    elif final_fault == "hash":
+                        data["staged_sha"] = "wrong"
+                    else:
+                        data["timestamp_utc"] = (
+                            ClockDatetime.now(timezone.utc) + timedelta(seconds=1)
+                        ).isoformat()
+                    receipt.write_text(json.dumps(data))
+                    canonical.write_bytes(receipt.read_bytes())
+            return SimpleNamespace(
+                decision=response.decision, summary=response.summary,
+                receipt_path=str(receipt.relative_to(repo)),
+            )
+
+        def intercept_run(args, cwd, **kwargs):
+            if list(args[:2]) == ["bash", str(hook)]:
+                assert kwargs["env"]["RCX_AGENT_BUS_DIR"] == bus
+                assert kwargs["env"].get("RCX_SKIP_RECEIPT_CHECK") != "1"
+                completed = real_run(args, cwd=cwd, **kwargs)
+                if not complete_gate("hook"):
+                    raise subprocess.CalledProcessError(1, args, stderr="mechanical hook failed")
+                return completed
+            if list(args[:2]) == ["git", "commit"]:
+                events.append("git")
+                assert kwargs["env"]["RCX_AGENT_BUS_DIR"] == bus
+                assert kwargs["env"].get("RCX_SKIP_RECEIPT_CHECK") != "1"
+                assert args == ["git", "commit", "-m", handoff["commit_message"]]
+                observation.exact_at_git = meta_bridge_mod.verify_pre_commit_receipt(
+                    repo, receipt_path=repo / observation.ready_receipt,
+                )
+                completed = real_run(args, cwd=cwd, **kwargs)
+                observation.hook_output = completed.stdout + completed.stderr
+                return completed
+            return real_run(args, cwd=cwd, **kwargs)
+
+        def pytest_gate(repo_root, files):
+            assert test_path in files
+            passed = complete_gate("pytest")
+            return {"passed": passed, "exit_code": 0 if passed else 1,
+                    "stdout": "targeted gate result", "stderr": ""}
+
+        def private_gate(repo_root, files):
+            assert test_path in files
+            passed = complete_gate("private")
+            return {"passed": passed, "skipped": False, "exit_code": 0 if passed else 1,
+                    "test_files": [test_path], "stdout": "", "stderr": "private gate result"}
+
+        def commit_ready(*args, **kwargs):
+            events.append("ready")
+            observation.ready_receipt = kwargs["receipt_path_from_supervisor"]
+
+        def post_commit(**kwargs):
+            events.append("post_commit")
+            return {**kwargs["result"], "status": "success"}
+
+        client = SimpleNamespace(run_meta_bridge_package=supervisor, MetaBridgeClientError=Exception)
+        with patch.dict(sys.modules, {"meta_bridge_client": client}), \
+             patch.object(commit_mod, "_run", side_effect=intercept_run), \
+             patch.object(commit_mod, "_run_pytest_on_files", side_effect=pytest_gate), \
+             patch.object(commit_mod, "run_private_attr_test_gate", side_effect=private_gate), \
+             patch.object(commit_mod, "_emit_commit_ready_event", side_effect=commit_ready), \
+             patch.object(commit_mod, "_run_post_commit_pipeline", side_effect=post_commit):
+            observation.result = commit_mod.run_commit_pipeline(handoff, repo_root=repo, bus_dir=bus)
+        return observation
+
+    return run
+
+
+class TestFinalReceiptAfterMechanicalGates:
+    @pytest.mark.parametrize("slow_gate, decision", [
+        ("hook", "COMMIT_GO_HOLD_PUSH"),
+        ("pytest", "COMMIT_GO"),
+        ("private", "COMMIT_GO_HOLD_PUSH"),
+    ])
+    def test_long_successful_gate_gets_fresh_authority_at_real_git_hook(
+        self, receipt_clock_pipeline, slow_gate, decision,
+    ):
+        case = receipt_clock_pipeline(slow_gate=slow_gate, decision=decision)
+        assert case.result["status"] == ("success" if decision == "COMMIT_GO" else "held"), case.result
+        assert case.events[:7] == [
+            "initial_review", "hook", "pytest", "private", "final_review", "ready", "git",
+        ]
+        assert ("post_commit" in case.events) is (decision == "COMMIT_GO")
+        assert case.expired_initial[0] is False
+        assert "2426s > 1800s" in case.expired_initial[1]
+        assert case.exact_at_git[0] is True, case.exact_at_git
+        assert case.ready_receipt == str(case.receipts[-1].relative_to(case.repo))
+        assert "Pre-commit receipt valid" in case.hook_output
+        initial, final = [json.loads(path.read_text()) for path in case.receipts]
+        assert case.receipts[0] != case.receipts[1]
+        assert initial["timestamp_utc"] == "2026-09-22T00:00:00+00:00"
+        assert final["timestamp_utc"] == "2026-09-22T00:40:26+00:00"
+        assert final["staged_sha"] == initial["staged_sha"]
+        assert final["decision"] == decision
+        assert case.canonical.read_bytes() == case.receipts[-1].read_bytes()
+        assert case.handoff_receipt.read_bytes() == case.handoff_bytes
+        durable = json.loads((case.repo / case.bus / "executors/phase_b_handoff.json").read_text())
+        assert durable["pre_commit_receipt_path"] == case.handoff["pre_commit_receipt_path"]
+        assert durable["evidence_handles"]["pre_commit_receipt"] == str(case.receipts[-1].relative_to(case.repo))
+        continuation = json.loads((case.repo / case.bus / "executors/commit_executor_test-wave.json").read_text())
+        assert continuation["receipt_decision"] == decision
+        assert continuation["commit_sha"] == _inventory_git(case.repo, "rev-parse", "HEAD")
+
+    @pytest.mark.parametrize("gate", ["hook", "pytest", "private"])
+    def test_failed_gate_never_requests_final_approval_or_git(self, receipt_clock_pipeline, gate):
+        case = receipt_clock_pipeline(slow_gate=gate, fail_gate=gate)
+        assert case.result["status"] == "error", case.result
+        assert case.result["step"] == ("private_attr_gate" if gate == "private" else "run_pre_commit_script")
+        assert len(case.receipts) == 1
+        assert not {"final_review", "ready", "git", "post_commit"} & set(case.events)
+        assert _inventory_git(case.repo, "rev-parse", "HEAD") == case.base
+
+    @pytest.mark.parametrize("fault, step", [
+        ("supervisor_reject", "build_and_run_supervisor"),
+        ("missing_receipt", "validate_receipt"),
+        ("decision", "validate_receipt"),
+        ("handoff_decision", "validate_receipt"),
+    ])
+    def test_final_review_and_receipt_chain_fail_closed(self, receipt_clock_pipeline, fault, step):
+        case = receipt_clock_pipeline(final_fault=fault)
+        assert case.result["status"] in {"error", "needs_phase_b"}, case.result
+        assert case.result["step"] == step, case.result
+        assert "final_review" in case.events
+        assert not {"ready", "git", "post_commit"} & set(case.events)
+        assert _inventory_git(case.repo, "rev-parse", "HEAD") == case.base
+
+    @pytest.mark.parametrize("fault, diagnostic", [
+        ("hash", "staged content changed"),
+        ("old_receipt", "2426s > 1800s"),
+        ("future", "timestamp is in the future"),
+    ])
+    def test_real_hook_still_rejects_invalid_final_authority(
+        self, receipt_clock_pipeline, fault, diagnostic,
+    ):
+        case = receipt_clock_pipeline(final_fault=fault)
+        assert case.result["status"] == "error", case.result
+        assert case.result["step"] == "git_commit", case.result
+        assert diagnostic in " ".join(case.result["errors"])
+        assert "git" in case.events
+        assert "git_commit" not in case.result["steps_completed"]
+        assert "post_commit" not in case.events
+        assert _inventory_git(case.repo, "rev-parse", "HEAD") == case.base
 
 
 class TestReceiptChainEndToEnd:

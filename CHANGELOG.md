@@ -4,6 +4,32 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-22
+
+### Fresh final commit approval after mechanical validation (Phase B; native review and landing pending)
+
+- Repairs the reproduced R6 ordering defect: successful native validation
+  consumed 2,426 seconds after approval, beyond the unchanged 1,800-second
+  receipt lifetime. The subsequent staged-hash mismatch is exactly accounted
+  for by native failure-status demotion; the stale-item checker passed.
+- Preserves the initial supervisor and receipt-checked mechanical hook, then
+  requests fresh supervisor approval and validates the original handoff/final
+  receipt chain after all mechanical checks pass. Candidate inventory and exact
+  staged bytes reject drift before final review and again before Git, including
+  legacy handoffs without inventory receipts. Commit-ready notification follows
+  final approval; hold and post-commit continuation remain intact.
+- Adds fast controlled-clock regressions using the shipped receipt writer,
+  verifier and real temporary Git hooks, covering expired initial approval,
+  failed gates/review, final staged drift, invalid receipts and hold/continuation.
+  Existing canonical growth-cap producer/rejection, pager and no-replay tests
+  remain selected. Separate collection passed 313 tool cases and 351 docs
+  cases. The declared evidence chain passed with zero theater risks/exceptions,
+  313 tool tests in 58.28 seconds and 351 docs tests in 1.65 seconds, with two
+  existing documentation freshness warnings.
+- Existing row40 retains ownership. Native review/commit/CI/merge/PRIMARY sync
+  precede supported fresh-code R6 continuation, eligible fleet retirement and
+  useful-work integration, then Mu. This repair does not close fleet cleanup.
+
 ## 2026-09-21
 
 ### Preserved cap producer R4 with complete native report authority (Phase B; native review and landing pending)
