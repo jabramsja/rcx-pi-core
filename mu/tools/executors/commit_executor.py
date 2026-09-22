@@ -13,6 +13,7 @@ Steps:
  6  build_and_run_supervisor  Build 11-field package, run supervisor
  7  validate_receipt          Read receipt JSON, check decision
  8  run_pre_commit_script     Explicit pre-commit-doc-check + targeted pytest gate
+    Repeat 6-7 after successful mechanical gates for fresh final approval
  9  git_commit                git commit -m <message>
 10  hold_check                COMMIT_GO_HOLD_PUSH = terminal stop
 11  run_pre_push_script       Explicit pre-push-fast run
@@ -20112,8 +20113,13 @@ def _run_commit_pipeline_impl(
             "steps_completed": result["steps_completed"],
         }
 
-    # ── Steps 6-7: supervisor review + receipt validation ───────────
-    if not skip_supervisor:
+    # The explicit hook needs an approved receipt, but its mechanical gates
+    # can outlive that receipt. Review once for the hook and again after all
+    # checks pass; only the final approval announces commit readiness.
+    receipt_decision = ""
+
+    def review_and_validate_receipt(*, final_approval: bool) -> dict[str, Any] | None:
+        nonlocal handoff, handoff_sha, receipt_decision
         # ── Step 6: build_and_run_supervisor ──────────────────────────────
         try:
             changed_files = _run(
@@ -20386,25 +20392,54 @@ def _run_commit_pipeline_impl(
                     "errors": [persist_error],
                     "steps_completed": result["steps_completed"]}
         result["steps_completed"].append("validate_receipt")
-        try:
-            _emit_commit_ready_event(
-                repo_root,
-                handoff=handoff,
-                receipt_path_from_supervisor=receipt_path_from_supervisor,
-                receipt_decision=receipt_decision,
-                handoff_receipt_rel=handoff_receipt_rel,
-            )
-        except Exception as exc:
-            return {
-                "status": "error",
-                "step": "commit_ready_pager",
-                "errors": [f"Commit-ready pager emission failed: {exc}"],
-                "steps_completed": result["steps_completed"],
-            }
+        if final_approval:
+            try:
+                _emit_commit_ready_event(
+                    repo_root,
+                    handoff=handoff,
+                    receipt_path_from_supervisor=receipt_path_from_supervisor,
+                    receipt_decision=receipt_decision,
+                    handoff_receipt_rel=handoff_receipt_rel,
+                )
+            except Exception as exc:
+                return {
+                    "status": "error",
+                    "step": "commit_ready_pager",
+                    "errors": [f"Commit-ready pager emission failed: {exc}"],
+                    "steps_completed": result["steps_completed"],
+                }
         log(
             "Step 7: receipt chain verified "
             f"(handoff={handoff_receipt_decision}, supervisor={receipt_decision})"
         )
+        return None
+
+    review_error = review_and_validate_receipt(final_approval=False)
+    if review_error is not None:
+        return review_error
+
+    def staged_candidate_bytes() -> bytes:
+        staged = _run_git_bytes(repo_root, ["diff", "--cached", "--binary"])
+        if staged.returncode != 0:
+            raise ValueError(f"Cannot read staged candidate: {_git_bytes_diagnostic(staged)}")
+        return staged.stdout
+
+    try:
+        validated_staged_candidate = staged_candidate_bytes()
+    except Exception as exc:
+        return {
+            **result,
+            "status": "error", "step": "verify_commit_candidate_authority",
+            "errors": [f"Commit candidate authority verification failed: {exc}"],
+        }
+
+    def verify_validated_candidate() -> None:
+        if candidate_authority_binding is not None:
+            _verify_commit_candidate_authority(repo_root, candidate_authority_binding)
+        # Legacy handoffs may omit inventory receipts. A fresh review still
+        # cannot authorize bytes different from those the mechanical gates saw.
+        if staged_candidate_bytes() != validated_staged_candidate:
+            raise ValueError("staged content changed during mechanical validation or final review")
 
     # ── Step 8: run_pre_commit_script ─────────────────────────────────
     pre_commit_script = repo_root / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
@@ -20474,6 +20509,39 @@ def _run_commit_pipeline_impl(
     result["steps_completed"].append("run_pre_commit_script")
     log("Step 8: pre-commit script passed")
 
+    # Reject drift instead of letting a fresh review bless a changed candidate.
+    # Recheck the same binding at Step 9 to cover mutation during final review.
+    try:
+        verify_validated_candidate()
+    except Exception as exc:
+        return {
+            **result,
+            "status": "error", "step": "verify_commit_candidate_authority",
+            "errors": [f"Commit candidate authority verification failed: {exc}"],
+        }
+
+    # The initial receipt authorizes the mechanical hook only. Revoke its
+    # canonical hook authority before final review: rejection or an error may
+    # never reach the receipt writer, even when staged bytes are unchanged.
+    # Keep per-invocation receipts intact for handoff provenance.
+    try:
+        agent_bus_path(
+            repo_root, _active_bus_dir(), "meta", "pre_commit_receipt.json",
+        ).unlink(missing_ok=True)
+    except (OSError, ExecutorCommonError) as exc:
+        return {
+            "status": "error", "step": "build_and_run_supervisor",
+            "errors": [
+                f"Cannot revoke initial pre-commit receipt before final approval: {exc}"
+            ],
+            "steps_completed": result["steps_completed"],
+        }
+
+    log("Step 8d: requesting fresh final approval after mechanical validation")
+    review_error = review_and_validate_receipt(final_approval=True)
+    if review_error is not None:
+        return review_error
+
     # ── Step 9: git_commit ────────────────────────────────────────────
     step9_env = _commit_subprocess_env(skip_receipt_check=False)
     try:
@@ -20509,16 +20577,15 @@ def _run_commit_pipeline_impl(
                     ),
                     "steps_completed": result["steps_completed"],
                 }
-        if candidate_authority_binding is not None:
-            try:
-                _verify_commit_candidate_authority(repo_root, candidate_authority_binding)
-            except Exception as exc:
-                return {
-                    **result,
-                    "status": "error", "step": "verify_commit_candidate_authority",
-                    "errors": [f"Commit candidate authority verification failed: {exc}"],
-                }
-            result["steps_completed"].append("verify_commit_candidate_authority")
+        try:
+            verify_validated_candidate()
+        except Exception as exc:
+            return {
+                **result,
+                "status": "error", "step": "verify_commit_candidate_authority",
+                "errors": [f"Commit candidate authority verification failed: {exc}"],
+            }
+        result["steps_completed"].append("verify_commit_candidate_authority")
         _commit_out, retry_detail = _run_git_commit_with_self_cleared_index_lock_retry(
             repo_root,
             handoff["commit_message"],

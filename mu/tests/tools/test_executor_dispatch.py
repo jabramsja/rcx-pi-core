@@ -57,6 +57,7 @@ recovery_mod = load_module(
 
 
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
+_PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
 
 
 @pytest.mark.parametrize("entry", ["surface", "routing"])
@@ -2533,7 +2534,7 @@ def _make_new_handoff(**overrides):
         "pr_title": "feat: test",
         "pr_body": "## Summary\ntest",
         "base_branch": "dev",
-        "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipt.json",
+        "pre_commit_receipt_path": _PHASE_B_RECEIPT_PATH,
         "task_id": "[TEST-1]",
         "caller": "phase_b",
     }
@@ -2638,6 +2639,27 @@ def _compute_staged_sha(repo):
         cwd=repo, capture_output=True, check=True,
     ).stdout
     return hashlib.sha256(staged_diff).hexdigest()
+
+
+def _make_commit_supervisor_result(repo, staged_sha, decision="COMMIT_GO"):
+    """Keep mocked handoff and supervisor receipts separate from hook authority."""
+    handoff_receipt = repo / _PHASE_B_RECEIPT_PATH
+    handoff_receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt = {
+        "decision": "COMMIT_GO",
+        "staged_sha": staged_sha,
+        "timestamp_utc": "2026-01-01T00:00:00Z",
+    }
+    handoff_receipt.write_text(json.dumps(receipt), encoding="utf-8")
+    supervisor_receipt = handoff_receipt.with_name("commit_supervisor.json")
+    supervisor_receipt.write_text(
+        json.dumps({**receipt, "decision": decision}), encoding="utf-8",
+    )
+    return SimpleNamespace(
+        decision=decision,
+        receipt_path=str(supervisor_receipt.relative_to(repo)),
+        summary="ok",
+    )
 
 
 def _commit_post_commit_source() -> str:
@@ -6632,9 +6654,9 @@ class TestReceiptAndCommit:
         (repo / "file1.py").write_text("x = 1\n")
 
         # Create a receipt at the handoff path (this SHOULD NOT be used as fallback)
-        receipt_dir = repo / ".agent_bus" / "meta"
-        receipt_dir.mkdir(parents=True, exist_ok=True)
-        (receipt_dir / "pre_commit_receipt.json").write_text(
+        handoff_receipt = repo / _PHASE_B_RECEIPT_PATH
+        handoff_receipt.parent.mkdir(parents=True, exist_ok=True)
+        handoff_receipt.write_text(
             json.dumps({"decision": "COMMIT_GO", "staged_sha": "x", "timestamp_utc": "2026-01-01T00:00:00Z"})
         )
 
@@ -6669,9 +6691,9 @@ class TestReceiptAndCommit:
         (repo / "file1.py").write_text("x = 1\n")
 
         # Create a receipt at the handoff path (must NOT be used as fallback)
-        receipt_dir = repo / ".agent_bus" / "meta"
-        receipt_dir.mkdir(parents=True, exist_ok=True)
-        (receipt_dir / "pre_commit_receipt.json").write_text(
+        handoff_receipt = repo / _PHASE_B_RECEIPT_PATH
+        handoff_receipt.parent.mkdir(parents=True, exist_ok=True)
+        handoff_receipt.write_text(
             json.dumps({"decision": "COMMIT_GO"})
         )
 
@@ -6804,9 +6826,9 @@ class TestReceiptAndCommit:
         )
 
         # Handoff receipt must also exist — step 7 validates the full chain
-        handoff_receipt_dir = repo / ".agent_bus" / "meta"
-        handoff_receipt_dir.mkdir(parents=True, exist_ok=True)
-        (handoff_receipt_dir / "pre_commit_receipt.json").write_text(
+        handoff_receipt = repo / _PHASE_B_RECEIPT_PATH
+        handoff_receipt.parent.mkdir(parents=True, exist_ok=True)
+        handoff_receipt.write_text(
             json.dumps({"decision": "COMMIT_GO", "staged_sha": "x", "timestamp_utc": "2026-01-01T00:00:00Z"})
         )
 
@@ -6815,9 +6837,7 @@ class TestReceiptAndCommit:
         mock_result.receipt_path = ".scratch/supervisor_receipt.json"
         mock_result.summary = "ok"
 
-        handoff = _make_new_handoff(
-            pre_commit_receipt_path=".agent_bus/meta/pre_commit_receipt.json"
-        )
+        handoff = _make_new_handoff()
 
         with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
             sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
@@ -6825,8 +6845,8 @@ class TestReceiptAndCommit:
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
         # Step 7 should PASS — both handoff and supervisor receipts exist and authorize
-        assert "validate_receipt" in result.get("steps_completed", []), (
-            f"Step 7 should succeed with full receipt chain. Got: {result}"
+        assert result.get("steps_completed", []).count("validate_receipt") == 2, (
+            f"Both reviews should validate the full receipt chain. Got: {result}"
         )
 
     def test_commit_path_refresh_persists_handoff_scope_and_fresh_receipt(self, tmp_path):
@@ -6960,9 +6980,9 @@ class TestReceiptAndCommit:
         )
 
         # Handoff receipt must also exist — step 7 validates the full chain
-        handoff_receipt_dir = repo / ".agent_bus" / "meta"
-        handoff_receipt_dir.mkdir(parents=True, exist_ok=True)
-        (handoff_receipt_dir / "pre_commit_receipt.json").write_text(
+        handoff_receipt = repo / _PHASE_B_RECEIPT_PATH
+        handoff_receipt.parent.mkdir(parents=True, exist_ok=True)
+        handoff_receipt.write_text(
             json.dumps({"decision": "COMMIT_GO", "staged_sha": "fresh_sha",
                          "timestamp_utc": "2026-01-01T00:00:00Z"})
         )
@@ -6980,8 +7000,8 @@ class TestReceiptAndCommit:
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
         # Should pass step 7 (validate_receipt) — no staged_sha check here
-        assert "validate_receipt" in result.get("steps_completed", []), (
-            f"Step 7 should succeed with full receipt chain. Got: {result}"
+        assert result.get("steps_completed", []).count("validate_receipt") == 2, (
+            f"Both reviews should validate the full receipt chain. Got: {result}"
         )
 
     def test_24_pre_commit_script_failure_surfaces_stdout_when_stderr_empty(self, tmp_path):
@@ -7016,18 +7036,7 @@ class TestReceiptAndCommit:
         subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
         staged_sha = _compute_staged_sha(repo)
 
-        # Create receipt with correct staged_sha
-        receipt_dir = repo / ".agent_bus" / "meta"
-        receipt_dir.mkdir(parents=True, exist_ok=True)
-        (receipt_dir / "pre_commit_receipt.json").write_text(
-            json.dumps({"decision": "COMMIT_GO", "staged_sha": staged_sha, "timestamp_utc": "2026-01-01T00:00:00Z"})
-        )
-
-        # Mock supervisor to return COMMIT_GO
-        mock_result = MagicMock()
-        mock_result.decision = "COMMIT_GO"
-        mock_result.receipt_path = ".agent_bus/meta/pre_commit_receipt.json"
-        mock_result.summary = "ok"
+        mock_result = _make_commit_supervisor_result(repo, staged_sha)
 
         with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
             sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
@@ -7151,17 +7160,7 @@ class TestReceiptAndCommit:
         subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
         staged_sha = _compute_staged_sha(repo)
 
-        receipt_dir = repo / ".agent_bus" / "meta"
-        receipt_dir.mkdir(parents=True, exist_ok=True)
-        (receipt_dir / "pre_commit_receipt.json").write_text(
-            json.dumps({"decision": receipt_decision, "staged_sha": staged_sha,
-                         "timestamp_utc": "2026-01-01T00:00:00Z"})
-        )
-
-        mock_result = MagicMock()
-        mock_result.decision = receipt_decision
-        mock_result.receipt_path = ".agent_bus/meta/pre_commit_receipt.json"
-        mock_result.summary = "ok"
+        mock_result = _make_commit_supervisor_result(repo, staged_sha, receipt_decision)
         return repo, env, mock_result
 
     def test_25_commit_go_full_pipeline(self, tmp_path):
@@ -7525,19 +7524,7 @@ class TestIntegrationScenarios:
         subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
         staged_sha = _compute_staged_sha(repo)
 
-        # Create receipt with correct staged_sha
-        receipt_dir = repo / ".agent_bus" / "meta"
-        receipt_dir.mkdir(parents=True, exist_ok=True)
-        (receipt_dir / "pre_commit_receipt.json").write_text(
-            json.dumps({"decision": "COMMIT_GO", "staged_sha": staged_sha,
-                         "timestamp_utc": "2026-01-01T00:00:00Z"})
-        )
-
-        # Mock supervisor
-        mock_sup = MagicMock()
-        mock_sup.decision = "COMMIT_GO"
-        mock_sup.receipt_path = ".agent_bus/meta/pre_commit_receipt.json"
-        mock_sup.summary = "ok"
+        mock_sup = _make_commit_supervisor_result(repo, staged_sha)
 
         # Count which steps we reach
         handoff = _make_new_handoff()
@@ -7581,17 +7568,7 @@ class TestIntegrationScenarios:
         subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
         staged_sha = _compute_staged_sha(repo)
 
-        receipt_dir = repo / ".agent_bus" / "meta"
-        receipt_dir.mkdir(parents=True, exist_ok=True)
-        (receipt_dir / "pre_commit_receipt.json").write_text(
-            json.dumps({"decision": "COMMIT_GO", "staged_sha": staged_sha,
-                         "timestamp_utc": "2026-01-01T00:00:00Z"})
-        )
-
-        mock_sup = MagicMock()
-        mock_sup.decision = "COMMIT_GO"
-        mock_sup.receipt_path = ".agent_bus/meta/pre_commit_receipt.json"
-        mock_sup.summary = "ok"
+        mock_sup = _make_commit_supervisor_result(repo, staged_sha)
 
         handoff = _make_new_handoff()
 

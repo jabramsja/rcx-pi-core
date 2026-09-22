@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-pr1311-fixture-continuation-r2-2026-09-22",
+  "repeat_run_speedup_ratio": 1.006608,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.328842,
+  "repeat_run_raw_seconds": [
+    0.331015,
+    0.328842
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.331015
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.659857
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-22T15:40:59Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "21e55c437bb662838e90018661d9ccab4be0b6d8"
+}
