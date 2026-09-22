@@ -47,6 +47,8 @@ candidate_authority_mod = load_module(
     REPO_ROOT / "mu" / "tools" / "executors" / "candidate_authority.py",
 )
 
+_PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
+
 
 def _canonical_handoff_sha_for_test(handoff: dict) -> str:
     canonical = json.dumps(handoff, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -70,7 +72,7 @@ def _make_new_schema_handoff(**overrides):
         "pr_title": "feat: test",
         "pr_body": "## Summary\ntest",
         "base_branch": "dev",
-        "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipt.json",
+        "pre_commit_receipt_path": _PHASE_B_RECEIPT_PATH,
         "fixes_implemented": ["test fix"],
         "tracker_note_text": (
             f"- Tracker sync note (2026-04-03, {wave_id}): **TEST — receipt handoff note.** "
@@ -144,14 +146,15 @@ def test_no_env_commit_retry_handoff_route_drives_commit_and_supervisor_events(
     tmp_path,
     monkeypatch,
 ):
-    repo = tmp_path / "repo"
-    repo.mkdir()
+    # Keep terminal pager authority inside this temporary repository.
+    repo = _setup_repo(tmp_path)
     _write_pager_config(repo, route="both")
     monkeypatch.delenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", raising=False)
 
     deliveries: list[str] = []
 
     def ack_target(repo_root, target, event, state, config, *, timeout_s):
+        assert repo_root == repo.resolve()
         deliveries.append(target)
         return {
             "acknowledged": True,
@@ -198,6 +201,7 @@ def test_no_env_commit_retry_handoff_route_drives_commit_and_supervisor_events(
         )
     )
     entries = list(state["events"].values())
+    assert len(entries) == 3
     assert {entry["route"] for entry in entries} == {"codex"}
     assert all(entry["requested_targets"] == ["codex"] for entry in entries)
 
@@ -1210,9 +1214,11 @@ def _setup_repo(tmp_path):
     subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True, env=env)
     (repo / "TASKS.md").write_text("## Ra\n\n- Tracker sync note (seed): init\n\n---\n")
     (repo / "file.py").write_text("# test")
-    handoff_receipt_dir = repo / ".agent_bus" / "meta"
-    handoff_receipt_dir.mkdir(parents=True, exist_ok=True)
-    (handoff_receipt_dir / "pre_commit_receipt.json").write_text(json.dumps({
+    # Phase B continuity uses an immutable per-invocation receipt. The
+    # canonical hook receipt is revoked before the fresh final approval.
+    handoff_receipt = repo / _PHASE_B_RECEIPT_PATH
+    handoff_receipt.parent.mkdir(parents=True, exist_ok=True)
+    handoff_receipt.write_text(json.dumps({
         "decision": "COMMIT_GO",
         "staged_sha": "phase_b_sha",
         "timestamp_utc": "2026-03-24T00:00:00+00:00",
@@ -1782,9 +1788,9 @@ class TestSupervisorReceiptIsAuthority:
         with patch.dict(sys.modules, {"meta_bridge_client": mock_client}):
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
-        # Step 7 should pass reading from supervisor receipt
-        assert "validate_receipt" in result.get("steps_completed", []), (
-            f"Step 7 should succeed reading supervisor receipt. Got: {result}"
+        # Both the initial and final reviews must validate the receipt chain.
+        assert result.get("steps_completed", []).count("validate_receipt") == 2, (
+            f"Both reviews should validate the supervisor receipt. Got: {result}"
         )
 
     def test_step7_emits_commit_ready_pager_event(self, tmp_path):
@@ -1833,11 +1839,21 @@ class TestSupervisorReceiptIsAuthority:
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
         assert result["status"] == "success", f"Unexpected commit pipeline result: {result}"
-        assert pager_calls
-        event = next(
+        approval_steps = {
+            "build_and_run_supervisor", "validate_receipt",
+            "run_pre_commit_script", "git_commit",
+        }
+        assert [step for step in result["steps_completed"] if step in approval_steps] == [
+            "build_and_run_supervisor", "validate_receipt",
+            "run_pre_commit_script",
+            "build_and_run_supervisor", "validate_receipt", "git_commit",
+        ]
+        ready_events = [
             call for call in pager_calls
             if call.get("event_type") == "commit_ready"
-        )
+        ]
+        assert len(ready_events) == 1
+        event = ready_events[0]
         assert event["event_type"] == "commit_ready"
         assert event["task_id"] == "[TEST]"
         assert event["plan_path"] == "reports/control_plane/test_wave.md"
@@ -1867,13 +1883,17 @@ class TestSupervisorReceiptIsAuthority:
 
         assert result["status"] == "error"
         assert result["step"] == "validate_receipt"
-        assert any("not found" in e.lower() or "receipt" in e.lower() for e in result["errors"])
+        assert result["errors"] == [
+            "Supervisor receipt not found at: .scratch/nonexistent_receipt.json"
+        ]
+        assert "validate_receipt" not in result["steps_completed"]
+        assert "git_commit" not in result["steps_completed"]
 
     def test_missing_handoff_receipt_fails_closed(self, tmp_path):
         """If the Phase B handoff receipt path is missing, the authority chain breaks."""
         from collections import namedtuple
         repo = _setup_repo(tmp_path)
-        (repo / ".agent_bus" / "meta" / "pre_commit_receipt.json").unlink()
+        (repo / _PHASE_B_RECEIPT_PATH).unlink()
 
         sup_receipt_path = ".scratch/step6_receipt.json"
         (repo / ".scratch").mkdir(parents=True, exist_ok=True)
@@ -1898,13 +1918,17 @@ class TestSupervisorReceiptIsAuthority:
 
         assert result["status"] == "error"
         assert result["step"] == "validate_receipt"
-        assert any("handoff receipt" in e.lower() for e in result["errors"])
+        assert result["errors"] == [
+            f"Phase B handoff receipt not found at: {_PHASE_B_RECEIPT_PATH}"
+        ]
+        assert "validate_receipt" not in result["steps_completed"]
+        assert "git_commit" not in result["steps_completed"]
 
     def test_standalone_empty_handoff_receipt_skips_provenance_check(self, tmp_path):
         """Standalone commit continuations intentionally omit stale handoff receipts."""
         from collections import namedtuple
         repo = _setup_repo(tmp_path)
-        (repo / ".agent_bus" / "meta" / "pre_commit_receipt.json").unlink()
+        (repo / _PHASE_B_RECEIPT_PATH).unlink()
 
         sup_receipt_path = ".scratch/step6_receipt.json"
         (repo / ".scratch").mkdir(parents=True, exist_ok=True)
@@ -1984,10 +2008,14 @@ class TestSupervisorReceiptIsAuthority:
 
         # The supervisor's HOLD decision should win (not the handoff GO)
         completed = result.get("steps_completed", [])
-        assert "validate_receipt" in completed
-        # Pipeline should reach hold_check and return held
-        if "git_commit" in completed:
-            assert result.get("status") == "held"
+        assert completed.count("validate_receipt") == 2
+        assert "git_commit" in completed
+        assert result["status"] == "held", result
+        assert json.loads((repo / handoff["pre_commit_receipt_path"]).read_text())["decision"] == "COMMIT_GO"
+        continuation = json.loads(
+            (repo / ".agent_bus/executors/commit_executor_test-wave.json").read_text()
+        )
+        assert continuation["receipt_decision"] == "COMMIT_GO_HOLD_PUSH"
 
     def test_commit_pipeline_fails_closed_in_agent_review_mode(self, tmp_path):
         repo = _setup_repo(tmp_path)
@@ -2451,6 +2479,7 @@ def receipt_clock_pipeline(tmp_path, monkeypatch):
                 packages[-1]["changed_files"]
             )
             if final:
+                assert not canonical.exists(), "Initial hook authority must be revoked before final review"
                 observation.expired_initial = meta_bridge_mod.verify_pre_commit_receipt(
                     repo, receipt_path=receipts[0],
                 )
@@ -2722,7 +2751,7 @@ class TestReceiptChainEndToEnd:
             files_to_stage=["file.py", packet_path],
             tracked_packet=packet_path,
             scope_items=[packet_path],
-            evidence_handles={"phase_b_receipt": ".agent_bus/meta/pre_commit_receipt.json"},
+            evidence_handles={"phase_b_receipt": _PHASE_B_RECEIPT_PATH},
         )
 
         mock_client = types.ModuleType("meta_bridge_client")
@@ -2795,7 +2824,7 @@ class TestReceiptChainEndToEnd:
             files_to_stage=["file.py", new_test_path, packet_path],
             tracked_packet=packet_path,
             scope_items=[packet_path],
-            evidence_handles={"phase_b_receipt": ".agent_bus/meta/pre_commit_receipt.json"},
+            evidence_handles={"phase_b_receipt": _PHASE_B_RECEIPT_PATH},
             tracker_note_text=tracker_note,
         )
 
@@ -6213,6 +6242,9 @@ class TestWaveIdBounds:
         assert any("no actionable tracker scope" in error for error in errors)
 
     def test_prepare_handoff_tracker_only_null_force_add_files_treated_as_empty(self, tmp_path):
+        # Ignore probes must use the fixture repo, even when pytest's temp
+        # directory is under an ignored path in the surrounding checkout.
+        repo = _setup_repo(tmp_path)
         record = {
             "wave_name": "tracker-only-wave",
             "summary": "sync tracker only",
@@ -6220,9 +6252,10 @@ class TestWaveIdBounds:
             "force_add_files": None,
             "files_to_stage": ["TASKS.md"],
         }
-        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, repo)
         assert errors == []
         assert handoff is not None
+        assert handoff["files_to_stage"] == ["TASKS.md"]
         assert handoff["force_add_files"] == []
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors

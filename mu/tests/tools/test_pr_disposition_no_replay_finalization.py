@@ -105,7 +105,11 @@ def _commit_pipeline_fixture(tmp_path: Path) -> tuple[Path, dict]:
         f"## Ra\n\n{tracker_note}\n\n---\n",
         encoding="utf-8",
     )
-    phase_b_receipt = candidate / ".agent_bus" / "meta" / "pre_commit_receipt.json"
+    # Preserve Phase B provenance when final approval revokes the canonical
+    # hook receipt, so these tests reach the no-replay evidence gate.
+    phase_b_receipt = (
+        candidate / ".agent_bus" / "meta" / "pre_commit_receipts" / "phase_b.json"
+    )
     phase_b_receipt.parent.mkdir(parents=True, exist_ok=True)
     phase_b_receipt.write_text(
         json.dumps({"decision": "COMMIT_GO"}) + "\n",
@@ -422,6 +426,10 @@ def test_copied_byte_mismatch_holds_pipeline_before_commit_or_successor(
     assert result["status"] == "held"
     assert result["decision"] == "HOLD"
     assert result["step"] == "validate_no_replay_finalization_evidence"
+    assert result["steps_completed"].count("validate_receipt") == 2
+    assert result["steps_completed"][-3:] == [
+        "run_pre_commit_script", "build_and_run_supervisor", "validate_receipt",
+    ]
     assert any("copied artifact" in error for error in result["errors"])
     assert calls == {
         "apply": 0,
@@ -462,6 +470,10 @@ def test_historical_digest_reuse_holds_pipeline_before_commit_or_successor(
     assert result["status"] == "held"
     assert result["decision"] == "HOLD"
     assert result["step"] == "validate_no_replay_finalization_evidence"
+    assert result["steps_completed"].count("validate_receipt") == 2
+    assert result["steps_completed"][-3:] == [
+        "run_pre_commit_script", "build_and_run_supervisor", "validate_receipt",
+    ]
     assert result["staged_candidate_sha256"] == historical_candidate_sha
     evidence = result["no_replay_finalization_evidence"]
     assert evidence["candidate_sha256"] == historical_candidate_sha

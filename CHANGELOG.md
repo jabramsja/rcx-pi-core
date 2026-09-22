@@ -6,6 +6,45 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-22
 
+### PR1311 existing-branch packet authority (Phase B; native review and landing pending)
+
+- Preserves the explicit authorized control-surface L4_ENABLER purpose in the
+  native R2 packet. Its real same-wave/authorization check passes before the
+  declared evidence chain; final packet bookkeeping receives the same check.
+- Carries all three reviewed receipt fixture repairs, both predecessor packets
+  and the R1 indicator intact. The generated R2 indicator and canonical TASKS
+  tracker note retain their incoming bytes. Production executor SHA256 remains
+  `d72e695d1b564239ee91d5644b7a44d8f24ce10cceaa5f70106a3a25fbe4d239`.
+- The declared evidence chain exited 0: zero theater risks or exceptions,
+  **1,061 tool tests in 140.50 seconds** and **351 documentation tests in
+  60.07 seconds**, with two existing freshness warnings. Native captured stdout
+  and default system pytest temporary paths were used. Existing PR1311, row40
+  and all 268 task IDs remain. Indexed handoff, fresh
+  review, commit, full pre-push, CI, merge, PRIMARY sync and carrier closeout
+  remain pending, followed by retained R6, physical cleanup/useful-work landing
+  and Mu.
+
+### Recovered PR1311 receipt fixtures (Phase B; native review and landing pending)
+
+- Adopts the three preserved native fixture repairs. Durable Phase B and
+  supervisor receipts use separate paths from canonical hook authority;
+  temporary Git repositories isolate pager routing and ignore probes. Retains
+  both approval checks, one final commit-ready event, exact missing-receipt
+  rejection, persisted HOLD and no-replay assertions. The existing clock test
+  also requires canonical hook revocation before final review while durable
+  Phase B receipt bytes remain intact.
+- The declared evidence chain passed: zero theater risks or exceptions,
+  **1,061 tool tests in 142.10 seconds**, then **351 documentation tests in
+  60.41 seconds**, with two existing documentation freshness warnings. Uses
+  default system pytest temporary paths and captured stdout; the predecessor's
+  reported 1,055 passes remain historical evidence.
+- Continues on the existing PR1311 branch and carrier at local HEAD
+  `21e55c437bb662838e90018661d9ccab4be0b6d8`. Production code, receipt lifetime
+  and committed bot revocation remain unchanged. Same row40 and all 268 task
+  IDs remain; native review/commit/full pre-push/CI/merge/PRIMARY sync and
+  carrier closeout are pending, followed by R6, eligible physical cleanup,
+  useful-work landing and Mu.
+
 ### Fresh final commit approval after mechanical validation (Phase B; native review and landing pending)
 
 - Repairs the reproduced R6 ordering defect: successful native validation
