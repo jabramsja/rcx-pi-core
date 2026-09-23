@@ -6,6 +6,28 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-23
 
+### Remaining fleet retirement authority (Phase B; landing and live actions pending)
+
+- Generated a fresh373-row census against PR1312 merge
+  `dafc4d6ff6d6301b38b99a9322655d2904280d13`:94 direct folders,
+  88 behind/34 ahead (overlapping counts),38 conditional actions in4 bounded
+  batches,335 holds, and88 native direct useful-work owners. The committed
+  census/classification/apply tools and native useful-work schema are unchanged.
+- Added exact source/index/history coverage for284 present sources,57 local
+  commits,37 consumed residual/transaction batches and2 older legacy operations,
+  188 retained journals and27 canonical preservation patches. Byte-identical
+  bootstrap/lifecycle counterparts are identified; unresolved hunks and retained
+  reports stay with existing owners. Source196's three held paths remain open.
+- Protected PRIMARY, the active carrier, stopped Mu, canonical preservation roots
+  and the specific FIFO/config-symlink/historical-active holds. Recorded the cold
+  launch's native lifecycle registration and the admission-sample date correction.
+- Synchronized the existing cleanup task with all4 fresh foreground apply/verify
+  pairs, exact roots and the Mu baton; preserved268 task IDs and39 parked rows.
+  Native review, indicator collection/commit, merge and PRIMARY sync remain with
+  the outer dispatcher. No fleet mutations or cleanup completion are claimed.
+- Required Phase B gates passed:423 fleet tests passed/1 skipped (195.32s);
+  351 documentation tests passed (1.78s), with2 existing freshness warnings.
+
 ### PR1312 R2 lifecycle fixture isolation (Phase B; native landing pending)
 
 - Reproduced the exact four-worker gate at **8 failed, 1,716 passed in 119.80s**.
