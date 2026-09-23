@@ -1,10 +1,10 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-09-22
+LAST_VERIFIED: 2026-09-23
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: mu/tests/tools/test_worktree_lifecycle.py, mu/tests/tools/test_commit_executor_post_merge_cleanup.py, mu/tests/tools/test_launch_wave.py, mu/tests/tools/test_recovery_gate.py
+GROUNDING_TESTS: mu/tests/tools/test_worktree_lifecycle.py, mu/tests/tools/test_workingrcx_fleet_apply.py, mu/tests/tools/test_commit_executor_post_merge_cleanup.py, mu/tests/tools/test_launch_wave.py, mu/tests/tools/test_recovery_gate.py
 -->
 # Native worktree lifecycle
 
@@ -155,6 +155,38 @@ process and open-file checks remain mandatory. Recovery finish records must
 match their actual producer schema, including inactive state, cleared child
 command, finish timestamp and consistent outcome. Live or ambiguous owners
 remain protected.
+
+The shared preservation admission also recognizes abandoned recovery owners in
+the observed `tier3_delegate_scope_validation`, `tier3_waiting_on_agent` and
+`tier2_fixing` producer schemas. A complete, coherent direct-bus record must
+retain its original invocation, task, wave, timestamps and attempt counters.
+Its positive owner PID and any recorded child must be absent; native locks,
+whole-tree process references and open files must independently pass the
+existing checks. Unknown fields, contradictory child/command/state evidence,
+missing identity, changed bytes or uncertain probes remain individual HOLDs.
+Neither elapsed age nor `active:true` nor a missing PID grants permission.
+
+Admission records the original status and hash, lock observations, manifest
+binding and fresh process/open-file evidence in the action's `process_checks`.
+It never finishes the original invocation, edits its status/log/claims, resets
+attempts, or declares its useful work landed. Preservation archives and the
+transaction checks retain those bytes through sync and relocation. Native
+completion uses the same admission, still requires useful-work coverage and
+registered-owner exit, and retains its original finite completion budget.
+
+For the September 23 orphan-owner wave, the committed `*_apply_plan.json` and
+`*_orphan_owner_evidence.json` bind the exact source identities, inherited useful
+work and consumed predecessor mappings. The foreground owner must first verify
+native landing and supported PRIMARY synchronization, then run each new
+operation's public `--apply` once and its matching `--verify`, using the exact
+classification SHA256, landed authority commit, batch and operation root from
+that plan. TASKS row38 carries the expanded commands. Record each actual
+MOVED/HOLD/INCOMPLETE outcome, source absence, preserved index/bytes/history,
+directory and behind-dev counts, and remaining landing owners. A recorded
+individual hold permits eligible peers to continue; an interrupted or consumed
+operation must never be replayed. Update the existing tracker and continue the
+production queue. The old reader diagnosis, source84/source196 journals,
+dangling bus links, FIFO and stopped Mu remain with their existing owners.
 
 Only the captured Spotlight `mdworker_shared` executable can qualify for a
 read-only indexing exception. Every reported process must include its command

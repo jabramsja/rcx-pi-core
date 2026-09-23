@@ -726,10 +726,67 @@ def _absent_pid(pid: object) -> bool:
     return False
 
 
-def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> None:
+def _orphan_recovery_schema(name: str, value: dict) -> bool:
+    """Only the three observed, unfinished native producer shapes, never age."""
+    text_fields = {
+        "invocation_id", "wave_id", "task_id", "plan_path", "step", "failure_class",
+        "started_at", "updated_at", "finished_at", "child_role", "state", "reason",
+        "retry_target", "last_action", "current_command", "explanation", "detail", "outcome",
+    }
+    integer_fields = {"tier", "tuple_attempt_index", "wave_invocation_count", "owner_pid",
+                      "child_pid", "current_iteration", "max_iterations"}
+    required = text_fields | integer_fields | {"active", "recovered", "exhausted"}
+    parts = Path(name).parts
+    if (len(parts) != 3 or parts[1:] != ("recovery", "recovery_status.json")
+            or not required <= value.keys() or value.keys() - required - {"pager_route"}
+            or any(not isinstance(value[k], str) for k in text_fields)
+            or any(type(value[k]) is not int for k in integer_fields)
+            or ("pager_route" in value and not isinstance(value["pager_route"], str))
+            or any(not value[k] for k in ("invocation_id", "wave_id", "task_id", "step", "failure_class"))
+            or value["active"] is not True or value["recovered"] is not False
+            or value["exhausted"] is not False or value["finished_at"] != "" or value["outcome"] != ""
+            or value["owner_pid"] <= 0 or value["child_pid"] < 0
+            or not 0 < value["tuple_attempt_index"] <= value["wave_invocation_count"]):
+        return False
+    try:
+        started = datetime.fromisoformat(value["started_at"])
+        updated = datetime.fromisoformat(value["updated_at"])
+        if (started.tzinfo is None or updated.tzinfo is None
+                or not started <= updated <= datetime.now(timezone.utc)):
+            return False
+    except ValueError:
+        return False
+    if value["state"] == "tier2_fixing":
+        return (value["tier"] == 2 and value["current_iteration"] == value["max_iterations"] == 0
+                and value["child_pid"] == 0 and value["child_role"] == ""
+                and value["last_action"] == value["current_command"] == "")
+    if value["tier"] != 3 or not 0 < value["current_iteration"] <= value["max_iterations"]:
+        return False
+    if value["state"] == "tier3_delegate_scope_validation":
+        return (value["child_pid"] == 0 and value["child_role"] == ""
+                and value["last_action"] == "delegate_implementer"
+                and value["current_command"] == "delegate_implementer scope validation")
+    return (value["state"] == "tier3_waiting_on_agent" and value["child_pid"] > 0
+            and value["child_role"] == "codex" and value["last_action"] == "diagnose"
+            and value["current_command"].startswith("codex exec "))
+
+
+def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> dict | None:
     """Contain uncertain read-only ownership evidence before target admission."""
     try:
-        _read_native_ownership(target, manifest, reconcile_r1=reconcile_r1)
+        ownership = _read_native_ownership(target, manifest, reconcile_r1=reconcile_r1)
+        if ownership["orphaned_recovery"]:
+            # Absence of recorded PIDs is only one observation. Derive the
+            # real repository identity and repeat the existing whole-tree
+            # process/open-file fence even for callers outside fleet apply.
+            ident = dict(path=str(target), git_dir=line(git(target, "rev-parse", "--absolute-git-dir")),
+                         branch=line(git(target, "symbolic-ref", "-q", "HEAD", allowed=(0, 1))))
+            diagnostic = process_idle(ident)
+            if _read_native_ownership(target, manifest, reconcile_r1=reconcile_r1) != ownership:
+                raise Hold("Native orphan ownership evidence changed during admission")
+            return dict(**ownership, observed_at=datetime.now(timezone.utc).isoformat(),
+                        source_identity=ident, manifest_sha256=digest(encoded(manifest)),
+                        process_check=diagnostic)
     except Hold:
         # Preserve specific active/ambiguous ownership reasons and diagnostics.
         raise
@@ -742,7 +799,17 @@ def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> 
         ) from exc
 
 
-def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) -> None:
+def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) -> dict:
+    ownership = dict(orphaned_recovery=[], native_locks=[])
+
+    def status_object(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise Hold("Native status has ambiguous duplicate fields")
+            value[key] = item
+        return value
+
     for name, entry in manifest.items():
         # Native buses are direct lane children. A saved pytest repository or
         # archived bus is evidence, even when it contains active:true fixtures.
@@ -756,8 +823,10 @@ def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) 
             with path.open("rb") as stream:
                 try:
                     fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    raw = stream.read().strip()
-                    if raw:
+                    raw = stream.read()
+                    if digest(raw) != entry.get("sha256"):
+                        raise Hold("Native owner lock evidence changed since inventory")
+                    if raw.strip():
                         try:
                             value = json.loads(raw)
                         except ValueError:
@@ -776,10 +845,15 @@ def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) 
                             raise Hold("Native owner lock timestamp is uncertain") from None
                         if acquired.tzinfo is None:
                             raise Hold("Native owner lock timestamp is uncertain")
+                    ownership["native_locks"].append(dict(path=name, sha256=digest(raw),
+                        flock_available=True, metadata=json.loads(raw) if raw.strip() else None))
                 except BlockingIOError as exc:
                     raise Hold("Native owner lock is active") from exc
         if path.name == "status.json" or path.name.endswith("_status.json"):
-            value = json.loads(read_plain(path))
+            raw = read_plain(path)
+            if digest(raw) != entry.get("sha256"):
+                raise Hold("Native ownership status changed since inventory")
+            value = json.loads(raw, object_pairs_hook=status_object)
             if not isinstance(value, dict):
                 raise Hold("Native status is malformed")
             for key in ("pid", "owner_pid", "child_pid"):
@@ -794,6 +868,13 @@ def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) 
                     else:
                         raise Hold("Native process identity remains live")
             state = str(value.get("state", value.get("status", ""))).lower()
+            if reconcile_r1 and _orphan_recovery_schema(name, value):
+                # The PID loop above has already proved every recorded owner
+                # and child absent. Preserve all producer fields verbatim;
+                # this is observation, never a successful recovery receipt.
+                ownership["orphaned_recovery"].append(dict(path=name, sha256=digest(raw),
+                    original_status=value, owner_pid_absent=True, child_pid_absent=value["child_pid"] > 0))
+                continue
             terminal_states = {"idle", "done", "complete", "completed", "failed", "stopped"}
             finished_schemas = {
                 **{f"tier{tier}_fixed": ("success", True, False) for tier in (1, 2)},
@@ -827,6 +908,7 @@ def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) 
             if reconcile_r1 and (not state or ("state" in value and "status" in value
                                                and value["state"] != value["status"])):
                 raise Hold("Native ownership status is active or uncertain")
+
             if reconcile_r1 and state in {"tier3_exhausted", "tier3_short_circuited"}:
                 # Only the two observed _finish_recovery_status records. No
                 # inference from a state name alone, and no status-file edits.
@@ -854,6 +936,8 @@ def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) 
                     or (state and state not in terminal_states)
                     or (value.get("active") is not False and state not in terminal_states)):
                 raise Hold("Native ownership status is active or uncertain")
+
+    return ownership
 
 
 def unprotected(repo: Path, ident: dict) -> None:
@@ -887,13 +971,15 @@ def inspect_target(repo: Path, ident: dict, *, head: str | None = None,
     else:
         unprotected(repo, ident)
     manifest = tree_manifest(target)
-    native_idle(target, manifest, reconcile_r1=reconcile_r1 or residual)
     try:
+        ownership = native_idle(target, manifest, reconcile_r1=reconcile_r1 or residual)
         diagnostic = process_idle(ident)
     except Hold as exc:
         if process_checks is not None and exc.diagnostic is not None:
             process_checks.append(exc.diagnostic)
         raise
+    if ownership is not None:
+        diagnostic = dict(diagnostic or {}, native_ownership=ownership)
     if process_checks is not None and diagnostic is not None:
         process_checks.append(diagnostic)
     return tracked, manifest
@@ -1127,6 +1213,9 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
             check_preservation()
             tracked, before = inspect_target(repo, ident, head=starting_head,
                                              reconcile_r1=reconcile_r1, process_checks=process_checks, residual=residual)
+            for record in entry.get("native_owner_records", []):
+                if before.get(record["path"], {}).get("sha256") != record["sha256"]:
+                    raise Hold("Native owner status differs from frozen retirement evidence")
             if residual:
                 admitted = transaction_state(target)
                 if admitted["head"] != starting_head or admitted["content"] != before:
@@ -1478,6 +1567,41 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
     common = root / "WorkingRCX/.git"
     if data.get("policy", {}).get("canonical_common_dir") != str(common):
         raise Hold("Residual common-directory authority mismatch")
+    # A captured orphan cohort pins its historical status bytes as well as the
+    # census identity. This optional wave-owned input grants no liveness waiver;
+    # all shared admission probes still run at each mutation boundary.
+    evidence_path = Path(f"reports/control_plane/{wave_id}_orphan_owner_evidence.json")
+    evidence_binding, owner_records = None, {}
+    if os.path.lexists(repo / evidence_path):
+        evidence_raw = read_plain(repo / evidence_path)
+        evidence = json.loads(evidence_raw)
+        if (not isinstance(evidence, dict) or evidence.get("schema_version") != 1
+                or evidence.get("wave_id") != wave_id
+                or evidence.get("comparison_commit") != data["comparison_commit"]
+                or evidence.get("mutation_authorized") is not False
+                or not isinstance(evidence.get("rows"), list)):
+            raise Hold("Orphan owner evidence lacks exact wave/comparison binding")
+        sources = {r["path"] for r in data["entries"]}
+        for row in evidence["rows"]:
+            if (not isinstance(row, dict) or not isinstance(row.get("source"), str)
+                    or row["source"] not in sources or row["source"] in owner_records
+                    or not isinstance(row.get("records"), list) or not row["records"]):
+                raise Hold("Orphan owner evidence has ambiguous source identity")
+            records = []
+            for record in row["records"]:
+                if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+                    raise Hold("Orphan owner evidence has an unknown record")
+                parts = Path(record["path"]).parts
+                if (len(parts) != 3 or not parts[0].startswith(".agent_bus")
+                        or parts[1:] != ("recovery", "recovery_status.json")
+                        or str(Path(record["path"])) != record["path"]
+                        or not isinstance(record.get("sha256"), str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", record["sha256"])
+                        or any(r["path"] == record["path"] for r in records)):
+                    raise Hold("Orphan owner evidence has an ambiguous status binding")
+                records.append(dict(path=record["path"], sha256=record["sha256"]))
+            owner_records[row["source"]] = records
+        evidence_binding = dict(path=str(evidence_path), sha256=digest(evidence_raw))
     selected, rows = [], []
     counts = Counter()
     for index, row in enumerate(data["entries"]):
@@ -1497,6 +1621,8 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
         entry = dict(source_index=index, path=str(path), source_identity=ident,
                      action=action, owner=row["owner"], comparison_commit=data["comparison_commit"],
                      reason_codes=[r["code"] for r in row["reasons"]])
+        if str(path) in owner_records:
+            entry["native_owner_records"] = owner_records[str(path)]
         if fresh_wave:
             useful = source.get("useful_work")
             entry.update(useful_work=useful, landing_owner=row.get("landing_owner"))
@@ -1541,7 +1667,8 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
                                operation_root=str(operation_root), source_indices=indices))
         for index in indices:
             rows[index]["destination"] = str(operation_root / str(index) / "worktree")
-    return dict(schema_version=2, wave_id=wave_id, mutation_authorized=False,
+    return dict(**({"orphan_owner_evidence": evidence_binding} if evidence_binding else {}),
+                schema_version=2, wave_id=wave_id, mutation_authorized=False,
                 classification_path=str(classification_path), classification_sha256=sha256,
                 census_path=str(census_path), census_sha256=digest(census_raw),
                 comparison_commit=data["comparison_commit"], fleet_root=str(root), common_dir=str(common),
@@ -1572,6 +1699,11 @@ def require_residual_authority(repo: Path, plan: dict, commit: str, *, fetch: bo
              Path("mu/tools/observability/pipeline_agent_pager.py"))
     if plan["wave_id"] != RESIDUAL_WAVE_ID:
         paths += (Path(f"reports/control_plane/{plan['wave_id']}_useful_work.json"),)
+    if plan.get("orphan_owner_evidence"):
+        evidence = plan["orphan_owner_evidence"]
+        paths += (Path(evidence["path"]),)
+        if file_hash(repo / evidence["path"]) != evidence["sha256"]:
+            raise Hold("Frozen orphan owner evidence changed")
     for path in paths:
         committed = git(repo, "show", f"{commit}:{path}")
         if read_plain(repo / path) != committed:
