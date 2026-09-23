@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -18,14 +19,25 @@ from tests.repo_root import REPO_ROOT
 
 @pytest.fixture
 def native_lane(tmp_path, monkeypatch):
+    root = tmp_path.resolve()
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
         GIT_AUTHOR_NAME="Native fixture", GIT_AUTHOR_EMAIL="native@example.invalid",
         GIT_COMMITTER_NAME="Native fixture", GIT_COMMITTER_EMAIL="native@example.invalid",
         PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=str(REPO_ROOT))
+    real_git = shutil.which("git", path=env["PATH"])
+    assert real_git
+    bindir = root / "git-bin"
+    bindir.mkdir()
+    wrapper = bindir / "git"
+    # Census deliberately drops inherited GIT_* overrides. Isolate runner
+    # system/global config at exec, leaving local/worktree filters observable.
+    wrapper.write_text(f'#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL={shlex.quote(os.devnull)} '
+                       f'exec {shlex.quote(real_git)} "$@"\n')
+    wrapper.chmod(0o700)
+    env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    root = tmp_path.resolve()
     primary, remote, lane = root / "WorkingRCX", root / "origin.git", root / "WorkingRCX-native"
     primary.mkdir()
 
@@ -62,8 +74,124 @@ def register_from_exited_owner(lane, env, *, status="stopped", result=None,
     )
     result = subprocess.run([sys.executable, "-c", program, str(lane), status,
         json.dumps(result), role, json.dumps(closeout)],
-        check=True, capture_output=True, text=True, env=env)
+        check=False, capture_output=True, text=True, env=env)
+    if result.returncode:
+        pytest.fail(f"Native lifecycle registration exited {result.returncode}:\n"
+                    f"{result.stdout}{result.stderr}", pytrace=False)
     return Path(result.stdout.strip())
+
+
+@pytest.mark.parametrize("config_source", ["system", "global"])
+@pytest.mark.parametrize("operation", ["clean", "process"])
+@pytest.mark.parametrize("same_head", [False, True])
+def test_native_fixture_isolates_ambient_filters(
+        tmp_path, monkeypatch, request, config_source, operation, same_head):
+    real_git = shutil.which("git")
+    assert real_git
+    ambient = tmp_path / "runner config"
+    ambient.mkdir()
+    marker = ambient / "filter-executed"
+    command = "touch " + shlex.quote(str(marker))
+    config = ambient / "gitconfig"
+    config.write_text(f'[filter "ambient-native"]\n\t{operation} = {json.dumps(command)}\n')
+    wrapper = ambient / "git"
+    if config_source == "system":
+        inject = f"export GIT_CONFIG_SYSTEM={shlex.quote(str(config))}\n"
+    else:
+        # Model the default global config that Git reads only in the absence
+        # of an explicit override, without changing the operator's HOME.
+        inject = ('if [ "${GIT_CONFIG_GLOBAL+x}" != x ]; then\n'
+                  f"  export GIT_CONFIG_GLOBAL={shlex.quote(str(config))}\nfi\n")
+    wrapper.write_text(f'#!/bin/sh\n{inject}exec {shlex.quote(real_git)} "$@"\n')
+    wrapper.chmod(0o700)
+    ambient_path = str(ambient) + os.pathsep + os.environ["PATH"]
+    monkeypatch.setenv("PATH", ambient_path)
+    ambient_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    observed = subprocess.run(["git", "config", "--get", f"filter.ambient-native.{operation}"],
+        env=ambient_env, capture_output=True, text=True, check=True)
+    assert observed.stdout.strip() == command
+
+    primary, lane, git, env = request.getfixturevalue("native_lane")
+    head = git(primary, "rev-parse", "HEAD")
+    # Reproduce the census failure with the runner's Git, then restore the
+    # fixture wrapper. Inherited GIT_* isolation alone cannot protect this probe.
+    with monkeypatch.context() as exposed:
+        exposed.setenv("PATH", ambient_path)
+        inventory = lifecycle.useful_work(str(lane), head)
+        assert inventory["status"] == "UNKNOWN", inventory
+        assert any("configured clean/process filters" in error.get("message", "")
+                   for error in inventory["errors"])
+        assert lane.is_dir() and not marker.exists()
+    inventory = lifecycle.useful_work(str(lane), head)
+    assert inventory["status"] == "COVERED", inventory
+    assert inventory["errors"] == []
+    if same_head:
+        (lane / "tracked").write_bytes(b"retained native implementation\n")
+        git(lane, "add", "tracked")
+        git(lane, "commit", "-m", "retained implementation")
+        head = git(lane, "rev-parse", "HEAD")
+        stopped = register_from_exited_owner(lane, env)
+        first = lifecycle.complete_pending(stopped, delay=0)
+        assert first["state"] == "ESCALATED" and lane.is_dir(), first
+        inventory = json.loads(Path(first["landing_owner"]["evidence"]).read_bytes())
+        assert inventory["status"] == "NEEDS_LANDING" and inventory["errors"] == [], inventory
+        original = {p.relative_to(stopped): p.read_bytes()
+                    for p in stopped.rglob("*") if p.is_file()}
+        git(primary, "merge", "--ff-only", "native-wave")
+        git(primary, "push", "origin", "dev")
+        assert git(lane, "rev-parse", "HEAD") == head
+    directory = register_from_exited_owner(lane, env, role="commit", closeout=True,
+        status="success", result=dict(status="success", merge_sha=head))
+    if same_head:
+        assert directory != stopped
+        assert json.loads((directory / "predecessor.json").read_bytes())["attempts_used"] == 1
+    closeout = (directory / "closeout.json").read_bytes()
+    # Exercise the standalone worker too: its fresh imports and Git probes
+    # must inherit fixture isolation, including same-HEAD continuation.
+    worker = subprocess.run([sys.executable, str(Path(lifecycle.__file__)),
+        "--record", str(directory), "--complete"], cwd=primary, env=env,
+        capture_output=True, text=True, timeout=60)
+    assert worker.returncode == 0, worker.stderr + worker.stdout
+    completed = json.loads(worker.stdout)
+    assert completed["state"] == "COMPLETE", completed
+    assert not lane.exists() and not marker.exists()
+    assert (directory / "closeout.json").read_bytes() == closeout
+    assert lifecycle.complete_pending(directory, delay=0) == completed
+    if same_head:
+        assert [p.name for p in directory.glob("attempt-*")] == ["attempt-2"]
+        assert {p: (stopped / p).read_bytes() for p in original} == original
+        assert lifecycle.complete_pending(stopped, delay=0) == first
+
+
+@pytest.mark.parametrize("operation", ["clean", "process"])
+def test_worktree_filters_retain_unknown_inventory_and_closeout(native_lane, operation):
+    primary, lane, git, env = native_lane
+    marker = primary.parent / "filter-executed"
+    git(primary, "config", "extensions.worktreeConfig", "true")
+    git(lane, "config", "--worktree", f"filter.native-retained.{operation}",
+        "touch " + shlex.quote(str(marker)))
+    (primary / ".git/info/attributes").write_text("tracked filter=native-retained\n")
+    directory = register_from_exited_owner(lane, env, role="commit", closeout=True,
+        status="success", result=dict(status="success", merge_sha=git(lane, "rev-parse", "HEAD")))
+    closeout = (directory / "closeout.json").read_bytes()
+    terminal = (directory / "terminal.json").read_bytes()
+    before = fleet.tree_manifest(lane)
+    index = Path(git(lane, "rev-parse", "--absolute-git-dir")) / "index"
+    index_before = index.read_bytes()
+
+    result = lifecycle.complete_pending(directory, delay=0)
+    assert result["state"] == "ESCALATED", result
+    inventory = json.loads(Path(result["landing_owner"]["evidence"]).read_bytes())
+    assert inventory["status"] == "UNKNOWN"
+    assert any("configured clean/process filters" in error.get("message", "") for error in inventory["errors"])
+    assert lane.is_dir() and not marker.exists()
+    assert fleet.tree_manifest(lane) == before and index.read_bytes() == index_before
+    assert (directory / "closeout.json").read_bytes() == closeout
+    assert (directory / "terminal.json").read_bytes() == terminal
+    assert not any((directory / "attempt-1" / name).exists() for name in (
+        "before.tar", "gitdir-before.tar", "preparation.json", "move-started.json", "worktree"))
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert [p.name for p in directory.glob("attempt-*")] == ["attempt-1"]
 
 
 @pytest.mark.parametrize("status", ["success", "stopped", "failed", "superseded"])

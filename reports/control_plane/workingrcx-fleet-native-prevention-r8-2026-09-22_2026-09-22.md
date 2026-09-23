@@ -128,7 +128,7 @@ FOUNDER_OVERRIDE:workingrcx-fleet-native-prevention-r8-2026-09-22
 - `indicator_collection_command`: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id workingrcx-fleet-native-prevention-r8-2026-09-22 --output reports/l4_wave_indicators/workingrcx-fleet-native-prevention-r8-2026-09-22.json.
 - `target_gate_id`: G8.
 - `evidence_command`: `PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 mu/tools/checks/check_theater_risk_ratchet.py --json && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_workingrcx_fleet_apply.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_commit_outcome_pager_lifetime.py mu/tests/tools/test_pr_disposition_no_replay_finalization.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py mu/tests/docs/test_growth_caps.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short`.
-- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md. (2) Final pytest gate covered 9 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `CHANGELOG.md`, `TASKS.md`, `mu/docs/agents/WorktreeLifecycle.v0.md`, `mu/tests/docs/test_growth_caps.py`, `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`, `mu/tests/tools/test_commit_executor_receipt.py`, `mu/tests/tools/test_executor_dispatch.py`, `mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_recovery_gate.py`, `mu/tests/tools/test_workingrcx_fleet_apply.py`, `mu/tests/tools/test_worktree_lifecycle.py`, `mu/tools/executors/commit_executor.py`, `mu/tools/executors/executor_dispatch.py`, `mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_b_executor.py`, `mu/tools/executors/recovery_gate.py`, `mu/tools/executors/workingrcx_fleet_apply.py`, `mu/tools/executors/worktree_lifecycle.py`, `reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md`, `reports/l4_wave_indicators/workingrcx-fleet-native-prevention-r8-2026-09-22.json`..
+- `evidence_delta`: (1) Phase B converged on the locked plan at reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `CHANGELOG.md`, `TASKS.md`, `mu/docs/agents/WorktreeLifecycle.v0.md`, `mu/tests/docs/test_growth_caps.py`, `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`, `mu/tests/tools/test_commit_executor_receipt.py`, `mu/tests/tools/test_executor_dispatch.py`, `mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_recovery_gate.py`, `mu/tests/tools/test_workingrcx_fleet_apply.py`, `mu/tests/tools/test_worktree_lifecycle.py`, `mu/tools/executors/commit_executor.py`, `mu/tools/executors/executor_dispatch.py`, `mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_b_executor.py`, `mu/tools/executors/recovery_gate.py`, `mu/tools/executors/workingrcx_fleet_apply.py`, `mu/tools/executors/worktree_lifecycle.py`, `reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md`, `reports/l4_wave_indicators/workingrcx-fleet-native-prevention-r8-2026-09-22.json`..
 - `bootstrap_endgame_policy`: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP.
 - `boot0_track_id`: V1.
 - `boot0_progress_state`: HOLD.
@@ -139,7 +139,7 @@ FOUNDER_OVERRIDE:workingrcx-fleet-native-prevention-r8-2026-09-22
 ## Commit-Time Generated Governance Authorization
 
 - Refresh wave: `workingrcx-fleet-native-prevention-r8-2026-09-22`
-- Step-5e provenance: `bumped`
+- Step-5e provenance: `already_recorded`
 - Purpose: commit automation may bind the exact same-wave growth-cap governance file after Phase B review; first bumps require staged-index proof, while already-recorded reuse requires clean HEAD/index proof.
 - Authorized generated governance path(s):
   - `mu/tests/docs/test_growth_caps.py`
@@ -154,10 +154,10 @@ FOUNDER_OVERRIDE:workingrcx-fleet-native-prevention-r8-2026-09-22
 - Refresh wave: `workingrcx-fleet-native-prevention-r8-2026-09-22`
 - Active packet: `reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `c2a176d31fdfa50ed61923036cef51d00cb28c6f64d1935216736b887380ec22`
+- Tracker note sha256: `aadcad6bff701e7d5f0f798b3c27a01acf324e6226d766147fd1d86e76082568`
 - Indicator artifact: `reports/l4_wave_indicators/workingrcx-fleet-native-prevention-r8-2026-09-22.json`
 - Evidence command: `PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 mu/tools/checks/check_theater_risk_ratchet.py --json && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_workingrcx_fleet_apply.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_commit_outcome_pager_lifetime.py mu/tests/tools/test_pr_disposition_no_replay_finalization.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py mu/tests/docs/test_growth_caps.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md. (2) Final pytest gate covered 9 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `CHANGELOG.md`, `TASKS.md`, `mu/docs/agents/WorktreeLifecycle.v0.md`, `mu/tests/docs/test_growth_caps.py`, `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`, `mu/tests/tools/test_commit_executor_receipt.py`, `mu/tests/tools/test_executor_dispatch.py`, `mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_recovery_gate.py`, `mu/tests/tools/test_workingrcx_fleet_apply.py`, `mu/tests/tools/test_worktree_lifecycle.py`, `mu/tools/executors/commit_executor.py`, `mu/tools/executors/executor_dispatch.py`, `mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_b_executor.py`, `mu/tools/executors/recovery_gate.py`, `mu/tools/executors/workingrcx_fleet_apply.py`, `mu/tools/executors/worktree_lifecycle.py`, `reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md`, `reports/l4_wave_indicators/workingrcx-fleet-native-prevention-r8-2026-09-22.json`..
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `CHANGELOG.md`, `TASKS.md`, `mu/docs/agents/WorktreeLifecycle.v0.md`, `mu/tests/docs/test_growth_caps.py`, `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`, `mu/tests/tools/test_commit_executor_receipt.py`, `mu/tests/tools/test_executor_dispatch.py`, `mu/tests/tools/test_launch_wave.py`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_recovery_gate.py`, `mu/tests/tools/test_workingrcx_fleet_apply.py`, `mu/tests/tools/test_worktree_lifecycle.py`, `mu/tools/executors/commit_executor.py`, `mu/tools/executors/executor_dispatch.py`, `mu/tools/executors/launch_wave.py`, `mu/tools/executors/phase_b_executor.py`, `mu/tools/executors/recovery_gate.py`, `mu/tools/executors/workingrcx_fleet_apply.py`, `mu/tools/executors/worktree_lifecycle.py`, `reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md`, `reports/l4_wave_indicators/workingrcx-fleet-native-prevention-r8-2026-09-22.json`..
 - Commit-generated governance paths:
   - `mu/tests/docs/test_growth_caps.py`
 - Evidence handles:
@@ -165,25 +165,8 @@ FOUNDER_OVERRIDE:workingrcx-fleet-native-prevention-r8-2026-09-22
   - `commit_time_generated_governance`: `mu/tests/docs/test_growth_caps.py`
   - `indicator`: `reports/l4_wave_indicators/workingrcx-fleet-native-prevention-r8-2026-09-22.json`
 - Current staged files:
-  - `CHANGELOG.md`
   - `TASKS.md`
-  - `mu/docs/agents/WorktreeLifecycle.v0.md`
-  - `mu/tests/docs/test_growth_caps.py`
-  - `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
-  - `mu/tests/tools/test_executor_dispatch.py`
-  - `mu/tests/tools/test_launch_wave.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tests/tools/test_workingrcx_fleet_apply.py`
   - `mu/tests/tools/test_worktree_lifecycle.py`
-  - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/executor_dispatch.py`
-  - `mu/tools/executors/launch_wave.py`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `mu/tools/executors/recovery_gate.py`
-  - `mu/tools/executors/workingrcx_fleet_apply.py`
-  - `mu/tools/executors/worktree_lifecycle.py`
   - `reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md`
   - `reports/l4_wave_indicators/workingrcx-fleet-native-prevention-r8-2026-09-22.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
