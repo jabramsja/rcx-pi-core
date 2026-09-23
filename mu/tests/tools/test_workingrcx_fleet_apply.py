@@ -2180,3 +2180,52 @@ def test_fresh_bulk_dependency_index_drift_refuses_before_claim(fleet, monkeypat
             batch=1, operation_root=Path(operation["operation_root"]))
     assert not Path(operation["operation_root"]).exists()
     assert not (f.common / ("rcx_fleet_apply_" + operation["operation_id"] + ".json")).exists()
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_source196_tracked_report_deletion_is_bound_in_native_journal_and_stash(fleet, staged):
+    f = fleet
+    deleted = "reports/deferred/non_blocking/source196_bridge_nonblockers.md"
+    report = f.repo / deleted
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_bytes(b"historically tracked generated report\n")
+    # Recorded source196 has 141 other entries under this directory, including
+    # README.md. Preserve that topology; this is the missing deletion-intent
+    # contract, not an empty-directory retirement fixture.
+    neighbor = report.parent / "README.md"
+    neighbor.write_bytes(b"retained neighboring report index\n")
+    f.original = commit(f, "tracked report at source196 base")
+    git(f, f.targets[0], "merge", "--ff-only", f.original)
+    (f.repo / "next-base.txt").write_text("unrelated landed change\n")
+    f.landed = commit(f, "fresh merge for source196 sync")
+    git(f, f.repo, "push", "origin", "dev")
+    if staged:
+        git(f, f.targets[0], "rm", "--", deleted)
+    else:
+        (f.targets[0] / deleted).unlink()
+    target, entry, directory = transaction_case(f, current=False, wip="mixed")
+    before = apply.transaction_state(target)
+    with apply.safe_git_environment(network=True):
+        outcome = apply.apply_target(f.repo, entry, directory, boundary, residual=True)
+    assert outcome["status"] == "MOVED", json.dumps(outcome, indent=2)
+    admitted = json.loads((directory / "admitted-state.json").read_text())
+    stash = json.loads((directory / "sync-stash.json").read_text())
+    journal = json.loads(Path(outcome["checkout_sync"]["primary_sync_transaction_path"]).read_text())
+    assert deleted in admitted["tracked_wip"] and deleted not in admitted["content"]
+    assert deleted in journal["tracked_paths"]
+    assert journal["tracked_snapshots"][deleted]["worktree"]["kind"] == "absent"
+    assert deleted in stash["content"] and stash["content"][deleted] is None
+    assert stash["index"] == before["index"] and stash["base"] == before["head"]
+    destination = Path(entry["destination"])
+    assert not (destination / deleted).exists()
+    assert (destination / neighbor.relative_to(f.repo)).read_bytes() == neighbor.read_bytes()
+    assert apply.transaction_state(destination)["index"] == before["index"] | {
+        "next-base.txt": apply.git_entries(f.repo)["next-base.txt"]}
+    omitted = deepcopy(stash)
+    del omitted["content"][deleted]
+    with pytest.raises(apply.Hold, match="native stash content differs"):
+        apply.require_stash_binding(admitted, omitted)
+    omitted = deepcopy(stash)
+    del omitted["content"]["wip.txt"]
+    with pytest.raises(apply.Hold, match="native stash content differs"):
+        apply.require_stash_binding(admitted, omitted)

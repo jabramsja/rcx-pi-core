@@ -6638,6 +6638,7 @@ def _sync_primary_worktree_to_base(
     log: Any,
     checkpoint: Any | None = None,
     target_identity: dict[str, Any] | None = None,
+    source_authority_commit: str = "",
 ) -> dict[str, Any]:
     """Fast-forward a clean founder PRIMARY working copy up to origin/base_branch.
 
@@ -6719,6 +6720,19 @@ def _sync_primary_worktree_to_base(
         outcome["reason"] = reason
         log(f"Step 15b: primary worktree base-sync skipped: {reason}")
         return outcome
+
+    if source_authority_commit:
+        try:
+            if checkpoint is not None or target_identity is not None:
+                return _skip("landed PRIMARY handoff cannot substitute an explicit transaction owner")
+            try:
+                from . import worktree_lifecycle as lifecycle
+            except ImportError:
+                import worktree_lifecycle as lifecycle
+            return lifecycle.sync_primary_from_landed_source(
+                repo_root, base_branch=base_branch, authority_commit=source_authority_commit)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            return _skip(f"landed PRIMARY source handoff HOLD: {exc}")
 
     def _behind_dev_signal_path(primary_path: Path) -> Path:
         # Durable founder-primary bus only. The active lane's repo_root can be a
@@ -7026,10 +7040,18 @@ def _sync_primary_worktree_to_base(
                 )
                 return _skip(changed_error)
 
+            # A tracked deletion remains intent even when its pathname is a
+            # generated report normally excluded from dirty-status checks.
+            # Keep it in the native journal/stash alongside the other WIP.
+            deleted_proc = _run(
+                ["git", "diff", "HEAD", "--no-renames", "--diff-filter=D", "--name-only", "-z"],
+                cwd=primary, check=True, timeout=30,
+            )
+            tracked_deletions = set(filter(None, deleted_proc.stdout.split("\0")))
             tracked_wip_paths = sorted(
                 path
                 for path in _tracked_dirty_paths(primary, no_renames=True)
-                if not _is_transient_status_path(path)
+                if not _is_transient_status_path(path) or path in tracked_deletions
             )
             untracked_proc = _run(
                 ["git", "ls-files", "--others", "--exclude-standard"],
@@ -14673,137 +14695,33 @@ def _post_merge_cleanup(
     base_branch: str,
     wave_id: str,
     log: Any,
+    terminal_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Best-effort cleanup after a PR merge succeeds.
+    """Transfer cleanup to a durable, preservation-safe native owner.
 
-    Runs from *cleanup_root* (main repo after ff-only to origin/base_branch).
-    Deletes the merged local branch, removes the wave worktree if distinct,
-    and drops executor-owned Phase B branch-switch stashes for *wave_id*.
-
-    All failures are logged and swallowed; the merge has already succeeded
-    and cleanup must never regress the pipeline.
-
-    Returns a dict with the per-substep outcomes (for test assertions).
+    The commit process and its dispatcher can still hold files/cwd in the
+    source. The finite completion child runs after terminal pager delivery and
+    parent exit. Branches, held stashes and unknown WIP are never force-removed.
     """
-    outcome: dict[str, Any] = {
-        "branch_deleted": False,
-        "worktree_removed": False,
-        "stashes_dropped": 0,
-        "warnings": [],
-    }
-
     try:
-        cleanup_branch = _run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cleanup_root
-        ).stdout.strip()
-    except subprocess.CalledProcessError as exc:
-        outcome["warnings"].append(f"cannot resolve cleanup_root HEAD: {exc}")
-        return outcome
-
-    if cleanup_branch != base_branch:
-        outcome["warnings"].append(
-            f"cleanup_root {cleanup_root} is on '{cleanup_branch}', expected "
-            f"'{base_branch}'; skipping cleanup to avoid deleting the wrong branch"
-        )
-        return outcome
-
-    # 16b: remove worktree FIRST so the branch it holds is unlocked for 16a.
-    # git rejects `branch -D` on a branch checked out by any linked worktree.
+        from . import worktree_lifecycle as lifecycle
+    except ImportError:
+        import worktree_lifecycle as lifecycle
+    outcome = dict(branch_deleted=False, worktree_removed=False, stashes_dropped=0,
+                   warnings=[], completion_state="PENDING")
     try:
-        repo_root_real = repo_root.resolve()
-    except OSError:
-        repo_root_real = repo_root
-    try:
-        cleanup_root_real = cleanup_root.resolve()
-    except OSError:
-        cleanup_root_real = cleanup_root
-    # Refuse to touch the main worktree. Git refuses `worktree remove` on the
-    # primary worktree, and attempting it would leave the branch checked out
-    # so the subsequent `branch -D` also fails. Main worktree's `.git` is a
-    # DIRECTORY; a linked worktree's `.git` is a FILE pointing at
-    # `<main>/.git/worktrees/<name>/`. Only attempt removal when the path is
-    # a linked worktree AND distinct from cleanup_root.
-    repo_git_path = repo_root_real / ".git"
-    is_linked_worktree = repo_git_path.is_file()
-    if (
-        repo_root_real != cleanup_root_real
-        and repo_root_real.exists()
-        and is_linked_worktree
-    ):
-        try:
-            _run(
-                ["git", "worktree", "remove", "--force", str(repo_root_real)],
-                cwd=cleanup_root, timeout=30,
-            )
-            outcome["worktree_removed"] = True
-            log(f"Step 16b: removed worktree {repo_root_real}")
-        except subprocess.CalledProcessError as exc:
-            detail = (exc.stderr or exc.stdout or str(exc)).strip()
-            outcome["warnings"].append(f"worktree remove: {detail[:200]}")
-            log(f"Step 16b worktree remove warning: {detail[:200]}")
-        except subprocess.TimeoutExpired:
-            outcome["warnings"].append("worktree remove timed out")
-            log("Step 16b worktree remove timed out")
-
-    # 16a: delete the merged local branch (now unlocked if step 16b ran)
-    try:
-        _run(["git", "branch", "-D", target_branch], cwd=cleanup_root, timeout=30)
-        outcome["branch_deleted"] = True
-        log(f"Step 16a: deleted local branch {target_branch}")
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or str(exc)).strip()
-        outcome["warnings"].append(f"branch delete: {detail[:200]}")
-        log(f"Step 16a branch delete warning: {detail[:200]}")
-    except subprocess.TimeoutExpired:
-        outcome["warnings"].append("branch delete timed out")
-        log("Step 16a branch delete timed out")
-
-    # 16c: drop executor-owned stashes for this wave. Do not drop arbitrary
-    # user/operator stashes just because their description mentions the wave_id.
-    # Drop highest-index first so remaining refs stay stable during loop.
-    if wave_id:
-        try:
-            stash_out = _run(
-                ["git", "stash", "list"], cwd=cleanup_root, timeout=30
-            ).stdout
-            refs_to_drop: list[tuple[int, str]] = []
-            for line in stash_out.splitlines():
-                if not _is_pipeline_owned_cleanup_stash(
-                    line,
-                    wave_id=wave_id,
-                    target_branch=target_branch,
-                ):
-                    continue
-                ref = line.split(":", 1)[0]
-                m = _STASH_REF_RE.match(ref)
-                if m is None:
-                    continue
-                refs_to_drop.append((int(m.group(1)), ref))
-            refs_to_drop.sort(reverse=True)
-            for _idx, ref in refs_to_drop:
-                try:
-                    _run(["git", "stash", "drop", ref], cwd=cleanup_root, timeout=30)
-                    outcome["stashes_dropped"] += 1
-                except subprocess.CalledProcessError as exc:
-                    detail = (exc.stderr or exc.stdout or str(exc)).strip()
-                    outcome["warnings"].append(f"stash drop {ref}: {detail[:200]}")
-                    log(f"Step 16c stash drop {ref} warning: {detail[:200]}")
-                except subprocess.TimeoutExpired:
-                    outcome["warnings"].append(f"stash drop {ref} timed out")
-                    log(f"Step 16c stash drop {ref} timed out")
-            if outcome["stashes_dropped"]:
-                log(
-                    f"Step 16c: dropped {outcome['stashes_dropped']} stash(es) "
-                    f"owned by pipeline markers for {wave_id}"
-                )
-        except subprocess.CalledProcessError as exc:
-            detail = (exc.stderr or exc.stdout or str(exc)).strip()
-            outcome["warnings"].append(f"stash list: {detail[:200]}")
-            log(f"Step 16c stash list warning: {detail[:200]}")
-        except subprocess.TimeoutExpired:
-            outcome["warnings"].append("stash list timed out")
-            log("Step 16c stash list timed out")
-
+        directory = lifecycle.register_lane(repo_root, wave_id, base_branch=base_branch,
+                                             bus_dir=_active_bus_dir(), role="commit")
+        if directory is None:
+            outcome.update(completion_state="RETAINED_PRIMARY")
+            return outcome
+        terminal = lifecycle.request_completion(directory, status="merged", result=terminal_result)
+        directory = Path(terminal["record"])
+        outcome["lifecycle_record"] = str(directory)
+        log(f"Step 16: durable native completion pending at {directory}")
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        outcome.update(completion_state="INCOMPLETE", warnings=[str(exc)])
+        log(f"Step 16: native completion ownership incomplete: {exc}")
     return outcome
 
 
@@ -16013,12 +15931,18 @@ def _refresh_post_merge_package_for_next_open_queue(
         merged_pr = 0
 
     residual_wave = "workingrcx-fleet-residual-completion-r1-2026-09-13"
+    # This recovery enabler repaired transaction R2; it never produced a new
+    # fleet plan. Keep the original committed owner, including consumed claims.
+    recovery_plan_owner = {
+        "workingrcx-fleet-live-recovery-r3-2026-09-16":
+            "workingrcx-fleet-transaction-landing-r2-2026-09-15",
+    }.get(str(handoff.get("wave_id") or ""))
     if str(handoff.get("task_id") or "").strip("[]") == "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION":
         fresh_wave = str(handoff.get("wave_id") or "")
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,160}", fresh_wave):
             raise QueueCommitAuthorityError("Fleet live-action handoff requires an exact safe wave identity")
-        residual_wave = fresh_wave
-    if handoff.get("wave_id") == residual_wave:
+        residual_wave = recovery_plan_owner or fresh_wave
+    if handoff.get("wave_id") == residual_wave or recovery_plan_owner:
         # This code merge cannot witness future foreground directory outcomes.
         # Carry the same task's committed operations through the existing stop.
         plan_path = f"reports/control_plane/{residual_wave}_apply_plan.json"
@@ -16040,10 +15964,23 @@ def _refresh_post_merge_package_for_next_open_queue(
             f"Authority commit: {merge_sha}. Plan: {plan_path}. "
             + str(fleet_plan["command_template"])
         )
+        if recovery_plan_owner:
+            request = (
+                "Retain the original transaction owner below. Inspect its recorded "
+                "claims and verify outcomes using each claim's original authority; "
+                "never rerun consumed operations. Only compatible unconsumed operations "
+                "may use the committed foreground plan/apply/verify API. The recovery "
+                "enabler has no apply plan and grants no fresh mutation authority. "
+                f"Original owner: {residual_wave}. Committed plan: {plan_path}. "
+                "Keep target-specific HOLD and useful-work owners; all consumed "
+                "operations and their receipts remain immutable."
+            )
         next_wave = residual_wave + "-live-retirement"
         candidate = dict(candidate=next_wave, bounded=True, tracked_packet=None,
                          owner={"task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
-                                "wave_id": residual_wave, "packet": _handoff_plan_path(handoff)},
+                                "wave_id": residual_wave,
+                                "packet": (f"reports/control_plane/{residual_wave}_{residual_wave[-10:]}.md"
+                                           if recovery_plan_owner else _handoff_plan_path(handoff))},
                          authority_commit=merge_sha, manifest_path=plan_path,
                          repo_root=str(repo_root), summary="Committed fleet actions remain CURRENT",
                          request_for_agent=request, request_for_claude=request)
@@ -16286,6 +16223,24 @@ def _refresh_post_merge_package_for_next_open_queue(
         + (" (hard stop)" if entry.get("hard_stop") else "")
     )
     return package
+
+
+refresh_post_merge_package_for_next_open_queue = _refresh_post_merge_package_for_next_open_queue
+
+
+def record_post_merge_replacements(verify_root: Path, *, primary_sync: dict,
+                                    wave_id: str, merge_sha: str) -> tuple[Path, list]:
+    """Read coverage only from an actually synchronized surviving checkout."""
+    root = verify_root
+    if primary_sync.get("primary"):
+        candidate = Path(primary_sync["primary"])
+        if _run(["git", "rev-parse", "HEAD"], cwd=candidate).stdout.strip() == merge_sha:
+            root = candidate
+    # The public consumer verifies checkout/committed-source authority when a
+    # coverage manifest exists. Its no-manifest result remains a no-op, so an
+    # unrelated wave does not acquire a replacement-ownership prerequisite.
+    return root, _load_pr_disposition_executor_module().record_lifecycle_replacements(
+        root, wave_id=wave_id, authority_commit=merge_sha)
 
 
 def record_commit_pr_lifecycle(
@@ -17060,14 +17015,15 @@ def _run_post_commit_pipeline_impl(
     # base, force, or reset). It runs BEFORE step 16 cleanup (which may remove
     # repo_root) and its failure must never affect the already-merged PR.
     result["primary_worktree_sync"] = _sync_primary_worktree_to_base(
-        repo_root, base_branch, log=log,
+        repo_root, base_branch, log=log, source_authority_commit=str(result.get("merge_sha") or ""),
     )
 
     try:
-        result["pr_replacement_ownership"] = _load_pr_disposition_executor_module().record_lifecycle_replacements(
-            verify_root, wave_id=str(handoff.get("wave_id") or ""),
-            authority_commit=str(result.get("merge_sha") or ""),
-        )
+        replacement_root, replacements = record_post_merge_replacements(
+            verify_root, primary_sync=result["primary_worktree_sync"],
+            wave_id=str(handoff.get("wave_id") or ""), merge_sha=str(result.get("merge_sha") or ""))
+        result["post_merge_authority_root"] = str(replacement_root)
+        result["pr_replacement_ownership"] = replacements
     except Exception as exc:
         result["pr_replacement_ownership_hold"] = str(exc)
         log(f"Explicit PR replacement ownership HOLD: {exc}")
@@ -17134,6 +17090,7 @@ def _run_post_commit_pipeline_impl(
         base_branch=base_branch,
         wave_id=str(handoff.get("wave_id") or ""),
         log=log,
+        terminal_result=result,
     )
     result["post_merge_cleanup"] = cleanup_outcome
     result["steps_completed"].append("post_merge_cleanup")
@@ -17177,7 +17134,7 @@ def _run_post_commit_pipeline_impl(
     if queue_authority_error is None:
         try:
             _refresh_post_merge_package_for_next_open_queue(
-                repo_root=verify_root,
+                repo_root=Path(result.get("post_merge_authority_root") or verify_root),
                 handoff=handoff,
                 result=result,
                 merge_sha=str(result.get("merge_sha") or ""),
@@ -17199,6 +17156,17 @@ def _run_post_commit_pipeline_impl(
             "Exact post-cleanup queue/terminal refresh failed at "
             f"{queue_commit_sha}: {queue_authority_error}"
         ]
+
+    if cleanup_outcome.get("lifecycle_record"):
+        try:
+            try:
+                from . import worktree_lifecycle as lifecycle
+            except ImportError:
+                import worktree_lifecycle as lifecycle
+            result["durable_closeout_path"] = str(lifecycle.publish_closeout(
+                Path(cleanup_outcome["lifecycle_record"]), repo=repo_root, handoff=handoff, result=result))
+        except (OSError, ValueError, RuntimeError) as exc:
+            result.update(status="error", step="durable_closeout", errors=[str(exc)])
 
     return result
 
@@ -20442,6 +20410,10 @@ def _run_commit_pipeline_impl(
             raise ValueError("staged content changed during mechanical validation or final review")
 
     # ── Step 8: run_pre_commit_script ─────────────────────────────────
+    try:
+        from .recovery_gate import recovery_command_diagnostic
+    except ImportError:
+        from recovery_gate import recovery_command_diagnostic
     pre_commit_script = repo_root / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
     if pre_commit_script.exists():
         # Propagate active bus authority to the hook verifier. Receipt checks
@@ -20455,16 +20427,24 @@ def _run_commit_pipeline_impl(
                 env=step8_env,
             )
         except subprocess.CalledProcessError as exc:
+            diagnostic = recovery_command_diagnostic(exc.cmd, outcome="failed",
+                exit_code=exc.returncode, stdout=exc.stdout, stderr=exc.stderr)
             failure_detail = _tail_failure_excerpt(exc.stderr or exc.stdout or "", limit=1000)
             error_text = "pre-commit-doc-check failed"
             if failure_detail:
                 error_text = f"{error_text}: {failure_detail}"
             return {"status": "error", "step": "run_pre_commit_script",
                     "errors": [error_text],
+                    "stdout": diagnostic["stdout"], "stderr": diagnostic["stderr"],
+                    "failure_command": diagnostic,
                     "steps_completed": result["steps_completed"]}
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
+            diagnostic = recovery_command_diagnostic(exc.cmd, outcome="timeout",
+                stdout=exc.stdout, stderr=exc.stderr, reason="pre-commit-doc-check timed out")
             return {"status": "error", "step": "run_pre_commit_script",
                     "errors": ["pre-commit-doc-check timed out"],
+                    "stdout": diagnostic["stdout"], "stderr": diagnostic["stderr"],
+                    "failure_command": diagnostic,
                     "steps_completed": result["steps_completed"]}
 
     try:
@@ -21063,12 +21043,30 @@ def run_commit_pipeline(
                 "steps_completed": [],
             }
 
-    result = _run_commit_pipeline_impl(
-        handoff,
-        repo_root=repo_root,
-        verbose=verbose,
-        skip_supervisor=skip_supervisor,
-    )
+    try:
+        from . import worktree_lifecycle as lifecycle
+    except ImportError:
+        import worktree_lifecycle as lifecycle
+    try:
+        lifecycle_owner = lifecycle.register_lane(repo_root, wave_id,
+            bus_dir=_active_bus_dir(), role="commit")
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        return dict(status="error", step="worktree_lifecycle_registration", errors=[str(exc)], steps_completed=[])
+    try:
+        result = _run_commit_pipeline_impl(
+            handoff,
+            repo_root=repo_root,
+            verbose=verbose,
+            skip_supervisor=skip_supervisor,
+        )
+    except BaseException:
+        if lifecycle_owner is not None:
+            try:
+                terminal = lifecycle.request_completion(lifecycle_owner, status="commit_unwound")
+                lifecycle.start_completion(Path(terminal["record"]))
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                print(f"[commit] Native completion INCOMPLETE at {lifecycle_owner}: {exc}", file=sys.stderr)
+        raise
     _maybe_demote_completed_handoff_state_for_commit_retry(
         repo_root=repo_root,
         handoff=handoff,
@@ -21111,6 +21109,16 @@ def run_commit_pipeline(
                     "step": "commit_outcome_pager",
                     "errors": outcome_errors,
                 }
+    if lifecycle_owner is not None:
+        try:
+            terminal = lifecycle.request_completion(lifecycle_owner, status=status, result=result)
+            record = Path(terminal["record"])
+            if not (record / "closeout.json").exists():
+                lifecycle.publish_closeout(record, repo=repo_root, handoff=handoff, result=result)
+            result["worktree_completion"] = lifecycle.start_completion(Path(terminal["record"]))
+        except (OSError, ValueError, RuntimeError) as exc:
+            result["worktree_completion"] = dict(state="INCOMPLETE", reason=str(exc),
+                record=str(lifecycle_owner))
     return result
 
 

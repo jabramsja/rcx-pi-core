@@ -7656,6 +7656,40 @@ class TestHandoffReceiptContainment:
 class TestCommitExecutorPytestGate:
     """Step 8 runs targeted pytest before allowing git commit."""
 
+    def test_step8_retains_actionable_stdout_and_stderr_for_recovery(self, tmp_path):
+        from collections import namedtuple
+        import types
+
+        repo = _setup_repo(tmp_path)
+        hook = repo / "mu/tools/hooks/pre-commit-doc-check"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        missing = "E   Governed docs missing DOC_STATUS header: mu/docs/agents/WorktreeLifecycle.v0.md"
+        stdout = "hook prelude\n" * 900 + missing + "\n" + "hook trailer\n" * 900
+        stderr = "stderr prelude\n" * 600 + "AssertionError: required document metadata\n" + "stderr trailer\n" * 600
+        hook.write_text("#!/bin/bash\ncat <<'OUTPUT'\n" + stdout + "OUTPUT\n"
+                        "cat >&2 <<'ERROR_OUTPUT'\n" + stderr + "ERROR_OUTPUT\nexit 1\n")
+        receipt = ".scratch/step6_receipt.json"
+        (repo / receipt).parent.mkdir(parents=True, exist_ok=True)
+        (repo / receipt).write_text(json.dumps({"decision": "COMMIT_GO", "staged_sha": "fresh_sha"}))
+        supervisor = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        client = types.ModuleType("meta_bridge_client")
+        client.run_meta_bridge_package = lambda *a, **kw: supervisor("COMMIT_GO", "test", receipt)
+        client.MetaBridgeClientError = Exception
+
+        with patch.dict(sys.modules, {"meta_bridge_client": client}):
+            result = commit_mod.run_commit_pipeline(_make_new_schema_handoff(), repo_root=repo)
+
+        assert result["status"] == "error" and result["step"] == "run_pre_commit_script"
+        assert "git_commit" not in result["steps_completed"]
+        assert missing in result["stdout"]
+        assert "AssertionError: required document metadata" in result["stderr"]
+        assert len(result["stdout"]) <= 6000 and len(result["stderr"]) <= 6000
+        command = result["failure_command"]
+        assert command["exit_code"] == 1 and command["outcome"] == "failed"
+        assert command["command"] == shlex.join(["bash", str(hook)])
+        prompt = recovery_gate_mod._build_diagnosis_prompt(result, "test-wave", 0, repo)  # ANTICHEAT_OK: real Step 8 transport consumer
+        assert missing in prompt and "AssertionError: required document metadata" in prompt
+
     def test_collect_commit_test_files_includes_direct_and_mirrored_tests(self, tmp_path):
         repo = tmp_path / "repo"
         (repo / "mu" / "tools").mkdir(parents=True)

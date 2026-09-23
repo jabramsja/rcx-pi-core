@@ -17,6 +17,7 @@ These tests cover:
 from __future__ import annotations
 
 import concurrent.futures
+import copy
 import dataclasses
 import hashlib
 import json
@@ -945,6 +946,116 @@ def _prepare_native_phase_b_terminal_state(
         "indicator_path": repo / config.indicator_artifact_ref,
         "observed": observed,
     }
+
+
+def _publish_native_pre_supervisor_fixture(repo, config, bus_dir):
+    """Use native note/fingerprint/seal producers on a real staged Git candidate."""
+    import phase_b_executor as phase_b
+    # Native scratch packages are ignored in WorkingRCX; model that in this
+    # minimal repository so the real candidate-scope guard stays enabled.
+    exclude = repo / ".git/info/exclude"
+    exclude.write_text(exclude.read_text() + "\n.scratch/\n")
+    packet = repo / config.tracked_packet
+    packet.write_text(packet.read_text().replace(
+        "Status: Phase B (locked, implementing)",
+        "Status: " + phase_b.PHASE_B_PRE_SUPERVISOR_PENDING_STATUS))
+    _git(repo, "add", config.tracked_packet)
+    changed = sorted(subprocess.check_output(["git", "diff", "--cached", "--name-only"], cwd=repo).decode().splitlines())
+    note = phase_b.build_phase_b_tracker_note(
+        wave_id=config.wave_id, task_id=config.task_id, wave_class=config.wave_class,
+        target_gate_id=config.target_gate_id, plan_path=config.tracked_packet,
+        plan_content=packet.read_text(), changed_files=changed,
+        test_files=phase_b.select_pytest_gate_files(changed, repo),
+        receipt_path=".scratch/phase_b_supervisor_package.json", bridge_rounds=2, reentry=True,
+        founder_override=config.founder_override, pre_supervisor=True,
+        packet_evidence_command=config.evidence_command, tracker_date=config.date,
+    )
+    tasks = repo / "TASKS.md"
+    initial = tsn.render_tracker_sync_note(lw.build_tracker_fields(config))
+    tasks.write_text(tasks.read_text().replace(initial, note))
+    _git(repo, "add", "TASKS.md")
+    package = dict(task_id=config.task_id, wave_name=config.wave_id, wave_class=config.wave_class,
+                   changed_files=changed, bridge_status=dict(rounds=2, total_rounds=2, reentry=True),
+                   tracker_note_text=note, evidence_command=config.evidence_command)
+    package_path = repo / ".scratch/phase_b_supervisor_package.json"
+    package_path.parent.mkdir(exist_ok=True)
+    package_path.write_text(json.dumps(package))
+    state = dict(plan_path=config.tracked_packet, wave_id=config.wave_id,
+        completed_step="needs_phase_b_reentry", bridge_rounds=0, post_reentry_prior_bridge_rounds=2,
+        reentry_findings="Latest supervisor: post-admission index-only drift must retain its landing owner",
+        runtime_pre_push_failure_reentry=False, native_supervisor_reentries=1,
+        native_supervisor_reentry_exhausted=False,
+        implementer_changed=[], executor_created=[], baseline_wave_files=changed,
+        all_non_blocking=[], finding_history={},
+        bridge_scope_fingerprint=phase_b._bridge_scope_fingerprint(repo, changed),  # ANTICHEAT_OK: native fingerprint producer binds the disposable candidate.
+        supervisor_reentry_identity=dict(wave_id=config.wave_id, task_id=config.task_id,
+            plan_path=config.tracked_packet, plan_sha256=_sha256_path(packet),
+            comparison_commit=config.comparison_commit, base_commit=config.comparison_commit))
+    state["supervisor_reentry_sha256"] = phase_b._canonical_json_sha256(state)  # ANTICHEAT_OK: exercise the native continuation seal, not a mocked authority decision.
+    assert phase_b.supervisor_reentry_continuation_issue(state) is None
+    path = ec.agent_bus_path(repo, bus_dir, "executors", "phase_b_state.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state))
+
+
+@pytest.mark.parametrize("fault", [None, "tracker", "packet", "candidate", "index", "mode", "flags", "state", "package", "claimed"])
+def test_exact_native_pre_supervisor_continuation_binds_latest_owner_and_every_candidate_byte(wave_repo, monkeypatch, fault):
+    state = _prepare_native_phase_b_terminal_state(
+        wave_repo, mutate_before_return=_publish_native_pre_supervisor_fixture)
+    config = state["config"]
+    _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    before_receipt = state["available_path"].read_bytes()
+    if fault == "tracker":
+        state["tasks_path"].write_text(state["tasks_path"].read_text().replace("package-bound L4", "arbitrary L4"))
+        _git(wave_repo, "add", "TASKS.md")
+    elif fault == "packet":
+        state["packet_path"].write_text(state["packet_path"].read_text().replace("## Scope", "## Altered Scope"))
+        _git(wave_repo, "add", config.tracked_packet)
+    elif fault in {"candidate", "index"}:
+        code = wave_repo / "mu/tools/executors/candidate_authority.py"
+        code.parent.mkdir(parents=True, exist_ok=True)
+        original = code.read_bytes() if code.exists() else b""
+        code.write_bytes(original + b"\n# unreceipted candidate change\n")
+        _git(wave_repo, "add", "mu/tools/executors/candidate_authority.py")
+        if fault == "index":
+            code.write_bytes(original)
+    elif fault == "mode":
+        state["packet_path"].chmod(0o755)
+    elif fault == "flags":
+        _git(wave_repo, "update-index", "--skip-worktree", "TASKS.md")
+    elif fault == "state":
+        path = ec.agent_bus_path(wave_repo, state["bus_dir"], "executors", "phase_b_state.json")
+        path.write_text(path.read_text().replace("Latest supervisor", "Obsolete supervisor"))
+    elif fault == "package":
+        path = wave_repo / ".scratch/phase_b_supervisor_package.json"
+        path.write_text(path.read_text().replace('"total_rounds": 2', '"total_rounds": 3'))
+    elif fault == "claimed":
+        state["available_path"].rename(state["claimed_path"])
+    before = _phase_b_resume_authority_snapshot(wave_repo, state)
+    calls = []
+    _forbid_phase_b_resume_producers(monkeypatch)
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        assert "phase-b" in command
+        assert state["claimed_path"].read_bytes() == before_receipt
+        return subprocess.CompletedProcess(command, 0)
+
+    if fault is None:
+        assert lw._native_phase_b_packet_sources_match(wave_repo, config)  # ANTICHEAT_OK: identify the exact continuation conjunct before real launch.
+        assert lw._native_phase_b_advanced_tracker_note(wave_repo, config, bus_dir=state["bus_dir"]) is not None  # ANTICHEAT_OK: producer-bound note must validate before launch.
+        assert lw._native_phase_b_tracker_matches_config(wave_repo, config, bus_dir=state["bus_dir"])  # ANTICHEAT_OK: assert real staged/worktree tracker agreement.
+        lw.run_wave_setup(wave_repo, config, launch=True, bus_dir=state["bus_dir"], runner=runner)
+        assert len(calls) == 1
+        with pytest.raises(lw.LaunchWaveError):
+            lw.run_wave_setup(wave_repo, config, launch=True, bus_dir=state["bus_dir"], runner=runner)
+        assert len(calls) == 1
+    else:
+        with pytest.raises(lw.LaunchWaveError):
+            lw.run_wave_setup(wave_repo, config, launch=True, bus_dir=state["bus_dir"], runner=runner)
+        assert calls == []
+        assert (state["claimed_path"] if fault == "claimed" else state["available_path"]).read_bytes() == before_receipt
+    assert _phase_b_resume_authority_snapshot(wave_repo, state) == before
 
 
 def _phase_b_resume_authority_snapshot(repo, state):
@@ -2789,7 +2900,7 @@ def test_authority_config_writes_bus_local_spec(wave_repo):
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     assert spec["wave_id"] == config.wave_id
     assert spec["comparison_commit"] == comparison_commit
-    assert spec["candidate_allowlist"] == sorted(_authority_allowlist(config))
+    assert spec["candidate_allowlist"] == sorted(config.candidate_allowlist)
     assert spec["indicator_artifact_ref"] == config.indicator_artifact_ref
     routing = json.loads(
         (
@@ -2805,7 +2916,7 @@ def test_authority_config_writes_bus_local_spec(wave_repo):
     assert identity["identity_version"] == 1
     assert identity["wave_id"] == config.wave_id
     assert identity["comparison_commit"] == comparison_commit
-    assert identity["candidate_allowlist"] == sorted(_authority_allowlist(config))
+    assert identity["candidate_allowlist"] == sorted(config.candidate_allowlist)
     assert identity["candidate_allowlist_hash"]
     assert identity["plan_path"] == config.tracked_packet
     assert identity["indicator_artifact_ref"] == config.indicator_artifact_ref
@@ -2813,6 +2924,84 @@ def test_authority_config_writes_bus_local_spec(wave_repo):
     assert identity["authority_required"] is True
     assert identity["spec_hash"]
     assert "target_branch_authority" not in authority
+
+
+@pytest.mark.parametrize("staged", [False, True], ids=["untracked", "staged"])
+@pytest.mark.parametrize("extra", [None, "other_wave", "unrelated_source"])
+def test_native_generated_report_is_optional_exact_and_bound_before_lock(wave_repo, staged, extra):
+    import phase_b_executor as phase_b
+    import candidate_authority as authority
+
+    config = _authority_config_for_repo(wave_repo)
+    report_rel = f"reports/deferred/non_blocking/{config.wave_id}_bridge_nonblockers.md"
+    assert report_rel not in _authority_allowlist(config)
+    assert config.candidate_allowlist.count(report_rel) == 1
+    assert config.scope_items.count(report_rel) == 1
+    roundtrip = lw.WaveConfig.from_dict(dataclasses.asdict(config))
+    assert dataclasses.asdict(roundtrip) == dataclasses.asdict(config)
+    setup = lw.run_wave_setup(wave_repo, config)
+    spec_path = Path(setup.candidate_authority_spec_path)
+    spec = authority.load_authority_spec(spec_path)
+    route_path = ec.routing_record_path(wave_repo)
+    route = json.loads(route_path.read_text())
+    envelope = route[lw.NATIVE_STUB_PACKET_CONTRACT_KEY]
+    assert report_rel in envelope["contract"]["scope_items"]
+    assert report_rel in spec.candidate_allowlist
+    report = wave_repo / report_rel
+    assert not report.exists()
+    assert authority.guard_candidate_scope_before_mutation(wave_repo, spec)["status"] == "scope-current"
+
+    packet = wave_repo / config.tracked_packet
+    packet.write_text(_phase_b_packet_content(config))
+    _git(wave_repo, "add", config.tracked_packet, "TASKS.md")
+    locked = {p: p.read_bytes() for p in (packet, route_path, spec_path)}
+    produced = phase_b._write_deferred_packet(  # ANTICHEAT_OK: reproduce the real native report producer against the builder's locked scope.
+        wave_repo, config.wave_id,
+        [{"title": "Retained optional loop follow-up", "class": "DOC_ACCURACY", "severity": "low"}],
+        wave_class=config.wave_class, target_gate_id=config.target_gate_id,
+    )
+    assert produced == report
+    if extra:
+        unexpected = ("reports/deferred/non_blocking/other-wave_bridge_nonblockers.md"
+                      if extra == "other_wave" else "mu/tools/executors/unrelated.py")
+        other = wave_repo / unexpected
+        other.parent.mkdir(parents=True, exist_ok=True)
+        other.write_text("unadmitted output\n")
+    if staged:
+        _git(wave_repo, "add", report_rel, *([unexpected] if extra else []))
+    index = wave_repo / ".git/index"
+    before = index.read_bytes()
+    if extra:
+        with pytest.raises(authority.CandidateAuthorityError, match="outside allowlist") as caught:
+            authority.guard_candidate_scope_before_mutation(wave_repo, spec)
+        assert unexpected in str(caught.value)
+    else:
+        assert authority.guard_candidate_scope_before_mutation(wave_repo, spec)["status"] == "scope-current"
+    assert index.read_bytes() == before
+    assert {p: p.read_bytes() for p in locked} == locked
+    if not extra:
+        report.unlink()  # Native GO may remove the optional report.
+        assert authority.guard_candidate_scope_before_mutation(wave_repo, spec)["status"] == "scope-current"
+        assert {p: p.read_bytes() for p in locked} == locked
+
+
+def test_generated_report_authority_cannot_expand_an_older_locked_contract(wave_repo):
+    config = _authority_config_for_repo(wave_repo)
+    report = f"reports/deferred/non_blocking/{config.wave_id}_bridge_nonblockers.md"
+    legacy = copy.deepcopy(config)
+    legacy.candidate_allowlist.remove(report)
+    legacy.scope_items.remove(report)
+    setup = lw.run_wave_setup(wave_repo, legacy)
+    packet = wave_repo / legacy.tracked_packet
+    packet.write_text(_phase_b_packet_content(legacy))
+    _git(wave_repo, "add", legacy.tracked_packet, "TASKS.md")
+    paths = [packet, wave_repo / "TASKS.md", wave_repo / ".git/index",
+             ec.routing_record_path(wave_repo), Path(setup.candidate_authority_spec_path)]
+    before = {path: path.read_bytes() for path in paths}
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(wave_repo, config)
+    assert {path: path.read_bytes() for path in paths} == before
+    assert not (wave_repo / report).exists()
 
 
 def test_authority_scope_guard_runs_before_l4_indicator_prestage(wave_repo):
@@ -2908,7 +3097,9 @@ def test_authority_config_accepts_hyphenated_aliases(wave_repo):
     config = lw.WaveConfig.from_dict(raw)
 
     assert config.comparison_commit == base
-    assert config.candidate_allowlist == _authority_allowlist(config)
+    assert config.candidate_allowlist == _authority_allowlist(config) + [
+        f"reports/deferred/non_blocking/{config.wave_id}_bridge_nonblockers.md",
+    ]
     assert config.pre_review_authority is True
     assert config.precommit_inventory is True
 
@@ -3192,6 +3383,27 @@ def test_run_wave_setup_fence_failure_persists_no_packet(wave_repo):
     assert "line-ref lint" in str(exc.value)
     assert not (wave_repo / config.tracked_packet).exists()
     assert _artifact_counts(wave_repo, config.wave_id) == (0, 0, 0)
+
+
+def test_pre_dispatch_refusal_keeps_registered_lifecycle_owner(wave_repo, monkeypatch):
+    import worktree_lifecycle
+    lane = wave_repo.parent / (wave_repo.name + "-native-lane")
+    _git(wave_repo, "worktree", "add", "-b", "native-registration", str(lane))
+    config = make_config(purpose="Patch loader.py:128 before shipping.")
+    children = []
+    # Test the real refused setup and durable registry. Only the asynchronous
+    # launch is observed here; real child follow-through has its own Git tests.
+    monkeypatch.setattr(worktree_lifecycle, "start_completion", lambda directory: children.append(directory))
+    with pytest.raises(lw.LaunchWaveError, match="line-ref lint"):
+        lw.run_wave_setup(lane, config, launch=True)
+    assert len(children) == 1
+    directory = children[0]
+    assert directory.parent == wave_repo.resolve() / ".git/rcx_worktree_lifecycle"
+    registered = json.loads((directory / "registration.json").read_text())
+    terminal = json.loads((directory / "terminal.json").read_text())
+    assert registered["identity"]["path"] == str(lane.resolve())
+    assert terminal["status"] == "setup_stopped" and terminal["state"] == "PENDING"
+    assert lane.exists() and not (lane / config.tracked_packet).exists()
 
 
 # --------------------------------------------------------------------------- #

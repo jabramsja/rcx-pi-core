@@ -708,6 +708,166 @@ def init_hybrid_delegate_tree(repo_root: Path) -> None:
     )
 
 
+@pytest.fixture
+def retained_native_scratch(tmp_path, monkeypatch):
+    """Real Git checkpoint with R1's retained dangling backup link."""
+    for key in list(os.environ):
+        if key.startswith("GIT_"):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    init_hybrid_delegate_tree(tmp_path)
+    (tmp_path / ".gitignore").write_text(".scratch/\n__pycache__/\n")
+    for args in (
+        ["init"], ["config", "user.name", "fixture"],
+        ["config", "user.email", "fixture@example.invalid"],
+        ["add", "."], ["commit", "-m", "checkpoint seed"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    backup = tmp_path / (
+        ".scratch/governance-retry-pytest.9PZktE/pytest-of-jeffabrams/pytest-0/"
+        "test_sync_primary_moves_nonign0/main/.git/"
+        "rcx_primary_worktree_sync_transactions/8c466713b9b940c7a7711c870a25de1a/backup"
+    )
+    backup.mkdir(parents=True)
+    link = backup / "collide.txt"
+    link.symlink_to("founder-bytes.txt")
+    evidence = backup / "retained.json"
+    evidence.write_bytes(b'{"owner":"native-sync","mode":384}\n')
+    return SimpleNamespace(root=tmp_path, link=link, backup=backup, evidence=evidence)
+
+
+@pytest.mark.parametrize("mutation", [
+    None, "new_link", "new_file", "retarget", "delete_link", "replace_link",
+    "target_created", "escape", "escaping_parent", "changed_evidence", "deleted_evidence",
+    "git_index", "git_ref",
+])
+def test_retained_native_dangling_scratch_is_inert_and_mutation_fails_closed(
+    retained_native_scratch, mutation,
+):
+    case = retained_native_scratch
+    scope = ["mu/tools/executors/recovery_gate.py"]
+    exceptions = rg_mod._hybrid_exception_paths()  # ANTICHEAT_OK: exact native checkpoint allowlist
+    ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: real retained R1 checkpoint
+        case.root, files_in_scope=scope, exception_paths=exceptions,
+    )
+    assert ok, baseline
+    rel = case.link.relative_to(case.root).as_posix()
+    assert baseline["inventory"][rel] == dict(exists=True, type="symlink", readlink="founder-bytes.txt")
+    assert baseline["manifest"][rel]["realpath"] == str(case.backup / "founder-bytes.txt")
+    assert not case.link.exists() and case.link.is_symlink()
+    immutable = copy.deepcopy(baseline)
+    if mutation == "new_link":
+        (case.backup / "new-link").symlink_to("founder-bytes.txt")
+    elif mutation == "new_file":
+        (case.backup / "new-evidence").write_text("unadmitted\n")
+    elif mutation in {"retarget", "delete_link", "replace_link", "escape"}:
+        case.link.unlink()
+        if mutation == "retarget":
+            case.link.symlink_to("different-missing.txt")
+        elif mutation == "replace_link":
+            case.link.write_text("replaced evidence\n")
+        elif mutation == "escape":
+            case.link.symlink_to(case.root / "outside-missing.txt")
+    elif mutation == "target_created":
+        (case.backup / "founder-bytes.txt").write_text("new target\n")
+    elif mutation == "escaping_parent":
+        saved = case.backup.with_name("retained-backup")
+        case.backup.rename(saved)
+        outside = case.root / "outside-backup"
+        outside.mkdir()
+        (outside / "collide.txt").symlink_to("founder-bytes.txt")
+        case.backup.symlink_to(outside, target_is_directory=True)
+    elif mutation == "changed_evidence":
+        case.evidence.write_bytes(b"changed\n")
+    elif mutation == "deleted_evidence":
+        case.evidence.unlink()
+    elif mutation == "git_index":
+        (case.root / scope[0]).write_text("permitted code edit, forbidden staging\n")
+        subprocess.run(["git", "add", scope[0]], cwd=case.root, check=True, capture_output=True)
+    elif mutation == "git_ref":
+        subprocess.run(["git", "branch", "unexpected-owner"], cwd=case.root, check=True, capture_output=True)
+    ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: native before/after authority audit
+        case.root, baseline=baseline, files_in_scope=scope, exception_paths=exceptions,
+    )
+    assert baseline == immutable
+    assert ok is (mutation is None), audit
+    if mutation is None:
+        assert audit["observed_drift"] == []
+        ok, after = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: prove exact unchanged inventory/manifest/Git
+            case.root, files_in_scope=scope, exception_paths=exceptions,
+        )
+        assert ok and after == baseline
+    else:
+        assert audit["detail"]
+
+
+def test_retained_native_dangling_scratch_escape_is_rejected_at_capture(retained_native_scratch):
+    case = retained_native_scratch
+    case.link.unlink()
+    case.link.symlink_to(case.root / "outside-missing.txt")
+    ok, result = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: missing target grants no escape authority
+        case.root, files_in_scope=["mu/tools/executors/recovery_gate.py"],
+        exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: native exact exceptions
+    )
+    assert not ok
+    assert "symlink escaped" in result["detail"]
+
+
+def test_native_recovery_validator_owns_pytest_scratch_without_changing_retained_baseline(
+    retained_native_scratch, monkeypatch,
+):
+    case = retained_native_scratch
+    test_path = "mu/tests/tools/test_recovery_gate.py"
+    (case.root / test_path).write_text(
+        "def test_native_backup(tmp_path):\n"
+        "    backup = tmp_path / 'backup'\n"
+        "    backup.mkdir()\n"
+        "    (backup / 'collide.txt').symlink_to('founder-bytes.txt')\n"
+        "    assert not (backup / 'collide.txt').exists()\n"
+    )
+    # Ambient pytest configuration must not create a second, unadmitted tree.
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--basetemp=.scratch/unadmitted-pytest")
+    exceptions = rg_mod._hybrid_exception_paths()  # ANTICHEAT_OK: exact native validation boundary
+    ok, before = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: real Git evidence before native validation
+        case.root, files_in_scope=[test_path], exception_paths=exceptions,
+    )
+    assert ok, before
+    result = rg_mod._run_pytest_targeted_validator(  # ANTICHEAT_OK: execute supported native validator
+        case.root, targets=[test_path], timeout=30,
+    )
+    assert result["passed"], result
+    assert "--basetemp" in result["command"]
+    assert not (case.root / ".scratch/unadmitted-pytest").exists()
+    ok, after = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: exact same retained inventory/manifest/Git
+        case.root, files_in_scope=[test_path], exception_paths=exceptions,
+    )
+    assert ok and after == before
+    assert case.link.is_symlink() and not case.link.exists()
+
+
+def test_native_delegate_admits_unchanged_retained_dangling_link(retained_native_scratch, monkeypatch):
+    case = retained_native_scratch
+    module = FakeHybridImplementerModule()
+    module.invoke_implementer = lambda *args, **kwargs: dict(
+        status="success", output="unchanged candidate", stderr="", exit_code=0, job_id="impl-1234abcd",
+    )
+    monkeypatch.setattr(rg_mod, "load_executor_config", lambda _root: {"hybrid_recovery_enabled": True})
+    monkeypatch.setattr(rg_mod, "_load_phase_b_implementer_module", lambda _root: module)
+    result = rg_mod._run_delegate_implementer_action(  # ANTICHEAT_OK: supported recovery admission and real validation
+        case.root, result={"status": "failed", "step": "settle_commit_generated_governance"},
+        wave_id="retained-scratch-fixture", step="settle_commit_generated_governance",
+        response=make_delegate_response(), explanation="admit retained native evidence",
+    )
+    assert result["ok"], result
+    assert result["validator_result"]["passed"]
+    assert result["pre_validation_audit"]["observed_drift"] == []
+    assert result["final_audit"]["observed_drift"] == []
+    assert "without running pytest or creating test scratch" in module.prompt_calls[0]["plan_content"]
+    assert case.link.is_symlink() and os.readlink(case.link) == "founder-bytes.txt"
+    assert not case.link.exists()
+
+
 class FakeHybridImplementerModule:
     def __init__(self, *, mutate_path: str = "mu/tools/executors/recovery_gate.py"):
         self.mutate_path = mutate_path
@@ -10185,6 +10345,136 @@ class TestApplyEditRepoEscape:
         assert ok is False
         assert "repo-escape blocked" in msg
         assert outside.read_text() == "secret"  # unchanged
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_failed_shell_diagnostic_reaches_next_planner_and_durable_log(tmp_path, monkeypatch, repair):
+    """Real guarded pytest failure -> model feedback -> real corrective edit.
+
+    The fixture calls the existing doc parser. Only the model boundary is
+    controlled; shell execution, edit guards and durable attempt writes run.
+    No verify_command is supplied, matching the observed lost-feedback path.
+    """
+    import hashlib
+
+    doc_rel = "mu/docs/agents/WorktreeLifecycle.v0.md"
+    doc = tmp_path / doc_rel
+    doc.parent.mkdir(parents=True)
+    old = "<!-- DOC_STATUS: REFERENCE -->"
+    new = ("<!--\nDOC_STATUS\nTYPE: REFERENCE\nLAST_VERIFIED: 2026-09-15\n"
+           "OWNER: RCX Core Team\nFOR_CURRENT_STATE: See STATUS.md and TASKS.md\n"
+           "GROUNDING_TESTS: mu/tests/tools/test_recovery_gate.py\n-->")
+    doc.write_text(old + "\n# Lifecycle\n")
+    diagnostic = tmp_path / "test_header_diagnostic.py"
+    diagnostic.write_text(
+        "import sys\nfrom pathlib import Path\n"
+        f"sys.path.insert(0, {str(_REPO_ROOT)!r})\n"
+        "from mu.tests.docs.test_doc_governance import parse_doc_header\n"
+        "def test_header():\n"
+        "    print('diagnostic prelude\\n' * 600)\n"
+        "    print('stderr prelude\\n' * 600, file=sys.stderr)\n"
+        f"    print('E   Header diagnostic stderr: {doc_rel}', file=sys.stderr)\n"
+        "    print('stderr trailer\\n' * 600, file=sys.stderr)\n"
+        f"    header = parse_doc_header(Path({doc_rel!r}).read_text())\n"
+        f"    assert header is not None, 'Governed doc missing DOC_STATUS header: {doc_rel}'\n"
+    )
+    command = "python3 -m pytest -q -s -p no:cacheprovider test_header_diagnostic.py --tb=short"
+    original = {"status": "error", "step": "run_pre_commit_script",
+                "failure_class": "test_failure", "errors": ["pre-commit-doc-check failed"]}
+    original_before = copy.deepcopy(original)
+    install_mock_recovery_agent(monkeypatch)
+    real_popen = subprocess.Popen
+    prompts = []
+
+    class Planner(FakePopen):
+        def communicate(self, input=None, timeout=None):
+            prompts.append(input)
+            if len(prompts) == 1:
+                response = {"action": "shell", "commands": [command], "explanation": "locate failing header"}
+            else:
+                assert doc.read_text().startswith(old)
+                assert "Step: run_pre_commit_script" in input
+                assert "Latest recovery command diagnostics" in input
+                assert "Governed doc missing DOC_STATUS header" in input
+                assert f"Header diagnostic stderr: {doc_rel}" in input
+                assert command in input and '"exit_code": 1' in input
+                attempts = json.loads((tmp_path / ".agent_bus/recovery/recovery_log.json").read_text())["attempts"]
+                assert attempts[-1]["outcome"] == "failed"
+                assert attempts[-1]["command_diagnostics"]["commands"][0]["exit_code"] == 1
+                response = {"action": "edit", "commands": [
+                    {"file_path": doc_rel, "old_text": old, "new_text": new}], "explanation": "repair diagnosed header"}
+            return json.dumps(response), ""
+
+    def popen(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and cmd[:2] == ["codex", "exec"]:
+            return Planner()
+        return real_popen(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(rg_mod.subprocess, "Popen", popen)
+    outcome = rg_mod.run_recovery_loop(tmp_path, original, "diagnostic-feedback", max_iterations=2 if repair else 1)
+    attempts = json.loads((tmp_path / ".agent_bus/recovery/recovery_log.json").read_text())["attempts"]
+    failed = attempts[0]
+    assert failed["outcome"] == "failed" and failed["step"] == "run_pre_commit_script"
+    record = failed["command_diagnostics"]["commands"][0]
+    assert record["command"] == command and record["exit_code"] == 1
+    assert record["command_sha256"] == hashlib.sha256(command.encode()).hexdigest()
+    assert record["outcome"] == "failed"
+    assert "Governed doc missing DOC_STATUS header" in record["stdout"]
+    assert f"Header diagnostic stderr: {doc_rel}" in record["stderr"]
+    assert len(record["stdout"]) <= 6000 and len(record["stderr"]) <= 6000
+    assert "[truncated " in record["stdout"] and "[truncated " in record["stderr"]
+    assert original == original_before
+    assert outcome["recovered"] is repair and outcome["exhausted"] is (not repair)
+    assert len(prompts) == (2 if repair else 1)
+    if repair:
+        assert attempts[-1]["outcome"] == "retry_requested"
+        assert attempts[-1]["action"] == "tier3_iter2_edit"
+        verified = subprocess.run(shlex.split(command), cwd=tmp_path, capture_output=True, text=True)
+        assert verified.returncode == 0, verified.stdout + verified.stderr
+    else:
+        assert doc.read_text().startswith(old)
+
+
+def test_shell_timeout_and_block_reasons_survive_to_next_diagnosis(tmp_path, monkeypatch):
+    install_mock_recovery_agent(monkeypatch)
+    real_run, real_popen = subprocess.run, subprocess.Popen
+    prompts, executed = [], []
+
+    class Planner(FakePopen):
+        def communicate(self, input=None, timeout=None):
+            prompts.append(input)
+            if len(prompts) == 1:
+                return json.dumps({"action": "shell", "commands": ["git reset --hard", "sleep 1"],
+                                   "explanation": "diagnose"}), ""
+            assert '"outcome": "blocked"' in input and "dangerous command blocked" in input
+            assert '"outcome": "timeout"' in input and "command timed out after 30s" in input
+            assert "partial stdout" in input and "partial stderr" in input
+            return json.dumps({"action": "escalate", "commands": [], "explanation": "still failed"}), ""
+
+    def run(command, **kwargs):
+        if kwargs.get("shell"):
+            executed.append(command)
+            assert command == "sleep 1"  # The dangerous command must never reach execution.
+            raise subprocess.TimeoutExpired(command, 30, output=b"partial stdout", stderr=b"partial stderr")
+        return real_run(command, **kwargs)
+
+    def popen(command, *args, **kwargs):
+        if isinstance(command, list) and command[:2] == ["codex", "exec"]:
+            return Planner()
+        return real_popen(command, *args, **kwargs)
+
+    monkeypatch.setattr(rg_mod.subprocess, "run", run)
+    monkeypatch.setattr(rg_mod.subprocess, "Popen", popen)
+    result = rg_mod.run_recovery_loop(tmp_path, {"step": "run_pre_commit_script", "failure_class": "test_failure"},
+                                      "diagnostic-timeout", max_iterations=2)
+    assert not result["recovered"] and result["exhausted"] and len(prompts) == 2
+    assert executed == ["sleep 1"]
+    attempts = json.loads((tmp_path / ".agent_bus/recovery/recovery_log.json").read_text())["attempts"]
+    commands = attempts[0]["command_diagnostics"]["commands"]
+    assert [entry["outcome"] for entry in commands] == ["blocked", "timeout"]
+    assert all(entry["exit_code"] is None for entry in commands)
+    assert commands[1]["stderr"] == "partial stderr"
+    assert attempts[0]["outcome"] == "failed"
 
 
 class TestRecoveryLoopDurableLogging:

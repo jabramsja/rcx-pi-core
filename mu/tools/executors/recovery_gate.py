@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import unicodedata
 import signal
@@ -5863,6 +5864,7 @@ _DANGEROUS_COPY_MOVE_KILL_COMMANDS: frozenset[str] = frozenset({
 MAX_RECOVERY_ITERATIONS = 3
 _RECOVERY_AGENT_PROMPT_MAX_CHARS = 200_000
 _RECOVERY_AGENT_PROMPT_MAX_LINE_CHARS = 2_000
+_RECOVERY_DIAGNOSTIC_MAX_COMMANDS = 4
 _SHELL_TIMEOUT = 30
 _TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
 _HYBRID_SCOPE_PATTERNS: tuple[str, ...] = (
@@ -7004,6 +7006,53 @@ def _structured_recovery_context_lines(result: dict[str, Any]) -> list[str]:
     return lines or ["(none)"]
 
 
+def _bounded_text_ends(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    marker = f"\n[truncated output of {len(text)} chars; middle omitted]\n"
+    remaining = limit - len(marker)
+    head = remaining // 2
+    return text[:head] + marker + text[-(remaining - head):]
+
+
+def _bounded_command_output(value: Any, limit: int = 6000) -> str:
+    """Retain assertion context as well as the ends of noisy command output."""
+    text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value or "")
+    if len(text) <= limit:
+        return text
+    lines = text.splitlines()
+    selected: set[int] = set()
+    for index, line in enumerate(lines):
+        if re.search(r"^E\s+|^FAILED\b|^ERROR\b|\b(?:AssertionError|\w*Error|\w*Exception):", line):
+            selected.update(range(max(0, index - 1), min(len(lines), index + 3)))
+    if not selected:
+        return _bounded_text_ends(text, limit)
+    # Reserve half the budget for failure lines and their immediate context.
+    # A long warning/captured-output trailer must not evict the named assertion.
+    quarter = (limit - 200) // 4
+    context = _bounded_text_ends("\n".join(lines[i] for i in sorted(selected)), 2 * quarter)
+    return (f"[truncated output of {len(text)} chars; head, failure context, tail follow]\n"
+            + text[:quarter] + "\n[failure context]\n" + context
+            + "\n[tail]\n" + text[-quarter:])
+
+
+def recovery_command_diagnostic(
+    command: str | list[str], *, outcome: str, exit_code: int | None = None,
+    stdout: Any = "", stderr: Any = "", reason: str = "",
+) -> dict[str, Any]:
+    """Bound command evidence for transport; it grants no retry/success authority."""
+    identity = command if isinstance(command, str) else shlex.join(command)
+    return {
+        "command": _bounded_text_ends(identity, 1000),
+        "command_sha256": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
+        "outcome": outcome,
+        "exit_code": exit_code,
+        "reason": _bounded_text_ends(reason, 1000),
+        "stdout": _bounded_command_output(stdout),
+        "stderr": _bounded_command_output(stderr),
+    }
+
+
 def _build_diagnosis_prompt(
     result: dict[str, Any], wave_id: str, iteration: int,
     repo_root: Path,
@@ -7020,6 +7069,14 @@ def _build_diagnosis_prompt(
     stderr_lines = _tail_recovery_prompt_lines(stderr, 100)
     stdout_lines = _tail_recovery_prompt_lines(stdout, 50)
     structured_context_lines = _structured_recovery_context_lines(result)
+    command_context = []
+    for key, label in (
+        ("last_recovery_diagnostics", "Latest recovery command diagnostics (separate from original failure; nonzero exit is NOT recovery success)"),
+        ("failure_command", "Original failure command evidence"),
+    ):
+        if isinstance(result.get(key), dict):
+            command_context.append(label + ":\n" + _bounded_text_ends(
+                json.dumps(result[key], indent=2, sort_keys=True), 60_000))
     # Get git status
     try:
         git_proc = subprocess.run(
@@ -7081,6 +7138,8 @@ Tier: {tier}
 Step: {step}
 Iteration: {iteration + 1}/{MAX_RECOVERY_ITERATIONS}
 Wave: {wave_id}
+
+{chr(10).join(command_context)}
 
 Structured failure context:
 {chr(10).join(structured_context_lines)}
@@ -7574,8 +7633,8 @@ def _hybrid_scope_contract(files_in_scope: list[str], validation_spec: list[dict
         "Prompt-level scope is advisory only; recovery will audit surviving drift and local git-control state after the run.",
         "Allowed product writes:",
         *[f"- {path}" for path in files_in_scope],
-        "Allowed transient executor byproducts:",
-        "- .scratch/",
+        "Allowed transient executor byproducts (exact paths; no new pytest subtree):",
+        "- .scratch/ (directory itself)",
         "- .scratch/recovery_agent_<token>.txt",
         "- .scratch/phase_b_implementer_prompt.md",
         "- .scratch/phase_b_implementer_output_<job>.txt",
@@ -8016,7 +8075,19 @@ def _validate_baselined_hybrid_scratch_path(
             target.relative_to(scratch_root)
         except ValueError:
             return False, f"baselined .scratch symlink escaped its stable realpath: {rel_path}"
-        if not (target.is_file() or target.is_dir()):
+        # Pytest's retained native transaction backups may contain dangling
+        # relative links. Capture their exact readlink/realpath as inert
+        # evidence; the baseline inventory and manifest still reject creation,
+        # deletion, retargeting and changed evidence on every subsequent audit.
+        # Only true absence inside scratch qualifies, never an unreadable or
+        # special target. New scratch links have no baseline authority.
+        try:
+            target_mode = target.stat().st_mode
+        except FileNotFoundError:
+            target_mode = None
+        except OSError as exc:
+            return False, f"cannot inspect baselined .scratch symlink target: {rel_path}: {exc}"
+        if target_mode is not None and not (stat.S_ISREG(target_mode) or stat.S_ISDIR(target_mode)):
             return False, f"baselined .scratch symlink target must remain a regular file or directory: {rel_path}"
     elif snapshot["type"] not in {"directory", "file"}:
         return False, f"baselined .scratch path must remain a regular file or directory: {rel_path}"
@@ -8631,9 +8702,12 @@ def _run_pytest_targeted_validator(
         "--tb=short",
         "-p",
         "no:cacheprovider",
-        *targets,
     ]
     with tempfile.TemporaryDirectory(prefix="rcx-recovery-tmp-") as tmp_root, tempfile.TemporaryDirectory(prefix="rcx-recovery-cache-") as cache_root:
+        # Bind pytest's fixture producer to this invocation's owned temp root.
+        # An inherited PYTEST_ADDOPTS --basetemp must not create unadmitted
+        # repository scratch. Existing retained evidence is never cleared.
+        command.extend(["--basetemp", tmp_root, *targets])
         env = {
             **os.environ,
             "PYTHONHASHSEED": "0",
@@ -8725,6 +8799,8 @@ def _build_delegate_implementer_prompt(
         "Do not modify any file outside the writable scope above.",
         "Do not modify validator modules unless explicitly listed in writable scope.",
         "Do not modify executor config, bridge config, implementer bootstrap files, or .git state.",
+        "Recovery owns verification: return the code edits without running pytest or creating test scratch.",
+        "The native validator runs the declared targets in its own temporary directory after your return.",
         "Recovery will audit surviving drift and local git-control immutability after your run.",
     ])
     return module.build_implementation_prompt(
@@ -8920,6 +8996,7 @@ def _log_tier3_attempt(
     repo_root: Path, wave_id: str, step: str, failure_class: str,
     iteration: int, action: str, outcome: str, duration_s: float,
     detail: str = "", invocation_id: str = "",
+    command_diagnostics: dict[str, Any] | None = None,
 ) -> None:
     """Persist a single Tier 3 recovery iteration to recovery_log.json."""
     attempts = _load_recovery_log(repo_root)
@@ -8930,7 +9007,10 @@ def _log_tier3_attempt(
         duration_s=duration_s, tokens_used=0, detail=detail,
         invocation_id=invocation_id,
     )
-    attempts.append(asdict(attempt))
+    record = asdict(attempt)
+    if command_diagnostics is not None:
+        record["command_diagnostics"] = command_diagnostics
+    attempts.append(record)
     _save_recovery_log(repo_root, attempts)
 
 
@@ -9067,6 +9147,7 @@ def run_recovery_loop(
 
     for i in range(max_iterations):
         iteration_t0 = time.monotonic()
+        iteration_diagnostics = None
         prompt = _build_diagnosis_prompt(result, wave_id, i, repo_root)
         try:
             agent_invocation = _resolve_recovery_agent_invocation(
@@ -9597,6 +9678,8 @@ def run_recovery_loop(
             # action == "edit" and applied -- fall through to verify/retry below.
         elif action == "shell":
             cmd_results = []
+            command_evidence = []
+            command_count = 0
             blocked = False
             executed = 0
             all_ok = True
@@ -9605,37 +9688,51 @@ def run_recovery_loop(
                 state="tier3_running_shell",
                 current_command=_excerpt(commands[0] if commands else ""),
             )
-            for cmd in commands:
+            for command_index, cmd in enumerate(commands):
                 if not isinstance(cmd, str):
                     continue
+                command_count += 1
                 if _is_dangerous_command(cmd):
-                    cmd_results.append(f"BLOCKED: {cmd}")
+                    cmd_results.append(f"BLOCKED: {_bounded_text_ends(cmd, 1000)}")
                     blocked = True
                     all_ok = False
-                    continue
-                if _targets_git_internals(cmd):
-                    cmd_results.append(f"BLOCKED (sensitive path): {cmd}")
+                    evidence = recovery_command_diagnostic(cmd, outcome="blocked", reason="dangerous command blocked")
+                elif _targets_git_internals(cmd):
+                    cmd_results.append(f"BLOCKED (sensitive path): {_bounded_text_ends(cmd, 1000)}")
                     blocked = True
                     all_ok = False
-                    continue
-                try:
-                    cmd_proc = subprocess.run(
-                        cmd, shell=True, capture_output=True, text=True,
-                        timeout=_SHELL_TIMEOUT, cwd=repo_root)
-                    executed += 1
-                    if cmd_proc.returncode != 0:
+                    evidence = recovery_command_diagnostic(cmd, outcome="blocked", reason="sensitive path blocked")
+                else:
+                    try:
+                        cmd_proc = subprocess.run(
+                            cmd, shell=True, capture_output=True, text=True,
+                            timeout=_SHELL_TIMEOUT, cwd=repo_root)
+                        executed += 1
+                        if cmd_proc.returncode != 0:
+                            all_ok = False
+                        evidence = recovery_command_diagnostic(cmd,
+                            outcome="passed" if cmd_proc.returncode == 0 else "failed",
+                            exit_code=cmd_proc.returncode, stdout=cmd_proc.stdout, stderr=cmd_proc.stderr)
+                        cmd_results.append(f"exit={cmd_proc.returncode}: {evidence['stdout'][:200]}")
+                    except subprocess.TimeoutExpired as exc:
                         all_ok = False
-                    cmd_results.append(
-                        f"exit={cmd_proc.returncode}: {cmd_proc.stdout[:200]}")
-                except subprocess.TimeoutExpired:
-                    all_ok = False
-                    cmd_results.append(f"TIMEOUT: {cmd}")
-                except OSError as exc:
-                    all_ok = False
-                    cmd_results.append(f"ERROR: {exc}")
+                        evidence = recovery_command_diagnostic(cmd, outcome="timeout",
+                            stdout=exc.stdout, stderr=exc.stderr, reason=f"command timed out after {_SHELL_TIMEOUT}s")
+                        cmd_results.append(f"TIMEOUT: {evidence['command']}")
+                    except OSError as exc:
+                        all_ok = False
+                        evidence = recovery_command_diagnostic(cmd, outcome="error", reason=str(exc))
+                        cmd_results.append(f"ERROR: {evidence['reason']}")
+                command_evidence.append({"command_index": command_index + 1, **evidence})
+                command_evidence = command_evidence[-_RECOVERY_DIAGNOSTIC_MAX_COMMANDS:]
+                cmd_results = cmd_results[-_RECOVERY_DIAGNOSTIC_MAX_COMMANDS:]
+            iteration_diagnostics = {"iteration": i + 1, "commands": command_evidence,
+                                     "omitted_commands": command_count - len(command_evidence)}
+            result = {**result, "last_recovery_diagnostics": iteration_diagnostics}
             loop_log.append({
                 "iteration": i + 1, "action": "shell",
-                "commands": commands, "results": cmd_results,
+                "commands": [entry["command"] for entry in command_evidence], "results": cmd_results,
+                "command_diagnostics": iteration_diagnostics,
                 "blocked": blocked, "detail": explanation,
                 "duration_s": round(time.monotonic() - iteration_t0, 3)})
             action_applied = executed > 0 and all_ok and not blocked
@@ -9682,7 +9779,7 @@ def run_recovery_loop(
                         "detail": "verification passed"})
                     _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
                                        action, "success", dur, "verification passed",
-                                       invocation_id=invocation_id)
+                                       invocation_id=invocation_id, command_diagnostics=iteration_diagnostics)
                     _finish_recovery_status(
                         repo_root,
                         recovered=True,
@@ -9713,6 +9810,7 @@ def run_recovery_loop(
                 repo_root, wave_id, step, fc, i + 1,
                 action, "retry_requested", dur, detail,
                 invocation_id=invocation_id,
+                command_diagnostics=iteration_diagnostics,
             )
             _finish_recovery_status(
                 repo_root,
@@ -9733,7 +9831,7 @@ def run_recovery_loop(
         dur = round(time.monotonic() - iteration_t0, 3)
         _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
                            action, "failed", dur, explanation,
-                           invocation_id=invocation_id)
+                           invocation_id=invocation_id, command_diagnostics=iteration_diagnostics)
 
     _finish_recovery_status(
         repo_root,

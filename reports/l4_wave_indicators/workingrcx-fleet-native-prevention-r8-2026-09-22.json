@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-fleet-native-prevention-r8-2026-09-22",
+  "repeat_run_speedup_ratio": 0.988373,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.342405,
+  "repeat_run_raw_seconds": [
+    0.338424,
+    0.342405
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.338424
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.680829
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-22T23:16:25Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "3fe05fdf8a61ec7d40398175e161a73e0006b20a"
+}

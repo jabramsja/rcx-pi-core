@@ -2005,6 +2005,7 @@ def build_phase_b_tracker_note(
     unblocks_runtime_blocker: str = "",
     pre_supervisor: bool = False,
     packet_evidence_command: str | None = None,
+    tracker_date: str = "",
 ) -> str:
     """Render a Phase B tracker note through the public package-class seam."""
     effective_wave_class = _effective_phase_b_tracker_wave_class(
@@ -2030,6 +2031,7 @@ def build_phase_b_tracker_note(
         unblocks_runtime_blocker=unblocks_runtime_blocker,
         pre_supervisor=pre_supervisor,
         packet_evidence_command=packet_evidence_command,
+        tracker_date=tracker_date,
     )
 
 
@@ -3215,6 +3217,12 @@ def supervisor_reentry_continuation_issue(state: dict[str, Any]) -> str | None:
         return "supervisor continuation requires a fresh reentry cycle"
     if not _valid_state_string(state.get("reentry_findings")) or type(state.get("runtime_pre_push_failure_reentry")) is not bool:
         return "supervisor continuation requires fresh findings and runtime authority"
+    if "native_supervisor_reentries" in state and (
+        type(state["native_supervisor_reentries"]) is not int
+        or state["native_supervisor_reentries"] != 1
+        or type(state.get("native_supervisor_reentry_exhausted")) is not bool
+    ):
+        return "native supervisor continuation requires its bounded attempt authority"
     if any(key.startswith(("private_attr_", "reentry_private_attr_", "bridge_fix_", "implementer_mutation")) for key in state):
         return "supervisor continuation cannot retain consumed private-review authority"
     identity = state.get("supervisor_reentry_identity")
@@ -6967,6 +6975,7 @@ def _build_phase_b_tracker_note(
     unblocks_runtime_blocker: str = "",
     pre_supervisor: bool = False,
     packet_evidence_command: str | None = None,
+    tracker_date: str = "",
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
     display_task = (task_id or "").strip() or wave_id
@@ -7159,6 +7168,7 @@ def _build_phase_b_tracker_note(
 
     fields = TrackerSyncNoteFields(
         wave_id=wave_id,
+        date=tracker_date,
         title=(
             f"{display_task} — Phase B pre-commit supervisor package"
             if pre_supervisor
@@ -9955,6 +9965,9 @@ def run_phase_b(
         shape_error = _validate_resumable_state_shape(_state_file_path(repo_root), saved)
         if shape_error is not None:
             return _state_load_error_result(shape_error)
+        if saved.get("native_supervisor_reentry_exhausted") is True:
+            return {"status": "needs_phase_b", "step": "native_supervisor_reentry",
+                    "errors": ["Bounded latest-supervisor repair exhausted; findings retained, no replay"]}
         completed_step = saved.get("completed_step", "")
         if completed_step in PRIVATE_ATTR_QUESTION_STEPS:
             return _private_attr_question_result_from_state(saved)
@@ -10482,6 +10495,8 @@ def run_phase_b(
         if bridge_fix_authority_fields:
             state.update(bridge_fix_authority_fields)
         state.update(bridge_fix_outcome_fields)
+        if saved_state and "native_supervisor_reentries" in saved_state:
+            state["native_supervisor_reentries"] = saved_state["native_supervisor_reentries"]
         return state
 
     def _private_attr_reentry_fields(*, reentry: bool) -> dict[str, Any]:
@@ -10495,8 +10510,12 @@ def run_phase_b(
         }
 
     def _continue_private_attr_supervisor_reentry(supervisor_step: str) -> dict[str, Any] | None:
-        """Atomically exchange consumed private authority for the new findings."""
-        if approved_private_attr_state is None:
+        """Exchange completed review ownership for the actual latest findings."""
+        native_late = (approved_private_attr_state is None
+                       and supervisor_step == "post_reentry_supervisor"
+                       and isinstance(routing_record.get("native_stub_packet_contract"), dict)
+                       and routing_record["native_stub_packet_contract"].get("required") is True)
+        if approved_private_attr_state is None and not native_late:
             return None
         try:
             identity, identity_error = _bridge_fix_active_identity(
@@ -10506,6 +10525,8 @@ def run_phase_b(
             if identity_error or identity is None:
                 raise PhaseBExecutorError(identity_error or "missing supervisor continuation identity")
             findings = result.get("pre_commit_summary") or "Fix required"
+            if native_late or (saved_state or {}).get("native_supervisor_reentries"):
+                findings = json.dumps(supervisor_parsed, ensure_ascii=False, sort_keys=True)
             checkpoint = {
                 "plan_path": plan_path, "wave_id": wave_id,
                 "completed_step": "needs_phase_b_reentry", "bridge_rounds": 0,
@@ -10523,11 +10544,24 @@ def run_phase_b(
                 ),
                 "supervisor_reentry_identity": identity,
             }
+            if native_late:
+                # One fresh repair cycle owns this late finding. Retain the
+                # newest finding on exhaustion; never reset its budget on resume.
+                prior = (saved_state or {}).get("native_supervisor_reentries", 0)
+                checkpoint.update(native_supervisor_reentries=1,
+                                  native_supervisor_reentry_exhausted=bool(prior))
+            elif saved_state and "native_supervisor_reentries" in saved_state:
+                checkpoint.update(native_supervisor_reentries=1,
+                                  native_supervisor_reentry_exhausted=True)
             checkpoint["supervisor_reentry_sha256"] = _canonical_json_sha256(checkpoint)
-            _save_bridge_fix_transition(repo_root, approved_private_attr_state, checkpoint)
+            previous = _load_state(repo_root) if native_late else approved_private_attr_state
+            _save_bridge_fix_transition(repo_root, previous, checkpoint)
+            exhausted = checkpoint.get("native_supervisor_reentry_exhausted") is True
             return {
-                **result, "status": "continue_phase_b", "step": "private_attr_supervisor_reentry",
+                **result, "status": "needs_phase_b" if exhausted else "continue_phase_b",
+                "step": "native_supervisor_reentry" if native_late else "private_attr_supervisor_reentry",
                 "supervisor_step": supervisor_step, "wave_id": wave_id,
+                **({"errors": ["Bounded latest-supervisor repair exhausted; newest findings retained"]} if exhausted else {}),
                 "completed_step": checkpoint["completed_step"], "resume_after": checkpoint["completed_step"],
                 "checkpoint_sha256": _sha256_bytes(_state_file_path(repo_root).read_bytes()),
                 **{key: checkpoint[key] for key in (

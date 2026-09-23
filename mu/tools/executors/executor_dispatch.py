@@ -2173,6 +2173,12 @@ def run_recoverable_surface_command(
     _signal_cleanup_token = _install_wave_end_signal_cleanup(monitor)
 
     try:
+        from . import worktree_lifecycle as lifecycle
+    except ImportError:
+        import worktree_lifecycle as lifecycle
+    lifecycle_owner = None
+    try:
+        lifecycle_owner = lifecycle.register_lane(repo_root, wave_id, bus_dir=bus_dir, role="dispatcher")
         while True:
             if result is not None and _is_chained_commit_failure(result):
                 retried = _retry_commit_only(
@@ -2337,6 +2343,16 @@ def run_recoverable_surface_command(
     finally:
         _remove_wave_end_signal_cleanup(_signal_cleanup_token)
         monitor.cleanup()
+        if lifecycle_owner is not None and (
+            args.surface == "commit" or (result or {}).get("executor") == "commit_executor"
+            or (result or {}).get("status") not in {"success", "held"}
+        ):
+            try:
+                terminal = lifecycle.request_completion(lifecycle_owner,
+                    status=str((result or {}).get("status") or "stopped"), result=result)
+                lifecycle.start_completion(Path(terminal["record"]))
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                print(f"[dispatch] Native completion INCOMPLETE at {lifecycle_owner}: {exc}", file=sys.stderr)
         if original_timeouts is not None:
             _restore_config_on_disk(
                 repo_root, original_timeouts,
@@ -3091,7 +3107,7 @@ def _ordinary_bridge_fix_continuation_issue(
 ) -> str | None:
     """Check the producer's byte-bound nonterminal result without changing state."""
     implementer = payload.get("step") == "implementer_finalize" and payload.get("resumed_from") == "implementer_mutation"
-    supervisor = payload.get("step") == "private_attr_supervisor_reentry"
+    supervisor = payload.get("step") in {"private_attr_supervisor_reentry", "native_supervisor_reentry"}
     if supervisor and (
         not isinstance(payload.get("supervisor_step"), str)
         or payload["supervisor_step"] not in {"post_reentry_supervisor", "commit_ready_status_supervisor"}
@@ -3131,6 +3147,12 @@ def _ordinary_bridge_fix_continuation_issue(
         issue = supervisor_reentry_continuation_issue(state)
         if issue:
             return issue
+        if payload.get("step") == "native_supervisor_reentry" and (
+            state.get("native_supervisor_reentries") != 1
+            or state.get("native_supervisor_reentry_exhausted") is not False
+            or payload.get("supervisor_step") != "post_reentry_supervisor"
+        ):
+            return "native supervisor continuation exhausted or lacks its bounded authority"
     else:
         mutation = state.get("implementer_mutation" if implementer else "bridge_fix_mutation")
         if not isinstance(mutation, dict) or mutation.get("state") != "SUCCESS_PENDING_FINALIZE":
@@ -3442,7 +3464,7 @@ def _continue_successful_executor_chain(
             if isinstance(following, dict) and following.get("status") == "continue_phase_b":
                 if (
                     payload.get("step") in {"bridge_fix_finalize", "implementer_finalize"}
-                    and following.get("step") == "private_attr_supervisor_reentry"
+                    and following.get("step") in {"private_attr_supervisor_reentry", "native_supervisor_reentry"}
                     and following.get("checkpoint_sha256") != payload.get("checkpoint_sha256")
                 ):
                     # Finalization can owe private review, whose GO can then
@@ -5774,6 +5796,12 @@ def main(argv: list[str] | None = None) -> int:
     # still runs the wave-end cleanup instead of bypassing the finally below.
     _signal_cleanup_token = _install_wave_end_signal_cleanup(monitor)
     try:
+        from . import worktree_lifecycle as lifecycle
+    except ImportError:
+        import worktree_lifecycle as lifecycle
+    lifecycle_owner = None
+    result = None
+    try:
         while True:
             wave_count += 1
             if args.verbose:
@@ -5799,6 +5827,10 @@ def main(argv: list[str] | None = None) -> int:
                         return 1
                     record = refresh_record
 
+            lifecycle_owner = lifecycle.register_lane(
+                repo_root, normalize_wave_id(record.get("wave_name") or record.get("wave_id") or "native-dispatch"),
+                bus_dir=args.bus_dir, role="dispatcher",
+            )
             # Dispatch with retries (while-based so recovery can grant extra attempts)
             max_attempts = 1 + max(0, args.retries)
             result = None
@@ -6054,6 +6086,15 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         _remove_wave_end_signal_cleanup(_signal_cleanup_token)
         monitor.cleanup()
+        if lifecycle_owner is not None:
+            try:
+                terminal = result if isinstance(result, dict) else {}
+                request = lifecycle.request_completion(lifecycle_owner,
+                    status=str(terminal.get("status") or "stopped"), result=terminal)
+                completion = lifecycle.start_completion(Path(request["record"]))
+                print("[dispatch] Native worktree completion: " + json.dumps(completion, sort_keys=True))
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                print(f"[dispatch] Native worktree completion INCOMPLETE at {lifecycle_owner}: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

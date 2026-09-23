@@ -6,6 +6,126 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-22
 
+### Fleet native lifecycle R8 (Phase B implementation; native review and landing pending)
+
+- Verified preserved R7 manifest SHA256
+  `391c47f4c04f4524e411f8a8fb3ed15d0dd30740e8628dd15baac7a7c64af65a`
+  and all 64 file lengths/hashes before carrying its 17 source/test/lifecycle-doc
+  files onto the unchanged PR1311 merge `3fe05fdf8a61ec7d40398175e161a73e0006b20a`.
+  R7 stopped at 2026-09-22T19:52:56Z on the live-dispatcher retry dependency.
+  Its full evidence, original index and terminal authority remain preserved.
+- A real dispatcher owner process and sequential commit children reproduced
+  both missing pre-mutation completion evidence and reuse of a failed post-merge
+  closeout at unchanged HEAD. Successor admission now accepts a verified failed
+  closeout before completion only when no attempt has started. Fresh successful
+  closeout remains mandatory; original failure bytes, consumed attempts and
+  interrupted-mutation protections remain. The real worker completes retirement
+  only after its dispatcher exits, using the original three-attempt budget.
+- Retains the R7/R6 implementation and PR1311 receipt/fixture behavior described
+  below. Canonical current-wave cap generation uses projected counts 361/131/67
+  and exact caps 171/63/19; no new exception or optional report is introduced.
+  All 268 task IDs and 39 parked obligations remain with existing row40.
+- The actual native dispatcher/commit-boundary regression failed all three
+  cases against the preserved R7 helper and passed with the correction,
+  including an already-consumed completion attempt. Collection passed for
+  4,546 tools/growth cases and 351 docs cases. The exact anti-theater-first
+  chain exited 0: zero findings/exceptions, **4,546 tests passed in 677.85
+  seconds**, then **351 docs tests passed in 1.79 seconds** with two existing
+  freshness warnings. All fixtures used default system temporary storage;
+  native stdout retains the results. Review, final gates, commit, CI, merge,
+  PRIMARY synchronization and durable operational closeout remain outer-owned.
+  Eligible physical cleanup/useful-work landing remains directly next, then Mu;
+  all 37 consumed fleet operations and held source196 evidence remain unchanged.
+
+The R7/R6 entries below retain their authoring-time validation evidence, not
+current approval. Both attempts stopped without landing. PR1311
+landed at 2026-09-22T16:25:05Z; its older pending-status entries are historical.
+
+### Fleet native lifecycle R7 (stopped; preserved authoring-time evidence)
+
+- Carries the preserved R6 lifecycle implementation onto verified PR1311 merge
+  `3fe05fdf8a61ec7d40398175e161a73e0006b20a` using clean three-way source,
+  test and lifecycle-document merges from R6 base `4cf7d5f4`. Verified the
+  terminal manifest SHA256
+  `dda50d4d72d5614d951d8b2627d44e7df4f4ce6f368aef229f7293f82e728c73`
+  and all 69 preserved files. The original carrier, index and evidence remain.
+- Retains PR1311 mechanical gates before fresh final approval, exact staged
+  bytes, hook-receipt revocation with per-invocation provenance and isolated
+  fixture repositories. Durable native completion, bounded same-HEAD
+  stopped-to-merged ownership, committed-source sync, original transaction
+  ownership, surviving-root coverage and tracked-report deletion intent now
+  coexist with those repairs. Latest supervisor findings and failed shell
+  diagnostics retain their bounded native continuation paths.
+- Reconciles current row40 owner/parallel/next facts from PRIMARY and the
+  durable R7 launch checkpoint. Preserves all 268 task IDs, the complete 39
+  parked obligations, both substantive changelog histories and held journals.
+  PR1311 landed at 2026-09-22T16:25:05Z; the older entries below describe their
+  authoring-time evidence and pending status. R6 stopped without a commit.
+- Derives current-base counts 361/131/67 and caps 171/63/19 from the unchanged
+  committed algorithm v2 producer, with R7 provenance. Strict `note.txt`,
+  existing L4 behavioral proofs and the empty exception registry remain.
+  The exact optional nonblocking report is admitted without creating one.
+- Initial implementation collection passed: 4,517 tools/growth cases and 351 docs cases.
+  The exact anti-theater-first chain exited 0 with zero risks/exceptions:
+  **4,517 tests passed in 693.90 seconds**, then **351 docs tests passed in
+  1.73 seconds** with two existing freshness warnings. Fixtures use default
+  system temporary storage outside checkouts; native stdout retains evidence.
+  Native review, final gates, commit, CI, merge, PRIMARY sync and durable
+  operational closeout remain with the outer pipeline. Existing eligible
+  retirement and useful-work landing follow, then Mu; all 37 old fleet
+  operations remain consumed.
+
+- Supervisor reentry repairs commit-owned failed closeout followed by native
+  continuation at unchanged HEAD, both before and after merge. The successor
+  verifies and hashes the failed closeout, preserves prior terminal/attempt
+  evidence, requires its own fresh successful closeout, and shares the original
+  three-attempt budget across repeated failures. Interrupted preparation and
+  changed predecessor evidence remain rejected. Reentry collection passed
+  4,531 tools/growth cases and 351 docs cases. The exact anti-theater-first
+  chain exited 0 with zero risks/exceptions: **4,531 tests passed in 678.23
+  seconds**, then **351 docs tests passed in 1.77 seconds** with the same two
+  freshness warnings. All 14 new regression cases passed. The preceding
+  counts record the initial implementation only; native review and landing
+  remain pending.
+
+### Fleet native lifecycle R6 (stopped; preserved authoring-time evidence)
+
+- Continues existing row40 on PR1310 merge `4cf7d5f4`. Verified the complete
+  46-file R5 preservation manifest and the three-file generated-report failure
+  manifest before selecting missing source, test and lifecycle-document hunks.
+- Adds bounded durable completion for successful, stopped and failed native
+  lanes, with useful-work and PR ownership, immutable attempts, and a verified
+  same-HEAD stopped-to-merged successor sharing the original retry budget.
+  Actual closeout/config/receipt evidence survives retirement in the common Git
+  directory. Missing or failed closeout retains the source and correction owner.
+- Uses freshly loaded committed recovery code and the existing identity/lock
+  API for PRIMARY sync. Keeps transaction R2 as the R3 recovery enabler's plan
+  owner and consumes replacement coverage from a synchronized surviving root.
+  Stale localdev and unrelated untracked evidence remain preserved.
+- Preserves source196 tracked-report deletion intent across admission, native
+  journal and stash, including a real-layout fixture with a retained neighbor.
+  Late-supervisor findings reach one bounded repair; failed shell diagnostics
+  retain actionable stdout/stderr for the next planner and durable attempt log.
+- The builder binds the exact optional same-wave nonblocking report before
+  locking. Tests cover native production, absent/removed reports, unauthorized
+  paths and refusal to expand an older locked contract. No placeholder report
+  or persistence requirement is introduced.
+- Uses the byte-verified committed PRIMARY algorithm v2 cap producer for the
+  actual helper/test/doc additions: counts 361/131/67, caps 171/63/19, with R6
+  provenance. Preserves the landed cap regressions, strict `note.txt` fixture,
+  L4 behavioral proofs and empty exception registry.
+- Separate collection passed: 4501 tool/growth cases and 351 docs cases. The
+  exact anti-theater-first evidence chain exited 0: zero risks/exceptions,
+  **4501 tests passed in 685.79 seconds**, then **351 docs tests passed in
+  1.69 seconds** with two existing freshness warnings. Native review, final
+  gate, commit, CI, merge, PRIMARY sync and completed-wave operational
+  verification remain outer-owned.
+- All 268 task IDs and 39 parked obligations remain. The 14 consumed/verified
+  batches retain 137 MOVED / 1 SYNCED_LOCAL_DEV / 19 HOLD / 8 INCOMPLETE. The
+  dated census of 92 direct folders and conservative 86 NEEDS_LANDING entries
+  do not establish useful-hunk landing. Fresh eligible retirement authority and
+  useful-work comparison remain with the existing cleanup owner immediately
+  after this recurrence-control task; all 37 old operations are immutable.
 ### PR1311 existing-branch packet authority (Phase B; native review and landing pending)
 
 - Preserves the explicit authorized control-surface L4_ENABLER purpose in the

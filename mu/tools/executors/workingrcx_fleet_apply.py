@@ -1231,6 +1231,9 @@ def apply_target(repo: Path, entry: dict, directory: Path, boundary,
                 # stash creation, closing the lock handoff admission window.
                 if stage == "after_prepared":
                     check_transaction(admitted, "checkout-sync-prepared")
+                    if set(_manifest["tracked_paths"]) != set(admitted["tracked_wip"]):
+                        transaction_drift("checkout-sync-prepared", admitted["tracked_wip"],
+                                          "native journal omits admitted tracked intent")
                 elif stage == "after_stash_before_publish":
                     phase = "checkout-sync-stashed"
                     oid = _manifest["stash_oid"]
@@ -1802,6 +1805,7 @@ def verify_residual_plan(repo: Path, plan: dict, *, authority_commit: str,
 
 SYNC_RECOVERY_DEPENDENCIES = (
     TOOL_PATH,
+    Path("mu/tools/executors/worktree_lifecycle.py"),
     Path("mu/tools/executors/commit_executor.py"),
     Path("mu/tools/executors/executor_common.py"),
     # commit_executor eagerly imports both, even when only native sync is used.
