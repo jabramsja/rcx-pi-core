@@ -4,6 +4,75 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-23
+
+### PR1312 R2 lifecycle fixture isolation (Phase B; native landing pending)
+
+- Reproduced the exact four-worker gate at **8 failed, 1,716 passed in 119.80s**.
+  Retained process snapshots identify live dispatcher fixture PIDs 46727, 58730
+  and 68578 matching other repositories solely through the shared `native-wave`
+  branch literal in their child-program arguments. Failed completion receipts
+  preserve all three process-identity holds; the R2 packet references raw evidence.
+- Lifecycle tests now derive deterministic branch and wave identities from each
+  disposable repository path and pass them through the real child processes,
+  handoffs and owner assertions. Paired real-process controls prove that a shared
+  branch exhausts three holds, an isolated lane completes while its peer lives,
+  and each peer's own registered owner still prevents retirement. Releasing the
+  collision leaves the sealed hold and consumed budget intact.
+- Supervisor re-entry found the same interference in the cleanup fixture:
+  **1 failed, 3 passed in 7.58s**, with three process-identity holds. Fresh
+  process captures identify cleanup child PID 52701 matching independent
+  repositories solely through `fixture-feature`. Keeping real cleanup peers
+  alive made all four ambient-filter cases fail before correction. The cleanup
+  fixture now derives branch and wave identities from each repository and passes
+  its branch as a child argument. All four cases complete on their first attempt
+  beside live peers; each peer's own lane, tree and index remain held. Exact
+  branch/history and PR-owner assertions remain, with durable PID diagnostics.
+- The exact declared chain passed: packet authorization; anti-theater with zero
+  findings/exceptions; **1,726 tools/growth tests in 124.88s**; **351 docs tests in
+  9.82s**, with two existing freshness warnings. The focused four-worker cleanup
+  command passed **4 tests in 8.04s**. Production lifecycle/fleet guards, the R1
+  ambient-Git boundary and classifier repair, and the original R1 packet/indicator
+  are preserved. All 268 IDs and 39 parked obligations remain. The R2 packet
+  references the retained failure, process captures and corrected validation.
+- Native indexed handoff, review, commit, pre-push, CI, PR1312 merge, PRIMARY
+  synchronization and carrier closeout remain outer-executor work. Eligible
+  physical cleanup/useful-work landing stays directly next, then Mu.
+
+### PR1312 R1 bounded CI continuation (preserved failed attempt)
+
+- Reproduced the remaining cleanup fixture escalation with ambient runner Git
+  filters. The fixture now isolates system/global configuration at Git exec,
+  including the lifecycle child and census, while retaining actual retirement,
+  closeout and PR-owner assertions. System/global clean/process cases also
+  verify that exposed filters still trigger production retention without execution.
+- Reproduced the historical successful TASKS read misclassification from the
+  preserved 1,580,135-byte commit stdout and its exact CI terminal JSON. Recovery
+  now recognizes the coherent native `wait_ci` test-failure envelope. Current
+  outer/terminal diagnostics, CI excerpts and bootstrap faults retain authority;
+  malformed or mismatched envelopes retain the full-stdout fallback.
+- Adds a bounded self-contained capture regression and current-diagnostic
+  negative controls. Scope/Git-control audits and finite attempt budgets remain
+  intact. All 268 task IDs and 39 parked obligations stay with row40; eligible
+  physical cleanup/useful-work landing remains directly next, then Mu.
+- Packet authorization and anti-theater passed with zero findings/exceptions.
+  The required tools/growth gate stopped at **7 failed, 1,717 passed in 119.51s**;
+  all seven failures are in unchanged `test_worktree_lifecycle.py`. The repaired
+  cleanup and recovery cases passed. The docs command short-circuited; the
+  locked-plan stop condition remains in force. Exact selectors are in the packet.
+  The governed footprint remains 361 test files,
+  131 tool scripts and 67 core docs, so caps 171/63/19 need no adjustment.
+  Native indicator collection, indexed handoff, review, commit, CI, PR1312 merge,
+  PRIMARY synchronization and carrier closeout remain with the outer pipeline.
+- Bridge-round-1 revalidation again passed packet authorization and anti-theater,
+  then stopped at **8 failed, 1,716 passed in 122.96s** in the unchanged lifecycle
+  tests. Six failing fixture receipts recorded three holds each with
+  `Active process references target identity`. Shared fixture branch names and
+  machine-wide process matching suggest worker interference; exact process
+  attribution and candidate causation remain unresolved. The cleanup/recovery
+  cases passed; docs again short-circuited. The blocking finding remains open
+  under the locked scope, with lifecycle source/tests preserved.
+
 ## 2026-09-22
 
 ### Fleet native lifecycle R8 (Phase B implementation; native review and landing pending)

@@ -8445,6 +8445,7 @@ _HYBRID_BOOTSTRAP_TERMINAL_DIAGNOSTIC_KEYS = (
     "detail",
     "message",
     "reason",
+    "ci_checks_output",
 )
 _HYBRID_BOOTSTRAP_ERROR_CHANNEL_KEYS = ("step", "stderr", "executor")
 
@@ -8511,7 +8512,10 @@ def _coherent_hybrid_terminal_envelope(result: dict[str, Any]) -> dict[str, Any]
     if failure_class == FailureClass.TEST_FAILURE.value:
         if terminal.get("status") not in {"error", "failed"}:
             return None
-        if terminal.get("step") != "run_pre_push_script":
+        if terminal.get("step") not in {"run_pre_push_script", "wait_ci"}:
+            return None
+        if (terminal.get("step") == "wait_ci"
+                and terminal.get("failure_class") != failure_class):
             return None
         terminal_executor = terminal.get("executor")
         if terminal_executor not in (None, "", "commit_executor"):
@@ -8543,6 +8547,15 @@ def _hybrid_bootstrap_diagnostic_haystacks(result: dict[str, Any]) -> tuple[str,
             _HYBRID_BOOTSTRAP_TERMINAL_DIAGNOSTIC_KEYS,
         ),
     )).lower()
+    if terminal.get("step") == "wait_ci":
+        # These are current failed-check diagnostics, unlike the successful
+        # review transcript preceding the native commit terminal JSON.
+        failures = terminal.get("ci_failures", [])
+        if isinstance(failures, list):
+            diagnostic_haystack += " " + " ".join(
+                _hybrid_bootstrap_text_from_keys(failure, ("excerpt",))
+                for failure in failures if isinstance(failure, dict)
+            )
     error_channel_haystack = " ".join((
         _hybrid_bootstrap_text_from_keys(
             result,
@@ -8566,7 +8579,7 @@ def _hybrid_bootstrap_fault_detected(
     # Adapter/bootstrap error PHRASES carry error semantics on their own. Legacy
     # direct/unstructured failures still scan captured stdout exactly as before,
     # because a real supervisor or phase step can print a bridge-adapter load
-    # fault there. Only two mechanically coherent dispatcher aggregates narrow
+    # fault there. Only mechanically coherent commit dispatcher aggregates narrow
     # stdout authority: their proven transcript prefix is historical text, while
     # explicit outer diagnostics and terminal top-level diagnostics, including
     # terminal stdout, remain authoritative.

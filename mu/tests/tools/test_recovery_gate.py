@@ -8943,6 +8943,89 @@ class TestHybridValidatorContract:
         assert not env["XDG_CACHE_HOME"].startswith(str(tmp_path))
 
 
+@pytest.fixture
+def pr1312_captured_ci_result():
+    """Replay the successful read containing the historical phrase and CI terminal.
+
+    Bounded extraction from fleet-native-prevention-r8-evidence-2026-09-22:
+    pr1312_followup_captured_commit_stdout.txt SHA256
+    ff0f6c8f9943539287fc3fc0ae430669660958e9aea7a39187845a6ea64aa1b7;
+    pr1312_followup_native_ci_error.json SHA256
+    5445f19b6ac57d737bc4c8e1282aeefd198d0993860abf7dd933f5e91f070d4e.
+    Only the historical read body is excerpted; terminal JSON is verbatim.
+    The inline capture keeps this regression independent of local archives.
+    """
+    successful_read = r"""{
+  "type": "item.completed",
+  "item": {
+    "id": "item_2",
+    "type": "command_execution",
+    "command": "/bin/bash -lc \"rg -n -C 3 '\"'^(#{1,4} .*NOW|#{1,4} .*NEXT|#{1,4} )|FLEET-NATIVE-LIFECYCLE-PREVENTION|workingrcx-fleet-native-prevention-r8-2026-09-22|OPEN|WARN|blocking|COMMIT_GO|convergence|Slice 1'\"' TASKS.md reports/control_plane/archive/meta_bridge_rollout_2026-03-20.md\"",
+    "aggregated_output": "TASKS.md:1074:- Tracker sync note (2026-04-17, pipeline-hardening-bundle-2026-04-17): **fix: Tier 1 MISSING_BRIDGE_CONFIG classifier + deterministic fixer; file 3 remaining hybrid-recovery inertness gaps as blocking deferred.** Class: L4_ENABLER. target_gate_id: G8. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`. evidence_delta: (1) Adds FailureClass.MISSING_BRIDGE_CONFIG (Tier 1) + classifier pattern matching 'bridge config not found' in stderr / error / detail / message to recovery_gate.py.\n",
+    "exit_code": 0,
+    "status": "completed"
+  }
+}"""
+    terminal = r"""{
+  "status": "error",
+  "step": "wait_ci",
+  "failure_class": "test_failure",
+  "errors": [
+    "CI checks failed (confirmed by polling): Command '['gh', 'pr', 'checks', '1312', '--watch', '--required']' returned non-zero exit status 1.. Failed required CI: green-gate (rcx-green-gate): green-gate\tRun green gate\t2026-09-23T02:54:21.1169475Z ##[error]Process completed with exit code 1."
+  ],
+  "ci_failures": [
+    {
+      "name": "green-gate",
+      "workflow": "rcx-green-gate",
+      "conclusion": "FAILURE",
+      "details_url": "https://github.com/jabramsja/rcx-pi-core/actions/runs/35811251493/job/107023121717",
+      "excerpt": "green-gate\tRun green gate\t2026-09-23T02:54:20.6992603Z =================================== FAILURES ===================================\ngreen-gate\tRun green gate\t2026-09-23T02:54:20.7032899Z E       AssertionError: {'state': 'ESCALATED', 'owner': 'FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION', 'reason': 'Retained useful work requires ...92975f06efa3', 'source': '/tmp/pytest-of-runner/pytest-0/popen-gw2/test_native_merge_owner_surviv0/carrier', ...}, ...}\ngreen-gate\tRun green gate\t2026-09-23T02:54:20.7035165Z tests/tools/test_commit_executor_post_merge_cleanup.py:5045: AssertionError\ngreen-gate\tRun green gate\t2026-09-23T02:54:20.7054418Z FAILED tests/tools/test_commit_executor_post_merge_cleanup.py::test_native_merge_owner_survives_lane_retirement_without_closing_predecessor - AssertionError: {'state': 'ESCALATED', 'owner': 'FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION', 'reason': 'Retained useful work requires ...92975f06efa3', 'source': '/tmp/pytest-of-runner/pytest-0/popen-gw2/test_native_merge_owner_surviv0/carrier', ...}, ...}\ngreen-gate\tRun green gate\t2026-09-23T02:54:21.1169475Z ##[error]Process completed with exit code 1."
+    }
+  ],
+  "ci_checks_output": "green-gate\tfail\t14m29s\thttps://github.com/jabramsja/rcx-pi-core/actions/runs/35811251493/job/107023121717\t\ntest\tpass\t35s\thttps://github.com/jabramsja/rcx-pi-core/actions/runs/35811249607/job/107023115716",
+  "steps_completed": [
+    "validate_inputs",
+    "ensure_feature_branch",
+    "ensure_tracker_note",
+    "stage_files",
+    "collect_and_stage_indicator",
+    "refresh_commit_packet_truth",
+    "settle_commit_generated_governance",
+    "prepare_commit_candidate_authority",
+    "build_and_run_supervisor",
+    "validate_receipt",
+    "run_pre_commit_script",
+    "build_and_run_supervisor",
+    "validate_receipt",
+    "verify_commit_candidate_authority",
+    "git_commit",
+    "hold_check",
+    "run_pre_push_script",
+    "git_push",
+    "ensure_pr"
+  ],
+  "pr_number": "1312",
+  "pr_lifecycle": {
+    "common_dir": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git",
+    "head": "58fe35e1332608dd8919ce98643c299fba5b1f56",
+    "branch": "jabramsja/workingrcx-fleet-native-prevention-r8-2026-09-22",
+    "owner": {
+      "task_id": "[FLEET-NATIVE-LIFECYCLE-PREVENTION]",
+      "wave_id": "workingrcx-fleet-native-prevention-r8-2026-09-22",
+      "packet": "reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md"
+    },
+    "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_pr_lifecycle/pr-1312/0b671ee439bdc3f17c14cb8b5b2f927bed6515edb9290091d0b4e9d785f77f58.json",
+    "state": "STOPPED"
+  }
+}
+"""
+    return {
+        "status": "failed", "executor": "commit_executor",
+        "failure_class": "test_failure", "stderr": "",
+        "stdout": successful_read + "\n" + terminal,
+    }
+
+
 class TestHybridScopeAudit:
     BOOTSTRAP_ERROR_PHRASES = (
         "Bridge adapter config error: missing backend",
@@ -8993,6 +9076,16 @@ class TestHybridScopeAudit:
                 "stdout": "2 failed, 900 passed",
                 "stderr": "pre-push-fast failed",
             }
+        elif kind == "wait_ci":
+            terminal = {
+                "status": "error",
+                "step": "wait_ci",
+                "failure_class": "test_failure",
+                "errors": ["CI checks failed (confirmed by polling)"],
+                "ci_failures": [{"name": "green-gate", "conclusion": "FAILURE",
+                                 "excerpt": "FAILED test_native_merge_owner"}],
+                "ci_checks_output": "green-gate\tfail",
+            }
         else:
             raise AssertionError(f"unknown aggregate kind: {kind}")
         terminal.update(overrides)
@@ -9010,6 +9103,7 @@ class TestHybridScopeAudit:
         failure_class = {
             "bot": "bot_findings_pending",
             "pre_push": "test_failure",
+            "wait_ci": "test_failure",
         }[kind]
         terminal = cls.terminal_aggregate_object(kind, **(terminal_overrides or {}))
         result = {
@@ -10008,7 +10102,52 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
-    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("include_review", [False, True])
+    def test_bootstrap_fault_ignores_captured_pr1312_successful_review(
+            self, pr1312_captured_ci_result, include_review):
+        result = pr1312_captured_ci_result
+        event, end = json.JSONDecoder().raw_decode(result["stdout"])
+        assert event["type"] == "item.completed"
+        assert event["item"]["status"] == "completed"
+        assert event["item"]["exit_code"] == 0
+        assert "TASKS.md:1074:- Tracker sync note (2026-04-17," in event["item"]["aggregated_output"]
+        assert "bridge config not found" in event["item"]["aggregated_output"]
+        terminal = result["stdout"][end:].strip()
+        current = json.loads(terminal)
+        assert current["step"] == "wait_ci" and current["failure_class"] == "test_failure"
+        assert "test_native_merge_owner_survives_lane_retirement_without_closing_predecessor" in current["ci_failures"][0]["excerpt"]
+        if not include_review:
+            result = {**result, "stdout": terminal}
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: captured successful TASKS read must not impersonate the current CI error.
+            result, ["mu/tests/tools/test_commit_executor_post_merge_cleanup.py"],
+        )
+        assert blocked is False
+        assert detail == ""
+
+    @pytest.mark.parametrize("location", ["ci_checks_output", "ci_failures"])
+    @pytest.mark.parametrize("phrase", BOOTSTRAP_ERROR_PHRASES)
+    def test_bootstrap_fault_keeps_current_ci_diagnostics(self, location, phrase):
+        value = [{"name": "green-gate", "excerpt": phrase}] if location == "ci_failures" else phrase
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: current failed-check diagnostics retain bootstrap authority.
+            self.coherent_aggregate_result("wait_ci", terminal_overrides={location: value}),
+            ["mu/tests/tools/test_commit_executor_post_merge_cleanup.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    @pytest.mark.parametrize("failure_class", [None, "unknown_error", "missing_bridge_config"])
+    def test_bootstrap_fault_rejects_wait_ci_terminal_class_mismatch(self, failure_class):
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: wait_ci requires matching native outer/terminal failure identity.
+            self.coherent_aggregate_result(
+                "wait_ci", prefix="historical bridge config not found\n",
+                terminal_overrides={"failure_class": failure_class},
+            ),
+            ["mu/tests/tools/test_commit_executor_post_merge_cleanup.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    @pytest.mark.parametrize("kind", ["bot", "pre_push", "wait_ci"])
     @pytest.mark.parametrize("prefix", [
         "TASKS.md diff summary says historical bridge config not found\n",
         "bot finding body: bridge config not found in old report text\n",
@@ -10025,7 +10164,7 @@ class TestHybridScopeAudit:
         assert blocked is False
         assert detail == ""
 
-    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("kind", ["bot", "pre_push", "wait_ci"])
     def test_bootstrap_fault_ignores_coherent_nested_non_diagnostic_bodies(self, kind):
         terminal_overrides = {
             "aggregated_output": "Bridge config not found in nested stream body",
@@ -10042,7 +10181,7 @@ class TestHybridScopeAudit:
         assert blocked is False
         assert detail == ""
 
-    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("kind", ["bot", "pre_push", "wait_ci"])
     @pytest.mark.parametrize("phrase", BOOTSTRAP_ERROR_PHRASES)
     def test_bootstrap_fault_blocks_terminal_stdout_phrase_in_coherent_aggregate(self, kind, phrase):
         blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: terminal stdout stays diagnostic authority
@@ -10052,7 +10191,7 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
-    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("kind", ["bot", "pre_push", "wait_ci"])
     @pytest.mark.parametrize("location", ["outer", "terminal"])
     @pytest.mark.parametrize("key", BOOTSTRAP_OUTER_DIAGNOSTIC_KEYS)
     def test_bootstrap_fault_blocks_explicit_aggregate_diagnostic_fields(self, kind, location, key):
@@ -10117,6 +10256,7 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
+    @pytest.mark.parametrize("kind", ["pre_push", "wait_ci"])
     @pytest.mark.parametrize("outer_overrides", [
         {"failure_class": "unknown_error"},
         {"failure_class": None},
@@ -10124,9 +10264,9 @@ class TestHybridScopeAudit:
         {"executor": "phase_b_executor"},
         {"step": "run_pre_push_script"},
     ])
-    def test_bootstrap_fault_identity_mismatched_aggregates_remain_fail_closed(self, outer_overrides):
+    def test_bootstrap_fault_identity_mismatched_aggregates_remain_fail_closed(self, kind, outer_overrides):
         result = self.coherent_aggregate_result(
-            "pre_push",
+            kind,
             prefix="historical bridge config not found\n",
             outer_overrides=outer_overrides,
         )
@@ -10137,14 +10277,15 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
+    @pytest.mark.parametrize("kind", ["pre_push", "wait_ci"])
     @pytest.mark.parametrize("terminal_overrides", [
         {"status": "ok"},
         {"step": "run_pre_commit_script"},
         {"executor": "phase_b_executor"},
     ])
-    def test_bootstrap_fault_terminal_identity_mismatch_remains_fail_closed(self, terminal_overrides):
+    def test_bootstrap_fault_terminal_identity_mismatch_remains_fail_closed(self, kind, terminal_overrides):
         result = self.coherent_aggregate_result(
-            "pre_push",
+            kind,
             prefix="historical bridge config not found\n",
             terminal_overrides=terminal_overrides,
         )

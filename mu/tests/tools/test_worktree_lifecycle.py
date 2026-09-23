@@ -1,9 +1,11 @@
 """Native completion in real disposable repositories, with surviving owners."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
+import select
 import shlex
 import shutil
 import subprocess
@@ -17,9 +19,20 @@ from mu.tools.executors import workingrcx_fleet_apply as fleet
 from tests.repo_root import REPO_ROOT
 
 
+def fixture_identity(lane, kind):
+    """Keep process-visible identities stable within, and unique across, repos."""
+    suffix = hashlib.sha256(os.fsencode(lane.parent.resolve())).hexdigest()[:16]
+    return f"native-{kind}-{suffix}"
+
+
 @pytest.fixture
 def native_lane(tmp_path, monkeypatch):
+    return make_native_lane(tmp_path, monkeypatch)
+
+
+def make_native_lane(tmp_path, monkeypatch):
     root = tmp_path.resolve()
+    root.mkdir(exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
         GIT_AUTHOR_NAME="Native fixture", GIT_AUTHOR_EMAIL="native@example.invalid",
@@ -53,7 +66,7 @@ def native_lane(tmp_path, monkeypatch):
     git(primary, "commit", "-m", "base")
     git(primary, "remote", "add", "origin", str(remote))
     git(primary, "push", "origin", "dev")
-    git(primary, "worktree", "add", "-b", "native-wave", str(lane))
+    git(primary, "worktree", "add", "-b", fixture_identity(lane, "branch"), str(lane))
     bus = lane / ".agent_bus"
     bus.mkdir()
     (bus / "receipt.json").write_bytes(b'{"native":"retained"}\n')
@@ -66,19 +79,118 @@ def register_from_exited_owner(lane, env, *, status="stopped", result=None,
         "import json,sys; from pathlib import Path; "
         "from mu.tools.executors import worktree_lifecycle as w; "
         "p=Path(sys.argv[1]); r=json.loads(sys.argv[3]); "
-        "d=w.register_lane(p, 'native-test-wave',role=sys.argv[4]); "
+        "d=w.register_lane(p,sys.argv[6],role=sys.argv[4]); "
         "v=w.request_completion(d,status=sys.argv[2],result=r); "
         "w.publish_closeout(Path(v['record']),repo=p, "
         "handoff={'pre_commit_receipt_path':'.agent_bus/receipt.json'},result=r) "
         "if json.loads(sys.argv[5]) else None; print(v['record'])"
     )
     result = subprocess.run([sys.executable, "-c", program, str(lane), status,
-        json.dumps(result), role, json.dumps(closeout)],
+        json.dumps(result), role, json.dumps(closeout), fixture_identity(lane, "wave")],
         check=False, capture_output=True, text=True, env=env)
     if result.returncode:
         pytest.fail(f"Native lifecycle registration exited {result.returncode}:\n"
                     f"{result.stdout}{result.stderr}", pytrace=False)
     return Path(result.stdout.strip())
+
+
+@pytest.mark.parametrize("shared_branch", [True, False], ids=["shared-holds", "isolated-completes"])
+def test_parallel_fixture_process_identity_controls(native_lane, tmp_path, monkeypatch, shared_branch):
+    """A real peer holds a shared branch, but cannot own another fixture's lane."""
+    primary, lane, git, env = native_lane
+    peer_primary, peer_lane, peer_git, peer_env = make_native_lane(tmp_path / "peer", monkeypatch)
+    branch = git(lane, "branch", "--show-current")
+    peer_branch = peer_git(peer_lane, "branch", "--show-current")
+    wave = fixture_identity(lane, "wave")
+    peer_wave = fixture_identity(peer_lane, "wave")
+    assert branch != peer_branch and wave != peer_wave
+    if shared_branch:
+        # Recreate the old cross-repository identity collision deliberately.
+        peer_git(peer_lane, "branch", "-m", branch)
+        peer_branch = branch
+    directory = register_from_exited_owner(lane, env)
+    identity = json.loads((directory / "terminal.json").read_bytes())["identity"]
+    before = fleet.tree_manifest(lane)
+    index = Path(git(lane, "rev-parse", "--absolute-git-dir")) / "index"
+    index_before = index.read_bytes()
+    program = (
+        "import json,os,sys; from pathlib import Path; "
+        "from mu.tools.executors import worktree_lifecycle as w; "
+        "d=w.register_lane(Path(sys.argv[1]),sys.argv[3]); "
+        "print(json.dumps(dict(pid=os.getpid(),record=str(d))),flush=True); "
+        "sys.stdin.readline()"
+    )
+    peer = subprocess.Popen([sys.executable, "-c", program, str(peer_lane), peer_branch, peer_wave],
+        cwd=peer_primary, env=peer_env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True)
+    evidence_path = tmp_path / "parallel-process-evidence.json"
+    try:
+        assert select.select([peer.stdout], [], [], 10)[0], "Peer registration timed out"
+        ready = peer.stdout.readline()
+        assert ready, "Peer exited before publishing its registration"
+        owner = json.loads(ready)
+        assert owner["pid"] == peer.pid and peer.poll() is None
+        observed = subprocess.run(["ps", "-ww", "-p", str(peer.pid), "-o", "pid=,command="],
+            capture_output=True, text=True, timeout=10, check=True)
+        command = observed.stdout.strip()
+        evidence = dict(shared_branch=shared_branch, identity=identity, peer=owner,
+            peer_branch=peer_branch, peer_wave=peer_wave, process_command=command)
+        evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+        assert str(lane) not in command and identity["git_dir"] not in command, evidence
+        assert (branch in command) == shared_branch, evidence
+
+        result = lifecycle.complete_pending(directory, delay=0)
+        evidence["completion"] = result
+        evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+        assert peer.poll() is None, evidence
+        if shared_branch:
+            assert result["state"] == "ESCALATED", evidence
+            assert result["attempts_exhausted"] == lifecycle.MAX_ATTEMPTS
+            attempts = sorted(directory.glob("attempt-*"))
+            assert len(attempts) == lifecycle.MAX_ATTEMPTS
+            for attempt in attempts:
+                held = json.loads((attempt / "result.json").read_bytes())
+                assert held["state"] == "PENDING", held
+                assert held["reason"] == "Active process references target identity", held
+            assert lane.is_dir() and fleet.tree_manifest(lane) == before
+            assert index.read_bytes() == index_before
+        else:
+            assert result["state"] == "COMPLETE", evidence
+            assert not lane.exists()
+            destination = Path(result["destination"])
+            assert (destination / "tracked").read_bytes() == b"native code\n"
+            assert (destination / ".agent_bus/receipt.json").read_bytes() == b'{"native":"retained"}\n'
+            assert [p.name for p in directory.glob("attempt-*")] == ["attempt-1"]
+        assert git(primary, "rev-parse", branch) == identity["HEAD"]
+        assert lifecycle.complete_pending(directory, delay=0) == result
+
+        # The peer still owns its own lane with the isolated fixture identity.
+        peer_record = Path(owner["record"])
+        lifecycle.request_completion(peer_record, status="stopped")
+        peer_before = fleet.tree_manifest(peer_lane)
+        peer_result = lifecycle.complete_pending(peer_record, delay=0)
+        evidence["live_owner_completion"] = peer_result
+        evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+        assert peer_result["state"] == "ESCALATED", evidence
+        assert peer_result["attempts_exhausted"] == lifecycle.MAX_ATTEMPTS
+        assert "owner remains live" in peer_result["reason"]
+        assert peer_lane.is_dir() and fleet.tree_manifest(peer_lane) == peer_before
+        assert peer.poll() is None
+    finally:
+        if peer.poll() is None:
+            peer.terminate()
+        try:
+            peer.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            peer.kill()
+            peer.communicate(timeout=10)
+    if shared_branch:
+        # Releasing the sole colliding process restores idleness, but does not
+        # reset the sealed completion or its consumed finite attempt budget.
+        assert fleet.process_idle(identity)["probe"] == "lsof"
+        saved = {p.relative_to(directory): p.read_bytes() for p in directory.rglob("*.json")}
+        assert lifecycle.complete_pending(directory, delay=0) == result
+        assert {p: (directory / p).read_bytes() for p in saved} == saved
 
 
 @pytest.mark.parametrize("config_source", ["system", "global"])
@@ -137,7 +249,7 @@ def test_native_fixture_isolates_ambient_filters(
         assert inventory["status"] == "NEEDS_LANDING" and inventory["errors"] == [], inventory
         original = {p.relative_to(stopped): p.read_bytes()
                     for p in stopped.rglob("*") if p.is_file()}
-        git(primary, "merge", "--ff-only", "native-wave")
+        git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
         git(primary, "push", "origin", "dev")
         assert git(lane, "rev-parse", "HEAD") == head
     directory = register_from_exited_owner(lane, env, role="commit", closeout=True,
@@ -205,7 +317,7 @@ def test_terminal_completion_preserves_lane_history_and_survives_source_absence(
     assert not lane.exists() and destination.is_dir()
     assert (destination / "tracked").read_bytes() == b"native code\n"
     assert (destination / ".agent_bus/receipt.json").read_bytes() == b'{"native":"retained"}\n'
-    assert git(primary, "rev-parse", "native-wave") == original
+    assert git(primary, "rev-parse", fixture_identity(lane, "branch")) == original
     assert str(destination) in git(primary, "worktree", "list", "--porcelain")
     recorded = {p.name: p.read_bytes() for p in directory.glob("*.json")}
     assert lifecycle.complete_pending(directory, delay=0) == result
@@ -221,7 +333,7 @@ def test_stopped_useful_candidate_retains_exact_landing_owner(native_lane):
     before = fleet.tree_manifest(lane)
     result = lifecycle.complete_pending(directory, delay=0)
     assert result["state"] == "ESCALATED"
-    assert result["landing_owner"]["branch"] == "refs/heads/native-wave"
+    assert result["landing_owner"]["branch"] == "refs/heads/" + fixture_identity(lane, "branch")
     assert fleet.tree_manifest(lane) == before
     evidence = json.loads(Path(result["landing_owner"]["evidence"]).read_text())
     assert evidence["status"] == "NEEDS_LANDING"
@@ -259,7 +371,7 @@ def test_detached_completion_inventories_exact_landing_owner_without_retirement(
 
     assert result["state"] == "ESCALATED", result
     assert "Detached" in result["reason"]
-    assert result["landing_owner"] == dict(wave_id="native-test-wave", branch="",
+    assert result["landing_owner"] == dict(wave_id=fixture_identity(lane, "wave"), branch="",
         head=head, source=str(lane), evidence=str(directory / "attempt-1/useful-work.json"))
     inventory = json.loads(Path(result["landing_owner"]["evidence"]).read_bytes())
     assert inventory["comparison_commit"] == base
@@ -281,7 +393,7 @@ def test_detached_completion_inventories_exact_landing_owner_without_retirement(
         assert inventory["local_commits"] == [] and inventory["changes"] == []
     assert fleet.tree_manifest(lane) == before and index.read_bytes() == index_before
     assert git(lane, "rev-parse", "HEAD") == head
-    assert git(primary, "rev-parse", "native-wave") == base
+    assert git(primary, "rev-parse", fixture_identity(lane, "branch")) == base
     assert (directory / "terminal.json").read_bytes() == terminal_before
     assert [p.name for p in directory.glob("attempt-*")] == ["attempt-1"]
     assert not any((directory / "attempt-1" / name).exists() for name in (
@@ -301,7 +413,7 @@ def test_detached_completion_rejects_changed_terminal_identity(native_lane, drif
     if drift == "head":
         git(lane, "commit", "--allow-empty", "-m", "later detached identity")
     else:
-        git(lane, "checkout", "native-wave")
+        git(lane, "checkout", fixture_identity(lane, "branch"))
     before = fleet.tree_manifest(lane)
     result = lifecycle.complete_pending(directory, delay=0)
     assert result["state"] == "ESCALATED" and result["attempts_exhausted"] == 3
@@ -315,10 +427,10 @@ def test_detached_completion_rejects_changed_terminal_identity(native_lane, drif
 def test_stopped_pr_retains_its_surviving_disposition_owner(native_lane):
     primary, lane, git, env = native_lane
     from mu.tools.executors import pr_disposition_executor
-    owner = dict(task_id="[FLEET-NATIVE-LIFECYCLE-PREVENTION]", wave_id="native-test-wave",
-                 packet="reports/control_plane/native-test-wave.md")
+    owner = dict(task_id="[FLEET-NATIVE-LIFECYCLE-PREVENTION]", wave_id=fixture_identity(lane, "wave"),
+                 packet=f"reports/control_plane/{fixture_identity(lane, 'wave')}.md")
     observed = pr_disposition_executor.record_native_pr_lifecycle(primary / ".git", number=123,
-        head=git(lane, "rev-parse", "HEAD"), branch="native-wave", owner=owner,
+        head=git(lane, "rev-parse", "HEAD"), branch=fixture_identity(lane, "branch"), owner=owner,
         state="STOPPED", detail="retained native PR")
     before = Path(observed["path"]).read_bytes()
     directory = register_from_exited_owner(lane, env, result={
@@ -364,7 +476,7 @@ def test_completion_rechecks_inventory_before_preservation_admission(native_lane
     assert lane.is_dir()
     assert fleet.tree_manifest(lane) == changed["manifest"]
     assert index.read_bytes() == changed["index"]
-    assert git(primary, "rev-parse", "native-wave") == changed["head"]
+    assert git(primary, "rev-parse", fixture_identity(lane, "branch")) == changed["head"]
     assert (directory / "terminal.json").read_bytes() == terminal
     first = json.loads((directory / "attempt-1/result.json").read_text())
     assert first["state"] == "PENDING" and first["outcome"]["status"] == "HOLD"
@@ -388,7 +500,7 @@ def test_completion_rechecks_inventory_before_preservation_admission(native_lane
 
 def test_live_registered_owner_cannot_be_retired(native_lane):
     _, lane, _, _ = native_lane
-    directory = lifecycle.register_lane(lane, "native-test-wave")
+    directory = lifecycle.register_lane(lane, fixture_identity(lane, "wave"))
     lifecycle.request_completion(directory, status="stopped")
     before = fleet.tree_manifest(lane)
     result = lifecycle.complete_pending(directory, delay=0)
@@ -511,7 +623,7 @@ def test_new_native_commit_gets_fresh_completion_without_replaying_stopped_owner
     assert first["state"] == "ESCALATED"
     old = {name: (stopped / name).read_bytes() for name in ("terminal.json", "completion.json")}
     git(lane, "commit", "-m", "native landing of retained work")
-    git(primary, "merge", "--ff-only", "native-wave")
+    git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
     git(primary, "push", "origin", "dev")
     successor = register_from_exited_owner(lane, env, status="success")
     assert successor != stopped
@@ -534,7 +646,7 @@ def test_same_head_merge_completes_with_immutable_stopped_evidence(native_lane, 
     first = lifecycle.complete_pending(stopped, delay=0)
     assert first["state"] == "ESCALATED" and first["landing_owner"]["head"] == head
     old = {p.relative_to(stopped): p.read_bytes() for p in stopped.rglob("*") if p.is_file()}
-    git(primary, "merge", "--ff-only", "native-wave")
+    git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
     git(primary, "push", "origin", "dev")
     assert git(lane, "rev-parse", "HEAD") == head
     assert lifecycle.useful_work(str(lane), head)["status"] == "COVERED"
@@ -564,7 +676,7 @@ def test_same_head_merge_keeps_consumed_attempt_budget(native_lane, monkeypatch)
     head = git(lane, "rev-parse", "HEAD")
     stopped = register_from_exited_owner(lane, env)
     assert lifecycle.complete_pending(stopped, delay=0)["state"] == "ESCALATED"
-    git(primary, "merge", "--ff-only", "native-wave")
+    git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
     git(primary, "push", "origin", "dev")
     successor = register_from_exited_owner(lane, env, status="merged", result={"merge_sha": head})
     assert successor != stopped
@@ -610,7 +722,7 @@ def test_same_head_merge_cannot_replay_an_interrupted_attempt(native_lane):
     first = lifecycle.complete_pending(stopped, delay=0)
     assert "no replay" in first["reason"]
     old = {p.relative_to(stopped): p.read_bytes() for p in stopped.rglob("*") if p.is_file()}
-    git(primary, "merge", "--ff-only", "native-wave")
+    git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
     git(primary, "push", "origin", "dev")
     with pytest.raises(fleet.Hold, match="pre-mutation"):
         lifecycle.request_completion(stopped, status="merged", result={"merge_sha": head})
@@ -627,7 +739,7 @@ def test_same_head_successor_rechecks_immutable_predecessor_before_completion(na
     head = git(lane, "rev-parse", "HEAD")
     stopped = register_from_exited_owner(lane, env)
     assert lifecycle.complete_pending(stopped, delay=0)["state"] == "ESCALATED"
-    git(primary, "merge", "--ff-only", "native-wave")
+    git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
     git(primary, "push", "origin", "dev")
     successor = register_from_exited_owner(lane, env, status="merged", result={"merge_sha": head})
     assert successor != stopped
@@ -648,7 +760,7 @@ def test_live_dispatcher_failed_then_successful_commit_children_complete_after_e
     git(lane, "commit", "-m", "implementation retained across commit retry")
     head = git(lane, "rev-parse", "HEAD")
     if already_merged:
-        git(primary, "merge", "--ff-only", "native-wave")
+        git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
         git(primary, "push", "origin", "dev")
     # The real dispatcher and commit lifecycle boundaries run in separate
     # processes. Only the mechanical commit body and recovery decision are
@@ -660,11 +772,11 @@ from unittest.mock import patch
 from mu.tools.executors import commit_executor as commit
 lane = Path(sys.argv[1])
 result = json.loads(sys.argv[2])
-handoff = dict(wave_id='native-test-wave', pre_commit_receipt_path='.agent_bus/receipt.json')
+handoff = dict(wave_id=sys.argv[4], pre_commit_receipt_path='.agent_bus/receipt.json')
 def mechanical_body(*args, **kwargs):
     if result.get('merge_sha'):
         cleanup = commit._post_merge_cleanup(cleanup_root=lane, repo_root=lane,
-            target_branch='native-wave', base_branch='dev', wave_id='native-test-wave',
+            target_branch=sys.argv[3], base_branch='dev', wave_id=sys.argv[4],
             log=lambda _: None, terminal_result=result)
         assert cleanup['completion_state'] == 'PENDING', cleanup
     return result
@@ -685,14 +797,15 @@ lane = Path(sys.argv[1])
 results = [json.loads(sys.argv[3]), json.loads(sys.argv[4])]
 handoff = lane / '.agent_bus/executors/phase_b_handoff.json'
 handoff.parent.mkdir(parents=True, exist_ok=True)
-handoff.write_text(json.dumps(dict(wave_id='native-test-wave')))
+handoff.write_text(json.dumps(dict(wave_id=sys.argv[6])))
 args = dispatch.build_surface_parser().parse_args(['commit', '--handoff', str(handoff)])
 children = []
 output = sys.stdout
 def executor(command, **kwargs):
     assert len(children) < 2, 'dispatcher replayed a consumed child'
     run = subprocess.run([sys.executable, '-c', sys.argv[2], str(lane),
-                          json.dumps(results[len(children)])], capture_output=True, text=True)
+                          json.dumps(results[len(children)]), sys.argv[5], sys.argv[6]],
+                         capture_output=True, text=True)
     if not run.stdout:
         raise AssertionError(run.stderr)
     value = json.loads(run.stdout)
@@ -729,7 +842,8 @@ print(json.dumps(dict(dispatch_exit=status, children=len(children))), flush=True
         earlier_bytes = {p.relative_to(earlier): p.read_bytes()
                          for p in earlier.rglob("*") if p.is_file()}
     parent = subprocess.Popen([sys.executable, "-c", parent_program, str(lane), child_program,
-        json.dumps(failed), json.dumps(success)], cwd=primary, env=env,
+        json.dumps(failed), json.dumps(success), fixture_identity(lane, "branch"),
+        fixture_identity(lane, "wave")], cwd=primary, env=env,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     def child_result():
@@ -751,7 +865,7 @@ print(json.dumps(dict(dispatch_exit=status, children=len(children))), flush=True
         old = {p.relative_to(stopped): p.read_bytes() for p in stopped.rglob("*") if p.is_file()}
         assert json.loads(old[Path("closeout.json")])["result"] == failed
         if not already_merged:
-            git(primary, "merge", "--ff-only", "native-wave")
+            git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
             git(primary, "push", "origin", "dev")
         assert git(lane, "rev-parse", "HEAD") == head
         receipt = lane / ".agent_bus/receipt.json"
@@ -783,7 +897,7 @@ print(json.dumps(dict(dispatch_exit=status, children=len(children))), flush=True
         destination = Path(completed["destination"])
         assert (destination / "tracked").read_bytes() == b"live parent implementation\n"
         assert (destination / ".agent_bus/receipt.json").read_bytes() == b'{"native":"fresh successful child receipt"}\n'
-        assert git(primary, "rev-parse", "native-wave") == head
+        assert git(primary, "rev-parse", fixture_identity(lane, "branch")) == head
         assert {p: (stopped / p).read_bytes() for p in old} == old
         assert not list(stopped.glob("attempt-*"))
         attempts = sorted(successor.glob("attempt-*"))
@@ -812,7 +926,7 @@ def test_failed_commit_closeout_gets_bounded_same_head_continuation(
     git(lane, "commit", "-m", "implementation")
     head = git(lane, "rev-parse", "HEAD")
     if already_merged:
-        git(primary, "merge", "--ff-only", "native-wave")
+        git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
         git(primary, "push", "origin", "dev")
     failed_result = dict(status="error", step="refresh_post_merge_package" if already_merged else "wait_ci",
                          errors=["Native closeout needs correction"])
@@ -826,7 +940,7 @@ def test_failed_commit_closeout_gets_bounded_same_head_continuation(
         assert "landing_owner" not in first and lane.is_dir()
     old = {p.relative_to(stopped): p.read_bytes() for p in stopped.rglob("*") if p.is_file()}
     if not already_merged:
-        git(primary, "merge", "--ff-only", "native-wave")
+        git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
         git(primary, "push", "origin", "dev")
     assert git(lane, "rev-parse", "HEAD") == head
     receipt = lane / ".agent_bus/receipt.json"
@@ -849,7 +963,7 @@ def test_failed_commit_closeout_gets_bounded_same_head_continuation(
         destination = Path(completed["destination"])
         assert (destination / "tracked").read_bytes() == b"native committed implementation\n"
         assert (destination / ".agent_bus/receipt.json").read_bytes() == b'{"native":"fresh continuation receipt"}\n'
-        assert git(primary, "rev-parse", "native-wave") == head
+        assert git(primary, "rev-parse", fixture_identity(lane, "branch")) == head
     else:
         assert completed["state"] == "ESCALATED" and lane.is_dir()
         reason = "not durably published" if closeout_status == "absent" else "closeout failed"
@@ -917,7 +1031,7 @@ def test_failed_closeout_successor_rejects_unverified_or_interrupted_evidence(na
     elif fault == "claim":
         (stopped / "attempt-1/claim.json").write_text('{"number":0}\n')
     if fault != "unlanded":
-        git(primary, "merge", "--ff-only", "native-wave")
+        git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
         git(primary, "push", "origin", "dev")
     old = {p.relative_to(stopped): p.read_bytes() for p in stopped.rglob("*") if p.is_file()}
     before = fleet.tree_manifest(lane)
@@ -971,14 +1085,14 @@ def test_commit_closeout_and_bridge_config_are_durable_before_retirement(native_
     program = (
         "import json,sys; from pathlib import Path; "
         "from mu.tools.executors import worktree_lifecycle as w; "
-        "p=Path(sys.argv[1]); d=w.register_lane(p,'native-test-wave',role='commit'); "
+        "p=Path(sys.argv[1]); d=w.register_lane(p,sys.argv[4],role='commit'); "
         "w.request_completion(d,status='merged',result={'merge_sha':sys.argv[3]}); "
         "w.publish_closeout(d,repo=p,handoff={'pre_commit_receipt_path':'.agent_bus/receipt.json'}, "
         "result={'status':sys.argv[2],'post_merge_package_path':'.agent_bus/meta/post_merge_package.json'}) "
         "if sys.argv[2]!='absent' else None; print(d)"
     )
     observed = subprocess.run([sys.executable, "-c", program, str(lane), closeout_status,
-                               git(primary, "rev-parse", "HEAD")],
+                               git(primary, "rev-parse", "HEAD"), fixture_identity(lane, "wave")],
         env=env, capture_output=True, text=True, check=True)
     directory = Path(observed.stdout.strip())
     value = lifecycle.complete_pending(directory, delay=0)

@@ -21,6 +21,8 @@ import hashlib
 import json
 import os
 import re
+import select
+import shlex
 import shutil
 import stat
 import subprocess
@@ -5017,38 +5019,154 @@ def test_native_stopped_owner_survives_return_or_unwind(tmp_path, monkeypatch, r
     assert all(r["owner"]["task_id"] == "[PIPELINE-FIX-53]" for r in records)
 
 
-def test_native_merge_owner_survives_lane_retirement_without_closing_predecessor(tmp_path, monkeypatch):
+def _cleanup_fixture_identity(repo: Path, kind: str) -> str:
+    """Isolate identities matched by machine-wide native process probes."""
+    suffix = hashlib.sha256(os.fsencode(repo.resolve())).hexdigest()[:16]
+    return f"cleanup-{kind}-{suffix}"
+
+
+@pytest.mark.parametrize("config_source", ["system", "global"])
+@pytest.mark.parametrize("operation", ["clean", "process"])
+def test_native_merge_owner_survives_lane_retirement_without_closing_predecessor(
+        tmp_path, monkeypatch, config_source, operation):
+    from mu.tools.executors import worktree_lifecycle, workingrcx_fleet_apply as fleet
+
+    real_git = shutil.which("git")
+    assert real_git
+    ambient = tmp_path / "runner config"
+    ambient.mkdir()
+    marker = ambient / "filter-executed"
+    command = "touch " + shlex.quote(str(marker))
+    config = ambient / "gitconfig"
+    config.write_text(f'[filter "ambient-cleanup"]\n\t{operation} = {json.dumps(command)}\n')
+    if config_source == "system":
+        inject = f"export GIT_CONFIG_SYSTEM={shlex.quote(str(config))}\n"
+    else:
+        inject = ('if [ "${GIT_CONFIG_GLOBAL+x}" != x ]; then\n'
+                  f"  export GIT_CONFIG_GLOBAL={shlex.quote(str(config))}\nfi\n")
+    runner_git = ambient / "git"
+    runner_git.write_text(f'#!/bin/sh\n{inject}exec {shlex.quote(real_git)} "$@"\n')
+    runner_git.chmod(0o700)
+    ambient_path = str(ambient) + os.pathsep + os.environ["PATH"]
+
+    # Census drops inherited GIT_* overrides. Isolate system/global config at
+    # exec so the real lifecycle child and its census share fixture isolation.
+    # Local/worktree configuration remains visible to production retention guards.
+    bindir = tmp_path / "git-bin"
+    bindir.mkdir()
+    wrapper = bindir / "git"
+    wrapper.write_text(f'#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL={shlex.quote(os.devnull)} '
+                       f'exec {shlex.quote(str(runner_git))} "$@"\n')
+    wrapper.chmod(0o700)
+    for key in list(os.environ):
+        if key.startswith("GIT_"):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + ambient_path)
     repo = _init_repo(tmp_path)
     carrier = tmp_path / "carrier"
-    _git(["worktree", "add", "-b", "fixture-feature", str(carrier), "dev"], cwd=repo)
+    target_branch = _cleanup_fixture_identity(repo, "branch")
+    _git(["worktree", "add", "-b", target_branch, str(carrier), "dev"], cwd=repo)
     head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
-    handoff = {"wave_id": "owned-merge-2026-09-13", "task_id": "[PIPELINE-FIX-53]"}
+    with monkeypatch.context() as exposed:
+        exposed.setenv("PATH", ambient_path)
+        observed = _git(["config", "--get", f"filter.ambient-cleanup.{operation}"], cwd=repo)
+        assert observed.stdout.strip() == command
+        inventory = worktree_lifecycle.useful_work(str(carrier), head)
+        assert inventory["status"] == "UNKNOWN", inventory
+        assert any("configured clean/process filters" in error.get("message", "")
+                   for error in inventory["errors"])
+        assert carrier.is_dir() and not marker.exists()
+    handoff = {"wave_id": _cleanup_fixture_identity(repo, "wave"), "task_id": "[PIPELINE-FIX-53]"}
     result = {"pr_number": "2303", "commit_sha": head, "steps_completed": []}
     _git(["remote", "add", "origin", str(repo)], cwd=repo)
+    peer_root = tmp_path / "peer"
+    peer_root.mkdir()
+    peer_repo = _init_repo(peer_root)
+    peer_carrier = peer_root / "carrier"
+    peer_branch = _cleanup_fixture_identity(peer_repo, "branch")
+    peer_wave = _cleanup_fixture_identity(peer_repo, "wave")
+    assert target_branch != peer_branch and handoff["wave_id"] != peer_wave
+    _git(["worktree", "add", "-b", peer_branch, str(peer_carrier), "dev"], cwd=peer_repo)
+
     def native_impl(**kwargs):
-        from mu.tools.executors import worktree_lifecycle
         script = (
             "import json,sys; from pathlib import Path; "
             "from mu.tools.executors import commit_executor as c; "
             "r=c._post_merge_cleanup(cleanup_root=Path(sys.argv[1]), repo_root=Path(sys.argv[2]), "
-            "target_branch='fixture-feature', base_branch='dev', wave_id=sys.argv[3], log=lambda _:None); "
+            "target_branch=sys.argv[4], base_branch='dev', wave_id=sys.argv[3], log=lambda _:None); "
             "from mu.tools.executors import worktree_lifecycle as lifecycle; "
             "lifecycle.publish_closeout(Path(r['lifecycle_record']), repo=Path(sys.argv[2]), "
             "handoff={}, result={'status':'success'}); "
-            "print(json.dumps(r))"
+            "print(json.dumps(r),flush=True); sys.stdin.readline()"
         )
-        child = subprocess.run([sys.executable, "-c", script, str(repo), str(carrier), handoff["wave_id"]],
+        child = subprocess.run(
+            [sys.executable, "-c", script, str(repo), str(carrier), handoff["wave_id"], target_branch],
             env={**os.environ, "PYTHONPATH": str(REPO_ROOT), "PYTHONDONTWRITEBYTECODE": "1"},
-            capture_output=True, text=True, check=True)
+            input="", capture_output=True, text=True, check=True, timeout=30)
         pending = json.loads(child.stdout)
-        completed = worktree_lifecycle.complete_pending(Path(pending["lifecycle_record"]), delay=0)
-        assert completed["state"] == "COMPLETE", completed
-        assert not carrier.exists()
+        # Keep an independent cleanup child alive through every completion
+        # probe. Scheduler timing must not hide a shared fixture identity.
+        peer = subprocess.Popen(
+            [sys.executable, "-c", script, str(peer_repo), str(peer_carrier), peer_wave, peer_branch],
+            cwd=peer_repo,
+            env={**os.environ, "PYTHONPATH": str(REPO_ROOT), "PYTHONDONTWRITEBYTECODE": "1"},
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        evidence = {"peer_pid": peer.pid, "peer_branch": peer_branch, "peer_wave": peer_wave,
+                    "record": pending["lifecycle_record"]}
+        evidence_path = tmp_path / "parallel-cleanup-evidence.json"
+        try:
+            assert select.select([peer.stdout], [], [], 10)[0], "Peer cleanup registration timed out"
+            ready = peer.stdout.readline()
+            assert ready, "Peer exited before publishing its cleanup record"
+            evidence["peer_pending"] = json.loads(ready)
+            observed = subprocess.run(["ps", "-ww", "-p", str(peer.pid), "-o", "pid=,command="],
+                capture_output=True, text=True, check=True, timeout=10)
+            evidence["peer_command"] = observed.stdout.strip()
+            directory = Path(pending["lifecycle_record"])
+            evidence["identity"] = json.loads((directory / "terminal.json").read_text())["identity"]
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+            assert peer_branch in evidence["peer_command"]
+            assert str(peer_carrier) in evidence["peer_command"]
+            assert not any(value in evidence["peer_command"] for value in
+                           (str(carrier), evidence["identity"]["git_dir"], target_branch)), evidence
+            completed = worktree_lifecycle.complete_pending(directory, delay=0)
+            evidence["completion"] = completed
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+            assert peer.poll() is None, evidence
+            assert completed["state"] == "COMPLETE", evidence
+            assert not carrier.exists()
+            assert [p.name for p in directory.glob("attempt-*")] == ["attempt-1"]
+            assert (Path(completed["destination"]) / "seed.txt").read_bytes() == b"seed"
+            assert _git(["rev-parse", target_branch], cwd=repo).stdout.strip() == head
+
+            # Isolation must not retire the independent child's own live lane.
+            peer_record = Path(evidence["peer_pending"]["lifecycle_record"])
+            peer_before = fleet.tree_manifest(peer_carrier)
+            peer_index = Path(_git(["rev-parse", "--absolute-git-dir"], cwd=peer_carrier).stdout.strip()) / "index"
+            peer_index_before = peer_index.read_bytes()
+            peer_completed = worktree_lifecycle.complete_pending(peer_record, delay=0)
+            evidence["live_owner_completion"] = peer_completed
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+            assert peer.poll() is None and peer_carrier.is_dir(), evidence
+            assert peer_completed["state"] == "ESCALATED", evidence
+            assert peer_completed["attempts_exhausted"] == worktree_lifecycle.MAX_ATTEMPTS
+            assert peer_completed["reason"] == "Registered native owner remains live or uncertain"
+            assert fleet.tree_manifest(peer_carrier) == peer_before
+            assert peer_index.read_bytes() == peer_index_before
+        finally:
+            if peer.poll() is None:
+                peer.terminate()
+            try:
+                peer.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                peer.kill()
+                peer.communicate(timeout=10)
         result["merge_sha"] = head
         return {"status": "success", "merge_sha": head}
     monkeypatch.setattr(commit_mod, "_run_post_commit_pipeline_impl", native_impl)
     outcome = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: verify native lifecycle finalization after actual retirement.
-        handoff=handoff, repo_root=carrier, result=result, target_branch="fixture-feature",
+        handoff=handoff, repo_root=carrier, result=result, target_branch=target_branch,
         base_branch="dev", continuation_path=carrier / ".agent_bus/continuation.json", log=_noop_log,
     )
     assert outcome["pr_lifecycle"]["state"] == "MERGED"
@@ -5056,6 +5174,9 @@ def test_native_merge_owner_survives_lane_retirement_without_closing_predecessor
     records = [json.loads(p.read_text()) for p in (repo / ".git/rcx_pr_lifecycle/pr-2303").glob("*.json")]
     assert {r["state"] for r in records} == {"PENDING", "MERGED"}
     assert all(r["replacement"] is None for r in records)
+    assert all(r["branch"] == target_branch and r["owner"]["wave_id"] == handoff["wave_id"]
+               for r in records)
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize(
