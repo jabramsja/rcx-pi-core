@@ -26,6 +26,9 @@ import commit_executor as boundary
 SOURCE = REPO_ROOT / apply.CLASSIFICATION_PATH
 REAL_SCRIPT = REPO_ROOT / apply.TOOL_PATH
 REAL_CANDIDATES = deepcopy(apply.CANDIDATES)
+ORPHAN_CAPTURE = REPO_ROOT / (
+    "reports/control_plane/workingrcx-fleet-orphan-owner-retirement-r1-2026-09-23_orphan_owner_evidence.json")
+ORPHAN_RECORDS = json.loads(ORPHAN_CAPTURE.read_bytes())["rows"]
 
 
 def git(f, root, *args):
@@ -153,6 +156,119 @@ def finished_recovery(state, owner_pid=0):
                 recovered=False, exhausted=True,
                 outcome="exhausted" if state == "tier3_exhausted" else "short_circuited_non_actionable",
                 last_action="exhausted" if state == "tier3_exhausted" else "escalate")
+
+
+def orphan_record(target, captured, owner, child=0):
+    """Replay producer bytes in a disposable lane with real, isolated PIDs."""
+    record = captured["records"][0]
+    assert apply.digest(record["raw"].encode()) == record["sha256"]
+    value = json.loads(record["raw"])
+    value["owner_pid"] = owner
+    if value["child_pid"]:
+        value["child_pid"] = child
+    status = target / record["path"]
+    status.parent.mkdir(parents=True, exist_ok=True)
+    status.write_bytes(apply.encoded(value))
+    return status, value
+
+
+@pytest.mark.parametrize("captured", ORPHAN_RECORDS,
+                         ids=lambda row: "source-" + str(row["old_source_index"]))
+def test_captured_orphan_admission_binds_immutable_original_owner(fleet, monkeypatch, captured):
+    f = fleet
+    owner = subprocess.Popen([sys.executable, "-c", "pass"])
+    owner.wait(timeout=10)
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=10)
+    target = f.targets[0]
+    status, value = orphan_record(target, captured, owner.pid, child.pid)
+    lock = status.parent.parent / "bridge.lock"
+    lock.write_bytes(apply.encoded(dict(pid=owner.pid, holder="bridge_supervisor",
+        acquired_at_utc=value["started_at"], lock_path=str(lock))))
+    log = status.parent / "recovery_log.json"
+    log.write_bytes(b'{"attempts":[{"budget_consumed":true}]}\n')
+    before = apply.tree_manifest(target)
+    monkeypatch.setattr(apply, "process_idle", f.original_idle)
+    checks = []
+    _, admitted = apply.inspect_target(f.repo, f.candidates[0]["source_identity"],
+                                      residual=True, process_checks=checks)
+    evidence = checks[0]["native_ownership"]
+    orphan = evidence["orphaned_recovery"][0]
+    assert orphan["path"] == str(status.relative_to(target))
+    assert orphan["sha256"] == apply.file_hash(status)
+    assert orphan["original_status"] == value
+    assert orphan["owner_pid_absent"] is True
+    assert orphan["child_pid_absent"] is (value["child_pid"] != 0)
+    assert evidence["native_locks"][0]["sha256"] == apply.file_hash(lock)
+    assert evidence["process_check"]["probe"] == "lsof"
+    assert admitted == before == apply.tree_manifest(target)
+    with pytest.raises(apply.Hold, match="active or uncertain|metadata"):
+        apply.native_idle(target, before)
+
+
+@pytest.mark.parametrize("change", [
+    dict(owner_pid=0), dict(owner_pid=True), dict(owner_pid=os.getpid()),
+    dict(child_pid=os.getpid()), dict(child_pid=-1), dict(child_role="unknown"),
+    dict(state="tier3_unknown"), dict(tier=2), dict(active="true"),
+    dict(finished_at="2026-09-23T00:00:00+00:00"), dict(outcome="success"),
+    dict(recovered=True), dict(exhausted=True), dict(last_action="skip"),
+    dict(current_command=""), dict(invocation_id=""), dict(task_id=""),
+    dict(started_at="bad"), dict(updated_at="2026-01-01T00:00:00+00:00"),
+    dict(max_iterations=-1), dict(current_iteration=99), dict(tuple_attempt_index=0),
+    dict(schema_version=999), dict(status="complete"),
+])
+def test_orphan_admission_rejects_live_ambiguous_or_unknown_schema(fleet, monkeypatch, change):
+    f = fleet
+    monkeypatch.setattr(apply, "process_idle", f.original_idle)
+    owner = subprocess.Popen([sys.executable, "-c", "pass"])
+    owner.wait(timeout=10)
+    status, value = orphan_record(f.targets[0], ORPHAN_RECORDS[0], owner.pid)
+    value.update(change)
+    status.write_bytes(apply.encoded(value))
+    before = apply.tree_manifest(f.targets[0])
+    with pytest.raises(apply.Hold):
+        apply.native_idle(f.targets[0], before, reconcile_r1=True)
+    assert apply.tree_manifest(f.targets[0]) == before
+
+
+@pytest.mark.parametrize("fence", ["lock", "process", "reader", "writer", "status_drift", "duplicate_fields"])
+def test_orphan_admission_keeps_real_locks_and_whole_tree_process_fences(fleet, monkeypatch, fence):
+    f = fleet
+    owner = subprocess.Popen([sys.executable, "-c", "pass"])
+    owner.wait(timeout=10)
+    target = f.targets[0]
+    status, value = orphan_record(target, ORPHAN_RECORDS[0], owner.pid)
+    before = apply.tree_manifest(target)
+    monkeypatch.setattr(apply, "process_idle", f.original_idle)
+    if fence == "duplicate_fields":
+        status.write_bytes(status.read_bytes().rstrip()[:-1] + b', "active": true}\n')
+        with pytest.raises(apply.Hold, match="duplicate fields"):
+            apply.native_idle(target, apply.tree_manifest(target), reconcile_r1=True)
+        return
+    if fence == "status_drift":
+        value["detail"] += " changed after inventory"
+        status.write_bytes(apply.encoded(value))
+        with pytest.raises(apply.Hold, match="changed"):
+            apply.native_idle(target, before, reconcile_r1=True)
+        return
+    if fence == "lock":
+        with (status.parent.parent / "bridge.lock").open("wb") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with pytest.raises(apply.Hold, match="lock is active"):
+                apply.native_idle(target, apply.tree_manifest(target), reconcile_r1=True)
+        return
+    code = ("import os,sys; "
+            "f=open('tracked',sys.argv[1]) if sys.argv[1] else None; "
+            "os.chdir('/') if f else None; print('ready',flush=True); sys.stdin.read()")
+    args = [sys.executable, "-c", code, {"process": "", "reader": "r", "writer": "r+"}[fence]]
+    proc = subprocess.Popen(args, cwd=target, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline().strip() == "ready"
+        with pytest.raises(apply.Hold, match="process|files|lsof"):
+            apply.native_idle(target, before, reconcile_r1=True)
+        assert apply.tree_manifest(target) == before
+    finally:
+        proc.communicate(timeout=10)
 
 
 def land_reconciliation(f, monkeypatch):
@@ -1219,7 +1335,7 @@ def test_reconciliation_requires_merged_authority_exact_mode_and_destination(rec
     assert not f.reconcile_operation.exists()
 
 
-def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False, wave_id=None):
+def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False, wave_id=None, orphan_rows=None):
     import workingrcx_fleet_census as census_tool
     import workingrcx_fleet_classification as classifier
     git(f, f.repo, "checkout", "-qb", "founder/primary")
@@ -1260,6 +1376,10 @@ def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False, wave_id=None):
     if wave_id:
         (f.repo / f"reports/control_plane/{wave_id}_useful_work.json").write_bytes(
             apply.encoded(classifier.useful_work_report(classification, sha)))
+    if orphan_rows is not None:
+        (f.repo / f"reports/control_plane/{wave_id}_orphan_owner_evidence.json").write_bytes(
+            apply.encoded(dict(schema_version=1, wave_id=wave_id, comparison_commit=f.landed,
+                               mutation_authorized=False, rows=orphan_rows)))
     plan = apply.build_residual_plan(f.repo, classification_path, sha, wave_id=wave_id or apply.RESIDUAL_WAVE_ID)
     (f.repo / plan_rel).write_bytes(apply.encoded(plan))
     for rel in ("mu/tools/executors/workingrcx_fleet_census.py",
@@ -1273,6 +1393,82 @@ def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False, wave_id=None):
     git(f, f.repo, "push", "-q", "origin", "HEAD:dev")
     f.residual_plan, f.shells = plan, shells
     return plan
+
+
+def test_orphan_retirement_preserves_work_and_spent_claims_while_live_peer_holds(fleet, monkeypatch):
+    f = fleet
+    owner = subprocess.Popen([sys.executable, "-c", "pass"])
+    owner.wait(timeout=10)
+    saved, orphan_rows = {}, []
+    for index, capture_index in enumerate((0, 2, 7, 1)):
+        target = f.targets[index]
+        status, _ = orphan_record(target, ORPHAN_RECORDS[capture_index],
+                                 os.getpid() if index == 3 else owner.pid, owner.pid)
+        claim = status.parent / "original-claim.json"
+        claim.write_bytes(b'{"consumed":true,"attempts":3,"max_attempts":3}\n')
+        saved[index] = {str(p.relative_to(target)): p.read_bytes() for p in (status, claim)}
+        orphan_rows.append(dict(source=str(target), records=[
+            dict(path=str(status.relative_to(target)), sha256=apply.file_hash(status))]))
+    (f.targets[0] / "tracked").write_bytes(b"unlanded staged work\n")
+    git(f, f.targets[0], "add", "tracked")
+    (f.targets[0] / "tracked").write_bytes(b"unlanded unstaged work\n")
+    plan = residual_fixture(f, monkeypatch, shell_count=0,
+                            wave_id="orphan-owner-preservation-2026-09-23", orphan_rows=orphan_rows)
+    assert plan["orphan_owner_evidence"]["sha256"]
+    operation = plan["operations"][0]
+    kwargs = dict(authority_commit=f.residual_authority, batch=operation["batch"],
+                  operation_root=Path(operation["operation_root"]))
+    monkeypatch.setattr(apply, "process_idle", f.original_idle)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"MOVED": 3, "HOLD": 1}, result
+    for index, outcome in enumerate(result["outcomes"]):
+        target = Path(outcome["destination"]) if outcome["status"] == "MOVED" else f.targets[index]
+        assert {p: (target / p).read_bytes() for p in saved[index]} == saved[index]
+        if index < 3:
+            assert not f.targets[index].exists()
+            assert len(outcome["process_checks"]) == 4
+            assert all(check["native_ownership"]["orphaned_recovery"] for check in outcome["process_checks"])
+            with tarfile.open(target.parent / "before.tar") as archive:
+                assert all(archive.extractfile("./" + p).read() == raw for p, raw in saved[index].items())
+    landed_owner = result["outcomes"][0]["landing_owner"]
+    assert landed_owner["status"] == "PENDING_NATIVE_LANDING_REVIEW"
+    assert landed_owner["source_path"] == str(f.targets[0])
+    assert "tracked" in landed_owner["scope"]
+    assert result["outcomes"][3]["reason"] == "Native process identity remains live"
+    evidence = apply.tree_manifest(kwargs["operation_root"])
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["verified_outcomes"] == result["outcome_counts"]
+    with pytest.raises(apply.Hold, match="consumed"):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert apply.tree_manifest(kwargs["operation_root"]) == evidence
+
+
+def test_changed_frozen_orphan_status_holds_before_preparation_and_peers_continue(fleet, monkeypatch):
+    f = fleet
+    owner = subprocess.Popen([sys.executable, "-c", "pass"])
+    owner.wait(timeout=10)
+    target = f.targets[0]
+    status, value = orphan_record(target, ORPHAN_RECORDS[0], owner.pid)
+    rows = [dict(source=str(target), records=[dict(path=str(status.relative_to(target)),
+                                                 sha256=apply.file_hash(status))])]
+    plan = residual_fixture(f, monkeypatch, shell_count=0,
+                            wave_id="frozen-orphan-status-2026-09-23", orphan_rows=rows)
+    value["detail"] += " changed after the frozen observation"
+    status.write_bytes(apply.encoded(value))
+    before = apply.tree_manifest(target)
+    monkeypatch.setattr(apply, "process_idle", f.original_idle)
+    operation = plan["operations"][0]
+    kwargs = dict(authority_commit=f.residual_authority, batch=operation["batch"],
+                  operation_root=Path(operation["operation_root"]))
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"HOLD": 1, "MOVED": 3}, result
+    held = result["outcomes"][0]
+    assert held["reason"] == "Native owner status differs from frozen retirement evidence"
+    assert held["prepared_head"] is None and held["boundary"] is None
+    assert apply.tree_manifest(target) == before
+    assert not (Path(held["destination"]).parent / "before.tar").exists()
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["verified_outcomes"] == result["outcome_counts"]
+    with pytest.raises(apply.Hold, match="consumed"):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
 
 
 def test_fresh_wave_authority_is_isolated_and_keeps_prior_operations_immutable(fleet, monkeypatch):

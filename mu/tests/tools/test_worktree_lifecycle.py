@@ -325,6 +325,74 @@ def test_terminal_completion_preserves_lane_history_and_survives_source_absence(
     assert not lane.exists()
 
 
+def captured_orphan_status(lane, source_index, owner_pid):
+    capture = REPO_ROOT / (
+        "reports/control_plane/workingrcx-fleet-orphan-owner-retirement-r1-2026-09-23_orphan_owner_evidence.json")
+    row = next(row for row in json.loads(capture.read_bytes())["rows"]
+               if row["old_source_index"] == source_index)
+    value = json.loads(row["records"][0]["raw"])
+    value["owner_pid"] = owner_pid
+    if value["child_pid"]:
+        value["child_pid"] = owner_pid
+    status = lane / row["records"][0]["path"]
+    status.parent.mkdir(parents=True)
+    status.write_bytes(fleet.encoded(value))
+    return status
+
+
+@pytest.mark.parametrize("source_index", [32, 45, 54])
+@pytest.mark.parametrize("useful_work", [False, True])
+def test_native_completion_uses_shared_orphan_admission_and_keeps_landing_ownership(
+        native_lane, source_index, useful_work):
+    primary, lane, git, env = native_lane
+    owner = subprocess.Popen([sys.executable, "-c", "pass"], env=env)
+    owner.wait(timeout=10)
+    status = captured_orphan_status(lane, source_index, owner.pid)
+    original = status.read_bytes()
+    if useful_work:
+        (lane / "tracked").write_bytes(b"original unlanded staged work\n")
+        git(lane, "add", "tracked")
+    directory = register_from_exited_owner(lane, env)
+    terminal = (directory / "terminal.json").read_bytes()
+    before = fleet.tree_manifest(lane)
+    result = lifecycle.complete_pending(directory, delay=0)
+    if useful_work:
+        assert result["state"] == "ESCALATED", result
+        assert result["landing_owner"]["source"] == str(lane)
+        assert fleet.tree_manifest(lane) == before
+        assert not (directory / "attempt-1" / "before.tar").exists()
+    else:
+        assert result["state"] == "COMPLETE", result
+        destination = Path(result["destination"])
+        assert not lane.exists()
+        assert (destination / status.relative_to(lane)).read_bytes() == original
+        assert result["outcome"]["process_checks"][0]["native_ownership"]["orphaned_recovery"]
+    assert (directory / "terminal.json").read_bytes() == terminal
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert [p.name for p in directory.glob("attempt-*")] == ["attempt-1"]
+
+
+def test_live_recovery_owner_exhaustion_cannot_be_reset_after_owner_exits(native_lane):
+    primary, lane, git, env = native_lane
+    owner = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
+                             stdin=subprocess.PIPE, env=env)
+    try:
+        status = captured_orphan_status(lane, 32, owner.pid)
+        directory = register_from_exited_owner(lane, env)
+        before = fleet.tree_manifest(lane)
+        result = lifecycle.complete_pending(directory, delay=0)
+        assert result["state"] == "ESCALATED", result
+        assert len(list(directory.glob("attempt-*"))) == 3
+        assert fleet.tree_manifest(lane) == before
+        evidence = fleet.tree_manifest(directory)
+    finally:
+        owner.communicate(timeout=10)
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert fleet.tree_manifest(directory) == evidence
+    assert fleet.tree_manifest(lane) == before
+    assert json.loads(status.read_bytes())["active"] is True
+
+
 def test_stopped_useful_candidate_retains_exact_landing_owner(native_lane):
     primary, lane, git, env = native_lane
     (lane / "tracked").write_bytes(b"unlanded staged implementation\n")

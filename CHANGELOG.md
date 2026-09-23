@@ -6,6 +6,35 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-23
 
+### Orphaned recovery-owner admission (Phase B; landing and live actions pending)
+
+- Reproduced all13captured unfinished recovery-owner HOLDs with unchanged
+  original status hashes and clear whole-tree process/open-file observations.
+  The before-correction gate failed24tests, including all13captured admission
+  witnesses;531passed/1skipped. Documentation was short-circuited.
+- The shared native preservation path now recognizes only the three observed
+  coherent producer schemas after owner/child absence, native lock and existing
+  process/open-file checks. It binds status bytes to the manifest and records
+  original ownership, attempt counters and admission evidence in action receipts.
+  Frozen fleet evidence also pins each captured status hash before preparation.
+  Original active/finish fields, logs, consumed claims and budgets stay unchanged.
+- Fresh native census/classification/useful-work artifacts bind exact comparison
+  `d9db7172b8cf42c9984b037f99dbf55130c16376`:373rows,77direct folders,
+  14conditional candidates in2operations,359HOLD rows and71useful-work owners.
+  The cohort is exactly13orphan sources plus the independently inspected finished
+  PR1313 carrier. All13orphan sources retain unresolved landing work and original
+  owner mappings; preservation is not integration.
+- Row38 now carries the two fresh foreground apply/verify pairs; row40 retains
+  the finished-reader correction and its immutable diagnosis. Source84/source196
+  journals, unsafe peers and stopped Mu remain protected. Native indicator and
+  precommit authority, reviews, CI, merge, PRIMARY sync and real apply/verify
+  remain with the outer executor and foreground owner. No physical cleanup or
+  useful-work completion is claimed by this implementation.
+
+- Required Phase B gates passed after correction:557tools tests passed/1skipped
+  in278.44s;351documentation tests passed in1.77s, with2existing freshness
+  warnings. Public native plan generation produced exactly2fresh bounded roots.
+
 ### Remaining fleet retirement authority (Phase B; landing and live actions pending)
 
 - Generated a fresh373-row census against PR1312 merge
