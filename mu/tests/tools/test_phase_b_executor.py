@@ -256,6 +256,52 @@ def implementer_ownership_lane(tmp_path):
         yield managed
 
 
+@pytest.mark.parametrize("exhaust", [False, True])
+def test_native_late_supervisor_hands_latest_full_findings_to_one_bounded_repair(implementer_ownership_lane, exhaust):
+    lane = implementer_ownership_lane("supervisor_reentry", source_path="mu/tools/ownership_probe.py")
+    lane.armed = False
+    lane.impl.build_implementation_prompt.side_effect = lambda content, **kwargs: content
+    newest = dict(decision="NEEDS_PHASE_B", summary="Latest supervisor finding Δ",
+                  findings=[dict(severity="high", title="Index-only race", detail="After before.tar the index drifted")],
+                  request_for_claude="Bind the actual preserved index and retain a landing owner")
+    supervisor = lane.mocks["run_pre_commit_supervisor"]
+    supervisor.side_effect = [
+        {"exit_code": 0, "parsed": {"decision": "NEEDS_PHASE_B", "summary": "Obsolete inventory-only finding"}},
+        {"exit_code": 0, "parsed": newest},
+    ]
+    route = {**_VALID_ROUTING_RECORD, "native_stub_packet_contract": {"required": True}}
+    run = lambda: pb_mod.run_phase_b(lane.repo, lane.plan_path, max_bridge_rounds=5,
+                                    routing_record_override=route.copy())
+    first = run()
+    assert first["status"] == "continue_phase_b" and first["step"] == "native_supervisor_reentry", first
+    state = json.loads(lane.state_path.read_bytes())
+    assert pb_mod.supervisor_reentry_continuation_issue(state) is None
+    assert json.loads(state["reentry_findings"]) == newest
+    assert state["native_supervisor_reentries"] == 1
+    assert not state["native_supervisor_reentry_exhausted"]
+    assert not any(k.startswith("implementer_mutation") for k in state)
+    edits = lane.counts["implementer"]
+    next_finding = {**newest, "summary": "Newest finding after bounded repair"}
+    supervisor.side_effect = None
+    supervisor.return_value = {"exit_code": 0, "receipt_path": ".agent_bus/meta/pre_commit_receipts/fixture.json",
+                               "parsed": next_finding if exhaust else {"decision": "COMMIT_GO", "summary": "Approved"}}
+    second = run()
+    assert lane.counts["implementer"] == edits + 1
+    prompt = lane.impl.invoke_implementer.call_args.args[1]
+    assert "After before.tar the index drifted" in prompt
+    assert "Obsolete inventory-only finding" not in prompt
+    if exhaust:
+        assert second["status"] == "needs_phase_b", second
+        stopped = lane.state_path.read_bytes()
+        assert json.loads(stopped)["native_supervisor_reentry_exhausted"] is True
+        assert json.loads(json.loads(stopped)["reentry_findings"]) == next_finding
+        assert run()["status"] == "needs_phase_b"
+        assert lane.state_path.read_bytes() == stopped
+        assert lane.counts["implementer"] == edits + 1
+    else:
+        assert second["status"] == "commit_ready", second
+
+
 @pytest.fixture
 def sdk_ownership_lane(implementer_ownership_lane):
     lane = implementer_ownership_lane("initial", source_path="mu/tools/ownership_probe.py")

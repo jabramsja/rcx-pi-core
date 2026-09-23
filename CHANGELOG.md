@@ -4,8 +4,197 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-23
+
+### PR1312 R2 lifecycle fixture isolation (Phase B; native landing pending)
+
+- Reproduced the exact four-worker gate at **8 failed, 1,716 passed in 119.80s**.
+  Retained process snapshots identify live dispatcher fixture PIDs 46727, 58730
+  and 68578 matching other repositories solely through the shared `native-wave`
+  branch literal in their child-program arguments. Failed completion receipts
+  preserve all three process-identity holds; the R2 packet references raw evidence.
+- Lifecycle tests now derive deterministic branch and wave identities from each
+  disposable repository path and pass them through the real child processes,
+  handoffs and owner assertions. Paired real-process controls prove that a shared
+  branch exhausts three holds, an isolated lane completes while its peer lives,
+  and each peer's own registered owner still prevents retirement. Releasing the
+  collision leaves the sealed hold and consumed budget intact.
+- Supervisor re-entry found the same interference in the cleanup fixture:
+  **1 failed, 3 passed in 7.58s**, with three process-identity holds. Fresh
+  process captures identify cleanup child PID 52701 matching independent
+  repositories solely through `fixture-feature`. Keeping real cleanup peers
+  alive made all four ambient-filter cases fail before correction. The cleanup
+  fixture now derives branch and wave identities from each repository and passes
+  its branch as a child argument. All four cases complete on their first attempt
+  beside live peers; each peer's own lane, tree and index remain held. Exact
+  branch/history and PR-owner assertions remain, with durable PID diagnostics.
+- The exact declared chain passed: packet authorization; anti-theater with zero
+  findings/exceptions; **1,726 tools/growth tests in 124.88s**; **351 docs tests in
+  9.82s**, with two existing freshness warnings. The focused four-worker cleanup
+  command passed **4 tests in 8.04s**. Production lifecycle/fleet guards, the R1
+  ambient-Git boundary and classifier repair, and the original R1 packet/indicator
+  are preserved. All 268 IDs and 39 parked obligations remain. The R2 packet
+  references the retained failure, process captures and corrected validation.
+- Native indexed handoff, review, commit, pre-push, CI, PR1312 merge, PRIMARY
+  synchronization and carrier closeout remain outer-executor work. Eligible
+  physical cleanup/useful-work landing stays directly next, then Mu.
+
+### PR1312 R1 bounded CI continuation (preserved failed attempt)
+
+- Reproduced the remaining cleanup fixture escalation with ambient runner Git
+  filters. The fixture now isolates system/global configuration at Git exec,
+  including the lifecycle child and census, while retaining actual retirement,
+  closeout and PR-owner assertions. System/global clean/process cases also
+  verify that exposed filters still trigger production retention without execution.
+- Reproduced the historical successful TASKS read misclassification from the
+  preserved 1,580,135-byte commit stdout and its exact CI terminal JSON. Recovery
+  now recognizes the coherent native `wait_ci` test-failure envelope. Current
+  outer/terminal diagnostics, CI excerpts and bootstrap faults retain authority;
+  malformed or mismatched envelopes retain the full-stdout fallback.
+- Adds a bounded self-contained capture regression and current-diagnostic
+  negative controls. Scope/Git-control audits and finite attempt budgets remain
+  intact. All 268 task IDs and 39 parked obligations stay with row40; eligible
+  physical cleanup/useful-work landing remains directly next, then Mu.
+- Packet authorization and anti-theater passed with zero findings/exceptions.
+  The required tools/growth gate stopped at **7 failed, 1,717 passed in 119.51s**;
+  all seven failures are in unchanged `test_worktree_lifecycle.py`. The repaired
+  cleanup and recovery cases passed. The docs command short-circuited; the
+  locked-plan stop condition remains in force. Exact selectors are in the packet.
+  The governed footprint remains 361 test files,
+  131 tool scripts and 67 core docs, so caps 171/63/19 need no adjustment.
+  Native indicator collection, indexed handoff, review, commit, CI, PR1312 merge,
+  PRIMARY synchronization and carrier closeout remain with the outer pipeline.
+- Bridge-round-1 revalidation again passed packet authorization and anti-theater,
+  then stopped at **8 failed, 1,716 passed in 122.96s** in the unchanged lifecycle
+  tests. Six failing fixture receipts recorded three holds each with
+  `Active process references target identity`. Shared fixture branch names and
+  machine-wide process matching suggest worker interference; exact process
+  attribution and candidate causation remain unresolved. The cleanup/recovery
+  cases passed; docs again short-circuited. The blocking finding remains open
+  under the locked scope, with lifecycle source/tests preserved.
+
 ## 2026-09-22
 
+### Fleet native lifecycle R8 (Phase B implementation; native review and landing pending)
+
+- Verified preserved R7 manifest SHA256
+  `391c47f4c04f4524e411f8a8fb3ed15d0dd30740e8628dd15baac7a7c64af65a`
+  and all 64 file lengths/hashes before carrying its 17 source/test/lifecycle-doc
+  files onto the unchanged PR1311 merge `3fe05fdf8a61ec7d40398175e161a73e0006b20a`.
+  R7 stopped at 2026-09-22T19:52:56Z on the live-dispatcher retry dependency.
+  Its full evidence, original index and terminal authority remain preserved.
+- A real dispatcher owner process and sequential commit children reproduced
+  both missing pre-mutation completion evidence and reuse of a failed post-merge
+  closeout at unchanged HEAD. Successor admission now accepts a verified failed
+  closeout before completion only when no attempt has started. Fresh successful
+  closeout remains mandatory; original failure bytes, consumed attempts and
+  interrupted-mutation protections remain. The real worker completes retirement
+  only after its dispatcher exits, using the original three-attempt budget.
+- Retains the R7/R6 implementation and PR1311 receipt/fixture behavior described
+  below. Canonical current-wave cap generation uses projected counts 361/131/67
+  and exact caps 171/63/19; no new exception or optional report is introduced.
+  All 268 task IDs and 39 parked obligations remain with existing row40.
+- The actual native dispatcher/commit-boundary regression failed all three
+  cases against the preserved R7 helper and passed with the correction,
+  including an already-consumed completion attempt. Collection passed for
+  4,546 tools/growth cases and 351 docs cases. The exact anti-theater-first
+  chain exited 0: zero findings/exceptions, **4,546 tests passed in 677.85
+  seconds**, then **351 docs tests passed in 1.79 seconds** with two existing
+  freshness warnings. All fixtures used default system temporary storage;
+  native stdout retains the results. Review, final gates, commit, CI, merge,
+  PRIMARY synchronization and durable operational closeout remain outer-owned.
+  Eligible physical cleanup/useful-work landing remains directly next, then Mu;
+  all 37 consumed fleet operations and held source196 evidence remain unchanged.
+
+The R7/R6 entries below retain their authoring-time validation evidence, not
+current approval. Both attempts stopped without landing. PR1311
+landed at 2026-09-22T16:25:05Z; its older pending-status entries are historical.
+
+### Fleet native lifecycle R7 (stopped; preserved authoring-time evidence)
+
+- Carries the preserved R6 lifecycle implementation onto verified PR1311 merge
+  `3fe05fdf8a61ec7d40398175e161a73e0006b20a` using clean three-way source,
+  test and lifecycle-document merges from R6 base `4cf7d5f4`. Verified the
+  terminal manifest SHA256
+  `dda50d4d72d5614d951d8b2627d44e7df4f4ce6f368aef229f7293f82e728c73`
+  and all 69 preserved files. The original carrier, index and evidence remain.
+- Retains PR1311 mechanical gates before fresh final approval, exact staged
+  bytes, hook-receipt revocation with per-invocation provenance and isolated
+  fixture repositories. Durable native completion, bounded same-HEAD
+  stopped-to-merged ownership, committed-source sync, original transaction
+  ownership, surviving-root coverage and tracked-report deletion intent now
+  coexist with those repairs. Latest supervisor findings and failed shell
+  diagnostics retain their bounded native continuation paths.
+- Reconciles current row40 owner/parallel/next facts from PRIMARY and the
+  durable R7 launch checkpoint. Preserves all 268 task IDs, the complete 39
+  parked obligations, both substantive changelog histories and held journals.
+  PR1311 landed at 2026-09-22T16:25:05Z; the older entries below describe their
+  authoring-time evidence and pending status. R6 stopped without a commit.
+- Derives current-base counts 361/131/67 and caps 171/63/19 from the unchanged
+  committed algorithm v2 producer, with R7 provenance. Strict `note.txt`,
+  existing L4 behavioral proofs and the empty exception registry remain.
+  The exact optional nonblocking report is admitted without creating one.
+- Initial implementation collection passed: 4,517 tools/growth cases and 351 docs cases.
+  The exact anti-theater-first chain exited 0 with zero risks/exceptions:
+  **4,517 tests passed in 693.90 seconds**, then **351 docs tests passed in
+  1.73 seconds** with two existing freshness warnings. Fixtures use default
+  system temporary storage outside checkouts; native stdout retains evidence.
+  Native review, final gates, commit, CI, merge, PRIMARY sync and durable
+  operational closeout remain with the outer pipeline. Existing eligible
+  retirement and useful-work landing follow, then Mu; all 37 old fleet
+  operations remain consumed.
+
+- Supervisor reentry repairs commit-owned failed closeout followed by native
+  continuation at unchanged HEAD, both before and after merge. The successor
+  verifies and hashes the failed closeout, preserves prior terminal/attempt
+  evidence, requires its own fresh successful closeout, and shares the original
+  three-attempt budget across repeated failures. Interrupted preparation and
+  changed predecessor evidence remain rejected. Reentry collection passed
+  4,531 tools/growth cases and 351 docs cases. The exact anti-theater-first
+  chain exited 0 with zero risks/exceptions: **4,531 tests passed in 678.23
+  seconds**, then **351 docs tests passed in 1.77 seconds** with the same two
+  freshness warnings. All 14 new regression cases passed. The preceding
+  counts record the initial implementation only; native review and landing
+  remain pending.
+
+### Fleet native lifecycle R6 (stopped; preserved authoring-time evidence)
+
+- Continues existing row40 on PR1310 merge `4cf7d5f4`. Verified the complete
+  46-file R5 preservation manifest and the three-file generated-report failure
+  manifest before selecting missing source, test and lifecycle-document hunks.
+- Adds bounded durable completion for successful, stopped and failed native
+  lanes, with useful-work and PR ownership, immutable attempts, and a verified
+  same-HEAD stopped-to-merged successor sharing the original retry budget.
+  Actual closeout/config/receipt evidence survives retirement in the common Git
+  directory. Missing or failed closeout retains the source and correction owner.
+- Uses freshly loaded committed recovery code and the existing identity/lock
+  API for PRIMARY sync. Keeps transaction R2 as the R3 recovery enabler's plan
+  owner and consumes replacement coverage from a synchronized surviving root.
+  Stale localdev and unrelated untracked evidence remain preserved.
+- Preserves source196 tracked-report deletion intent across admission, native
+  journal and stash, including a real-layout fixture with a retained neighbor.
+  Late-supervisor findings reach one bounded repair; failed shell diagnostics
+  retain actionable stdout/stderr for the next planner and durable attempt log.
+- The builder binds the exact optional same-wave nonblocking report before
+  locking. Tests cover native production, absent/removed reports, unauthorized
+  paths and refusal to expand an older locked contract. No placeholder report
+  or persistence requirement is introduced.
+- Uses the byte-verified committed PRIMARY algorithm v2 cap producer for the
+  actual helper/test/doc additions: counts 361/131/67, caps 171/63/19, with R6
+  provenance. Preserves the landed cap regressions, strict `note.txt` fixture,
+  L4 behavioral proofs and empty exception registry.
+- Separate collection passed: 4501 tool/growth cases and 351 docs cases. The
+  exact anti-theater-first evidence chain exited 0: zero risks/exceptions,
+  **4501 tests passed in 685.79 seconds**, then **351 docs tests passed in
+  1.69 seconds** with two existing freshness warnings. Native review, final
+  gate, commit, CI, merge, PRIMARY sync and completed-wave operational
+  verification remain outer-owned.
+- All 268 task IDs and 39 parked obligations remain. The 14 consumed/verified
+  batches retain 137 MOVED / 1 SYNCED_LOCAL_DEV / 19 HOLD / 8 INCOMPLETE. The
+  dated census of 92 direct folders and conservative 86 NEEDS_LANDING entries
+  do not establish useful-hunk landing. Fresh eligible retirement authority and
+  useful-work comparison remain with the existing cleanup owner immediately
+  after this recurrence-control task; all 37 old operations are immutable.
 ### PR1311 existing-branch packet authority (Phase B; native review and landing pending)
 
 - Preserves the explicit authorized control-surface L4_ENABLER purpose in the

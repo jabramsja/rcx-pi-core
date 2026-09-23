@@ -24,6 +24,7 @@ from mu.tests.tools.test_phase_b_executor import (
     PrivateReviewCrash, private_review_checkpoint, real_pre_review_package,
     reentry_private_bridge_lane,
 )
+from mu.tests.tools.test_worktree_lifecycle import native_lane
 
 # Load executor_common first (dependency)
 common_mod = load_module(
@@ -58,6 +59,39 @@ recovery_mod = load_module(
 
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
 _PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
+
+
+def test_phase_b_surface_chained_commit_hands_completion_to_surviving_owner(native_lane, monkeypatch):
+    import worktree_lifecycle
+    primary, lane, git, env = native_lane
+    handoff = lane / ".agent_bus/executors/phase_b_handoff.json"
+    handoff.parent.mkdir(parents=True)
+    _write_phase_b_handoff(handoff, wave_id="native-wave", tracked_packet="reports/control_plane/example.md")
+    args = dispatch_mod.build_surface_parser().parse_args([
+        "phase-b", "--plan", "reports/control_plane/example.md",
+        "--routing-record-json", '{"wave_name":"native-wave","decision":"ROUTE_PHASE_B"}',
+        "--json",
+    ])
+    commands, completions = [], []
+    def executor(command, **kwargs):
+        commands.append(command)
+        assert len(commands) <= 2, "Successful native handoff must not replay an executor"
+        payload = {"status": "commit_ready"} if len(commands) == 1 else {"status": "success"}
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+    monkeypatch.setattr(worktree_lifecycle, "start_completion", lambda record: completions.append(record))
+    with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=executor), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "attempt_recovery",
+                      side_effect=AssertionError("Successful native handoff must not enter recovery")) as recovery:
+        assert dispatch_mod.run_recoverable_surface_command(args, repo_root=lane, config={}) == 0
+    assert len(commands) == 2 and len(completions) == 1
+    record = completions[0]
+    assert record.parent == primary / ".git/rcx_worktree_lifecycle"
+    terminal = json.loads((record / "terminal.json").read_bytes())
+    assert terminal["identity"]["path"] == str(lane)
+    assert terminal["status"] == "success"
+    assert lane.exists()
+    recovery.assert_not_called()
 
 
 @pytest.mark.parametrize("entry", ["surface", "routing"])
@@ -10306,7 +10340,8 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["merge_sha"] == fetched_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert "post_merge_cleanup" in post_commit["steps_completed"]
-        assert post_commit["post_merge_cleanup"]["branch_deleted"] is True
+        assert post_commit["post_merge_cleanup"]["branch_deleted"] is False
+        assert post_commit["post_merge_cleanup"]["completion_state"] == "RETAINED_PRIMARY"
         assert "TASKS.md" in post_commit["post_merge_verify_warning"]
         assert continuation_path.exists() is False
         assert package_path.read_bytes() == original_package

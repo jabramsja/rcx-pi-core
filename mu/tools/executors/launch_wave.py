@@ -484,6 +484,22 @@ class WaveConfig:
             self.routing_summary = self.purpose
         if not self.scope_summary:
             self.scope_summary = self.purpose
+        if (self.routing_decision == "ROUTE_PHASE_A"
+                and isinstance(self.candidate_allowlist, list) and self.candidate_allowlist
+                and isinstance(self.scope_items, list) and self.scope_items
+                and _ec.normalize_wave_id(self.wave_id) == self.wave_id):
+            # Phase B owns this optional output. Bind its exact path in both
+            # the candidate spec and the STUB contract before either is locked.
+            # Reconstructing an older locked contract without this declaration
+            # still fails the existing immutable-contract relaunch check.
+            report = f"reports/deferred/non_blocking/{self.wave_id}_bridge_nonblockers.md"
+            self.candidate_allowlist = list(self.candidate_allowlist)
+            self.scope_items = list(self.scope_items)
+            if report not in self.candidate_allowlist:
+                self.candidate_allowlist.append(report)
+            if not any(isinstance(item, str) and item.split(" -- ", 1)[0].strip("` ") == report
+                       for item in self.scope_items):
+                self.scope_items.append(report)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WaveConfig":
@@ -1501,6 +1517,12 @@ def _build_dispatch_terminal_receipt(
         )
         receipt["candidate_authority_spec_path"] = spec_rel
         receipt["candidate_authority_spec_sha256"] = _sha256_bytes(spec_bytes)
+    if b"Status: Phase B (pre-supervisor pending, bridge-converged)" in worktree_packet.splitlines():
+        # Late continuation includes new tracker/package/findings authority.
+        # Bind it when the dispatcher stops, before any relaunch can claim it.
+        receipt["phase_b_advanced_authority"] = _native_phase_b_advanced_snapshot(
+            repo_root, config, bus_dir=bus_dir,
+        )
     return receipt
 
 
@@ -1939,11 +1961,14 @@ def _native_phase_b_packet_matches_config(
     packet_text: str,
     config: WaveConfig,
 ) -> bool:
-    """Accept only the one locked packet grammar eligible for this resume."""
+    """Accept the initial and exact producer-owned pre-supervisor grammar."""
     if not isinstance(packet_text, str):
         return False
     lines = packet_text.splitlines()
-    if lines.count("Status: Phase B (locked, implementing)") != 1:
+    if sum(lines.count(status) for status in (
+        "Status: Phase B (locked, implementing)",
+        "Status: Phase B (pre-supervisor pending, bridge-converged)",
+    )) != 1:
         return False
     if sum(line.startswith("Status:") for line in lines) != 1:
         return False
@@ -2009,6 +2034,7 @@ def _native_phase_b_packet_matches_config(
 def _native_phase_b_tracker_matches_config(
     repo_root: Path,
     config: WaveConfig,
+    *, bus_dir: str | Path | None = None,
 ) -> bool:
     """Match the exact config-rendered tracker note in worktree and index."""
     tasks_path = Path(repo_root) / "TASKS.md"
@@ -2022,6 +2048,11 @@ def _native_phase_b_tracker_matches_config(
             return False
         index_text = index_bytes.decode("utf-8")
         expected_note = _tsn.render_tracker_sync_note(build_tracker_fields(config))
+        packet = (Path(repo_root) / config.tracked_packet).read_text(encoding="utf-8")
+        if "Status: Phase B (pre-supervisor pending, bridge-converged)" in packet.splitlines():
+            expected_note = _native_phase_b_advanced_tracker_note(repo_root, config, bus_dir=bus_dir)
+            if expected_note is None or worktree_text != index_text:
+                return False
         return (
             _tracker_note_line_for_wave(worktree_text, config.wave_id)
             == expected_note
@@ -2034,6 +2065,7 @@ def _native_phase_b_tracker_matches_config(
         _tsn.TrackerSyncError,
         TypeError,
         ValueError,
+        OSError,
     ):
         return False
 
@@ -2064,6 +2096,91 @@ def _native_phase_b_packet_sources_match(
     except UnicodeDecodeError:
         return False
     return _native_phase_b_packet_matches_config(packet_text, config)
+
+
+def _native_phase_b_advanced_snapshot(repo_root: Path, config: WaveConfig, *, bus_dir) -> dict:
+    """Bind the complete late candidate and its exact producer checkpoint."""
+    paths = sorted(set(config.candidate_allowlist) | {"TASKS.md", config.tracked_packet,
+                                                   config.indicator_artifact_ref})
+    state = _ec.agent_bus_path(repo_root, bus_dir, "executors", "phase_b_state.json")
+    package = repo_root / ".scratch/phase_b_supervisor_package.json"
+    result = {"state": _sha256_bytes(_read_regular_file_bytes(state, label="late Phase B checkpoint")),
+              "package": _sha256_bytes(_read_regular_file_bytes(package, label="late supervisor package"))}
+    for name in paths:
+        path = repo_root / name
+        raw = _read_regular_file_bytes(path, label="late candidate") if path.exists() or path.is_symlink() else None
+        indexed = _git_index_bytes(repo_root, name)
+        result[name] = {"worktree": _sha256_bytes(raw) if raw is not None else None,
+                        "index": _sha256_bytes(indexed) if indexed is not None else None,
+                        "mode": path.stat().st_mode if raw is not None else None}
+    for name, args in (("head", ["rev-parse", "HEAD"]), ("branch", ["symbolic-ref", "HEAD"]),
+                       ("index_entries", ["ls-files", "--stage", "-z"]),
+                       ("index_flags", ["ls-files", "-v", "-z"])):
+        proc = subprocess.run(["git", *args], cwd=repo_root, capture_output=True, check=False)
+        if proc.returncode:
+            raise LaunchWaveError(f"cannot bind late candidate {name}")
+        result[name] = _sha256_bytes(proc.stdout)
+    return result
+
+
+def _native_phase_b_advanced_tracker_note(repo_root: Path, config: WaveConfig, *, bus_dir) -> str | None:
+    """Re-render the exact producer note from a sealed latest-finding owner."""
+    try:
+        from . import phase_b_executor as phase_b
+    except ImportError:
+        import phase_b_executor as phase_b
+    try:
+        state = json.loads(_read_regular_file_bytes(
+            _ec.agent_bus_path(repo_root, bus_dir, "executors", "phase_b_state.json"), label="Phase B checkpoint"))
+        package = json.loads(_read_regular_file_bytes(
+            repo_root / ".scratch/phase_b_supervisor_package.json", label="supervisor package"))
+        if (not isinstance(state, dict) or not isinstance(package, dict)
+                or phase_b.supervisor_reentry_continuation_issue(state)
+                or state.get("native_supervisor_reentry_exhausted") is True):
+            return None
+        identity = state["supervisor_reentry_identity"]
+        packet = _read_regular_file_bytes(repo_root / config.tracked_packet, label="tracked packet")
+        if any(identity.get(key) != value for key, value in (
+            ("wave_id", config.wave_id), ("task_id", config.task_id), ("plan_path", config.tracked_packet),
+            ("comparison_commit", config.comparison_commit), ("base_commit", config.comparison_commit),
+            ("plan_sha256", _sha256_bytes(packet)),
+        )):
+            return None
+        proc = subprocess.run(["git", "diff", "--cached", "--name-only", "-z"],
+                              cwd=repo_root, capture_output=True, check=False)
+        if proc.returncode:
+            return None
+        changed = sorted(os.fsdecode(p) for p in proc.stdout.split(b"\0") if p)
+        if (package.get("changed_files") != changed or not set(changed) <= set(config.candidate_allowlist)
+                or package.get("task_id") != config.task_id or package.get("wave_name") != config.wave_id
+                or package.get("wave_class") != config.wave_class
+                or package.get("evidence_command") != config.evidence_command
+                or state.get("bridge_scope_fingerprint") != phase_b._bridge_scope_fingerprint(repo_root, changed)):
+            return None
+        bridge = package["bridge_status"]
+        rounds = bridge.get("total_rounds", bridge.get("rounds"))
+        reentry = bridge.get("reentry", False)
+        if type(rounds) is not int or rounds < 0 or type(reentry) is not bool:
+            return None
+        note = package["tracker_note_text"]
+        # Preserve the producer's date across midnight; every other character
+        # is generated from the bound config, package scope and current plan.
+        from datetime import date
+        tracker_date = note.split("- Tracker sync note (", 1)[1].split(",", 1)[0]
+        date.fromisoformat(tracker_date)
+        rendered = phase_b.build_phase_b_tracker_note(
+            wave_id=config.wave_id, task_id=config.task_id, wave_class=config.wave_class,
+            target_gate_id=config.target_gate_id, plan_path=config.tracked_packet,
+            plan_content=packet.decode("utf-8"), changed_files=changed,
+            test_files=phase_b.select_pytest_gate_files(changed, repo_root),
+            receipt_path=".scratch/phase_b_supervisor_package.json", bridge_rounds=rounds,
+            reentry=reentry, founder_override=config.founder_override, pre_supervisor=True,
+            packet_evidence_command=config.evidence_command, tracker_date=tracker_date,
+        )
+        initial = _tsn.render_tracker_sync_note(build_tracker_fields(config))
+        return note if note in {rendered, initial} else None
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError):
+        return None
 
 
 def _native_phase_b_immutable_snapshot(
@@ -3893,7 +4010,7 @@ def _native_phase_b_resume_authority(
     )
     if not _native_phase_b_packet_sources_match(repo_root, config):
         return None
-    if not _native_phase_b_tracker_matches_config(repo_root, config):
+    if not _native_phase_b_tracker_matches_config(repo_root, config, bus_dir=bus_dir):
         return None
 
     candidate_ok, candidate_spec_path, _target_branch = (
@@ -4102,6 +4219,38 @@ class WaveSetupResult:
 
 
 def run_wave_setup(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    launch: bool = False,
+    bus_dir: str | Path | None = None,
+    runner: Callable[..., Any] = subprocess.run,
+) -> WaveSetupResult:
+    """Retain ownership if native setup refuses before dispatcher entry."""
+    directory = None
+    if launch and _native_relaunch_guard_identity_is_safe(config):
+        try:
+            from . import worktree_lifecycle as lifecycle
+        except ImportError:
+            import worktree_lifecycle as lifecycle
+        try:
+            directory = lifecycle.register_lane(Path(repo_root), config.wave_id,
+                                                 bus_dir=bus_dir, role="launcher")
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            raise LaunchWaveError(f"native lifecycle registration failed: {exc}") from exc
+    try:
+        return _run_wave_setup_impl(repo_root, config, launch=launch, bus_dir=bus_dir, runner=runner)
+    except BaseException:
+        if directory is not None:
+            try:
+                terminal = lifecycle.request_completion(directory, status="setup_stopped")
+                lifecycle.start_completion(Path(terminal["record"]))
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                print(f"launch_wave: completion remains incomplete at {directory}: {exc}", file=sys.stderr)
+        raise
+
+
+def _run_wave_setup_impl(
     repo_root: Path,
     config: WaveConfig,
     *,

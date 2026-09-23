@@ -708,6 +708,166 @@ def init_hybrid_delegate_tree(repo_root: Path) -> None:
     )
 
 
+@pytest.fixture
+def retained_native_scratch(tmp_path, monkeypatch):
+    """Real Git checkpoint with R1's retained dangling backup link."""
+    for key in list(os.environ):
+        if key.startswith("GIT_"):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    init_hybrid_delegate_tree(tmp_path)
+    (tmp_path / ".gitignore").write_text(".scratch/\n__pycache__/\n")
+    for args in (
+        ["init"], ["config", "user.name", "fixture"],
+        ["config", "user.email", "fixture@example.invalid"],
+        ["add", "."], ["commit", "-m", "checkpoint seed"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    backup = tmp_path / (
+        ".scratch/governance-retry-pytest.9PZktE/pytest-of-jeffabrams/pytest-0/"
+        "test_sync_primary_moves_nonign0/main/.git/"
+        "rcx_primary_worktree_sync_transactions/8c466713b9b940c7a7711c870a25de1a/backup"
+    )
+    backup.mkdir(parents=True)
+    link = backup / "collide.txt"
+    link.symlink_to("founder-bytes.txt")
+    evidence = backup / "retained.json"
+    evidence.write_bytes(b'{"owner":"native-sync","mode":384}\n')
+    return SimpleNamespace(root=tmp_path, link=link, backup=backup, evidence=evidence)
+
+
+@pytest.mark.parametrize("mutation", [
+    None, "new_link", "new_file", "retarget", "delete_link", "replace_link",
+    "target_created", "escape", "escaping_parent", "changed_evidence", "deleted_evidence",
+    "git_index", "git_ref",
+])
+def test_retained_native_dangling_scratch_is_inert_and_mutation_fails_closed(
+    retained_native_scratch, mutation,
+):
+    case = retained_native_scratch
+    scope = ["mu/tools/executors/recovery_gate.py"]
+    exceptions = rg_mod._hybrid_exception_paths()  # ANTICHEAT_OK: exact native checkpoint allowlist
+    ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: real retained R1 checkpoint
+        case.root, files_in_scope=scope, exception_paths=exceptions,
+    )
+    assert ok, baseline
+    rel = case.link.relative_to(case.root).as_posix()
+    assert baseline["inventory"][rel] == dict(exists=True, type="symlink", readlink="founder-bytes.txt")
+    assert baseline["manifest"][rel]["realpath"] == str(case.backup / "founder-bytes.txt")
+    assert not case.link.exists() and case.link.is_symlink()
+    immutable = copy.deepcopy(baseline)
+    if mutation == "new_link":
+        (case.backup / "new-link").symlink_to("founder-bytes.txt")
+    elif mutation == "new_file":
+        (case.backup / "new-evidence").write_text("unadmitted\n")
+    elif mutation in {"retarget", "delete_link", "replace_link", "escape"}:
+        case.link.unlink()
+        if mutation == "retarget":
+            case.link.symlink_to("different-missing.txt")
+        elif mutation == "replace_link":
+            case.link.write_text("replaced evidence\n")
+        elif mutation == "escape":
+            case.link.symlink_to(case.root / "outside-missing.txt")
+    elif mutation == "target_created":
+        (case.backup / "founder-bytes.txt").write_text("new target\n")
+    elif mutation == "escaping_parent":
+        saved = case.backup.with_name("retained-backup")
+        case.backup.rename(saved)
+        outside = case.root / "outside-backup"
+        outside.mkdir()
+        (outside / "collide.txt").symlink_to("founder-bytes.txt")
+        case.backup.symlink_to(outside, target_is_directory=True)
+    elif mutation == "changed_evidence":
+        case.evidence.write_bytes(b"changed\n")
+    elif mutation == "deleted_evidence":
+        case.evidence.unlink()
+    elif mutation == "git_index":
+        (case.root / scope[0]).write_text("permitted code edit, forbidden staging\n")
+        subprocess.run(["git", "add", scope[0]], cwd=case.root, check=True, capture_output=True)
+    elif mutation == "git_ref":
+        subprocess.run(["git", "branch", "unexpected-owner"], cwd=case.root, check=True, capture_output=True)
+    ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: native before/after authority audit
+        case.root, baseline=baseline, files_in_scope=scope, exception_paths=exceptions,
+    )
+    assert baseline == immutable
+    assert ok is (mutation is None), audit
+    if mutation is None:
+        assert audit["observed_drift"] == []
+        ok, after = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: prove exact unchanged inventory/manifest/Git
+            case.root, files_in_scope=scope, exception_paths=exceptions,
+        )
+        assert ok and after == baseline
+    else:
+        assert audit["detail"]
+
+
+def test_retained_native_dangling_scratch_escape_is_rejected_at_capture(retained_native_scratch):
+    case = retained_native_scratch
+    case.link.unlink()
+    case.link.symlink_to(case.root / "outside-missing.txt")
+    ok, result = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: missing target grants no escape authority
+        case.root, files_in_scope=["mu/tools/executors/recovery_gate.py"],
+        exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: native exact exceptions
+    )
+    assert not ok
+    assert "symlink escaped" in result["detail"]
+
+
+def test_native_recovery_validator_owns_pytest_scratch_without_changing_retained_baseline(
+    retained_native_scratch, monkeypatch,
+):
+    case = retained_native_scratch
+    test_path = "mu/tests/tools/test_recovery_gate.py"
+    (case.root / test_path).write_text(
+        "def test_native_backup(tmp_path):\n"
+        "    backup = tmp_path / 'backup'\n"
+        "    backup.mkdir()\n"
+        "    (backup / 'collide.txt').symlink_to('founder-bytes.txt')\n"
+        "    assert not (backup / 'collide.txt').exists()\n"
+    )
+    # Ambient pytest configuration must not create a second, unadmitted tree.
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--basetemp=.scratch/unadmitted-pytest")
+    exceptions = rg_mod._hybrid_exception_paths()  # ANTICHEAT_OK: exact native validation boundary
+    ok, before = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: real Git evidence before native validation
+        case.root, files_in_scope=[test_path], exception_paths=exceptions,
+    )
+    assert ok, before
+    result = rg_mod._run_pytest_targeted_validator(  # ANTICHEAT_OK: execute supported native validator
+        case.root, targets=[test_path], timeout=30,
+    )
+    assert result["passed"], result
+    assert "--basetemp" in result["command"]
+    assert not (case.root / ".scratch/unadmitted-pytest").exists()
+    ok, after = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: exact same retained inventory/manifest/Git
+        case.root, files_in_scope=[test_path], exception_paths=exceptions,
+    )
+    assert ok and after == before
+    assert case.link.is_symlink() and not case.link.exists()
+
+
+def test_native_delegate_admits_unchanged_retained_dangling_link(retained_native_scratch, monkeypatch):
+    case = retained_native_scratch
+    module = FakeHybridImplementerModule()
+    module.invoke_implementer = lambda *args, **kwargs: dict(
+        status="success", output="unchanged candidate", stderr="", exit_code=0, job_id="impl-1234abcd",
+    )
+    monkeypatch.setattr(rg_mod, "load_executor_config", lambda _root: {"hybrid_recovery_enabled": True})
+    monkeypatch.setattr(rg_mod, "_load_phase_b_implementer_module", lambda _root: module)
+    result = rg_mod._run_delegate_implementer_action(  # ANTICHEAT_OK: supported recovery admission and real validation
+        case.root, result={"status": "failed", "step": "settle_commit_generated_governance"},
+        wave_id="retained-scratch-fixture", step="settle_commit_generated_governance",
+        response=make_delegate_response(), explanation="admit retained native evidence",
+    )
+    assert result["ok"], result
+    assert result["validator_result"]["passed"]
+    assert result["pre_validation_audit"]["observed_drift"] == []
+    assert result["final_audit"]["observed_drift"] == []
+    assert "without running pytest or creating test scratch" in module.prompt_calls[0]["plan_content"]
+    assert case.link.is_symlink() and os.readlink(case.link) == "founder-bytes.txt"
+    assert not case.link.exists()
+
+
 class FakeHybridImplementerModule:
     def __init__(self, *, mutate_path: str = "mu/tools/executors/recovery_gate.py"):
         self.mutate_path = mutate_path
@@ -8783,6 +8943,89 @@ class TestHybridValidatorContract:
         assert not env["XDG_CACHE_HOME"].startswith(str(tmp_path))
 
 
+@pytest.fixture
+def pr1312_captured_ci_result():
+    """Replay the successful read containing the historical phrase and CI terminal.
+
+    Bounded extraction from fleet-native-prevention-r8-evidence-2026-09-22:
+    pr1312_followup_captured_commit_stdout.txt SHA256
+    ff0f6c8f9943539287fc3fc0ae430669660958e9aea7a39187845a6ea64aa1b7;
+    pr1312_followup_native_ci_error.json SHA256
+    5445f19b6ac57d737bc4c8e1282aeefd198d0993860abf7dd933f5e91f070d4e.
+    Only the historical read body is excerpted; terminal JSON is verbatim.
+    The inline capture keeps this regression independent of local archives.
+    """
+    successful_read = r"""{
+  "type": "item.completed",
+  "item": {
+    "id": "item_2",
+    "type": "command_execution",
+    "command": "/bin/bash -lc \"rg -n -C 3 '\"'^(#{1,4} .*NOW|#{1,4} .*NEXT|#{1,4} )|FLEET-NATIVE-LIFECYCLE-PREVENTION|workingrcx-fleet-native-prevention-r8-2026-09-22|OPEN|WARN|blocking|COMMIT_GO|convergence|Slice 1'\"' TASKS.md reports/control_plane/archive/meta_bridge_rollout_2026-03-20.md\"",
+    "aggregated_output": "TASKS.md:1074:- Tracker sync note (2026-04-17, pipeline-hardening-bundle-2026-04-17): **fix: Tier 1 MISSING_BRIDGE_CONFIG classifier + deterministic fixer; file 3 remaining hybrid-recovery inertness gaps as blocking deferred.** Class: L4_ENABLER. target_gate_id: G8. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`. evidence_delta: (1) Adds FailureClass.MISSING_BRIDGE_CONFIG (Tier 1) + classifier pattern matching 'bridge config not found' in stderr / error / detail / message to recovery_gate.py.\n",
+    "exit_code": 0,
+    "status": "completed"
+  }
+}"""
+    terminal = r"""{
+  "status": "error",
+  "step": "wait_ci",
+  "failure_class": "test_failure",
+  "errors": [
+    "CI checks failed (confirmed by polling): Command '['gh', 'pr', 'checks', '1312', '--watch', '--required']' returned non-zero exit status 1.. Failed required CI: green-gate (rcx-green-gate): green-gate\tRun green gate\t2026-09-23T02:54:21.1169475Z ##[error]Process completed with exit code 1."
+  ],
+  "ci_failures": [
+    {
+      "name": "green-gate",
+      "workflow": "rcx-green-gate",
+      "conclusion": "FAILURE",
+      "details_url": "https://github.com/jabramsja/rcx-pi-core/actions/runs/35811251493/job/107023121717",
+      "excerpt": "green-gate\tRun green gate\t2026-09-23T02:54:20.6992603Z =================================== FAILURES ===================================\ngreen-gate\tRun green gate\t2026-09-23T02:54:20.7032899Z E       AssertionError: {'state': 'ESCALATED', 'owner': 'FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION', 'reason': 'Retained useful work requires ...92975f06efa3', 'source': '/tmp/pytest-of-runner/pytest-0/popen-gw2/test_native_merge_owner_surviv0/carrier', ...}, ...}\ngreen-gate\tRun green gate\t2026-09-23T02:54:20.7035165Z tests/tools/test_commit_executor_post_merge_cleanup.py:5045: AssertionError\ngreen-gate\tRun green gate\t2026-09-23T02:54:20.7054418Z FAILED tests/tools/test_commit_executor_post_merge_cleanup.py::test_native_merge_owner_survives_lane_retirement_without_closing_predecessor - AssertionError: {'state': 'ESCALATED', 'owner': 'FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION', 'reason': 'Retained useful work requires ...92975f06efa3', 'source': '/tmp/pytest-of-runner/pytest-0/popen-gw2/test_native_merge_owner_surviv0/carrier', ...}, ...}\ngreen-gate\tRun green gate\t2026-09-23T02:54:21.1169475Z ##[error]Process completed with exit code 1."
+    }
+  ],
+  "ci_checks_output": "green-gate\tfail\t14m29s\thttps://github.com/jabramsja/rcx-pi-core/actions/runs/35811251493/job/107023121717\t\ntest\tpass\t35s\thttps://github.com/jabramsja/rcx-pi-core/actions/runs/35811249607/job/107023115716",
+  "steps_completed": [
+    "validate_inputs",
+    "ensure_feature_branch",
+    "ensure_tracker_note",
+    "stage_files",
+    "collect_and_stage_indicator",
+    "refresh_commit_packet_truth",
+    "settle_commit_generated_governance",
+    "prepare_commit_candidate_authority",
+    "build_and_run_supervisor",
+    "validate_receipt",
+    "run_pre_commit_script",
+    "build_and_run_supervisor",
+    "validate_receipt",
+    "verify_commit_candidate_authority",
+    "git_commit",
+    "hold_check",
+    "run_pre_push_script",
+    "git_push",
+    "ensure_pr"
+  ],
+  "pr_number": "1312",
+  "pr_lifecycle": {
+    "common_dir": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git",
+    "head": "58fe35e1332608dd8919ce98643c299fba5b1f56",
+    "branch": "jabramsja/workingrcx-fleet-native-prevention-r8-2026-09-22",
+    "owner": {
+      "task_id": "[FLEET-NATIVE-LIFECYCLE-PREVENTION]",
+      "wave_id": "workingrcx-fleet-native-prevention-r8-2026-09-22",
+      "packet": "reports/control_plane/workingrcx-fleet-native-prevention-r8-2026-09-22_2026-09-22.md"
+    },
+    "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_pr_lifecycle/pr-1312/0b671ee439bdc3f17c14cb8b5b2f927bed6515edb9290091d0b4e9d785f77f58.json",
+    "state": "STOPPED"
+  }
+}
+"""
+    return {
+        "status": "failed", "executor": "commit_executor",
+        "failure_class": "test_failure", "stderr": "",
+        "stdout": successful_read + "\n" + terminal,
+    }
+
+
 class TestHybridScopeAudit:
     BOOTSTRAP_ERROR_PHRASES = (
         "Bridge adapter config error: missing backend",
@@ -8833,6 +9076,16 @@ class TestHybridScopeAudit:
                 "stdout": "2 failed, 900 passed",
                 "stderr": "pre-push-fast failed",
             }
+        elif kind == "wait_ci":
+            terminal = {
+                "status": "error",
+                "step": "wait_ci",
+                "failure_class": "test_failure",
+                "errors": ["CI checks failed (confirmed by polling)"],
+                "ci_failures": [{"name": "green-gate", "conclusion": "FAILURE",
+                                 "excerpt": "FAILED test_native_merge_owner"}],
+                "ci_checks_output": "green-gate\tfail",
+            }
         else:
             raise AssertionError(f"unknown aggregate kind: {kind}")
         terminal.update(overrides)
@@ -8850,6 +9103,7 @@ class TestHybridScopeAudit:
         failure_class = {
             "bot": "bot_findings_pending",
             "pre_push": "test_failure",
+            "wait_ci": "test_failure",
         }[kind]
         terminal = cls.terminal_aggregate_object(kind, **(terminal_overrides or {}))
         result = {
@@ -9848,7 +10102,52 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
-    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("include_review", [False, True])
+    def test_bootstrap_fault_ignores_captured_pr1312_successful_review(
+            self, pr1312_captured_ci_result, include_review):
+        result = pr1312_captured_ci_result
+        event, end = json.JSONDecoder().raw_decode(result["stdout"])
+        assert event["type"] == "item.completed"
+        assert event["item"]["status"] == "completed"
+        assert event["item"]["exit_code"] == 0
+        assert "TASKS.md:1074:- Tracker sync note (2026-04-17," in event["item"]["aggregated_output"]
+        assert "bridge config not found" in event["item"]["aggregated_output"]
+        terminal = result["stdout"][end:].strip()
+        current = json.loads(terminal)
+        assert current["step"] == "wait_ci" and current["failure_class"] == "test_failure"
+        assert "test_native_merge_owner_survives_lane_retirement_without_closing_predecessor" in current["ci_failures"][0]["excerpt"]
+        if not include_review:
+            result = {**result, "stdout": terminal}
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: captured successful TASKS read must not impersonate the current CI error.
+            result, ["mu/tests/tools/test_commit_executor_post_merge_cleanup.py"],
+        )
+        assert blocked is False
+        assert detail == ""
+
+    @pytest.mark.parametrize("location", ["ci_checks_output", "ci_failures"])
+    @pytest.mark.parametrize("phrase", BOOTSTRAP_ERROR_PHRASES)
+    def test_bootstrap_fault_keeps_current_ci_diagnostics(self, location, phrase):
+        value = [{"name": "green-gate", "excerpt": phrase}] if location == "ci_failures" else phrase
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: current failed-check diagnostics retain bootstrap authority.
+            self.coherent_aggregate_result("wait_ci", terminal_overrides={location: value}),
+            ["mu/tests/tools/test_commit_executor_post_merge_cleanup.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    @pytest.mark.parametrize("failure_class", [None, "unknown_error", "missing_bridge_config"])
+    def test_bootstrap_fault_rejects_wait_ci_terminal_class_mismatch(self, failure_class):
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: wait_ci requires matching native outer/terminal failure identity.
+            self.coherent_aggregate_result(
+                "wait_ci", prefix="historical bridge config not found\n",
+                terminal_overrides={"failure_class": failure_class},
+            ),
+            ["mu/tests/tools/test_commit_executor_post_merge_cleanup.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
+    @pytest.mark.parametrize("kind", ["bot", "pre_push", "wait_ci"])
     @pytest.mark.parametrize("prefix", [
         "TASKS.md diff summary says historical bridge config not found\n",
         "bot finding body: bridge config not found in old report text\n",
@@ -9865,7 +10164,7 @@ class TestHybridScopeAudit:
         assert blocked is False
         assert detail == ""
 
-    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("kind", ["bot", "pre_push", "wait_ci"])
     def test_bootstrap_fault_ignores_coherent_nested_non_diagnostic_bodies(self, kind):
         terminal_overrides = {
             "aggregated_output": "Bridge config not found in nested stream body",
@@ -9882,7 +10181,7 @@ class TestHybridScopeAudit:
         assert blocked is False
         assert detail == ""
 
-    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("kind", ["bot", "pre_push", "wait_ci"])
     @pytest.mark.parametrize("phrase", BOOTSTRAP_ERROR_PHRASES)
     def test_bootstrap_fault_blocks_terminal_stdout_phrase_in_coherent_aggregate(self, kind, phrase):
         blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: terminal stdout stays diagnostic authority
@@ -9892,7 +10191,7 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
-    @pytest.mark.parametrize("kind", ["bot", "pre_push"])
+    @pytest.mark.parametrize("kind", ["bot", "pre_push", "wait_ci"])
     @pytest.mark.parametrize("location", ["outer", "terminal"])
     @pytest.mark.parametrize("key", BOOTSTRAP_OUTER_DIAGNOSTIC_KEYS)
     def test_bootstrap_fault_blocks_explicit_aggregate_diagnostic_fields(self, kind, location, key):
@@ -9957,6 +10256,7 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
+    @pytest.mark.parametrize("kind", ["pre_push", "wait_ci"])
     @pytest.mark.parametrize("outer_overrides", [
         {"failure_class": "unknown_error"},
         {"failure_class": None},
@@ -9964,9 +10264,9 @@ class TestHybridScopeAudit:
         {"executor": "phase_b_executor"},
         {"step": "run_pre_push_script"},
     ])
-    def test_bootstrap_fault_identity_mismatched_aggregates_remain_fail_closed(self, outer_overrides):
+    def test_bootstrap_fault_identity_mismatched_aggregates_remain_fail_closed(self, kind, outer_overrides):
         result = self.coherent_aggregate_result(
-            "pre_push",
+            kind,
             prefix="historical bridge config not found\n",
             outer_overrides=outer_overrides,
         )
@@ -9977,14 +10277,15 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
+    @pytest.mark.parametrize("kind", ["pre_push", "wait_ci"])
     @pytest.mark.parametrize("terminal_overrides", [
         {"status": "ok"},
         {"step": "run_pre_commit_script"},
         {"executor": "phase_b_executor"},
     ])
-    def test_bootstrap_fault_terminal_identity_mismatch_remains_fail_closed(self, terminal_overrides):
+    def test_bootstrap_fault_terminal_identity_mismatch_remains_fail_closed(self, kind, terminal_overrides):
         result = self.coherent_aggregate_result(
-            "pre_push",
+            kind,
             prefix="historical bridge config not found\n",
             terminal_overrides=terminal_overrides,
         )
@@ -10185,6 +10486,136 @@ class TestApplyEditRepoEscape:
         assert ok is False
         assert "repo-escape blocked" in msg
         assert outside.read_text() == "secret"  # unchanged
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_failed_shell_diagnostic_reaches_next_planner_and_durable_log(tmp_path, monkeypatch, repair):
+    """Real guarded pytest failure -> model feedback -> real corrective edit.
+
+    The fixture calls the existing doc parser. Only the model boundary is
+    controlled; shell execution, edit guards and durable attempt writes run.
+    No verify_command is supplied, matching the observed lost-feedback path.
+    """
+    import hashlib
+
+    doc_rel = "mu/docs/agents/WorktreeLifecycle.v0.md"
+    doc = tmp_path / doc_rel
+    doc.parent.mkdir(parents=True)
+    old = "<!-- DOC_STATUS: REFERENCE -->"
+    new = ("<!--\nDOC_STATUS\nTYPE: REFERENCE\nLAST_VERIFIED: 2026-09-15\n"
+           "OWNER: RCX Core Team\nFOR_CURRENT_STATE: See STATUS.md and TASKS.md\n"
+           "GROUNDING_TESTS: mu/tests/tools/test_recovery_gate.py\n-->")
+    doc.write_text(old + "\n# Lifecycle\n")
+    diagnostic = tmp_path / "test_header_diagnostic.py"
+    diagnostic.write_text(
+        "import sys\nfrom pathlib import Path\n"
+        f"sys.path.insert(0, {str(_REPO_ROOT)!r})\n"
+        "from mu.tests.docs.test_doc_governance import parse_doc_header\n"
+        "def test_header():\n"
+        "    print('diagnostic prelude\\n' * 600)\n"
+        "    print('stderr prelude\\n' * 600, file=sys.stderr)\n"
+        f"    print('E   Header diagnostic stderr: {doc_rel}', file=sys.stderr)\n"
+        "    print('stderr trailer\\n' * 600, file=sys.stderr)\n"
+        f"    header = parse_doc_header(Path({doc_rel!r}).read_text())\n"
+        f"    assert header is not None, 'Governed doc missing DOC_STATUS header: {doc_rel}'\n"
+    )
+    command = "python3 -m pytest -q -s -p no:cacheprovider test_header_diagnostic.py --tb=short"
+    original = {"status": "error", "step": "run_pre_commit_script",
+                "failure_class": "test_failure", "errors": ["pre-commit-doc-check failed"]}
+    original_before = copy.deepcopy(original)
+    install_mock_recovery_agent(monkeypatch)
+    real_popen = subprocess.Popen
+    prompts = []
+
+    class Planner(FakePopen):
+        def communicate(self, input=None, timeout=None):
+            prompts.append(input)
+            if len(prompts) == 1:
+                response = {"action": "shell", "commands": [command], "explanation": "locate failing header"}
+            else:
+                assert doc.read_text().startswith(old)
+                assert "Step: run_pre_commit_script" in input
+                assert "Latest recovery command diagnostics" in input
+                assert "Governed doc missing DOC_STATUS header" in input
+                assert f"Header diagnostic stderr: {doc_rel}" in input
+                assert command in input and '"exit_code": 1' in input
+                attempts = json.loads((tmp_path / ".agent_bus/recovery/recovery_log.json").read_text())["attempts"]
+                assert attempts[-1]["outcome"] == "failed"
+                assert attempts[-1]["command_diagnostics"]["commands"][0]["exit_code"] == 1
+                response = {"action": "edit", "commands": [
+                    {"file_path": doc_rel, "old_text": old, "new_text": new}], "explanation": "repair diagnosed header"}
+            return json.dumps(response), ""
+
+    def popen(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and cmd[:2] == ["codex", "exec"]:
+            return Planner()
+        return real_popen(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(rg_mod.subprocess, "Popen", popen)
+    outcome = rg_mod.run_recovery_loop(tmp_path, original, "diagnostic-feedback", max_iterations=2 if repair else 1)
+    attempts = json.loads((tmp_path / ".agent_bus/recovery/recovery_log.json").read_text())["attempts"]
+    failed = attempts[0]
+    assert failed["outcome"] == "failed" and failed["step"] == "run_pre_commit_script"
+    record = failed["command_diagnostics"]["commands"][0]
+    assert record["command"] == command and record["exit_code"] == 1
+    assert record["command_sha256"] == hashlib.sha256(command.encode()).hexdigest()
+    assert record["outcome"] == "failed"
+    assert "Governed doc missing DOC_STATUS header" in record["stdout"]
+    assert f"Header diagnostic stderr: {doc_rel}" in record["stderr"]
+    assert len(record["stdout"]) <= 6000 and len(record["stderr"]) <= 6000
+    assert "[truncated " in record["stdout"] and "[truncated " in record["stderr"]
+    assert original == original_before
+    assert outcome["recovered"] is repair and outcome["exhausted"] is (not repair)
+    assert len(prompts) == (2 if repair else 1)
+    if repair:
+        assert attempts[-1]["outcome"] == "retry_requested"
+        assert attempts[-1]["action"] == "tier3_iter2_edit"
+        verified = subprocess.run(shlex.split(command), cwd=tmp_path, capture_output=True, text=True)
+        assert verified.returncode == 0, verified.stdout + verified.stderr
+    else:
+        assert doc.read_text().startswith(old)
+
+
+def test_shell_timeout_and_block_reasons_survive_to_next_diagnosis(tmp_path, monkeypatch):
+    install_mock_recovery_agent(monkeypatch)
+    real_run, real_popen = subprocess.run, subprocess.Popen
+    prompts, executed = [], []
+
+    class Planner(FakePopen):
+        def communicate(self, input=None, timeout=None):
+            prompts.append(input)
+            if len(prompts) == 1:
+                return json.dumps({"action": "shell", "commands": ["git reset --hard", "sleep 1"],
+                                   "explanation": "diagnose"}), ""
+            assert '"outcome": "blocked"' in input and "dangerous command blocked" in input
+            assert '"outcome": "timeout"' in input and "command timed out after 30s" in input
+            assert "partial stdout" in input and "partial stderr" in input
+            return json.dumps({"action": "escalate", "commands": [], "explanation": "still failed"}), ""
+
+    def run(command, **kwargs):
+        if kwargs.get("shell"):
+            executed.append(command)
+            assert command == "sleep 1"  # The dangerous command must never reach execution.
+            raise subprocess.TimeoutExpired(command, 30, output=b"partial stdout", stderr=b"partial stderr")
+        return real_run(command, **kwargs)
+
+    def popen(command, *args, **kwargs):
+        if isinstance(command, list) and command[:2] == ["codex", "exec"]:
+            return Planner()
+        return real_popen(command, *args, **kwargs)
+
+    monkeypatch.setattr(rg_mod.subprocess, "run", run)
+    monkeypatch.setattr(rg_mod.subprocess, "Popen", popen)
+    result = rg_mod.run_recovery_loop(tmp_path, {"step": "run_pre_commit_script", "failure_class": "test_failure"},
+                                      "diagnostic-timeout", max_iterations=2)
+    assert not result["recovered"] and result["exhausted"] and len(prompts) == 2
+    assert executed == ["sleep 1"]
+    attempts = json.loads((tmp_path / ".agent_bus/recovery/recovery_log.json").read_text())["attempts"]
+    commands = attempts[0]["command_diagnostics"]["commands"]
+    assert [entry["outcome"] for entry in commands] == ["blocked", "timeout"]
+    assert all(entry["exit_code"] is None for entry in commands)
+    assert commands[1]["stderr"] == "partial stderr"
+    assert attempts[0]["outcome"] == "failed"
 
 
 class TestRecoveryLoopDurableLogging:
