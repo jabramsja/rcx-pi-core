@@ -10306,6 +10306,7 @@ class TestDraftPRReadyBeforeMerge:
         merge_script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         target_branch = "jabramsja/draft-ready-test"
         head_sha = "a" * 40
+        merged_base_sha = "b" * 40
         events: list[str] = []
         commands: list[list[str]] = []
         query_count = 0
@@ -10359,6 +10360,12 @@ class TestDraftPRReadyBeforeMerge:
             commands.append(command)
             if command == ["git", "rev-parse", "HEAD"]:
                 return completed(command, stdout=head_sha + "\n")
+            if command == ["git", "rev-parse", "origin/dev"]:
+                # The merged tip comes from the fetched base; checkout HEAD
+                # stays unchanged until the landed preservation transaction.
+                assert "merge" in events
+                assert ["git", "fetch", "origin", "dev"] in commands
+                return completed(command, stdout=merged_base_sha + "\n")
             if command == ["gh", "pr", "ready", "1189"]:
                 events.append("ready")
                 if ready_fails:
@@ -10417,6 +10424,8 @@ class TestDraftPRReadyBeforeMerge:
                 log=lambda _msg: None,
             )
 
+        if outcome["status"] == "success":
+            assert outcome["merge_sha"] == merged_base_sha
         return outcome, events, commands, query_count
 
     def test_draft_pr_is_marked_ready_after_ci_and_before_merge(self, tmp_path):

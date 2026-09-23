@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-fleet-closeout-recurrence-r3-2026-09-23",
+  "repeat_run_speedup_ratio": 0.967995,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.356569,
+  "repeat_run_raw_seconds": [
+    0.345157,
+    0.356569
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.345157
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.701726
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-23T18:49:41Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "d55d1ff7ec5009fc7884edd7f2ea57a143d18c54"
+}
