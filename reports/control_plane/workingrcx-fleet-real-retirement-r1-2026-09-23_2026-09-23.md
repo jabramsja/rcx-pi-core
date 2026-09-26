@@ -165,28 +165,9 @@ FOUNDER_OVERRIDE:workingrcx-fleet-real-retirement-r1-2026-09-23
 - Evidence command: `PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_workingrcx_fleet_census.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_workingrcx_fleet_apply.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_executor_dispatch.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short`.
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_2026-09-23.md. (2) Final pytest gate covered 5 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package. scope_refs: `CHANGELOG.md`, `TASKS.md`, `mu/docs/agents/WorktreeLifecycle.v0.md`, `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`, `mu/tests/tools/test_workingrcx_fleet_apply.py`, `mu/tests/tools/test_workingrcx_fleet_census.py`, `mu/tests/tools/test_workingrcx_fleet_classification.py`, `mu/tests/tools/test_worktree_lifecycle.py`, `mu/tools/executors/commit_executor.py`, `mu/tools/executors/workingrcx_fleet_apply.py`, `mu/tools/executors/workingrcx_fleet_census.py`, `mu/tools/executors/workingrcx_fleet_classification.py`, `mu/tools/executors/worktree_lifecycle.py`, `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_2026-09-23.md`, `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_apply_plan.json`, `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_census.json`, `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_classification.json`, `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_retirement_evidence.json`, `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_useful_work.json`, `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_useful_work_coverage.json`, `reports/deferred/non_blocking/workingrcx-fleet-real-retirement-r1-2026-09-23_bridge_nonblockers.md`, `reports/l4_wave_indicators/workingrcx-fleet-real-retirement-r1-2026-09-23.json`..
 - Evidence handles:
+  - `candidate_authority_receipt`: `.agent_bus-fleet-real-retirement-r1-20260926/meta/candidate_authority_receipts/workingrcx-fleet-real-retirement-r1-2026-09-23/commit-pre-supervisor.json`
   - `indicator`: `reports/l4_wave_indicators/workingrcx-fleet-real-retirement-r1-2026-09-23.json`
 - Current staged files:
-  - `CHANGELOG.md`
-  - `TASKS.md`
-  - `mu/docs/agents/WorktreeLifecycle.v0.md`
-  - `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`
-  - `mu/tests/tools/test_workingrcx_fleet_apply.py`
-  - `mu/tests/tools/test_workingrcx_fleet_census.py`
-  - `mu/tests/tools/test_workingrcx_fleet_classification.py`
-  - `mu/tests/tools/test_worktree_lifecycle.py`
-  - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/workingrcx_fleet_apply.py`
-  - `mu/tools/executors/workingrcx_fleet_census.py`
-  - `mu/tools/executors/workingrcx_fleet_classification.py`
-  - `mu/tools/executors/worktree_lifecycle.py`
   - `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_2026-09-23.md`
-  - `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_apply_plan.json`
-  - `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_census.json`
-  - `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_classification.json`
-  - `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_retirement_evidence.json`
-  - `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_useful_work.json`
-  - `reports/control_plane/workingrcx-fleet-real-retirement-r1-2026-09-23_useful_work_coverage.json`
-  - `reports/deferred/non_blocking/workingrcx-fleet-real-retirement-r1-2026-09-23_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/workingrcx-fleet-real-retirement-r1-2026-09-23.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
