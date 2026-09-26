@@ -45,17 +45,21 @@ _T2 = 1_700_000_200
 
 
 def _wait_for(predicate, *, timeout=10):
+    """Return the successful observation so callers need not sample it again."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if predicate():
-            return
+        if observation := predicate():
+            return observation
         time.sleep(0.05)
-    assert predicate(), "Timed out waiting for the real watcher transition"
+    observation = predicate()
+    assert observation, "Timed out waiting for the real watcher transition"
+    return observation
 
 
 def _watcher_tails(watcher, log):
     rows = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,command="],
-                          capture_output=True, text=True, check=True).stdout.splitlines()
+                          capture_output=True, text=True, check=True,
+                          timeout=_TIMEOUT_S).stdout.splitlines()
     return [int(parts[0]) for row in rows if len(parts := row.strip().split(None, 2)) == 3
             and parts[1] == str(watcher.pid) and "tail -f " in parts[2] and str(log) in parts[2]]
 
@@ -97,8 +101,7 @@ def test_generated_watcher_releases_terminal_reader_on_heartbeat_and_restart(tmp
     # Successful-looking text is not native terminal truth.
     log.write_text("Status: success; active owner still writing\n")
     with generated_log_watcher(tmp_path, lane, env) as (watcher, output):
-        _wait_for(lambda: bool(_watcher_tails(watcher, log)))
-        first = _watcher_tails(watcher, log)
+        first = _wait_for(lambda: _watcher_tails(watcher, log))
         _wait_for(lambda: bool(pids := _watcher_tails(watcher, log)) and pids != first)
         with log.open("a") as stream:
             stream.write("active output remains visible\n")
@@ -205,8 +208,7 @@ def test_generated_watcher_rebinds_live_log_after_carrier_transition(tmp_path, m
                 text=True, check=True).stdout.splitlines()
             assert resolved == [str(lane_b), bus_b]
             expected_log = log_a if log_mode == "explicit-pin" else log_b
-            _wait_for(lambda: bool(_watcher_tails(watcher, expected_log)))
-            first = _watcher_tails(watcher, expected_log)
+            first = _wait_for(lambda: _watcher_tails(watcher, expected_log))
             _wait_for(lambda: bool(pids := _watcher_tails(watcher, expected_log)) and pids != first)
             with expected_log.open("a") as stream:
                 stream.write("selected log heartbeat output\n")
@@ -253,8 +255,7 @@ def test_generated_watcher_binds_named_bus_terminal_owner(tmp_path, monkeypatch,
         # Launch from PRIMARY, exactly as the default monitor does. The real
         # resolver must bind the selected carrier root AND its named bus.
         with generated_log_watcher(tmp_path, primary, env, monitor_env=monitor_env) as (watcher, output):
-            _wait_for(lambda: bool(_watcher_tails(watcher, log)))
-            first = _watcher_tails(watcher, log)
+            first = _wait_for(lambda: _watcher_tails(watcher, log))
             _wait_for(lambda: bool(pids := _watcher_tails(watcher, log)) and pids != first)
             with log.open("a") as stream:
                 stream.write("named-bus heartbeat still visible\n")
@@ -267,9 +268,13 @@ def test_generated_watcher_binds_named_bus_terminal_owner(tmp_path, monkeypatch,
             if monitor != "default-pin":
                 _wait_for(lambda: "Terminal lane" in output.read_text(), timeout=6)
             time.sleep(3.2)
+            # Heartbeat replacement briefly has no tail. Assert the observed
+            # readiness result instead of racing a second process scan.
             if monitor == "default-pin":
-                _wait_for(lambda: bool(_watcher_tails(watcher, log)))
-            assert bool(_watcher_tails(watcher, log)) == (monitor == "default-pin")
+                tails = _wait_for(lambda: _watcher_tails(watcher, log))
+            else:
+                tails = _watcher_tails(watcher, log)
+            assert bool(tails) == (monitor == "default-pin")
             assert ("Terminal lane" in output.read_text()) == (monitor != "default-pin")
             assert watcher.poll() is None
         # Recent log content is not authority to reacquire the terminal owner.
@@ -277,8 +282,10 @@ def test_generated_watcher_binds_named_bus_terminal_owner(tmp_path, monkeypatch,
             _wait_for(lambda: "named-bus heartbeat still visible" in output.read_text())
             time.sleep(3.2)
             if monitor == "default-pin":
-                _wait_for(lambda: bool(_watcher_tails(watcher, log)))
-            assert bool(_watcher_tails(watcher, log)) == (monitor == "default-pin")
+                tails = _wait_for(lambda: _watcher_tails(watcher, log))
+            else:
+                tails = _watcher_tails(watcher, log)
+            assert bool(tails) == (monitor == "default-pin")
             assert ("Terminal lane" in output.read_text()) == (monitor != "default-pin")
             assert watcher.poll() is None
         assert (directory / "registration.json").read_bytes() == registration

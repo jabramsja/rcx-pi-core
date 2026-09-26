@@ -143,9 +143,11 @@ def sync_landed_checkout_owners(primary: Path, base_branch: str) -> dict:
             base_outcome = dict(primary_outcome)
         else:
             admitted = None
+            recovered_transactions = []
+            recovery_error = None
 
             def guard(stage, _manifest):
-                nonlocal admitted
+                nonlocal admitted, recovered_transactions, recovery_error
                 if stage not in {"before_recovery", "after_prepared", "before_fast_forward"}:
                     return
                 # Called continuously under the existing common-directory lock,
@@ -154,12 +156,28 @@ def sync_landed_checkout_owners(primary: Path, base_branch: str) -> dict:
                 fleet.native_idle(target, fleet.tree_manifest(target), reconcile_r1=True)
                 fleet.process_idle(base_identity)
                 if stage == "before_recovery":
+                    # Recover under the sync lock before admitting index/WIP:
+                    # an interrupted isolation may have changed both. The sync
+                    # API's subsequent discovery skips these terminal journals.
+                    recovered_transactions, recovery_error = (
+                        boundary._discover_and_recover_primary_sync_transactions(
+                            common_dir=common, primary=target, log=lambda _: None))
+                    if recovery_error:
+                        raise fleet.Hold("durable primary-sync recovery HOLD: " + recovery_error)
+                    if recovered_transactions:
+                        fleet.inspect_identity(base_identity)
+                        fleet.native_idle(target, fleet.tree_manifest(target), reconcile_r1=True)
+                        fleet.process_idle(base_identity)
                     admitted = fleet.transaction_state(target)
                 elif stage == "after_prepared":
                     fleet.require_transaction_state(target, admitted, "automatic-base-sync-prepared")
 
-            base_outcome = observed(target, boundary.sync_primary_worktree_to_base(
-                primary, base_branch, target_identity=base_binding, checkpoint=guard, log=lambda _: None))
+            base_sync = boundary.sync_primary_worktree_to_base(
+                primary, base_branch, target_identity=base_binding, checkpoint=guard, log=lambda _: None)
+            base_sync["recovered_transactions"] = recovered_transactions + base_sync.get("recovered_transactions", [])
+            if recovery_error:
+                base_sync["recovery_hold"] = recovery_error
+            base_outcome = observed(target, base_sync)
     elif base_outcome.get("primary"):
         base_outcome = observed(Path(base_outcome["primary"]), base_outcome)
     return {**primary_outcome, "base_worktree_sync": base_outcome,

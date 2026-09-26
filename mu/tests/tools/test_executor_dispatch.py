@@ -24,7 +24,7 @@ from mu.tests.tools.test_phase_b_executor import (
     PrivateReviewCrash, private_review_checkpoint, real_pre_review_package,
     reentry_private_bridge_lane,
 )
-from mu.tests.tools.test_worktree_lifecycle import native_lane
+from mu.tests.tools.test_worktree_lifecycle import native_base, native_lane
 
 # Load executor_common first (dependency)
 common_mod = load_module(
@@ -57,8 +57,89 @@ recovery_mod = load_module(
 )
 
 
+@pytest.fixture(autouse=True)
+def isolated_pager_transports(monkeypatch):
+    """Keep real pager bookkeeping without contacting provider transports."""
+    from mu.tools.observability import pipeline_agent_pager as pager
+
+    def unavailable(_repo_root, _event, _context, *, timeout_s):
+        return {"acknowledged": False, "error": "Executor test pager transport unavailable"}
+
+    # These executor cases emit real events. A failed delivery stays pending,
+    # so every later event retries it; the subprocess-level provider guard
+    # alone still launches a Node/CLI process for each attempt. Isolate only
+    # the external transports, retaining routing, persistence and retry state.
+    monkeypatch.setattr(pager, "_dispatch_codex", unavailable)  # ANTICHEAT_OK: external pager transport boundary
+    monkeypatch.setattr(pager, "_dispatch_claude", unavailable)  # ANTICHEAT_OK: external pager transport boundary
+    # executor_common resolves this public name lazily. Restore any previous
+    # binding on teardown so other modules keep their own transport coverage.
+    monkeypatch.setitem(sys.modules, "pipeline_agent_pager", pager)
+    return pager
+
+
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
 _PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
+
+
+@pytest.mark.parametrize("route,targets", [
+    ("codex", {"codex"}), ("claude", {"claude"}), ("both", {"codex", "claude"}),
+])
+def test_isolated_pager_preserves_pending_events_and_retries(
+    tmp_path, isolated_pager_transports, route, targets,
+):
+    bus = ".agent_bus-dispatch-test"
+    event = dict(event_type="commit_started", wave_id="isolated-dispatch",
+                 task_id="[ISOLATED-DISPATCH]", phase="commit_executor", state="started",
+                 transition_key="started", route=route)
+    with patch.object(subprocess, "Popen", side_effect=AssertionError("Pager spawned a provider")) as spawn:
+        first = common_mod.emit_pipeline_agent_event(tmp_path, bus_dir=bus, **event)
+        duplicate = common_mod.emit_pipeline_agent_event(tmp_path, bus_dir=bus, **event)
+        last = common_mod.emit_pipeline_agent_event(tmp_path, bus_dir=bus,
+            **{**event, "event_type": "commit_failed", "state": "error", "transition_key": "failed"})
+        spawn.assert_not_called()
+
+    assert first["enabled"] and first["route"] == route
+    assert duplicate["event_id"] == first["event_id"] != last["event_id"]
+    assert {attempt["target"] for attempt in last["attempted"]} == targets
+    assert len(last["attempted"]) == 2 * len(targets)
+    assert all(not attempt["acknowledged"] for attempt in last["attempted"])
+    observability = tmp_path / bus / "observability"
+    events = [json.loads(line) for line in
+              (observability / "pipeline_agent_events.jsonl").read_text().splitlines()]
+    assert [item["event_id"] for item in events] == [first["event_id"], last["event_id"]]
+    assert [item["event_type"] for item in events] == ["commit_started", "commit_failed"]
+    state = json.loads((observability / "pipeline_agent_pager_state.json").read_text())
+    for event_id, count in ((first["event_id"], 3), (last["event_id"], 1)):
+        entry = state["events"][event_id]
+        assert set(entry["pending_targets"]) == targets
+        assert entry["delivered_targets"] == entry["skipped_targets"] == {}
+        assert {target: attempt["count"] for target, attempt in entry["attempts"].items()} == {
+            target: count for target in targets
+        }
+        assert all(attempt["last_error"] == "Executor test pager transport unavailable"
+                   for attempt in entry["attempts"].values())
+    assert not (observability / "pipeline_agent_delivery_receipts.jsonl").exists()
+    assert not (observability / "pipeline_agent_skip_receipts.jsonl").exists()
+    assert not (tmp_path / ".agent_bus").exists()
+
+
+def test_isolated_pager_keeps_notify_only_delivery(tmp_path, isolated_pager_transports):
+    with patch.object(subprocess, "Popen", side_effect=AssertionError("Pager spawned a provider")) as spawn:
+        result = common_mod.emit_pipeline_agent_event(tmp_path, bus_dir=".agent_bus", event_type="commit_started",
+            wave_id="isolated-dispatch", task_id="[ISOLATED-DISPATCH]", phase="commit_executor",
+            state="started", transition_key="started", route="notify-only")
+        spawn.assert_not_called()
+    assert result["route"] == "notify-only"
+    assert len(result["attempted"]) == 1 and result["attempted"][0]["acknowledged"]
+    observability = tmp_path / ".agent_bus/observability"
+    state = json.loads((observability / "pipeline_agent_pager_state.json").read_text())
+    entry = state["events"][result["event_id"]]
+    assert entry["pending_targets"] == []
+    assert set(entry["delivered_targets"]) == {"notify-only"}
+    receipts = [json.loads(line) for line in
+                (observability / "pipeline_agent_delivery_receipts.jsonl").read_text().splitlines()]
+    assert len(receipts) == 1 and receipts[0]["event_id"] == result["event_id"]
+    assert receipts[0]["target"] == "notify-only"
 
 
 def test_phase_b_surface_chained_commit_hands_completion_to_surviving_owner(native_lane, monkeypatch):
