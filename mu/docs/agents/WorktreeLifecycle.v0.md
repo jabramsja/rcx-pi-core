@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-09-23
+LAST_VERIFIED: 2026-09-26
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: mu/tests/tools/test_worktree_lifecycle.py, mu/tests/tools/test_workingrcx_fleet_apply.py, mu/tests/tools/test_commit_executor_post_merge_cleanup.py, mu/tests/tools/test_pipeline_monitor_autofollow.py, mu/tests/tools/test_launch_wave.py, mu/tests/tools/test_recovery_gate.py
@@ -149,7 +149,8 @@ unresolved landing owner in both the apply outcome and lifecycle result.
 
 Detached linked worktrees are inventoried from their exact HEAD and index,
 including detached-only commits and staged/unstaged/untracked changes. They
-have no symbolic local branch reference and remain held for retirement. Their
+have no symbolic local branch reference; ordinary automatic completion holds
+them until fresh explicit retirement authority. Their
 useful changes still receive the same native landing ownership as named lanes.
 Native completion rechecks the terminal detached identity before inventory and
 records the exact wave, empty branch, HEAD, source and inventory path in its
@@ -165,9 +166,10 @@ WIP has a native landing stub in the wave's useful-work JSON, with source
 branch/head, local commits, changed paths
 and patch hashes. Stopped Mu remains protected for its later owner.
 
-Standalone clones and divergent branches remain individually held
-where canonical registration, comparison objects or safe fast-forward cannot
-be proved. Their explicit landing owners must reconcile actual useful work.
+Legacy preservation still requires safe fast-forward. Fresh explicit retirement
+supports exact detached and divergent checkouts, standalone clones with no
+other registered owners, and native archives with their original successful
+move receipts. Their landing owners must reconcile actual useful work.
 Archival never counts as integration.
 
 Only committed foreground `workingrcx_fleet_apply.py --residual --wave-id ...`
@@ -175,6 +177,69 @@ plan/apply/verify may act on the fleet after native merge and PRIMARY sync. Use
 the plan's exact classification hash, authority commit, batch and destination.
 Each operation is consumed once. Prior R1/R2 and September 13 plans, receipts
 and operation roots remain immutable.
+
+### Explicit historical-source retirement
+
+Census and classification accept `--retirement` with a fresh residual wave.
+The actual September 23 retirement wave binds exact predecessor
+`a76ccb9b238b45474946b93a5f3d3be1b07a8b93`. Non-ancestry is a history relationship,
+not missing-code evidence. Coverage records comparison blobs and exact reverse
+binary-patch checks against independently materialized dev files. Unmatched
+hunks retain review ownership; inherited owners and HELD journal intent are not
+closed by current-checkout equality. Work remains under the existing cleanup
+task, with no speculative wave per folder. Stopped Mu, PRIMARY, the active
+carrier, base checkouts and canonical preservation roots remain protected.
+
+The fresh plan admits `RETIRE_WORKTREE`, `RETIRE_CLONE` and `RETIRE_ARCHIVE`.
+It preserves raw source bytes, symlink targets, modes, index/admin bytes,
+index-only blobs, refs, reflog history, declared stashes and journal directories.
+A history bundle is verified and imported in an empty standalone recovery Git
+directory. The original index and staged blobs are restored there and checked
+independently before source removal. Source preparation never fetches, merges,
+checks out or synthesizes a branch in the historical source.
+
+`bind_terminal_retirement_identity` binds that source and preservation to
+surviving PRIMARY. `execute_terminal_retirement_once` retains the existing
+shared lock, fresh fetch, PRIMARY behind-zero check and durable consumed claim.
+Active-checkout and PR callers retain their ordinary symbolic-branch and
+never-behind contract. Identity, original owners, liveness, source bytes,
+independent recovery and refs are rechecked under the terminal lock.
+
+The action renames the exact source into its fresh operation directory, then
+uses `git worktree remove` on the single absent registered source. It never
+uses force or prune or deletes branch/stash history. A clone is preserved by
+rename without a canonical registration removal. `RETIRED` requires the exact
+registration delta and verified recoverability. `MOVED` remains archival only.
+The raw snapshot retains its original `.git` bytes; inspect its independent
+Git recovery with `git --git-dir <operation/row/recovery.git> --work-tree
+<operation/row/worktree> ...`. Original administration is also retained in
+`gitdir-before.tar`; the snapshot is not silently rewritten into a new checkout.
+
+The captured dangling direct-bus `bridge_config.json` adapter links are retained
+verbatim while their destinations remain absent. Captured FIFOs under the saved
+`test_metadata_rejects_fifo_wit0` pytest directories are archived as FIFO
+metadata, never opened for payload. Whole-tree liveness/open-file checks still
+apply. Unknown links, other special files, live owners and ambiguous journals
+hold individually. The observed PREPARED original sync owner may be preserved
+only with unchanged identity/HEAD, no published or marker-matched stash and no
+state transition beyond PREPARED. Its journal remains unchanged and unresolved;
+the fresh retirement mapping grants no recovery replay.
+
+Native fleet and completed lifecycle archives retain their original receipts,
+landing owners and spent operation/attempt budgets. An immutable separate
+retirement mapping permits lifecycle inspection to verify the new recovery and
+report retired registration without recreating the old destination or changing
+the original completion receipt. Public `--verify` independently rereads the
+archives, recovered index/history, consumed terminal claim, original owners,
+source absence and exact registration outcomes. Foreground apply/verify after
+landing and PRIMARY synchronization remains required; Phase B reports no live
+retirement or completed useful-work integration.
+
+Earlier HOLD and INCOMPLETE operations are also indexed by their original
+source identity. Their landing owners and preservation hashes remain in the
+fresh census, useful-work ledger, plan and recovery proof, even when current
+source changes are already covered. Retirement verifies those original receipts
+and preserved artifacts without resolving or relabeling their obligations.
 
 ## Safety and preservation
 
@@ -226,8 +291,9 @@ Every descriptor must be numeric, read-only and regular, match the current
 inode/device/path, and have stable content. Writers, cwd/root descriptors,
 unknown readers and incomplete `lsof` results remain HOLDs, including trailing
 process records with no descriptor. Symlink aliases, unreadable entries,
-nested mounts and special files (including retained FIFOs) require exact
-external preservation resolution.
+nested mounts and unsupported special files require exact external preservation
+resolution. Only fresh explicit retirement admits the captured dangling adapter
+links and saved pytest FIFOs described above.
 
 Tracked deletions retain explicit absent-path intent in admission, the native
 journal and stash evidence, even for a tracked generated report. Missing stash

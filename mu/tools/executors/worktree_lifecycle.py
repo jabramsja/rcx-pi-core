@@ -234,6 +234,28 @@ def terminal_log_record(repo: Path, bus_dir: str = ".agent_bus") -> str | None:
         return released
 
 
+def retirement_owners(common: Path, identity: dict, preserved_operation: dict | None = None) -> list[dict]:
+    """Observe surviving native owners; fresh fleet authority never resets them."""
+    paths = {identity["path"]}
+    if preserved_operation:
+        paths.add(preserved_operation["source_identity"]["path"])
+    records = []
+    for path in sorted((common / REGISTRY).glob("*/registration.json")):
+        registration = json.loads(fleet.read_plain(path))
+        if registration.get("identity", {}).get("path") not in paths:
+            continue
+        for owner in sorted(path.parent.glob("owner-*.json")):
+            raw = fleet.read_plain(owner)
+            value = json.loads(raw)
+            if not fleet._absent_pid(value.get("pid")):
+                raise fleet.Hold("Registered native retirement owner remains live or uncertain")
+        metadata = sorted([*path.parent.glob("*.json"), *path.parent.glob("attempt-*/*.json")])
+        records.append(dict(record=str(path.parent), registration_sha256=fleet.file_hash(path),
+            files={str(p.relative_to(path.parent)): fleet.file_hash(p) for p in metadata},
+            max_attempts=registration.get("max_attempts"), original_budget_unchanged=True))
+    return records
+
+
 def lane_identity(repo: Path) -> dict:
     repo = repo.absolute()
     fleet.plain_directory(repo)
@@ -619,6 +641,16 @@ def complete_pending(directory: Path, *, delay: float = 2.0) -> dict:
             if value["state"] == "COMPLETE":
                 target = Path(registration["identity"]["path"])
                 destination = Path(value["destination"])
+                retirement = fleet.retirement_record_path(common, destination)
+                if os.path.lexists(retirement):
+                    # Historical MOVED stays immutable. A separate committed
+                    # fleet operation may retire its obsolete registration;
+                    # reading completion follows independently verified evidence
+                    # without recreating the source or spending another claim.
+                    with fleet.safe_git_environment():
+                        record = fleet.verify_retirement_record(common.parent, destination)
+                    return {**value, "registration_state": "RETIRED",
+                            "retirement": record["result"], "retirement_evidence": str(retirement)}
                 manifest = json.loads(fleet.read_plain(destination.parent / "after.json"))
                 if os.path.lexists(target) or fleet.tree_manifest(destination) != manifest:
                     raise fleet.Hold("Completed lifecycle destination/source verification failed")

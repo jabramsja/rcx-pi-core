@@ -7579,6 +7579,11 @@ def _terminal_mutation_binding_digest(
             "base_ref",
         )
     }
+    if "retirement" in target_identity:
+        # Old spent bindings retain their original digest. A fresh retirement
+        # binds the historical source and independent preservation as well as
+        # the surviving checkout whose never-behind policy still applies.
+        binding["retirement"] = target_identity["retirement"]
     serialized = json.dumps(
         binding,
         ensure_ascii=True,
@@ -8153,6 +8158,71 @@ def execute_terminal_mutation_once(
         diagnostic_only=False,
         log=log,
     )
+
+
+def bind_terminal_retirement_identity(
+    primary: Path, *, source_identity: dict, preservation_directory: Path,
+    preservation_sha256: dict,
+) -> dict[str, Any]:
+    """Bind an offline historical source to a surviving PRIMARY operation.
+
+    No source fetch, merge, checkout or symbolic-branch synthesis is allowed.
+    The ordinary active-checkout/PR terminal policy is unchanged.
+    """
+    binding = bind_terminal_target_identity(primary, base_branch="dev")
+    if _git_common_dir(primary) != primary / ".git" or source_identity.get("path") == str(primary):
+        binding.update(bound=False, reason="Retirement requires surviving PRIMARY and a distinct source")
+        return binding
+    binding["retirement"] = dict(source_identity=source_identity,
+        preservation_directory=str(preservation_directory), preservation_sha256=preservation_sha256)
+    return binding
+
+
+def execute_terminal_retirement_once(
+    primary: Path, target_identity: dict[str, Any], *, terminal_action: Callable[[], Any], log: Any,
+) -> dict[str, Any]:
+    """Consume retirement once under the unchanged freshly fetched PRIMARY fence."""
+    def retire():
+        from importlib import import_module
+        fleet = import_module("mu.tools.executors.workingrcx_fleet_apply" if __package__
+                              else "workingrcx_fleet_apply")
+        record = target_identity.get("retirement")
+        if (not isinstance(record, dict) or _git_common_dir(primary) != primary / ".git"
+                or target_identity["worktree_identity"]["path"] != str(primary)):
+            raise RuntimeError("Retirement lacks its surviving PRIMARY binding")
+        ident = record["source_identity"]
+        source = Path(ident["path"])
+        if source == primary or primary.is_relative_to(source) or (
+                ident["common_dir"] == str(primary / ".git")
+                and ident.get("branch") in {"refs/heads/dev", "refs/heads/main", "refs/heads/master"}):
+            raise RuntimeError("Retirement target is an active/base checkout")
+        fleet.inspect_identity(ident, retirement=True)
+        directory = Path(record["preservation_directory"])
+        if not record["preservation_sha256"]:
+            raise RuntimeError("Retirement lacks independent preservation")
+        for name, expected in record["preservation_sha256"].items():
+            if Path(name).name != name or fleet.file_hash(directory / name) != expected:
+                raise RuntimeError("Retirement preservation binding changed")
+        return terminal_action()
+
+    return execute_terminal_mutation_once(primary, target_identity, terminal_action=retire, log=log)
+
+
+def verify_terminal_mutation_receipt(primary: Path, binding: dict, outcome: dict) -> bool:
+    """Read the original consumed claim; never grant another invocation."""
+    if not isinstance(binding, dict) or not isinstance(outcome, dict):
+        return False
+    operation = binding.get("operation_id", "")
+    if (not isinstance(operation, str) or not _TERMINAL_MUTATION_OPERATION_ID_RE.fullmatch(operation)
+            or not outcome.get("authority_consumed")
+            or not outcome.get("action_succeeded") or outcome.get("operation_id") != operation):
+        return False
+    path = _terminal_mutation_attempt_path(primary / ".git", operation)
+    if outcome.get("authority_record_path") != str(path):
+        return False
+    return _existing_terminal_mutation_attempt_reason(path, operation_id=operation,
+        binding_digest=_terminal_mutation_binding_digest(binding)) == (
+            f"terminal operation {operation} was already attempted; single-use authority cannot be replayed")
 
 
 PRE_PUSH_ISOLATION_VERIFIED_VALUE = "pre_push_passed"

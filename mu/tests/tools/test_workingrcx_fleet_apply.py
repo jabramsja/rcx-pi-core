@@ -1395,6 +1395,270 @@ def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False, wave_id=None, 
     return plan
 
 
+def retirement_fixture(f):
+    """Fresh native authority in the existing /tmp-only real Git fixture."""
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    wave = "fixture-real-retirement"
+    classification_rel, census_rel, plan_rel = apply.residual_paths(wave)
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    (f.repo / census_rel).write_bytes(apply.encoded(observed))
+    classified = classifier.classify(observed, source_sha256=apply.digest(apply.encoded(observed)),
+        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True, wave_id=wave, retirement=True)
+    raw = apply.encoded(classified)
+    (f.repo / classification_rel).write_bytes(raw)
+    sha = apply.digest(raw)
+    (f.repo / f"reports/control_plane/{wave}_useful_work.json").write_bytes(
+        apply.encoded(classifier.useful_work_report(classified, sha)))
+    plan = apply.build_residual_plan(f.repo, f.repo / classification_rel, sha, wave_id=wave)
+    (f.repo / plan_rel).write_bytes(apply.encoded(plan))
+    for rel in ("mu/tools/executors/workingrcx_fleet_census.py",
+                "mu/tools/executors/workingrcx_fleet_classification.py",
+                "mu/tools/executors/worktree_lifecycle.py", "mu/tools/observability/pipeline_agent_pager.py"):
+        path = f.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((REPO_ROOT / rel).read_bytes())
+    authority = commit(f, "fresh finite retirement authority")
+    git(f, f.repo, "push", "-q", "origin", "HEAD:dev")
+    operation = plan["operations"][0]
+    kwargs = dict(authority_commit=authority, batch=operation["batch"], operation_root=Path(operation["operation_root"]))
+    return plan, kwargs
+
+
+def test_real_retirement_detached_divergent_clone_index_and_history(fleet, monkeypatch):
+    f = fleet
+    target = f.targets[0]
+    git(f, target, "checkout", "--detach")
+    (target / "local-code").write_bytes(b"detached local commit\n")
+    git(f, target, "add", "local-code")
+    git(f, target, "commit", "-qm", "retained detached implementation")
+    local = git(f, target, "rev-parse", "HEAD")
+    (target / "index-only").write_bytes(b"staged intent absent from worktree\n")
+    git(f, target, "add", "index-only")
+    staged = git(f, target, "rev-parse", ":index-only")
+    (target / "index-only").unlink()
+    (target / "tracked").write_bytes(b"staged replacement\n")
+    git(f, target, "add", "tracked")
+    (target / "tracked").write_bytes(b"unstaged follow-up\n")
+    raw_index = (Path(git(f, target, "rev-parse", "--absolute-git-dir")) / "index").read_bytes()
+    (f.targets[1] / "unique-code").write_bytes(b"named local history\n")
+    git(f, f.targets[1], "add", "unique-code")
+    git(f, f.targets[1], "commit", "-qm", "non ancestor source")
+    named_head = git(f, f.targets[1], "rev-parse", "HEAD")
+    clone = f.root / "WorkingRCX-standalone-clone"
+    git(f, f.repo, "clone", "-q", "--no-local", str(f.repo), str(clone))
+    git(f, clone, "checkout", "-qb", "clone-history")
+    (clone / "private-clone-work").write_bytes(b"private source history\n")
+    git(f, clone, "add", "private-clone-work")
+    git(f, clone, "commit", "-qm", "clone private branch")
+    clone_head = git(f, clone, "rev-parse", "HEAD")
+    plan, kwargs = retirement_fixture(f)
+    entries = {e["path"]: e for e in plan["entries"]}
+    assert entries[str(target)]["action"] == "RETIRE_WORKTREE"
+    assert entries[str(f.targets[1])]["action"] == "RETIRE_WORKTREE"
+    assert entries[str(clone)]["action"] == "RETIRE_CLONE"
+    assert entries[str(f.repo)]["action"] == "UNTOUCHED_HOLD"
+    before = apply.registration_paths(f.repo)
+    monkeypatch.setattr(apply, "process_idle", f.original_idle)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"RETIRED": 5}, result
+    assert result["registration_delta"] == -4
+    assert apply.registration_paths(f.repo) == before - {str(t) for t in f.targets}
+    assert result["before_prefix_directories"] - result["after_prefix_directories"] == 5
+    for source, head in ((target, local), (f.targets[1], named_head), (clone, clone_head)):
+        entry = entries[str(source)]
+        destination = Path(entry["destination"])
+        recovery = destination.parent / "recovery.git"
+        assert not source.exists()
+        assert git(f, recovery, "rev-parse", "HEAD") == head
+        assert git(f, recovery, "fsck", "--full", "--strict") is not None
+    dest = Path(entries[str(target)]["destination"])
+    assert (dest / "tracked").read_bytes() == b"unstaged follow-up\n"
+    assert (dest / "ignored-evidence/private.bin").read_bytes() == b"\x00private evidence\xff\n"
+    assert (dest.parent / "recovery.git/index").read_bytes() == raw_index
+    assert git(f, dest.parent / "recovery.git", "cat-file", "blob", staged) == "staged intent absent from worktree"
+    assert git(f, f.repo, "rev-parse", entries[str(f.targets[1])]["source_identity"]["branch"]) == named_head
+    verified = apply.verify_residual_plan(f.repo, plan, **kwargs)
+    assert verified["batch_complete"] and verified["verified_outcomes"] == {"RETIRED": 5}
+    with pytest.raises(apply.Hold, match="consumed"):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    (dest.parent / "recovery.git/index").write_bytes(b"corrupt independent staged recovery")
+    with pytest.raises(apply.Hold, match="recovery/index changed"):
+        apply.verify_residual_plan(f.repo, plan, **kwargs)
+
+
+def test_real_retirement_inherits_spent_archival_receipts_without_replay(fleet):
+    f = fleet
+    moved = apply.apply_plan(f.repo, f.plan)
+    assert moved["outcome_counts"] == {"MOVED": 4}
+    originals = {p: p.read_bytes() for p in f.operation.rglob("*.json") if "worktree" not in p.parts}
+    owner_path = Path(moved["outcomes"][0]["destination"]).parent / "outcome.json"
+    value = json.loads(owner_path.read_bytes())
+    # The observed retained-owner schema; fresh action must carry it verbatim.
+    value["landing_owner"] = dict(task="FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+        wave_id="original-owner", status="PENDING_NATIVE_LANDING_REVIEW", scope=["original-code"])
+    owner_path.write_bytes(apply.encoded(value))
+    originals[owner_path] = owner_path.read_bytes()
+    plan, kwargs = retirement_fixture(f)
+    admitted = [e for e in plan["entries"] if e["action"] != "UNTOUCHED_HOLD"]
+    assert len(admitted) == 4 and all(e["action"] == "RETIRE_ARCHIVE" for e in admitted)
+    assert any(e["landing_owner"] == value["landing_owner"] for e in admitted)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"RETIRED": 4}, result
+    assert result["registration_delta"] == -4
+    assert {p: p.read_bytes() for p in originals} == originals
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
+
+
+def test_real_retirement_preserves_captured_dangling_config_fifo_and_pending_owner(fleet):
+    f = fleet
+    link = f.targets[0] / ".agent_bus-fix54r2/bridge_config.json"
+    link.parent.mkdir()
+    link.symlink_to("/tmp/rcx-fix54-bootstrap-adapter/bridge_config.json")
+    fifo = f.targets[1] / ".scratch/phase-b-r2/pytest/test_metadata_rejects_fifo_wit0/mu/tools/executors/executor_common.py"
+    fifo.parent.mkdir(parents=True)
+    os.mkfifo(fifo)
+    with (f.common / "info/exclude").open("a") as stream:
+        stream.write("\n.scratch/\n")
+    pending = f.targets[2]
+    (pending / "tracked").write_bytes(b"preserved original pending intent\n")
+    ident = boundary.bind_terminal_target_identity(pending, base_branch="dev")
+    def stop(stage, _manifest):
+        if stage == "after_prepared":
+            raise RuntimeError("stop at the captured PREPARED boundary")
+    with apply.safe_git_environment(network=True):
+        result = boundary.sync_primary_worktree_to_base(f.repo, "dev", target_identity=ident,
+            checkpoint=stop, log=lambda _: None)
+    journal = Path(result["primary_sync_transaction_path"])
+    original = journal.read_bytes()
+    assert json.loads(original)["state"] == "PREPARED"
+    plan, kwargs = retirement_fixture(f)
+    outcome = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert outcome["outcome_counts"] == {"RETIRED": 4}, outcome
+    assert journal.read_bytes() == original
+    entries = {e["path"]: e for e in plan["entries"]}
+    dest_link = Path(entries[str(f.targets[0])]["destination"]) / link.relative_to(f.targets[0])
+    assert os.readlink(dest_link) == "/tmp/rcx-fix54-bootstrap-adapter/bridge_config.json"
+    dest_fifo = Path(entries[str(f.targets[1])]["destination"]) / fifo.relative_to(f.targets[1])
+    import stat
+    assert stat.S_ISFIFO(dest_fifo.lstat().st_mode)
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
+
+
+def test_real_retirement_source_drift_holds_individually_and_cannot_replay_callback(fleet, monkeypatch):
+    f = fleet
+    plan, kwargs = retirement_fixture(f)
+    (f.targets[0] / "tracked").write_bytes(b"new valuable source after committed inventory\n")
+    execute = boundary.execute_terminal_retirement_once
+    captured = []
+    def remember(repo, binding, **options):
+        captured.append(binding)
+        return execute(repo, binding, **options)
+    monkeypatch.setattr(boundary, "execute_terminal_retirement_once", remember)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"HOLD": 1, "RETIRED": 3}, result
+    assert f.targets[0].exists()
+    assert "Useful-work/index evidence changed" in result["outcomes"][0]["reason"]
+    with apply.safe_git_environment(network=True):
+        replay = execute(f.repo, captured[0], terminal_action=lambda: pytest.fail("replayed retirement"), log=lambda _: None)
+    assert not replay["action_invoked"] and "already attempted" in replay["reason"]
+
+
+def test_real_retirement_interrupted_registration_remove_preserves_recovery_and_peers(fleet, monkeypatch):
+    f = fleet
+    plan, kwargs = retirement_fixture(f)
+    actual_git = apply.git
+    failed = False
+    def interrupt(root, *args, **options):
+        nonlocal failed
+        if args[:2] == ("worktree", "remove") and not failed:
+            failed = True
+            raise apply.Hold("registration remove interrupted after preservation rename")
+        return actual_git(root, *args, **options)
+    monkeypatch.setattr(apply, "git", interrupt)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"INCOMPLETE": 1, "RETIRED": 3}, result
+    assert result["registration_delta"] == -3
+    assert result["before_prefix_directories"] - result["after_prefix_directories"] == 4
+    incomplete = result["outcomes"][0]
+    destination = Path(incomplete["destination"])
+    assert destination.exists() and not f.targets[0].exists()
+    assert incomplete["boundary"]["authority_consumed"]
+    assert incomplete["boundary"]["action_succeeded"] is False
+    assert git(f, destination.parent / "recovery.git", "rev-parse", "HEAD") == f.original
+    assert str(f.targets[0]) in apply.registration_paths(f.repo)
+    assert not apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
+    with pytest.raises(apply.Hold, match="consumed"):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+
+
+def test_real_retirement_late_index_intent_survives_before_registration_removal(fleet, monkeypatch):
+    f = fleet
+    plan, kwargs = retirement_fixture(f)
+    entry = next(e for e in plan["entries"] if e["path"] == str(f.targets[0]))
+    admin = Path(entry["source_identity"]["git_dir"])
+    original = (admin / "index").read_bytes()
+    rename = os.rename
+    def late_index(source, destination):
+        rename(source, destination)
+        if source == f.targets[0]:
+            git(f, destination, "--git-dir", str(admin), "--work-tree", str(destination),
+                "rm", "--cached", "tracked")
+    monkeypatch.setattr(apply.os, "rename", late_index)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"INCOMPLETE": 1, "RETIRED": 3}, result
+    assert admin.exists() and (admin / "index").read_bytes() != original
+    destination = Path(entry["destination"])
+    assert (destination.parent / "recovery.git/index").read_bytes() == original
+    assert str(f.targets[0]) in apply.registration_paths(f.repo)
+    assert "index/admin changed" in result["outcomes"][0]["reason"]
+
+
+def test_real_retirement_native_live_owner_holds_before_preservation(fleet):
+    f = fleet
+    status = f.targets[0] / ".agent_bus/recovery/status.json"
+    status.parent.mkdir(parents=True)
+    status.write_text(json.dumps(dict(state="running", active=True, owner_pid=os.getpid())))
+    original = status.read_bytes()
+    plan, kwargs = retirement_fixture(f)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"HOLD": 1, "RETIRED": 3}, result
+    held = result["outcomes"][0]
+    assert held["reason"] == "Native process identity remains live"
+    assert status.read_bytes() == original and held["boundary"] is None
+    assert not (Path(held["destination"]).parent / "before.tar").exists()
+
+
+def test_real_retirement_retains_original_landing_owner_from_spent_hold(fleet, monkeypatch):
+    f = fleet
+    target = f.targets[0]
+    (target / "tracked").write_bytes(b"original useful work still awaiting landing\n")
+    status = target / ".agent_bus/recovery/status.json"
+    status.parent.mkdir(parents=True)
+    status.write_text(json.dumps(dict(state="running", active=True, owner_pid=os.getpid())))
+    old_plan = residual_fixture(f, monkeypatch, shell_count=0, wave_id="prior-retained-owner")
+    old_operation = old_plan["operations"][0]
+    old_result = apply.apply_residual_plan(f.repo, old_plan, authority_commit=f.residual_authority,
+        batch=old_operation["batch"], operation_root=Path(old_operation["operation_root"]))
+    assert old_result["outcome_counts"] == {"HOLD": 1, "MOVED": 3}, old_result
+    original_owner = old_result["outcomes"][0]["landing_owner"]
+    receipts = {p: p.read_bytes() for p in Path(old_operation["operation_root"]).glob("*/outcome.json")}
+    status.unlink()  # Disposable original owner exits before fresh observation.
+    f.landed = f.residual_authority
+    plan, kwargs = retirement_fixture(f)
+    entry = next(e for e in plan["entries"] if e["path"] == str(target))
+    assert entry["landing_owner"] == original_owner
+    assert entry["inherited_landing_owners"] == [original_owner]
+    assert entry["current_landing_review"]["wave_id"] == plan["wave_id"]
+    assert "tracked" in entry["current_landing_review"]["scope"]
+    assert entry["retirement_evidence"]["prior_owners"][0]["status"] == "HOLD"
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"RETIRED": 4}, result
+    assert next(o for o in result["outcomes"] if o["source_identity"]["path"] == str(target))["landing_owner"] == original_owner
+    assert {p: p.read_bytes() for p in receipts} == receipts
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
+
+
 def test_orphan_retirement_preserves_work_and_spent_claims_while_live_peer_holds(fleet, monkeypatch):
     f = fleet
     owner = subprocess.Popen([sys.executable, "-c", "pass"])

@@ -348,11 +348,17 @@ def require_landed(repo: Path, plan: dict) -> str:
     return landed
 
 
-def inspect_identity(ident: dict, *, path: Path | None = None, head: str | None = None) -> None:
+def inspect_identity(ident: dict, *, path: Path | None = None, head: str | None = None,
+                     retirement: bool = False) -> None:
     target = path if path is not None else Path(ident["path"])
     common, admin = Path(ident["common_dir"]), Path(ident["git_dir"])
     for directory in (target, common, admin):
         plain_directory(directory)
+    clone = retirement and common == admin == target / ".git"
+    branch = line(git(target, "symbolic-ref", "--quiet", "HEAD", allowed=(0, 1)))
+    expected_branch = ident["branch"] or ""
+    if not retirement and not expected_branch:
+        raise Hold("Symbolic branch required outside explicit retirement")
     if "filesystem_identity" in ident:
         info = target.lstat()
         if ident["filesystem_identity"] != dict(device=info.st_dev, inode=info.st_ino, mode=info.st_mode):
@@ -360,11 +366,11 @@ def inspect_identity(ident: dict, *, path: Path | None = None, head: str | None 
     if (line(git(target, "rev-parse", "--show-toplevel")) != str(target)
             or line(git(target, "rev-parse", "--absolute-git-dir")) != str(admin)
             or (target / line(git(target, "rev-parse", "--git-common-dir"))).resolve() != common
-            or line(git(target, "symbolic-ref", "HEAD")) != ident["branch"]
+            or branch != expected_branch
             or line(git(target, "rev-parse", "HEAD")) != (head or ident["HEAD"])
-            or read_plain(target / ".git").strip() != b"gitdir: " + os.fsencode(admin)
-            or read_plain(admin / "gitdir").strip() != os.fsencode(target / ".git")
-            or (admin / line(read_plain(admin / "commondir"))).resolve() != common):
+            or (not clone and (read_plain(target / ".git").strip() != b"gitdir: " + os.fsencode(admin)
+                or read_plain(admin / "gitdir").strip() != os.fsencode(target / ".git")
+                or (admin / line(read_plain(admin / "commondir"))).resolve() != common))):
         raise Hold("Source HEAD/branch/path/Git/common-dir identity drift")
     registrations = []
     for block in os.fsdecode(git(target, "worktree", "list", "--porcelain")).split("\n\n"):
@@ -372,8 +378,12 @@ def inspect_identity(ident: dict, *, path: Path | None = None, head: str | None 
                       for item in block.splitlines())
         if record.get("worktree") == str(target):
             registrations.append(record)
-    if registrations != [dict(worktree=str(target), HEAD=head or ident["HEAD"], branch=ident["branch"])]:
+    expected = dict(worktree=str(target), HEAD=head or ident["HEAD"])
+    expected.update({"branch": expected_branch} if expected_branch else {"detached": ""})
+    if registrations != [expected]:
         raise Hold("Missing, locked, prunable or drifted registration")
+    if clone and git(target, "worktree", "list", "--porcelain").count(b"worktree ") != 1:
+        raise Hold("Standalone clone has other registered owners")
     for root, names in ((admin, ("index.lock", "HEAD.lock", "locked", "MERGE_HEAD",
                                 "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD")),
                         (common, ("config.lock", "packed-refs.lock", "shallow", "info/grafts"))):
@@ -400,7 +410,7 @@ def clean_state(target: Path, *, allow_wip: bool = False) -> set[str]:
     return {os.fsdecode(r.split(b"\t", 1)[1]) for r in stages if r}
 
 
-def tree_manifest(root: Path) -> dict:
+def tree_manifest(root: Path, *, allowed_fifos: tuple[str, ...] = ()) -> dict:
     """Byte/mode accounting without following symlinks or executing filters."""
     plain_directory(root)
     result = {}
@@ -430,6 +440,10 @@ def tree_manifest(root: Path) -> dict:
                 if stable_stat(os.fstat(stream.fileno())) != stable_stat(info):
                     raise Hold("Content changed during accounting")
             record.update(kind="file", size=info.st_size, sha256=h.hexdigest())
+        elif stat.S_ISFIFO(info.st_mode) and rel in allowed_fifos:
+            # An idle saved pytest FIFO has metadata, never readable payload.
+            # Liveness is checked independently before every retirement.
+            record["kind"] = "fifo"
         else:
             raise Hold(f"Unreadable or special content: {root / rel}; owner must resolve this exact entry before a fresh preservation operation")
         result[rel] = record
@@ -438,7 +452,7 @@ def tree_manifest(root: Path) -> dict:
     return result
 
 
-def preserve_archive(root: Path, output: Path, manifest: dict) -> None:
+def preserve_archive(root: Path, output: Path, manifest: dict, *, allowed_fifos: tuple[str, ...] = ()) -> None:
     # O_EXCL also prevents tarfile from replacing an unrelated artifact.
     with output.open("xb") as stream:
         with tarfile.open(fileobj=stream, mode="w", dereference=False) as archive:
@@ -447,7 +461,7 @@ def preserve_archive(root: Path, output: Path, manifest: dict) -> None:
         os.fsync(stream.fileno())
     sync_directory(output.parent)
     verify_archive(output, manifest)
-    if tree_manifest(root) != manifest:
+    if tree_manifest(root, allowed_fifos=allowed_fifos) != manifest:
         raise Hold("Preservation archive/source verification failed")
 
 
@@ -468,6 +482,8 @@ def verify_archive(path: Path, manifest: dict) -> None:
                     entry["kind"] = "directory"
                 elif member.issym():
                     entry.update(kind="symlink", target=member.linkname)
+                elif member.isfifo():
+                    entry["kind"] = "fifo"
                 elif member.isfile() or member.islnk():
                     stream = archive.extractfile(member)
                     if stream is None:
@@ -771,10 +787,12 @@ def _orphan_recovery_schema(name: str, value: dict) -> bool:
             and value["current_command"].startswith("codex exec "))
 
 
-def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> dict | None:
+def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False,
+                retirement_evidence: dict | None = None) -> dict | None:
     """Contain uncertain read-only ownership evidence before target admission."""
     try:
-        ownership = _read_native_ownership(target, manifest, reconcile_r1=reconcile_r1)
+        ownership = _read_native_ownership(target, manifest, reconcile_r1=reconcile_r1,
+                                          retirement_evidence=retirement_evidence)
         if ownership["orphaned_recovery"]:
             # Absence of recorded PIDs is only one observation. Derive the
             # real repository identity and repeat the existing whole-tree
@@ -782,7 +800,8 @@ def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> 
             ident = dict(path=str(target), git_dir=line(git(target, "rev-parse", "--absolute-git-dir")),
                          branch=line(git(target, "symbolic-ref", "-q", "HEAD", allowed=(0, 1))))
             diagnostic = process_idle(ident)
-            if _read_native_ownership(target, manifest, reconcile_r1=reconcile_r1) != ownership:
+            if _read_native_ownership(target, manifest, reconcile_r1=reconcile_r1,
+                                      retirement_evidence=retirement_evidence) != ownership:
                 raise Hold("Native orphan ownership evidence changed during admission")
             return dict(**ownership, observed_at=datetime.now(timezone.utc).isoformat(),
                         source_identity=ident, manifest_sha256=digest(encoded(manifest)),
@@ -799,7 +818,8 @@ def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False) -> 
         ) from exc
 
 
-def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) -> dict:
+def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool,
+                           retirement_evidence: dict | None = None) -> dict:
     ownership = dict(orphaned_recovery=[], native_locks=[])
 
     def status_object(pairs):
@@ -817,6 +837,11 @@ def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool) 
         if not Path(name).parts or not Path(name).parts[0].startswith(".agent_bus"):
             continue
         if entry["kind"] == "symlink":
+            links = (retirement_evidence or {}).get("native_links", [])
+            if (len(Path(name).parts) == 2 and Path(name).name == "bridge_config.json"
+                    and dict(path=name, target=entry["target"], dangling=True) in links
+                    and not os.path.exists(target / name)):
+                continue  # Preserve the captured dangling adapter link verbatim.
             raise Hold("Native ownership evidence points outside its recorded tree")
         path = target / name
         if path.name in ("bridge.lock", "meta_bridge.lock"):
@@ -1522,6 +1547,341 @@ RESIDUAL_CLASSIFICATION_PATH = Path(f"reports/control_plane/{RESIDUAL_WAVE_ID}_c
 RESIDUAL_CENSUS_PATH = Path(f"reports/control_plane/{RESIDUAL_WAVE_ID}_census.json")
 RESIDUAL_PLAN_PATH = Path(f"reports/control_plane/{RESIDUAL_WAVE_ID}_apply_plan.json")
 RESIDUAL_ACTIONS = {"PRESERVE_WORKTREE", "PRESERVE_BUS_SHELL", "SYNC_LOCAL_DEV"}
+RETIREMENT_ACTIONS = {"RETIRE_WORKTREE", "RETIRE_ARCHIVE", "RETIRE_CLONE"}
+
+
+def retirement_record_path(common: Path, source: Path) -> Path:
+    return common / ("rcx_fleet_retired_" + digest(os.fsencode(source)) + ".json")
+
+
+def retirement_fifos(entry: dict) -> tuple[str, ...]:
+    names = tuple(r["path"] for r in entry["retirement_evidence"].get("fifos", []))
+    if any(not n.startswith(".scratch/") or not n.endswith(
+            "/test_metadata_rejects_fifo_wit0/mu/tools/executors/executor_common.py") for n in names):
+        raise Hold("Unrecognized FIFO owner; only captured idle pytest evidence is supported")
+    return names
+
+
+def retirement_state(entry: dict) -> dict:
+    target = Path(entry["path"])
+    inspect_identity(entry["source_identity"], retirement=True)
+    clean_state(target, allow_wip=True)
+    before_index = git_entries(target)
+    state = dict(head=line(git(target, "rev-parse", "HEAD")), index=before_index,
+        index_sha256=file_hash(Path(entry["source_identity"]["git_dir"]) / "index"),
+        content=tree_manifest(target, allowed_fifos=retirement_fifos(entry)))
+    if before_index != git_entries(target):
+        raise Hold("Retirement index changed during observation")
+    return state
+
+
+def inspect_retirement(repo: Path, entry: dict) -> dict:
+    try:
+        from .workingrcx_fleet_census import retirement_observation
+        from .worktree_lifecycle import retirement_owners
+    except ImportError:
+        from workingrcx_fleet_census import retirement_observation
+        from worktree_lifecycle import retirement_owners
+    target, ident = Path(entry["path"]), entry["source_identity"]
+    common = repo / ".git"
+    if target == repo or repo.is_relative_to(target) or os.path.lexists(retirement_record_path(common, target)):
+        raise Hold("Active or previously retired source cannot acquire another retirement")
+    if ident["common_dir"] == str(common) and ident.get("branch") in {
+            "refs/heads/dev", "refs/heads/main", "refs/heads/master"}:
+        raise Hold("Base checkout remains protected")
+    observed = retirement_observation(str(target), str(repo.parent), str(common))
+    if observed != entry["retirement_evidence"] or observed.get("status") != "OBSERVED":
+        raise Hold("Retirement original-owner evidence changed")
+    state = retirement_state(entry)
+    native_idle(target, state["content"], reconcile_r1=True, retirement_evidence=observed)
+    process_idle(ident)
+    state["native_owners"] = retirement_owners(common, ident, observed.get("preserved_operation"))
+    for record in observed["journals"]:
+        journal = json.loads(read_plain(Path(record["path"])))
+        if journal.get("owner") != "commit_executor:primary_worktree_sync":
+            raise Hold("Unknown original sync journal owner")
+        if journal["state"] == "PREPARED":
+            # Observed owner b2f8568... never published a stash or started sync.
+            # Preserve its journal and source, with a fresh external mapping;
+            # never rewrite the journal or replay the original sync claim.
+            wi = journal.get("worktree_identity", {})
+            fi = ident["filesystem_identity"]
+            if (journal.get("stash_oid") is not None or journal.get("old_head") != ident["HEAD"]
+                    or wi.get("path") != str(target)
+                    or any(wi.get(k) != fi[k] for k in ("device", "inode"))
+                    or [h.get("state") for h in journal.get("state_history", [])] != ["PREPARED"]
+                    or not journal.get("stash_marker")
+                    or journal["stash_marker"].encode() in git(target, "stash", "list", "--format=%s")):
+                raise Hold("Pending journal requires its exact original recovery owner")
+        elif journal["state"] not in {"HELD", "RECOVERED"}:
+            raise Hold("Pending journal requires its original recovery owner")
+    return state
+
+
+def git_input(root: Path, payload: bytes, *args: str) -> bytes:
+    proc = subprocess.run(["git", "-C", str(root), *args], input=payload,
+                          capture_output=True, timeout=120)
+    if proc.returncode:
+        raise Hold(f"Independent Git {args[0]} failed (exit {proc.returncode})")
+    return proc.stdout
+
+
+def preserve_retirement(repo: Path, entry: dict, directory: Path, state: dict) -> dict:
+    """Produce a standalone object/index recovery without changing the source."""
+    target, admin = Path(entry["path"]), Path(entry["source_identity"]["git_dir"])
+    write_new(directory / "admitted-state.json", encoded(state))
+    write_new(directory / "before.json", encoded(state["content"]))
+    preserve_archive(target, directory / "before.tar", state["content"], allowed_fifos=retirement_fifos(entry))
+    admin_state = tree_manifest(admin)
+    write_new(directory / "gitdir-before.json", encoded(admin_state))
+    preserve_archive(admin, directory / "gitdir-before.tar", admin_state)
+    preserve_index_blobs(target, directory, state)
+    held_stashes = sorted({j["stash_oid"] for j in entry["retirement_evidence"]["journals"] if j.get("stash_oid")})
+    git(target, "bundle", "create", str(directory / "history.bundle"), "--all", "--reflog", "HEAD", *held_stashes)
+    with (directory / "history.bundle").open("rb") as stream:
+        os.fsync(stream.fileno())
+    history = git(target, "rev-list", "--all", "--reflog", "HEAD").splitlines()
+    refs = git(target, "for-each-ref", "--format=%(objectname) %(refname)")
+    write_new(directory / "refs-before.txt", refs)
+    recovery = directory / "recovery.git"
+    new_directory(recovery)
+    git(recovery, "init", "--bare")
+    # Verify in an EMPTY repository: checking against the original object store
+    # would not establish independent recoverability or detect prerequisites.
+    git(recovery, "bundle", "verify", str(directory / "history.bundle"))
+    git(recovery, "bundle", "unbundle", str(directory / "history.bundle"))
+    for oid in held_stashes:
+        git(recovery, "cat-file", "-e", oid + "^{commit}")
+    for record in refs.splitlines():
+        oid, ref = record.split(b" ", 1)
+        git(recovery, "update-ref", os.fsdecode(ref), oid.decode())
+    git(recovery, "update-ref", "--no-deref", "HEAD", state["head"])
+    with tarfile.open(directory / "index-blobs.tar") as archive:
+        for member in archive:
+            with archive.extractfile(member) as stream:
+                if line(git_input(recovery, stream.read(), "hash-object", "-w", "--stdin")) != member.name:
+                    raise Hold("Independent staged blob differs from original index")
+    for file in [admin / "index", *sorted(admin.glob("sharedindex.*"))]:
+        write_new(recovery / file.name, read_plain(file))
+    checked = git_input(recovery, b"\n".join(history) + b"\n", "cat-file", "--batch-check=%(objectname) %(objecttype)")
+    if checked.splitlines() != [oid + b" commit" for oid in history] or git_entries(recovery) != state["index"]:
+        raise Hold("Independent history/index recovery is incomplete")
+    git(recovery, "fsck", "--full", "--strict")
+    journals = []
+    for number, record in enumerate(entry["retirement_evidence"]["journals"]):
+        source = Path(record["path"]).parent
+        manifest = tree_manifest(source)
+        stem = f"journal-{number}"
+        write_new(directory / (stem + ".json"), encoded(manifest))
+        preserve_archive(source, directory / (stem + ".tar"), manifest)
+        journals.append(dict(original=record, archive=stem + ".tar", manifest=stem + ".json"))
+    inherited = entry["retirement_evidence"].get("preserved_operation")
+    if inherited:
+        parent = Path(inherited["receipt_path"]).parent
+        for name, expected in inherited["preservation_sha256"].items():
+            if Path(name).name != name or file_hash(parent / name) != expected:
+                raise Hold("Original spent operation preservation changed")
+        # The historical receipts stay where their original owners published
+        # them. Bind them rather than changing a MOVED claim to RETIRED.
+        write_new(directory / "inherited-owner.json", encoded(inherited))
+    proof = dict(source_identity=entry["source_identity"], head=state["head"],
+        index=state["index"], raw_index_sha256=state["index_sha256"], journals=journals,
+        history_commits=[line(v) for v in history], recovery_manifest=tree_manifest(recovery),
+        inherited_owner=inherited, landing_owner=entry.get("landing_owner"),
+        current_landing_review=entry.get("current_landing_review"),
+        native_owners=state["native_owners"], prior_owners=entry["retirement_evidence"].get("prior_owners", []))
+    write_new(directory / "recovery.json", encoded(proof))
+    sync_directory(directory)
+    return {p.name: file_hash(p) for p in sorted(directory.iterdir()) if p.is_file()}
+
+
+def verify_retirement_preservation(directory: Path, entry: dict, hashes: dict) -> dict:
+    required = {"admitted-state.json", "before.json", "before.tar", "gitdir-before.json",
+                "gitdir-before.tar", "index-blobs.json", "index-blobs.tar", "history.bundle",
+                "recovery.json", "refs-before.txt"}
+    if not required <= hashes.keys():
+        raise Hold("Retirement lacks full independent recovery evidence")
+    for name, expected in hashes.items():
+        if Path(name).name != name or file_hash(directory / name) != expected:
+            raise Hold("Retirement preservation bytes changed")
+    state = json.loads(read_plain(directory / "admitted-state.json"))
+    proof = json.loads(read_plain(directory / "recovery.json"))
+    if (proof["source_identity"] != entry["source_identity"] or proof["head"] != state["head"]
+            or proof["head"] != entry["source_identity"]["HEAD"] or proof["index"] != state["index"]
+            or proof["landing_owner"] != entry.get("landing_owner")
+            or proof["current_landing_review"] != entry.get("current_landing_review")):
+        raise Hold("Retirement source/index/owner proof changed")
+    for stem in ("before", "gitdir-before", "index-blobs"):
+        manifest = json.loads(read_plain(directory / (stem + ".json")))
+        verify_archive(directory / (stem + ".tar"), manifest)
+        if stem == "before" and manifest != state["content"]:
+            raise Hold("Retirement admitted content differs from archive")
+    recovery = directory / "recovery.git"
+    if (tree_manifest(recovery) != proof["recovery_manifest"]
+            or file_hash(recovery / "index") != proof["raw_index_sha256"]
+            or git_entries(recovery) != state["index"]
+            or os.path.lexists(recovery / "objects/info/alternates")):
+        raise Hold("Independent retirement recovery/index changed")
+    git(recovery, "fsck", "--full", "--strict")
+    for record in proof["journals"]:
+        verify_archive(directory / record["archive"], json.loads(read_plain(directory / record["manifest"])))
+        if file_hash(Path(record["original"]["path"])) != record["original"]["sha256"]:
+            raise Hold("Original journal changed; retained owner needs reconciliation")
+    inherited = proof["inherited_owner"]
+    if inherited:
+        if file_hash(Path(inherited["receipt_path"])) != inherited["sha256"]:
+            raise Hold("Original spent receipt changed")
+        for name, expected in inherited["preservation_sha256"].items():
+            if file_hash(Path(inherited["receipt_path"]).parent / name) != expected:
+                raise Hold("Inherited source evidence changed")
+        if inherited.get("lifecycle_completion") and file_hash(Path(inherited["lifecycle_completion"])) != inherited["lifecycle_completion_sha256"]:
+            raise Hold("Original lifecycle completion changed")
+        try:
+            from .commit_executor import verify_terminal_mutation_receipt
+        except ImportError:
+            from commit_executor import verify_terminal_mutation_receipt
+        original = Path(inherited["receipt_path"])
+        binding = json.loads(read_plain(original.parent / "terminal-identity.json"))
+        previous = json.loads(read_plain(original))
+        primary = Path(entry["source_identity"]["common_dir"]).parent
+        if (binding.get("worktree_identity", {}).get("path") != inherited["source_identity"]["path"]
+                or binding.get("expected_head") != previous.get("prepared_head")
+                or not verify_terminal_mutation_receipt(primary, binding, previous["boundary"])):
+            raise Hold("Original archive has no exact consumed native terminal claim")
+    for owner in proof["native_owners"]:
+        for name, expected in owner["files"].items():
+            if file_hash(Path(owner["record"]) / name) != expected:
+                raise Hold("Original native lifecycle claims or budgets changed")
+    if proof["prior_owners"] != entry["retirement_evidence"].get("prior_owners", []):
+        raise Hold("Prior useful-work owner continuity changed")
+    for previous in proof["prior_owners"]:
+        receipt = Path(previous["receipt_path"])
+        if file_hash(receipt) != previous["sha256"]:
+            raise Hold("Prior spent outcome changed")
+        for name, expected in previous["preservation_sha256"].items():
+            if Path(name).name != name or file_hash(receipt.parent / name) != expected:
+                raise Hold("Prior independently preserved useful work changed")
+    return state
+
+
+def registration_paths(repo: Path) -> set[str]:
+    try:
+        from .workingrcx_fleet_census import _worktrees
+    except ImportError:
+        from workingrcx_fleet_census import _worktrees
+    records, errors = _worktrees(git(repo, "worktree", "list", "--porcelain", "-z"))
+    if errors:
+        raise Hold("Registration enumeration is uncertain")
+    return {r["path"] for r in records}
+
+
+def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict:
+    target, destination = Path(entry["path"]), Path(entry["destination"])
+    outcome = dict(source_identity=entry["source_identity"], destination=str(destination),
+        owner=entry["owner"], landing_owner=entry.get("landing_owner"), status="HOLD", reason=None,
+        current_landing_review=entry.get("current_landing_review"),
+        inherited_landing_owners=entry.get("inherited_landing_owners", []), boundary=None, registration_retired=False)
+    started = False
+    try:
+        with preparation_lock(repo / ".git"):
+            state = inspect_retirement(repo, entry)
+            try:
+                from .workingrcx_fleet_census import useful_work
+            except ImportError:
+                from workingrcx_fleet_census import useful_work
+            if encoded(useful_work(str(target), entry["comparison_commit"], comparison_repo=str(repo), coverage=True)) != encoded(entry["useful_work"]):
+                raise Hold("Useful-work/index evidence changed since committed retirement plan")
+            if target.stat().st_dev != directory.stat().st_dev or os.path.lexists(destination):
+                raise Hold("Retirement destination is occupied or on another filesystem")
+            hashes = preserve_retirement(repo, entry, directory, state)
+            outcome["preservation_sha256"] = hashes
+            verify_retirement_preservation(directory, entry, hashes)
+            if inspect_retirement(repo, entry) != state:
+                raise Hold("Retirement source changed during independent recovery")
+        binding = boundary.bind_terminal_retirement_identity(repo, source_identity=entry["source_identity"],
+            preservation_directory=directory, preservation_sha256=hashes)
+        write_new(directory / "terminal-identity.json", encoded(binding))
+
+        def retire_once():
+            nonlocal started
+            verify_retirement_preservation(directory, entry, hashes)
+            if inspect_retirement(repo, entry) != state or os.path.lexists(destination):
+                raise Hold("Retirement source/destination changed under terminal lock")
+            if git(target, "for-each-ref", "--format=%(objectname) %(refname)") != read_plain(directory / "refs-before.txt"):
+                raise Hold("Retirement source refs/stashes changed during preservation")
+            before = registration_paths(repo)
+            linked = entry["action"] != "RETIRE_CLONE"
+            if (str(target) in before) != linked:
+                raise Hold("Retirement registration ownership changed")
+            write_new(directory / "retirement-started.json", encoded(dict(target_identity=binding,
+                registrations_before=sorted(before), state="STARTED_OUTCOME_UNKNOWN")))
+            started = True
+            # Rename retains every source byte, including the original .git
+            # pointer. Git then removes only this exact now-absent registration;
+            # no force, prune, branch deletion or dirty-checkout rewrite.
+            os.rename(target, destination)
+            sync_directory(target.parent)
+            sync_directory(destination.parent)
+            if tree_manifest(destination, allowed_fifos=retirement_fifos(entry)) != state["content"]:
+                raise Hold("Retirement destination differs before registration removal")
+            if linked:
+                if tree_manifest(Path(entry["source_identity"]["git_dir"])) != json.loads(read_plain(directory / "gitdir-before.json")):
+                    raise Hold("Retirement index/admin changed before registration removal")
+                git(repo, "worktree", "remove", str(target))
+                if git(repo, "for-each-ref", "--format=%(objectname) %(refname)") != read_plain(directory / "refs-before.txt"):
+                    raise Hold("Original branch/stash references changed during retirement")
+            after = registration_paths(repo)
+            if after != before - ({str(target)} if linked else set()) or os.path.lexists(target):
+                raise Hold("Exact obsolete registration retirement was not verified")
+            if linked and os.path.lexists(entry["source_identity"]["git_dir"]):
+                raise Hold("Obsolete registration admin directory remains")
+            verify_retirement_preservation(directory, entry, hashes)
+            result = dict(destination=str(destination), source_absent=True,
+                registration_retired=linked, registrations_before=sorted(before), registrations_after=sorted(after),
+                manifest_sha256=digest(encoded(state["content"])))
+            write_new(retirement_record_path(repo / ".git", target), encoded(dict(
+                source_identity=entry["source_identity"], directory=str(directory), entry=entry,
+                preservation_sha256=hashes, result=result)))
+            return result
+
+        outcome["boundary"] = boundary.execute_terminal_retirement_once(repo, binding,
+            terminal_action=retire_once, log=lambda _: None)
+        if outcome["boundary"].get("action_succeeded"):
+            outcome.update(status="RETIRED", registration_retired=entry["action"] != "RETIRE_CLONE")
+        else:
+            outcome.update(status="INCOMPLETE" if started else "HOLD",
+                reason=outcome["boundary"].get("action_error") or outcome["boundary"].get("reason"))
+    except (Hold, OSError, ValueError, tarfile.TarError, subprocess.SubprocessError) as exc:
+        outcome.update(status="INCOMPLETE" if started else "HOLD", reason=str(exc))
+    if outcome["status"] != "RETIRED":
+        outcome["next_action"] = "Retain exact original and recovery owners; inspect this consumed operation before fresh authority. Never replay."
+    write_new(directory / "outcome.json", encoded(outcome))
+    return outcome
+
+
+def verify_retirement_record(repo: Path, source: Path) -> dict:
+    record = json.loads(read_plain(retirement_record_path(repo / ".git", source)))
+    directory, entry = Path(record["directory"]), record["entry"]
+    if entry["path"] != str(source) or entry["source_identity"] != record["source_identity"]:
+        raise Hold("Retirement mapping source changed")
+    state = verify_retirement_preservation(directory, entry, record["preservation_sha256"])
+    outcome = json.loads(read_plain(directory / "outcome.json"))
+    binding = json.loads(read_plain(directory / "terminal-identity.json"))
+    try:
+        from .commit_executor import verify_terminal_mutation_receipt
+    except ImportError:
+        from commit_executor import verify_terminal_mutation_receipt
+    if (binding.get("retirement") != dict(source_identity=entry["source_identity"],
+            preservation_directory=str(directory), preservation_sha256=record["preservation_sha256"])
+            or not verify_terminal_mutation_receipt(repo, binding, outcome["boundary"])):
+        raise Hold("Retirement lost its exact consumed terminal authority")
+    if (outcome["status"] != "RETIRED" or outcome.get("boundary", {}).get("action_succeeded") is not True
+            or outcome["boundary"].get("action_outcome") != record["result"]
+            or outcome["preservation_sha256"] != record["preservation_sha256"]
+            or os.path.lexists(source) or str(source) in registration_paths(repo)
+            or tree_manifest(Path(entry["destination"]), allowed_fifos=retirement_fifos(entry)) != state["content"]):
+        raise Hold("Retired source/destination/registration proof changed")
+    return record
 
 
 def residual_paths(wave_id: str) -> tuple[Path, Path, Path]:
@@ -1551,6 +1911,11 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
     except ImportError:
         import workingrcx_fleet_classification as classifier
     classifier._validate_inventory(census)
+    retirement = data.get("retirement") is True
+    if retirement and str(census["fleet_root"]) == classifier.LANDED_FLEET and (
+            wave_id != classifier.RETIREMENT_WAVE_ID
+            or data.get("comparison_commit") != classifier.RETIREMENT_PREDECESSOR):
+        raise Hold("Retirement requires the exact locked predecessor and wave")
     if fresh_wave:
         useful_path = repo / f"reports/control_plane/{wave_id}_useful_work.json"
         if json.loads(read_plain(useful_path)) != classifier.useful_work_report(data, sha256):
@@ -1630,19 +1995,57 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
                     not isinstance(useful, dict) or useful.get("status") == "UNKNOWN"
                     or (useful.get("status") != "COVERED" and not row.get("landing_owner"))):
                 raise Hold("Fresh residual lacks exact useful-work coverage or native landing owner")
+        if retirement:
+            entry["retirement_evidence"] = source.get("retirement_evidence")
+            entry["inherited_landing_owners"] = row.get("inherited_landing_owners", [])
+            entry["current_landing_review"] = row.get("current_landing_review")
         if action != "UNTOUCHED_HOLD":
-            if (action not in RESIDUAL_ACTIONS or path.parent != root
-                    or not path.name.casefold().startswith("workingrcx")
+            archive = retirement and action == "RETIRE_ARCHIVE"
+            native_archive = (path.is_relative_to(common / "rcx_worktree_lifecycle")
+                and len(path.relative_to(common / "rcx_worktree_lifecycle").parts) == 3
+                and path.parent.name in {"attempt-1", "attempt-2", "attempt-3"} and path.name == "worktree"
+                and bool((entry.get("retirement_evidence", {}).get("preserved_operation") or {}).get("lifecycle_completion")))
+            exact_archive = (path.is_relative_to(root) and len(path.relative_to(root).parts) == 3
+                and path.relative_to(root).parts[0].startswith("fleet-apply-preserved-")
+                and path.parent.name.isdigit() and path.name == "worktree")
+            if (action not in RESIDUAL_ACTIONS | (RETIREMENT_ACTIONS if retirement else set())
+                    or (not archive and (path.parent != root or not path.name.casefold().startswith("workingrcx")))
+                    or (archive and not (exact_archive or native_archive))
                     or source.get("availability_status") != "present"
                     or source.get("entry_kind") != "directory" or source.get("errors")
                     or not isinstance(ident["filesystem_identity"], dict)
-                    or str(path) in data["policy"]["protected_paths"]):
+                    or (not native_archive and any(path == Path(p) or path.is_relative_to(p) for p in data["policy"]["protected_paths"]))):
                 raise Hold("Residual candidate is outside the exact bounded policy")
             if action == "PRESERVE_BUS_SHELL":
                 if (source.get("bus_only_shell") is not True or source["registered_worktrees"]
                         or source["repository_kind"] != "non_repository"):
                     raise Hold("Residual shell has ambiguous repository ownership")
                 entry["shell_entries"] = source["shell_entries"]
+            elif action in RETIREMENT_ACTIONS:
+                evidence = entry["retirement_evidence"]
+                branch = ident["branch"]
+                detached = source["git"].get("branch_status") == "detached" and branch is None
+                expected_reg = dict(path=str(path), HEAD=ident["HEAD"])
+                expected_reg.update({"detached": True} if detached else {"branch": branch})
+                if (not isinstance(evidence, dict) or evidence.get("status") != "OBSERVED" or evidence.get("errors")
+                        or source["inspection_status"] != "ok" or not classifier._oid(ident["HEAD"])
+                        or (not detached and (source["git"].get("branch_status") != "symbolic"
+                            or not isinstance(branch, str) or not branch.startswith("refs/heads/")))
+                        or source["git"]["dirty_counts"]["unmerged"] != 0
+                        or not source.get("useful_work", {}).get("coverage_method")):
+                    raise Hold("Retirement source lacks exact ownership/coverage evidence")
+                if action == "RETIRE_CLONE":
+                    if (source["repository_kind"] != "standalone_repository"
+                            or ident["common_dir"] != str(path / ".git") or ident["git_dir"] != str(path / ".git")
+                            or source["registered_worktrees"] or source["registration_status"] != "not_registered"):
+                        raise Hold("Standalone retirement repository authority mismatch")
+                elif (source["repository_kind"] != "linked_worktree"
+                        or ident["common_dir"] != str(common) or Path(ident["git_dir"]).parent != common / "worktrees"
+                        or source["registered_worktrees"] != [expected_reg]
+                        or branch in {"refs/heads/dev", "refs/heads/main", "refs/heads/master"}
+                        or (archive and not evidence.get("preserved_operation"))):
+                    raise Hold("Retirement linked/archive authority mismatch")
+                retirement_fifos(entry)
             else:
                 if (source["repository_kind"] != "linked_worktree"
                         or ident["common_dir"] != str(common)
@@ -1668,6 +2071,7 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
         for index in indices:
             rows[index]["destination"] = str(operation_root / str(index) / "worktree")
     return dict(**({"orphan_owner_evidence": evidence_binding} if evidence_binding else {}),
+                **({"retirement": True} if retirement else {}),
                 schema_version=2, wave_id=wave_id, mutation_authorized=False,
                 classification_path=str(classification_path), classification_sha256=sha256,
                 census_path=str(census_path), census_sha256=digest(census_raw),
@@ -1699,6 +2103,8 @@ def require_residual_authority(repo: Path, plan: dict, commit: str, *, fetch: bo
              Path("mu/tools/observability/pipeline_agent_pager.py"))
     if plan["wave_id"] != RESIDUAL_WAVE_ID:
         paths += (Path(f"reports/control_plane/{plan['wave_id']}_useful_work.json"),)
+    if plan.get("retirement"):
+        paths += (Path("mu/tools/executors/worktree_lifecycle.py"),)
     if plan.get("orphan_owner_evidence"):
         evidence = plan["orphan_owner_evidence"]
         paths += (Path(evidence["path"]),)
@@ -1801,6 +2207,42 @@ def residual_operation(plan: dict, batch: int, operation_root: Path) -> dict:
     return matches[0]
 
 
+def retirement_evidence_report(repo: Path, plan: dict) -> dict:
+    classification = json.loads(read_plain(repo / plan["classification_path"]))
+    census = json.loads(read_plain(repo / plan["census_path"]))
+    bindings = {str(p): file_hash(repo / p) for p in (
+        TOOL_PATH, Path("mu/tools/executors/workingrcx_fleet_census.py"),
+        Path("mu/tools/executors/workingrcx_fleet_classification.py"),
+        Path("mu/tools/executors/commit_executor.py"), Path("mu/tools/executors/worktree_lifecycle.py"))}
+    root = Path(plan["fleet_root"])
+    return dict(schema_version=1, wave_id=plan["wave_id"], comparison_commit=plan["comparison_commit"],
+        mutation_authorized=False, observation_kind="native_retirement_bindings",
+        census_sha256=plan["census_sha256"], classification_sha256=plan["classification_sha256"],
+        plan_sha256=digest(encoded(plan)), implementation_sha256=bindings,
+        observed_counts=dict(entries=census["entry_count"],
+            direct=census["enumeration"]["fleet_root"]["matching_entries"],
+            registrations=census["enumeration"]["anchor_worktrees"]["records"],
+            outside_fleet=sum(bool(r["registered_worktrees"]) and not Path(r["path"]).is_relative_to(root) for r in census["entries"])),
+        action_counts=dict(Counter(r["action"] for r in plan["entries"])),
+        individual_holds=[dict(path=r["path"], reasons=r["reasons"], owner=r["owner"])
+                          for r in classification["entries"] if r["decision"] == "HOLD"],
+        observed_native_shapes=[dict(path=r["path"],
+            native_links=r["retirement_evidence"].get("native_links", []),
+            fifos=r["retirement_evidence"].get("fifos", []),
+            journals=[{k: j.get(k) for k in ("path", "sha256", "owner", "state", "transaction_id", "stash_oid")}
+                      for j in r["retirement_evidence"].get("journals", [])])
+            for r in plan["entries"] if r.get("retirement_evidence") and any(
+                r["retirement_evidence"].get(k) for k in ("native_links", "fifos", "journals"))],
+        operations=plan["operations"],
+        action_contract=["Fresh committed plan on separately synchronized PRIMARY",
+            "Exact identity/index/WIP/history/owner and independent empty-repository recovery",
+            "Source and preservation bound to one consumed terminal action under the shared lock",
+            "Exact rename followed by single absent-source Git worktree remove, without force or prune",
+            "Independent public verify; old receipts/journals/owners and budgets remain unchanged"],
+        foreground=dict(state="PENDING_LANDING_PRIMARY_SYNC_AND_PUBLIC_APPLY_VERIFY", executed_pairs=0),
+        useful_work_complete=False, fleet_complete=False)
+
+
 def prefix_directory_count(root: Path) -> int:
     return sum(p.name.casefold().startswith("workingrcx") and p.is_dir() and not p.is_symlink()
                for p in root.iterdir())
@@ -1825,6 +2267,7 @@ def apply_residual_plan(repo: Path, plan: dict, *, authority_commit: str,
         write_new(operation_root / "intent.json", encoded(intent))
         write_new(operation_root / "plan.json", encoded(plan))
         before_count = prefix_directory_count(Path(plan["fleet_root"]))
+        before_registrations = registration_paths(repo)
         write_new(operation_root / "before-count.json", encoded(dict(prefix_directories=before_count)))
         try:
             from . import commit_executor as boundary
@@ -1836,14 +2279,19 @@ def apply_residual_plan(repo: Path, plan: dict, *, authority_commit: str,
             directory = operation_root / str(index)
             new_directory(directory)
             write_new(directory / "intent.json", encoded(entry))
-            action = apply_shell if entry["action"] == "PRESERVE_BUS_SHELL" else apply_target
-            kwargs = {} if action is apply_shell else {"residual": True}
+            action = (apply_retirement if entry["action"] in RETIREMENT_ACTIONS else
+                      apply_shell if entry["action"] == "PRESERVE_BUS_SHELL" else apply_target)
+            kwargs = {"residual": True} if action is apply_target else {}
             outcomes.append(action(repo, entry, directory, boundary, **kwargs))
         summary = dict(wave_id=plan["wave_id"], operation=operation, outcomes=outcomes,
                        outcome_counts=dict(Counter(o["status"] for o in outcomes)),
                        before_prefix_directories=before_count,
                        after_prefix_directories=prefix_directory_count(Path(plan["fleet_root"])),
                        untouched_holds=plan["untouched_holds"], fleet_clean=False)
+        if plan.get("retirement"):
+            after_registrations = registration_paths(repo)
+            summary.update(before_registrations=sorted(before_registrations), after_registrations=sorted(after_registrations),
+                registration_delta=len(after_registrations) - len(before_registrations))
         write_new(operation_root / "summary.json", encoded(summary))
         return summary
 
@@ -1870,6 +2318,14 @@ def verify_residual_plan(repo: Path, plan: dict, *, authority_commit: str,
             outcome = json.loads(read_plain(directory / "outcome.json"))
             if outcome.get("source_identity") != entry["source_identity"] or outcome.get("owner") != entry["owner"]:
                 raise Hold("Residual per-target outcome identity changed")
+            if outcome["status"] == "RETIRED":
+                record = verify_retirement_record(repo, Path(entry["path"]))
+                if record["entry"] != entry or record["directory"] != str(directory):
+                    raise Hold("Retirement mapping differs from committed action")
+            elif entry["action"] in RETIREMENT_ACTIONS and outcome.get("preservation_sha256"):
+                # A failed or interrupted action retains independent evidence;
+                # verification reports it without finishing the consumed action.
+                verify_retirement_preservation(directory, entry, outcome["preservation_sha256"])
             if outcome["status"] in {"MOVED", "SYNCED_LOCAL_DEV"}:
                 target = Path(entry["path"])
                 destination = target if outcome["status"] == "SYNCED_LOCAL_DEV" else Path(entry["destination"])
@@ -1928,8 +2384,19 @@ def verify_residual_plan(repo: Path, plan: dict, *, authority_commit: str,
         counts = dict(Counter(o["status"] for o in verified))
         if counts != summary.get("outcome_counts"):
             raise Hold("Residual outcome counts changed")
+        if plan.get("retirement"):
+            before_regs, after_regs = set(summary["before_registrations"]), set(summary["after_registrations"])
+            removed = {o["source_identity"]["path"] for o in verified
+                       if o["status"] == "RETIRED" and o["registration_retired"]}
+            # An interrupted action can leave a partial delta, but it cannot be
+            # reported as a completely verified retirement cohort.
+            if all(o["status"] != "INCOMPLETE" for o in verified) and (
+                    after_regs != before_regs - removed or summary["registration_delta"] != -len(removed)):
+                raise Hold("Retirement registration delta disagrees with exact outcomes")
         return dict(operation=operation, verified_outcomes=counts,
-                    batch_complete=all(o["status"] in {"MOVED", "SYNCED_LOCAL_DEV"} for o in verified),
+                    batch_complete=all(o["status"] in {"MOVED", "SYNCED_LOCAL_DEV", "RETIRED"} for o in verified),
+                    **({"actual_registrations": sorted(registration_paths(repo)),
+                        "recorded_registration_delta": summary["registration_delta"]} if plan.get("retirement") else {}),
                     actual_prefix_directories=prefix_directory_count(Path(plan["fleet_root"])),
                     recorded_before=summary["before_prefix_directories"],
                     recorded_after=summary["after_prefix_directories"], fleet_clean=False)
@@ -2193,10 +2660,14 @@ def main(argv: list[str] | None = None) -> int:
                                 batch=args.batch, operation_root=args.operation_root)
                 print(json.dumps(result, sort_keys=True))
                 counts = result.get("outcome_counts", result.get("verified_outcomes", {}))
-                return 3 if any(k not in {"MOVED", "SYNCED_LOCAL_DEV"} for k in counts) else 0
+                return 3 if any(k not in {"MOVED", "SYNCED_LOCAL_DEV", "RETIRED"} for k in counts) else 0
             if any(v is not None for v in (args.batch, args.authority_commit, args.operation_root)):
                 raise Hold("Residual batch authority requires explicit --apply or --verify")
             write_new(args.plan_output, encoded(plan), verify_existing=True)
+            if plan.get("retirement"):
+                report = retirement_evidence_report(repo, plan)
+                write_new(repo / f"reports/control_plane/{wave_id}_retirement_evidence.json",
+                          encoded(report), verify_existing=True)
             print(json.dumps({k: plan[k] for k in ("entry_count", "conditional_candidates", "untouched_holds")}
                              | {"bounded_operations": len(plan["operations"])}))
             return 0
