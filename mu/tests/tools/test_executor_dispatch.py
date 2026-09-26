@@ -24,7 +24,7 @@ from mu.tests.tools.test_phase_b_executor import (
     PrivateReviewCrash, private_review_checkpoint, real_pre_review_package,
     reentry_private_bridge_lane,
 )
-from mu.tests.tools.test_worktree_lifecycle import native_lane
+from mu.tests.tools.test_worktree_lifecycle import native_base, native_lane
 
 # Load executor_common first (dependency)
 common_mod = load_module(
@@ -57,8 +57,89 @@ recovery_mod = load_module(
 )
 
 
+@pytest.fixture(autouse=True)
+def isolated_pager_transports(monkeypatch):
+    """Keep real pager bookkeeping without contacting provider transports."""
+    from mu.tools.observability import pipeline_agent_pager as pager
+
+    def unavailable(_repo_root, _event, _context, *, timeout_s):
+        return {"acknowledged": False, "error": "Executor test pager transport unavailable"}
+
+    # These executor cases emit real events. A failed delivery stays pending,
+    # so every later event retries it; the subprocess-level provider guard
+    # alone still launches a Node/CLI process for each attempt. Isolate only
+    # the external transports, retaining routing, persistence and retry state.
+    monkeypatch.setattr(pager, "_dispatch_codex", unavailable)  # ANTICHEAT_OK: external pager transport boundary
+    monkeypatch.setattr(pager, "_dispatch_claude", unavailable)  # ANTICHEAT_OK: external pager transport boundary
+    # executor_common resolves this public name lazily. Restore any previous
+    # binding on teardown so other modules keep their own transport coverage.
+    monkeypatch.setitem(sys.modules, "pipeline_agent_pager", pager)
+    return pager
+
+
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
 _PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
+
+
+@pytest.mark.parametrize("route,targets", [
+    ("codex", {"codex"}), ("claude", {"claude"}), ("both", {"codex", "claude"}),
+])
+def test_isolated_pager_preserves_pending_events_and_retries(
+    tmp_path, isolated_pager_transports, route, targets,
+):
+    bus = ".agent_bus-dispatch-test"
+    event = dict(event_type="commit_started", wave_id="isolated-dispatch",
+                 task_id="[ISOLATED-DISPATCH]", phase="commit_executor", state="started",
+                 transition_key="started", route=route)
+    with patch.object(subprocess, "Popen", side_effect=AssertionError("Pager spawned a provider")) as spawn:
+        first = common_mod.emit_pipeline_agent_event(tmp_path, bus_dir=bus, **event)
+        duplicate = common_mod.emit_pipeline_agent_event(tmp_path, bus_dir=bus, **event)
+        last = common_mod.emit_pipeline_agent_event(tmp_path, bus_dir=bus,
+            **{**event, "event_type": "commit_failed", "state": "error", "transition_key": "failed"})
+        spawn.assert_not_called()
+
+    assert first["enabled"] and first["route"] == route
+    assert duplicate["event_id"] == first["event_id"] != last["event_id"]
+    assert {attempt["target"] for attempt in last["attempted"]} == targets
+    assert len(last["attempted"]) == 2 * len(targets)
+    assert all(not attempt["acknowledged"] for attempt in last["attempted"])
+    observability = tmp_path / bus / "observability"
+    events = [json.loads(line) for line in
+              (observability / "pipeline_agent_events.jsonl").read_text().splitlines()]
+    assert [item["event_id"] for item in events] == [first["event_id"], last["event_id"]]
+    assert [item["event_type"] for item in events] == ["commit_started", "commit_failed"]
+    state = json.loads((observability / "pipeline_agent_pager_state.json").read_text())
+    for event_id, count in ((first["event_id"], 3), (last["event_id"], 1)):
+        entry = state["events"][event_id]
+        assert set(entry["pending_targets"]) == targets
+        assert entry["delivered_targets"] == entry["skipped_targets"] == {}
+        assert {target: attempt["count"] for target, attempt in entry["attempts"].items()} == {
+            target: count for target in targets
+        }
+        assert all(attempt["last_error"] == "Executor test pager transport unavailable"
+                   for attempt in entry["attempts"].values())
+    assert not (observability / "pipeline_agent_delivery_receipts.jsonl").exists()
+    assert not (observability / "pipeline_agent_skip_receipts.jsonl").exists()
+    assert not (tmp_path / ".agent_bus").exists()
+
+
+def test_isolated_pager_keeps_notify_only_delivery(tmp_path, isolated_pager_transports):
+    with patch.object(subprocess, "Popen", side_effect=AssertionError("Pager spawned a provider")) as spawn:
+        result = common_mod.emit_pipeline_agent_event(tmp_path, bus_dir=".agent_bus", event_type="commit_started",
+            wave_id="isolated-dispatch", task_id="[ISOLATED-DISPATCH]", phase="commit_executor",
+            state="started", transition_key="started", route="notify-only")
+        spawn.assert_not_called()
+    assert result["route"] == "notify-only"
+    assert len(result["attempted"]) == 1 and result["attempted"][0]["acknowledged"]
+    observability = tmp_path / ".agent_bus/observability"
+    state = json.loads((observability / "pipeline_agent_pager_state.json").read_text())
+    entry = state["events"][result["event_id"]]
+    assert entry["pending_targets"] == []
+    assert set(entry["delivered_targets"]) == {"notify-only"}
+    receipts = [json.loads(line) for line in
+                (observability / "pipeline_agent_delivery_receipts.jsonl").read_text().splitlines()]
+    assert len(receipts) == 1 and receipts[0]["event_id"] == result["event_id"]
+    assert receipts[0]["target"] == "notify-only"
 
 
 def test_phase_b_surface_chained_commit_hands_completion_to_surviving_owner(native_lane, monkeypatch):
@@ -8289,6 +8370,7 @@ class TestCommitContinuationAndBotFreshness:
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
+        merged_sha = "d" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {"steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"]}
@@ -8307,6 +8389,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=f"{head_sha}\n")
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert result["remote_pr_merged"] is True
+                return completed(cmd, stdout=f"{merged_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -8398,7 +8483,7 @@ class TestCommitContinuationAndBotFreshness:
 
         assert post_commit["pr_number"] == "673"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
-        assert "merge_sha" in post_commit
+        assert post_commit["merge_sha"] == merged_sha
         assert post_commit["pr_lifecycle"]["state"] == "MERGED"
         assert post_commit["pr_lifecycle"]["head"] == head_sha
         assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
@@ -8483,6 +8568,7 @@ class TestCommitContinuationAndBotFreshness:
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
+        merged_sha = "d" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
@@ -8516,6 +8602,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=f"{head_sha}\n")
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert result["remote_pr_merged"] is True
+                return completed(cmd, stdout=f"{merged_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -8610,7 +8699,7 @@ class TestCommitContinuationAndBotFreshness:
         )
 
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
-        assert "merge_sha" in post_commit
+        assert post_commit["merge_sha"] == merged_sha
         assert post_commit["pr_lifecycle"]["state"] == "MERGED"
         assert post_commit["pr_lifecycle"]["head"] == head_sha
         assert post_commit["pr_lifecycle"]["common_dir"] == str(isolated_pr_lifecycle.resolve())
@@ -8862,6 +8951,7 @@ class TestCommitContinuationAndBotFreshness:
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
+        merged_sha = "d" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
@@ -8903,6 +8993,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=f"{head_sha}\n")
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert result["remote_pr_merged"] is True
+                return completed(cmd, stdout=f"{merged_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -8992,6 +9085,7 @@ class TestCommitContinuationAndBotFreshness:
         )
 
         assert post_commit["pr_number"] == "673"
+        assert post_commit["merge_sha"] == merged_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 1
         assert post_commit["pr_lifecycle"]["state"] == "MERGED"
@@ -9006,6 +9100,7 @@ class TestCommitContinuationAndBotFreshness:
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
+        merged_sha = "d" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
@@ -9047,6 +9142,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=f"{head_sha}\n")
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert result["remote_pr_merged"] is True
+                return completed(cmd, stdout=f"{merged_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -9143,6 +9241,7 @@ class TestCommitContinuationAndBotFreshness:
         )
 
         assert post_commit["pr_number"] == "673"
+        assert post_commit["merge_sha"] == merged_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 1
         assert post_commit["pr_lifecycle"]["state"] == "MERGED"
@@ -9157,6 +9256,7 @@ class TestCommitContinuationAndBotFreshness:
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
+        merged_sha = "d" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
@@ -9198,6 +9298,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=f"{head_sha}\n")
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert result["remote_pr_merged"] is True
+                return completed(cmd, stdout=f"{merged_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -9278,6 +9381,7 @@ class TestCommitContinuationAndBotFreshness:
         )
 
         assert post_commit["pr_number"] == "673"
+        assert post_commit["merge_sha"] == merged_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 0
         assert post_commit["pr_lifecycle"]["state"] == "MERGED"
@@ -9292,6 +9396,7 @@ class TestCommitContinuationAndBotFreshness:
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
+        merged_sha = "d" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
@@ -9333,6 +9438,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=f"{head_sha}\n")
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert result["remote_pr_merged"] is True
+                return completed(cmd, stdout=f"{merged_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -9450,6 +9558,7 @@ class TestCommitContinuationAndBotFreshness:
         )
 
         assert post_commit["pr_number"] == "673"
+        assert post_commit["merge_sha"] == merged_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 1
         assert post_commit["pr_lifecycle"]["state"] == "MERGED"
@@ -9464,6 +9573,7 @@ class TestCommitContinuationAndBotFreshness:
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
+        merged_sha = "d" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
@@ -9504,6 +9614,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=f"{head_sha}\n")
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert result["remote_pr_merged"] is True
+                return completed(cmd, stdout=f"{merged_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -9589,6 +9702,7 @@ class TestCommitContinuationAndBotFreshness:
         )
 
         assert post_commit["pr_number"] == "673"
+        assert post_commit["merge_sha"] == merged_sha
         assert "wait_ci" in post_commit["steps_completed"]
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert required_checks_calls["count"] == 3
@@ -9680,6 +9794,7 @@ class TestCommitContinuationAndBotFreshness:
         self, tmp_path, monkeypatch, isolated_pr_lifecycle,
     ):
         head_sha = "a" * 40
+        merged_sha = "d" * 40
         repo = tmp_path
         handoff = _make_new_handoff()
         result = {
@@ -9722,6 +9837,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=f"{head_sha}\n")
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert result["remote_pr_merged"] is True
+                return completed(cmd, stdout=f"{merged_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return completed(cmd, stdout="dev\n")
             if cmd[:4] == ["git", "remote", "get-url", "origin"]:
@@ -9811,6 +9929,7 @@ class TestCommitContinuationAndBotFreshness:
         )
 
         assert post_commit["pr_number"] == "673"
+        assert post_commit["merge_sha"] == merged_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert comment_calls == []
         assert post_commit["pr_lifecycle"]["state"] == "MERGED"
@@ -9925,7 +10044,7 @@ class TestCommitContinuationAndBotFreshness:
         merge_attempts = {"count": 0}
         ci_watch_calls = []
         auto_resolve_calls = []
-        head_reads = iter([f"{head_sha}\n", f"{resolved_head_sha}\n", f"{resolved_head_sha}\n", f"{merge_sha}\n"])
+        head_reads = iter([f"{head_sha}\n", f"{resolved_head_sha}\n", f"{resolved_head_sha}\n"])
 
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
@@ -9936,6 +10055,10 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=f"{isolated_pr_lifecycle}\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=next(head_reads))
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert merge_attempts["count"] == 2
+                assert result["remote_pr_merged"] is True
+                return completed(cmd, stdout=f"{merge_sha}\n")
             if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
                 ci_watch_calls.append(cmd)
                 return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
@@ -10005,6 +10128,7 @@ class TestCommitContinuationAndBotFreshness:
         assert auto_resolve_calls == [(repo, "673", "dev", "jabramsja/test-wave-id", "test-wave-id")]
         assert len(ci_watch_calls) == 6
         assert merge_attempts["count"] == 2
+        assert list(head_reads) == []
         assert post_commit["merge_sha"] == merge_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert continuation_path.exists() is False
@@ -10029,6 +10153,7 @@ class TestCommitContinuationAndBotFreshness:
         repo.mkdir()
         dev_worktree = tmp_path / "dev-worktree"
         dev_worktree.mkdir()
+        base_head_sha = "3" * 40
         merged_sha = "4" * 40
         handoff = _make_new_handoff()
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
@@ -10054,8 +10179,10 @@ class TestCommitContinuationAndBotFreshness:
         }
         merge_cwds = []
         fetch_cwds = []
+        origin_dev_rev_parse_calls = []
         merge_cmds = []
         package_refresh_calls = []
+        sync_primary = MagicMock(wraps=commit_mod._sync_primary_worktree_to_base)  # ANTICHEAT_OK: observe landed-source handoff without replacing preservation behavior
 
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
@@ -10065,8 +10192,14 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 if cwd == dev_worktree:
-                    return completed(cmd, stdout=f"{merged_sha}\n")
+                    return completed(cmd, stdout=f"{base_head_sha}\n")
                 return completed(cmd, stdout=f"{head_sha}\n")
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert cwd == dev_worktree
+                assert merge_cwds == [repo.parent]
+                assert fetch_cwds == [dev_worktree]
+                origin_dev_rev_parse_calls.append((list(cmd), cwd))
+                return completed(cmd, stdout=f"{merged_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 # The linked dev worktree is on 'dev'; the feature worktree
                 # (repo) is on its own branch. _resolve_post_merge_verify_root's
@@ -10087,7 +10220,7 @@ class TestCommitContinuationAndBotFreshness:
                     f"HEAD {head_sha}\n"
                     "branch refs/heads/jabramsja/test-wave-id\n\n"
                     f"worktree {dev_worktree}\n"
-                    f"HEAD {merged_sha}\n"
+                    f"HEAD {base_head_sha}\n"
                     "branch refs/heads/dev\n\n"
                 )
                 return completed(cmd, stdout=stdout)
@@ -10134,7 +10267,7 @@ class TestCommitContinuationAndBotFreshness:
                 merge_cmds.append(list(cmd))
                 return completed(cmd)
             if cmd[:2] == ["git", "pull"]:
-                raise AssertionError("git pull must not be used in post-merge verify path; use git fetch + git merge --ff-only")
+                raise AssertionError("post-merge verification must leave checkout synchronization to the landed preservation transaction")
             if cmd[:2] == ["git", "status"]:
                 return completed(cmd)
             if cmd[:3] == ["git", "branch", "-D"]:
@@ -10148,6 +10281,7 @@ class TestCommitContinuationAndBotFreshness:
             raise AssertionError(f"unexpected command: {cmd} cwd={cwd}")
 
         monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod, "_sync_primary_worktree_to_base", sync_primary)
         monkeypatch.setattr(
             commit_mod,
             "_refresh_post_merge_package_for_next_open_queue",
@@ -10169,7 +10303,13 @@ class TestCommitContinuationAndBotFreshness:
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert merge_cwds == [repo.parent]
         assert fetch_cwds == [dev_worktree]
-        assert merge_cmds == [["git", "merge", "--ff-only", "origin/dev"]]
+        assert origin_dev_rev_parse_calls == [
+            (["git", "rev-parse", "origin/dev"], dev_worktree)
+        ]
+        assert merge_cmds == []
+        assert sync_primary.call_count == 1
+        assert sync_primary.call_args.args == (repo, "dev")
+        assert sync_primary.call_args.kwargs["source_authority_commit"] == merged_sha
         assert len(package_refresh_calls) == 1
         assert package_refresh_calls[0]["queue_commit_sha"] == merged_sha
         assert post_commit["pr_lifecycle"]["state"] == "MERGED"
@@ -10218,6 +10358,7 @@ class TestCommitContinuationAndBotFreshness:
         merge_cwds = []
         fetch_cwds = []
         origin_dev_rev_parse_calls = []
+        dirty_diff_calls = []
         package_refresh_calls = []
 
         def completed(cmd, stdout="", stderr=""):
@@ -10228,7 +10369,10 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=f"{head_sha}\n")
-            if cmd[:3] == ["git", "rev-parse", "origin/dev"]:
+            if cmd == ["git", "rev-parse", "origin/dev"]:
+                assert cwd == dev_worktree
+                assert merge_cwds == [repo.parent]
+                assert fetch_cwds == [dev_worktree]
                 origin_dev_rev_parse_calls.append((list(cmd), cwd))
                 return completed(cmd, stdout=f"{fetched_sha}\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
@@ -10290,8 +10434,12 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:2] == ["git", "fetch"]:
                 fetch_cwds.append(cwd)
                 return completed(cmd)
-            if cmd[:4] == ["git", "diff", "--name-only", "HEAD"]:
-                return completed(cmd, stdout="TASKS.md\n")
+            if cmd == ["git", "diff", "--name-only", "-z", "--cached"]:
+                dirty_diff_calls.append((list(cmd), cwd))
+                return completed(cmd)
+            if cmd == ["git", "diff", "--name-only", "-z"]:
+                dirty_diff_calls.append((list(cmd), cwd))
+                return completed(cmd, stdout="TASKS.md\0")
             if cmd[:4] == ["git", "ls-files", "--others", "--exclude-standard"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "status"]:
@@ -10299,7 +10447,7 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:3] == ["git", "merge", "--ff-only"]:
                 raise AssertionError("dirty linked verify root must not run git merge --ff-only")
             if cmd[:2] == ["git", "pull"]:
-                raise AssertionError("git pull must not be used in post-merge verify path; use git fetch + git merge --ff-only")
+                raise AssertionError("post-merge verification must leave checkout synchronization to the landed preservation transaction")
             if cmd[:3] == ["git", "branch", "-D"]:
                 # Step 16a: delete the merged feature branch from the dev worktree.
                 return completed(cmd)
@@ -10347,6 +10495,10 @@ class TestCommitContinuationAndBotFreshness:
         assert package_path.read_bytes() == original_package
         assert merge_cwds == [repo.parent]
         assert fetch_cwds == [dev_worktree]
+        assert dirty_diff_calls == [
+            (["git", "diff", "--name-only", "-z", "--cached"], dev_worktree),
+            (["git", "diff", "--name-only", "-z"], dev_worktree),
+        ]
         assert origin_dev_rev_parse_calls == [
             (["git", "rev-parse", "origin/dev"], dev_worktree)
         ]

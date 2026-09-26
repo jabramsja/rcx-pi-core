@@ -25,12 +25,22 @@ def fixture_identity(lane, kind):
     return f"native-{kind}-{suffix}"
 
 
+@pytest.fixture(scope="module")
+def native_base(tmp_path_factory):
+    # The serial recovery gate exercises every lifecycle case. Build only the
+    # common initial history once; each case still gets independent Git files,
+    # a private remote and a newly registered worktree/process identity.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        primary, _, _ = make_native_base(tmp_path_factory.mktemp("native-base"), monkeypatch)
+    return primary
+
+
 @pytest.fixture
-def native_lane(tmp_path, monkeypatch):
-    return make_native_lane(tmp_path, monkeypatch)
+def native_lane(tmp_path, monkeypatch, native_base):
+    return make_native_lane(tmp_path, monkeypatch, base=native_base)
 
 
-def make_native_lane(tmp_path, monkeypatch):
+def native_git(tmp_path, monkeypatch):
     root = tmp_path.resolve()
     root.mkdir(exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -51,26 +61,86 @@ def make_native_lane(tmp_path, monkeypatch):
     env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    primary, remote, lane = root / "WorkingRCX", root / "origin.git", root / "WorkingRCX-native"
-    primary.mkdir()
 
     def git(path, *args):
         return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
             "-C", str(path), *args], check=True, capture_output=True, env=env).stdout.decode().strip()
 
+    return git, env
+
+
+def make_native_base(tmp_path, monkeypatch):
+    root = tmp_path.resolve()
+    git, env = native_git(root, monkeypatch)
+    primary, remote = root / "WorkingRCX", root / "origin.git"
+    primary.mkdir()
     git(primary, "init", "-b", "dev")
     git(primary, "init", "--bare", str(remote))
     (primary / "tracked").write_bytes(b"native code\n")
-    (primary / ".gitignore").write_text(".agent_bus*/\n")
+    (primary / ".gitignore").write_text(".agent_bus*/\n.scratch/\n")
     git(primary, "add", ".")
     git(primary, "commit", "-m", "base")
     git(primary, "remote", "add", "origin", str(remote))
     git(primary, "push", "origin", "dev")
+    return primary, git, env
+
+
+def make_native_lane(tmp_path, monkeypatch, *, base=None):
+    root = tmp_path.resolve()
+    if base is None:
+        primary, git, env = make_native_base(root, monkeypatch)
+    else:
+        git, env = native_git(root, monkeypatch)
+        primary, remote = root / "WorkingRCX", root / "origin.git"
+        # Copy objects too: hard links or alternates would let a fixture's
+        # corruption/permission changes affect the template or another case.
+        shutil.copytree(base, primary)
+        shutil.copytree(base.parent / "origin.git", remote)
+        git(primary, "remote", "set-url", "origin", str(remote))
+    lane = root / "WorkingRCX-native"
     git(primary, "worktree", "add", "-b", fixture_identity(lane, "branch"), str(lane))
     bus = lane / ".agent_bus"
     bus.mkdir()
     (bus / "receipt.json").write_bytes(b'{"native":"retained"}\n')
     return primary, lane, git, env
+
+
+def test_native_base_copies_keep_history_index_remote_and_environment_independent(
+        tmp_path, monkeypatch, native_base):
+    template = {p: p.read_bytes() for root in (native_base, native_base.parent / "origin.git")
+                for p in root.rglob("*") if p.is_file()}
+    before_path = os.environ["PATH"]
+    with monkeypatch.context() as isolated:
+        primary, lane, git, env = make_native_lane(tmp_path / "first", isolated, base=native_base)
+        peer_primary, peer_lane, peer_git, peer_env = make_native_lane(
+            tmp_path / "second", isolated, base=native_base)
+        head = git(primary, "rev-parse", "HEAD")
+        peer_index = Path(peer_git(peer_lane, "rev-parse", "--absolute-git-dir")) / "index"
+        peer_index_before = peer_index.read_bytes()
+        assert fixture_identity(lane, "branch") != fixture_identity(peer_lane, "branch")
+        assert fixture_identity(lane, "wave") != fixture_identity(peer_lane, "wave")
+        assert env["PATH"] != peer_env["PATH"]
+        for owner in (primary, peer_primary):
+            assert git(owner, "remote", "get-url", "origin") == str(owner.parent / "origin.git")
+            assert git(owner, "worktree", "list", "--porcelain").count("worktree ") == 2
+            assert not (owner / ".git/objects/info/alternates").exists()
+            for source in (native_base / ".git/objects").glob("*/*"):
+                if source.is_file():
+                    copied = owner / source.relative_to(native_base)
+                    assert not os.path.samefile(source, copied)
+
+        (lane / "tracked").write_bytes(b"private committed implementation\n")
+        git(lane, "add", "tracked")
+        git(lane, "commit", "-m", "only first fixture")
+        git(lane, "push", "origin", "HEAD:dev")
+        git(peer_primary, "fetch", "origin", "dev")
+        assert git(primary, "rev-parse", "origin/dev") != head
+        assert peer_git(peer_primary, "rev-parse", "origin/dev") == head
+        assert peer_git(peer_lane, "rev-parse", "HEAD") == head
+        assert (peer_lane / "tracked").read_bytes() == b"native code\n"
+        assert peer_index.read_bytes() == peer_index_before
+        assert {p: p.read_bytes() for p in template} == template
+    assert os.environ["PATH"] == before_path
 
 
 def register_from_exited_owner(lane, env, *, status="stopped", result=None,
@@ -92,6 +162,174 @@ def register_from_exited_owner(lane, env, *, status="stopped", result=None,
         pytest.fail(f"Native lifecycle registration exited {result.returncode}:\n"
                     f"{result.stdout}{result.stderr}", pytrace=False)
     return Path(result.stdout.strip())
+
+
+@pytest.mark.parametrize("writer", [False, True], ids=["reader-retires", "writer-holds"])
+def test_finished_generated_reader_releases_within_native_completion_budget(native_lane, tmp_path, writer):
+    from mu.tests.tools.test_pipeline_monitor_autofollow import (
+        generated_log_watcher, _wait_for, _watcher_tails)
+    primary, lane, _, env = native_lane
+    log = lane / ".scratch/commit_executor_live.log"
+    log.parent.mkdir()
+    log.write_text("last completed output\n")
+    process = None
+    if writer:
+        process = subprocess.Popen([sys.executable, "-c",
+            "import os,sys; f=open(os.environ['RCX_TEST_WRITER_PATH'],'a'); "
+            "print('ready',flush=True); sys.stdin.readline()"], cwd=primary,
+            env=env | {"RCX_TEST_WRITER_PATH": str(log)}, stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, text=True)
+        assert select.select([process.stdout], [], [], 10)[0]
+        assert process.stdout.readline().strip() == "ready"
+    try:
+        with generated_log_watcher(tmp_path, lane, env) as (watcher, output):
+            _wait_for(lambda: bool(_watcher_tails(watcher, log)))
+            directory = register_from_exited_owner(lane, env, status="success")
+            terminal = (directory / "terminal.json").read_bytes()
+            result = lifecycle.complete_pending(directory)
+            _wait_for(lambda: not _watcher_tails(watcher, log))
+            assert watcher.poll() is None
+            assert (directory / "terminal.json").read_bytes() == terminal
+            if writer:
+                assert result["state"] == "ESCALATED", result
+                assert result["attempts_exhausted"] == lifecycle.MAX_ATTEMPTS
+                assert "Open target files/processes" in result["reason"], result
+                assert lane.exists() and process.poll() is None
+            else:
+                assert result["state"] == "COMPLETE", result
+                assert not lane.exists()
+                assert (Path(result["destination"]) / ".scratch/commit_executor_live.log").read_text() == "last completed output\n"
+            receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+    finally:
+        if process is not None:
+            process.communicate(input="exit\n", timeout=10)
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert all(p.read_bytes() == data for p, data in receipts.items())
+
+
+@pytest.mark.parametrize("hold", ["divergent", "live-owner"])
+def test_landed_sync_reports_checked_out_base_hold_separately_from_primary(native_lane, hold):
+    from mu.tools.executors import commit_executor
+    primary, lane, git, env = native_lane
+    old = git(primary, "rev-parse", "HEAD")
+    git(primary, "checkout", "-b", fixture_identity(lane, "founder"))
+    local_dev = primary.parent / "WorkingRCX-local-dev"
+    git(primary, "worktree", "add", str(local_dev), "dev")
+    for rel in fleet.SYNC_RECOVERY_DEPENDENCIES:
+        path = lane / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((REPO_ROOT / rel).read_bytes())
+    git(lane, "add", ".")
+    git(lane, "commit", "-m", "landed native coordination")
+    git(lane, "push", "origin", "HEAD:dev")
+    authority = git(lane, "rev-parse", "HEAD")
+    git(primary, "fetch", "origin", "dev")
+    if hold == "divergent":
+        git(local_dev, "commit", "--allow-empty", "-m", "unlanded local history")
+    else:
+        status = local_dev / ".agent_bus/executors/recovery_status.json"
+        status.parent.mkdir(parents=True)
+        status.write_text(json.dumps(dict(state="working", active=True, owner_pid=os.getpid())))
+        status_before = status.read_bytes()
+    held_head = git(local_dev, "rev-parse", "HEAD")
+    (local_dev / "tracked").write_bytes(b"held base WIP\n")
+    (local_dev / "untracked-report").write_bytes(b"retained evidence\n")
+    result = commit_executor.sync_primary_worktree_to_base(primary, "dev", log=lambda _: None,
+                                                           source_authority_commit=authority)
+    assert result["synced"] is True, result
+    assert git(primary, "rev-parse", "HEAD") == authority
+    assert result["all_owners_current"] is False, result
+    base = result["base_worktree_sync"]
+    assert base["state"] == "HOLD" and base["behind_count"] == 1, base
+    assert base["primary"] == str(local_dev)
+    assert git(local_dev, "rev-parse", "HEAD") == held_head
+    assert (local_dev / "tracked").read_bytes() == b"held base WIP\n"
+    assert (local_dev / "untracked-report").read_bytes() == b"retained evidence\n"
+    assert git(primary, "stash", "list") == ""
+    if hold == "live-owner":
+        assert held_head == old and status.read_bytes() == status_before
+        assert "live" in base["reason"].lower()
+    else:
+        assert "divergent" in base["reason"].lower()
+
+
+@pytest.mark.parametrize("late_drift", [False, True], ids=["recovered-wip", "later-drift-holds"])
+def test_landed_sync_admits_recovered_wip_and_rechecks_later_drift(native_lane, monkeypatch, late_drift):
+    from mu.tools.executors import commit_executor
+    primary, lane, git, _ = native_lane
+    old = git(primary, "rev-parse", "HEAD")
+    git(primary, "checkout", "-b", fixture_identity(lane, "founder"))
+    local_dev = primary.parent / "WorkingRCX-local-dev"
+    git(primary, "worktree", "add", str(local_dev), "dev")
+    (lane / "landed").write_bytes(b"independent landed implementation\n")
+    git(lane, "add", "landed")
+    git(lane, "commit", "-m", "land disjoint change")
+    git(lane, "push", "origin", "HEAD:dev")
+    authority = git(lane, "rev-parse", "HEAD")
+    git(primary, "fetch", "origin", "dev")
+    (local_dev / "tracked").write_bytes(b"original staged implementation\n")
+    git(local_dev, "add", "tracked")
+    staged = git(local_dev, "rev-parse", ":tracked")
+    private = b"original private implementation\n"
+    (local_dev / "tracked").write_bytes(private)
+    (local_dev / "tracked").chmod(0o600)
+
+    class InterruptedStash(BaseException):
+        pass
+
+    def interrupt(stage, _manifest):
+        if stage == "after_stash_before_publish":
+            raise InterruptedStash()
+
+    binding = commit_executor.bind_terminal_target_identity(local_dev, base_branch="dev")
+    with pytest.raises(InterruptedStash):
+        commit_executor.sync_primary_worktree_to_base(primary, "dev", target_identity=binding,
+            checkpoint=interrupt, log=lambda _: None)
+    journal = next((primary / ".git/rcx_primary_worktree_sync_transactions").glob("*/manifest.json"))
+    pending = json.loads(journal.read_bytes())
+    assert pending["state"] == "PREPARED" and pending["stash_oid"] is None
+    assert git(local_dev, "rev-parse", ":tracked") != staged
+    assert (local_dev / "tracked").read_bytes() == b"native code\n"
+    assert git(primary, "stash", "list")
+
+    edits = []
+    if late_drift:
+        transaction_state = fleet.transaction_state
+
+        def admitted_then_exited_writer(target):
+            admitted = transaction_state(target)
+            if target == local_dev and not edits:
+                assert admitted["index"]["tracked"][1] == staged
+                assert (target / "tracked").read_bytes() == private
+                (target / "tracked").write_bytes(b"later private implementation\n")
+                edits.append(target)
+            return admitted
+
+        monkeypatch.setattr(fleet, "transaction_state", admitted_then_exited_writer)
+
+    result = lifecycle.sync_landed_checkout_owners(primary, "dev")
+    assert result["current"] and git(primary, "rev-parse", "HEAD") == authority, result
+    base = result["base_worktree_sync"]
+    recovered = base["recovered_transactions"]
+    assert len(recovered) == 1 and recovered[0]["manifest_path"] == str(journal), base
+    assert recovered[0]["state"] == "RECOVERED"
+    assert recovered[0]["tracked_restored_paths"] == ["tracked"]
+    assert json.loads(journal.read_bytes())["state"] == "RECOVERED"
+    assert not base["recovery_hold"]
+    assert git(local_dev, "rev-parse", ":tracked") == staged
+    assert (local_dev / "tracked").stat().st_mode & 0o777 == 0o600
+    assert git(primary, "stash", "list") == ""
+    if late_drift:
+        assert edits == [local_dev]
+        assert base["state"] == "HOLD" and not base["synced"] and not result["all_owners_current"], base
+        assert "automatic-base-sync-prepared" in base["reason"], base
+        assert git(local_dev, "rev-parse", "HEAD") == old
+        assert (local_dev / "tracked").read_bytes() == b"later private implementation\n"
+    else:
+        assert base["state"] == "CURRENT" and base["synced"] and result["all_owners_current"], base
+        assert git(local_dev, "rev-parse", "HEAD") == authority
+        assert (local_dev / "tracked").read_bytes() == private
+        assert (local_dev / "landed").read_bytes() == b"independent landed implementation\n"
 
 
 @pytest.mark.parametrize("shared_branch", [True, False], ids=["shared-holds", "isolated-completes"])

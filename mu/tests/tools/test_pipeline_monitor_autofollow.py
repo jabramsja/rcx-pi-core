@@ -3,14 +3,14 @@
 Wave: monitor-default-autofollow-bus-resolver-narrow-2026-06-10
 FOUNDER_OVERRIDE: monitor-default-autofollow-bus-resolver-narrow-2026-06-10
 
-Covers three surfaces that together let the DEFAULT pipeline monitor's panes 2-4
+Covers three surfaces that together let the DEFAULT pipeline monitor's panes
 follow the freshest active lane bus by re-resolving the (root, bus) pair on each
 pane refresh:
 
 * WI-1/WI-3 — ``_resolve_live_root.sh --emit-pair`` opt-in pair mode with the
   unique-strict-max lane selection rule (A1-A7).
 * WI-2 — ``pipeline_monitor.sh rebuild_tmux_session`` wires the ephemeral
-  ``RCX_OBS_AUTOFOLLOW_BUS=1`` signal into the DEFAULT monitor's pane 2/3/4
+  ``RCX_OBS_AUTOFOLLOW_BUS=1`` signal into all four DEFAULT monitor pane
   commands, and pinned monitors keep their fixed bus (B1-B2).
 * WI-2B — each pane script's ``refresh_context`` rebinds the effective bus from
   the pair helper when the signal is set, with a fail-safe that keeps the
@@ -22,9 +22,13 @@ mu/tests/tools/test_pipeline_monitor_autofollow.py``
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
+import select
+import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -38,6 +42,258 @@ _TIMEOUT_S = int(os.environ.get("RCX_TEST_OBSERVABILITY_ONESHOT_TIMEOUT_S", "30"
 _T0 = 1_700_000_000
 _T1 = 1_700_000_100
 _T2 = 1_700_000_200
+
+
+def _wait_for(predicate, *, timeout=10):
+    """Return the successful observation so callers need not sample it again."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if observation := predicate():
+            return observation
+        time.sleep(0.05)
+    observation = predicate()
+    assert observation, "Timed out waiting for the real watcher transition"
+    return observation
+
+
+def _watcher_tails(watcher, log):
+    rows = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,command="],
+                          capture_output=True, text=True, check=True,
+                          timeout=_TIMEOUT_S).stdout.splitlines()
+    return [int(parts[0]) for row in rows if len(parts := row.strip().split(None, 2)) == 3
+            and parts[1] == str(watcher.pid) and "tail -f " in parts[2] and str(log) in parts[2]]
+
+
+@contextmanager
+def generated_log_watcher(tmp_path, lane, env, *, monitor_env=None):
+    """Run the actual generated script, with a real tail in an owned process group."""
+    from mu.tools.executors import worktree_lifecycle
+    source = (OBSERVABILITY_DIR / "pipeline_monitor.sh").read_text()
+    script = source.split("  cat <<'WATCHER_EOF'\n", 1)[1].split("\nWATCHER_EOF", 1)[0]
+    watcher_path = tmp_path / "generated-watcher.sh"
+    watcher_path.write_text(script)
+    output = tmp_path / "watcher-output.txt"
+    with output.open("wb") as stream:
+        watcher = subprocess.Popen(["bash", str(watcher_path)], cwd=lane, stdout=stream,
+            stderr=stream, start_new_session=True, env=env | {
+                "RCX_OBS_REPO_ROOT": str(lane), "RCX_OBS_ROOT_HELPER": "",
+                "RCX_OBS_STATUS_SCRIPT": "", "RCX_AGENT_BUS_DIR": ".agent_bus",
+                "RCX_OBS_LIFECYCLE_HELPER": worktree_lifecycle.__file__,
+                "RCX_PIPELINE_LIVE_LOG": str(tmp_path / "unused-live-log"),
+                "RCX_LOG_WATCHER_HEARTBEAT_SECONDS": "1"} | (monitor_env or {}))
+        try:
+            yield watcher, output
+        finally:
+            # Only this test's newly created group; never an unrelated watcher.
+            try:
+                os.killpg(watcher.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            watcher.wait(timeout=10)
+
+
+def test_generated_watcher_releases_terminal_reader_on_heartbeat_and_restart(tmp_path, monkeypatch):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, register_from_exited_owner
+    from mu.tools.executors import worktree_lifecycle
+    _, lane, _, env = make_native_lane(tmp_path, monkeypatch)
+    log = lane / ".scratch/commit_executor_live.log"
+    log.parent.mkdir()
+    # Successful-looking text is not native terminal truth.
+    log.write_text("Status: success; active owner still writing\n")
+    with generated_log_watcher(tmp_path, lane, env) as (watcher, output):
+        first = _wait_for(lambda: _watcher_tails(watcher, log))
+        _wait_for(lambda: bool(pids := _watcher_tails(watcher, log)) and pids != first)
+        with log.open("a") as stream:
+            stream.write("active output remains visible\n")
+        _wait_for(lambda: "active output remains visible" in output.read_text())
+        directory = register_from_exited_owner(lane, env, status="success")
+        terminal = (directory / "terminal.json").read_bytes()
+        _wait_for(lambda: not _watcher_tails(watcher, log), timeout=6)
+        time.sleep(3.2)  # Cross both heartbeat and the old three-second poll.
+        assert not _watcher_tails(watcher, log)
+        assert "active output remains visible" in output.read_text()
+        assert (directory / "terminal.json").read_bytes() == terminal
+        assert watcher.poll() is None
+    # A cold start must consult native truth, even though this log is recent.
+    with generated_log_watcher(tmp_path, lane, env) as (watcher, output):
+        _wait_for(lambda: "Terminal lane" in output.read_text())
+        time.sleep(3.2)
+        assert not _watcher_tails(watcher, log)
+        assert watcher.poll() is None
+        assert (directory / "terminal.json").read_bytes() == terminal
+        assert not (directory / "completion.json").exists()
+        # Reader release grants no completion authority of its own.
+        assert worktree_lifecycle.MAX_ATTEMPTS == 3
+
+
+def test_generated_watcher_keeps_live_registered_terminal_owner_visible(tmp_path, monkeypatch):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, fixture_identity
+    primary, lane, _, env = make_native_lane(tmp_path, monkeypatch)
+    log = lane / ".scratch/commit_executor_live.log"
+    log.parent.mkdir()
+    log.write_text("native owner still closing\n")
+    program = (
+        "import sys; from pathlib import Path; from mu.tools.executors import worktree_lifecycle as w; "
+        "d=w.register_lane(Path(sys.argv[1]),sys.argv[2]); "
+        "w.request_completion(d,status='success'); print(d,flush=True); sys.stdin.readline()")
+    owner = subprocess.Popen([sys.executable, "-c", program, str(lane), fixture_identity(lane, "wave")],
+        cwd=primary, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert select.select([owner.stdout], [], [], 10)[0]
+        directory = Path(owner.stdout.readline().strip())
+        terminal = (directory / "terminal.json").read_bytes()
+        with generated_log_watcher(tmp_path, lane, env) as (watcher, output):
+            _wait_for(lambda: bool(_watcher_tails(watcher, log)))
+            _wait_for(lambda: "native owner still closing" in output.read_text())
+            assert owner.poll() is None
+            assert "Terminal lane" not in output.read_text()
+            owner.communicate(input="finished\n", timeout=10)
+            _wait_for(lambda: "Terminal lane" in output.read_text())
+            assert not _watcher_tails(watcher, log)
+            assert (directory / "terminal.json").read_bytes() == terminal
+    finally:
+        if owner.poll() is None:
+            owner.communicate(input="finished\n", timeout=10)
+
+
+@pytest.mark.parametrize("log_mode", ["implicit-tee", "implicit-scratch", "explicit-pin"])
+def test_generated_watcher_rebinds_live_log_after_carrier_transition(tmp_path, monkeypatch, log_mode):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, fixture_identity
+    primary, lane_a, git, env = make_native_lane(tmp_path, monkeypatch)
+    lane_b = primary.parent / "WorkingRCX-next"
+    git(primary, "worktree", "add", "-b", fixture_identity(lane_a, "next"), str(lane_b))
+    activity_a = lane_a / ".agent_bus/executors/phase_b_state.json"
+    activity_a.parent.mkdir(parents=True)
+    activity_a.write_text('{"active": true}\n')
+    os.utime(activity_a, (_T1, _T1))
+    bus_b = ".agent_bus-" + fixture_identity(lane_b, "monitor")
+    helper = OBSERVABILITY_DIR / "_resolve_live_root.sh"
+
+    def tee_path(lane):
+        key = subprocess.run(["cksum"], input=str(lane), text=True, capture_output=True,
+                             check=True).stdout.split()[0]
+        return Path(f"/tmp/rcx_pipeline_live_{key}.txt")
+
+    # Use the actual root-derived tee paths, never replacing a preexisting log.
+    created_logs = []
+    log_a, tee_b = tee_path(lane_a), tee_path(lane_b)
+    try:
+        with log_a.open("x") as stream:
+            created_logs.append(log_a)
+            stream.write("carrier A recent tee output\n")
+        monitor_env = {
+            "RCX_OBS_REPO_ROOT": "",
+            "RCX_OBS_ROOT_HELPER": str(helper),
+            "RCX_OBS_AUTOFOLLOW_BUS": "1",
+            "RCX_PIPELINE_LIVE_LOG": str(log_a) if log_mode == "explicit-pin" else "",
+        }
+        with generated_log_watcher(tmp_path, primary, env, monitor_env=monitor_env) as (watcher, output):
+            _wait_for(lambda: bool(_watcher_tails(watcher, log_a)))
+            _wait_for(lambda: "carrier A recent tee output" in output.read_text())
+            activity_b = lane_b / bus_b / "executors/phase_b_state.json"
+            activity_b.parent.mkdir(parents=True)
+            activity_b.write_text('{"active": true}\n')
+            os.utime(activity_b, (_T2, _T2))
+            if log_mode == "implicit-scratch":
+                log_b = lane_b / ".scratch/phase_b_executor_live.log"
+                log_b.parent.mkdir()
+                log_b.write_text("carrier B active output\n")
+            else:
+                log_b = tee_b
+                with log_b.open("x") as stream:
+                    created_logs.append(log_b)
+                    stream.write("carrier B active output\n")
+            resolved = subprocess.run(["bash", str(helper), "--emit-pair"], cwd=primary,
+                env=env | {"RCX_AGENT_BUS_DIR": ".agent_bus"}, capture_output=True,
+                text=True, check=True).stdout.splitlines()
+            assert resolved == [str(lane_b), bus_b]
+            expected_log = log_a if log_mode == "explicit-pin" else log_b
+            first = _wait_for(lambda: _watcher_tails(watcher, expected_log))
+            _wait_for(lambda: bool(pids := _watcher_tails(watcher, expected_log)) and pids != first)
+            with expected_log.open("a") as stream:
+                stream.write("selected log heartbeat output\n")
+            _wait_for(lambda: "selected log heartbeat output" in output.read_text())
+            assert bool(_watcher_tails(watcher, log_a)) == (log_mode == "explicit-pin")
+            assert bool(_watcher_tails(watcher, log_b)) == (log_mode != "explicit-pin")
+            assert ("carrier B active output" in output.read_text()) == (log_mode != "explicit-pin")
+            assert "carrier A recent tee output" in log_a.read_text()
+            assert watcher.poll() is None
+    finally:
+        for log in created_logs:
+            log.unlink()
+
+
+@pytest.mark.parametrize("monitor", ["default-autofollow", "named-pin", "default-pin"])
+def test_generated_watcher_binds_named_bus_terminal_owner(tmp_path, monkeypatch, monitor):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, fixture_identity
+    primary, lane, _, env = make_native_lane(tmp_path, monkeypatch)
+    bus = ".agent_bus-" + fixture_identity(lane, "monitor")
+    activity = lane / bus / "executors/phase_b_state.json"
+    activity.parent.mkdir(parents=True)
+    activity.write_text('{"active": true}\n')
+    log = lane / ".scratch/commit_executor_live.log"
+    log.parent.mkdir()
+    log.write_text("named-bus active output\n")
+    monitor_env = {
+        "RCX_OBS_REPO_ROOT": "",
+        "RCX_OBS_ROOT_HELPER": str(OBSERVABILITY_DIR / "_resolve_live_root.sh"),
+        "RCX_OBS_AUTOFOLLOW_BUS": "1" if monitor == "default-autofollow" else "",
+        "RCX_AGENT_BUS_DIR": bus if monitor == "named-pin" else ".agent_bus",
+    }
+    program = (
+        "import sys; from pathlib import Path; from mu.tools.executors import worktree_lifecycle as w; "
+        "d=w.register_lane(Path(sys.argv[1]),sys.argv[2],bus_dir=sys.argv[3]); "
+        "print(d,flush=True); sys.stdin.readline(); w.request_completion(d,status='success')")
+    owner = subprocess.Popen([sys.executable, "-c", program, str(lane),
+        fixture_identity(lane, "wave"), bus], cwd=primary, env=env,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert select.select([owner.stdout], [], [], 10)[0]
+        directory = Path(owner.stdout.readline().strip())
+        registration = (directory / "registration.json").read_bytes()
+        assert json.loads(registration)["bus_dir"] == str(lane / bus)
+        # Launch from PRIMARY, exactly as the default monitor does. The real
+        # resolver must bind the selected carrier root AND its named bus.
+        with generated_log_watcher(tmp_path, primary, env, monitor_env=monitor_env) as (watcher, output):
+            first = _wait_for(lambda: _watcher_tails(watcher, log))
+            _wait_for(lambda: bool(pids := _watcher_tails(watcher, log)) and pids != first)
+            with log.open("a") as stream:
+                stream.write("named-bus heartbeat still visible\n")
+            _wait_for(lambda: "named-bus heartbeat still visible" in output.read_text())
+            assert owner.poll() is None
+            assert "Terminal lane" not in output.read_text()
+            owner.communicate(input="finished\n", timeout=10)
+            assert owner.returncode == 0
+            terminal = (directory / "terminal.json").read_bytes()
+            if monitor != "default-pin":
+                _wait_for(lambda: "Terminal lane" in output.read_text(), timeout=6)
+            time.sleep(3.2)
+            # Heartbeat replacement briefly has no tail. Assert the observed
+            # readiness result instead of racing a second process scan.
+            if monitor == "default-pin":
+                tails = _wait_for(lambda: _watcher_tails(watcher, log))
+            else:
+                tails = _watcher_tails(watcher, log)
+            assert bool(tails) == (monitor == "default-pin")
+            assert ("Terminal lane" in output.read_text()) == (monitor != "default-pin")
+            assert watcher.poll() is None
+        # Recent log content is not authority to reacquire the terminal owner.
+        with generated_log_watcher(tmp_path, primary, env, monitor_env=monitor_env) as (watcher, output):
+            _wait_for(lambda: "named-bus heartbeat still visible" in output.read_text())
+            time.sleep(3.2)
+            if monitor == "default-pin":
+                tails = _wait_for(lambda: _watcher_tails(watcher, log))
+            else:
+                tails = _watcher_tails(watcher, log)
+            assert bool(tails) == (monitor == "default-pin")
+            assert ("Terminal lane" in output.read_text()) == (monitor != "default-pin")
+            assert watcher.poll() is None
+        assert (directory / "registration.json").read_bytes() == registration
+        assert (directory / "terminal.json").read_bytes() == terminal
+        assert not (directory / "completion.json").exists()
+    finally:
+        if owner.poll() is None:
+            owner.communicate(input="finished\n", timeout=10)
 
 
 def _write_exec(path: Path, content: str) -> None:
@@ -512,7 +768,7 @@ def test_b1_default_monitor_panes_carry_autofollow_signal(tmp_path):
     repo.mkdir()
     log_lines = _start_and_capture(tmp_path, repo)
 
-    for pane_script in ("_pane_findings.sh", "_pane_processes.sh", "_pane_timeline.sh"):
+    for pane_script in ("rcx_log_watcher.sh", "_pane_findings.sh", "_pane_processes.sh", "_pane_timeline.sh"):
         commands = _pane_command_lines(log_lines, pane_script)
         assert commands, f"no pane command captured for {pane_script}"
         for command in commands:
@@ -522,21 +778,15 @@ def test_b1_default_monitor_panes_carry_autofollow_signal(tmp_path):
             assert "BUS_DIR=.agent_bus " in command, command
             assert "RCX_AGENT_BUS_DIR=.agent_bus " in command, command
 
-    # Pane 1 (live-log watcher) is out of scope and must NOT carry the signal.
-    watcher = _pane_command_lines(log_lines, "rcx_log_watcher.sh")
-    assert watcher, "watcher pane command not captured"
-    for command in watcher:
-        assert "RCX_OBS_AUTOFOLLOW_BUS" not in command, command
-
-
 @pytest.mark.parametrize(
-    "pin_args",
+    "pin_args,expected_bus",
     [
-        pytest.param(("--bus-dir", ".agent_bus-alpha"), id="bus-dir"),
-        pytest.param(("--lane", "alpha"), id="lane"),
+        pytest.param(("--bus-dir", ".agent_bus-alpha"), ".agent_bus-alpha", id="bus-dir"),
+        pytest.param(("--lane", "alpha"), ".agent_bus-alpha", id="lane"),
+        pytest.param(("--bus-dir", ".agent_bus"), ".agent_bus", id="default-bus-pin"),
     ],
 )
-def test_b2_pinned_monitor_panes_have_no_autofollow_signal(tmp_path, pin_args):
+def test_b2_pinned_monitor_panes_have_no_autofollow_signal(tmp_path, pin_args, expected_bus):
     repo = tmp_path / "repo"
     repo.mkdir()
     log_lines = _start_and_capture(
@@ -553,13 +803,13 @@ def test_b2_pinned_monitor_panes_have_no_autofollow_signal(tmp_path, pin_args):
         },
     )
 
-    for pane_script in ("_pane_findings.sh", "_pane_processes.sh", "_pane_timeline.sh"):
+    for pane_script in ("rcx_log_watcher.sh", "_pane_findings.sh", "_pane_processes.sh", "_pane_timeline.sh"):
         commands = _pane_command_lines(log_lines, pane_script)
         assert commands, f"no pane command captured for {pane_script}"
         for command in commands:
             assert "RCX_OBS_AUTOFOLLOW_BUS" not in command, command
             # Pinned monitors keep their explicit fixed bus.
-            assert "BUS_DIR=.agent_bus-alpha " in command, command
+            assert f"BUS_DIR={expected_bus} " in command, command
 
 
 def test_orchestrator_mode_launch_can_override_tmux_session_for_selected_bus(tmp_path):

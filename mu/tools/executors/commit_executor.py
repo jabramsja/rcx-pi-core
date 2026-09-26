@@ -5258,7 +5258,10 @@ def _tracked_dirty_paths(
     *,
     no_renames: bool = False,
 ) -> set[str]:
-    """Return tracked paths that differ from HEAD.
+    """Return distinct HEAD-to-index and index-to-worktree tracked intent.
+
+    A staged addition deleted from the worktree (AD) has no net HEAD diff.
+    Inventory both components so journal preparation cannot lose that blob.
 
     With ``no_renames=True`` git's DEFAULT rename detection is disabled, so a
     tracked rename (``git mv a b``) is reported as BOTH its deleted source and
@@ -5267,18 +5270,14 @@ def _tracked_dirty_paths(
     source-deletion survives the operation and corrupts the later restore.
     """
     dirty: set[str] = set()
-    cmd = ["git", "diff", "--name-only", "HEAD"]
-    if no_renames:
-        cmd.append("--no-renames")
-    if pathspecs:
-        cmd.extend(["--", *pathspecs])
-    diff_proc = _run(cmd, cwd=repo_root, check=False)
-    if diff_proc.returncode == 0:
-        dirty.update(
-            path.strip()
-            for path in diff_proc.stdout.splitlines()
-            if path.strip()
-        )
+    for component in (["--cached"], []):
+        cmd = ["git", "diff", "--name-only", "-z", *component]
+        if no_renames:
+            cmd.append("--no-renames")
+        if pathspecs:
+            cmd.extend(["--", *pathspecs])
+        diff_proc = _run(cmd, cwd=repo_root, check=True)
+        dirty.update(filter(None, diff_proc.stdout.split("\0")))
     return dirty
 
 
@@ -5851,6 +5850,7 @@ def _stash_primary_sync_tracked_wip(
     *,
     marker: str,
     expected_fingerprints: dict[str, str],
+    expected_snapshots: dict[str, Any],
     log: Any,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Isolate exact tracked dirty paths under a predeclared marker."""
@@ -5869,26 +5869,80 @@ def _stash_primary_sync_tracked_wip(
             + ", ".join(missing_paths)
         )
 
-    # Git validates stash pathspecs against the index. A staged deletion is
-    # present only in HEAD and therefore fails that validation. Whole-index
-    # stash handles deletions, but is safe only when the declared transaction
-    # owns *all* current tracked WIP. Untracked/ignored bytes are never included.
-    deleted = _run(
-        ["git", "diff", "--cached", "--no-renames", "--diff-filter=D", "--name-only", "-z"],
-        cwd=repo_root, check=False,
-    )
-    if deleted.returncode:
-        return None, "cannot establish staged-deletion identity before stash"
-    has_deleted = bool(set(deleted.stdout.split("\0")) & set(paths))
+    # Git validates stash pathspecs against the index. A staged deletion fails
+    # that validation. Whole-index stash handles staged deletions, but is safe
+    # only when this transaction owns *all* tracked WIP. AD needs the separate
+    # index/worktree construction below: stash push can resurrect that blob in
+    # its worktree tree even without a pathspec. Untracked bytes stay excluded.
+    deletions: set[str] = set()
+    staged_deletions: set[str] = set()
+    for component in (["--cached"], []):
+        deleted = _run(
+            ["git", "diff", *component, "--no-renames", "--diff-filter=D", "--name-only", "-z"],
+            cwd=repo_root, check=False,
+        )
+        if deleted.returncode:
+            return None, "cannot establish index/worktree deletion identity before stash"
+        deletions.update(filter(None, deleted.stdout.split("\0")))
+        if component:
+            staged_deletions.update(filter(None, deleted.stdout.split("\0")))
+    added = _run(["git", "diff", "--cached", "--no-renames", "--diff-filter=A", "--name-only", "-z"],
+                 cwd=repo_root)
+    ad_paths = set(filter(None, added.stdout.split("\0"))) & deletions & set(paths)
+    has_deleted = bool((staged_deletions | ad_paths) & set(paths))
     if has_deleted and set(paths) != current_tracked:
         return None, "staged-deletion stash requires exact ownership of all tracked WIP"
     pathspec = [] if has_deleted else ["--", *[":(top,literal)" + p for p in paths]]
-    result = _run(
-        ["git", "stash", "push", "-m", marker, *pathspec],
-        cwd=repo_root,
-        check=False,
-        timeout=120,
-    )
+    if ad_paths:
+        # Build a standard two-parent stash without changing the live index or
+        # worktree. Applying the actual unstaged patch to a disposable index
+        # preserves the AD absence that git stash push omits. PREPARED already
+        # binds the marker, original snapshots and both patch fingerprints.
+        head = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+        index_tree = _run(["git", "write-tree"], cwd=repo_root).stdout.strip()
+        unstaged = _run(["git", "diff", "--binary", "--full-index", "--no-ext-diff", "--no-renames"],
+                        cwd=repo_root).stdout
+        with tempfile.TemporaryDirectory(prefix="rcx-ad-stash-") as temporary:
+            index_env = {k: v for k, v in os.environ.items() if not k.startswith("RCX_SKIP_")}
+            index_env["GIT_INDEX_FILE"] = str(Path(temporary) / "index")
+            _run(["git", "read-tree", index_tree], cwd=repo_root, env=index_env)
+            _run(["git", "apply", "--cached", "--binary"], cwd=repo_root, env=index_env,
+                 input_text=unstaged)
+            worktree_tree = _run(["git", "write-tree"], cwd=repo_root, env=index_env).stdout.strip()
+        index_commit = _run(["git", "commit-tree", index_tree, "-p", head, "-m", "index: " + marker],
+                            cwd=repo_root).stdout.strip()
+        oid = _run(["git", "commit-tree", worktree_tree, "-p", head, "-p", index_commit, "-m", marker],
+                   cwd=repo_root).stdout.strip()
+        captured, error = _primary_sync_stash_fingerprints(repo_root, oid, paths)
+        if error or captured != expected_fingerprints:
+            return None, error or "AD stash does not match the declared index/worktree intent"
+
+        def unchanged():
+            exact, error = _primary_sync_snapshots_match(repo_root, expected_snapshots, paths)
+            if (not exact or _tracked_dirty_paths(repo_root, no_renames=True) != set(paths)
+                    or _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip() != head):
+                raise RuntimeError(error or "AD owner/index/WIP changed before isolation")
+
+        unchanged()
+        # Store before clearing WIP. A crash on either side is discoverable by
+        # the original PREPARED marker through the existing recovery transaction.
+        _run(["git", "stash", "store", "-m", marker, oid], cwd=repo_root)
+        unchanged()
+        # AD worktree paths are already absent. Touch only their index entries
+        # so Git cannot prune the original empty directories during isolation.
+        result = _run(["git", "restore", "--source=" + head, "--staged",
+                       "--", *[":(top,literal)" + p for p in sorted(ad_paths)]], cwd=repo_root, check=False)
+        other_paths = sorted(set(paths) - ad_paths)
+        if result.returncode == 0 and other_paths:
+            result = _run(["git", "restore", "--source=" + head, "--staged", "--worktree",
+                           "--", *[":(top,literal)" + p for p in other_paths]], cwd=repo_root, check=False)
+    else:
+        result = _run(
+            ["git", "stash", "push", "-m", marker, *pathspec],
+            cwd=repo_root,
+            check=False,
+            timeout=120,
+        )
     stash_ref = _find_stash_ref_by_marker(repo_root, marker)
     if stash_ref is None:
         detail = (result.stderr or result.stdout or "").strip()
@@ -5911,6 +5965,8 @@ def _stash_primary_sync_tracked_wip(
         "stash_oid": oid,
         "paths": list(paths),
     }
+    if result.returncode:
+        return record, "tracked WIP isolation failed; exact stash retained for native recovery"
     if fingerprint_error or actual_fingerprints != expected_fingerprints:
         return record, (
             fingerprint_error
@@ -6084,6 +6140,31 @@ def _restore_primary_sync_tracked_paths_idempotently(
         return error
 
     stash_oid = str(stash_record.get("stash_oid") or "")
+    added = _run(["git", "diff", "--no-renames", "--diff-filter=A", "--name-only", "-z",
+                  stash_oid + "^1", stash_oid + "^2", "--", *restore_paths], cwd=repo_root)
+    absent_additions = sorted(path for path in filter(None, added.stdout.split("\0"))
+                             if expected[path].get("worktree", {}).get("kind") == "absent")
+    if absent_additions:
+        # Restore AD directly into the index. Materializing the added file and
+        # then deleting it would prune parent directories that were present in
+        # the admitted tree. Worktree absence is a separately verified intent.
+        for path in absent_additions:
+            exact, error = _primary_sync_snapshots_match(repo_root, expected, [path])
+            if exact:
+                continue
+            absent, error = _primary_sync_snapshots_match(repo_root, expected, [path], component="worktree")
+            if not absent:
+                return error or "AD worktree absence changed before index restoration"
+            restore_error = _primary_sync_restore_patch(repo_root,
+                before_ref=stash_oid + "^1", after_ref=stash_oid + "^2", paths=[path],
+                apply_args=["--cached", "--binary"], label="staged AD")
+            if restore_error:
+                return restore_error
+            exact, error = _primary_sync_snapshots_match(repo_root, expected, [path])
+            if not exact:
+                return error or "AD index/worktree restoration did not verify"
+        return _restore_primary_sync_tracked_paths_idempotently(repo_root, manifest, stash_record,
+            sorted(set(restore_paths) - set(absent_additions)), log=log)
     index_exact, index_error = _primary_sync_snapshots_match(
         repo_root, expected, restore_paths, component="index"
     )
@@ -6657,8 +6738,8 @@ def _sync_primary_worktree_to_base(
     Every unmet guard or error is a clean SKIP (logged), never an exception out
     of `_run_post_commit_pipeline`: the PR has already merged and this sync must
     never regress the pipeline or change the wave Status.  The optional
-    ``checkpoint`` callback is a focused crash-test seam; production callers
-    leave it unset.
+    ``checkpoint`` callback supports focused crash tests and the native
+    admission checks under the shared lock before recovery and mutation.
 
     Guards (any miss -> SKIP):
       GUARD-A primary is on a FEATURE branch (not base_branch/main/master).
@@ -6674,8 +6755,8 @@ def _sync_primary_worktree_to_base(
       GUARD-D a NON-BLOCKING file lock under the common git dir is acquired
               (concurrent lanes do not race on the primary's index).
 
-    A committed fleet operation may pass an explicit native target_identity to
-    reuse this transaction for the checked-out local dev owner. PRIMARY remains
+    A committed fleet operation or landed postmerge child may pass an explicit
+    native target_identity to synchronize the checked-out local dev owner. PRIMARY remains
     the default; an explicit target must match its Git and filesystem identity
     under the same lock. No ref is changed underneath another checkout.
 
@@ -6915,6 +6996,9 @@ def _sync_primary_worktree_to_base(
                         != target_identity.get("expected_head")):
                     return _skip("explicit sync target drifted before locked preparation")
 
+            if checkpoint is not None:
+                checkpoint("before_recovery", {})
+
             # A transaction is durable before its first destructive operation.
             # Reconcile this worktree's nonterminal journals under the common dir
             # before fetching or allocating a new transaction.  This covers a
@@ -7043,11 +7127,13 @@ def _sync_primary_worktree_to_base(
             # A tracked deletion remains intent even when its pathname is a
             # generated report normally excluded from dirty-status checks.
             # Keep it in the native journal/stash alongside the other WIP.
-            deleted_proc = _run(
-                ["git", "diff", "HEAD", "--no-renames", "--diff-filter=D", "--name-only", "-z"],
-                cwd=primary, check=True, timeout=30,
-            )
-            tracked_deletions = set(filter(None, deleted_proc.stdout.split("\0")))
+            tracked_deletions: set[str] = set()
+            for component in (["--cached"], []):
+                deleted_proc = _run(
+                    ["git", "diff", *component, "--no-renames", "--diff-filter=D", "--name-only", "-z"],
+                    cwd=primary, check=True, timeout=30,
+                )
+                tracked_deletions.update(filter(None, deleted_proc.stdout.split("\0")))
             tracked_wip_paths = sorted(
                 path
                 for path in _tracked_dirty_paths(primary, no_renames=True)
@@ -7182,6 +7268,7 @@ def _sync_primary_worktree_to_base(
                         expected_fingerprints=dict(
                             manifest["tracked_patch_fingerprints"]
                         ),
+                        expected_snapshots=manifest["tracked_snapshots"],
                         log=log,
                     )
                     if stash_record is not None:
@@ -7300,6 +7387,8 @@ def _sync_primary_worktree_to_base(
                     )
                 outcome["primary_sync_transaction_state"] = "ISOLATED"
 
+                if checkpoint is not None:
+                    checkpoint("before_fast_forward", copy.deepcopy(manifest))
                 merge_proc = _run(
                     ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
                     cwd=primary,
@@ -7398,6 +7487,8 @@ def _sync_primary_worktree_to_base(
             # --exclude-standard`, which excludes ignored files. git merge can
             # silently overwrite ignored files by default; --no-overwrite-ignore
             # makes it abort instead, preserving that WIP.
+            if checkpoint is not None:
+                checkpoint("before_fast_forward", {})
             merge_proc = _run(
                 ["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_ref],
                 cwd=primary,
@@ -16950,10 +17041,11 @@ def _run_post_commit_pipeline_impl(
         _run(["git", "fetch", "origin", base_branch], cwd=verify_root, timeout=60)
         pre_verify_status = _run(["git", "status", "--short"], cwd=verify_root).stdout.strip()
         pre_verify_dirty = _dirty_worktree_paths(verify_root) if pre_verify_status else set()
-        # This exact terminal wave must read the landed tracked evidence below.
-        # An ff-only update preserves unrelated dirt and fails before terminal
-        # preparation on a collision; generic dirty-root behavior stays unchanged.
-        if pre_verify_dirty and not terminal_required:
+        # Ordinary postmerge synchronization belongs to the landed child and
+        # its per-owner locked preservation transactions (including local dev).
+        # The exact terminal-disposition wave still needs its landed evidence
+        # here before its separately guarded terminal preparation below.
+        if not terminal_required:
             head_sha = _run(
                 ["git", "rev-parse", f"origin/{base_branch}"], cwd=verify_root
             ).stdout.strip()
@@ -16963,13 +17055,10 @@ def _run_post_commit_pipeline_impl(
             if "ensure_review_clear_and_merge" not in result["steps_completed"]:
                 result["steps_completed"].append("ensure_review_clear_and_merge")
             _clear_continuation_record(continuation_path)
-            log(
-                f"Step 15: WARN post-merge verify root {verify_root} was already dirty "
-                f"before ff-only sync; using origin/{base_branch}={head_sha[:8]} as "
-                f"merged tip and continuing to step 16:\n{status_output}"
-            )
-            result["post_merge_verify_warning"] = status_output
-            log(f"Step 15: merged, HEAD={head_sha[:8]} (pre-verify dirty, continuing to step 16)")
+            if pre_verify_dirty:
+                result["post_merge_verify_warning"] = status_output
+            log(f"Step 15: merged tip origin/{base_branch}={head_sha[:8]}; "
+                f"checkout {verify_root} will synchronize through the landed preservation transaction")
         else:
             _run(["git", "merge", "--ff-only", f"origin/{base_branch}"], cwd=verify_root, timeout=60)
             head_sha = _run(["git", "rev-parse", "HEAD"], cwd=verify_root).stdout.strip()
@@ -17006,17 +17095,16 @@ def _run_post_commit_pipeline_impl(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
-    # ── Step 15b: sync the founder's PRIMARY working copy to base ──────
-    # The verify-root ff above only advances a worktree ALREADY on base_branch.
-    # The founder's primary checkout normally rests on a FEATURE branch, so it
-    # is never that target and drifts behind base_branch as waves merge. This
-    # PULL-ONLY, fully fail-open helper brings origin/{base_branch} DOWN into the
-    # primary's current feature branch (fetch + ff-only; never push, checkout
-    # base, force, or reset). It runs BEFORE step 16 cleanup (which may remove
-    # repo_root) and its failure must never affect the already-merged PR.
+    # ── Step 15b: landed-source synchronization of PRIMARY and local base ────
+    # Independent preservation outcomes keep a held sibling explicit. Neither
+    # owner failure changes the already-merged PR or grants retirement authority.
     result["primary_worktree_sync"] = _sync_primary_worktree_to_base(
         repo_root, base_branch, log=log, source_authority_commit=str(result.get("merge_sha") or ""),
     )
+    if "base_worktree_sync" in result["primary_worktree_sync"]:
+        result["base_worktree_sync"] = result["primary_worktree_sync"]["base_worktree_sync"]
+        if not result["primary_worktree_sync"]["all_owners_current"]:
+            log(f"Step 15b: checkout synchronization HOLD: {result['primary_worktree_sync']}")
 
     try:
         replacement_root, replacements = record_post_merge_replacements(

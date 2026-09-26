@@ -16,6 +16,7 @@ Covers:
 
 from __future__ import annotations
 
+import base64
 import fcntl
 import hashlib
 import json
@@ -5507,6 +5508,114 @@ def test_explicit_dirty_local_dev_sync_preserves_primary_stashes_and_evidence(tm
         primary, "dev", target_identity=binding, log=lambda _: None)
     assert refused["synced"] is False
     assert _git(["stash", "list", "--format=%H"], cwd=local_dev).stdout.splitlines() == stashes
+
+
+@pytest.mark.parametrize("overlap", [False, True], ids=["restore", "held"])
+def test_captured_ad_intent_survives_shared_fleet_preparation(tmp_path, monkeypatch, overlap):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane
+    from mu.tools.executors import workingrcx_fleet_apply as fleet
+    from mu.tools.executors import worktree_lifecycle as lifecycle
+
+    primary, lane, git, _ = make_native_lane(tmp_path, monkeypatch)
+    evidence_path = REPO_ROOT / "reports/control_plane/workingrcx-fleet-closeout-recurrence-r3-2026-09-23_observed_blockers.json"
+    capture = json.loads(evidence_path.read_bytes())["blockers"]["ad_inventory"]["captured_trace"]
+    relpath = capture["path"]
+    path = lane / relpath
+    path.parent.mkdir(parents=True)
+    path.write_bytes(base64.b64decode(capture["index_blob_base64"]))
+    git(lane, "add", relpath)
+    assert git(lane, "rev-parse", ":" + relpath) == capture["index_blob_sha"]
+    path.unlink()
+    assert git(lane, "status", "--short", "--", relpath) == "AD " + relpath
+    assert git(lane, "diff", "HEAD", "--", relpath) == ""
+    # Ordinary mixed WIP travels through the same journal and stash.
+    (lane / "tracked").write_bytes(b"staged ordinary WIP\n")
+    git(lane, "add", "tracked")
+    (lane / "tracked").write_bytes(b"unstaged ordinary WIP\n")
+    (lane / "private.bin").write_bytes(b"\x00retained\xff")
+    staged = git(lane, "diff", "--cached", "--binary", "--", "tracked")
+    unstaged = git(lane, "diff", "--binary", "--", "tracked")
+    admitted = fleet.transaction_state(lane)
+    identity = lifecycle.lane_identity(lane)
+    landed = primary / (relpath if overlap else "new-landed-file")
+    landed.parent.mkdir(parents=True, exist_ok=True)
+    landed.write_bytes(b"landed bytes\n")
+    git(primary, "add", ".")
+    git(primary, "commit", "-m", "landed independent change")
+    git(primary, "push", "origin", "dev")
+    merge = git(primary, "rev-parse", "HEAD")
+    operation = tmp_path / "new-preservation"
+    operation.mkdir()
+    result = fleet.apply_target(primary, dict(source_index=84, source_identity=identity,
+        destination=str(operation / "worktree"), owner=lifecycle.OWNER,
+        comparison_commit=merge, action="PRESERVE_WORKTREE"), operation, commit_mod, residual=True)
+    assert result["status"] == "MOVED", result
+    sync = result["checkout_sync"]
+    journal = json.loads(Path(sync["primary_sync_transaction_path"]).read_bytes())
+    assert set(journal["tracked_paths"]) == set(admitted["tracked_wip"]) == {relpath, "tracked"}
+    assert journal["tracked_snapshots"][relpath]["worktree"] == {"kind": "absent"}
+    assert capture["index_blob_sha"] in journal["tracked_snapshots"][relpath]["index"]
+    stash = json.loads((operation / "sync-stash.json").read_bytes())
+    assert stash["index"][relpath][1] == capture["index_blob_sha"]
+    assert stash["content"][relpath] is None
+    restored = operation / "worktree"
+    assert not lane.exists()
+    assert (restored / "private.bin").read_bytes() == b"\x00retained\xff"
+    assert git(restored, "diff", "--cached", "--binary", "--", "tracked") == staged
+    assert git(restored, "diff", "--binary", "--", "tracked") == unstaged
+    if overlap:
+        assert journal["state"] == "HELD"
+        assert sync["tracked_wip_held_paths"] == [relpath]
+        assert (restored / relpath).read_bytes() == b"landed bytes\n"
+        assert git(primary, "rev-parse", stash["oid"] + "^2:" + relpath) == capture["index_blob_sha"]
+        assert stash["oid"] in git(primary, "stash", "list", "--format=%H").splitlines()
+    else:
+        assert journal["state"] == "RECOVERED"
+        assert not (restored / relpath).exists()
+        assert git(restored, "status", "--short", "--", relpath) == "AD " + relpath
+        assert git(restored, "rev-parse", ":" + relpath) == capture["index_blob_sha"]
+
+
+def test_landed_sync_automatically_preserves_primary_and_checked_out_dirty_base(tmp_path):
+    from mu.tools.executors import workingrcx_fleet_apply as fleet
+    upstream, primary, _, env = _init_origin_and_primary(tmp_path)
+    _git(["checkout", "-b", "founder/" + tmp_path.name], cwd=primary)
+    local_dev = tmp_path / "workingrcx_clarolesfull_20260627"
+    _git(["worktree", "add", str(local_dev), "dev"], cwd=primary)
+    (primary / "seed.txt").write_text("unrelated older stash")
+    _git(["stash", "push", "-m", "retained owner"], cwd=primary, env=env)
+    stashes = _git(["stash", "list", "--format=%H"], cwd=primary).stdout
+    before = {}
+    for owner in (primary, local_dev):
+        (owner / "seed.txt").write_text("staged " + owner.name)
+        _git(["add", "seed.txt"], cwd=owner)
+        (owner / "seed.txt").write_text("unstaged " + owner.name)
+        (owner / "untracked-evidence").write_bytes(b"\xffretained report\x00")
+        before[owner] = (_git(["diff", "--cached", "--binary"], cwd=owner).stdout,
+                         _git(["diff", "--binary"], cwd=owner).stdout)
+    for rel in fleet.SYNC_RECOVERY_DEPENDENCIES:
+        path = upstream / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((REPO_ROOT / rel).read_bytes())
+    _git(["add", "."], cwd=upstream, env=env)
+    _git(["commit", "-m", "landed synchronization"], cwd=upstream, env=env)
+    authority = _git(["rev-parse", "HEAD"], cwd=upstream).stdout.strip()
+    _git(["fetch", "origin", "dev"], cwd=primary)
+    result = commit_mod.sync_primary_worktree_to_base(primary, "dev", log=_noop_log,
+                                                     source_authority_commit=authority)
+    assert result["synced"] is True, result
+    # PRIMARY success must not conceal a still-behind sibling.
+    assert _git(["rev-parse", "HEAD"], cwd=local_dev).stdout.strip() == authority, result
+    assert result["all_owners_current"] is True
+    assert result["base_worktree_sync"]["primary"] == str(local_dev)
+    assert result["base_worktree_sync"]["behind_count"] == 0
+    for owner in (primary, local_dev):
+        assert _git(["rev-parse", "HEAD"], cwd=owner).stdout.strip() == authority
+        assert (_git(["diff", "--cached", "--binary"], cwd=owner).stdout,
+                _git(["diff", "--binary"], cwd=owner).stdout) == before[owner]
+        assert (owner / "untracked-evidence").read_bytes() == b"\xffretained report\x00"
+    assert _git(["stash", "list", "--format=%H"], cwd=primary).stdout == stashes
+    assert _git(["symbolic-ref", "HEAD"], cwd=local_dev).stdout.strip() == "refs/heads/dev"
 
 
 @pytest.mark.parametrize("deleted", [

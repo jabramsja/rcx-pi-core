@@ -4,7 +4,7 @@ TYPE: REFERENCE
 LAST_VERIFIED: 2026-09-23
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: mu/tests/tools/test_worktree_lifecycle.py, mu/tests/tools/test_workingrcx_fleet_apply.py, mu/tests/tools/test_commit_executor_post_merge_cleanup.py, mu/tests/tools/test_launch_wave.py, mu/tests/tools/test_recovery_gate.py
+GROUNDING_TESTS: mu/tests/tools/test_worktree_lifecycle.py, mu/tests/tools/test_workingrcx_fleet_apply.py, mu/tests/tools/test_commit_executor_post_merge_cleanup.py, mu/tests/tools/test_pipeline_monitor_autofollow.py, mu/tests/tools/test_launch_wave.py, mu/tests/tools/test_recovery_gate.py
 -->
 # Native worktree lifecycle
 
@@ -36,11 +36,22 @@ nonblocker reports are optional and may be removed by a native GO.
 Native commit closeout publishes the actual result, handoff and available
 config/routing/package/receipt bytes in the common directory before retirement.
 Those copies preserve evidence; they grant no replay authority. Missing or failed
-closeout retains the source and its correction owner. Post-merge PRIMARY sync
-loads the exact landed dependencies in a fresh interpreter before calling the
-existing identity-bound, locked transaction API. Foreign journals remain with
-their recorded owners. Replacement coverage uses an actually synchronized
-surviving checkout; a dirty stale local dev checkout remains explicitly stale.
+closeout retains the source and its correction owner. Ordinary post-merge
+verification records the fetched merge without first modifying the base owner.
+Synchronization loads the exact landed dependencies in a fresh interpreter and
+coordinates PRIMARY plus the exact separately checked-out base owner through
+the existing identity-bound, locked transaction API. The base owner is bound
+before PRIMARY sync and rechecked under the shared lock before recovery,
+preparation and fast-forward. Native ownership, process/open-file and content
+checks retain live, uncertain, changed or divergent owners individually.
+
+`primary_worktree_sync` retains PRIMARY's outcome and adds `base_worktree_sync`
+and `all_owners_current`. Each owner reports actual ahead/behind counts and
+CURRENT, CURRENT_WITH_HELD_WIP or HOLD; a base with no checkout reports
+NOT_CHECKED_OUT. PRIMARY success cannot conceal a stale base checkout. These
+local holds do not revert a merged PR or release a useful-work owner. Foreign
+journals remain with their recorded owners. Replacement coverage uses an
+actually synchronized surviving checkout.
 The recorded R3 recovery enabler carries transaction R2 as its original plan
 owner and cannot fabricate a new plan or restart consumed operations.
 
@@ -48,6 +59,25 @@ The child writes its log and receipts in the common directory and uses surviving
 PRIMARY as its cwd. Escalation uses the existing Codex pager at an identity-bound
 surviving root. Pager errors have their own durable receipt. It never writes a
 pager event into a retired source.
+
+The generated raw-log watcher uses native lifecycle registration and terminal
+identity, including the exact bus, HEAD and filesystem identity, plus registered
+owner exit to release its own follower. Log text, age and PID absence alone do
+not prove terminal state. A live registered owner continues to display output.
+The default monitor resolves the selected carrier's root and bus together on
+each refresh. Log selection, terminal probes and heartbeat attachment all use
+that same pair, including named-bus carriers. The implicit tee-log path is
+derived from the selected root on each refresh, so a previous carrier's recent
+tee cannot hide the new carrier's active output. `RCX_PIPELINE_LIVE_LOG` retains
+its explicit log override. Explicit lane or bus pins retain
+their fixed bus; a terminal record on a different bus cannot release the reader.
+The watcher moves its cwd to the surviving common-directory owner, checks
+terminal state before selection and attachment (including heartbeat and cold
+restart), and leaves the last output visible or renders a finite snapshot.
+It stops only its own tail; it never exempts readers from the generic retirement
+guard. An open writer still holds native completion. The same three-attempt
+budget and all historical claims remain unchanged; reader release grants no
+retry or retirement authority.
 
 Supported inspection and bounded completion commands:
 
@@ -204,11 +234,30 @@ journal and stash evidence, even for a tracked generated report. Missing stash
 keys cannot substitute for that intent or for any present admitted content.
 No generated report is restored as a documentation requirement.
 
-The shared WIP sync transaction handles staged deletions by using a whole-index
-stash only when its declared paths own all tracked WIP. This avoids Git's
-index-only pathspec validation while retaining staged/unstaged intent. Ordinary
-path-filtered stashes use literal paths. Untracked/ignored evidence and existing
-held stashes retain their original safeguards.
+Inventory takes the union of HEAD-to-index and index-to-worktree changes.
+An AD path (staged addition, deleted worktree file) is retained even when its
+net HEAD-to-worktree diff is empty. Deletion intent in either component also
+retains a transient deferred report in journal/stash preparation. Snapshots
+bind the added index blob separately from the absent worktree path. Exact
+non-overlap restoration reproduces both components; overlap keeps that same
+intent in the verified HELD stash while the checkout takes the landed bytes.
+The captured Source84 regression uses its original blob and report path in
+disposable repositories through shared fleet admission. It grants no recovery
+or replay authority over Source84's old PREPARED journal or source196's HELD
+journal and useful hunks.
+
+The shared WIP sync transaction handles staged deletions with a whole-index
+stash only when its declared paths own all tracked WIP, avoiding Git's index-only
+pathspec validation. For AD, `stash push` also resurrects the absent blob without
+a pathspec. The transaction constructs a standard two-parent stash from the
+original index and the actual unstaged binary patch applied to a temporary index.
+It verifies both fingerprints and rechecks HEAD, index and WIP before storing
+the predeclared marker, then isolates only the declared paths with `git restore`.
+AD isolation and restoration touch only the index, preserving the absent
+worktree path and its original parent directories without a create/delete cycle.
+The existing PREPARED recovery handles interruption before or after isolation.
+Ordinary path-filtered stashes use literal paths. Untracked/ignored evidence and
+existing held stashes retain their original safeguards.
 
 Stash equality uses Git's regular-file mode representation (0644 or 0755),
 alongside exact base, index, size and content hash. Admission and archives keep

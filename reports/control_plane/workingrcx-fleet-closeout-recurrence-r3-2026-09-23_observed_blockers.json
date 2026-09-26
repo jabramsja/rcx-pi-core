@@ -1,0 +1,488 @@
+{
+  "schema_version": 1,
+  "wave_id": "workingrcx-fleet-closeout-recurrence-r3-2026-09-23",
+  "task_id": "[FLEET-NATIVE-LIFECYCLE-PREVENTION]",
+  "comparison_commit": "d55d1ff7ec5009fc7884edd7f2ea57a143d18c54",
+  "recorded_at": "2026-09-23T17:01:26.837592+00:00",
+  "authority": {
+    "tracker": "TASKS.md",
+    "tracker_note": "Tracker sync note (2026-09-23, workingrcx-fleet-closeout-recurrence-r3-2026-09-23)",
+    "proof_class": "Phase B local implementation evidence only; candidate, review, CI, merge and live closeout authority remain outer-owned."
+  },
+  "frozen_predecessor": {
+    "manifest": {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/manifest.json",
+      "sha256": "2e583f29e8b0f5d5f6e3741b8abd37d49a734f278974b50be09ef9b1f48468df"
+    },
+    "files_verified": 21,
+    "commit": "9c82251a39e076bf0dbba67ede3f788f3568d73b",
+    "base": "d55d1ff7ec5009fc7884edd7f2ea57a143d18c54",
+    "disposition": "Stopped before push; native dispatcher repair now admitted in R3. No old review or action authority imported."
+  },
+  "historical_sources": [
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-orphan-owner-retirement-r1-evidence-2026-09-23/foreground_batch_outcomes.json",
+      "sha256": "25603909d5480bea5870d48878d315b03d9b128b1e57d83ef9f03314caf73fb9"
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-orphan-owner-retirement-r1-evidence-2026-09-23/native_log_follower_recurrence.json",
+      "sha256": "bf453349c16fb91f50d4f76607fa4a79bcea8a01088cd60d5e79359adfc88a64"
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-orphan-owner-retirement-r1-evidence-2026-09-23/native_log_follower_recurrence_snapshot/manifest.json",
+      "sha256": "9dc8daf3ae4826137409f415c61f2b8da71ce6f716b69987649ef910eee78a5f"
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-remaining-retirement-r1-evidence-2026-09-23/source84_index_worktree_inventory_root_cause.json",
+      "sha256": "065ad682918d54cc763a6856cd2cb040ecca5bbe18f185ad320f5ace06e00b6c"
+    }
+  ],
+  "blockers": {
+    "finished_reader": {
+      "native_receipts": [
+        {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/c7573d36f80fa12e07836f427b0ab997268088b42ea54471a46f001bc9755891/registration.json",
+          "sha256": "47714d67e79ef31fcd557fd6e40bfc2b5324c661ec4415e32fe4ef6b7401622c"
+        },
+        {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/c7573d36f80fa12e07836f427b0ab997268088b42ea54471a46f001bc9755891/terminal.json",
+          "sha256": "6f4ce3feffbe2aac56ae16dac22849e9e0f00154b933619d19fe3e2c6c169382"
+        },
+        {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/c7573d36f80fa12e07836f427b0ab997268088b42ea54471a46f001bc9755891/completion.json",
+          "sha256": "73ff324db58f0386a225c8b1b5a2216e6a3be9d192a65dd7c259d521fe4dbe5d"
+        },
+        {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/c7573d36f80fa12e07836f427b0ab997268088b42ea54471a46f001bc9755891/attempt-1/result.json",
+          "sha256": "4909b5817430588c6725a0b7cfa178879e4ef22f3bbab02170d7637a9cf2b2ff"
+        },
+        {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/c7573d36f80fa12e07836f427b0ab997268088b42ea54471a46f001bc9755891/attempt-2/result.json",
+          "sha256": "aedfbd8b9918e63c7b306bfd3d77b00099b13c7d0bf7b2b942fe4aee300e19fc"
+        },
+        {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/c7573d36f80fa12e07836f427b0ab997268088b42ea54471a46f001bc9755891/attempt-3/result.json",
+          "sha256": "7d5a3d99a173b819cc8b5411b5ec6e8876485d2fe097b98abf7fe9707d6d1898"
+        }
+      ],
+      "native_completion_state": "ESCALATED",
+      "attempts_consumed": 3,
+      "historical_rejecting_pid": null,
+      "mechanism": "Generated raw-log watcher can keep or reacquire its own tail on the completed carrier during its recent-log window.",
+      "proof_limit": "Native receipts omit rejecting PIDs. Matching-process observations corroborate the guard condition; they are not historical PID attribution."
+    },
+    "checked_out_base": {
+      "captured_owner": {
+        "at": "2026-09-23T11:23:15.681Z",
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_clarolesfull_20260627",
+        "head": "d9db7172b8cf42c9984b037f99dbf55130c16376",
+        "origin_dev": "d55d1ff7ec5009fc7884edd7f2ea57a143d18c54",
+        "ahead_behind": "0\t2",
+        "status": "?? reports/control_plane/claude-roles-full-2026-06-27_2026-06-27.md\n?? reports/control_plane/native-stub-phase-b-same-config-relaunch-repair-r1-2026-09-10_2026-09-10.md"
+      },
+      "mechanism": "Landed synchronization bound PRIMARY while a separate dirty/untracked checked-out dev owner remained behind."
+    },
+    "ad_inventory": {
+      "captured_trace": {
+        "at": "2026-09-23T09:40:50.955Z",
+        "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-test-provider-isolation-root-20260826-r3",
+        "path": "reports/deferred/non_blocking/test-provider-isolation-root-r3-2026-08-26_bridge_nonblockers.md",
+        "head": "dafc4d6ff6d6301b38b99a9322655d2904280d13",
+        "status": "AD reports/deferred/non_blocking/test-provider-isolation-root-r3-2026-08-26_bridge_nonblockers.md",
+        "head_to_worktree": "",
+        "head_to_index": "A\treports/deferred/non_blocking/test-provider-isolation-root-r3-2026-08-26_bridge_nonblockers.md\n",
+        "index_to_worktree": "D\treports/deferred/non_blocking/test-provider-isolation-root-r3-2026-08-26_bridge_nonblockers.md\n",
+        "head_tracked_deletions": "",
+        "index_blob_sha": "4c65aa2d6dd91f6dedd90ec79bbf90eb8c64f132",
+        "worktree_present": false,
+        "index_blob_base64": "IyBEZWZlcnJlZCBOb24tQmxvY2tpbmcgRmluZGluZ3M6IHRlc3QtcHJvdmlkZXItaXNvbGF0aW9uLXJvb3QtcjMtMjAyNi0wOC0yNgoKV2F2ZTogdGVzdC1wcm92aWRlci1pc29sYXRpb24tcm9vdC1yMy0yMDI2LTA4LTI2CkNsYXNzOiBMNF9FTkFCTEVSClRhcmdldCBHYXRlOiBHOApTdGF0dXM6IERFRkVSUkVEX05PTl9CTE9DS0lORwpHZW5lcmF0ZWQgYnkgUGhhc2UgQiBleGVjdXRvci4gNSBmaW5kaW5nKHMpLgoKIyMgMS4gQWJzZW50IG9yIGVtcHR5IGluaGVyaXRlZCBQQVRIIHJlbW92ZXMgZGVmYXVsdCBleGVjdXRhYmxlIHNlYXJjaAotICoqQ2xhc3M6KiogREVGRUNUCi0gKipTZXZlcml0eToqKiBtZWRpdW0KLSAqKkZpbGU6KiogY29uZnRlc3QucHkKLSAqKkRpc3Bvc2l0aW9uOioqIG5vbl9ibG9ja2luZwotICoqRXZpZGVuY2U6KiogYHB5dGhvbl9iaW49JChjb21tYW5kIC12IHB5dGhvbjMpOyBlbnYgLXUgUEFUSCAtdSBOT0RFX09QVElPTlMgVE1QRElSPSIkUFdELy5zY3JhdGNoIiBQWVRIT05ET05UV1JJVEVCWVRFQ09ERT0xIFBZVEhPTkhBU0hTRUVEPTAgIiRweXRob25fYmluIiAtbSBweXRlc3QgLXEgLS10Yj1zaG9ydCAtcCBubzpjYWNoZXByb3ZpZGVyIG11L3Rlc3RzL3Rvb2xzL3Rlc3RfcGlwZWxpbmVfYWdlbnRfcGFnZXIucHk6OnRlc3RfcHJvdmlkZXJfaXNvbGF0aW9uX2NvZGV4X2FwcF9zZXJ2ZXJfdHJhbnNwb3J0X2ZhaWxzX2JlZm9yZV9jb25uZWN0YAoKIyMgMi4gVW5xdW90ZWQgTk9ERV9PUFRJT05TIGd1YXJkIHBhdGggYnJlYWtzIHVuZGVyIGEgc3BhY2UtY29udGFpbmluZyBUTVBESVIKLSAqKkNsYXNzOioqIFBPTElDWV9CT1VORAotICoqU2V2ZXJpdHk6KiogbWVkaXVtCi0gKipGaWxlOioqIGNvbmZ0ZXN0LnB5Ci0gKipEaXNwb3NpdGlvbjoqKiBub25fYmxvY2tpbmcKLSAqKkV2aWRlbmNlOioqIGBta2RpciAtcCAnLnNjcmF0Y2gvaG9vay1hdWRpdC1yMy9zcGFjZSB0bXAnOyBUTVBESVI9IiRQV0QvLnNjcmF0Y2gvaG9vay1hdWRpdC1yMy9zcGFjZSB0bXAiIFBZVEhPTkRPTlRXUklURUJZVEVDT0RFPTEgUFlUSE9OSEFTSFNFRUQ9MCBweXRob24zIC1tIHB5dGVzdCAtcSAtLXRiPXNob3J0IC1wIG5vOmNhY2hlcHJvdmlkZXIgbXUvdGVzdHMvdG9vbHMvdGVzdF9waXBlbGluZV9hZ2VudF9wYWdlci5weTo6dGVzdF9wcm92aWRlcl9pc29sYXRpb25fY29kZXhfYXBwX3NlcnZlcl90cmFuc3BvcnRfZmFpbHNfYmVmb3JlX2Nvbm5lY3RgCgojIyAzLiBFdmVyeSBjb250cm9sbGVyIGFuZCB3b3JrZXIgcGVybWFuZW50bHkgcmV0YWlucyBpdHMgcHJvdmlkZXItaXNvbGF0aW9uIGRpcmVjdG9yeQotICoqQ2xhc3M6KiogUE9MSUNZX0JPVU5ECi0gKipTZXZlcml0eToqKiBsb3cKLSAqKkZpbGU6KiogY29uZnRlc3QucHkKLSAqKkRpc3Bvc2l0aW9uOioqIG5vbl9ibG9ja2luZwotICoqRXZpZGVuY2U6KiogYENvdW50IC5zY3JhdGNoL3JjeC1weXRlc3QtcHJvdmlkZXItKiBkaXJlY3RvcmllcywgcnVuIG9uZSByZXBvc2l0b3J5LXJvb3QgcHl0ZXN0IHNlbGVjdG9yIHdpdGggVE1QRElSPSRQV0QvLnNjcmF0Y2gsIGFuZCBjb3VudCBhZ2Fpbi5gCgojIyA0LiBQQVRIIGxvb2t1cCBjYW4gZmFsbCB0aHJvdWdoIHRvIGEgbGl2ZSBwcm92aWRlciB3aGVuIHRoZSBnZW5lcmF0ZWQgc2hpbSBpcyBub24tZXhlY3V0YWJsZQotICoqQ2xhc3M6KiogREVGRUNUCi0gKipTZXZlcml0eToqKiBtZWRpdW0KLSAqKkZpbGU6KiogY29uZnRlc3QucHkKLSAqKkRpc3Bvc2l0aW9uOioqIG5vbl9ibG9ja2luZwotICoqRXZpZGVuY2U6KiogYFBBVEg9JFBXRC8uc2NyYXRjaC9ob29rLWF1ZGl0LXIzL25vbmV4ZWMtYmluOiRQV0QvLnNjcmF0Y2gvaG9vay1hdWRpdC1yMy9mYWxsYmFjay1iaW46L3Vzci9iaW46L2JpbiAvdXNyL2Jpbi9weXRob24zIC1jICdpbXBvcnQgc3VicHJvY2Vzczsgcj1zdWJwcm9jZXNzLnJ1bihbImNsYXVkZSIsIi0tdmVyc2lvbiJdLGNhcHR1cmVfb3V0cHV0PVRydWUsdGV4dD1UcnVlKTsgcHJpbnQoci5yZXR1cm5jb2RlLHIuc3RkZXJyLnN0cmlwKCkpJ2AKCiMjIDUuIENvbnRyb2wgcGFja2V0IGFiYnJldmlhdGVzIHRoZSBjYW5vbmljYWwgdGFzayBpZGVudGlmaWVyCi0gKipDbGFzczoqKiBET0NfQUNDVVJBQ1kKLSAqKlNldmVyaXR5OioqIGxvdwotICoqRmlsZToqKiByZXBvcnRzL2NvbnRyb2xfcGxhbmUvdGVzdC1wcm92aWRlci1pc29sYXRpb24tcm9vdC1yMy0yMDI2LTA4LTI2XzIwMjYtMDgtMjYubWQKLSAqKkRpc3Bvc2l0aW9uOioqIG5vbl9ibG9ja2luZwotICoqRXZpZGVuY2U6KiogYGdpdCBzaG93IDpyZXBvcnRzL2NvbnRyb2xfcGxhbmUvdGVzdC1wcm92aWRlci1pc29sYXRpb24tcm9vdC1yMy0yMDI2LTA4LTI2XzIwMjYtMDgtMjYubWQgfCBubCAtYmEgfCBzZWQgLW4gJzVwOzc3cCc7IGdpdCBzaG93IDpUQVNLUy5tZCB8IG5sIC1iYSB8IHNlZCAtbiAnMTMwcCdgCg==",
+        "index_blob_sha256": "05ebf4b0b08c1fab30899e0226bbbf6ed1e7fdd8606775071d4fbaaff60f56c5"
+      },
+      "journals": [
+        {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/b2f8568f8aae4f5f87714a00cfbce250/manifest.json",
+          "sha256": "1d8fc2917c972185299194222206679ce6a97d0bde35995dc1c33492aac60665",
+          "state": "PREPARED",
+          "tracked_paths": [
+            "reports/control_plane/test-provider-isolation-root-r3-2026-08-26_2026-08-26.md",
+            "reports/l4_wave_indicators/test-provider-isolation-root-r3-2026-08-26.json"
+          ],
+          "stash_oid": null
+        },
+        {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/cdacef6bdae74e5ba2088f4b7dd266c4/manifest.json",
+          "sha256": "efea1343669b6335b5c71f535f92862ce83077ff0a02bbe21f4f96433e85f5d2",
+          "state": "HELD",
+          "tracked_paths": [
+            "TASKS.md",
+            "conftest.py",
+            "mu/tests/tools/test_pipeline_agent_pager.py",
+            "reports/control_plane/test-provider-isolation-root-r3-2026-08-26_2026-08-26.md",
+            "reports/l4_wave_indicators/test-provider-isolation-root-r3-2026-08-26.json"
+          ],
+          "stash_oid": "a6b56b6205dc779df573da4b08d0693349645874"
+        }
+      ],
+      "mechanism": "HEAD-to-worktree inventory cancels the added index blob and absent worktree file; both components must survive preparation and restore or HELD handling."
+    }
+  },
+  "residual_ownership": {
+    "verified_pr1314_retirements": 12,
+    "physical_count_checkpoint": {
+      "before": 77,
+      "after": 65,
+      "observed_at": "2026-09-23T11:28:10.386Z"
+    },
+    "orphan_useful_work_owners_open": 13,
+    "orphan_sources_relocated": 11,
+    "useful_work": "All13 orphan-source useful-work owners remain open;71 current native direct-source stubs and inherited mappings preserved. Archival is not useful-work landing.",
+    "historical_carriers": [
+      {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-closeout-recurrence-r1-20260923",
+        "state": "STOPPED_PRESERVED",
+        "head": "d55d1ff7ec5009fc7884edd7f2ea57a143d18c54",
+        "index": {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-fleet-closeout-recurrence-r1-20260923/index",
+          "sha256": "15c82461dacd49dae308de7d62c3fe214c725acd77bc61b8ab06c1f7d28d8143"
+        }
+      },
+      {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-closeout-recurrence-r2-20260923",
+        "state": "STOPPED_PRESERVED",
+        "head": "9c82251a39e076bf0dbba67ede3f788f3568d73b",
+        "index": {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-fleet-closeout-recurrence-r2-20260923/index",
+          "sha256": "544cf78c1a068ffc09595cae7c6b1cfc1bcd3ecb18e4cc9d5bbbb98b6c81c94d"
+        }
+      }
+    ],
+    "other_retained_owners": {
+      "source84": "Separate index/worktree AD intent omitted by HEAD-only native inventory; PREPARED journal b2f8568f8aae4f5f87714a00cfbce250 preserved",
+      "source196": "Original recovery consumed; HELD journal cdacef6bdae74e5ba2088f4b7dd266c4 and useful hunks remain owned",
+      "dangling_bus_links": 4,
+      "mu": "Stopped 17-file candidate preserved; canonical production baton remains after bounded cleanup/prevention"
+    },
+    "next": "Existing row38 remaining physical/useful-work/registration cleanup, then Mu. Archive relocation is not integration or final deregistration.",
+    "no_full_fleet_recensus": true,
+    "no_replay": true,
+    "actual_postmerge_verification": "PENDING_OUTER_PIPELINE_AND_FOREGROUND_OWNER",
+    "candidate_indicator_review_ci_merge": "PENDING_NATIVE_PRODUCERS; no R1/R2 packet, indicator, routing or review authority imported."
+  },
+  "phase_b_validation": {
+    "state": "PASS",
+    "before_correction": {
+      "exit_code": 1,
+      "passed": 1668,
+      "failed": 12,
+      "seconds": 459.21,
+      "log": {
+        "path": "/tmp/rcx-r3-before-correction.log",
+        "sha256": "cf42c49103a1df55d8a2e01f4085df0dd090fb9606a0212963cd8bb01960536e"
+      },
+      "failed_selectors": [
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py::test_captured_ad_intent_survives_shared_fleet_preparation[restore]",
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py::test_captured_ad_intent_survives_shared_fleet_preparation[held]",
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py::test_landed_sync_automatically_preserves_primary_and_checked_out_dirty_base",
+        "mu/tests/tools/test_worktree_lifecycle.py::test_finished_generated_reader_releases_within_native_completion_budget[reader-retires]",
+        "mu/tests/tools/test_worktree_lifecycle.py::test_finished_generated_reader_releases_within_native_completion_budget[writer-holds]",
+        "mu/tests/tools/test_worktree_lifecycle.py::test_landed_sync_reports_checked_out_base_hold_separately_from_primary[divergent]",
+        "mu/tests/tools/test_worktree_lifecycle.py::test_landed_sync_reports_checked_out_base_hold_separately_from_primary[live-owner]",
+        "mu/tests/tools/test_pipeline_monitor_autofollow.py::test_b1_default_monitor_panes_carry_autofollow_signal",
+        "mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_releases_terminal_reader_on_heartbeat_and_restart",
+        "mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_keeps_live_registered_terminal_owner_visible",
+        "mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_binds_named_bus_terminal_owner[default-autofollow]",
+        "mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_binds_named_bus_terminal_owner[named-pin]"
+      ],
+      "candidate": "Exact landed production d55d1ff with the three reused regression test files and fresh R3 captured AD input. Receipt/dispatcher fixtures remained at the landed baseline.",
+      "reproduced": [
+        "AD admission returns INCOMPLETE rather than MOVED in both restore/HELD shapes.",
+        "PRIMARY advances while the dirty/untracked checked-out base remains behind.",
+        "Reader-only native completion exhausts its unchanged three attempts; generated watcher reattaches after terminal state."
+      ],
+      "later_gates": "Recovery-monitor and docs short-circuited after tools failure.",
+      "production_sha256": {
+        "mu/tools/executors/commit_executor.py": "2f2efa83ca68b6897eddca757d1c7df83f292cb8514345919664bce234423adc",
+        "mu/tools/executors/worktree_lifecycle.py": "3ab271881767daec3ea261269c615b61c24aab66a1131da9d5bcfecc2e677a2c",
+        "mu/tools/observability/pipeline_monitor.sh": "57c0f29da06ae2a759b0e0cff9a9f0db042f67a85a5acaf710463fa2315fb666"
+      }
+    },
+    "corrected_chain": {
+      "exit_code": 0,
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_workingrcx_fleet_apply.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_recovery_gate.py -k pipeline_monitor --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+      "log": {
+        "path": "/tmp/rcx-r3-corrected.log",
+        "sha256": "f27015fd4da4df72848333073ed20a95e579e8cb33fe64cee997f49e493bcacf"
+      },
+      "tools": {
+        "passed": 1680,
+        "failed": 0,
+        "skipped": 0,
+        "seconds": 437.92,
+        "passed_by_file": {
+          "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": 159,
+          "mu/tests/tools/test_commit_executor_receipt.py": 300,
+          "mu/tests/tools/test_executor_dispatch.py": 749,
+          "mu/tests/tools/test_pipeline_monitor_autofollow.py": 38,
+          "mu/tests/tools/test_workingrcx_fleet_apply.py": 341,
+          "mu/tests/tools/test_worktree_lifecycle.py": 93
+        }
+      },
+      "recovery_monitor": {
+        "passed": 23,
+        "failed": 0,
+        "deselected": 1459,
+        "seconds": 56.38
+      },
+      "docs": {
+        "passed": 351,
+        "failed": 0,
+        "warnings": 2,
+        "seconds": 1.8
+      },
+      "warning_detail": [
+        "Existing stale reference-doc verification dates.",
+        "STATUS.md last commit is 84 days old."
+      ],
+      "gate_output_tail": "============================= slowest 20 durations =============================\n18.35s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_orphan_retirement_preserves_work_and_spent_claims_while_live_peer_holds\n16.70s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_residual_bounded_operations_preserve_bytes_registration_and_no_replay\n15.48s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_changed_frozen_orphan_status_holds_before_preparation_and_peers_continue\n15.47s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_fresh_wave_authority_is_isolated_and_keeps_prior_operations_immutable\n14.99s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_residual_dirty_dev_sync_and_independent_changed_shell_hold\n14.95s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_fresh_restored_wip_keeps_recoverable_stash_history_and_verifies\n12.89s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_fresh_verification_detects_index_only_drift_at_retired_destination\n12.31s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_bulk_late_drift_holds_one_target_and_verification_never_replays\n12.23s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_bulk_malformed_stale_lock_records_hold_continues_peers_and_never_replays[change4-None-Native ownership evidence is uncertain (OverflowError)]\n12.10s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_bulk_malformed_stale_lock_records_hold_continues_peers_and_never_replays[change5-OwnershipObservationFault-Native ownership evidence is uncertain (OwnershipObservationFault)]\n11.87s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_bulk_malformed_stale_lock_records_hold_continues_peers_and_never_replays[change1-None-Native owner lock timestamp]\n11.83s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_bulk_malformed_stale_lock_records_hold_continues_peers_and_never_replays[change0-None-Native owner lock timestamp]\n11.75s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_bulk_malformed_stale_lock_records_hold_continues_peers_and_never_replays[change6-PermissionError-Native owner lock metadata remains ambiguous or live]\n11.67s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_bulk_malformed_stale_lock_records_hold_continues_peers_and_never_replays[change2-None-Native owner lock timestamp]\n11.58s call     mu/tests/tools/test_workingrcx_fleet_apply.py::test_bulk_malformed_stale_lock_records_hold_continues_peers_and_never_replays[change3-None-Native owner lock metadata]\n10.58s call     mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_binds_named_bus_terminal_owner[default-autofollow]\n10.40s call     mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_binds_named_bus_terminal_owner[named-pin]\n9.77s call     mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_releases_terminal_reader_on_heartbeat_and_restart\n9.34s call     mu/tests/tools/test_executor_dispatch.py::TestRecoveryGateWiring::test_chained_phase_b_live_timeout_attribution_and_cap\n8.80s call     mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_binds_named_bus_terminal_owner[default-pin]\n======================= 1680 passed in 437.92s (0:07:17) =======================\n.......................                                                  [100%]\n23 passed, 1459 deselected in 56.38s\n........................................................................ [ 20%]\n........................................................................ [ 41%]\n........................................................................ [ 61%]\n........................................................................ [ 82%]\n...............................................................          [100%]\n=============================== warnings summary ===============================\nmu/tests/docs/test_doc_governance.py::TestLaw2DocLifecycle::test_warn_stale_docs\n  /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-closeout-recurrence-r3-20260923/mu/tests/docs/test_doc_governance.py:440: UserWarning: Docs not verified in 90+ days:\n    - MetaCircularReadiness.v1.md: 232 days old\n    - Flags.md: 232 days old\n    - cli_quickstart.md: 232 days old\n    - cli_schema.md: 232 days old\n    - orbit_viz_dot.md: 232 days old\n    - orbit_viz_svg.md: 232 days old\n    - DebtCategories.v0.md: 232 days old\n    - EngineNewsStructural.v0.md: 232 days old\n    - EntropyBudget.md: 232 days old\n    - MuType.v0.md: 232 days old\n  \n    warnings.warn(msg)\n\nmu/tests/docs/test_root_files.py::TestStatusMd::test_freshness_via_git\n  /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-closeout-recurrence-r3-20260923/mu/tests/docs/test_root_files.py:268: UserWarning: STATUS.md last git commit was 84 days ago (2026-07-01). Consider reviewing if it's still accurate.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n351 passed, 2 warnings in 1.80s\n",
+      "validated_files_sha256": {
+        "mu/tools/executors/commit_executor.py": "2cff09d2f98f332b9242646a496c0e7bf599dc9697f00b15e3bde1fcc088db0c",
+        "mu/tools/executors/worktree_lifecycle.py": "fea82016eb646d27b1636e68e29b74de19d4a1b19ff0c1c21ee039c441821eae",
+        "mu/tools/observability/pipeline_monitor.sh": "3f6c699a6438c99ff45014e2a984e6ffc6e6e87955b42d849b7324a91a3ca70a",
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "7bc21ea6adf4e606f286042ea59f2177966200858d50d8a5f832e772a775c91e",
+        "mu/tests/tools/test_commit_executor_receipt.py": "6955298aeb1569b41029bc854c078fee8a25973b6d2e81c3dbcc849ea8935c39",
+        "mu/tests/tools/test_executor_dispatch.py": "9d2a5c36100d4d20412475eb22d2924f69b96081f1bccf9c01626fe6898e5c58",
+        "mu/tests/tools/test_worktree_lifecycle.py": "9fb403378a86e3e6872d275f90f52766b3a3b57c3b864a457a27f95558d8cd93",
+        "mu/tests/tools/test_pipeline_monitor_autofollow.py": "478740fa8a84eef09a304b86c30f23a6c091950610f6853c96c7cd739798580d",
+        "mu/docs/agents/WorktreeLifecycle.v0.md": "75becbed30e60e63002dda7b3c1f9957e2d1b4354d1c7f2c36d3971691600db0",
+        "mu/tests/tools/test_workingrcx_fleet_apply.py": "b472ac0077b22914bdf1fe5e0f07f41fa28b0938da22281b5b1109a73256340f"
+      }
+    },
+    "final_documentation_recheck": {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+      "exit_code": 0,
+      "passed": 351,
+      "warnings": 2,
+      "seconds": 1.76,
+      "reason": "Verify final TASKS/CHANGELOG result bookkeeping.",
+      "log": {
+        "path": "/tmp/rcx-r3-final-docs.log",
+        "sha256": "a7620abc208de7a6e69714fd195db5056fb4dbd4e3703b07ebf0e760cff000fd"
+      }
+    },
+    "supervisor_reentry": {
+      "recorded_at": "2026-09-23T17:58:12.853143+00:00",
+      "finding": "The generated watcher resolved carrier/bus per refresh but retained the startup implicit tee path. A recent A tee hid B active output after a real A-to-B carrier transition.",
+      "correction": "Derive implicit tee selection from OBSERVED_REPO_ROOT for each log search, sharing the selected carrier with terminal probes and heartbeat. Preserve explicit RCX_PIPELINE_LIVE_LOG overrides and fixed bus pins.",
+      "before_correction": {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_workingrcx_fleet_apply.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py --tb=short",
+        "exit_code": 1,
+        "failed": 2,
+        "passed": 1681,
+        "skipped": 0,
+        "seconds": 447.74,
+        "failed_selectors": [
+          "mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_rebinds_live_log_after_carrier_transition[implicit-tee]",
+          "mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_rebinds_live_log_after_carrier_transition[implicit-scratch]"
+        ],
+        "control_passed": "mu/tests/tools/test_pipeline_monitor_autofollow.py::test_generated_watcher_rebinds_live_log_after_carrier_transition[explicit-pin]",
+        "production_sha256": "3f6c699a6438c99ff45014e2a984e6ffc6e6e87955b42d849b7324a91a3ca70a",
+        "test_sha256": "140367d01bc53baec181780622eb1c0be25a16bb7296e2bb818b88f4ac5ecd24",
+        "log": {
+          "path": "/tmp/rcx-r3-log-selection-before.log",
+          "sha256": "ea8d8ba27cf0592a19f1c9bc1be694e2a992d26ea0acd9bb533750679a843168"
+        },
+        "failure_excerpt": "_ test_generated_watcher_rebinds_live_log_after_carrier_transition[implicit-tee] _\n[gw0] darwin -- Python 3.13.13 /opt/homebrew/opt/python@3.13/bin/python3.13\nmu/tests/tools/test_pipeline_monitor_autofollow.py:208: in test_generated_watcher_rebinds_live_log_after_carrier_transition\n    _wait_for(lambda: bool(_watcher_tails(watcher, expected_log)))\nmu/tests/tools/test_pipeline_monitor_autofollow.py:53: in _wait_for\n    assert predicate(), \"Timed out waiting for the real watcher transition\"\nE   AssertionError: Timed out waiting for the real watcher transition\nE   assert False\nE    +  where False = <function test_generated_watcher_rebinds_live_log_after_carrier_transition.<locals>.<lambda> at 0x10f2c77e0>()\n_ test_generated_watcher_rebinds_live_log_after_carrier_transition[implicit-scratch] _\n[gw0] darwin -- Python 3.13.13 /opt/homebrew/opt/python@3.13/bin/python3.13\nmu/tests/tools/test_pipeline_monitor_autofollow.py:208: in test_generated_watcher_rebinds_live_log_after_carrier_transition\n    _wait_for(lambda: bool(_watcher_tails(watcher, expected_log)))\nmu/tests/tools/test_pipeline_monitor_autofollow.py:53: in _wait_for\n    assert predicate(), \"Timed out waiting for the real watcher transition\"\nE   AssertionError: Timed out waiting for the real watcher transition\nE   assert False\nE    +  where False = <function test_generated_watcher_rebinds_live_log_after_carrier_transition.<locals>.<lambda> at 0x10e3fd800>()"
+      },
+      "corrected_chain": {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_workingrcx_fleet_apply.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_recovery_gate.py -k pipeline_monitor --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+        "exit_code": 0,
+        "log": {
+          "path": "/tmp/rcx-r3-log-selection-corrected.log",
+          "sha256": "7837dbe981a7cacdafbefc5ac2580afaf2e6a85023dab887baf59ce1ec54e3ee"
+        },
+        "tools": {
+          "passed": 1683,
+          "failed": 0,
+          "skipped": 0,
+          "seconds": 437.92,
+          "passed_by_file": {
+            "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": 159,
+            "mu/tests/tools/test_commit_executor_receipt.py": 300,
+            "mu/tests/tools/test_executor_dispatch.py": 749,
+            "mu/tests/tools/test_pipeline_monitor_autofollow.py": 41,
+            "mu/tests/tools/test_workingrcx_fleet_apply.py": 341,
+            "mu/tests/tools/test_worktree_lifecycle.py": 93
+          }
+        },
+        "recovery_monitor": {
+          "passed": 23,
+          "failed": 0,
+          "deselected": 1459,
+          "seconds": 55.15
+        },
+        "docs": {
+          "passed": 351,
+          "failed": 0,
+          "warnings": 2,
+          "seconds": 1.74
+        },
+        "warning_detail": [
+          "Existing stale reference-doc verification dates.",
+          "STATUS.md last commit is 84 days old."
+        ],
+        "validated_files_sha256": {
+          "mu/tools/executors/commit_executor.py": "2cff09d2f98f332b9242646a496c0e7bf599dc9697f00b15e3bde1fcc088db0c",
+          "mu/tools/executors/worktree_lifecycle.py": "fea82016eb646d27b1636e68e29b74de19d4a1b19ff0c1c21ee039c441821eae",
+          "mu/tools/observability/pipeline_monitor.sh": "fb8f319a06c9a8c633a29577073d7d77fafecad373b1d91e98b86ef4353b8f24",
+          "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "7bc21ea6adf4e606f286042ea59f2177966200858d50d8a5f832e772a775c91e",
+          "mu/tests/tools/test_commit_executor_receipt.py": "6955298aeb1569b41029bc854c078fee8a25973b6d2e81c3dbcc849ea8935c39",
+          "mu/tests/tools/test_executor_dispatch.py": "9d2a5c36100d4d20412475eb22d2924f69b96081f1bccf9c01626fe6898e5c58",
+          "mu/tests/tools/test_worktree_lifecycle.py": "9fb403378a86e3e6872d275f90f52766b3a3b57c3b864a457a27f95558d8cd93",
+          "mu/tests/tools/test_pipeline_monitor_autofollow.py": "140367d01bc53baec181780622eb1c0be25a16bb7296e2bb818b88f4ac5ecd24",
+          "mu/docs/agents/WorktreeLifecycle.v0.md": "bfe6295b075ec72817f08a124147b24c06b0ed9f581adc2a9661c8eb7b675857",
+          "mu/tests/tools/test_workingrcx_fleet_apply.py": "b472ac0077b22914bdf1fe5e0f07f41fa28b0938da22281b5b1109a73256340f"
+        }
+      },
+      "proof_limits": [
+        "Local generated watcher, real linked-Git fixtures, real followers, fresh output and heartbeat observations; no actual fleet mutation or postmerge result claimed.",
+        "The complete original gates and terminal/live-owner/open-writer protections pass; no completion budget, pin semantics or generic process guard changed.",
+        "Fresh supervisor review, candidate staging/authority, CI/merge and live preservation/sync/closeout verification remain outer-owned."
+      ],
+      "final_documentation_recheck": {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+        "exit_code": 0,
+        "passed": 351,
+        "warnings": 2,
+        "seconds": 1.82,
+        "reason": "Verify final re-entry TASKS/CHANGELOG and evidence bookkeeping.",
+        "log": {
+          "path": "/tmp/rcx-r3-log-selection-final-docs.log",
+          "sha256": "03b57117a70acfc54e6dbcdbe9ee26ef00729cd398f01cf84b33762e81685616"
+        }
+      }
+    },
+    "latest_candidate_validation": "supervisor_reentry.corrected_chain"
+  },
+  "proof_limits": [
+    "No consumed apply/verify pair, journal, original recovery or exhausted lifecycle claim is replayed.",
+    "Fresh tests use disposable repositories and owned process groups; no actual fleet cleanup or postmerge result is claimed.",
+    "The prior discarded-output recovery timeout has no established timing cause."
+  ],
+  "integration_fixture_repair": {
+    "source_log": {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-closeout-recurrence-r2-20260923/.scratch/recovery_agent_workingrcx-fleet-closeout-recurrence-r2-2026-09-23-run-pre-push-script-1.txt",
+      "sha256": "9b7e7eec3fdafaf46ca68e015e2d7a727e11da2ed6492aaf44aa2252d279145e"
+    },
+    "historical_result": "11 failed, 11019 passed, 2 skipped in 939.28s",
+    "historical_failed_selector_excerpt": [
+      "tests/tools/test_executor_dispatch.py::TestCommitContinuationAndBotFreshness::test_post_commit_does_not_recomment_same_head_bot_review_request",
+      "tests/tools/test_executor_dispatch.py::TestCommitContinuationAndBotFreshness::test_post_commit_late_auto_resolve_retries_ci_and_merge",
+      "tests/tools/test_executor_dispatch.py::TestCommitContinuationAndBotFreshness::test_post_commit_uses_linked_base_worktree_for_merge_verification",
+      "tests/tools/test_executor_dispatch.py::TestCommitContinuationAndBotFreshness::test_post_commit_wait_ci_retries_until_checks_register",
+      "tests/tools/test_executor_dispatch.py::TestCommitContinuationAndBotFreshness::test_post_commit_warns_when_linked_base_worktree_is_already_dirty"
+    ],
+    "source_excerpt_limit": "The retained error text truncates the earlier part of the eleven-failure list; only five complete selectors can be extracted here.",
+    "correction": "Reuse native fetched origin/dev merge-tip assertions, safe landed checkout-sync handoff and separate staged/unstaged inventory reads. Preserve review, CI, retry and ownership assertions.",
+    "fresh_complete_suite_result": "749 passed, zero failed/skipped in the declared six-file gate.",
+    "prior_recovery_timeout": "300-second validator discarded its output; timing cause remains unproven."
+  },
+  "receipt_fixture_repair": {
+    "surface": "TestDraftPRReadyBeforeMerge._run_step15_path",
+    "correction": "Reuse distinct fetched merge-tip fixture, merge/fetch ordering assertions and resulting merge_sha assertion; full behavioral suite required.",
+    "fresh_complete_suite_result": "300 passed, zero failed/skipped in the declared six-file gate; readiness, CI and merge ordering retained."
+  },
+  "tracker_preservation": {
+    "task_ids": 268,
+    "task_ids_unchanged_from_comparison": true,
+    "parked_obligations": 39,
+    "parked_backlog_byte_exact_to_comparison": true,
+    "parked_backlog_sha256": "5048f21c9c56ceec296fd826c51a0b784c0cd99121b9196dcc1651eb52fa4a3a",
+    "quota_policy": "Immediate stop at or below 10%; unreadable quota pauses work; no automatic resume. Private usage values excluded.",
+    "final_reverified": true,
+    "parked_backlog_hash_scope": "UTF-8 bytes from the PARKED PIPELINE BACKLOG heading up to, excluding, the NON-LAUNCHABLE PROGRAM GOVERNANCE AND HISTORY heading, including separating newlines."
+  },
+  "reused_candidate_files": [
+    {
+      "path": "mu/tools/executors/commit_executor.py",
+      "frozen_source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/candidate/mu/tools/executors/commit_executor.py",
+      "frozen_sha256": "2cff09d2f98f332b9242646a496c0e7bf599dc9697f00b15e3bde1fcc088db0c",
+      "current_sha256": "2cff09d2f98f332b9242646a496c0e7bf599dc9697f00b15e3bde1fcc088db0c",
+      "byte_exact": true
+    },
+    {
+      "path": "mu/tools/executors/worktree_lifecycle.py",
+      "frozen_source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/candidate/mu/tools/executors/worktree_lifecycle.py",
+      "frozen_sha256": "fea82016eb646d27b1636e68e29b74de19d4a1b19ff0c1c21ee039c441821eae",
+      "current_sha256": "fea82016eb646d27b1636e68e29b74de19d4a1b19ff0c1c21ee039c441821eae",
+      "byte_exact": true
+    },
+    {
+      "path": "mu/tools/observability/pipeline_monitor.sh",
+      "frozen_source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/candidate/mu/tools/observability/pipeline_monitor.sh",
+      "frozen_sha256": "3f6c699a6438c99ff45014e2a984e6ffc6e6e87955b42d849b7324a91a3ca70a",
+      "current_sha256": "fb8f319a06c9a8c633a29577073d7d77fafecad373b1d91e98b86ef4353b8f24",
+      "byte_exact": false,
+      "only_delta": "Supervisor-requested per-refresh implicit tee binding to the resolved carrier; explicit log override retained."
+    },
+    {
+      "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "frozen_source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/candidate/mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "frozen_sha256": "b2e13dfcc67cb593ea61aeb09bbb1eb6cf69b1da72982b15aa8eb1830f4f3873",
+      "current_sha256": "7bc21ea6adf4e606f286042ea59f2177966200858d50d8a5f832e772a775c91e",
+      "byte_exact": false,
+      "only_delta": "The captured AD fixture now reads the fresh R3 evidence path; all behavior assertions remain unchanged."
+    },
+    {
+      "path": "mu/tests/tools/test_commit_executor_receipt.py",
+      "frozen_source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/candidate/mu/tests/tools/test_commit_executor_receipt.py",
+      "frozen_sha256": "6955298aeb1569b41029bc854c078fee8a25973b6d2e81c3dbcc849ea8935c39",
+      "current_sha256": "6955298aeb1569b41029bc854c078fee8a25973b6d2e81c3dbcc849ea8935c39",
+      "byte_exact": true
+    },
+    {
+      "path": "mu/tests/tools/test_executor_dispatch.py",
+      "frozen_source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/candidate/mu/tests/tools/test_executor_dispatch.py",
+      "frozen_sha256": "9d2a5c36100d4d20412475eb22d2924f69b96081f1bccf9c01626fe6898e5c58",
+      "current_sha256": "9d2a5c36100d4d20412475eb22d2924f69b96081f1bccf9c01626fe6898e5c58",
+      "byte_exact": true
+    },
+    {
+      "path": "mu/tests/tools/test_worktree_lifecycle.py",
+      "frozen_source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/candidate/mu/tests/tools/test_worktree_lifecycle.py",
+      "frozen_sha256": "9fb403378a86e3e6872d275f90f52766b3a3b57c3b864a457a27f95558d8cd93",
+      "current_sha256": "9fb403378a86e3e6872d275f90f52766b3a3b57c3b864a457a27f95558d8cd93",
+      "byte_exact": true
+    },
+    {
+      "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+      "frozen_source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/candidate/mu/tests/tools/test_pipeline_monitor_autofollow.py",
+      "frozen_sha256": "478740fa8a84eef09a304b86c30f23a6c091950610f6853c96c7cd739798580d",
+      "current_sha256": "140367d01bc53baec181780622eb1c0be25a16bb7296e2bb818b88f4ac5ecd24",
+      "byte_exact": false,
+      "only_delta": "Real generated-watcher A-to-B regressions for implicit tee, executor fallback and explicit log pin."
+    },
+    {
+      "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+      "frozen_source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-closeout-recurrence-r2-evidence-2026-09-23/stopped_pre_push_candidate/candidate/mu/docs/agents/WorktreeLifecycle.v0.md",
+      "frozen_sha256": "75becbed30e60e63002dda7b3c1f9957e2d1b4354d1c7f2c36d3971691600db0",
+      "current_sha256": "bfe6295b075ec72817f08a124147b24c06b0ed9f581adc2a9661c8eb7b675857",
+      "byte_exact": false,
+      "only_delta": "Describe per-refresh implicit tee selection and preserved explicit log override."
+    }
+  ],
+  "evidence_command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_workingrcx_fleet_apply.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_recovery_gate.py -k pipeline_monitor --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+  "validation_diagnostics": {
+    "tools_pytest_addopts": "-vv --durations=20 -o faulthandler_timeout=120",
+    "purpose": "Retain per-test progress, durations and non-terminating stack diagnostics. No test timeout or completion budget is increased.",
+    "scope": "Only the three Phase B-local pytest commands declared by the locked plan."
+  },
+  "preservation_verified": {
+    "frozen_predecessor_files": 21,
+    "reused_files": 9,
+    "byte_exact_to_frozen_candidate": 5,
+    "only_reuse_delta": "Fresh R3 AD evidence pathname plus the supervisor-requested implicit tee correction, generated-watcher regressions and matching lifecycle documentation.",
+    "historical_carriers": "R1/R2 HEAD and raw index hashes unchanged.",
+    "historical_records": "All bound source, lifecycle receipt and PREPARED/HELD journal hashes unchanged.",
+    "scope": "All changed paths remain inside the immutable fifteen-path allowlist; no staging or live action."
+  }
+}

@@ -64,14 +64,11 @@ def sync_primary_from_landed_source(repo: Path, *, base_branch: str, authority_c
                 source.chmod(0o755 if entry[0] == "100755" else 0o644)
             program = (
                 "import json,sys; from pathlib import Path; "
-                "sys.path.insert(0,sys.argv[1]); import commit_executor as boundary; "
+                "sys.path.insert(0,sys.argv[1]); import worktree_lifecycle as lifecycle; "
                 "primary=Path(sys.argv[2]); identity=json.loads(sys.argv[4]); "
                 "assert all({'device':Path(p).stat().st_dev,'inode':Path(p).stat().st_ino}==v "
                 "for p,v in identity.items()), 'PRIMARY identity changed'; "
-                "binding=boundary.bind_terminal_target_identity(primary,base_branch=sys.argv[3]); "
-                "assert binding.get('bound'), binding; "
-                "print(json.dumps(boundary.sync_primary_worktree_to_base(primary,sys.argv[3],"
-                "target_identity=binding,log=lambda _:None)))"
+                "print(json.dumps(lifecycle.sync_landed_checkout_owners(primary,sys.argv[3])))"
             )
             process = subprocess.run([sys.executable, "-I", "-B", "-c", program,
                 str(root / "mu/tools/executors"), str(primary), base_branch, json.dumps(identity)],
@@ -80,6 +77,161 @@ def sync_primary_from_landed_source(repo: Path, *, base_branch: str, authority_c
             if not isinstance(outcome, dict):
                 raise fleet.Hold("Landed PRIMARY sync returned no outcome")
             return {**outcome, "source_authority_commit": authority_commit}
+
+
+def sync_landed_checkout_owners(primary: Path, base_branch: str) -> dict:
+    """Coordinate PRIMARY and the exact checked-out base in the landed child.
+
+    Each owner uses the shared identity/lock-bound WIP transaction. A held
+    sibling is a separate outcome, never hidden by PRIMARY's successful sync.
+    """
+    from importlib import import_module
+    boundary = import_module("mu.tools.executors.commit_executor" if __package__ else "commit_executor")
+    common = Path(fleet.line(fleet.git(primary, "rev-parse", "--path-format=absolute", "--git-common-dir")))
+    entries = boundary._parse_worktree_list(fleet.line(fleet.git(primary, "worktree", "list", "--porcelain")))
+    base_entries = [entry for entry in entries if entry.get("branch") == "refs/heads/" + base_branch]
+    base_binding = None
+    base_identity = None
+    base_outcome = dict(state="NOT_CHECKED_OUT", current=True, synced=False, skipped=True,
+                        primary=None, behind_count=None, reason=None)
+    # Bind before PRIMARY synchronization; any change during that transaction
+    # must be rejected by the sibling's own locked identity check.
+    if base_entries:
+        base_outcome.update(state="HOLD", current=False, reason="Checked-out base ownership is uncertain")
+        if len(base_entries) == 1:
+            entry = base_entries[0]
+            target = Path(entry["worktree"])
+            base_outcome["primary"] = str(target)
+            try:
+                if any(k in entry for k in ("locked", "prunable", "bare", "detached")):
+                    raise fleet.Hold("Checked-out base registration is locked or uncertain")
+                if target != primary:
+                    base_identity = lane_identity(target)
+                    if (base_identity["common_dir"] != str(common)
+                            or base_identity["HEAD"] != entry.get("HEAD")
+                            or base_identity["branch"] != "refs/heads/" + base_branch):
+                        raise fleet.Hold("Checked-out base Git identity changed")
+                base_binding = boundary.bind_terminal_target_identity(target, base_branch=base_branch)
+                if (not base_binding.get("bound") or base_binding.get("expected_branch") != base_branch
+                        or base_binding.get("expected_head") != entry.get("HEAD")):
+                    raise fleet.Hold("Checked-out base binding changed")
+            except (fleet.Hold, OSError, ValueError, subprocess.SubprocessError) as exc:
+                base_binding = None
+                base_outcome["reason"] = str(exc)
+
+    def observed(target: Path, outcome: dict) -> dict:
+        value = dict(outcome, primary=str(target), current=False, state="HOLD")
+        try:
+            value["behind_count"] = int(fleet.git(target, "rev-list", "--count", "HEAD..origin/" + base_branch))
+            value["ahead_count"] = int(fleet.git(target, "rev-list", "--count", "origin/" + base_branch + "..HEAD"))
+            value["current"] = (value["behind_count"] == value["ahead_count"] == 0
+                and not value.get("recovery_hold") and (value.get("synced") is True
+                    or "already current" in str(value.get("reason") or "")))
+            if value["current"]:
+                value["state"] = ("CURRENT_WITH_HELD_WIP" if value.get("primary_sync_transaction_state") == "HELD"
+                                  else "CURRENT")
+        except (fleet.Hold, OSError, ValueError, subprocess.SubprocessError) as exc:
+            value.update(behind_count=None, ahead_count=None, reason=str(exc))
+        return value
+
+    primary_binding = boundary.bind_terminal_target_identity(primary, base_branch=base_branch)
+    primary_outcome = observed(primary, boundary.sync_primary_worktree_to_base(
+        primary, base_branch, target_identity=primary_binding, log=lambda _: None))
+    if base_binding is not None:
+        target = Path(base_binding["worktree_identity"]["path"])
+        if target == primary:
+            base_outcome = dict(primary_outcome)
+        else:
+            admitted = None
+            recovered_transactions = []
+            recovery_error = None
+
+            def guard(stage, _manifest):
+                nonlocal admitted, recovered_transactions, recovery_error
+                if stage not in {"before_recovery", "after_prepared", "before_fast_forward"}:
+                    return
+                # Called continuously under the existing common-directory lock,
+                # before journal recovery and before either stash or ff mutation.
+                fleet.inspect_identity(base_identity)
+                fleet.native_idle(target, fleet.tree_manifest(target), reconcile_r1=True)
+                fleet.process_idle(base_identity)
+                if stage == "before_recovery":
+                    # Recover under the sync lock before admitting index/WIP:
+                    # an interrupted isolation may have changed both. The sync
+                    # API's subsequent discovery skips these terminal journals.
+                    recovered_transactions, recovery_error = (
+                        boundary._discover_and_recover_primary_sync_transactions(
+                            common_dir=common, primary=target, log=lambda _: None))
+                    if recovery_error:
+                        raise fleet.Hold("durable primary-sync recovery HOLD: " + recovery_error)
+                    if recovered_transactions:
+                        fleet.inspect_identity(base_identity)
+                        fleet.native_idle(target, fleet.tree_manifest(target), reconcile_r1=True)
+                        fleet.process_idle(base_identity)
+                    admitted = fleet.transaction_state(target)
+                elif stage == "after_prepared":
+                    fleet.require_transaction_state(target, admitted, "automatic-base-sync-prepared")
+
+            base_sync = boundary.sync_primary_worktree_to_base(
+                primary, base_branch, target_identity=base_binding, checkpoint=guard, log=lambda _: None)
+            base_sync["recovered_transactions"] = recovered_transactions + base_sync.get("recovered_transactions", [])
+            if recovery_error:
+                base_sync["recovery_hold"] = recovery_error
+            base_outcome = observed(target, base_sync)
+    elif base_outcome.get("primary"):
+        base_outcome = observed(Path(base_outcome["primary"]), base_outcome)
+    return {**primary_outcome, "base_worktree_sync": base_outcome,
+            "all_owners_current": primary_outcome["current"] and base_outcome["current"]}
+
+
+def terminal_log_record(repo: Path, bus_dir: str = ".agent_bus") -> str | None:
+    """Read-only reader release; this grants no retirement or retry authority.
+
+    Require an exact native terminal identity and exited registered owners.
+    A live/restarted owner, changed HEAD, wrong bus or uncertain record keeps
+    active monitoring. Generic process/writer checks still govern retirement.
+    """
+    repo = repo.resolve(strict=True)
+    if not (repo / ".git").is_file():
+        return None
+    bus = Path(bus_dir)
+    if not bus.is_absolute():
+        bus = repo / bus
+    with fleet.safe_git_environment():
+        common = Path(fleet.line(fleet.git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")))
+        matches = []
+        for path in (common / REGISTRY).glob("*/registration.json"):
+            registration = json.loads(fleet.read_plain(path))
+            if registration.get("identity", {}).get("path") == str(repo) and registration.get("bus_dir") == str(bus):
+                matches.append((path.parent, registration))
+        if not matches:
+            return None
+        current = lane_identity(repo)
+        released = None
+        for directory, registration in matches:
+            identity = registration["identity"]
+            if any(identity.get(k) != current[k] for k in ("path", "git_dir", "common_dir", "filesystem_identity")):
+                continue  # An older physical checkout cannot describe this owner.
+            owners = list(directory.glob("owner-*.json"))
+            if not owners:
+                return None
+            for path in owners:
+                owner = json.loads(fleet.read_plain(path))
+                if owner.get("wave_id") != registration.get("wave_id") or not fleet._absent_pid(owner.get("pid")):
+                    return None
+            path = directory / "terminal.json"
+            if not path.exists():
+                return None
+            terminal = json.loads(fleet.read_plain(path))
+            if terminal.get("identity") != current:
+                continue
+            if (registration.get("owner") != OWNER or terminal.get("owner") != OWNER
+                    or terminal.get("wave_id") != registration.get("wave_id")
+                    or terminal.get("record") != str(directory) or terminal.get("state") != "PENDING"):
+                return None
+            _surviving_root(terminal)
+            released = str(directory)
+        return released
 
 
 def lane_identity(repo: Path) -> dict:

@@ -6,6 +6,43 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-23
 
+### Preserved fleet closeout corrections and dispatcher fixtures (R3 Phase B; not landed)
+
+- Verified the frozen R2 manifest and all 21 archived files. R3 reuses the
+  preservation, checkout synchronization and finished-reader corrections;
+  R1/R2 carriers, indices, histories, journals and receipts remain preserved.
+- Tracked inventory retains separate index/worktree intent, including the
+  captured Source84 AD blob and absent deferred report, through native stash
+  preparation and exact restoration or verified HELD overlap with mixed WIP.
+- The landed child coordinates PRIMARY and the exact separately checked-out
+  base using locked preservation transactions. Per-owner CURRENT/HOLD and
+  ahead/behind outcomes expose a retained sibling independently of PRIMARY.
+- Native terminal identity and exited ownership release the generated log
+  watcher's own follower and cwd. Heartbeat/restart cannot immediately reattach;
+  active output, pinned/default monitoring and generic writer/live-owner holds
+  retain their behavior and original completion budgets.
+- The preserved receipt and dispatcher fixtures recognize the fetched merge
+  tip, landed synchronization handoff and separate dirty index/worktree reads.
+  Existing readiness, CI, review, retry and ownership assertions remain.
+  Before correction, the declared six-file gate reproduced 12 failures and
+  1,668 passes in 459.21s; recovery-monitor/docs short-circuited. The corrected
+  chain passed: 1,680 tools tests in 437.92s (all 749 dispatcher and 300 receipt
+  tests), 23 recovery-monitor tests in 56.38s, and 351 docs tests in 1.80s with
+  two existing freshness warnings. Per-test output and stack/duration
+  diagnostics are retained; no timeout or completion budget was increased.
+- Supervisor re-entry reproduced stale implicit tee selection after an A-to-B
+  carrier transition: 2 failures and 1,681 passes in 447.74s. The watcher now
+  derives the tee path from the resolved carrier on each refresh; real generated
+  watcher cases cover B's tee/executor output and retained explicit log pins.
+  The corrected declared chain passed: 1,683 tools tests in 437.92s, 23
+  recovery-monitor tests in 55.15s and 351 docs tests in 1.74s with the same two
+  freshness warnings. Fresh supervisor review remains pending.
+- R2 remains locally committed but never pushed or merged. All 13 orphan
+  useful-work owners remain open despite 11 source relocations. Native review,
+  candidate authority, CI/merge and actual postmerge verification remain
+  outer-owned; existing row38 physical/useful-work/registration cleanup follows
+  this correction before Mu. All 268 task IDs and 39 parked obligations remain.
+
 ### Orphaned recovery-owner admission (Phase B; landing and live actions pending)
 
 - Reproduced all13captured unfinished recovery-owner HOLDs with unchanged

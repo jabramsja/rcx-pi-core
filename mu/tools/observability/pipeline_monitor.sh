@@ -153,7 +153,7 @@ if [ -n "$ORCHESTRATOR_MODE" ] && [ "$ORCHESTRATOR_MODE" != "codex" ] && [ "$ORC
 fi
 
 # Default-monitor autofollow signal (WI-2). The DEFAULT monitor (no explicit
-# --lane/--bus-dir pin, identity lane "default", bus ".agent_bus") lets panes 2-4
+# --lane/--bus-dir pin, identity lane "default", bus ".agent_bus") lets all panes
 # auto-follow the freshest active lane bus by re-resolving the (root,bus) pair on
 # every refresh inside the pane scripts (see _pane_*.sh refresh_context +
 # _resolve_live_root.sh --emit-pair). This is an ephemeral launch-time FLAG, not
@@ -218,9 +218,7 @@ write_log_watcher() {
 #!/usr/bin/env bash
 # Resilient: never exits on transient errors
 set +e  # Do not exit on error
-# Keep the freshest real phase log visible for longer after a run ends so the
-# monitor still shows the last live failure/success instead of blanking almost
-# immediately.
+# Retain recent output, but a native terminal owner releases its live reader.
 IDLE_WINDOW_SECONDS=3600
 LOG_WATCHER_HEARTBEAT_SECONDS="${RCX_LOG_WATCHER_HEARTBEAT_SECONDS:-300}"
 case "$LOG_WATCHER_HEARTBEAT_SECONDS" in
@@ -229,6 +227,7 @@ esac
 current_log=""
 tail_pid=""
 last_heartbeat_epoch=0
+shown_terminal_record=""
 BUS_DIR="${RCX_AGENT_BUS_DIR:-${BUS_DIR:-.agent_bus}}"
 
 resolve_repo_root() {
@@ -253,7 +252,11 @@ resolve_repo_root() {
     printf '%s\n' "$root"
     return 0
   fi
-  git rev-parse --show-toplevel 2>/dev/null || pwd
+  if [ -n "${INITIAL_REPO_ROOT:-}" ]; then
+    printf '%s\n' "$INITIAL_REPO_ROOT"
+  else
+    git rev-parse --show-toplevel 2>/dev/null || pwd
+  fi
 }
 
 resolve_live_log() {
@@ -261,17 +264,75 @@ resolve_live_log() {
     printf '%s\n' "$RCX_PIPELINE_LIVE_LOG"
     return 0
   fi
-  local repo_root="" key=""
-  repo_root="$(resolve_repo_root)"
+  local repo_root="$1" key=""
   key="$(printf '%s' "$repo_root" | cksum | awk '{print $1}')"
   printf '/tmp/rcx_pipeline_live_%s.txt\n' "$key"
 }
 
-LIVE_LOG="$(resolve_live_log)"
+INITIAL_REPO_ROOT="$(resolve_repo_root)"
+# A monitor launched in a linked carrier must not retain its cwd after tail
+# release. The common-directory owner survives native retirement.
+watcher_common="$(git -C "$INITIAL_REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+if [ -n "$watcher_common" ] && [ -d "$watcher_common" ]; then
+  cd "$(dirname "$watcher_common")" || exit 1
+  case "${RCX_OBS_LIFECYCLE_HELPER:-$INITIAL_REPO_ROOT/}" in
+    "$INITIAL_REPO_ROOT/"*)
+      if [ -f "$PWD/mu/tools/executors/worktree_lifecycle.py" ]; then
+        RCX_OBS_LIFECYCLE_HELPER="$PWD/mu/tools/executors/worktree_lifecycle.py"
+      fi
+      ;;
+  esac
+fi
+
+OBSERVED_REPO_ROOT="$INITIAL_REPO_ROOT"
+
+refresh_context() {
+  local next_root="" next_bus=""
+  if [ "${RCX_OBS_AUTOFOLLOW_BUS:-}" = "1" ] && [ -f "${RCX_OBS_ROOT_HELPER:-}" ]; then
+    { IFS= read -r next_root; IFS= read -r next_bus; } < <(
+      RCX_AGENT_BUS_DIR="$BUS_DIR" bash "$RCX_OBS_ROOT_HELPER" --emit-pair 2>/dev/null
+    ) || true
+    if [ -d "$next_root" ] && { [ "$next_bus" = ".agent_bus" ] || [[ "$next_bus" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; }; then
+      OBSERVED_REPO_ROOT="$next_root"
+      BUS_DIR="$next_bus"
+      export BUS_DIR RCX_AGENT_BUS_DIR="$next_bus"
+      return
+    fi
+  fi
+  # Pinned monitors retain their bus. Unknown pair output falls back to the
+  # existing root resolver for that bus, without broadening terminal ownership.
+  OBSERVED_REPO_ROOT="$(resolve_repo_root)"
+}
+
+terminal_lane_record() {
+  local repo_root="$1" bus_dir="$2" helper="${RCX_OBS_LIFECYCLE_HELPER:-}"
+  if [ -z "$helper" ]; then
+    helper="$repo_root/mu/tools/executors/worktree_lifecycle.py"
+  fi
+  [ -f "$helper" ] || return 1
+  # Pass the observed owner in the environment so the short read-only probe
+  # itself does not advertise a target path as a long-lived process owner.
+  RCX_LOG_WATCH_ROOT="$repo_root" RCX_LOG_WATCH_BUS="$bus_dir" \
+    python3 -I -B - "$helper" <<'TERMINAL_PY'
+import os
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(sys.argv[1]).resolve().parent))
+try:
+    import worktree_lifecycle
+    record = worktree_lifecycle.terminal_log_record(
+        Path(os.environ["RCX_LOG_WATCH_ROOT"]), os.environ["RCX_LOG_WATCH_BUS"])
+except Exception:
+    record = None  # Unknown ownership keeps monitoring; no retirement claim.
+if record:
+    print(record)
+sys.exit(0 if record else 1)
+TERMINAL_PY
+}
 
 resolve_branch_name() {
   local repo_root=""
-  repo_root="$(resolve_repo_root)"
+  repo_root="$OBSERVED_REPO_ROOT"
   [ -n "$repo_root" ] || {
     echo "unknown"
     return 0
@@ -328,16 +389,23 @@ find_newest_recent_log() {
 }
 
 find_newest_log() {
-  local repo_root=""
+  terminal_lane_record "$OBSERVED_REPO_ROOT" "$BUS_DIR" >/dev/null && return
+  find_recent_log
+}
+
+find_recent_log() {
+  local repo_root="$OBSERVED_REPO_ROOT" live_log=""
+  # Bind the implicit tee path to this refresh's carrier, just like the bus
+  # and terminal probe. An explicit RCX_PIPELINE_LIVE_LOG remains pinned.
+  live_log="$(resolve_live_log "$repo_root")"
   # Live tee output (from 'exec' command) takes priority
-  if file_is_recent "$LIVE_LOG" && file_has_visible_content "$LIVE_LOG"; then
-    echo "$LIVE_LOG"
+  if file_is_recent "$live_log" && file_has_visible_content "$live_log"; then
+    echo "$live_log"
     return
   fi
   # After the explicit live tee log, choose the freshest real pipeline surface
   # across reviewer transcripts and stdout/live logs. Bridge stderr placeholders
   # stay in a final fallback tier so they cannot outrank fresher real output.
-  repo_root="$(resolve_repo_root)"
   [ -n "$repo_root" ] || return
   local newest=""
   newest="$(find_newest_recent_log \
@@ -374,9 +442,12 @@ stop_tail() {
   current_log=""
 }
 
+trap 'stop_tail' EXIT
+trap 'exit 0' INT TERM
+
 render_idle_screen() {
   local repo_root="" branch="" now=""
-  repo_root="$(resolve_repo_root)"
+  repo_root="$OBSERVED_REPO_ROOT"
   branch="$(resolve_branch_name)"
   now="$(date '+%H:%M:%S')"
   printf '\033[H\033[2J\033[3J'
@@ -395,7 +466,9 @@ render_idle_screen() {
 switch_tail() {
   local new_log="$1"
   stop_tail
+  terminal_lane_record "$OBSERVED_REPO_ROOT" "$BUS_DIR" >/dev/null && return
   if [ -f "$new_log" ]; then
+    shown_terminal_record=""
     printf '\033[H\033[2J\033[3J'
     printf '\033[1;36mPane 1: live pipeline log\033[0m\n'
     printf '\033[1;36m── %s ──\033[0m\n' "$(basename "$new_log")"
@@ -415,23 +488,40 @@ refresh_tail_if_due() {
 }
 
 while true; do
+  # Resolve once per refresh: log selection, terminal probes and heartbeat
+  # attachment must all describe the same selected carrier and bus.
+  refresh_context
   newest=$(find_newest_log) || newest=""
   if [ -n "$newest" ] && [ "$newest" != "$current_log" ]; then
     switch_tail "$newest"
   elif [ -n "$newest" ] && [ "$newest" = "$current_log" ]; then
     refresh_tail_if_due "$newest"
   elif [ -z "$newest" ]; then
+    terminal_record="$(terminal_lane_record "$OBSERVED_REPO_ROOT" "$BUS_DIR")" || terminal_record=""
+    last_log="$current_log"
     if [ -n "$current_log" ]; then
       stop_tail
     fi
-    render_idle_screen
+    if [ -n "$terminal_record" ]; then
+      if [ "$shown_terminal_record" != "$terminal_record" ]; then
+        # A cold restart may show a finite snapshot, never a new follower.
+        if [ -z "$last_log" ]; then
+          last_log="$(find_recent_log)"
+          [ -f "$last_log" ] && tail -n 10 "$last_log"
+        fi
+        printf '\nTerminal lane; live log reader released.\nEvidence: %s\n' "$terminal_record"
+        shown_terminal_record="$terminal_record"
+      fi
+    else
+      render_idle_screen
+    fi
   fi
   # Check if tail process died (file deleted/truncated)
   if [ -n "$tail_pid" ] && ! kill -0 "$tail_pid" 2>/dev/null; then
     tail_pid=""
     current_log=""
   fi
-  sleep 3
+  sleep 1
 done
 WATCHER_EOF
 }
@@ -856,12 +946,13 @@ rebuild_tmux_session() {
   chmod +x "$watcher"
 
   local OBS_DIR="$repo_root/mu/tools/observability"
-  local repo_q="" obs_q="" watcher_q="" status_q="" root_helper_q="" bus_q="" lane_q=""
+  local repo_q="" obs_q="" watcher_q="" status_q="" root_helper_q="" bus_q="" lane_q="" lifecycle_q=""
   printf -v repo_q '%q' "$repo_root"
   printf -v obs_q '%q' "$OBS_DIR"
   printf -v watcher_q '%q' "$watcher"
   printf -v status_q '%q' "$OBS_DIR/pipeline_status.sh"
   printf -v root_helper_q '%q' "$OBS_DIR/_resolve_live_root.sh"
+  printf -v lifecycle_q '%q' "$repo_root/mu/tools/executors/worktree_lifecycle.py"
   printf -v bus_q '%q' "$BUS_DIR"
   printf -v lane_q '%q' "$IDENTITY_LANE"
 
@@ -873,7 +964,7 @@ rebuild_tmux_session() {
   # that ENABLES the per-refresh (root,bus) re-resolution inside the pane refresh
   # loops. It does NOT bake a dynamic bus into the one-shot pane command (a pane
   # command runs once); the panes themselves rebind the effective bus each
-  # refresh. Pinned monitors and pane 1 (the live-log watcher) never get it.
+  # refresh. Pinned monitors never get it.
   local autofollow_seed=""
   if [ "${AUTOFOLLOW_BUS_SIGNAL:-0}" = "1" ]; then
     autofollow_seed="RCX_OBS_AUTOFOLLOW_BUS=1 "
@@ -881,7 +972,7 @@ rebuild_tmux_session() {
   # Do not pin panes to the launcher worktree. Let each pane re-resolve the
   # freshest active pipeline worktree on every refresh so tmux stays honest
   # when the real run lives in a different linked worktree.
-  pane1_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $watcher_q"
+  pane1_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && ${autofollow_seed}BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q RCX_OBS_LIFECYCLE_HELPER=$lifecycle_q bash $watcher_q"
   pane2_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && ${autofollow_seed}BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_findings.sh"
   pane3_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && ${autofollow_seed}BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_processes.sh"
   pane4_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && ${autofollow_seed}BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_timeline.sh"
