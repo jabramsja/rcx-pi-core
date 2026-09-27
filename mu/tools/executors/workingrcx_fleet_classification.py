@@ -28,6 +28,31 @@ RESIDUAL_WAVE_ID = "workingrcx-fleet-residual-completion-r1-2026-09-13"
 RESIDUAL_BATCH_SIZE = 12
 RETIREMENT_WAVE_ID = "workingrcx-fleet-real-retirement-r1-2026-09-23"
 RETIREMENT_PREDECESSOR = "a76ccb9b238b45474946b93a5f3d3be1b07a8b93"
+MISSING_WAVE_ID = "workingrcx-fleet-missing-registration-retirement-r1-2026-09-27"
+# Only these individually enumerated predecessor sources can be proposed for
+# release. The preservation container itself and the stopped Mu owner cannot.
+HISTORICAL_SOURCES = (
+    "WorkingRCX-audit-origin-dev-20260729",
+    "WorkingRCX-fleet-preservation-owner-binding-r1-20260927",
+    "WorkingRCX-fleet-validation-convergence-r1-20260927",
+    "workingrcx_pr_preservation_20260630",
+    "WorkingRCX-worktrees",
+    *("WorkingRCX-preservation/" + name for name in (
+        "never-behind-fleet-authority-r1-phase-a-request-changes-20260909",
+        "never-behind-fleet-authority-r2-phase-b-policy-bound-20260909",
+        "never-behind-fleet-authority-r3-precommit-needs-phase-a-20260909",
+        "phase-b-private-review-byte-preserving-resume-r1-builder-stub-stop-20260909",
+        "phase-b-private-review-byte-preserving-resume-r1-generation1-contract-stop-20260909",
+        "phase-b-private-review-byte-preserving-resume-r1-nonconvergent-r3-20260909",
+        "pr-disposition-apply-r1-phase-a-corrected-config-required-20260910",
+        "pr-disposition-apply-r2-terminal-transition-blocked-20260910",
+        "pr-disposition-execution-r1-phase-a-corrected-config-20260909",
+        "pr-disposition-execution-r2-phase-a-corrected-config-20260909",
+        "pr-disposition-r2-adoption-enabler-diverged-20260910",
+        "r3c6-green-review-envelope-stop-20260909",
+        "recovery-private-review-envelope-r1-review-nogo-20260909",
+    )),
+)
 LANDED_CENSUS = "workingrcx-fleet-census-r3-2026-09-11_census.json"
 LANDED_SHA256 = "ac6f61337081c9adb7c100bac061270f6c7864aaed55d48912f50b8473d0cd81"
 LANDED_BASE = "c209bf29841425305003eeceddfd567a93874742"
@@ -106,6 +131,31 @@ def _absolute(value: object) -> bool:
 
 def _oid(value: object) -> bool:
     return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) is not None
+
+
+def valid_missing_source(source: dict, common: str) -> bool:
+    evidence = source.get("missing_registration") or {}
+    ident = evidence.get("identity") or {}
+    git = source.get("git") or {}
+    manifest = evidence.get("admin_manifest") or {}
+    return (evidence.get("status") == "OBSERVED" and evidence.get("errors") == []
+        and evidence.get("ownership_holds") == [] and not evidence.get("registration", {}).get("locked")
+        and evidence.get("path") == source["path"]
+        and ident == dict(path=source["path"], **{k: git.get(k) for k in (
+            "HEAD", "branch", "common_dir", "git_dir")})
+        and _oid(ident.get("HEAD")) and ident.get("common_dir") == common
+        and _absolute(ident.get("git_dir")) and str(Path(ident["git_dir"]).parent) == common + "/worktrees"
+        and source.get("availability_status") == "missing" and source.get("entry_kind") == "missing"
+        and source.get("inspection_status") == "admin_only" and source.get("errors") == []
+        and source.get("repository_kind") == "missing_linked_worktree"
+        and source.get("registration_status") == "registered"
+        and source.get("registered_worktrees") == [evidence.get("registration")]
+        and set(evidence.get("admin_filesystem_identity", {})) == {"device", "inode", "mode"}
+        and all(type(v) is int for v in evidence["admin_filesystem_identity"].values())
+        and {"HEAD", "index", "gitdir", "commondir"} <= manifest.keys()
+        and manifest["index"].get("sha256") == evidence.get("index_sha256")
+        and all(isinstance(evidence.get(k), str) and re.fullmatch(r"[0-9a-f]{64}", evidence[k])
+                for k in ("index_sha256", "index_entries_sha256", "indexed_objects_sha256", "history_sha256")))
 
 
 def _observation_valid(source: dict, census: dict) -> bool:
@@ -252,7 +302,8 @@ def retirement_authority_binding(census: dict, *, wave_id: str, predecessor: str
 def classify(census: dict, *, source_sha256: str, base_commit: str,
              carrier: str, landed: bool, residual: bool = False,
              wave_id: str | None = None, protected: tuple[str, ...] = (),
-             retirement: bool = False, retirement_predecessor: str | None = None) -> dict:
+             retirement: bool = False, retirement_predecessor: str | None = None,
+             missing_paths: tuple[str, ...] = (), historical_paths: tuple[str, ...] = ()) -> dict:
     """Return one decision per validated row using only carrier-local objects."""
     _validate_inventory(census)
     if residual and landed:
@@ -272,6 +323,15 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
     if retirement and authority is None and census["fleet_root"] == LANDED_FLEET and (
             selected_wave != RETIREMENT_WAVE_ID or base_commit != RETIREMENT_PREDECESSOR):
         raise ValueError("Actual fleet retirement requires explicit fresh predecessor authority")
+    observed_paths = {r["path"] for r in census["entries"]}
+    allowed_historical = {census["fleet_root"] + "/" + p for p in HISTORICAL_SOURCES}
+    if missing_paths or historical_paths:
+        if (authority is None or not set(missing_paths + historical_paths) <= observed_paths
+                or len(set(missing_paths)) != len(missing_paths)
+                or len(set(historical_paths)) != len(historical_paths)
+                or (historical_paths and (selected_wave != MISSING_WAVE_ID
+                    or not set(historical_paths) <= allowed_historical))):
+            raise ValueError("Registration/historical release requires fresh exact finite source authority")
     if not _oid(base_commit):
         raise ValueError("base-commit must be an exact 40-character commit ID")
     if not _success(_git(carrier, "rev-parse", "--show-toplevel"), carrier + "\n"):
@@ -313,6 +373,13 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
         def hold(code: str, detail: str) -> None:
             reasons.append({"code": code, "detail": detail})
         name = os.path.basename(path)
+        missing = path in missing_paths and valid_missing_source(source, common)
+        admin_owner = source.get("missing_registration", {}).get("status") == "OBSERVED"
+        historical = path in historical_paths
+        empty = (historical and name == "WorkingRCX-worktrees"
+                 and source.get("shell_entries") == [] and not registrations
+                 and source.get("registration_status") == "not_registered"
+                 and source.get("repository_kind") == "non_repository")
         shell = (residual and source.get("bus_only_shell") is True
                  and source.get("repository_kind") == "non_repository"
                  and source.get("inspection_status") == "not_repository"
@@ -370,7 +437,7 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                 # Full bytes/index/history are archived before native safe sync.
                 reasons = [r for r in reasons if r["code"] != "dirty_or_unknown"]
         retirement_action = None
-        if retirement and not shell:
+        if retirement and not shell and not empty:
             evidence = source.get("retirement_evidence", {})
             clone = source.get("repository_kind") == "standalone_repository"
             detached = git.get("branch_status") == "detached" and git.get("branch") is None
@@ -403,8 +470,34 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                     or Path(link["path"]).name != "bridge_config.json" for link in evidence.get("native_links", [])):
                 hold("unknown_native_link_owner", "Native owner links require exact known dangling adapter evidence.")
             retirement_action = "RETIRE_CLONE" if clone else "RETIRE_ARCHIVE" if archive else "RETIRE_WORKTREE"
+        if missing:
+            exclusions = {"outside_direct_fleet", "unavailable_or_non_directory", "inspection_uncertain",
+                "not_linked_worktree", "registration_uncertain", "dirty_or_unknown", "filesystem_identity_uncertain"}
+            # Only the source-name heuristic is released. Explicit protected
+            # paths, base branches and unknown Git identity still hold.
+            if not any(path == p or path.startswith(p + "/") for p in protected_paths):
+                exclusions.add("protected_evidence")
+            reasons = [r for r in reasons if r["code"] not in exclusions]
+            retirement_action = "RETIRE_MISSING_REGISTRATION"
+        elif path in missing_paths:
+            locks = source.get("missing_registration", {}).get("ownership_holds", [])
+            if locks:
+                hold("missing_admin_owned", "Original Git locks or unfinished operations remain: " + ", ".join(locks))
+            else:
+                hold("missing_admin_uncertain", "Explicit missing source lacks exact original admin/index/history evidence.")
+        if historical:
+            # The canonical preservation parent may protect an exact named
+            # child; explicit --protect and the active carrier always win.
+            if not any(path == p or path.startswith(p + "/") for p in (*protected, carrier, census["anchor_repo"])):
+                reasons = [r for r in reasons if r["code"] not in {"protected_evidence", "outside_direct_fleet"}]
+        if empty:
+            reasons = [r for r in reasons if r["code"] not in {"inspection_uncertain", "not_linked_worktree",
+                "repository_identity_uncertain", "head_or_branch_uncertain", "registration_uncertain", "dirty_or_unknown"}]
+            if source.get("inspection_status") != "not_repository" or source.get("errors"):
+                hold("empty_container_uncertain", "Exact empty container inspection failed.")
+            retirement_action = "RETIRE_EMPTY_CONTAINER"
         ancestry = {"status": "NOT_APPLICABLE" if shell else "NOT_PROBED", "probes": []}
-        if not reasons and not shell:
+        if not reasons and not shell and not empty:
             head = git["HEAD"]
             if head not in cache:
                 cache[head] = _ancestry(carrier, head, base_commit)
@@ -437,10 +530,10 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
             owner_id = selected_wave + "-useful-" + hashlib.sha256(path.encode("utf-8", "surrogateescape")).hexdigest()[:12]
             rows[-1]["useful_work"] = useful
             needs_landing = (useful.get("status") == "NEEDS_LANDING"
-                and source.get("availability_status") == "present"
-                and source.get("repository_kind") in {"linked_worktree", "standalone_repository"}
+                and (admin_owner or source.get("availability_status") == "present")
+                and source.get("repository_kind") in {"linked_worktree", "standalone_repository", "missing_linked_worktree"}
                 and (os.path.dirname(path) == census["fleet_root"] or (retirement and
-                     source.get("retirement_evidence", {}).get("preserved_operation"))))
+                     source.get("retirement_evidence", {}).get("preserved_operation")) or admin_owner or historical))
             rows[-1]["landing_owner"] = (
                 None if not needs_landing else dict(
                     task="FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION", wave_id=owner_id,
@@ -453,7 +546,10 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                     staged_patch_sha256=useful.get("staged_patch_sha256"),
                     unstaged_patch_sha256=useful.get("unstaged_patch_sha256"),
                     next_action="Native Phase A must compare the retained index/worktree and local commits to dev; land missing hunks before marking this owner complete."))
-            if not shell and (not useful or useful.get("status") == "UNKNOWN"):
+            if admin_owner and rows[-1]["landing_owner"]:
+                rows[-1]["landing_owner"].update(unstaged_untracked_intent="UNKNOWN_ABSENT_CHECKOUT",
+                    next_action="Compare retained index hunks and original receipts to dev; absent unstaged/untracked bytes remain unknown. Byte difference is not a production deficit.")
+            if not shell and not empty and (not useful or useful.get("status") == "UNKNOWN"):
                 # Inventory uncertainty never becomes preservation permission.
                 if rows[-1]["decision"] != "HOLD":
                     rows[-1].update(decision="HOLD", proposed_action="UNTOUCHED_HOLD", apply_prerequisites=[])
@@ -518,6 +614,10 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
         report["policy"]["protected_heads"] = []
     if authority is not None:
         report["retirement_authority"] = authority
+    if missing_paths or historical_paths:
+        report["policy"].update(missing_registration_paths=list(missing_paths),
+                                reviewed_historical_paths=list(historical_paths),
+                                explicit_protected_paths=sorted(set((*protected, carrier, census["anchor_repo"]))))
     return report
 
 
@@ -612,6 +712,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--retirement-predecessor", help="Explicit exact comparison commit for a new reviewed retirement authority; cannot rebind the original wave")
     parser.add_argument("--wave-id", help="Fresh residual owner; omitted retains the legacy authority")
     parser.add_argument("--protect", action="append", default=[], help="Exact additional active/preserved source path")
+    parser.add_argument("--missing-registration", action="append", default=[], help="One exact observed admin-only source; repeated finite opt-in")
+    parser.add_argument("--historical-source", action="append", default=[], help="One exact enumerated historical source in this wave")
     parser.add_argument("--census", required=True)
     parser.add_argument("--base-commit", required=True)
     parser.add_argument("--output", required=True)
@@ -641,7 +743,8 @@ def main(argv: list[str] | None = None) -> int:
         report = classify(census, source_sha256=digest, base_commit=args.base_commit,
                           carrier=os.getcwd(), landed=landed, residual=args.residual,
                           wave_id=args.wave_id, protected=tuple(args.protect), retirement=args.retirement,
-                          retirement_predecessor=args.retirement_predecessor)
+                          retirement_predecessor=args.retirement_predecessor,
+                          missing_paths=tuple(args.missing_registration), historical_paths=tuple(args.historical_source))
         payload = (json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii")
         _write_or_verify(output, payload)
         if args.wave_id and args.wave_id != RESIDUAL_WAVE_ID:

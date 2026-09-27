@@ -219,7 +219,7 @@ The fresh plan admits `RETIRE_WORKTREE`, `RETIRE_CLONE` and `RETIRE_ARCHIVE`.
 It preserves raw source bytes, symlink targets, modes, index/admin bytes,
 index-only blobs, refs, reflog history, declared stashes and journal directories.
 A history bundle is verified and imported in an empty standalone recovery Git
-directory. Git's read-only `rev-list --objects --indexed-objects` traversal also
+directory. Git's read-only `rev-list --single-worktree --objects --indexed-objects` traversal also
 enumerates cache-tree objects and their descendants that neither history nor
 staged blobs necessarily retain. A separate `index-objects.pack` carries that
 closure into recovery; object identities, original raw index bytes (including
@@ -228,6 +228,37 @@ alternates. Neither source nor preserved index is refreshed or normalized to
 make recovery pass. The original index and objects are checked independently
 before source removal. Source preparation never fetches, merges,
 checks out or synthesizes a branch in the historical source.
+
+Fresh classification can also name individual absent registrations with repeated
+`--missing-registration <exact-source-path>` arguments. Each must resolve to one
+canonical common-dir `worktrees/<admin>/gitdir` pointer and one matching Git
+registration. `RETIRE_MISSING_REGISTRATION` binds the original admin inode,
+HEAD/ref bytes, raw index and full admin manifest, reflogs, indexed-object closure
+and HEAD history. Symbolic owners also retain exact loose/packed-ref storage
+and branch-reflog archives; original HEAD and branch reflogs are restored in
+the independent recovery repository. An absent source is never classified clean: its unstaged and
+untracked bytes remain unknown. Every such source retains a useful-work owner;
+staged differences require exact comparison to dev and historical receipts,
+without treating a byte difference as proof of missing production behavior.
+
+The admin-only action uses the same independent bundle/index-object recovery,
+strict fsck, process/lock/native-owner checks and consumed-once PRIMARY boundary.
+It preserves the raw admin archive and symbolic or detached HEAD in standalone
+recovery before `git worktree remove <exact-absent-source>`. It creates no
+worktree snapshot or replacement checkout and makes no directory-loss recovery
+claim. Source reappearance, changed pointers/index/history, ambiguous owners or
+failed recovery hold that individual target. Verification rereads recovery,
+the original consumed claim, exact registration delta and admin absence.
+
+The September 27 missing-registration wave may additionally name only the
+enumerated historical sources with `--historical-source <exact-path>`; these
+remain subject to the existing present-source preservation and liveness checks.
+The canonical `WorkingRCX-preservation` parent remains protected. The exact
+unregistered empty `WorkingRCX-worktrees` container uses
+`RETIRE_EMPTY_CONTAINER`: its device/inode/mode, empty contents and registration
+absence are checked again within the same terminal boundary. It requires no Git
+history synthesis. No wildcard release, force/prune, original journal rewrite,
+spent operation replay or lifecycle-budget reset is permitted.
 
 `bind_terminal_retirement_identity` binds that source and preservation to
 surviving PRIMARY. `execute_terminal_retirement_once` retains the existing

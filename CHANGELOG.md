@@ -6,6 +6,20 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-27
 
+### Missing fleet registrations and finite historical retirement (Phase B; landing pending)
+
+- Add exact read-only admin mapping and raw index/history inventory for absent
+  registered checkouts. Explicit finite classification retains useful-work
+  owners, including staged-only objects and unknown unstaged/untracked intent.
+- Reuse standalone strict recovery and the consumed-once PRIMARY boundary for
+  admin-only registration retirement. Raw admin/HEAD/index bytes and indexed
+  object closure are preserved before exact non-force Git removal; independent
+  verification checks recovery and registration deltas.
+- Limit historical releases to the enumerated sources and exact empty container.
+  PRIMARY, separate dev, stopped Mu, the active carrier and canonical preservation
+  parent remain protected. The five PR1318 operations and original owner ledgers
+  remain unchanged. Phase B performs no live cleanup or useful-work closure.
+
 ### Fleet preservation and native validation convergence (Phase B; landing pending)
 
 - Carried forward the preserved cache-tree object closure correction, exact

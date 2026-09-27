@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-fleet-missing-registration-retirement-r1-2026-09-27",
+  "repeat_run_speedup_ratio": 0.971766,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.315757,
+  "repeat_run_raw_seconds": [
+    0.306842,
+    0.315757
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.306842
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.622599
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-27T19:57:10Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "3687357d1a20a98af8ddbd51e63a2d160ebce4f0"
+}
