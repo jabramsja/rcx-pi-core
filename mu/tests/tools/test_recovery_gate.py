@@ -8910,6 +8910,74 @@ class TestHybridDelegateRuntime:
 
 
 class TestHybridValidatorContract:
+    @pytest.mark.parametrize("shared_basetemp", [True, False], ids=["collision", "native"])
+    def test_initialization_evidence_and_provider_guards_survive_tmp_path(
+        self, tmp_path, monkeypatch, shared_basetemp,
+    ):
+        # Load the real provider policy in an isolated child pytest project.
+        (tmp_path / "conftest.py").write_bytes((_REPO_ROOT / "conftest.py").read_bytes())
+        target = "test_validator_guards.py"
+        (tmp_path / target).write_text(
+            "import os, shlex, subprocess, tempfile\n"
+            "from pathlib import Path\n"
+            "stub_dir = Path(os.environ['PATH'].split(os.pathsep)[0])\n"
+            "websocket_guard = Path([token.removeprefix('--require=')\n"
+            "    for token in shlex.split(os.environ['NODE_OPTIONS'])\n"
+            "    if token.startswith('--require=')][-1])\n"
+            "guards = [stub_dir / 'claude', stub_dir / 'codex', websocket_guard]\n"
+            "before = {path: path.read_bytes() for path in guards}\n"
+            "evidence = Path(tempfile.mkdtemp(prefix='validator-initialization-')) / 'evidence'\n"
+            "evidence.write_bytes(b'created before tmp_path')\n"
+            "def test_guards_survive(tmp_path):\n"
+            "    assert tmp_path.is_dir()\n"
+            "    assert all(path.is_file() for path in guards), 'provider guards deleted by basetemp'\n"
+            "    assert {path: path.read_bytes() for path in guards} == before\n"
+            "    assert evidence.read_bytes() == b'created before tmp_path'\n"
+            "    for guard in guards[:2]:\n"
+            "        result = subprocess.run([str(guard)], capture_output=True, text=True,\n"
+            "            check=False, timeout=5)\n"
+            "        assert result.returncode == 86\n"
+            "        assert 'RCX_TEST_PROVIDER_ISOLATION_CLI_BLOCKED' in result.stderr\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("PYTEST_ADDOPTS", "--basetemp=.scratch/unadmitted-pytest")
+        if shared_basetemp:
+            real_run = subprocess.run
+
+            def run_with_collision(command, **kwargs):
+                # Recreate only the old ownership relationship; pytest, its
+                # initialization hooks, fixtures and failure reporting run for real.
+                command = list(command)
+                command[command.index("--basetemp") + 1] = kwargs["env"]["TMPDIR"]
+                return real_run(command, **kwargs)
+
+            monkeypatch.setattr(rg_mod.subprocess, "run", run_with_collision)
+        result = rg_mod._run_pytest_targeted_validator(  # ANTICHEAT_OK: actual native validator and provider policy
+            tmp_path, targets=[target], timeout=30,
+        )
+        output = result["stdout"] + "\n" + result["stderr"]
+        assert not (tmp_path / ".scratch/unadmitted-pytest").exists()
+        assert result["passed"] is (not shared_basetemp), output
+        assert result["exit_code"] == (1 if shared_basetemp else 0), output
+        if shared_basetemp:
+            assert "provider guards deleted by basetemp" in result["stdout"], output
+        else:
+            assert "1 passed" in result["stdout"], output
+
+    def test_native_validator_preserves_detached_receiver_provider_stub(self):
+        result = rg_mod._run_pytest_targeted_validator(  # ANTICHEAT_OK: captured failure through the actual validator
+            _REPO_ROOT,
+            targets=[
+                "mu/tests/tools/test_pipeline_agent_pager.py::"
+                "test_provider_isolation_detached_receiver_inherits_stub",
+            ],
+            timeout=60,
+        )
+        output = result["stdout"] + "\n" + result["stderr"]
+        assert result["passed"] is True, output
+        assert result["exit_code"] == 0, output
+        assert "1 passed" in result["stdout"], output
+
     def test_pytest_targeted_uses_executor_owned_argv_and_repo_write_suppressed_env(self, tmp_path):
         captured = {}
 
@@ -8941,6 +9009,11 @@ class TestHybridValidatorContract:
         assert env["PYTHONDONTWRITEBYTECODE"] == "1"
         assert not env["TMPDIR"].startswith(str(tmp_path))
         assert not env["XDG_CACHE_HOME"].startswith(str(tmp_path))
+        basetemp = Path(captured["args"][captured["args"].index("--basetemp") + 1])
+        assert basetemp.parent == Path(env["TMPDIR"])
+        assert env["TMP"] == env["TEMP"] == env["TMPDIR"]
+        assert Path(env["XDG_CACHE_HOME"]) != Path(env["TMPDIR"])
+        assert env["PATH"] == os.environ["PATH"]
 
 
 @pytest.fixture

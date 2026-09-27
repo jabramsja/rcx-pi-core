@@ -4,6 +4,29 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-26
+
+### Recovery-validator temporary ownership (Phase B; landing pending)
+
+- Targeted recovery validation gives pytest a disposable child basetemp beneath
+  its owned temporary root. Configuration-time provider guards and temporary
+  evidence survive the first `tmp_path` initialization. Explicit basetemp
+  override, external temp/cache ownership, repository-write suppression, failure
+  reporting and finite recovery budgets remain intact.
+- A real child pytest regression loads the unchanged root provider policy,
+  reproduces guard deletion with shared ownership, and verifies guard bytes,
+  initialization evidence and provider blocking with separate ownership.
+  Existing retained-scratch and environment safeguards remain. The actual
+  validator passes all four focused contract cases; the original safe-fake
+  detached receiver changes from one failure in 10.20s to one pass in 0.31s.
+- The declared Phase B gate passed 1,589 tools tests in 47.98s and 351 docs
+  tests in 1.82s, with two existing documentation freshness warnings.
+- Preserved the native Python-only `rcx_pi/worlds/test_worlds_godel_liar.py`
+  probe correction, both committed fleet ancestors and the prior pending-status
+  packet. This continuation stays on the authorized existing feature branch.
+  Native landing and sync remain executor-owned; original public apply/verify,
+  unsafe holds and missing useful-work ownership remain open before Mu.
+
 ## 2026-09-23
 
 ### Actual fleet source and registration retirement (Phase B; live actions pending)
