@@ -1912,14 +1912,34 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
         import workingrcx_fleet_classification as classifier
     classifier._validate_inventory(census)
     retirement = data.get("retirement") is True
-    if retirement and str(census["fleet_root"]) == classifier.LANDED_FLEET and (
+    authority = data.get("retirement_authority")
+    if "retirement_authority" in data:
+        if (not retirement or not isinstance(authority, dict)
+                or type(authority.get("schema_version")) is not int):
+            raise Hold("Malformed fresh retirement authority")
+        try:
+            expected_authority = classifier.retirement_authority_binding(census,
+                wave_id=wave_id, predecessor=data.get("comparison_commit"), source_sha256=digest(census_raw))
+        except ValueError as exc:
+            raise Hold(str(exc)) from exc
+        if authority != expected_authority:
+            raise Hold("Fresh retirement wave/predecessor/census authority mismatch")
+    if retirement and authority is None and str(census["fleet_root"]) == classifier.LANDED_FLEET and (
             wave_id != classifier.RETIREMENT_WAVE_ID
             or data.get("comparison_commit") != classifier.RETIREMENT_PREDECESSOR):
-        raise Hold("Retirement requires the exact locked predecessor and wave")
+        raise Hold("Retirement requires explicit fresh predecessor authority")
+    renewed_reports = {}
     if fresh_wave:
         useful_path = repo / f"reports/control_plane/{wave_id}_useful_work.json"
-        if json.loads(read_plain(useful_path)) != classifier.useful_work_report(data, sha256):
+        useful_raw = read_plain(useful_path)
+        if json.loads(useful_raw) != classifier.useful_work_report(data, sha256):
             raise Hold("Fresh useful-work/landing authority does not match classification")
+        if authority is not None:
+            coverage_raw = read_plain(repo / f"reports/control_plane/{wave_id}_useful_work_coverage.json")
+            if json.loads(coverage_raw) != classifier.retirement_coverage_report(data, sha256):
+                raise Hold("Fresh retirement coverage authority does not match classification")
+            renewed_reports = dict(retirement_authority=authority,
+                useful_work_sha256=digest(useful_raw), useful_work_coverage_sha256=digest(coverage_raw))
     if (data.get("wave_id") != wave_id or data.get("schema_version") != 1
             or data.get("coverage_complete") is not True or data.get("mutation_authorized") is not False
             or data.get("source_sha256") != digest(census_raw)
@@ -2072,6 +2092,7 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
             rows[index]["destination"] = str(operation_root / str(index) / "worktree")
     return dict(**({"orphan_owner_evidence": evidence_binding} if evidence_binding else {}),
                 **({"retirement": True} if retirement else {}),
+                **renewed_reports,
                 schema_version=2, wave_id=wave_id, mutation_authorized=False,
                 classification_path=str(classification_path), classification_sha256=sha256,
                 census_path=str(census_path), census_sha256=digest(census_raw),
@@ -2105,6 +2126,14 @@ def require_residual_authority(repo: Path, plan: dict, commit: str, *, fetch: bo
         paths += (Path(f"reports/control_plane/{plan['wave_id']}_useful_work.json"),)
     if plan.get("retirement"):
         paths += (Path("mu/tools/executors/worktree_lifecycle.py"),)
+    if "retirement_authority" in plan:
+        # Renewals commit the complete coverage ledger as well as the plan.
+        # Rebuild for verify callers too; a self-consistent JSON label is not
+        # a substitute for the exact census/classification/report binding.
+        if build_residual_plan(repo, repo / classification_path, plan["classification_sha256"],
+                               wave_id=plan["wave_id"]) != plan:
+            raise Hold("Fresh retirement plan differs from its bound authority")
+        paths += (Path(f"reports/control_plane/{plan['wave_id']}_useful_work_coverage.json"),)
     if plan.get("orphan_owner_evidence"):
         evidence = plan["orphan_owner_evidence"]
         paths += (Path(evidence["path"]),)
@@ -2215,7 +2244,7 @@ def retirement_evidence_report(repo: Path, plan: dict) -> dict:
         Path("mu/tools/executors/workingrcx_fleet_classification.py"),
         Path("mu/tools/executors/commit_executor.py"), Path("mu/tools/executors/worktree_lifecycle.py"))}
     root = Path(plan["fleet_root"])
-    return dict(schema_version=1, wave_id=plan["wave_id"], comparison_commit=plan["comparison_commit"],
+    report = dict(schema_version=1, wave_id=plan["wave_id"], comparison_commit=plan["comparison_commit"],
         mutation_authorized=False, observation_kind="native_retirement_bindings",
         census_sha256=plan["census_sha256"], classification_sha256=plan["classification_sha256"],
         plan_sha256=digest(encoded(plan)), implementation_sha256=bindings,
@@ -2241,6 +2270,47 @@ def retirement_evidence_report(repo: Path, plan: dict) -> dict:
             "Independent public verify; old receipts/journals/owners and budgets remain unchanged"],
         foreground=dict(state="PENDING_LANDING_PRIMARY_SYNC_AND_PUBLIC_APPLY_VERIFY", executed_pairs=0),
         useful_work_complete=False, fleet_complete=False)
+    if "retirement_authority" in plan:
+        report.update(retirement_authority=plan["retirement_authority"],
+            useful_work_sha256=plan["useful_work_sha256"],
+            useful_work_coverage_sha256=plan["useful_work_coverage_sha256"])
+        # Preserve actual earlier batch outcomes, including all-HOLD batches.
+        # Reading a summary neither verifies an old action again nor spends it.
+        prior_roots = sorted({str(Path(owner["receipt_path"]).parent.parent)
+            for row in plan["entries"] for owner in (row.get("retirement_evidence") or {}).get("prior_owners", [])})
+        report["prior_operation_summaries"] = []
+        for prior in prior_roots:
+            summary_path = Path(prior) / "summary.json"
+            raw = read_plain(summary_path)
+            summary = json.loads(raw)
+            report["prior_operation_summaries"].append(dict(path=str(summary_path), sha256=digest(raw),
+                recorded_outcome_counts=summary.get("outcome_counts"),
+                before_prefix_directories=summary.get("before_prefix_directories"),
+                after_prefix_directories=summary.get("after_prefix_directories"),
+                registration_delta=summary.get("registration_delta"), replay_authorized=False))
+        checks = []
+        with safe_git_environment():
+            for entry in plan["entries"]:
+                if entry["action"] == "UNTOUCHED_HOLD":
+                    continue
+                check = dict(source_index=entry["source_index"], path=entry["path"], status="MATCH")
+                try:
+                    if entry["action"] == "PRESERVE_BUS_SHELL":
+                        info = Path(entry["path"]).lstat()
+                        if entry["source_identity"]["filesystem_identity"] != dict(
+                                device=info.st_dev, inode=info.st_ino, mode=info.st_mode):
+                            raise Hold("Shell filesystem identity drift")
+                    else:
+                        inspect_identity(entry["source_identity"], retirement=entry["action"] in RETIREMENT_ACTIONS)
+                except (Hold, OSError, ValueError, subprocess.SubprocessError) as exc:
+                    check.update(status="HOLD", reason=str(exc))
+                checks.append(check)
+        report["current_identity_checks"] = checks
+        report["identity_check_policy"] = "Read-only identity observation; action-time liveness, ownership, preservation and committed authority remain required. Drift holds the exact source."
+        note = f", {plan['wave_id']}):"
+        report["tracker_sync_note"] = next((line for line in (repo / "TASKS.md").read_text().splitlines()
+            if line.startswith("- Tracker sync note (") and note in line), None)
+    return report
 
 
 def prefix_directory_count(root: Path) -> int:

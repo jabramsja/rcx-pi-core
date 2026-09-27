@@ -190,6 +190,31 @@ closed by current-checkout equality. Work remains under the existing cleanup
 task, with no speculative wave per folder. Stopped Mu, PRIMARY, the active
 carrier, base checkouts and canonical preservation roots remain protected.
 
+After observed identity drift, renew through a complete native retirement
+census and a distinct wave. Classification requires
+`--retirement-predecessor <exact-comparison-commit>` for actual-fleet successors;
+it binds that predecessor, wave, raw census hash and canonical fleet/anchor.
+Every recorded useful-work comparison must use that predecessor. The original
+September 23 wave remains readable with its original authority and cannot be
+rebound through renewal. A supplied JSON binding grants no live action rights.
+Planning checks the binding and derives both useful-work ledgers exactly from
+classification. The fresh plan pins their hashes; foreground apply and verify
+require committed bytes, index and mode for the complete authority, including
+the coverage ledger. Native merge, ancestor checks and synchronized PRIMARY
+remain mandatory before any public apply.
+
+The September 27 observation found device `16777231` where the September 26
+census recorded `16777229`; matching inodes and modes did not authorize a
+substitution. The first old public batch was consumed as 12 independently
+verified HOLDs, with zero retirements or registration change. Retain that batch,
+its receipts and every old artifact unchanged; do not spend remaining stale
+batches. A fresh full census supplies current identities and fresh operation
+IDs derived from its new classification hash and wave. Current identity checks
+remain read-only evidence; any later device/inode/mode, HEAD, index, ownership
+or source drift still holds the affected target at action time. A retained
+carrier can receive new conditional retirement authority without replaying its
+ESCALATED completion. Inherited landing owners and protected WIP remain open.
+
 The fresh plan admits `RETIRE_WORKTREE`, `RETIRE_CLONE` and `RETIRE_ARCHIVE`.
 It preserves raw source bytes, symlink targets, modes, index/admin bytes,
 index-only blobs, refs, reflog history, declared stashes and journal directories.

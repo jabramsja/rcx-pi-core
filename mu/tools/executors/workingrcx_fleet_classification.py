@@ -222,10 +222,37 @@ def _ancestry(carrier: str, head: str, base: str) -> dict:
     return {"status": status, "probes": [object_probe, probe]}
 
 
+def retirement_authority_binding(census: dict, *, wave_id: str, predecessor: str,
+                                 source_sha256: str) -> dict:
+    """Bind a renewal proposal; only its later landed plan can authorize actions.
+
+    The original retirement wave remains a legacy reader, never a renewal ID.
+    Census useful-work comparisons must be observed against this predecessor;
+    relabeling an earlier observation does not renew its authority.
+    """
+    if (not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,160}", wave_id or "")
+            or wave_id in {WAVE_ID, RESIDUAL_WAVE_ID, RETIREMENT_WAVE_ID,
+                          "workingrcx-fleet-apply-r1-2026-09-11",
+                          "workingrcx-fleet-apply-action-reconciliation-r2-2026-09-11"}
+            or not _oid(predecessor)
+            or not isinstance(source_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", source_sha256)
+            or census["anchor_repo"] != census["fleet_root"] + "/WorkingRCX"):
+        raise ValueError("Fresh retirement authority requires a new wave, exact predecessor and canonical census binding")
+    for source in census["entries"]:
+        useful = source.get("useful_work")
+        if useful is not None and (not isinstance(useful, dict)
+                or useful.get("comparison_commit") != predecessor):
+            raise ValueError("Fresh retirement predecessor differs from observed useful-work authority")
+    return dict(schema_version=1, wave_id=wave_id, predecessor_commit=predecessor,
+                census_sha256=source_sha256, fleet_root=census["fleet_root"],
+                anchor_repo=census["anchor_repo"])
+
+
 def classify(census: dict, *, source_sha256: str, base_commit: str,
              carrier: str, landed: bool, residual: bool = False,
              wave_id: str | None = None, protected: tuple[str, ...] = (),
-             retirement: bool = False) -> dict:
+             retirement: bool = False, retirement_predecessor: str | None = None) -> dict:
     """Return one decision per validated row using only carrier-local objects."""
     _validate_inventory(census)
     if residual and landed:
@@ -236,9 +263,15 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
     selected_wave = wave_id or RESIDUAL_WAVE_ID
     if retirement and (not residual or not fresh_wave):
         raise ValueError("Retirement requires fresh residual wave authority")
-    if retirement and census["fleet_root"] == LANDED_FLEET and (
+    authority = None
+    if retirement_predecessor is not None:
+        if not retirement or retirement_predecessor != base_commit:
+            raise ValueError("Fresh retirement predecessor must match the explicit retirement comparison")
+        authority = retirement_authority_binding(census, wave_id=selected_wave,
+            predecessor=retirement_predecessor, source_sha256=source_sha256)
+    if retirement and authority is None and census["fleet_root"] == LANDED_FLEET and (
             selected_wave != RETIREMENT_WAVE_ID or base_commit != RETIREMENT_PREDECESSOR):
-        raise ValueError("Actual fleet retirement requires the exact locked wave/predecessor")
+        raise ValueError("Actual fleet retirement requires explicit fresh predecessor authority")
     if not _oid(base_commit):
         raise ValueError("base-commit must be an exact 40-character commit ID")
     if not _success(_git(carrier, "rev-parse", "--show-toplevel"), carrier + "\n"):
@@ -483,6 +516,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
     if retirement:
         report["retirement"] = True
         report["policy"]["protected_heads"] = []
+    if authority is not None:
+        report["retirement_authority"] = authority
     return report
 
 
@@ -498,6 +533,8 @@ def useful_work_report(classification: dict, classification_sha256: str) -> dict
             row["inherited_landing_owners"] = source.get("inherited_landing_owners", [])
             row["current_landing_review"] = source.get("current_landing_review")
     return dict(schema_version=1, wave_id=classification["wave_id"],
+        **({"retirement_authority": classification["retirement_authority"]}
+           if "retirement_authority" in classification else {}),
         census_sha256=classification["source_sha256"], classification_sha256=classification_sha256,
         comparison_commit=classification["comparison_commit"], entries=rows, entry_count=len(rows),
         landing_owners=sum(row["landing_owner"] is not None for row in rows),
@@ -524,6 +561,8 @@ def retirement_coverage_report(classification: dict, classification_sha256: str)
                     or journal.get("state") == "PREPARED" else "HISTORICAL_RECOVERY_EVIDENCE",
                 integration_completed=False) for journal in evidence.get("journals", [])]))
     return dict(schema_version=1, wave_id=classification["wave_id"],
+        **({"retirement_authority": classification["retirement_authority"]}
+           if "retirement_authority" in classification else {}),
         comparison_commit=classification["comparison_commit"], classification_sha256=classification_sha256,
         census_sha256=classification["source_sha256"], mutation_authorized=False, entries=entries,
         evidence_policy="Exact reverse binary patches and comparison blobs prove only the recorded source changes. A failed comparison requires hunk review, not an inference of missing code. Inherited owners and held journal intent remain open independently.",
@@ -570,6 +609,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--residual", action="store_true", help="Fresh manifest-bound residual batches; historical authority is unchanged")
     parser.add_argument("--retirement", action="store_true", help="Fresh preservation-first physical/registration retirement")
+    parser.add_argument("--retirement-predecessor", help="Explicit exact comparison commit for a new reviewed retirement authority; cannot rebind the original wave")
     parser.add_argument("--wave-id", help="Fresh residual owner; omitted retains the legacy authority")
     parser.add_argument("--protect", action="append", default=[], help="Exact additional active/preserved source path")
     parser.add_argument("--census", required=True)
@@ -600,7 +640,8 @@ def main(argv: list[str] | None = None) -> int:
             output = _output_path(args.output, census, os.getcwd(), landed)
         report = classify(census, source_sha256=digest, base_commit=args.base_commit,
                           carrier=os.getcwd(), landed=landed, residual=args.residual,
-                          wave_id=args.wave_id, protected=tuple(args.protect), retirement=args.retirement)
+                          wave_id=args.wave_id, protected=tuple(args.protect), retirement=args.retirement,
+                          retirement_predecessor=args.retirement_predecessor)
         payload = (json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii")
         _write_or_verify(output, payload)
         if args.wave_id and args.wave_id != RESIDUAL_WAVE_ID:

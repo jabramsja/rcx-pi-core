@@ -4,6 +4,32 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-27
+
+### Fleet retirement authority renewal (Phase B; landing and live actions pending)
+
+- The original public retirement batch consumed 12 HOLDs after reboot changed
+  device identities; independent verification recorded zero retirements,
+  unchanged 68 direct folders and zero registration delta. Original plans,
+  receipts, claims and remaining stale operations stay immutable.
+- Fresh successors explicitly bind their wave, exact predecessor, census hash
+  and useful-work comparisons. Planning binds both useful-work reports, and
+  foreground authority checks committed coverage bytes/index/mode along with
+  the existing plan and dependencies. Legacy plan serialization is unchanged;
+  exact identity, liveness, ownership, preservation and no-replay checks remain.
+- A complete native census against PR1316 merge
+  `48ed34c6e2d32d9121e072f3780cbe2189d692d3` records 378 rows and 372
+  registrations. Classification conditionally admits 254 sources in 22 new
+  operations and retains 124 HOLDs and 245 landing owners. Current evidence
+  retains earlier batch outcomes and read-only identity checks.
+- Final declared validation passed 440 fleet tests in 235.70s and 351 docs
+  tests in 1.84s, with two existing freshness warnings. All 1,272 snapshotted
+  historical artifact/batch/claim/lifecycle files and all 268 task IDs are
+  unchanged. Native indicators report zero net host-semantic delta. Native
+  review/merge, PRIMARY and dev sync, public apply/verify and useful-work
+  disposition remain open under existing row38 before Mu; Phase B executes
+  zero live fleet actions.
+
 ## 2026-09-26
 
 ### Recovery-validator temporary ownership (Phase B; landing pending)
