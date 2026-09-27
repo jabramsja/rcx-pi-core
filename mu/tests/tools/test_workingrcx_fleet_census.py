@@ -117,6 +117,50 @@ def test_useful_inventory_retains_clone_local_branches_and_exact_index_wip(tmp_p
     assert _snapshot(fleet) == before
 
 
+def test_retirement_coverage_proves_nonancestor_hunks_and_retains_missing_work():
+    with tempfile.TemporaryDirectory(prefix="rcx-retirement-coverage-", dir="/tmp") as tmp:
+        root = Path(tmp).resolve()
+        primary = _repo(root / "WorkingRCX")
+        old = _git(primary, "rev-parse", "HEAD")
+        detached = root / "WorkingRCX-detached"
+        _git(primary, "worktree", "add", "--detach", str(detached), old)
+        (detached / "valuable.py").write_text("implemented = 42\n")
+        _git(detached, "add", "valuable.py")
+        _git(detached, "commit", "-qm", "historical implementation")
+        source = _git(detached, "rev-parse", "HEAD")
+        # Same useful code under an independently authored dev commit.
+        (primary / "valuable.py").write_text("implemented = 42\n")
+        _git(primary, "add", "valuable.py")
+        _git(primary, "commit", "-qm", "independent landed implementation")
+        base = _git(primary, "rev-parse", "HEAD")
+        assert source != base
+        before = _snapshot(detached)
+        output = root / "census.json"
+        with _fixture_git_env() as env:
+            result = subprocess.run([sys.executable, str(CLI), "--fleet-root", str(root),
+                "--anchor-repo", str(primary), "--comparison-commit", base, "--retirement",
+                "--output", str(output)], env=env, capture_output=True)
+        assert result.returncode == 0, result.stderr
+        work = _rows(json.loads(output.read_bytes()))[str(detached)]["useful_work"]
+        assert work["local_commits"] == [source] and work["status"] == "COVERED"
+        assert work["local_commit_changes"][0]["coverage"] == "EXACT_REVERSE_PATCH"
+        assert work["local_commit_changes"][0]["comparison_blobs"]["valuable.py"][1] == _git(primary, "rev-parse", "HEAD:valuable.py")
+        assert _snapshot(detached) == before
+        (detached / "valuable.py").write_text("independent_missing = 7\n")
+        _git(detached, "add", "valuable.py")
+        (detached / "valuable.py").write_text("different_unstaged_intent = 9\n")
+        with _fixture_git_env() as env:
+            result = subprocess.run([sys.executable, str(CLI), "--fleet-root", str(root),
+                "--anchor-repo", str(primary), "--comparison-commit", base, "--retirement",
+                "--output", str(output)], env=env, capture_output=True)
+        assert result.returncode == 0, result.stderr
+        work = _rows(json.loads(output.read_bytes()))[str(detached)]["useful_work"]
+        assert work["status"] == "NEEDS_LANDING"
+        change = work["changes"][0]
+        assert change["index_coverage"] == change["worktree_coverage"] == "REQUIRES_HUNK_REVIEW"
+        assert change["index"] != change["worktree"] != change["comparison"]
+
+
 @pytest.mark.parametrize("state", ["covered", "wip", "local_history"])
 def test_useful_inventory_reads_detached_head_history_and_wip_without_writes(tmp_path, state):
     fleet = tmp_path / "fleet"

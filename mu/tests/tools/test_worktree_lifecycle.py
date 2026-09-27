@@ -17,12 +17,39 @@ import pytest
 from mu.tools.executors import worktree_lifecycle as lifecycle
 from mu.tools.executors import workingrcx_fleet_apply as fleet
 from tests.repo_root import REPO_ROOT
+from mu.tests.tools.test_workingrcx_fleet_apply import (
+    fleet as retirement_fleet, retirement_fixture,
+    apply as retirement_apply)
 
 
 def fixture_identity(lane, kind):
     """Keep process-visible identities stable within, and unique across, repos."""
     suffix = hashlib.sha256(os.fsencode(lane.parent.resolve())).hexdigest()[:16]
     return f"native-{kind}-{suffix}"
+
+
+def test_completed_move_can_follow_fresh_registration_retirement_without_replaying_owner(retirement_fleet):
+    f = retirement_fleet
+    lane = f.targets[0]
+    record = register_from_exited_owner(lane, f.env | {"PYTHONPATH": str(REPO_ROOT)})
+    moved = lifecycle.complete_pending(record, delay=0)
+    assert moved["state"] == "COMPLETE", moved
+    completion = (record / "completion.json").read_bytes()
+    claims = {p: p.read_bytes() for p in record.glob("attempt-*/claim.json")}
+    old_destination = Path(moved["destination"])
+    assert str(old_destination) in retirement_apply.registration_paths(f.repo)
+    plan, kwargs = retirement_fixture(f)
+    entry = next(e for e in plan["entries"] if e["path"] == str(old_destination))
+    assert entry["action"] == "RETIRE_ARCHIVE"
+    result = retirement_apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"RETIRED": 4}, result
+    inspected = lifecycle.complete_pending(record, delay=0)
+    assert inspected["registration_state"] == "RETIRED"
+    assert inspected["retirement"]["registration_retired"] is True
+    assert (record / "completion.json").read_bytes() == completion
+    assert {p: p.read_bytes() for p in claims} == claims
+    assert not lane.exists() and not old_destination.exists()
+    assert retirement_apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
 
 
 @pytest.fixture(scope="module")

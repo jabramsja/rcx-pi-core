@@ -35,6 +35,10 @@ receiver_mod = load_module(
 _REAL_RECEIVER_ENSURE_DRAINING = receiver_mod.ClaudePagerReceiver.ensure_draining
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+# Keep rcx_pi-only collection independent of the archived Rust contracts, which
+# require cargo on PATH. This Python-only module has enough tests for two workers
+# and still discovers the real root conftest without loading mu/tests fixtures.
+_RCX_PI_PROVIDER_PROBE_TARGET = "rcx_pi/worlds/test_worlds_godel_liar.py"
 _PROVIDER_ENV_KEYS = (
     "PATH",
     "NODE_OPTIONS",
@@ -761,9 +765,9 @@ def test_provider_isolation_detached_receiver_inherits_stub(
 def test_provider_isolation_rcx_pi_only_child_loads_root_boundary(tmp_path):
     result, records = _run_provider_probe_pytest(
         tmp_path,
-        "rcx_pi/specs/test_vars_demo_contract.py",
+        _RCX_PI_PROVIDER_PROBE_TARGET,
     )
-    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.returncode == 0, result.stdout + "\n" + result.stderr
     assert len(records) == 1
     record = records[0]
     assert record["role"] == "controller"
@@ -774,11 +778,10 @@ def test_provider_isolation_rcx_pi_only_child_loads_root_boundary(tmp_path):
 def test_provider_isolation_ordinary_xdist_is_topology_independent(tmp_path):
     result, records = _run_provider_probe_pytest(
         tmp_path,
-        "rcx_pi/specs/test_vars_demo_contract.py",
-        "rcx_pi/specs/test_triad_plus_contract.py",
+        _RCX_PI_PROVIDER_PROBE_TARGET,
         workers=2,
     )
-    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.returncode == 0, result.stdout + "\n" + result.stderr
     assert {record["role"] for record in records} == {
         "controller",
         "gw0",
@@ -795,11 +798,10 @@ def test_provider_isolation_ordinary_xdist_is_topology_independent(tmp_path):
 def test_provider_isolation_two_worker_lifecycle_and_exact_restoration(tmp_path):
     result, records = _run_provider_probe_pytest(
         tmp_path,
-        "rcx_pi/specs/test_vars_demo_contract.py",
-        "rcx_pi/specs/test_triad_plus_contract.py",
+        _RCX_PI_PROVIDER_PROBE_TARGET,
         workers=2,
     )
-    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.returncode == 0, result.stdout + "\n" + result.stderr
     assert len(records) == 3
     controller = next(
         record for record in records if record["role"] == "controller"

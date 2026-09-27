@@ -35,6 +35,7 @@ import pytest
 
 from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
+from mu.tests.tools.test_workingrcx_fleet_apply import fleet as retirement_fleet, git as retirement_git
 
 
 commit_mod = load_module(
@@ -70,6 +71,39 @@ def _init_repo(tmp_path: Path) -> Path:
 
 def _noop_log(msg: str) -> None:
     pass
+
+
+def test_retirement_terminal_uses_surviving_primary_and_preserves_detached_source(retirement_fleet):
+    f = retirement_fleet
+    source = f.targets[0]
+    retirement_git(f, source, "checkout", "--detach")
+    ordinary = commit_mod.bind_terminal_target_identity(source, base_branch="dev")
+    assert not ordinary["bound"]  # Active/PR symbolic-branch policy is unchanged.
+    info = source.stat()
+    identity = dict(path=str(source), HEAD=f.original, branch=None, common_dir=str(f.common),
+        git_dir=retirement_git(f, source, "rev-parse", "--absolute-git-dir"),
+        filesystem_identity=dict(device=info.st_dev, inode=info.st_ino, mode=info.st_mode))
+    evidence = f.root / "independent-preservation"
+    evidence.mkdir()
+    (evidence / "marker").write_bytes(b"boundary identity fixture")
+    binding = commit_mod.bind_terminal_retirement_identity(f.repo, source_identity=identity,
+        preservation_directory=evidence,
+        preservation_sha256={"marker": hashlib.sha256((evidence / "marker").read_bytes()).hexdigest()})
+    seen = []
+    def callback():
+        with (f.common / "rcx_primary_worktree_sync.lock").open("rb") as lock:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        seen.append(retirement_git(f, source, "rev-parse", "HEAD"))
+    result = commit_mod.execute_terminal_retirement_once(f.repo, binding,
+        terminal_action=callback, log=_noop_log)
+    assert result["action_succeeded"] and result["authority_consumed"] and result["fresh_fetch"]
+    assert result["behind_count"] == 0 and result["target_head"] == f.landed
+    assert seen == [f.original] and source.exists()
+    again = commit_mod.execute_terminal_retirement_once(f.repo, binding,
+        terminal_action=callback, log=_noop_log)
+    assert not again["action_invoked"] and "already attempted" in again["reason"]
+    assert seen == [f.original]
 
 
 @pytest.mark.parametrize("selectors, caller_timeout, expected_budget", [

@@ -4,7 +4,54 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-26
+
+### Recovery-validator temporary ownership (Phase B; landing pending)
+
+- Targeted recovery validation gives pytest a disposable child basetemp beneath
+  its owned temporary root. Configuration-time provider guards and temporary
+  evidence survive the first `tmp_path` initialization. Explicit basetemp
+  override, external temp/cache ownership, repository-write suppression, failure
+  reporting and finite recovery budgets remain intact.
+- A real child pytest regression loads the unchanged root provider policy,
+  reproduces guard deletion with shared ownership, and verifies guard bytes,
+  initialization evidence and provider blocking with separate ownership.
+  Existing retained-scratch and environment safeguards remain. The actual
+  validator passes all four focused contract cases; the original safe-fake
+  detached receiver changes from one failure in 10.20s to one pass in 0.31s.
+- The declared Phase B gate passed 1,589 tools tests in 47.98s and 351 docs
+  tests in 1.82s, with two existing documentation freshness warnings.
+- Preserved the native Python-only `rcx_pi/worlds/test_worlds_godel_liar.py`
+  probe correction, both committed fleet ancestors and the prior pending-status
+  packet. This continuation stays on the authorized existing feature branch.
+  Native landing and sync remain executor-owned; original public apply/verify,
+  unsafe holds and missing useful-work ownership remain open before Mu.
+
 ## 2026-09-23
+
+### Actual fleet source and registration retirement (Phase B; live actions pending)
+
+- Fresh explicit retirement handles detached/non-ancestor checkouts, standalone
+  clones and native registered archives. It preserves original bytes, raw index,
+  staged-only blobs, refs/reflog history, stashes, journals and inherited owners;
+  independent empty-repository recovery precedes source removal.
+- A fresh source/preservation binding uses synchronized PRIMARY's existing
+  locked, consumed-once terminal boundary. Exact source rename and targeted
+  absent-source registration removal produce RETIRED; historical MOVED receipts
+  and active/PR never-behind policy remain unchanged. Lifecycle inspection can
+  follow the separately verified retirement without replaying its old budget.
+- Captured dangling bus adapter links and saved pytest FIFOs retain their exact
+  form. The observed PREPARED owner remains immutable and unreplayed. Live,
+  uncertain, locked or changed peers retain individual holds.
+- Coverage records exact comparison blobs and reverse binary-patch evidence.
+  Non-ancestry and unmatched hunks alone do not prove missing code; historical
+  owners and held journal intent remain open under the existing cleanup task.
+- The final declared gate passed 1,788 tool tests with one skip in 458.85s and
+  351 docs tests in 1.86s, with two existing freshness warnings. Fresh native
+  artifacts conditionally admit 253 targets in 22 finite operations, retain
+  124 individual holds and account for all 500 original outcome receipts.
+  No live fleet action, merge, useful-work integration or cleanup completion
+  is claimed by Phase B.
 
 ### Preserved fleet closeout corrections and dispatcher fixtures (R3 Phase B; not landed)
 

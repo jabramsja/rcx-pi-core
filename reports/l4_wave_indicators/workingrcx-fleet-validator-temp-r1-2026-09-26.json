@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-fleet-validator-temp-r1-2026-09-26",
+  "repeat_run_speedup_ratio": 0.998134,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.343979,
+  "repeat_run_raw_seconds": [
+    0.343337,
+    0.343979
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.343337
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.687316
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-09-27T00:35:51Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "b914cf0d4012d0fecc4e7c3c99bac2123ff09be6"
+}

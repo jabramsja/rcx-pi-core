@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests.repo_root import REPO_ROOT
+from mu.tests.tools.test_workingrcx_fleet_apply import fleet as retirement_fleet, git as retirement_git
 
 
 CLI = REPO_ROOT / "mu/tools/executors/workingrcx_fleet_classification.py"
@@ -23,6 +24,27 @@ LANDED_HASH = "ac6f61337081c9adb7c100bac061270f6c7864aaed55d48912f50b8473d0cd81"
 LANDED_BASE = "c209bf29841425305003eeceddfd567a93874742"
 STAMP = "2026-09-11T18:34:09+00:00"
 ZERO_COUNTS = dict(entries=0, tracked=0, untracked=0, staged=0, unstaged=0, unmerged=0)
+
+
+def test_fresh_retirement_admits_detached_but_keeps_exact_locks_and_protected_owners(retirement_fleet):
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    f = retirement_fleet
+    retirement_git(f, f.targets[0], "checkout", "--detach")
+    retirement_git(f, f.repo, "worktree", "lock", str(f.targets[2]))
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    options = dict(source_sha256=hashlib.sha256(json.dumps(observed).encode()).hexdigest(),
+        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True,
+        wave_id="fixture-retirement-classification", protected=(str(f.targets[1]),))
+    current = classifier.classify(observed, **options, retirement=True)
+    rows = {r["path"]: r for r in current["entries"]}
+    assert rows[str(f.targets[0])]["proposed_action"] == "RETIRE_WORKTREE"
+    assert rows[str(f.targets[1])]["decision"] == "HOLD"
+    assert rows[str(f.targets[2])]["decision"] == "HOLD"
+    assert "registration_uncertain" in {r["code"] for r in rows[str(f.targets[2])]["reasons"]}
+    assert rows[str(f.repo)]["decision"] == "HOLD"
+    legacy = classifier.classify(observed, **options)
+    assert next(r for r in legacy["entries"] if r["path"] == str(f.targets[0]))["decision"] == "HOLD"
 
 
 def git(fixture, root, *args):

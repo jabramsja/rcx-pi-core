@@ -19,9 +19,11 @@ import hashlib
 from datetime import datetime, timezone
 import json
 import os
+from pathlib import Path
 import stat
 import subprocess
 import sys
+import tempfile
 
 
 def _now() -> str:
@@ -270,7 +272,8 @@ def _inspect(row: dict) -> None:
     row["inspection_status"] = "partial" if errors else "ok"
 
 
-def useful_work(path: str, comparison_commit: str, *, comparison_repo: str | None = None) -> dict:
+def useful_work(path: str, comparison_commit: str, *, comparison_repo: str | None = None,
+                coverage: bool = False) -> dict:
     """Inventory local history and WIP without filters, fetching or index writes.
 
     Equality is conservative: changed bytes not identical to the comparison
@@ -391,12 +394,160 @@ def useful_work(path: str, comparison_commit: str, *, comparison_repo: str | Non
                 dev_covered=index == base and worktree == base))
         result["status"] = "COVERED" if not result["local_commits"] and all(
             change["dev_covered"] for change in result["changes"]) else "NEEDS_LANDING"
+        if coverage:
+            # A non-ancestor commit is history, not evidence of missing code.
+            # Reverse-check its exact binary patch against independent dev
+            # bytes. Failure means review, never proof that code is missing.
+            def covered_patch(patch, names):
+                with tempfile.TemporaryDirectory(prefix="rcx-coverage-", dir="/tmp") as temp:
+                    for name in names:
+                        parts = Path(name).parts
+                        if not parts or Path(name).is_absolute() or ".." in parts:
+                            raise ValueError("Unsafe coverage path")
+                        entry = base_tree.get(name)
+                        if entry is None:
+                            continue
+                        mode, oid = entry
+                        out = Path(temp) / name
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        content = probe("cat-file", "blob", oid)
+                        if mode == "120000":
+                            out.symlink_to(os.fsdecode(content))
+                        elif mode in {"100644", "100755"}:
+                            out.write_bytes(content)
+                            out.chmod(int(mode, 8) & 0o777)
+                        else:
+                            raise ValueError("Unsupported coverage tree mode")
+                    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+                    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+                               GIT_ALLOW_PROTOCOL="", GIT_OPTIONAL_LOCKS="0")
+                    checked = subprocess.run(["git", "apply", "--reverse", "--check", "--binary", "-"],
+                        cwd=temp, env=env, input=patch, capture_output=True, timeout=30)
+                    return checked.returncode == 0
+
+            for change in result["local_commit_changes"]:
+                patch = probe("diff-tree", "--root", "--binary", "--no-ext-diff", "--no-textconv",
+                              "--no-renames", "-r", "-m", "--first-parent", change["commit"])
+                change["coverage"] = ("EXACT_REVERSE_PATCH" if not patch or covered_patch(patch, change["paths"])
+                                      else "REQUIRES_HUNK_REVIEW")
+                change["comparison_blobs"] = {p: base_tree.get(p) for p in change["paths"]}
+            for change in result["changes"]:
+                name = change["path"]
+                for label, options in (("index", ("--cached",)), ("worktree", ())):
+                    patch = probe("diff", "--binary", "--no-ext-diff", "--no-textconv",
+                                  "--no-renames", *options, "--", name)
+                    change[label + "_patch_sha256"] = hashlib.sha256(patch).hexdigest()
+                    exact = change[label] == change["comparison"]
+                    # An untracked file has no diff. Its absent index is not a
+                    # coverage proof for the independently retained bytes.
+                    untracked = label == "worktree" and name not in index_tree
+                    change[label + "_coverage"] = ("EXACT_BLOB" if exact else
+                        "NO_CHANGE" if not patch and not untracked else
+                        "EXACT_REVERSE_PATCH" if patch and covered_patch(patch, [name]) else
+                        "REQUIRES_HUNK_REVIEW")
+                change["dev_covered"] = all(change[k + "_coverage"] != "REQUIRES_HUNK_REVIEW"
+                                            for k in ("index", "worktree"))
+            result["coverage_method"] = "exact_binary_reverse_patch_against_comparison_blobs"
+            result["status"] = "COVERED" if (all(c["dev_covered"] for c in result["changes"])
+                and all(c["coverage"] != "REQUIRES_HUNK_REVIEW" for c in result["local_commit_changes"])) else "NEEDS_LANDING"
     except (OSError, ValueError) as exc:
         result["errors"].append(dict(operation="useful_work", message=str(exc)))
     return result
 
 
-def census(fleet_root: str, anchor_repo: str, *, comparison_commit: str | None = None) -> dict:
+def preserved_operation_owners(fleet_root: str) -> dict:
+    """Index original useful-work owners, including spent HOLD/INCOMPLETE rows."""
+    try:
+        from . import workingrcx_fleet_apply as fleet
+    except ImportError:
+        import workingrcx_fleet_apply as fleet
+    result = {}
+    for path in sorted(Path(fleet_root).glob("fleet-apply-preserved-*/*/outcome.json")):
+        if not path.parent.name.isdigit():
+            continue
+        raw = fleet.read_plain(path)
+        value = json.loads(raw)
+        identity = value.get("source_identity")
+        if not isinstance(identity, dict) or not isinstance(identity.get("path"), str):
+            raise ValueError("Original operation receipt lacks source ownership: " + str(path))
+        result.setdefault(identity["path"], []).append(dict(receipt_path=str(path), sha256=fleet.digest(raw),
+            status=value.get("status"), source_identity=identity, destination=value.get("destination"),
+            landing_owner=value.get("landing_owner"), preservation_sha256=value.get("preservation_sha256", {})))
+    return result
+
+
+def retirement_observation(path: str, fleet_root: str, common: str, *, prior_owners: dict | None = None) -> dict:
+    """Read native ownership evidence without releasing any original claim."""
+    result = dict(status="OBSERVED", errors=[], preserved_operation=None, prior_owners=[], journals=[],
+                  native_links=[], fifos=[])
+    target = Path(path)
+    try:
+        from . import workingrcx_fleet_apply as fleet
+    except ImportError:
+        import workingrcx_fleet_apply as fleet
+    try:
+        relative = target.relative_to(fleet_root)
+        fleet_archive = (len(relative.parts) == 3 and relative.parts[0].startswith("fleet-apply-preserved-")
+                         and relative.parts[1].isdigit() and relative.parts[2] == "worktree")
+        lifecycle_root = Path(common) / "rcx_worktree_lifecycle"
+        native_archive = (target.is_relative_to(lifecycle_root)
+            and len(target.relative_to(lifecycle_root).parts) == 3
+            and target.parent.name in {"attempt-1", "attempt-2", "attempt-3"} and target.name == "worktree")
+        if fleet_archive or native_archive:
+            receipt = target.parent / "outcome.json"
+            raw = fleet.read_plain(receipt)
+            value = json.loads(raw)
+            if (value.get("status") != "MOVED" or value.get("destination") != path
+                    or value.get("boundary", {}).get("action_succeeded") is not True
+                    or value.get("boundary", {}).get("authority_consumed") is not True):
+                raise ValueError("Archive lacks its exact successful native move receipt")
+            result["preserved_operation"] = dict(receipt_path=str(receipt), sha256=fleet.digest(raw),
+                source_identity=value["source_identity"], landing_owner=value.get("landing_owner"),
+                original_operation_id=value["boundary"]["operation_id"],
+                preservation_sha256=value.get("preservation_sha256", {}))
+            if native_archive:
+                completed = target.parent.parent / "completion.json"
+                completed_raw = fleet.read_plain(completed)
+                completion = json.loads(completed_raw)
+                if completion.get("state") != "COMPLETE" or completion.get("destination") != path:
+                    raise ValueError("Native archive has no exact completed owner")
+                result["preserved_operation"].update(lifecycle_completion=str(completed),
+                    lifecycle_completion_sha256=fleet.digest(completed_raw))
+        original = (result["preserved_operation"] or {}).get("source_identity", {}).get("path", path)
+        owners = preserved_operation_owners(fleet_root) if prior_owners is None else prior_owners
+        result["prior_owners"] = owners.get(original, [])
+        journal_root = Path(common) / "rcx_primary_worktree_sync_transactions"
+        for journal in sorted(journal_root.glob("*/manifest.json")):
+            raw = fleet.read_plain(journal)
+            value = json.loads(raw)
+            if value.get("worktree_identity", {}).get("path") in {path, original}:
+                result["journals"].append(dict(path=str(journal), sha256=fleet.digest(raw),
+                    state=value.get("state"), owner=value.get("owner"),
+                    transaction_id=value.get("transaction_id"), stash_oid=value.get("stash_oid"),
+                    worktree_identity=value.get("worktree_identity"), old_head=value.get("old_head"),
+                    held_paths=sorted(set(value.get("held_tracked_paths", [])) | set(value.get("held_untracked_paths", []))),
+                    tracked_snapshots=value.get("tracked_snapshots", {}),
+                    tracked_patch_fingerprints=value.get("tracked_patch_fingerprints", {})))
+        for directory, dirs, files in os.walk(target, followlinks=False):
+            dirs[:] = [d for d in dirs if d != ".git"]
+            for name in dirs + files:
+                file = Path(directory) / name
+                info = file.lstat()
+                rel = str(file.relative_to(target))
+                if stat.S_ISFIFO(info.st_mode):
+                    result["fifos"].append(dict(path=rel, mode=stat.S_IMODE(info.st_mode)))
+                if stat.S_ISLNK(info.st_mode) and Path(rel).parts[0].startswith(".agent_bus"):
+                    result["native_links"].append(dict(path=rel, target=os.readlink(file),
+                        dangling=not os.path.exists(file)))
+        result["fifos"].sort(key=lambda r: r["path"])
+        result["native_links"].sort(key=lambda r: r["path"])
+    except (OSError, ValueError, fleet.Hold) as exc:
+        result.update(status="UNKNOWN", errors=[str(exc)])
+    return result
+
+
+def census(fleet_root: str, anchor_repo: str, *, comparison_commit: str | None = None,
+           retirement: bool = False) -> dict:
     """Return fresh metadata; only main() writes the explicitly named output."""
     started = _now()
     # Resolve the input directories once (e.g. /var -> /private/var on macOS).
@@ -436,6 +587,7 @@ def census(fleet_root: str, anchor_repo: str, *, comparison_commit: str | None =
     registered.update(records=len(records), finished_at=_now())
 
     rows = []
+    prior_owners = preserved_operation_owners(root) if retirement else None
     for path in sorted(targets, key=os.fsencode):
         row = targets[path]
         row.update(
@@ -449,7 +601,9 @@ def census(fleet_root: str, anchor_repo: str, *, comparison_commit: str | None =
         )
         _inspect(row)
         if comparison_commit and row["repository_kind"] in ("linked_worktree", "standalone_repository"):
-            row["useful_work"] = useful_work(path, comparison_commit, comparison_repo=anchor)
+            row["useful_work"] = useful_work(path, comparison_commit, comparison_repo=anchor, coverage=retirement)
+        if retirement and Path(path).is_relative_to(root) and row["entry_kind"] == "directory":
+            row["retirement_evidence"] = retirement_observation(path, root, os.path.join(anchor, ".git"), prior_owners=prior_owners)
         if row["repository_kind"] == "non_repository" and row["entry_kind"] == "directory":
             # Includes shells inside a containing Git checkout: rev-parse can
             # succeed there without this directory owning any Git registration.
@@ -522,12 +676,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fleet-root", required=True)
     parser.add_argument("--anchor-repo", required=True)
     parser.add_argument("--comparison-commit", help="Exact local comparison commit for useful-work inventory")
+    parser.add_argument("--retirement", action="store_true", help="Observe native archive/journal owners and exact patch coverage")
     parser.add_argument(
         "--output", required=True,
         help="JSON artifact; a census for the same fleet root and anchor may be refreshed",
     )
     args = parser.parse_args(argv)
-    report = census(args.fleet_root, args.anchor_repo, comparison_commit=args.comparison_commit)
+    report = census(args.fleet_root, args.anchor_repo, comparison_commit=args.comparison_commit, retirement=args.retirement)
     try:
         _write_report(args.output, report)
     except (OSError, ValueError) as exc:

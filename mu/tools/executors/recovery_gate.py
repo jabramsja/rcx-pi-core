@@ -8717,10 +8717,11 @@ def _run_pytest_targeted_validator(
         "no:cacheprovider",
     ]
     with tempfile.TemporaryDirectory(prefix="rcx-recovery-tmp-") as tmp_root, tempfile.TemporaryDirectory(prefix="rcx-recovery-cache-") as cache_root:
-        # Bind pytest's fixture producer to this invocation's owned temp root.
+        # Pytest clears basetemp on first tmp_path use. Give it a child so
+        # configuration-time provider guards and other TMPDIR files survive.
         # An inherited PYTEST_ADDOPTS --basetemp must not create unadmitted
         # repository scratch. Existing retained evidence is never cleared.
-        command.extend(["--basetemp", tmp_root, *targets])
+        command.extend(["--basetemp", str(Path(tmp_root) / "pytest"), *targets])
         env = {
             **os.environ,
             "PYTHONHASHSEED": "0",

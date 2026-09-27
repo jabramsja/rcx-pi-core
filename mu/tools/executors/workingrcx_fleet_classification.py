@@ -26,6 +26,8 @@ import sys
 WAVE_ID = "workingrcx-fleet-classification-r1-2026-09-11"
 RESIDUAL_WAVE_ID = "workingrcx-fleet-residual-completion-r1-2026-09-13"
 RESIDUAL_BATCH_SIZE = 12
+RETIREMENT_WAVE_ID = "workingrcx-fleet-real-retirement-r1-2026-09-23"
+RETIREMENT_PREDECESSOR = "a76ccb9b238b45474946b93a5f3d3be1b07a8b93"
 LANDED_CENSUS = "workingrcx-fleet-census-r3-2026-09-11_census.json"
 LANDED_SHA256 = "ac6f61337081c9adb7c100bac061270f6c7864aaed55d48912f50b8473d0cd81"
 LANDED_BASE = "c209bf29841425305003eeceddfd567a93874742"
@@ -222,7 +224,8 @@ def _ancestry(carrier: str, head: str, base: str) -> dict:
 
 def classify(census: dict, *, source_sha256: str, base_commit: str,
              carrier: str, landed: bool, residual: bool = False,
-             wave_id: str | None = None, protected: tuple[str, ...] = ()) -> dict:
+             wave_id: str | None = None, protected: tuple[str, ...] = (),
+             retirement: bool = False) -> dict:
     """Return one decision per validated row using only carrier-local objects."""
     _validate_inventory(census)
     if residual and landed:
@@ -231,6 +234,11 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
         raise ValueError("Fresh wave identity requires residual mode and a safe wave ID")
     fresh_wave = wave_id is not None and wave_id != RESIDUAL_WAVE_ID
     selected_wave = wave_id or RESIDUAL_WAVE_ID
+    if retirement and (not residual or not fresh_wave):
+        raise ValueError("Retirement requires fresh residual wave authority")
+    if retirement and census["fleet_root"] == LANDED_FLEET and (
+            selected_wave != RETIREMENT_WAVE_ID or base_commit != RETIREMENT_PREDECESSOR):
+        raise ValueError("Actual fleet retirement requires the exact locked wave/predecessor")
     if not _oid(base_commit):
         raise ValueError("base-commit must be an exact 40-character commit ID")
     if not _success(_git(carrier, "rev-parse", "--show-toplevel"), carrier + "\n"):
@@ -258,6 +266,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
     if residual:
         protected_paths = [census["fleet_root"] + "/" + name for name in (
             "WorkingRCX", "WorkingRCX-preservation", "workingrcx_pr_preservation_20260630")]
+    if retirement:
+        protected_paths.append(census["fleet_root"] + "/WorkingRCX-mu-coinduction-prefix-r1-20260914")
     protected_paths += [census["anchor_repo"], carrier]
     if any(not _absolute(p) for p in protected):
         raise ValueError("Protected owners require exact absolute paths")
@@ -278,7 +288,7 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                     and git.get("branch") == "refs/heads/dev")
         if (any(path == p or path.startswith(p + "/") for p in protected_paths)
                 or re.match(r"workingrcx[-_](audit|admin|source)([-_]|$)", name, re.I)
-                or any(h in PROTECTED_HEADS for h in [git.get("HEAD"), *(r.get("HEAD") for r in registrations)])):
+                or (not retirement and any(h in PROTECTED_HEADS for h in [git.get("HEAD"), *(r.get("HEAD") for r in registrations)]))):
             hold("protected_evidence", "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected.")
         if not sync_dev and any(branch in ("refs/heads/dev", "refs/heads/main", "refs/heads/master")
                for branch in [git.get("branch"), *(r.get("branch") for r in registrations)]):
@@ -326,13 +336,47 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                   and counts["unmerged"] == 0):
                 # Full bytes/index/history are archived before native safe sync.
                 reasons = [r for r in reasons if r["code"] != "dirty_or_unknown"]
+        retirement_action = None
+        if retirement and not shell:
+            evidence = source.get("retirement_evidence", {})
+            clone = source.get("repository_kind") == "standalone_repository"
+            detached = git.get("branch_status") == "detached" and git.get("branch") is None
+            expected_registration = dict(path=path, HEAD=git.get("HEAD"))
+            expected_registration.update({"detached": True} if detached else {"branch": git.get("branch")})
+            if detached and _oid(git.get("HEAD")):
+                reasons = [r for r in reasons if r["code"] != "head_or_branch_uncertain"]
+            if registrations == [expected_registration] and source.get("registration_status") == "registered":
+                reasons = [r for r in reasons if r["code"] != "registration_uncertain"]
+            if clone and (git.get("root") == path and git.get("common_dir") == path + "/.git"
+                          and git.get("git_dir") == path + "/.git" and not registrations
+                          and source.get("registration_status") == "not_registered"):
+                reasons = [r for r in reasons if r["code"] not in {
+                    "not_linked_worktree", "repository_identity_uncertain", "registration_uncertain"}]
+            archive = evidence.get("preserved_operation")
+            if archive and os.path.commonpath([path, census["fleet_root"]]) == census["fleet_root"]:
+                reasons = [r for r in reasons if r["code"] != "outside_direct_fleet"]
+                if archive.get("lifecycle_completion"):
+                    reasons = [r for r in reasons if r["code"] != "protected_evidence"]
+            if evidence.get("status") != "OBSERVED" or evidence.get("errors") != []:
+                hold("retirement_ownership_unknown", "Fresh archive, native-bus and original journal evidence is required.")
+            if git.get("branch") in {"refs/heads/dev", "refs/heads/main", "refs/heads/master"} and not clone:
+                hold("protected_branch", "Active/base checkout remains a synchronization owner.")
+            if any(j.get("state") not in {"HELD", "RECOVERED", "PREPARED"} for j in evidence.get("journals", [])):
+                hold("pending_journal_owner", "Original native journal owner must resolve the exact unfinished transaction.")
+            if any(not f["path"].startswith(".scratch/") or not f["path"].endswith(
+                    "/test_metadata_rejects_fifo_wit0/mu/tools/executors/executor_common.py") for f in evidence.get("fifos", [])):
+                hold("unknown_fifo_owner", "Only the captured idle pytest FIFO shape has preservation support.")
+            if any(not link.get("dangling") or len(Path(link["path"]).parts) != 2
+                    or Path(link["path"]).name != "bridge_config.json" for link in evidence.get("native_links", [])):
+                hold("unknown_native_link_owner", "Native owner links require exact known dangling adapter evidence.")
+            retirement_action = "RETIRE_CLONE" if clone else "RETIRE_ARCHIVE" if archive else "RETIRE_WORKTREE"
         ancestry = {"status": "NOT_APPLICABLE" if shell else "NOT_PROBED", "probes": []}
         if not reasons and not shell:
             head = git["HEAD"]
             if head not in cache:
                 cache[head] = _ancestry(carrier, head, base_commit)
             ancestry = cache[head]
-            if ancestry["status"] != "ANCESTOR":
+            if ancestry["status"] != "ANCESTOR" and not retirement:
                 hold("unmerged_history" if ancestry["status"] == "NOT_ANCESTOR" else "ancestry_unknown",
                      "Local objects do not prove this recorded HEAD is an ancestor of the exact comparison commit.")
         decision = "HOLD" if reasons else "CONDITIONAL_RETIRE_CANDIDATE"
@@ -352,6 +396,7 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                        else "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]"),
                 proposed_action=("UNTOUCHED_HOLD" if decision == "HOLD" else
                                  "PRESERVE_BUS_SHELL" if shell else
+                                 retirement_action if retirement_action else
                                  "SYNC_LOCAL_DEV" if sync_dev else "PRESERVE_WORKTREE"),
             )
         if fresh_wave:
@@ -361,7 +406,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
             needs_landing = (useful.get("status") == "NEEDS_LANDING"
                 and source.get("availability_status") == "present"
                 and source.get("repository_kind") in {"linked_worktree", "standalone_repository"}
-                and os.path.dirname(path) == census["fleet_root"])
+                and (os.path.dirname(path) == census["fleet_root"] or (retirement and
+                     source.get("retirement_evidence", {}).get("preserved_operation"))))
             rows[-1]["landing_owner"] = (
                 None if not needs_landing else dict(
                     task="FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION", wave_id=owner_id,
@@ -379,6 +425,28 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                 if rows[-1]["decision"] != "HOLD":
                     rows[-1].update(decision="HOLD", proposed_action="UNTOUCHED_HOLD", apply_prerequisites=[])
                 rows[-1]["reasons"].append(dict(code="useful_work_unknown", detail="Exact useful-work inventory requires the recorded native owner."))
+            if retirement:
+                current_review = rows[-1]["landing_owner"]
+                if current_review:
+                    current_review.update(wave_id=selected_wave,
+                        source_key=hashlib.sha256(os.fsencode(path)).hexdigest(),
+                        status="PENDING_EXACT_HUNK_REVIEW")
+                rows[-1]["current_landing_review"] = current_review
+                inherited = source.get("retirement_evidence", {}).get("preserved_operation") or {}
+                previous_owners = [r["landing_owner"] for r in source.get("retirement_evidence", {}).get("prior_owners", [])
+                                   if r.get("landing_owner")]
+                rows[-1]["inherited_landing_owners"] = previous_owners
+                if inherited.get("landing_owner"):
+                    rows[-1]["landing_owner"] = inherited["landing_owner"]
+                elif previous_owners:
+                    rows[-1]["landing_owner"] = previous_owners[-1]
+                if rows[-1]["decision"] != "HOLD":
+                    rows[-1]["reasons"] = [dict(code="recorded_retirement_source",
+                        detail="Exact historical source retained independently; preservation, original owners and one-shot retirement must be verified at action time.")]
+                    rows[-1]["apply_prerequisites"] = [
+                        "UNMET: Verify exact source/index/bytes/refs, native owners, journals and liveness under lock.",
+                        "UNMET: Independently recover the original history and index before source/registration retirement.",
+                        "UNMET: Consume a fresh source-and-preservation-bound terminal operation on synchronized PRIMARY; preserve original claims."]
     counts = Counter(r["decision"] for r in rows)
     report = {
         "schema_version": 1, "observation_kind": "read_only_fleet_classification",
@@ -412,6 +480,9 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
             unlisted_targets="HOLD individually; historical HOLDs were freshly reassessed",
         )
         report["limitations"][-1] = "Committed foreground plan/apply/verify remains required for every bounded operation."
+    if retirement:
+        report["retirement"] = True
+        report["policy"]["protected_heads"] = []
     return report
 
 
@@ -422,11 +493,41 @@ def useful_work_report(classification: dict, classification_sha256: str) -> dict
                  disposition=row["proposed_action"], owner=row["owner"],
                  inventory=row.get("useful_work"), landing_owner=row.get("landing_owner"))
             for row in classification["entries"]]
+    if classification.get("retirement"):
+        for row, source in zip(rows, classification["entries"]):
+            row["inherited_landing_owners"] = source.get("inherited_landing_owners", [])
+            row["current_landing_review"] = source.get("current_landing_review")
     return dict(schema_version=1, wave_id=classification["wave_id"],
         census_sha256=classification["source_sha256"], classification_sha256=classification_sha256,
         comparison_commit=classification["comparison_commit"], entries=rows, entry_count=len(rows),
         landing_owners=sum(row["landing_owner"] is not None for row in rows),
         completion="PENDING_NATIVE_LANDINGS_AND_COMMITTED_LIVE_ACTIONS")
+
+
+def retirement_coverage_report(classification: dict, classification_sha256: str) -> dict:
+    """Keep independent byte/hunk proof separate from historical owner closure."""
+    entries = []
+    for row in classification["entries"]:
+        useful = row.get("useful_work") or {}
+        evidence = row["source"].get("retirement_evidence") or {}
+        inherited = evidence.get("preserved_operation")
+        entries.append(dict(source_index=row["source_index"], path=row["path"],
+            head=row["source"]["git"]["HEAD"], source_action=row["proposed_action"],
+            current_source_coverage=useful.get("status", "UNKNOWN"),
+            changes=useful.get("changes", []), commits=useful.get("local_commit_changes", []),
+            landing_owner=row.get("landing_owner"), inherited_operation=inherited,
+            current_landing_review=row.get("current_landing_review"),
+            prior_operation_owners=evidence.get("prior_owners", []),
+            retained_journal_owners=[dict(**journal,
+                task="FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+                disposition="PRESERVED_ORIGINAL_INTENT_REQUIRES_REVIEW" if journal.get("held_paths")
+                    or journal.get("state") == "PREPARED" else "HISTORICAL_RECOVERY_EVIDENCE",
+                integration_completed=False) for journal in evidence.get("journals", [])]))
+    return dict(schema_version=1, wave_id=classification["wave_id"],
+        comparison_commit=classification["comparison_commit"], classification_sha256=classification_sha256,
+        census_sha256=classification["source_sha256"], mutation_authorized=False, entries=entries,
+        evidence_policy="Exact reverse binary patches and comparison blobs prove only the recorded source changes. A failed comparison requires hunk review, not an inference of missing code. Inherited owners and held journal intent remain open independently.",
+        completion="PENDING_NATIVE_LANDING_REVIEW_AND_FOREGROUND_RETIREMENT")
 
 
 def _write_or_verify(path: str, payload: bytes) -> None:
@@ -468,6 +569,7 @@ def _output_path(output: str, census: dict, carrier: str, landed: bool) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--residual", action="store_true", help="Fresh manifest-bound residual batches; historical authority is unchanged")
+    parser.add_argument("--retirement", action="store_true", help="Fresh preservation-first physical/registration retirement")
     parser.add_argument("--wave-id", help="Fresh residual owner; omitted retains the legacy authority")
     parser.add_argument("--protect", action="append", default=[], help="Exact additional active/preserved source path")
     parser.add_argument("--census", required=True)
@@ -498,13 +600,17 @@ def main(argv: list[str] | None = None) -> int:
             output = _output_path(args.output, census, os.getcwd(), landed)
         report = classify(census, source_sha256=digest, base_commit=args.base_commit,
                           carrier=os.getcwd(), landed=landed, residual=args.residual,
-                          wave_id=args.wave_id, protected=tuple(args.protect))
+                          wave_id=args.wave_id, protected=tuple(args.protect), retirement=args.retirement)
         payload = (json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii")
         _write_or_verify(output, payload)
         if args.wave_id and args.wave_id != RESIDUAL_WAVE_ID:
             useful = useful_work_report(report, hashlib.sha256(payload).hexdigest())
             _write_or_verify(os.getcwd() + "/reports/control_plane/" + args.wave_id + "_useful_work.json",
                              (json.dumps(useful, indent=2, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii"))
+        if args.retirement:
+            coverage = retirement_coverage_report(report, hashlib.sha256(payload).hexdigest())
+            _write_or_verify(os.getcwd() + "/reports/control_plane/" + args.wave_id + "_useful_work_coverage.json",
+                             (json.dumps(coverage, indent=2, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii"))
         print(json.dumps({"entry_count": report["entry_count"], "decision_counts": report["decision_counts"],
                           "source_sha256": digest, "comparison_commit": args.base_commit}, sort_keys=True))
         return 0
