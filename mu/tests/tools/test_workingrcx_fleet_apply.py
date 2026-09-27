@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 import fcntl
 import json
 import os
@@ -29,6 +30,10 @@ REAL_CANDIDATES = deepcopy(apply.CANDIDATES)
 ORPHAN_CAPTURE = REPO_ROOT / (
     "reports/control_plane/workingrcx-fleet-orphan-owner-retirement-r1-2026-09-23_orphan_owner_evidence.json")
 ORPHAN_RECORDS = json.loads(ORPHAN_CAPTURE.read_bytes())["rows"]
+BINDING_REPORT = json.loads((REPO_ROOT / (
+    "reports/control_plane/workingrcx-fleet-validation-convergence-r1-2026-09-27_retirement_evidence.json"
+)).read_bytes())
+BINDING_CAPTURE = BINDING_REPORT["root_cause_evidence"]["captured"]
 
 
 def git(f, root, *args):
@@ -69,7 +74,11 @@ def fleet(monkeypatch):
         wrapper = bindir / "git"
         # Census drops GIT_* overrides before probing effective config. Keep
         # runner system filters out of disposable repos at the exec boundary.
-        wrapper.write_text(f'#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 exec {shlex.quote(real_git)} "$@"\n')
+        # Use fast compression for repeated disposable history bundles. Keep
+        # real Git objects, delta packing and all recovery/fsck checks intact.
+        wrapper.write_text(
+            f'#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 exec {shlex.quote(real_git)} '
+            '-c core.compression=1 "$@"\n')
         wrapper.chmod(0o700)
         env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
         for key in tuple(os.environ):
@@ -84,8 +93,22 @@ def fleet(monkeypatch):
         f.remote.mkdir()
         git(f, f.repo, "init", "-q")
         git(f, f.remote, "init", "--bare", "-q")
-        (f.repo / "TASKS.md").write_text(
-            (REPO_ROOT / "TASKS.md").read_text().replace(str(apply.FLEET_ROOT), str(root)))
+        # The serial gate repeatedly commits, bundles and archives this file.
+        # Bound the fixture to its authorization and exact candidate rows so
+        # unrelated growth in the live tracker cannot consume the test budget.
+        # Protection tests still add real target identities to this document;
+        # unprotected() reads both its worktree and committed origin/dev bytes.
+        tasks = (
+            "# Fleet apply fixture tasks\n\n"
+            "- [FLEET-CLEANUP-APPLY] Retain the bounded four-candidate authority.\n"
+            "- [FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] Retain residual ownership.\n\n"
+            "| Worktree | Decision |\n| --- | --- |\n"
+        )
+        tasks += "".join(
+            f"| `{Path(candidate['path']).name}` | CONDITIONAL_RETIRE_CANDIDATE |\n"
+            for candidate in REAL_CANDIDATES
+        )
+        (f.repo / "TASKS.md").write_text(tasks)
         (f.repo / "tracked").write_bytes(b"original tracked evidence\n")
         (f.repo / ".gitignore").write_text("ignored*\n.agent_bus*\n")
         f.original = commit(f, "recorded source heads")
@@ -1611,6 +1634,221 @@ def test_real_retirement_inherits_spent_archival_receipts_without_replay(fleet):
     assert result["registration_delta"] == -4
     assert {p: p.read_bytes() for p in originals} == originals
     assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
+
+
+@pytest.mark.parametrize("captured", BINDING_CAPTURE["raw_index_object_omission"]["proof"]["cases"],
+                         ids=lambda c: str(c["index"]))
+def test_raw_index_cache_tree_closure_is_independent_and_byte_exact(fleet, captured):
+    f, target = fleet, fleet.targets[0]
+    assert captured["fsck_exit"] == 8 and captured["objects"][0]["source_type"] == "tree"
+    nested = target / "index-only/subtree/leaf"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("cache-tree regression for " + captured["objects"][0]["oid"])
+    git(f, target, "add", "index-only")
+    tree = git(f, target, "write-tree")
+    assert tree not in git(f, target, "rev-list", "--objects", "--all", "--reflog")
+    # The bytes whose recovery failed in the six captured cases must survive;
+    # write-tree/refresh in preservation would mask the actual omission.
+    index = Path(git(f, target, "rev-parse", "--absolute-git-dir")) / "index"
+    original = index.read_bytes()
+    nested.unlink()
+    plan, kwargs = retirement_fixture(f, renew=True)
+    assert index.read_bytes() == original
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"RETIRED": 4}, result
+    entry = next(e for e in plan["entries"] if e["path"] == str(target))
+    directory = Path(entry["destination"]).parent
+    recovery = directory / "recovery.git"
+    assert (recovery / "index").read_bytes() == original
+    with tarfile.open(directory / "gitdir-before.tar") as archive:
+        assert archive.extractfile("./index").read() == original
+    assert git(f, recovery, "cat-file", "-t", tree) == "tree"
+    assert git(f, recovery, "cat-file", "blob", tree + ":index-only/subtree/leaf") == (
+        "cache-tree regression for " + captured["objects"][0]["oid"])
+    assert not (recovery / "objects/info/alternates").exists()
+    git(f, recovery, "fsck", "--full", "--strict")
+    proof = json.loads((directory / "recovery.json").read_bytes())
+    assert tree + " tree" in proof["index_objects"]
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
+    (directory / "index-objects.pack").write_bytes(b"corrupt closure pack")
+    with pytest.raises(apply.Hold, match="preservation bytes changed"):
+        apply.verify_residual_plan(f.repo, plan, **kwargs)
+
+
+def historical_owner_archive(f, monkeypatch, records):
+    """Create a real consumed native move receipt at the captured historical time."""
+    class HistoricalClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 15, 12, tzinfo=timezone.utc).astimezone(tz)
+
+    target = f.targets[0]
+    for name, value in records.items():
+        value = deepcopy(value)
+        if "lock_path" in value:
+            value["lock_path"] = str(target / name)
+        path = target / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(apply.encoded(value))
+    # Model original admission with absent historical PIDs. The fresh admission
+    # below uses its own live process-creation evidence and real flock checks.
+    with monkeypatch.context() as context:
+        context.setattr(boundary, "datetime", HistoricalClock)
+        context.setattr(apply, "_absent_pid", lambda pid: type(pid) is int and pid > 0)
+        plan = residual_fixture(f, context, shell_count=0, wave_id="fixture-historical-owner-move")
+        operation = plan["operations"][0]
+        result = apply.apply_residual_plan(f.repo, plan, authority_commit=f.residual_authority,
+            batch=1, operation_root=Path(operation["operation_root"]))
+    assert result["outcome_counts"] == {"MOVED": 4}, result
+    destination = Path(next(e for e in plan["entries"] if e["path"] == str(target))["destination"])
+    fresh, kwargs = retirement_fixture(f, renew=True)
+    entry = next(e for e in fresh["entries"] if e["path"] == str(destination))
+    return destination, entry, fresh, kwargs
+
+
+def test_all_forty_relocated_locks_require_the_original_consumed_move(fleet, monkeypatch):
+    f, records = fleet, {}
+    cases = BINDING_CAPTURE["historical_lock_binding"]["proof"]["cases"]
+    assert len(cases) == 40
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=10)
+    for i, captured in enumerate(cases):
+        lock = captured["locks"][0]
+        assert lock["original_bound_path_matches"] and not lock["current_path_matches"]
+        # Isolate captured bus names so repeated .agent_bus/meta names can live
+        # in one disposable source; preserve each holder/timestamp/path shape.
+        parts = Path(lock["relative_path"]).parts
+        name = str(Path(parts[0] + f"-captured-{i}", *parts[1:]))
+        records[name] = {**lock["metadata"], "pid": child.pid}
+    target, entry, plan, kwargs = historical_owner_archive(f, monkeypatch, records)
+    before = apply.tree_manifest(target)
+    evidence = entry["retirement_evidence"]
+    observed = apply.native_idle(target, before, reconcile_r1=True, retirement_evidence=evidence)
+    assert len(observed["historical_records"]) == 40
+    with pytest.raises(apply.Hold):
+        apply.native_idle(target, before, reconcile_r1=True)
+    forged = deepcopy(evidence)
+    forged["preserved_operation"]["source_identity"]["path"] += "-unrelated"
+    with pytest.raises(apply.Hold, match="source/archive binding"):
+        apply.native_idle(target, before, reconcile_r1=True, retirement_evidence=forged)
+    lock = target / next(iter(records))
+    with lock.open("rb") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(apply.Hold, match="lock is active"):
+            apply.inspect_retirement(f.repo, entry)
+    original_bytes = lock.read_bytes()
+    value = json.loads(original_bytes)
+    value["lock_path"] += "-arbitrary-old-path"
+    lock.write_bytes(apply.encoded(value))
+    with pytest.raises(apply.Hold, match="source/archive binding"):
+        apply.inspect_retirement(f.repo, entry)
+    lock.write_bytes(original_bytes)
+    assert apply.tree_manifest(target) == before
+    originals = {p: p.read_bytes() for p in target.parent.glob("*.json")}
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result["outcome_counts"] == {"RETIRED": 4}, result
+    assert {p: p.read_bytes() for p in originals} == originals
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
+
+
+@pytest.mark.parametrize("kind", ["lock", "status"])
+@pytest.mark.parametrize("process", ["reused", "original", "uncertain", "racing"])
+def test_captured_pid_reuse_requires_creation_identity_and_historical_bytes(fleet, monkeypatch, kind, process):
+    f = fleet
+    if kind == "lock":
+        captured = BINDING_CAPTURE["historical_lock_binding"]["proof"]["cases"]
+        lock = next(c["locks"][0] for c in captured if c["index"] == 132)
+        name, value = lock["relative_path"], lock["metadata"]
+        pid, started = 2657, "Sat Sep 26 20:29:02 2026\n"
+    else:
+        record = BINDING_REPORT["captured_status_records"][0]
+        value = record["value"]
+        name = str(Path(*Path(record["path"]).parts[-3:]))
+        pid, started = 1595, "Sat Sep 26 20:20:25 2026\n"
+    target, entry, plan, kwargs = historical_owner_archive(f, monkeypatch, {name: value})
+    before = (target / name).read_bytes()
+    monkeypatch.setattr(apply, "_absent_pid", lambda candidate: candidate != pid)
+    real_run, probes = subprocess.run, []
+    def process_identity(args, **options):
+        if args[:4] == ["ps", "-p", str(pid), "-o"]:
+            probes.append(args)
+            assert args[4] == "lstart=" and options["env"]["TZ"] == "UTC"
+            output = started if process == "reused" else "Thu Sep 10 10:23:50 2026\n"
+            if process == "uncertain":
+                output = "unavailable"
+            if process == "racing" and len(probes) % 2:
+                output = started
+            return subprocess.CompletedProcess(args, 0, output, "")
+        return real_run(args, **options)
+    monkeypatch.setattr(subprocess, "run", process_identity)
+    if process == "reused":
+        apply.inspect_retirement(f.repo, entry)
+        # A process using the source still holds even if recorded PID identity
+        # is obsolete. Exercise the production whole-tree process probe.
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], cwd=target)
+        try:
+            monkeypatch.setattr(apply, "process_idle", f.original_idle)
+            with pytest.raises(apply.Hold):
+                apply.inspect_retirement(f.repo, entry)
+        finally:
+            child.terminate()
+            child.wait(timeout=10)
+        result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+        assert result["outcome_counts"] == {"RETIRED": 4}, result
+        assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
+        target = Path(entry["destination"])
+    else:
+        with pytest.raises(apply.Hold, match="live|uncertain"):
+            apply.inspect_retirement(f.repo, entry)
+    assert probes and (target / name).read_bytes() == before
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "device", "inode", "journal", "history", "marker", "stash"])
+def test_prepared_journal_device_transition_requires_fresh_exact_binding(fleet, fault):
+    f, target = fleet, fleet.targets[0]
+    (target / "tracked").write_text("retained PREPARED work\n")
+    ident = boundary.bind_terminal_target_identity(target, base_branch="dev")
+    def stop(stage, _manifest):
+        if stage == "after_prepared":
+            raise RuntimeError("retain original PREPARED owner")
+    with apply.safe_git_environment(network=True):
+        result = boundary.sync_primary_worktree_to_base(f.repo, "dev", target_identity=ident,
+            checkpoint=stop, log=lambda _: None)
+    journal = Path(result["primary_sync_transaction_path"])
+    value = json.loads(journal.read_bytes())
+    value["worktree_identity"]["device"] = target.stat().st_dev - 2
+    if fault == "history":
+        value["state_history"].append(dict(state="SYNC_STARTED"))
+    if fault == "marker":
+        value["stash_marker"] = ""
+    if fault == "stash":
+        value["stash_oid"] = f.original
+    journal.write_bytes(apply.encoded(value))
+    original = journal.read_bytes()
+    index = (f.common / "worktrees" / target.name / "index").read_bytes()
+    plan, kwargs = retirement_fixture(f, renew=True)
+    entry = next(e for e in plan["entries"] if e["path"] == str(target))
+    if fault == "missing":
+        entry.pop("prepared_owner_bindings")
+    if fault in {"device", "inode"}:
+        entry["prepared_owner_bindings"][0]["current_identity"]["filesystem_identity"][fault] += 1
+    if fault == "journal":
+        journal.write_bytes(original + b"\n")
+        original = journal.read_bytes()
+    if fault:
+        with pytest.raises(apply.Hold):
+            apply.inspect_retirement(f.repo, entry)
+        assert (f.common / "worktrees" / target.name / "index").read_bytes() == index
+    else:
+        binding = entry["prepared_owner_bindings"][0]
+        assert binding["original_identity"]["device"] != binding["current_identity"]["filesystem_identity"]["device"]
+        assert binding["journal_sha256"] == apply.digest(original)
+        outcome = apply.apply_residual_plan(f.repo, plan, **kwargs)
+        assert outcome["outcome_counts"] == {"RETIRED": 4}, outcome
+        assert apply.verify_residual_plan(f.repo, plan, **kwargs)["batch_complete"]
+        with pytest.raises(apply.Hold, match="consumed"):
+            apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert journal.read_bytes() == original
 
 
 def test_real_retirement_preserves_captured_dangling_config_fifo_and_pending_owner(fleet):

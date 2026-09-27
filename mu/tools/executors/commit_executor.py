@@ -4795,10 +4795,12 @@ def _run_pytest_on_files(
     # 2026-04-21, and the same commit gate exhausted the old 300s budget on
     # 2026-05-05. Keep enough slack that the gate fails on test truth, not an
     # undersized commit-executor budget.
-    # The full fleet-apply module passed 293 tests in 574.48s on 2026-09-16,
-    # exceeding the singleton bot-remediation budget. Give that exact canonical
-    # module 900s (over five minutes of margin); node selectors and other files
-    # retain 240s each. Callers may still request a larger total timeout.
+    # On 2026-09-27 the complete fleet module still exceeded 900s serially
+    # after bounding its fixtures. The declared fleet/classification suite ran
+    # 463 tests in 281.30s with four xdist workers. Use that bounded execution
+    # policy whenever the exact full module is selected, including mixed gates.
+    # Keep every selector, the existing finite budget and the marker/import mode.
+    full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in test_files
     effective_timeout = max(timeout, sum(
         900 if selector == "mu/tests/tools/test_workingrcx_fleet_apply.py" else 240
         for selector in test_files
@@ -4814,6 +4816,7 @@ def _run_pytest_on_files(
                 "--import-mode=importlib",
                 "-m",
                 "not slow and not fuzzer",
+                *(["-n", "4", "--dist", "worksteal"] if full_fleet else []),
                 *test_files,
             ],
             cwd=repo_root,
