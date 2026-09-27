@@ -8860,7 +8860,7 @@ class TestHybridDelegateRuntime:
         assert validator_result["passed"] is False
         assert validator_result["timed_out"] is True
         assert validator_result["exit_code"] == 124
-        assert "timed out" in validator_result["stderr"]
+        assert validator_result["stderr"] == "hybrid validator timed out after 90s"
 
     def test_validation_failure_is_fed_into_next_iteration(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)
@@ -8910,13 +8910,16 @@ class TestHybridDelegateRuntime:
 
 
 class TestHybridValidatorContract:
-    @pytest.mark.parametrize("shared_basetemp", [True, False], ids=["collision", "native"])
+    @pytest.mark.parametrize("shared_basetemp, full_fleet", [
+        (True, False), (False, False), (False, True),
+    ], ids=["collision", "native", "full-fleet-workers"])
     def test_initialization_evidence_and_provider_guards_survive_tmp_path(
-        self, tmp_path, monkeypatch, shared_basetemp,
+        self, tmp_path, monkeypatch, shared_basetemp, full_fleet,
     ):
         # Load the real provider policy in an isolated child pytest project.
         (tmp_path / "conftest.py").write_bytes((_REPO_ROOT / "conftest.py").read_bytes())
-        target = "test_validator_guards.py"
+        target = "mu/tests/tools/test_workingrcx_fleet_apply.py" if full_fleet else "test_validator_guards.py"
+        (tmp_path / target).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / target).write_text(
             "import os, shlex, subprocess, tempfile\n"
             "from pathlib import Path\n"
@@ -8930,6 +8933,7 @@ class TestHybridValidatorContract:
             "evidence.write_bytes(b'created before tmp_path')\n"
             "def test_guards_survive(tmp_path):\n"
             "    assert tmp_path.is_dir()\n"
+            f"    if {full_fleet!r}: assert os.environ['PYTEST_XDIST_WORKER_COUNT'] == '4'\n"
             "    assert all(path.is_file() for path in guards), 'provider guards deleted by basetemp'\n"
             "    assert {path: path.read_bytes() for path in guards} == before\n"
             "    assert evidence.read_bytes() == b'created before tmp_path'\n"
@@ -8978,7 +8982,27 @@ class TestHybridValidatorContract:
         assert result["exit_code"] == 0, output
         assert "1 passed" in result["stdout"], output
 
-    def test_pytest_targeted_uses_executor_owned_argv_and_repo_write_suppressed_env(self, tmp_path):
+    @pytest.mark.parametrize("targets, caller_timeout, expected_timeout, parallel", [
+        (["mu/tests/tools/test_recovery_gate.py"], 45, 45, False),
+        (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 300, 900, True),
+        (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 1800, 1800, True),
+        (["mu/tests/tools/test_workingrcx_fleet_apply.py",
+          "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+          "mu/tests/tools/test_recovery_gate.py"], 300, 1380, True),
+        (["mu/tests/tools/test_recovery_gate.py",
+          "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+          "mu/tests/tools/test_workingrcx_fleet_apply.py"], 300, 1380, True),
+        (["mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+          "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+          "mu/tests/tools/test_recovery_gate.py",
+          "mu/tests/tools/test_workingrcx_fleet_apply.py"], 300, 1620, True),
+        (["mu/tests/tools/test_workingrcx_fleet_apply.py::test_original_owner_cli_rejects_each_uncommitted_dependency_before_claim"],
+         60, 60, False),
+        (["elsewhere/test_workingrcx_fleet_apply.py"], 60, 60, False),
+    ])
+    def test_pytest_targeted_uses_executor_owned_argv_and_repo_write_suppressed_env(
+        self, tmp_path, targets, caller_timeout, expected_timeout, parallel,
+    ):
         captured = {}
 
         def fake_run(args, **kwargs):
@@ -8989,8 +9013,8 @@ class TestHybridValidatorContract:
         with patch.object(rg_mod.subprocess, "run", side_effect=fake_run):
             result = rg_mod._run_pytest_targeted_validator(  # ANTICHEAT_OK: validator builder contract
                 tmp_path,
-                targets=["mu/tests/tools/test_recovery_gate.py"],
-                timeout=45,
+                targets=targets,
+                timeout=caller_timeout,
             )
 
         assert result["passed"] is True
@@ -9003,7 +9027,13 @@ class TestHybridValidatorContract:
             "-p",
             "no:cacheprovider",
         ]
-        assert captured["args"][-1] == "mu/tests/tools/test_recovery_gate.py"
+        assert captured["args"][-len(targets):] == targets
+        assert result["targets"] == targets
+        assert captured["kwargs"]["timeout"] == expected_timeout
+        if parallel:
+            assert captured["args"][7:11] == ["-n", "4", "--dist", "worksteal"]
+        else:
+            assert "-n" not in captured["args"]
         env = captured["kwargs"]["env"]
         assert env["PYTHONHASHSEED"] == "0"
         assert env["PYTHONDONTWRITEBYTECODE"] == "1"
@@ -9014,6 +9044,63 @@ class TestHybridValidatorContract:
         assert env["TMP"] == env["TEMP"] == env["TMPDIR"]
         assert Path(env["XDG_CACHE_HOME"]) != Path(env["TMPDIR"])
         assert env["PATH"] == os.environ["PATH"]
+
+    @pytest.mark.parametrize("outcome", ["pass", "failure", "empty", "timeout"])
+    def test_hybrid_full_fleet_policy_keeps_failure_empty_and_timeout(self, tmp_path, monkeypatch, outcome):
+        targets = ["mu/tests/tools/test_workingrcx_fleet_apply.py",
+                   "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                   "mu/tests/tools/test_recovery_gate.py"]
+        calls = []
+        def run(args, **kwargs):
+            calls.append(args)
+            assert args[7:11] == ["-n", "4", "--dist", "worksteal"]
+            assert args[-3:] == targets
+            assert kwargs["timeout"] == 1380
+            if outcome == "timeout":
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            code = {"pass": 0, "failure": 1, "empty": 5}[outcome]
+            return subprocess.CompletedProcess(args, code, outcome + " stdout", outcome + " stderr")
+        monkeypatch.setattr(rg_mod.subprocess, "run", run)
+        spec = [{"validator": "pytest_targeted", "targets": targets}]
+        if outcome == "timeout":
+            with pytest.raises(subprocess.TimeoutExpired) as error:
+                rg_mod._run_hybrid_validation_spec(tmp_path, validation_spec=spec, timeout=300)  # ANTICHEAT_OK: real hybrid runner propagates the actual finite deadline.
+            assert error.value.timeout == 1380
+        else:
+            result = rg_mod._run_hybrid_validation_spec(tmp_path, validation_spec=spec, timeout=300)  # ANTICHEAT_OK: hybrid fleet scheduling must preserve negative validator results.
+            assert result["passed"] is (outcome == "pass")
+            assert result["stdout"] == outcome + " stdout"
+            assert result["stderr"] == outcome + " stderr"
+        assert len(calls) == 1
+
+    @pytest.mark.parametrize("outcome, code", [("pass", 0), ("failure", 2), ("empty", 5)])
+    def test_hybrid_full_fleet_runs_real_mixed_selection(self, tmp_path, outcome, code):
+        targets = ["mu/tests/tools/test_workingrcx_fleet_apply.py",
+                   "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                   "mu/tests/tools/test_recovery_gate.py"]
+        for index, target in enumerate(targets):
+            path = tmp_path / target
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("" if outcome == "empty" else (
+                "import os\nfrom pathlib import Path\n"
+                "def test_selection(tmp_path):\n"
+                "    assert os.environ['PYTEST_XDIST_WORKER_COUNT'] == '4'\n"
+                "    assert tmp_path.resolve().is_relative_to((Path(os.environ['TMPDIR']) / 'pytest').resolve())\n"
+                f"    Path({str(tmp_path / ('selected-' + str(index)))!r}).write_text('ran')\n"
+                f"    assert {not (outcome == 'failure' and index == 2)!r}, 'mixed selection failure'\n"
+            ))
+        result = rg_mod._run_hybrid_validation_spec(  # ANTICHEAT_OK: real xdist subprocess validates all mixed targets, initialization ownership and failure/empty reporting.
+            tmp_path, validation_spec=[{"validator": "pytest_targeted", "targets": targets}], timeout=300,
+        )
+        output = result["stdout"] + "\n" + result["stderr"]
+        assert result["passed"] is (outcome == "pass"), output
+        # Preserve xdist's -x INTERRUPTED status and the underlying failure.
+        assert result["exit_code"] == code, output
+        if outcome == "pass":
+            assert "3 passed" in result["stdout"], result
+            assert all((tmp_path / ('selected-' + str(index))).read_text() == 'ran' for index in range(3))
+        if outcome == "failure":
+            assert "mixed selection failure" in result["stdout"], result
 
 
 @pytest.fixture

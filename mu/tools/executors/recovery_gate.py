@@ -8707,6 +8707,12 @@ def _run_pytest_targeted_validator(
     targets: list[str],
     timeout: int,
 ) -> dict[str, Any]:
+    # The canonical fleet module exceeded both the 300s recovery and 900s
+    # commit serial gates on 2026-09-27. Its declared four-worker suite passed
+    # in 281.30s. Match commit's bounded workers and full-module budget here;
+    # leave unrelated targets and node selectors on their caller's policy.
+    full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in targets
+    effective_timeout = max(timeout, 900 + 240 * (len(targets) - 1)) if full_fleet else timeout
     command = [
         sys.executable,
         "-m",
@@ -8715,6 +8721,7 @@ def _run_pytest_targeted_validator(
         "--tb=short",
         "-p",
         "no:cacheprovider",
+        *(["-n", "4", "--dist", "worksteal"] if full_fleet else []),
     ]
     with tempfile.TemporaryDirectory(prefix="rcx-recovery-tmp-") as tmp_root, tempfile.TemporaryDirectory(prefix="rcx-recovery-cache-") as cache_root:
         # Pytest clears basetemp on first tmp_path use. Give it a child so
@@ -8736,7 +8743,7 @@ def _run_pytest_targeted_validator(
             cwd=repo_root,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=effective_timeout,
             env=env,
             check=False,
         )
@@ -8963,7 +8970,7 @@ def _run_delegate_implementer_action(
             "command": command,
             "targets": validator_targets,
             "stdout": "",
-            "stderr": f"hybrid validator timed out after {validator_timeout}s",
+            "stderr": f"hybrid validator timed out after {exc.timeout}s",
             "exit_code": 124,
             "passed": False,
             "timed_out": True,

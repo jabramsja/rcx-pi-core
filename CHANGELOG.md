@@ -6,6 +6,34 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-27
 
+### Fleet preservation and native validation convergence (Phase B; landing pending)
+
+- Carried forward the preserved cache-tree object closure correction, exact
+  receipt-bound relocated lock evidence, creation-identity checks for reused
+  status/lock PIDs, and fresh PREPARED journal device bindings. Raw indices,
+  journals and historical owner records remain immutable; standalone strict
+  recovery and real liveness checks remain mandatory.
+- Carried forward the bounded TASKS fixture and disposable Git compression
+  correction. The complete canonical fleet module now selects four xdist
+  workers through the actual commit and recovery pytest helpers, including
+  mixed selections. Commit retains its finite 900-second fleet allowance plus
+  240 seconds per other selector; recovery uses that same allowance only when
+  the complete fleet module is selected. Other targets keep their existing
+  policy, isolation and failure enforcement.
+- Fresh native builders bind predecessor `8ceb73fa792372e537535d3e4e2911e44fba8264`
+  to 176 observed entries and five new operations for 51 conditional sources.
+  They retain 125 HOLDs, 55 useful-work landing owners, all historical claims
+  and all six protected file hashes. The prior 204 verified retirements and
+  50 holds remain historical outcomes; Phase B performs zero live actions.
+
+- Final local gates passed 463 fleet/classification tests in 278.06s, 1,667
+  validator tests in 233.95s and 351 docs tests with two existing freshness
+  warnings. The actual native commit/recovery helpers each passed all 378
+  fleet tests in 264.216s/251.353s under 900s. Their exact four-selector mixed
+  invocations each passed 2,067 tests in 333.178s/339.493s under 1,620s; recovery's
+  mixed workload exceeds the old 300s cap even after parallelization. No
+  publication, synchronization or live retirement is claimed by these tests.
+
 ### Fleet retirement authority renewal (Phase B; landing and live actions pending)
 
 - The original public retirement batch consumed 12 HOLDs after reboot changed

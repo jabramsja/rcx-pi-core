@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-09-26
+LAST_VERIFIED: 2026-09-27
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: mu/tests/tools/test_worktree_lifecycle.py, mu/tests/tools/test_workingrcx_fleet_apply.py, mu/tests/tools/test_commit_executor_post_merge_cleanup.py, mu/tests/tools/test_pipeline_monitor_autofollow.py, mu/tests/tools/test_launch_wave.py, mu/tests/tools/test_recovery_gate.py
@@ -219,8 +219,14 @@ The fresh plan admits `RETIRE_WORKTREE`, `RETIRE_CLONE` and `RETIRE_ARCHIVE`.
 It preserves raw source bytes, symlink targets, modes, index/admin bytes,
 index-only blobs, refs, reflog history, declared stashes and journal directories.
 A history bundle is verified and imported in an empty standalone recovery Git
-directory. The original index and staged blobs are restored there and checked
-independently before source removal. Source preparation never fetches, merges,
+directory. Git's read-only `rev-list --objects --indexed-objects` traversal also
+enumerates cache-tree objects and their descendants that neither history nor
+staged blobs necessarily retain. A separate `index-objects.pack` carries that
+closure into recovery; object identities, original raw index bytes (including
+shared indices), and strict standalone `fsck --full --strict` must agree without
+alternates. Neither source nor preserved index is refreshed or normalized to
+make recovery pass. The original index and objects are checked independently
+before source removal. Source preparation never fetches, merges,
 checks out or synthesizes a branch in the historical source.
 
 `bind_terminal_retirement_identity` binds that source and preservation to
@@ -245,10 +251,23 @@ verbatim while their destinations remain absent. Captured FIFOs under the saved
 `test_metadata_rejects_fifo_wit0` pytest directories are archived as FIFO
 metadata, never opened for payload. Whole-tree liveness/open-file checks still
 apply. Unknown links, other special files, live owners and ambiguous journals
-hold individually. The observed PREPARED original sync owner may be preserved
-only with unchanged identity/HEAD, no published or marker-matched stash and no
-state transition beyond PREPARED. Its journal remains unchanged and unresolved;
-the fresh retirement mapping grants no recovery replay.
+hold individually. Relocated lock metadata may retain its original `lock_path`
+only when the fresh authority binds the original consumed native move receipt,
+terminal claim and exact archived record bytes. An arbitrary old path is not
+historical ownership evidence. Both lock and status PID reuse require immutable
+receipt-bound records and repeated OS process-creation observations proving the
+current process began after preservation. Missing, conflicting or ambiguous
+creation identity remains a HOLD. No process is terminated by reconciliation;
+actual flock, whole-tree process and open-file fences still apply.
+
+The observed PREPARED original sync owner requires unchanged path, HEAD, inode,
+history and marker, no published or marker-matched stash, and no transition
+beyond PREPARED. A device transition requires an explicit fresh reviewed
+`prepared_owner_bindings` plan entry: journal path/hash, original owner and
+transaction, original identity, exact current identity, and new wave/predecessor/
+census authority. Action-time identity checks still require the current device;
+the old journal and device remain immutable evidence. Its journal remains
+unchanged and unresolved; the fresh retirement mapping grants no recovery replay.
 
 Native fleet and completed lifecycle archives retain their original receipts,
 landing owners and spent operation/attempt budgets. An immutable separate

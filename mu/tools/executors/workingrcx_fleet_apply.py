@@ -742,6 +742,60 @@ def _absent_pid(pid: object) -> bool:
     return False
 
 
+def historical_native_record(target: Path, name: str, entry: dict, evidence: dict | None) -> dict:
+    """Bind unchanged relocated bytes to the original consumed move, never age."""
+    inherited = (evidence or {}).get("preserved_operation")
+    if not inherited:
+        raise Hold("Native historical owner lacks an original preservation receipt")
+    receipt = Path(inherited["receipt_path"])
+    raw = read_plain(receipt)
+    previous = json.loads(raw)
+    binding = json.loads(read_plain(receipt.parent / "terminal-identity.json"))
+    try:
+        from .commit_executor import verify_terminal_mutation_receipt
+    except ImportError:
+        from commit_executor import verify_terminal_mutation_receipt
+    original = inherited["source_identity"]
+    result = previous.get("boundary", {})
+    after_raw = read_plain(receipt.parent / "after.json")
+    if (digest(raw) != inherited["sha256"] or receipt.parent / "worktree" != target
+            or previous.get("status") != "MOVED" or previous.get("destination") != str(target)
+            or previous.get("source_identity") != original
+            or result.get("action_succeeded") is not True or result.get("authority_consumed") is not True
+            or result.get("operation_id") != inherited["original_operation_id"]
+            or binding.get("worktree_identity", {}).get("path") != original["path"]
+            or binding.get("expected_head") != previous.get("prepared_head")
+            or result.get("action_outcome", {}).get("destination") != str(target)
+            or result.get("action_outcome", {}).get("manifest_sha256") != digest(after_raw)
+            or json.loads(after_raw).get(name) != entry
+            or not verify_terminal_mutation_receipt(Path(original["common_dir"]).parent, binding, result)):
+        raise Hold("Native historical owner lacks exact original source/archive binding")
+    return dict(original_path=str(Path(original["path"]) / name), receipt_path=str(receipt),
+                receipt_sha256=digest(raw), recorded_before=result.get("checked_at"))
+
+
+def historical_pid_reused(pid: int, recorded_at: object, historical: dict) -> bool:
+    """A newer OS process cannot own an immutable record from before its birth."""
+    try:
+        recorded = datetime.fromisoformat(recorded_at)
+        preserved = datetime.fromisoformat(historical["recorded_before"])
+        if recorded.tzinfo is None or preserved.tzinfo is None or not recorded <= preserved:
+            return False
+        env = {**os.environ, "LC_ALL": "C", "TZ": "UTC"}
+        observations = [subprocess.run(["ps", "-p", str(pid), "-o", "lstart="],
+            env=env, capture_output=True, text=True, timeout=10) for _ in range(2)]
+        if any(p.returncode or p.stderr.strip() for p in observations):
+            return False
+        if observations[0].stdout != observations[1].stdout:
+            return False
+        started = datetime.strptime(observations[0].stdout.strip(), "%a %b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc)
+        # ps truncates to seconds. Strict separation from the receipt (which
+        # postdates the record) also rejects within-second ambiguous identities.
+        return preserved < started <= datetime.now(timezone.utc)
+    except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError):
+        return False
+
+
 def _orphan_recovery_schema(name: str, value: dict) -> bool:
     """Only the three observed, unfinished native producer shapes, never age."""
     text_fields = {
@@ -793,7 +847,7 @@ def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False,
     try:
         ownership = _read_native_ownership(target, manifest, reconcile_r1=reconcile_r1,
                                           retirement_evidence=retirement_evidence)
-        if ownership["orphaned_recovery"]:
+        if ownership["orphaned_recovery"] or ownership["historical_records"]:
             # Absence of recorded PIDs is only one observation. Derive the
             # real repository identity and repeat the existing whole-tree
             # process/open-file fence even for callers outside fleet apply.
@@ -820,7 +874,12 @@ def native_idle(target: Path, manifest: dict, *, reconcile_r1: bool = False,
 
 def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool,
                            retirement_evidence: dict | None = None) -> dict:
-    ownership = dict(orphaned_recovery=[], native_locks=[])
+    ownership = dict(orphaned_recovery=[], native_locks=[], historical_records=[])
+
+    def historical_record(name, entry):
+        record = historical_native_record(target, name, entry, retirement_evidence)
+        ownership["historical_records"].append(dict(path=name, sha256=entry["sha256"], **record))
+        return record
 
     def status_object(pairs):
         value = {}
@@ -859,9 +918,19 @@ def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool,
                         if (not reconcile_r1 or not isinstance(value, dict)
                                 or not isinstance(value.get("holder"), str)
                                 or value.get("holder") not in {"bridge_supervisor", "meta_bridge_supervisor"}
-                                or value.get("lock_path") != str(path)
-                                or not _absent_pid(value.get("pid"))):
+                                or type(value.get("pid")) is not int or value["pid"] <= 0):
                             raise Hold("Native owner lock metadata remains ambiguous or live")
+                        historical = None
+                        if value.get("lock_path") != str(path):
+                            if not (retirement_evidence or {}).get("preserved_operation"):
+                                raise Hold("Native owner lock metadata remains ambiguous or live")
+                            historical = historical_record(name, entry)
+                            if value.get("lock_path") != historical["original_path"]:
+                                raise Hold("Native owner lock metadata remains ambiguous or live")
+                        if not _absent_pid(value["pid"]):
+                            if historical is None or not historical_pid_reused(
+                                    value["pid"], value.get("acquired_at_utc"), historical):
+                                raise Hold("Native owner lock metadata remains ambiguous or live")
                         try:
                             acquired = datetime.fromisoformat(value.get("acquired_at_utc", ""))
                         except (TypeError, ValueError):
@@ -885,13 +954,13 @@ def _read_native_ownership(target: Path, manifest: dict, *, reconcile_r1: bool,
                 pid = value.get(key, 0)
                 if type(pid) is not int or pid < 0:
                     raise Hold("Native process identity is uncertain")
-                if pid:
-                    try:
-                        os.kill(pid, 0)
-                    except ProcessLookupError:
-                        pass
-                    else:
+                if pid and not _absent_pid(pid):
+                    if (not reconcile_r1 or value.get("active") is not False
+                            or not (retirement_evidence or {}).get("preserved_operation")):
                         raise Hold("Native process identity remains live")
+                    historical = historical_record(name, entry)
+                    if not historical_pid_reused(pid, value.get("updated_at"), historical):
+                        raise Hold("Native process identity remains live or uncertain")
             state = str(value.get("state", value.get("status", ""))).lower()
             if reconcile_r1 and _orphan_recovery_schema(name, value):
                 # The PID loop above has already proved every recorded owner
@@ -1575,6 +1644,26 @@ def retirement_state(entry: dict) -> dict:
     return state
 
 
+def prepared_owner_bindings(entry: dict, authority: dict) -> list[dict]:
+    """Expose each device transition in the fresh, reviewed finite action plan."""
+    bindings = []
+    ident = entry["source_identity"]
+    current = ident["filesystem_identity"]
+    for record in (entry.get("retirement_evidence") or {}).get("journals", []):
+        original = record.get("worktree_identity") or {}
+        if (record.get("state") == "PREPARED" and record.get("stash_oid") is None
+                and record.get("owner") == "commit_executor:primary_worktree_sync"
+                and record.get("old_head") == ident["HEAD"] and original.get("path") == entry["path"]
+                and original.get("inode") == current["inode"]
+                and type(original.get("device")) is int and type(current["device"]) is int
+                and original["device"] != current["device"]):
+            bindings.append(dict(journal_path=record["path"], journal_sha256=record["sha256"],
+                owner=record["owner"], transaction_id=record["transaction_id"],
+                original_identity=original, current_identity=ident,
+                retirement_authority=authority, recovery_replay_authorized=False))
+    return bindings
+
+
 def inspect_retirement(repo: Path, entry: dict) -> dict:
     try:
         from .workingrcx_fleet_census import retirement_observation
@@ -1606,9 +1695,17 @@ def inspect_retirement(repo: Path, entry: dict) -> dict:
             # never rewrite the journal or replay the original sync claim.
             wi = journal.get("worktree_identity", {})
             fi = ident["filesystem_identity"]
+            device_bound = wi.get("device") == fi["device"]
+            for binding in entry.get("prepared_owner_bindings", []):
+                if binding.get("journal_path") == record["path"]:
+                    authority = binding.get("retirement_authority", {})
+                    if (authority.get("predecessor_commit") != entry["comparison_commit"]
+                            or binding not in prepared_owner_bindings(entry, authority)):
+                        raise Hold("PREPARED journal fresh owner/identity binding changed")
+                    device_bound = True
             if (journal.get("stash_oid") is not None or journal.get("old_head") != ident["HEAD"]
                     or wi.get("path") != str(target)
-                    or any(wi.get(k) != fi[k] for k in ("device", "inode"))
+                    or wi.get("inode") != fi["inode"] or not device_bound
                     or [h.get("state") for h in journal.get("state_history", [])] != ["PREPARED"]
                     or not journal.get("stash_marker")
                     or journal["stash_marker"].encode() in git(target, "stash", "list", "--format=%s")):
@@ -1663,6 +1760,24 @@ def preserve_retirement(repo: Path, entry: dict, directory: Path, state: dict) -
                     raise Hold("Independent staged blob differs from original index")
     for file in [admin / "index", *sorted(admin.glob("sharedindex.*"))]:
         write_new(recovery / file.name, read_plain(file))
+    # Git's own index traversal includes TREE cache entries and their closure,
+    # even when those trees are not reachable from refs/reflogs or staged blobs.
+    # It reads the original index without refreshing, writing or normalizing it.
+    index_objects = sorted(set(git(target, "rev-list", "--objects", "--indexed-objects",
+                                  "--no-object-names").splitlines()))
+    objects_input = b"".join(oid + b"\n" for oid in index_objects)
+    object_types = git_input(target, objects_input, "cat-file", "--batch-check=%(objectname) %(objecttype)")
+    if (len(object_types.splitlines()) != len(index_objects)
+            or any(row.split() not in ([oid, b"blob"], [oid, b"tree"])
+                   for oid, row in zip(index_objects, object_types.splitlines()))):
+        raise Hold("Original raw-index object closure is unavailable")
+    pack = git_input(target, objects_input, "pack-objects", "--stdout")
+    write_new(directory / "index-objects.pack", pack)
+    git_input(recovery, pack, "index-pack", "--stdin", "--strict")
+    if (git_input(recovery, objects_input, "cat-file", "--batch-check=%(objectname) %(objecttype)") != object_types
+            or file_hash(admin / "index") != state["index_sha256"]
+            or file_hash(recovery / "index") != state["index_sha256"]):
+        raise Hold("Independent raw-index bytes/object closure differs from source")
     checked = git_input(recovery, b"\n".join(history) + b"\n", "cat-file", "--batch-check=%(objectname) %(objecttype)")
     if checked.splitlines() != [oid + b" commit" for oid in history] or git_entries(recovery) != state["index"]:
         raise Hold("Independent history/index recovery is incomplete")
@@ -1686,6 +1801,8 @@ def preserve_retirement(repo: Path, entry: dict, directory: Path, state: dict) -
         write_new(directory / "inherited-owner.json", encoded(inherited))
     proof = dict(source_identity=entry["source_identity"], head=state["head"],
         index=state["index"], raw_index_sha256=state["index_sha256"], journals=journals,
+        index_objects=[line(v) for v in object_types.splitlines()],
+        prepared_owner_bindings=entry.get("prepared_owner_bindings", []),
         history_commits=[line(v) for v in history], recovery_manifest=tree_manifest(recovery),
         inherited_owner=inherited, landing_owner=entry.get("landing_owner"),
         current_landing_review=entry.get("current_landing_review"),
@@ -1706,10 +1823,14 @@ def verify_retirement_preservation(directory: Path, entry: dict, hashes: dict) -
             raise Hold("Retirement preservation bytes changed")
     state = json.loads(read_plain(directory / "admitted-state.json"))
     proof = json.loads(read_plain(directory / "recovery.json"))
+    if "index_objects" in proof and "index-objects.pack" not in hashes:
+        raise Hold("Retirement lacks raw-index object closure pack")
     if (proof["source_identity"] != entry["source_identity"] or proof["head"] != state["head"]
             or proof["head"] != entry["source_identity"]["HEAD"] or proof["index"] != state["index"]
+            or proof["raw_index_sha256"] != state["index_sha256"]
             or proof["landing_owner"] != entry.get("landing_owner")
-            or proof["current_landing_review"] != entry.get("current_landing_review")):
+            or proof["current_landing_review"] != entry.get("current_landing_review")
+            or proof.get("prepared_owner_bindings", []) != entry.get("prepared_owner_bindings", [])):
         raise Hold("Retirement source/index/owner proof changed")
     for stem in ("before", "gitdir-before", "index-blobs"):
         manifest = json.loads(read_plain(directory / (stem + ".json")))
@@ -1723,6 +1844,11 @@ def verify_retirement_preservation(directory: Path, entry: dict, hashes: dict) -
             or os.path.lexists(recovery / "objects/info/alternates")):
         raise Hold("Independent retirement recovery/index changed")
     git(recovery, "fsck", "--full", "--strict")
+    if "index_objects" in proof:
+        objects_input = b"".join(record.split()[0].encode() + b"\n" for record in proof["index_objects"])
+        checked = git_input(recovery, objects_input, "cat-file", "--batch-check=%(objectname) %(objecttype)")
+        if checked.decode().splitlines() != proof["index_objects"]:
+            raise Hold("Independent raw-index object identities changed")
     for record in proof["journals"]:
         verify_archive(directory / record["archive"], json.loads(read_plain(directory / record["manifest"])))
         if file_hash(Path(record["original"]["path"])) != record["original"]["sha256"]:
@@ -2019,6 +2145,10 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
             entry["retirement_evidence"] = source.get("retirement_evidence")
             entry["inherited_landing_owners"] = row.get("inherited_landing_owners", [])
             entry["current_landing_review"] = row.get("current_landing_review")
+            if authority is not None and action in RETIREMENT_ACTIONS:
+                bindings = prepared_owner_bindings(entry, authority)
+                if bindings:
+                    entry["prepared_owner_bindings"] = bindings
         if action != "UNTOUCHED_HOLD":
             archive = retirement and action == "RETIRE_ARCHIVE"
             native_archive = (path.is_relative_to(common / "rcx_worktree_lifecycle")
@@ -2236,7 +2366,7 @@ def residual_operation(plan: dict, batch: int, operation_root: Path) -> dict:
     return matches[0]
 
 
-def retirement_evidence_report(repo: Path, plan: dict) -> dict:
+def retirement_evidence_report(repo: Path, plan: dict, *, root_cause_evidence: Path | None = None) -> dict:
     classification = json.loads(read_plain(repo / plan["classification_path"]))
     census = json.loads(read_plain(repo / plan["census_path"]))
     bindings = {str(p): file_hash(repo / p) for p in (
@@ -2310,6 +2440,56 @@ def retirement_evidence_report(repo: Path, plan: dict) -> dict:
         note = f", {plan['wave_id']}):"
         report["tracker_sync_note"] = next((line for line in (repo / "TASKS.md").read_text().splitlines()
             if line.startswith("- Tracker sync note (") and note in line), None)
+    if root_cause_evidence is not None:
+        raw = read_plain(root_cause_evidence)
+        captured = json.loads(raw)
+        if (captured.get("authority_commit") != plan["comparison_commit"]
+                or captured.get("all_operations_consumed") is not True):
+            raise Hold("Root-cause evidence does not bind the consumed predecessor")
+        completed_path = Path(captured["completed_action_evidence"])
+        completed_raw = read_plain(completed_path)
+        completed = json.loads(completed_raw)
+        sources = {r["path"]: r for r in plan["entries"]}
+        report["root_cause_evidence"] = dict(path=str(root_cause_evidence), sha256=digest(raw), captured=captured)
+        report["completed_action_evidence"] = dict(path=str(completed_path), sha256=digest(completed_raw),
+            totals=completed["totals"], held_sources=completed["held_sources"],
+            verified_pairs=completed["verified_pairs"], replay_authorized=False)
+        report["renewed_held_sources"] = [dict(path=r["path"], previous_reason=r["reason"],
+            action=sources[r["path"]]["action"], source_identity=sources[r["path"]]["source_identity"],
+            prepared_owner_bindings=sources[r["path"]].get("prepared_owner_bindings", []),
+            terminal_check="Fresh foreground fetch and all admission checks required; not executed in Phase B")
+            for r in completed["held_sources"]]
+        report["protected_files"] = [dict(path=r["path"], expected=r["expected"],
+            observed=file_hash(Path(r["path"]))) for r in completed["protected_files"]]
+        if any(r["expected"] != r["observed"] for r in report["protected_files"]):
+            raise Hold("Protected original WIP changed")
+        report["original_index_checks"] = []
+        for case in captured["raw_index_object_omission"]["proof"]["cases"]:
+            admitted_path = Path(case["directory"]) / "admitted-state.json"
+            admitted_raw = read_plain(admitted_path)
+            original = json.loads(admitted_raw)["index_sha256"]
+            current = file_hash(Path(sources[case["path"]]["source_identity"]["git_dir"]) / "index")
+            if current != original:
+                raise Hold("Original held raw index changed since the consumed operation")
+            report["original_index_checks"].append(dict(path=case["path"], raw_index_sha256=current,
+                prior_admitted_state=str(admitted_path), prior_admitted_state_sha256=digest(admitted_raw)))
+        report["historical_lock_bindings"] = []
+        for case in captured["historical_lock_binding"]["proof"]["cases"]:
+            target = Path(case["path"])
+            for lock in case["locks"]:
+                path = target / lock["relative_path"]
+                raw = read_plain(path)
+                if digest(raw) != lock["sha256"]:
+                    raise Hold("Captured historical lock bytes changed")
+                record = dict(kind="file", size=len(raw), mode=stat.S_IMODE(path.stat().st_mode), sha256=digest(raw))
+                binding = historical_native_record(target, lock["relative_path"], record,
+                    sources[case["path"]]["retirement_evidence"])
+                report["historical_lock_bindings"].append(dict(path=str(path), sha256=digest(raw), **binding))
+        report["captured_status_records"] = []
+        for record in captured["historical_pid_reuse"]["status_case"]["ownership_records"]:
+            status_raw = read_plain(Path(record["file"]))
+            report["captured_status_records"].append(dict(path=record["file"], sha256=digest(status_raw),
+                value=json.loads(status_raw)))
     return report
 
 
@@ -2701,6 +2881,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reconcile-r1", action="store_true",
                         help="Plan the fixed follow-up to the four pinned R1 zero-move outcomes")
     parser.add_argument("--operation-root", type=Path)
+    parser.add_argument("--root-cause-evidence", type=Path,
+                        help="Bind immutable predecessor evidence into a fresh retirement planning report")
     parser.add_argument("--recover-sync", type=Path, metavar="MANIFEST",
                         help="Recover the exact native journal owner once using landed PRIMARY authority")
     args = parser.parse_args(argv)
@@ -2712,6 +2894,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.classification is None or args.classification_sha256 is None or args.plan_output is None:
         parser.error("--classification, --classification-sha256 and --plan-output are required")
     try:
+        if args.root_cause_evidence is not None and (not args.residual or args.apply or args.verify or args.recover_sync):
+            raise Hold("Root-cause evidence is a read-only retirement planning input")
         if args.recover_sync is not None:
             result = recover_pending_sync(args.recover_sync, authority_commit=args.authority_commit)
             print(json.dumps(result, sort_keys=True))
@@ -2735,7 +2919,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise Hold("Residual batch authority requires explicit --apply or --verify")
             write_new(args.plan_output, encoded(plan), verify_existing=True)
             if plan.get("retirement"):
-                report = retirement_evidence_report(repo, plan)
+                report = retirement_evidence_report(repo, plan, root_cause_evidence=args.root_cause_evidence)
                 write_new(repo / f"reports/control_plane/{wave_id}_retirement_evidence.json",
                           encoded(report), verify_existing=True)
             print(json.dumps({k: plan[k] for k in ("entry_count", "conditional_candidates", "untouched_holds")}

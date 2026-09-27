@@ -111,12 +111,23 @@ def test_retirement_terminal_uses_surviving_primary_and_preserves_detached_sourc
     (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 1800, 1800),
     (["mu/tests/tools/test_workingrcx_fleet_apply.py",
       "mu/tests/tools/test_commit_executor_receipt.py"], 120, 1140),
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "mu/tests/tools/test_recovery_gate.py"], 120, 1380),
+    (["mu/tests/tools/test_recovery_gate.py",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py"], 120, 1380),
+    (["mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+      "mu/tests/tools/test_recovery_gate.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py"], 120, 1620),
     (["mu/tests/tools/test_commit_executor_receipt.py"], 120, 240),
     (["mu/tests/tools/test_commit_executor_receipt.py",
       "mu/tests/tools/test_commit_executor_post_merge_cleanup.py"], 120, 480),
     (["mu/tests/tools/test_commit_executor_receipt.py"], 1800, 1800),
     (["mu/tests/tools/test_workingrcx_fleet_apply.py::test_original_owner_cli_rejects_each_uncommitted_dependency_before_claim"],
      120, 240),
+    (["elsewhere/test_workingrcx_fleet_apply.py"], 120, 240),
 ])
 def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
     tmp_path, monkeypatch, selectors, caller_timeout, expected_budget,
@@ -129,6 +140,8 @@ def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
         return SimpleNamespace(returncode=0, stdout="selected tests passed\n", stderr="")
 
     monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    monkeypatch.setenv("RCX_AGENT_BUS_DIR", ".agent_bus-live-fleet-wave")
+    monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "codex")
     result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: observe the real shared runner's deadline and complete subprocess selection.
         tmp_path, selectors, timeout=caller_timeout,
     )
@@ -137,14 +150,18 @@ def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
                       "stderr": "", "passed": True}
     assert len(calls) == 1
     args, kwargs = calls[0]
+    parallel = ["-n", "4", "--dist", "worksteal"] if (
+        "mu/tests/tools/test_workingrcx_fleet_apply.py" in selectors) else []
     assert args == [commit_mod.sys.executable, "-m", "pytest", "-x", "--tb=short",
-                    "--import-mode=importlib", "-m", "not slow and not fuzzer", *selectors]
+                    "--import-mode=importlib", "-m", "not slow and not fuzzer", *parallel, *selectors]
     assert kwargs["cwd"] == tmp_path
     assert kwargs["timeout"] == expected_budget
     assert kwargs["check"] is False
     assert kwargs["env"]["PYTHONHASHSEED"] == "0"
     assert kwargs["env"]["RCX_CI"] == "1"
     assert kwargs["env"]["HYPOTHESIS_PROFILE"] == "ci_fast"
+    assert "RCX_AGENT_BUS_DIR" not in kwargs["env"]
+    assert "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE" not in kwargs["env"]
     if selectors == ["mu/tests/tools/test_workingrcx_fleet_apply.py"] and caller_timeout == 120:
         assert 574.48 < kwargs["timeout"] <= 900
 
@@ -191,6 +208,57 @@ def test_targeted_pytest_empty_selection_starts_no_process(tmp_path, monkeypatch
     monkeypatch.setattr(commit_mod.subprocess, "run", run)
     result = commit_mod._run_pytest_on_files(tmp_path, [])  # ANTICHEAT_OK: preserve the existing empty-selection contract.
     assert result == {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
+
+
+def test_native_wave_mixed_selection_includes_source_gate_hint():
+    selected = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: real native selection must retain the source-owned receipt gate alongside all three changed test modules.
+        REPO_ROOT, [
+            "mu/tools/executors/commit_executor.py",
+            "mu/tools/executors/recovery_gate.py",
+            "mu/tools/executors/workingrcx_fleet_apply.py",
+            "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+            "mu/tests/tools/test_recovery_gate.py",
+            "mu/tests/tools/test_workingrcx_fleet_apply.py",
+        ],
+    )
+    assert selected == [
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+        "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+        "mu/tests/tools/test_recovery_gate.py",
+        "mu/tests/tools/test_workingrcx_fleet_apply.py",
+    ]
+
+
+@pytest.mark.parametrize("failing", [False, True])
+def test_full_fleet_mixed_policy_runs_every_selected_file_with_real_xdist(tmp_path, failing):
+    selectors = ["mu/tests/tools/test_workingrcx_fleet_apply.py",
+                 "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                 "mu/tests/tools/test_recovery_gate.py"]
+    for index, selector in enumerate(selectors):
+        target = tmp_path / selector
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "import os\nfrom pathlib import Path\n"
+            "def test_selected():\n"
+            "    assert os.environ['PYTEST_XDIST_WORKER_COUNT'] == '4'\n"
+            "    assert os.environ['RCX_CI'] == '1'\n"
+            "    assert os.environ['HYPOTHESIS_PROFILE'] == 'ci_fast'\n"
+            f"    Path({str(tmp_path / ('selected-' + str(index)))!r}).write_text('ran')\n"
+            f"    assert {not (failing and index == 2)!r}, 'mixed selection failure'\n"
+        )
+    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: real child execution verifies complete mixed selection and nonzero failure propagation.
+        tmp_path, selectors,
+    )
+    output = result["stdout"] + "\n" + result["stderr"]
+    assert result["passed"] is (not failing), output
+    # xdist's -x shutdown reports INTERRUPTED (2), while preserving the
+    # assertion failure. The gate must return that real nonzero status intact.
+    assert result["exit_code"] == (2 if failing else 0), output
+    if failing:
+        assert "mixed selection failure" in result["stdout"], result
+    else:
+        assert "3 passed" in result["stdout"], result
+        assert all((tmp_path / ('selected-' + str(index))).read_text() == 'ran' for index in range(3))
 
 
 def _write_queue_packet(repo: Path, relpath: str, status: str) -> None:
