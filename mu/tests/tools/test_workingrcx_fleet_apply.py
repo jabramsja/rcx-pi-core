@@ -169,7 +169,7 @@ def fleet(monkeypatch):
         git(f, f.repo, "push", "-q", "origin", "dev")
         # Tests concerned with Git and preservation isolate OS process timing.
         # The complete four-candidate success test below restores real probes.
-        monkeypatch.setattr(apply, "process_idle", lambda _ident: None)
+        monkeypatch.setattr(apply, "process_idle", lambda _ident, **_options: None)
         yield f
 
 
@@ -1418,7 +1418,8 @@ def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False, wave_id=None, 
     return plan
 
 
-def retirement_fixture(f, *, wave="fixture-real-retirement", renew=False, stale_device=False):
+def retirement_fixture(f, *, wave="fixture-real-retirement", renew=False, stale_device=False,
+                       missing_paths=(), historical_paths=()):
     """Fresh native authority in the existing /tmp-only real Git fixture."""
     import workingrcx_fleet_census as census_tool
     import workingrcx_fleet_classification as classifier
@@ -1431,7 +1432,8 @@ def retirement_fixture(f, *, wave="fixture-real-retirement", renew=False, stale_
     (f.repo / census_rel).write_bytes(apply.encoded(observed))
     classified = classifier.classify(observed, source_sha256=apply.digest(apply.encoded(observed)),
         base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True, wave_id=wave, retirement=True,
-        retirement_predecessor=f.landed if renew else None)
+        retirement_predecessor=f.landed if renew else None,
+        missing_paths=missing_paths, historical_paths=historical_paths)
     raw = apply.encoded(classified)
     (f.repo / classification_rel).write_bytes(raw)
     sha = apply.digest(raw)
@@ -1440,6 +1442,13 @@ def retirement_fixture(f, *, wave="fixture-real-retirement", renew=False, stale_
     if renew:
         (f.repo / f"reports/control_plane/{wave}_useful_work_coverage.json").write_bytes(
             apply.encoded(classifier.retirement_coverage_report(classified, sha)))
+    if missing_paths:
+        evidence = dict(wave_id=wave, census_sha256=apply.digest(apply.encoded(observed)),
+            comparison_commit=f.landed, mutation_authorized=False, entry_count=len(missing_paths),
+            entries=[dict(path=r['path'], current=r['missing_registration'],
+                          owner=dict(task='FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION'))
+                     for r in observed['entries'] if r['path'] in missing_paths])
+        (f.repo / f"reports/control_plane/{wave}_missing_registration_evidence.json").write_bytes(apply.encoded(evidence))
     plan = apply.build_residual_plan(f.repo, f.repo / classification_rel, sha, wave_id=wave)
     (f.repo / plan_rel).write_bytes(apply.encoded(plan))
     for rel in ("mu/tools/executors/workingrcx_fleet_census.py",
@@ -3030,3 +3039,167 @@ def test_source196_tracked_report_deletion_is_bound_in_native_journal_and_stash(
     del omitted["content"]["wip.txt"]
     with pytest.raises(apply.Hold, match="native stash content differs"):
         apply.require_stash_binding(admitted, omitted)
+
+
+@pytest.mark.parametrize('detached', [False, True])
+@pytest.mark.parametrize('staged', [False, True])
+def test_missing_registration_independent_raw_recovery_and_consumed_action(fleet, monkeypatch, detached, staged):
+    f = fleet
+    target = f.targets[0]
+    if detached:
+        git(f, target, 'checkout', '--detach')
+    admin = Path(git(f, target, 'rev-parse', '--absolute-git-dir'))
+    if staged:
+        (target / 'index-only').write_bytes(b'\x00index only\xff\n')
+        (target / 'tracked').unlink()
+        (target / 'staged-link').symlink_to('index-only')
+        git(f, target, 'add', 'index-only', 'tracked', 'staged-link')
+        # A cached tree need not be reachable from any commit or reflog.
+        tree = git(f, target, 'write-tree')
+        blob = git(f, target, 'rev-parse', ':index-only')
+    original = apply.tree_manifest(admin)
+    raw_index = (admin / 'index').read_bytes()
+    raw_head = (admin / 'HEAD').read_bytes()
+    head_log = (admin / 'logs/HEAD').read_bytes()
+    reference_bytes = {}
+    if not detached:
+        branch = raw_head.decode().strip().removeprefix('ref: ')
+        git(f, f.repo, 'pack-refs', '--all')
+        reference_bytes = {name: (f.common / name).read_bytes()
+                           for name in ('packed-refs', 'logs/' + branch)}
+    shutil.rmtree(target)  # Disposable fixture models the already absent source.
+    plan, kwargs = retirement_fixture(f, renew=True, missing_paths=(str(target),))
+    entry = next(e for e in plan['entries'] if e['path'] == str(target))
+    assert entry['action'] == 'RETIRE_MISSING_REGISTRATION'
+    assert entry['landing_owner']['unstaged_untracked_intent'] == 'UNKNOWN_ABSENT_CHECKOUT'
+    assert entry['useful_work']['retained_index_changed'] is staged
+    import workingrcx_fleet_census as census_tool
+    current = census_tool.missing_registration(str(target), str(f.common))
+    assert current == entry['source_identity']['missing_registration'], [
+        k for k in current if current[k] != entry['source_identity']['missing_registration'].get(k)]
+    monkeypatch.setattr(apply, 'process_idle', f.original_idle)
+    before = apply.registration_paths(f.repo)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result['outcome_counts'] == {'RETIRED': 4}, [(o['status'], o['reason'],
+        bool(o.get('preservation_sha256')), o.get('boundary', {}).get('action_error') if o.get('boundary') else None)
+        for o in result['outcomes']]
+    assert result['registration_delta'] == -4
+    assert apply.registration_paths(f.repo) == before - {str(p) for p in f.targets}
+    directory = Path(entry['destination']).parent
+    recovery = directory / 'recovery.git'
+    assert not target.exists() and not admin.exists() and not Path(entry['destination']).exists()
+    assert not (directory / 'before.tar').exists()
+    assert json.loads((directory / 'before.json').read_bytes()) is None
+    assert (recovery / 'index').read_bytes() == raw_index
+    assert (recovery / 'HEAD').read_bytes() == raw_head
+    assert (recovery / 'logs/HEAD').read_bytes() == head_log
+    with tarfile.open(directory / 'reference-files.tar') as archive:
+        assert {member.name: archive.extractfile(member).read() for member in archive} == reference_bytes
+    for name, raw in reference_bytes.items():
+        if name.startswith('logs/'):
+            assert (recovery / name).read_bytes() == raw
+    assert json.loads((directory / 'gitdir-before.json').read_bytes()) == original
+    apply.verify_archive(directory / 'gitdir-before.tar', original)
+    assert not (recovery / 'objects/info/alternates').exists()
+    git(f, recovery, 'fsck', '--full', '--strict')
+    if staged:
+        assert git(f, recovery, 'cat-file', '-t', tree) == 'tree'
+        assert subprocess.run([f.git, '-C', str(recovery), 'cat-file', 'blob', blob],
+                              env=f.env, check=True, capture_output=True).stdout == b'\x00index only\xff\n'
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)['batch_complete']
+    with pytest.raises(apply.Hold, match='consumed'):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    (recovery / 'index').write_bytes(b'corrupted retained raw index')
+    with pytest.raises(apply.Hold, match='recovery/index changed'):
+        apply.verify_residual_plan(f.repo, plan, **kwargs)
+
+
+@pytest.mark.parametrize('drift', ['source', 'pointer', 'index', 'reference', 'live_owner', 'failed_recovery'])
+def test_missing_registration_drift_or_live_owner_holds_only_target(fleet, monkeypatch, drift):
+    f = fleet
+    target = f.targets[0]
+    admin = Path(git(f, target, 'rev-parse', '--absolute-git-dir'))
+    shutil.rmtree(target)
+    plan, kwargs = retirement_fixture(f, renew=True, missing_paths=(str(target),))
+    child = None
+    if drift == 'source':
+        target.mkdir()
+        (target / 'new-owner').write_text('must survive')
+    elif drift == 'pointer':
+        (admin / 'gitdir').write_text(str(f.root / 'different/.git') + '\n')
+    elif drift == 'index':
+        before_index = (admin / 'index').read_bytes()
+        git(f, f.repo, '--git-dir', str(admin), '--work-tree', str(f.repo), 'read-tree', '--empty')
+        assert (admin / 'index').read_bytes() != before_index
+    elif drift == 'reference':
+        branch = (admin / 'HEAD').read_text().strip().removeprefix('ref: ')
+        reflog = f.common / 'logs' / branch
+        original_log = reflog.read_bytes()
+        reflog.write_bytes(original_log + original_log.splitlines(keepends=True)[-1])
+    elif drift == 'live_owner':
+        monkeypatch.setattr(apply, 'process_idle', f.original_idle)
+        child = subprocess.Popen([sys.executable, '-c',
+            'import sys,time; f=open(sys.argv[1],"rb"); print("ready",flush=True); time.sleep(30)',
+            str(admin / 'index')], stdout=subprocess.PIPE, text=True)
+        assert child.stdout.readline().strip() == 'ready'
+    else:
+        preserve = apply.preserve_retirement
+        def corrupt(repo, entry, directory, state):
+            hashes = preserve(repo, entry, directory, state)
+            if entry['action'] == 'RETIRE_MISSING_REGISTRATION':
+                (directory / 'recovery.git/index').write_bytes(b'failed independent recovery')
+            return hashes
+        monkeypatch.setattr(apply, 'preserve_retirement', corrupt)
+    try:
+        result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+        assert result['outcome_counts'] == {'HOLD': 1, 'RETIRED': 3}, result
+        assert admin.exists()
+        assert result['outcomes'][0]['boundary'] is None
+        assert result['registration_delta'] == -3
+    finally:
+        if child:
+            child.terminate()
+            child.wait()
+            child.stdout.close()
+
+
+def test_reviewed_historical_children_and_empty_container_keep_parent(fleet):
+    import workingrcx_fleet_classification as classifier
+    f = fleet
+    parent = f.root / 'WorkingRCX-preservation'
+    parent.mkdir()
+    relative = next(p for p in classifier.HISTORICAL_SOURCES if p.startswith('WorkingRCX-preservation/'))
+    target = f.root / relative
+    git(f, f.repo, 'worktree', 'add', '--detach', str(target), f.original)
+    (target / 'retained-evidence').write_bytes(b'original historical intent\n')
+    empty = f.root / 'WorkingRCX-worktrees'
+    empty.mkdir()
+    plan, kwargs = retirement_fixture(f, wave=classifier.MISSING_WAVE_ID, renew=True,
+                                      historical_paths=(str(target), str(empty)))
+    entries = {e['path']: e for e in plan['entries']}
+    assert entries[str(parent)]['action'] == 'UNTOUCHED_HOLD'
+    assert entries[str(target)]['action'] == 'RETIRE_WORKTREE'
+    assert entries[str(empty)]['action'] == 'RETIRE_EMPTY_CONTAINER'
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result['outcome_counts'] == {'RETIRED': 6}, result
+    assert result['registration_delta'] == -5
+    assert parent.exists() and list(parent.iterdir()) == []
+    assert not empty.exists() and not target.exists()
+    assert (Path(entries[str(target)]['destination']) / 'retained-evidence').read_bytes() == b'original historical intent\n'
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)['batch_complete']
+
+
+def test_missing_registration_original_cohort_cannot_be_rebound(fleet):
+    f = fleet
+    target = f.targets[0]
+    admin = Path(git(f, target, 'rev-parse', '--absolute-git-dir'))
+    shutil.rmtree(target)
+    plan, kwargs = retirement_fixture(f, renew=True, missing_paths=(str(target),))
+    evidence_path = f.repo / plan['missing_registration_evidence']['path']
+    evidence = json.loads(evidence_path.read_bytes())
+    evidence['entries'][0]['current']['index_sha256'] = '0' * 64
+    evidence_path.write_bytes(apply.encoded(evidence))
+    with pytest.raises(apply.Hold, match='cohort/owner authority'):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert admin.exists() and str(target) in apply.registration_paths(f.repo)
+    assert not kwargs['operation_root'].exists()

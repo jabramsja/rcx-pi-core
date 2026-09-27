@@ -792,3 +792,74 @@ def test_bus_shell_inside_containing_repository_has_fresh_filesystem_identity(tm
     assert row["filesystem_identity"] == {"device": info.st_dev, "inode": info.st_ino, "mode": info.st_mode}
     assert row["registered_worktrees"] == []
     assert _snapshot(shell) == before
+
+
+@pytest.mark.parametrize('detached', [False, True])
+@pytest.mark.parametrize('staged', [False, True])
+def test_absent_checkout_inventory_preserves_raw_index_and_unknown_bytes(tmp_path, detached, staged):
+    from mu.tools.executors import workingrcx_fleet_census as census_tool
+    root = (tmp_path / 'fleet').resolve()
+    anchor = _repo(root / 'WorkingRCX')
+    target = root / 'WorkingRCX-source-observed'
+    options = ('--detach',) if detached else ('-b', 'historical-source')
+    _git(anchor, 'worktree', 'add', *options, str(target), 'HEAD')
+    base = _git(anchor, 'rev-parse', 'HEAD')
+    if staged:
+        (target / 'index-only').write_bytes(b'only staged bytes\x00\xff')
+        _git(target, 'add', 'index-only')
+        _git(target, 'write-tree')
+    admin = Path(_git(target, 'rev-parse', '--absolute-git-dir'))
+    original = _snapshot(admin)
+    raw_index = (admin / 'index').read_bytes()
+    shutil.rmtree(target)
+    observed = census_tool.census(str(root), str(anchor), comparison_commit=base, retirement=True)
+    row = _rows(observed)[str(target)]
+    proof = row['missing_registration']
+    assert proof['status'] == 'OBSERVED', proof
+    assert row['inspection_status'] == 'admin_only'
+    assert row['git']['dirty_status'] == 'unknown' and row['git']['dirty_counts'] is None
+    assert proof['identity']['git_dir'] == str(admin)
+    assert proof['index_sha256'] == hashlib.sha256(raw_index).hexdigest()
+    assert proof['head_raw_hex'] == (admin / 'HEAD').read_bytes().hex()
+    assert proof['indexed_objects_count'] > 0 and proof['history_count'] == 1
+    assert row['useful_work']['retained_index_changed'] is staged
+    assert row['useful_work']['unstaged_untracked_intent'] == 'UNKNOWN_ABSENT_CHECKOUT'
+    assert _snapshot(admin) == original
+    (admin / 'index.lock').write_text('held owner')
+    locked = census_tool.missing_registration(str(target), str(anchor / '.git'))
+    assert locked['status'] == 'OBSERVED' and locked['ownership_holds'] == [str(admin / 'index.lock')]
+
+
+def test_missing_owner_report_keeps_historical_blob_and_open_ledger(tmp_path):
+    from mu.tools.executors import workingrcx_fleet_census as census_tool
+    root = (tmp_path / 'fleet').resolve()
+    repo = _repo(root / 'WorkingRCX')
+    target = root / 'WorkingRCX-missing'
+    _git(repo, 'worktree', 'add', '-b', 'retained-index-owner', str(target), 'HEAD')
+    (target / 'tracked.txt').write_text('once landed\n')
+    _git(target, 'add', 'tracked.txt')
+    admin = Path(_git(target, 'rev-parse', '--absolute-git-dir'))
+    original = dict(path=str(target), git_dir=str(admin), head=(admin / 'HEAD').read_text().strip(),
+                    index_sha256=hashlib.sha256((admin / 'index').read_bytes()).hexdigest())
+    (repo / 'tracked.txt').write_text('once landed\n')
+    _git(repo, 'commit', '-qam', 'historical equivalent')
+    historical = _git(repo, 'rev-parse', 'HEAD')
+    (repo / 'tracked.txt').write_text('later implementation\n')
+    _git(repo, 'commit', '-qam', 'later implementation')
+    comparison = _git(repo, 'rev-parse', 'HEAD')
+    shutil.rmtree(target)
+    observed = census_tool.census(str(root), str(repo), comparison_commit=comparison, retirement=True)
+    prior = tmp_path / 'prior.json'
+    prior.write_text(json.dumps(dict(rows=[original], comparison_commit=comparison)))
+    ledger = tmp_path / 'owners.json'
+    owner = dict(status='PENDING_EXACT_HUNK_REVIEW', source_path=str(target))
+    ledger.write_text(json.dumps(dict(wave_id='older-wave', entries=[dict(path=str(target),
+        source_index=0, landing_owner=owner, inventory=None)])))
+    report = census_tool.missing_registration_report(observed, wave_id='new-wave', census_sha256='1'*64,
+        prior_inventory=prior, inherited_ledgers=(ledger,))
+    row = report['entries'][0]
+    assert row['original_admin_matches'] and row['original_raw_index_matches'] and row['original_head_matches']
+    assert row['staged_hunk_obligations'][0]['historical_dev_blob']['commit'] == historical
+    assert row['owner']['integration_completed'] is False
+    assert report['inherited_ledgers'][0]['original_owners'][0]['landing_owner'] == owner
+    assert report['inherited_ledgers'][0]['owner_count'] == 1

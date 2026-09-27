@@ -476,6 +476,219 @@ def preserved_operation_owners(fleet_root: str) -> dict:
     return result
 
 
+def missing_registration(path: str, common: str) -> dict:
+    """Resolve an absent checkout through its unique, original Git admin.
+
+    No worktree status is inferred. Hashes cover the raw admin (including
+    reflogs/index extensions), semantic index and Git's indexed-object closure.
+    This observation is evidence only; fresh finite authority is still required.
+    """
+    try:
+        from . import workingrcx_fleet_apply as fleet
+    except ImportError:
+        import workingrcx_fleet_apply as fleet
+    result = dict(status="UNKNOWN", errors=[], path=path)
+    try:
+        target, shared = Path(path), Path(common)
+        if (not target.is_absolute() or target.resolve() != target
+                or os.path.lexists(target)):
+            raise fleet.Hold("Missing source reappeared or has an aliased path")
+        fleet.plain_directory(shared)
+        registry = shared / "worktrees"
+        fleet.plain_directory(registry)
+        matches = []
+        for admin in sorted(registry.iterdir()):
+            fleet.plain_directory(admin)
+            pointer = fleet.read_plain(admin / "gitdir")
+            if pointer == os.fsencode(target / ".git") + b"\n":
+                matches.append(admin)
+        if len(matches) != 1:
+            raise fleet.Hold("Missing source lacks exactly one admin/gitdir mapping")
+        admin = matches[0]
+        if (admin / fleet.line(fleet.read_plain(admin / "commondir"))).resolve() != shared:
+            raise fleet.Hold("Missing registration common-directory mismatch")
+        ownership_holds = []
+        for root, names in ((admin, ("index.lock", "HEAD.lock", "locked", "MERGE_HEAD",
+                                    "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD")),
+                            (shared, ("config.lock", "packed-refs.lock", "shallow", "info/grafts"))):
+            ownership_holds.extend(str(root / name) for name in names if os.path.lexists(root / name))
+        ownership_holds.extend(str(p) for p in sorted(shared.glob("refs/**/*.lock")))
+        before = fleet.tree_manifest(admin)
+        if any(r["kind"] not in {"file", "directory"} for r in before.values()):
+            raise fleet.Hold("Missing admin contains an aliased or special record")
+        with fleet.safe_git_environment():
+            head = fleet.line(fleet.git(admin, "rev-parse", "--verify", "HEAD^{commit}"))
+            branch = fleet.line(fleet.git(admin, "symbolic-ref", "--quiet", "HEAD", allowed=(0, 1))) or None
+            records, errors = _worktrees(fleet.git(shared, "worktree", "list", "--porcelain", "-z"))
+            registrations = [r for r in records if r["path"] == path]
+            expected = dict(path=path, HEAD=head, **({"branch": branch} if branch else {"detached": True}))
+            if errors or len(registrations) != 1 or {
+                    k: v for k, v in registrations[0].items() if k not in {"prunable", "locked"}} != expected:
+                raise fleet.Hold("Missing registration HEAD/ref/flags do not match its admin")
+            index = fleet.git_entries(admin)
+            if any(v[0] not in {"100644", "100755", "120000"} for v in index.values()):
+                raise fleet.Hold("Missing index contains an unsupported object mode")
+            objects = sorted(set(fleet.git(admin, "rev-list", "--single-worktree", "--objects", "--indexed-objects",
+                                          "--no-object-names").splitlines()))
+            typed = fleet.git_input(admin, b"".join(o + b"\n" for o in objects),
+                                   "cat-file", "--batch-check=%(objectname) %(objecttype)")
+            if (len(typed.splitlines()) != len(objects) or any(row.split() not in (
+                    [oid, b"blob"], [oid, b"tree"]) for oid, row in zip(objects, typed.splitlines()))):
+                raise fleet.Hold("Missing raw-index object closure is unavailable")
+            history = fleet.git(admin, "rev-list", "HEAD")
+            head_raw = fleet.read_plain(admin / "HEAD")
+            if head_raw != (("ref: " + branch) if branch else head).encode() + b"\n":
+                raise fleet.Hold("Missing raw HEAD differs from its resolved identity")
+        info = admin.lstat()
+        if fleet.tree_manifest(admin) != before or os.path.lexists(target):
+            raise fleet.Hold("Missing registration changed during observation")
+        result.update(status="OBSERVED", ownership_holds=ownership_holds, identity=dict(path=path, HEAD=head, branch=branch,
+            common_dir=common, git_dir=str(admin)), registration=registrations[0],
+            admin_filesystem_identity=dict(device=info.st_dev, inode=info.st_ino, mode=info.st_mode),
+            admin_manifest=before, head_raw_hex=head_raw.hex(),
+            gitdir_raw_hex=fleet.read_plain(admin / "gitdir").hex(),
+            commondir_raw_hex=fleet.read_plain(admin / "commondir").hex(),
+            index_sha256=fleet.file_hash(admin / "index"), index_entry_count=len(index),
+            index_entries_sha256=fleet.digest(fleet.encoded(index)),
+            indexed_objects_count=len(objects), indexed_objects_sha256=fleet.digest(typed),
+            history_count=len(history.splitlines()), history_sha256=fleet.digest(history),
+            reference_files=fleet.missing_reference_files(shared, branch),
+            absent_worktree_bytes="UNKNOWN; no unstaged/untracked preservation claim")
+    except (OSError, ValueError, fleet.Hold, subprocess.SubprocessError) as exc:
+        result["errors"].append(str(exc))
+    return result
+
+
+def missing_useful_work(observation: dict, comparison_commit: str) -> dict:
+    """Account for index intent separately from absent, unknowable worktree bytes."""
+    try:
+        from . import workingrcx_fleet_apply as fleet
+    except ImportError:
+        import workingrcx_fleet_apply as fleet
+    result = dict(comparison_commit=comparison_commit, status="UNKNOWN", errors=[], changes=[],
+                  local_commits=[], local_commit_changes=[], local_refs=[],
+                  coverage_method="exact_retained_index_and_comparison_blobs",
+                  unstaged_untracked_intent="UNKNOWN_ABSENT_CHECKOUT", integration_completed=False)
+    try:
+        if observation.get("status") != "OBSERVED":
+            raise fleet.Hold("Missing registration inventory is uncertain")
+        admin = Path(observation["identity"]["git_dir"])
+        with fleet.safe_git_environment():
+            index = fleet.git_entries(admin)
+            head = fleet.git_entries(admin, "HEAD")
+            dev = fleet.git_entries(admin, comparison_commit)
+            for name in sorted(set(index) | set(head)):
+                if index.get(name) == head.get(name):
+                    continue
+                retained = index.get(name)
+                result["changes"].append(dict(path=name, original=head.get(name), index=retained,
+                    comparison=dev.get(name), worktree=None,
+                    index_blob_sha256=fleet.digest(fleet.git(admin, "cat-file", "blob", retained[1])) if retained else None,
+                    dev_covered=retained == dev.get(name),
+                    disposition="EXACT_CURRENT_BLOB" if retained == dev.get(name) else "REQUIRES_EXACT_HUNK_REVIEW"))
+            result["staged_patch_sha256"] = fleet.digest(fleet.git(admin, "diff", "--cached", "--binary",
+                "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD"))
+            result["local_commits"] = fleet.git(admin, "rev-list", "HEAD", "--not", comparison_commit).decode().splitlines()
+            for commit in result["local_commits"]:
+                paths = fleet.git(admin, "diff-tree", "--root", "--no-commit-id", "--name-only",
+                                  "--no-renames", "-r", "-m", "--first-parent", "-z", commit)
+                result["local_commit_changes"].append(dict(commit=commit,
+                    paths=sorted({os.fsdecode(p) for p in paths.split(b"\0") if p}), coverage="REQUIRES_HUNK_REVIEW"))
+            # Even a HEAD-equal index cannot close lost unstaged/untracked intent.
+            result.update(status="NEEDS_LANDING", retained_index_changed=bool(result["changes"]))
+    except (OSError, ValueError, fleet.Hold, subprocess.SubprocessError) as exc:
+        result["errors"].append(str(exc))
+    return result
+
+
+def missing_registration_report(observed: dict, *, wave_id: str, census_sha256: str,
+                                prior_inventory: Path, inherited_ledgers: tuple[Path, ...],
+                                retained_reports: tuple[Path, ...] = ()) -> dict:
+    """Account for the entire observed cohort and retain earlier owner ledgers.
+
+    Historical blob/receipt matches identify available evidence, never semantic
+    integration or closure of an original owner. Inputs are retained by hash.
+    """
+    try:
+        from . import workingrcx_fleet_apply as fleet
+    except ImportError:
+        import workingrcx_fleet_apply as fleet
+    raw = fleet.read_plain(prior_inventory)
+    prior = json.loads(raw)
+    original = {r["path"]: r for r in prior["rows"]}
+    if len(original) != len(prior["rows"]):
+        raise ValueError("Original missing inventory has duplicate sources")
+    rows = {r["path"]: r for r in observed["entries"]}
+    if not original.keys() <= rows.keys():
+        raise ValueError("Fresh census silently excludes an original missing owner")
+    comparisons = {r["useful_work"]["comparison_commit"] for r in observed["entries"] if r.get("useful_work")}
+    if len(comparisons) != 1:
+        raise ValueError("Missing owners require one exact fresh comparison commit")
+    comparison_commit = comparisons.pop()
+    ledgers, retained, blob_owners = [], [], {}
+    for path in inherited_ledgers:
+        content = fleet.read_plain(path)
+        ledger = json.loads(content)
+        owners = [r for r in ledger["entries"] if r.get("landing_owner")]
+        ledgers.append(dict(path=str(path), sha256=fleet.digest(content), wave_id=ledger["wave_id"],
+            owner_count=len(owners), original_owners=[dict(source_index=r["source_index"], path=r["path"],
+                landing_owner=r["landing_owner"]) for r in owners], integration_completed=False))
+        for row in ledger["entries"]:
+            for change in (row.get("inventory") or {}).get("changes", []):
+                for version in ("index", "worktree"):
+                    blob = change.get(version)
+                    if blob:
+                        blob_owners.setdefault((change["path"], tuple(blob)), []).append(dict(
+                            ledger=str(path), source_index=row["source_index"], source_path=row["path"], version=version))
+    for path in retained_reports:
+        content = fleet.read_plain(path)
+        retained.append(dict(path=str(path), sha256=fleet.digest(content), evidence=json.loads(content),
+                             grants_owner_closure=False))
+    entries = []
+    for path, previous in original.items():
+        source = rows[path]
+        evidence = source.get("missing_registration") or {}
+        useful = source.get("useful_work") or {}
+        changes = []
+        for change in useful.get("changes", []):
+            value = dict(change)
+            value["retained_source_matches"] = blob_owners.get((change["path"], tuple(change["index"] or ())), [])
+            value["historical_dev_blob"] = None
+            if change["index"] and not change["dev_covered"]:
+                mode, oid = change["index"]
+                admin = Path(evidence["identity"]["git_dir"])
+                with fleet.safe_git_environment():
+                    commits = fleet.git(admin, "log", "--format=%H", "--find-object=" + oid,
+                                        comparison_commit, "--", change["path"]).decode().splitlines()
+                    for commit in commits:
+                        tree = fleet.git(admin, "ls-tree", "-z", commit, "--", change["path"])
+                        expected = f"{mode} blob {oid}\t".encode() + os.fsencode(change["path"]) + b"\0"
+                        if tree == expected:
+                            value["historical_dev_blob"] = dict(commit=commit, mode=mode, oid=oid,
+                                proof="EXACT_HISTORICAL_DEV_BLOB; not semantic integration")
+                            break
+            value["landing_obligation"] = ("Retain original owner; exact current blob is evidence only."
+                if change["dev_covered"] else "Review this exact HEAD-to-index hunk against dev and retained receipts; land only a demonstrated missing behavior.")
+            changes.append(value)
+        entries.append(dict(path=path, original_inventory=previous, current=evidence,
+            original_admin_matches=(evidence.get("identity", {}).get("git_dir") == previous["git_dir"]),
+            original_raw_index_matches=evidence.get("index_sha256") == previous["index_sha256"],
+            original_head_matches=(bytes.fromhex(evidence.get("head_raw_hex", "")).decode().rstrip("\n") == previous["head"]),
+            useful_work=useful, staged_hunk_obligations=changes,
+            inherited_source_mapping=source.get("retirement_evidence"),
+            owner=dict(task="FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION", source_path=path,
+                status="PENDING_EXACT_INDEX_AND_ORIGINAL_INTENT_REVIEW", integration_completed=False),
+            unstaged_untracked_bytes="UNKNOWN_UNLESS_AN_EXACT_EARLIER_RECEIPT_PROVES_THEM"))
+    return dict(schema_version=1, observation_kind="read_only_missing_registration_owners", wave_id=wave_id,
+        census_sha256=census_sha256, comparison_commit=comparison_commit, mutation_authorized=False,
+        prior_inventory=dict(path=str(prior_inventory), sha256=fleet.digest(raw), comparison_commit=prior.get("comparison_commit")), entry_count=len(entries),
+        staged_owner_count=sum(bool(e["staged_hunk_obligations"]) for e in entries), entries=entries,
+        inherited_ledgers=ledgers, retained_triage=retained,
+        proof_limits=["No source, registration, index, lock or historical receipt was mutated.",
+            "Independent preservation and public terminal apply/verify remain required after landing.",
+            "Absent unstaged/untracked bytes and original intent remain unresolved; equality is not owner closure."])
+
+
 def retirement_observation(path: str, fleet_root: str, common: str, *, prior_owners: dict | None = None) -> dict:
     """Read native ownership evidence without releasing any original claim."""
     result = dict(status="OBSERVED", errors=[], preserved_operation=None, prior_owners=[], journals=[],
@@ -486,7 +699,7 @@ def retirement_observation(path: str, fleet_root: str, common: str, *, prior_own
     except ImportError:
         import workingrcx_fleet_apply as fleet
     try:
-        relative = target.relative_to(fleet_root)
+        relative = target.relative_to(fleet_root) if target.is_relative_to(fleet_root) else Path(".")
         fleet_archive = (len(relative.parts) == 3 and relative.parts[0].startswith("fleet-apply-preserved-")
                          and relative.parts[1].isdigit() and relative.parts[2] == "worktree")
         lifecycle_root = Path(common) / "rcx_worktree_lifecycle"
@@ -600,6 +813,19 @@ def census(fleet_root: str, anchor_repo: str, *, comparison_commit: str | None =
                      branch_status="unknown", dirty_status="unknown", dirty_counts=None),
         )
         _inspect(row)
+        if retirement and row["availability_status"] == "missing" and row["registration_status"] == "registered":
+            common_raw, common_error = _git(anchor, "rev-parse", "--path-format=absolute", "--git-common-dir")
+            observation = (missing_registration(path, _line(common_raw)) if not common_error else
+                           dict(status="UNKNOWN", errors=[common_error]))
+            row["missing_registration"] = observation
+            if observation["status"] == "OBSERVED":
+                row["git"].update(observation["identity"], root=path,
+                    branch_status="symbolic" if observation["identity"]["branch"] else "detached")
+                row["git"].pop("path", None)
+                row.update(repository_kind="missing_linked_worktree", inspection_status="admin_only", errors=[])
+                row["retirement_evidence"] = retirement_observation(path, root, _line(common_raw), prior_owners=prior_owners)
+                if comparison_commit:
+                    row["useful_work"] = missing_useful_work(observation, comparison_commit)
         if comparison_commit and row["repository_kind"] in ("linked_worktree", "standalone_repository"):
             row["useful_work"] = useful_work(path, comparison_commit, comparison_repo=anchor, coverage=retirement)
         if retirement and Path(path).is_relative_to(root) and row["entry_kind"] == "directory":

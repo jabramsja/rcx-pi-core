@@ -350,6 +350,30 @@ def require_landed(repo: Path, plan: dict) -> str:
 
 def inspect_identity(ident: dict, *, path: Path | None = None, head: str | None = None,
                      retirement: bool = False) -> None:
+    if retirement and ident.get("missing_registration"):
+        try:
+            from .workingrcx_fleet_census import missing_registration
+        except ImportError:
+            from workingrcx_fleet_census import missing_registration
+        observed = missing_registration(ident["path"], ident["common_dir"])
+        if (path is not None or head is not None or observed.get("status") != "OBSERVED" or observed.get("ownership_holds")
+                or observed != ident["missing_registration"]
+                or observed["identity"] != {k: ident[k] for k in ("path", "HEAD", "branch", "common_dir", "git_dir")}):
+            changed = sorted(k for k in set(observed) | set(ident["missing_registration"])
+                             if observed.get(k) != ident["missing_registration"].get(k))
+            raise Hold("Missing source/admin/index/history identity drift: " + ", ".join(changed)
+                       + ("; " + str(observed.get("errors")) if observed.get("errors") else ""))
+        return
+    if retirement and ident.get("empty_container"):
+        target = Path(ident["path"])
+        plain_directory(target)
+        info = target.lstat()
+        if (path is not None or head is not None
+                or target != Path(ident["common_dir"]).parent.parent / "WorkingRCX-worktrees"
+                or ident["filesystem_identity"] != dict(device=info.st_dev, inode=info.st_ino, mode=info.st_mode)
+                or list(target.iterdir()) or str(target) in registration_paths(Path(ident["common_dir"]).parent)):
+            raise Hold("Empty container identity/content/registration drift")
+        return
     target = path if path is not None else Path(ident["path"])
     common, admin = Path(ident["common_dir"]), Path(ident["git_dir"])
     for directory in (target, common, admin):
@@ -612,7 +636,7 @@ def verify_untracked_preserved(tracked: set[str], before: dict, after: dict) -> 
             raise Hold("Untracked/ignored evidence changed during preparation")
 
 
-def process_idle(ident: dict) -> dict:
+def process_idle(ident: dict, *, directory: Path | None = None) -> dict:
     target = Path(ident["path"])
     branch_token = str(ident.get("branch") or "").removeprefix("refs/heads/")
     if branch_token in {"dev", "main", "master"}:
@@ -629,7 +653,7 @@ def process_idle(ident: dict) -> dict:
                 tuple(v for v in (str(target), ident.get("git_dir"), branch_token) if v)):
             raise Hold("Active process references target identity")
     # +D is limited to this exact target, and includes open descendants/cwds.
-    command = ["lsof", "-nP", "+D", str(target), "-FpcfatDin"]
+    command = ["lsof", "-nP", "+D", str(directory or target), "-FpcfatDin"]
     diagnostic = dict(probe="lsof", command=command,
                       observed_at=datetime.now(timezone.utc).isoformat())
     try:
@@ -1616,11 +1640,48 @@ RESIDUAL_CLASSIFICATION_PATH = Path(f"reports/control_plane/{RESIDUAL_WAVE_ID}_c
 RESIDUAL_CENSUS_PATH = Path(f"reports/control_plane/{RESIDUAL_WAVE_ID}_census.json")
 RESIDUAL_PLAN_PATH = Path(f"reports/control_plane/{RESIDUAL_WAVE_ID}_apply_plan.json")
 RESIDUAL_ACTIONS = {"PRESERVE_WORKTREE", "PRESERVE_BUS_SHELL", "SYNC_LOCAL_DEV"}
-RETIREMENT_ACTIONS = {"RETIRE_WORKTREE", "RETIRE_ARCHIVE", "RETIRE_CLONE"}
+RETIREMENT_ACTIONS = {"RETIRE_WORKTREE", "RETIRE_ARCHIVE", "RETIRE_CLONE",
+                      "RETIRE_MISSING_REGISTRATION", "RETIRE_EMPTY_CONTAINER"}
 
 
 def retirement_record_path(common: Path, source: Path) -> Path:
     return common / ("rcx_fleet_retired_" + digest(os.fsencode(source)) + ".json")
+
+
+def missing_reference_files(common: Path, branch: str | None) -> dict:
+    """Original symbolic-ref storage and branch reflog, without rewriting either."""
+    if branch is None:
+        return {}
+    if (not branch.startswith("refs/heads/") or ".." in Path(branch).parts
+            or str(Path(branch)) != branch):
+        raise Hold("Missing source has an unsupported symbolic reference")
+    names = [branch if os.path.lexists(common / branch) else "packed-refs"]
+    if os.path.lexists(common / "logs" / branch):
+        names.append("logs/" + branch)
+    result = {}
+    for name in names:
+        data = read_plain(common / name)
+        result[name] = dict(kind="file", mode=stat.S_IMODE((common / name).lstat().st_mode),
+                            size=len(data), sha256=digest(data))
+    return result
+
+
+def preserve_missing_references(entry: dict, directory: Path) -> None:
+    ident = entry["source_identity"]
+    common = Path(ident["common_dir"])
+    expected = ident["missing_registration"]["reference_files"]
+    if missing_reference_files(common, ident["branch"]) != expected:
+        raise Hold("Original missing-source ref/reflog bytes changed")
+    write_new(directory / "reference-files.json", encoded(expected))
+    with (directory / "reference-files.tar").open("xb") as stream:
+        with tarfile.open(fileobj=stream, mode="w", dereference=False) as archive:
+            for name in sorted(expected):
+                archive.add(common / name, arcname=name, recursive=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    verify_archive(directory / "reference-files.tar", expected)
+    if missing_reference_files(common, ident["branch"]) != expected:
+        raise Hold("Original missing-source ref/reflog drift during preservation")
 
 
 def retirement_fifos(entry: dict) -> tuple[str, ...]:
@@ -1634,11 +1695,17 @@ def retirement_fifos(entry: dict) -> tuple[str, ...]:
 def retirement_state(entry: dict) -> dict:
     target = Path(entry["path"])
     inspect_identity(entry["source_identity"], retirement=True)
-    clean_state(target, allow_wip=True)
+    if entry["action"] == "RETIRE_EMPTY_CONTAINER":
+        return dict(head=None, index={}, index_sha256=None, content=tree_manifest(target))
+    missing = entry["action"] == "RETIRE_MISSING_REGISTRATION"
+    if missing:
+        target = Path(entry["source_identity"]["git_dir"])
+    else:
+        clean_state(target, allow_wip=True)
     before_index = git_entries(target)
     state = dict(head=line(git(target, "rev-parse", "HEAD")), index=before_index,
         index_sha256=file_hash(Path(entry["source_identity"]["git_dir"]) / "index"),
-        content=tree_manifest(target, allowed_fifos=retirement_fifos(entry)))
+        content=None if missing else tree_manifest(target, allowed_fifos=retirement_fifos(entry)))
     if before_index != git_entries(target):
         raise Hold("Retirement index changed during observation")
     return state
@@ -1649,6 +1716,8 @@ def prepared_owner_bindings(entry: dict, authority: dict) -> list[dict]:
     bindings = []
     ident = entry["source_identity"]
     current = ident["filesystem_identity"]
+    if not isinstance(current, dict):
+        return bindings
     for record in (entry.get("retirement_evidence") or {}).get("journals", []):
         original = record.get("worktree_identity") or {}
         if (record.get("state") == "PREPARED" and record.get("stash_oid") is None
@@ -1682,14 +1751,19 @@ def inspect_retirement(repo: Path, entry: dict) -> dict:
     if observed != entry["retirement_evidence"] or observed.get("status") != "OBSERVED":
         raise Hold("Retirement original-owner evidence changed")
     state = retirement_state(entry)
-    native_idle(target, state["content"], reconcile_r1=True, retirement_evidence=observed)
-    process_idle(ident)
+    if entry["action"] == "RETIRE_MISSING_REGISTRATION":
+        process_idle(ident, directory=Path(ident["git_dir"]))
+    else:
+        native_idle(target, state["content"], reconcile_r1=True, retirement_evidence=observed)
+        process_idle(ident)
     state["native_owners"] = retirement_owners(common, ident, observed.get("preserved_operation"))
     for record in observed["journals"]:
         journal = json.loads(read_plain(Path(record["path"])))
         if journal.get("owner") != "commit_executor:primary_worktree_sync":
             raise Hold("Unknown original sync journal owner")
         if journal["state"] == "PREPARED":
+            if entry["action"] == "RETIRE_MISSING_REGISTRATION":
+                raise Hold("Absent source has an unresolved PREPARED journal owner")
             # Observed owner b2f8568... never published a stash or started sync.
             # Preserve its journal and source, with a fresh external mapping;
             # never rewrite the journal or replay the original sync claim.
@@ -1725,10 +1799,21 @@ def git_input(root: Path, payload: bytes, *args: str) -> bytes:
 
 def preserve_retirement(repo: Path, entry: dict, directory: Path, state: dict) -> dict:
     """Produce a standalone object/index recovery without changing the source."""
-    target, admin = Path(entry["path"]), Path(entry["source_identity"]["git_dir"])
+    target = Path(entry["path"])
     write_new(directory / "admitted-state.json", encoded(state))
     write_new(directory / "before.json", encoded(state["content"]))
-    preserve_archive(target, directory / "before.tar", state["content"], allowed_fifos=retirement_fifos(entry))
+    if entry["action"] == "RETIRE_EMPTY_CONTAINER":
+        preserve_archive(target, directory / "before.tar", state["content"])
+        return {p.name: file_hash(p) for p in sorted(directory.iterdir()) if p.is_file()}
+    admin = Path(entry["source_identity"]["git_dir"])
+    missing = entry["action"] == "RETIRE_MISSING_REGISTRATION"
+    if missing:
+        # The absent directory has no bytes to archive. All Git commands below
+        # read the original admin directly; no checkout/index normalization.
+        target = admin
+        preserve_missing_references(entry, directory)
+    else:
+        preserve_archive(target, directory / "before.tar", state["content"], allowed_fifos=retirement_fifos(entry))
     admin_state = tree_manifest(admin)
     write_new(directory / "gitdir-before.json", encoded(admin_state))
     preserve_archive(admin, directory / "gitdir-before.tar", admin_state)
@@ -1753,6 +1838,17 @@ def preserve_retirement(repo: Path, entry: dict, directory: Path, state: dict) -
         oid, ref = record.split(b" ", 1)
         git(recovery, "update-ref", os.fsdecode(ref), oid.decode())
     git(recovery, "update-ref", "--no-deref", "HEAD", state["head"])
+    if missing:
+        (recovery / "HEAD").write_bytes(read_plain(admin / "HEAD"))
+        log_sources = [(admin / "logs/HEAD", "logs/HEAD")]
+        log_sources.extend((Path(entry["source_identity"]["common_dir"]) / name, name)
+                           for name in entry["source_identity"]["missing_registration"]["reference_files"]
+                           if name.startswith("logs/"))
+        for source, name in log_sources:
+            if source.exists():
+                output = recovery / name
+                output.parent.mkdir(parents=True, exist_ok=True)
+                write_new(output, read_plain(source))
     with tarfile.open(directory / "index-blobs.tar") as archive:
         for member in archive:
             with archive.extractfile(member) as stream:
@@ -1763,7 +1859,7 @@ def preserve_retirement(repo: Path, entry: dict, directory: Path, state: dict) -
     # Git's own index traversal includes TREE cache entries and their closure,
     # even when those trees are not reachable from refs/reflogs or staged blobs.
     # It reads the original index without refreshing, writing or normalizing it.
-    index_objects = sorted(set(git(target, "rev-list", "--objects", "--indexed-objects",
+    index_objects = sorted(set(git(target, "rev-list", "--single-worktree", "--objects", "--indexed-objects",
                                   "--no-object-names").splitlines()))
     objects_input = b"".join(oid + b"\n" for oid in index_objects)
     object_types = git_input(target, objects_input, "cat-file", "--batch-check=%(objectname) %(objecttype)")
@@ -1813,9 +1909,25 @@ def preserve_retirement(repo: Path, entry: dict, directory: Path, state: dict) -
 
 
 def verify_retirement_preservation(directory: Path, entry: dict, hashes: dict) -> dict:
+    if entry["action"] == "RETIRE_EMPTY_CONTAINER":
+        if not {"admitted-state.json", "before.json", "before.tar"} <= hashes.keys():
+            raise Hold("Empty container lacks exact preservation evidence")
+        for name, expected in hashes.items():
+            if Path(name).name != name or file_hash(directory / name) != expected:
+                raise Hold("Empty container preservation changed")
+        state = json.loads(read_plain(directory / "admitted-state.json"))
+        manifest = json.loads(read_plain(directory / "before.json"))
+        if state["content"] != manifest or set(manifest) != {"."}:
+            raise Hold("Empty container archive contains undeclared content")
+        verify_archive(directory / "before.tar", manifest)
+        return state
     required = {"admitted-state.json", "before.json", "before.tar", "gitdir-before.json",
                 "gitdir-before.tar", "index-blobs.json", "index-blobs.tar", "history.bundle",
                 "recovery.json", "refs-before.txt"}
+    missing = entry["action"] == "RETIRE_MISSING_REGISTRATION"
+    if missing:
+        required.remove("before.tar")
+        required.update({"reference-files.json", "reference-files.tar"})
     if not required <= hashes.keys():
         raise Hold("Retirement lacks full independent recovery evidence")
     for name, expected in hashes.items():
@@ -1834,10 +1946,23 @@ def verify_retirement_preservation(directory: Path, entry: dict, hashes: dict) -
         raise Hold("Retirement source/index/owner proof changed")
     for stem in ("before", "gitdir-before", "index-blobs"):
         manifest = json.loads(read_plain(directory / (stem + ".json")))
+        if missing and stem == "before":
+            if manifest is not None or state["content"] is not None or os.path.lexists(directory / "before.tar"):
+                raise Hold("Missing registration cannot claim absent worktree preservation")
+            continue
         verify_archive(directory / (stem + ".tar"), manifest)
+        if missing and stem == "gitdir-before" and manifest != entry["source_identity"]["missing_registration"]["admin_manifest"]:
+            raise Hold("Missing original admin bytes differ from bound observation")
         if stem == "before" and manifest != state["content"]:
             raise Hold("Retirement admitted content differs from archive")
     recovery = directory / "recovery.git"
+    if missing and read_plain(recovery / "HEAD").hex() != entry["source_identity"]["missing_registration"]["head_raw_hex"]:
+        raise Hold("Independent missing HEAD/ref bytes changed")
+    if missing:
+        references = json.loads(read_plain(directory / "reference-files.json"))
+        if references != entry["source_identity"]["missing_registration"]["reference_files"]:
+            raise Hold("Original missing-source ref/reflog manifest changed")
+        verify_archive(directory / "reference-files.tar", references)
     if (tree_manifest(recovery) != proof["recovery_manifest"]
             or file_hash(recovery / "index") != proof["raw_index_sha256"]
             or git_entries(recovery) != state["index"]
@@ -1903,7 +2028,10 @@ def registration_paths(repo: Path) -> set[str]:
 
 def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict:
     target, destination = Path(entry["path"]), Path(entry["destination"])
-    outcome = dict(source_identity=entry["source_identity"], destination=str(destination),
+    missing = entry["action"] == "RETIRE_MISSING_REGISTRATION"
+    empty = entry["action"] == "RETIRE_EMPTY_CONTAINER"
+    linked = entry["action"] not in {"RETIRE_CLONE", "RETIRE_EMPTY_CONTAINER"}
+    outcome = dict(source_identity=entry["source_identity"], destination=None if missing else str(destination),
         owner=entry["owner"], landing_owner=entry.get("landing_owner"), status="HOLD", reason=None,
         current_landing_review=entry.get("current_landing_review"),
         inherited_landing_owners=entry.get("inherited_landing_owners", []), boundary=None, registration_retired=False)
@@ -1912,12 +2040,14 @@ def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict
         with preparation_lock(repo / ".git"):
             state = inspect_retirement(repo, entry)
             try:
-                from .workingrcx_fleet_census import useful_work
+                from .workingrcx_fleet_census import useful_work, missing_useful_work
             except ImportError:
-                from workingrcx_fleet_census import useful_work
-            if encoded(useful_work(str(target), entry["comparison_commit"], comparison_repo=str(repo), coverage=True)) != encoded(entry["useful_work"]):
+                from workingrcx_fleet_census import useful_work, missing_useful_work
+            useful = (missing_useful_work(entry["source_identity"]["missing_registration"], entry["comparison_commit"])
+                      if missing else None if empty else useful_work(str(target), entry["comparison_commit"], comparison_repo=str(repo), coverage=True))
+            if encoded(useful) != encoded(entry["useful_work"]):
                 raise Hold("Useful-work/index evidence changed since committed retirement plan")
-            if target.stat().st_dev != directory.stat().st_dev or os.path.lexists(destination):
+            if (not missing and target.stat().st_dev != directory.stat().st_dev) or os.path.lexists(destination):
                 raise Hold("Retirement destination is occupied or on another filesystem")
             hashes = preserve_retirement(repo, entry, directory, state)
             outcome["preservation_sha256"] = hashes
@@ -1933,10 +2063,10 @@ def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict
             verify_retirement_preservation(directory, entry, hashes)
             if inspect_retirement(repo, entry) != state or os.path.lexists(destination):
                 raise Hold("Retirement source/destination changed under terminal lock")
-            if git(target, "for-each-ref", "--format=%(objectname) %(refname)") != read_plain(directory / "refs-before.txt"):
+            if not empty and git(Path(entry["source_identity"]["git_dir"]) if missing else target,
+                    "for-each-ref", "--format=%(objectname) %(refname)") != read_plain(directory / "refs-before.txt"):
                 raise Hold("Retirement source refs/stashes changed during preservation")
             before = registration_paths(repo)
-            linked = entry["action"] != "RETIRE_CLONE"
             if (str(target) in before) != linked:
                 raise Hold("Retirement registration ownership changed")
             write_new(directory / "retirement-started.json", encoded(dict(target_identity=binding,
@@ -1945,15 +2075,20 @@ def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict
             # Rename retains every source byte, including the original .git
             # pointer. Git then removes only this exact now-absent registration;
             # no force, prune, branch deletion or dirty-checkout rewrite.
-            os.rename(target, destination)
-            sync_directory(target.parent)
-            sync_directory(destination.parent)
-            if tree_manifest(destination, allowed_fifos=retirement_fifos(entry)) != state["content"]:
-                raise Hold("Retirement destination differs before registration removal")
+            if not missing:
+                os.rename(target, destination)
+                sync_directory(target.parent)
+                sync_directory(destination.parent)
+                if tree_manifest(destination, allowed_fifos=retirement_fifos(entry)) != state["content"]:
+                    raise Hold("Retirement destination differs before registration removal")
             if linked:
                 if tree_manifest(Path(entry["source_identity"]["git_dir"])) != json.loads(read_plain(directory / "gitdir-before.json")):
                     raise Hold("Retirement index/admin changed before registration removal")
+                if os.path.lexists(target):
+                    raise Hold("Absent source reappeared before registration removal")
                 git(repo, "worktree", "remove", str(target))
+                if missing and missing_reference_files(repo / ".git", entry["source_identity"]["branch"]) != entry["source_identity"]["missing_registration"]["reference_files"]:
+                    raise Hold("Original missing-source reference/reflog changed during removal")
                 if git(repo, "for-each-ref", "--format=%(objectname) %(refname)") != read_plain(directory / "refs-before.txt"):
                     raise Hold("Original branch/stash references changed during retirement")
             after = registration_paths(repo)
@@ -1965,6 +2100,8 @@ def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict
             result = dict(destination=str(destination), source_absent=True,
                 registration_retired=linked, registrations_before=sorted(before), registrations_after=sorted(after),
                 manifest_sha256=digest(encoded(state["content"])))
+            if missing:
+                result.update(destination=None, absent_worktree_bytes="UNKNOWN", admin_only=True)
             write_new(retirement_record_path(repo / ".git", target), encoded(dict(
                 source_identity=entry["source_identity"], directory=str(directory), entry=entry,
                 preservation_sha256=hashes, result=result)))
@@ -1973,7 +2110,7 @@ def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict
         outcome["boundary"] = boundary.execute_terminal_retirement_once(repo, binding,
             terminal_action=retire_once, log=lambda _: None)
         if outcome["boundary"].get("action_succeeded"):
-            outcome.update(status="RETIRED", registration_retired=entry["action"] != "RETIRE_CLONE")
+            outcome.update(status="RETIRED", registration_retired=linked)
         else:
             outcome.update(status="INCOMPLETE" if started else "HOLD",
                 reason=outcome["boundary"].get("action_error") or outcome["boundary"].get("reason"))
@@ -2005,7 +2142,10 @@ def verify_retirement_record(repo: Path, source: Path) -> dict:
             or outcome["boundary"].get("action_outcome") != record["result"]
             or outcome["preservation_sha256"] != record["preservation_sha256"]
             or os.path.lexists(source) or str(source) in registration_paths(repo)
-            or tree_manifest(Path(entry["destination"]), allowed_fifos=retirement_fifos(entry)) != state["content"]):
+            or (entry["action"] != "RETIRE_MISSING_REGISTRATION" and
+                tree_manifest(Path(entry["destination"]), allowed_fifos=retirement_fifos(entry)) != state["content"])
+            or (entry["action"] == "RETIRE_MISSING_REGISTRATION" and (
+                os.path.lexists(entry["source_identity"]["git_dir"]) or os.path.lexists(entry["destination"])))):
         raise Hold("Retired source/destination/registration proof changed")
     return record
 
@@ -2114,6 +2254,29 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
             owner_records[row["source"]] = records
         evidence_binding = dict(path=str(evidence_path), sha256=digest(evidence_raw))
     selected, rows = [], []
+    missing_paths = data["policy"].get("missing_registration_paths", [])
+    historical_paths = data["policy"].get("reviewed_historical_paths", [])
+    if (missing_paths or historical_paths) and (authority is None
+            or not set(missing_paths + historical_paths) <= {r["path"] for r in census["entries"]}
+            or (historical_paths and (wave_id != classifier.MISSING_WAVE_ID
+                or not set(historical_paths) <= {str(root / p) for p in classifier.HISTORICAL_SOURCES}))):
+        raise Hold("Missing/historical sources lack exact finite renewal authority")
+    missing_evidence_path = Path(f"reports/control_plane/{wave_id}_missing_registration_evidence.json")
+    missing_evidence = None
+    if missing_paths and (os.path.lexists(repo / missing_evidence_path) or str(root) == classifier.LANDED_FLEET):
+        missing_raw = read_plain(repo / missing_evidence_path)
+        inventory = json.loads(missing_raw)
+        sources = {r["path"]: r for r in census["entries"]}
+        if (inventory.get("wave_id") != wave_id or inventory.get("census_sha256") != digest(census_raw)
+                or inventory.get("comparison_commit") != data["comparison_commit"]
+                or inventory.get("mutation_authorized") is not False
+                or inventory.get("entry_count") != len(missing_paths)
+                or len(inventory.get("entries", [])) != len(missing_paths)
+                or {r["path"] for r in inventory["entries"]} != set(missing_paths)
+                or any(r.get("current") != sources[r["path"]].get("missing_registration")
+                       or not r.get("owner") for r in inventory["entries"])):
+            raise Hold("Missing registration evidence lost original cohort/owner authority")
+        missing_evidence = dict(path=str(missing_evidence_path), sha256=digest(missing_raw))
     counts = Counter()
     for index, row in enumerate(data["entries"]):
         source = census["entries"][index]
@@ -2129,6 +2292,17 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
         counts[decision] += 1
         ident = identity_of(row)
         ident["filesystem_identity"] = source.get("filesystem_identity")
+        missing = action == "RETIRE_MISSING_REGISTRATION"
+        empty = action == "RETIRE_EMPTY_CONTAINER"
+        historical = str(path) in historical_paths
+        if missing:
+            if str(path) not in missing_paths or not classifier.valid_missing_source(source, str(common)):
+                raise Hold("Missing registration candidate lacks exact admin authority")
+            ident["missing_registration"] = source["missing_registration"]
+        if empty:
+            if not historical or path != root / "WorkingRCX-worktrees":
+                raise Hold("Empty container is not the exact reviewed historical source")
+            ident.update(empty_container=True, common_dir=str(common))
         entry = dict(source_index=index, path=str(path), source_identity=ident,
                      action=action, owner=row["owner"], comparison_commit=data["comparison_commit"],
                      reason_codes=[r["code"] for r in row["reasons"]])
@@ -2137,7 +2311,7 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
         if fresh_wave:
             useful = source.get("useful_work")
             entry.update(useful_work=useful, landing_owner=row.get("landing_owner"))
-            if action not in {"UNTOUCHED_HOLD", "PRESERVE_BUS_SHELL"} and (
+            if action not in {"UNTOUCHED_HOLD", "PRESERVE_BUS_SHELL", "RETIRE_EMPTY_CONTAINER"} and (
                     not isinstance(useful, dict) or useful.get("status") == "UNKNOWN"
                     or (useful.get("status") != "COVERED" and not row.get("landing_owner"))):
                 raise Hold("Fresh residual lacks exact useful-work coverage or native landing owner")
@@ -2159,18 +2333,24 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
                 and path.relative_to(root).parts[0].startswith("fleet-apply-preserved-")
                 and path.parent.name.isdigit() and path.name == "worktree")
             if (action not in RESIDUAL_ACTIONS | (RETIREMENT_ACTIONS if retirement else set())
-                    or (not archive and (path.parent != root or not path.name.casefold().startswith("workingrcx")))
+                    or any(path == Path(p) or path.is_relative_to(p) for p in data["policy"].get("explicit_protected_paths", []))
+                    or (not archive and not missing and not historical and (path.parent != root or not path.name.casefold().startswith("workingrcx")))
                     or (archive and not (exact_archive or native_archive))
-                    or source.get("availability_status") != "present"
-                    or source.get("entry_kind") != "directory" or source.get("errors")
-                    or not isinstance(ident["filesystem_identity"], dict)
-                    or (not native_archive and any(path == Path(p) or path.is_relative_to(p) for p in data["policy"]["protected_paths"]))):
+                    or source.get("availability_status") != ("missing" if missing else "present")
+                    or source.get("entry_kind") != ("missing" if missing else "directory") or source.get("errors")
+                    or (not missing and not isinstance(ident["filesystem_identity"], dict))
+                    or (not native_archive and not historical and any(path == Path(p) or path.is_relative_to(p) for p in data["policy"]["protected_paths"]))):
                 raise Hold("Residual candidate is outside the exact bounded policy")
             if action == "PRESERVE_BUS_SHELL":
                 if (source.get("bus_only_shell") is not True or source["registered_worktrees"]
                         or source["repository_kind"] != "non_repository"):
                     raise Hold("Residual shell has ambiguous repository ownership")
                 entry["shell_entries"] = source["shell_entries"]
+            elif empty:
+                if (source.get("shell_entries") != [] or source["registered_worktrees"]
+                        or source["repository_kind"] != "non_repository"
+                        or source["registration_status"] != "not_registered"):
+                    raise Hold("Empty container has unknown content or registration")
             elif action in RETIREMENT_ACTIONS:
                 evidence = entry["retirement_evidence"]
                 branch = ident["branch"]
@@ -2178,10 +2358,10 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
                 expected_reg = dict(path=str(path), HEAD=ident["HEAD"])
                 expected_reg.update({"detached": True} if detached else {"branch": branch})
                 if (not isinstance(evidence, dict) or evidence.get("status") != "OBSERVED" or evidence.get("errors")
-                        or source["inspection_status"] != "ok" or not classifier._oid(ident["HEAD"])
+                        or source["inspection_status"] != ("admin_only" if missing else "ok") or not classifier._oid(ident["HEAD"])
                         or (not detached and (source["git"].get("branch_status") != "symbolic"
                             or not isinstance(branch, str) or not branch.startswith("refs/heads/")))
-                        or source["git"]["dirty_counts"]["unmerged"] != 0
+                        or (not missing and source["git"]["dirty_counts"]["unmerged"] != 0)
                         or not source.get("useful_work", {}).get("coverage_method")):
                     raise Hold("Retirement source lacks exact ownership/coverage evidence")
                 if action == "RETIRE_CLONE":
@@ -2189,9 +2369,9 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
                             or ident["common_dir"] != str(path / ".git") or ident["git_dir"] != str(path / ".git")
                             or source["registered_worktrees"] or source["registration_status"] != "not_registered"):
                         raise Hold("Standalone retirement repository authority mismatch")
-                elif (source["repository_kind"] != "linked_worktree"
+                elif (source["repository_kind"] != ("missing_linked_worktree" if missing else "linked_worktree")
                         or ident["common_dir"] != str(common) or Path(ident["git_dir"]).parent != common / "worktrees"
-                        or source["registered_worktrees"] != [expected_reg]
+                        or (not missing and source["registered_worktrees"] != [expected_reg])
                         or branch in {"refs/heads/dev", "refs/heads/main", "refs/heads/master"}
                         or (archive and not evidence.get("preserved_operation"))):
                     raise Hold("Retirement linked/archive authority mismatch")
@@ -2221,6 +2401,7 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
         for index in indices:
             rows[index]["destination"] = str(operation_root / str(index) / "worktree")
     return dict(**({"orphan_owner_evidence": evidence_binding} if evidence_binding else {}),
+                **({"missing_registration_evidence": missing_evidence} if missing_evidence else {}),
                 **({"retirement": True} if retirement else {}),
                 **renewed_reports,
                 schema_version=2, wave_id=wave_id, mutation_authorized=False,
@@ -2269,6 +2450,11 @@ def require_residual_authority(repo: Path, plan: dict, commit: str, *, fetch: bo
         paths += (Path(evidence["path"]),)
         if file_hash(repo / evidence["path"]) != evidence["sha256"]:
             raise Hold("Frozen orphan owner evidence changed")
+    if plan.get("missing_registration_evidence"):
+        evidence = plan["missing_registration_evidence"]
+        paths += (Path(evidence["path"]),)
+        if file_hash(repo / evidence["path"]) != evidence["sha256"]:
+            raise Hold("Missing registration cohort/owner evidence changed")
     for path in paths:
         committed = git(repo, "show", f"{commit}:{path}")
         if read_plain(repo / path) != committed:
@@ -2396,7 +2582,8 @@ def retirement_evidence_report(repo: Path, plan: dict, *, root_cause_evidence: P
         action_contract=["Fresh committed plan on separately synchronized PRIMARY",
             "Exact identity/index/WIP/history/owner and independent empty-repository recovery",
             "Source and preservation bound to one consumed terminal action under the shared lock",
-            "Exact rename followed by single absent-source Git worktree remove, without force or prune",
+            "Present sources are renamed; already absent sources preserve only available admin/index/history; exact registered-source removal never uses force or prune",
+            "The exact empty unregistered container needs only identity, empty-content and liveness proof; no Git history is synthesized",
             "Independent public verify; old receipts/journals/owners and budgets remain unchanged"],
         foreground=dict(state="PENDING_LANDING_PRIMARY_SYNC_AND_PUBLIC_APPLY_VERIFY", executed_pairs=0),
         useful_work_complete=False, fleet_complete=False)

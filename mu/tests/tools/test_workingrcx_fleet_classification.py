@@ -745,3 +745,34 @@ def test_residual_cli_reassesses_full_manifest_with_bounded_batches_and_owned_ho
     assert all(r["source"] == rows[i] and r["mutation_authorized"] is False for i, r in enumerate(report["entries"]))
     # None of these recorded fresh names were in the old fourteen-name policy.
     assert all("outside_bounded_candidate_set" not in [v["code"] for v in r["reasons"]] for r in report["entries"])
+
+
+def test_missing_registration_requires_exact_fresh_opt_in_and_retains_owner(retirement_fleet):
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    f = retirement_fleet
+    target = f.targets[0]
+    retirement_git(f, target, 'checkout', '--detach')
+    (target / 'staged-only').write_text('retained intent\n')
+    retirement_git(f, target, 'add', 'staged-only')
+    shutil.rmtree(target)
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    options = dict(source_sha256=hashlib.sha256(json.dumps(observed).encode()).hexdigest(),
+        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True,
+        wave_id='fixture-missing-classification', retirement=True, retirement_predecessor=f.landed)
+    def row(report):
+        return next(r for r in report['entries'] if r['path'] == str(target))
+    assert row(classifier.classify(observed, **options))['decision'] == 'HOLD'
+    result = row(classifier.classify(observed, **options, missing_paths=(str(target),)))
+    assert result['proposed_action'] == 'RETIRE_MISSING_REGISTRATION'
+    assert result['landing_owner']['scope'] == ['staged-only']
+    assert result['landing_owner']['unstaged_untracked_intent'] == 'UNKNOWN_ABSENT_CHECKOUT'
+    assert row(classifier.classify(observed, **options, missing_paths=(str(target),),
+                                   protected=(str(target),)))['decision'] == 'HOLD'
+    corrupted = deepcopy(observed)
+    next(r for r in corrupted['entries'] if r['path'] == str(target))['missing_registration']['identity']['git_dir'] += '-other'
+    assert row(classifier.classify(corrupted, **options, missing_paths=(str(target),)))['decision'] == 'HOLD'
+    with pytest.raises(ValueError, match='exact finite'):
+        classifier.classify(observed, **options, missing_paths=(str(f.root / 'arbitrary'),))
+    with pytest.raises(ValueError, match='exact finite'):
+        classifier.classify(observed, **options, historical_paths=(str(f.repo),))
