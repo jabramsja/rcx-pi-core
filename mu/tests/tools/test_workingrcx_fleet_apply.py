@@ -1395,21 +1395,28 @@ def residual_fixture(f, monkeypatch, *, shell_count=1, dev=False, wave_id=None, 
     return plan
 
 
-def retirement_fixture(f):
+def retirement_fixture(f, *, wave="fixture-real-retirement", renew=False, stale_device=False):
     """Fresh native authority in the existing /tmp-only real Git fixture."""
     import workingrcx_fleet_census as census_tool
     import workingrcx_fleet_classification as classifier
-    wave = "fixture-real-retirement"
     classification_rel, census_rel, plan_rel = apply.residual_paths(wave)
     observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    if stale_device:
+        # Model the captured pre-reboot authority, retaining inode and mode.
+        for row in observed["entries"]:
+            row["filesystem_identity"]["device"] += 1
     (f.repo / census_rel).write_bytes(apply.encoded(observed))
     classified = classifier.classify(observed, source_sha256=apply.digest(apply.encoded(observed)),
-        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True, wave_id=wave, retirement=True)
+        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True, wave_id=wave, retirement=True,
+        retirement_predecessor=f.landed if renew else None)
     raw = apply.encoded(classified)
     (f.repo / classification_rel).write_bytes(raw)
     sha = apply.digest(raw)
     (f.repo / f"reports/control_plane/{wave}_useful_work.json").write_bytes(
         apply.encoded(classifier.useful_work_report(classified, sha)))
+    if renew:
+        (f.repo / f"reports/control_plane/{wave}_useful_work_coverage.json").write_bytes(
+            apply.encoded(classifier.retirement_coverage_report(classified, sha)))
     plan = apply.build_residual_plan(f.repo, f.repo / classification_rel, sha, wave_id=wave)
     (f.repo / plan_rel).write_bytes(apply.encoded(plan))
     for rel in ("mu/tools/executors/workingrcx_fleet_census.py",
@@ -1423,6 +1430,102 @@ def retirement_fixture(f):
     operation = plan["operations"][0]
     kwargs = dict(authority_commit=authority, batch=operation["batch"], operation_root=Path(operation["operation_root"]))
     return plan, kwargs
+
+
+def test_real_retirement_renewal_after_device_hold_preserves_spent_authority(fleet, monkeypatch):
+    import workingrcx_fleet_classification as classifier
+    f = fleet
+    monkeypatch.setattr(classifier, "LANDED_FLEET", str(f.root))
+    (f.targets[0] / "tracked").write_bytes(b"staged original intent\n")
+    git(f, f.targets[0], "add", "tracked")
+    (f.targets[0] / "tracked").write_bytes(b"unstaged original intent\n")
+    original_index = (f.common / "worktrees" / f.targets[0].name / "index").read_bytes()
+    before = [apply.tree_manifest(target) for target in f.targets]
+    registrations = apply.registration_paths(f.repo)
+    old, old_args = retirement_fixture(f, wave="fixture-preboot-retirement", renew=True, stale_device=True)
+    result = apply.apply_residual_plan(f.repo, old, **old_args)
+    assert result["outcome_counts"] == {"HOLD": 4}
+    assert result["registration_delta"] == 0
+    assert result["before_prefix_directories"] == result["after_prefix_directories"]
+    assert all(row["reason"] == "Target filesystem identity drift" and row["boundary"] is None
+               for row in result["outcomes"])
+    assert apply.verify_residual_plan(f.repo, old, **old_args)["verified_outcomes"] == {"HOLD": 4}
+    assert [apply.tree_manifest(target) for target in f.targets] == before
+    assert (f.common / "worktrees" / f.targets[0].name / "index").read_bytes() == original_index
+    assert apply.registration_paths(f.repo) == registrations
+    with pytest.raises(apply.Hold, match="consumed"):
+        apply.apply_residual_plan(f.repo, old, **old_args)
+    preserved = [*old_args["operation_root"].rglob("*.json"),
+        *f.repo.glob(f"reports/control_plane/{old['wave_id']}_*.json"),
+        f.common / ("rcx_fleet_apply_" + old["operations"][0]["operation_id"] + ".json")]
+    old_bytes = {path: path.read_bytes() for path in preserved}
+
+    f.landed = old_args["authority_commit"]
+    fresh, fresh_args = retirement_fixture(f, wave="fixture-postboot-retirement", renew=True)
+    assert fresh["classification_sha256"] != old["classification_sha256"]
+    assert fresh["operations"][0]["operation_id"] != old["operations"][0]["operation_id"]
+    assert fresh_args["operation_root"] != old_args["operation_root"]
+    assert fresh["retirement_authority"]["predecessor_commit"] == old_args["authority_commit"]
+    evidence = apply.retirement_evidence_report(f.repo, fresh)
+    assert all(check["status"] == "MATCH" for check in evidence["current_identity_checks"])
+    assert evidence["prior_operation_summaries"] == [dict(
+        path=str(old_args["operation_root"] / "summary.json"),
+        sha256=apply.file_hash(old_args["operation_root"] / "summary.json"),
+        recorded_outcome_counts={"HOLD": 4}, before_prefix_directories=5,
+        after_prefix_directories=5, registration_delta=0, replay_authorized=False)]
+    result = apply.apply_residual_plan(f.repo, fresh, **fresh_args)
+    assert result["outcome_counts"] == {"RETIRED": 4}, result
+    assert result["registration_delta"] == -4
+    assert apply.verify_residual_plan(f.repo, fresh, **fresh_args)["batch_complete"]
+    for target, manifest in zip(f.targets, before):
+        entry = next(row for row in fresh["entries"] if row["path"] == str(target))
+        destination = Path(entry["destination"])
+        assert not target.exists() and apply.tree_manifest(destination) == manifest
+        assert entry["retirement_evidence"]["prior_owners"][0]["status"] == "HOLD"
+    first = next(row for row in fresh["entries"] if row["path"] == str(f.targets[0]))
+    recovery = Path(first["destination"]).parent / "recovery.git"
+    assert (recovery / "index").read_bytes() == original_index
+    assert old_bytes == {path: path.read_bytes() for path in preserved}
+    with pytest.raises(apply.Hold, match="consumed"):
+        apply.apply_residual_plan(f.repo, old, **old_args)
+
+
+@pytest.mark.parametrize("field", ["wave_id", "predecessor_commit", "census_sha256", "missing"])
+def test_real_retirement_plan_rejects_mismatched_renewal_authority(fleet, monkeypatch, field):
+    import workingrcx_fleet_classification as classifier
+    f = fleet
+    monkeypatch.setattr(classifier, "LANDED_FLEET", str(f.root))
+    plan, kwargs = retirement_fixture(f, renew=True)
+    classification = f.repo / plan["classification_path"]
+    data = json.loads(classification.read_bytes())
+    if field == "missing":
+        data.pop("retirement_authority")
+    else:
+        data["retirement_authority"][field] = "unbound"
+    classification.write_bytes(apply.encoded(data))
+    with pytest.raises(apply.Hold, match="authority"):
+        apply.build_residual_plan(f.repo, classification, apply.file_hash(classification), wave_id=plan["wave_id"])
+    assert not kwargs["operation_root"].exists()
+    assert all(target.exists() for target in f.targets)
+
+
+def test_real_retirement_renewal_coverage_requires_committed_bytes_and_index(fleet):
+    f = fleet
+    plan, kwargs = retirement_fixture(f, renew=True)
+    coverage_rel = Path(f"reports/control_plane/{plan['wave_id']}_useful_work_coverage.json")
+    coverage = f.repo / coverage_rel
+    original = coverage.read_bytes()
+    changed = json.loads(original)
+    changed["comparison_commit"] = f.original
+    coverage.write_bytes(apply.encoded(changed))
+    with pytest.raises(apply.Hold, match="coverage authority"):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    coverage.write_bytes(original)
+    git(f, f.repo, "update-index", "--assume-unchanged", str(coverage_rel))
+    with pytest.raises(apply.Hold, match="authority index/mode identity"):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert not kwargs["operation_root"].exists()
+    assert not (f.common / ("rcx_fleet_apply_" + plan["operations"][0]["operation_id"] + ".json")).exists()
 
 
 def test_real_retirement_detached_divergent_clone_index_and_history(fleet, monkeypatch):

@@ -47,6 +47,62 @@ def test_fresh_retirement_admits_detached_but_keeps_exact_locks_and_protected_ow
     assert next(r for r in legacy["entries"] if r["path"] == str(f.targets[0]))["decision"] == "HOLD"
 
 
+def test_actual_fleet_successor_requires_explicit_observed_predecessor(retirement_fleet, monkeypatch):
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    f = retirement_fleet
+    # Exercise the actual-fleet admission branch using only disposable Git.
+    monkeypatch.setattr(classifier, "LANDED_FLEET", str(f.root))
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    options = dict(source_sha256=hashlib.sha256(json.dumps(observed).encode()).hexdigest(),
+        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True,
+        wave_id="workingrcx-fleet-live-authority-r1-2026-09-27", retirement=True,
+        protected=(str(f.targets[1]),))
+    before = [snapshot(target) for target in f.targets]
+    with pytest.raises(ValueError, match="explicit fresh predecessor authority"):
+        classifier.classify(observed, **options)
+    renewed = classifier.classify(observed, **options, retirement_predecessor=f.landed)
+    assert renewed["retirement_authority"] == dict(schema_version=1, wave_id=options["wave_id"],
+        predecessor_commit=f.landed, census_sha256=options["source_sha256"],
+        fleet_root=str(f.root), anchor_repo=str(f.repo))
+    rows = {row["path"]: row for row in renewed["entries"]}
+    assert rows[str(f.targets[0])]["proposed_action"] == "RETIRE_WORKTREE"
+    assert rows[str(f.targets[1])]["decision"] == rows[str(f.repo)]["decision"] == "HOLD"
+    assert all(row["mutation_authorized"] is False for row in rows.values())
+    with pytest.raises(ValueError, match="must match"):
+        classifier.classify(observed, **options, retirement_predecessor=f.original)
+    mismatched = deepcopy(observed)
+    next(row for row in mismatched["entries"] if row["path"] == str(f.targets[0]))[
+        "useful_work"]["comparison_commit"] = f.original
+    with pytest.raises(ValueError, match="observed useful-work authority"):
+        classifier.classify(mismatched, **options, retirement_predecessor=f.landed)
+    with pytest.raises(ValueError, match="requires a new wave"):
+        classifier.classify(observed, **{**options, "wave_id": classifier.RETIREMENT_WAVE_ID},
+                            retirement_predecessor=f.landed)
+    assert [snapshot(target) for target in f.targets] == before
+
+
+def test_public_retirement_renewal_cli_binds_both_useful_work_reports(retirement_fleet):
+    import workingrcx_fleet_census as census_tool
+    f = retirement_fleet
+    wave = "fixture-public-retirement-renewal"
+    folder = f.repo / "reports/control_plane"
+    census_path = folder / f"{wave}_census.json"
+    output = folder / f"{wave}_classification.json"
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    census_path.write_text(json.dumps(observed))
+    result = subprocess.run([sys.executable, str(CLI), "--retirement", "--residual", "--wave-id", wave,
+        "--retirement-predecessor", f.landed, "--base-commit", f.landed, "--census", str(census_path),
+        "--expected-census-sha256", hashlib.sha256(census_path.read_bytes()).hexdigest(),
+        "--output", str(output)], cwd=f.repo, env=f.env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    report = json.loads(output.read_bytes())
+    for suffix in ("useful_work", "useful_work_coverage"):
+        ledger = json.loads((folder / f"{wave}_{suffix}.json").read_bytes())
+        assert ledger["retirement_authority"] == report["retirement_authority"]
+        assert ledger["classification_sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
+
+
 def git(fixture, root, *args):
     result = subprocess.run(
         [fixture.git, "-c", "init.defaultBranch=dev", "-c", "core.hooksPath=/dev/null",
