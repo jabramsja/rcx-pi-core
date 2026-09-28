@@ -400,6 +400,9 @@ class WaveConfig:
     progress_proof_after: str = ""
 
     # Class-specific tracker-note fields
+    host_semantics_delta_before: str = ""
+    host_semantics_delta_after: str = ""
+    workload_target: str = ""
     structural_artifact_ref: str = ""
     post_gate_contract_sweep: str = ""
     no_op_proof: str = ""
@@ -660,6 +663,20 @@ class WaveConfig:
                     errors.append(f"invalid indicator declaration: {exc}")
         if self.routing_decision == "ROUTE_PHASE_A":
             errors.extend(_native_phase_a_contract_input_errors(self))
+        if self.wave_class == "L4_STRUCTURAL":
+            # Structural metadata is needed before the first native review,
+            # so reject missing inputs before packet/tracker/route writes.
+            errors.extend(_tsn.validate_fields(build_tracker_fields(self)))
+            for field_name in (
+                "host_semantics_delta_before",
+                "host_semantics_delta_after",
+                "workload_target",
+            ):
+                value = getattr(self, field_name)
+                if not isinstance(value, str) or not value.strip():
+                    errors.append(
+                        f"{field_name} required as a non-empty string for L4_STRUCTURAL"
+                    )
         return errors
 
 
@@ -4171,6 +4188,9 @@ def build_tracker_fields(config: WaveConfig) -> Any:
         evidence_delta=config.evidence_delta,
         progress_proof_before=config.progress_proof_before,
         progress_proof_after=config.progress_proof_after,
+        host_semantics_delta_before=config.host_semantics_delta_before,
+        host_semantics_delta_after=config.host_semantics_delta_after,
+        workload_target=config.workload_target,
         structural_artifact_ref=config.structural_artifact_ref,
         post_gate_contract_sweep=config.post_gate_contract_sweep,
         no_op_proof=config.no_op_proof,

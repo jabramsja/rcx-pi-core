@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "wave_id": "launch-wave-structural-tracker-inputs-r2-2026-09-28",
+  "task_id": "MU-COINDUCTION-PRODUCTION-PROOF",
+  "status": "PHASE_B_LOCAL_VALIDATION_PASSED",
+  "baseline": {
+    "fixture": "Preserved portable _structural_config_data(include_required=False); no stopped config execution",
+    "config_validate_errors": [],
+    "schema_missing": [
+      "host_semantics_delta_before",
+      "host_semantics_delta_after",
+      "workload_target"
+    ],
+    "built_tracker_values": {
+      "host_semantics_delta_before": "",
+      "host_semantics_delta_after": "",
+      "workload_target": ""
+    },
+    "downstream_passed": false,
+    "downstream_errors": [
+      "L4_STRUCTURAL missing host_semantics_delta_before in tracker note",
+      "L4_STRUCTURAL missing host_semantics_delta_after in tracker note",
+      "L4_STRUCTURAL host_semantics_delta_before is low-signal/placeholder text",
+      "L4_STRUCTURAL host_semantics_delta_after is low-signal/placeholder text",
+      "L4_STRUCTURAL missing workload_target in tracker note (required for RCX-first semantic destination binding)"
+    ],
+    "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'\nfrom pathlib import Path\nimport ast,dataclasses,importlib.util,json,sys\nr=Path.cwd(); sys.path.insert(0,str(r/'mu/tools/executors')); sys.path.insert(0,str(r/'mu/tools/checks'))\nimport launch_wave as lw,tracker_sync_note as tsn,enforce_l4_execution_contract as l4\nspec=importlib.util.spec_from_file_location('portable_launch_fixture',r/'mu/tests/tools/test_launch_wave.py')\ntests=importlib.util.module_from_spec(spec); spec.loader.exec_module(tests)\nsource=r.parent/'WorkingRCX-structural-tracker-inputs-r1-20260928/mu/tests/tools/test_launch_wave.py'\ntree=ast.parse(source.read_text())\nnodes=[node for node in tree.body if (isinstance(node,ast.FunctionDef) and node.name=='_structural_config_data') or (isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id in ('_STRUCTURAL_TRACKER_INPUTS','_STRUCTURAL_CHANGED_FILES') for t in node.targets))]\nns={'dataclasses':dataclasses,'make_config':tests.make_config}\nexec(compile(ast.Module(body=nodes,type_ignores=[]),str(source),'exec'),ns)\nconfig=lw.WaveConfig.from_dict(ns['_structural_config_data'](include_required=False))\nfields=lw.build_tracker_fields(config); names=ns['_STRUCTURAL_TRACKER_INPUTS']\npassed,errors=l4.enforce(config.wave_class,ns['_STRUCTURAL_CHANGED_FILES'],notes=l4.parse_tracker_notes(tsn.render_tracker_sync_note(fields)))\nresult={'fixture':'Preserved portable _structural_config_data(include_required=False); no stopped config execution','config_validate_errors':config.validate(r),'schema_missing':[name for name in names if name not in {f.name for f in dataclasses.fields(lw.WaveConfig)}],'built_tracker_values':{name:getattr(fields,name) for name in names},'downstream_passed':passed,'downstream_errors':errors}\nassert result['config_validate_errors']==[]\nassert len(result['schema_missing'])==3\nassert all(value=='' for value in result['built_tracker_values'].values())\nassert not passed\nfor name in names: assert any(f'missing {name}' in error for error in errors)\nprint(json.dumps(result,indent=2))\nPY",
+    "exit_code": 0
+  },
+  "reconstruction": {
+    "source_manifest": "../WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/structural_tracker_r1_stopped_candidate_20260928.json",
+    "independent_patch": "../WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/structural_tracker_r1_pre_stop_candidate_20260928.patch",
+    "independent_patch_sha256": "08b1c6a386faa6ae1f3b9c453e3f006d34d083d60363b56b7933762dd6dff372",
+    "changes": [
+      {
+        "path": "mu/tools/executors/launch_wave.py",
+        "added_lines": 20,
+        "removed_lines": 0,
+        "sha256": "be46ebca12b5ba65e927f20d6fb80e8301caaa6c5d49eae60562fa636c2bd5c6",
+        "exact_preserved_source": true,
+        "description": "Add the three typed structural config inputs, reuse tracker validation and reject absent/blank/non-string required structural inputs before writes; forward supplied values unchanged."
+      },
+      {
+        "path": "mu/tests/tools/test_launch_wave.py",
+        "added_lines": 154,
+        "removed_lines": 0,
+        "sha256": "4decb9b8fbbce408fed07311314e9a94da8e40a14f8a9da5e514cc0b8e35aa77",
+        "exact_preserved_source": true,
+        "description": "Portable omitted-input reproduction; missing/empty/whitespace/non-string rejection without setup writes; JSON roundtrip, idempotent native setup, canonical Ra placement, real downstream L4 metadata checks, and config/worktree/index authority for every field."
+      }
+    ],
+    "old_config_or_receipt_replayed": false,
+    "new_runtime_changes": false,
+    "old_test_selector": "mu/tests/tools/test_tracker_sync_note.py",
+    "actual_declared_test_selector": "mu/tests/tools/test_tracker_sync_note_generation.py"
+  },
+  "tracker": {
+    "primary_tasks_source": "../WorkingRCX/TASKS.md",
+    "primary_tasks_carried_sha256": "62595691fda972b7921e3f03d994b3fc265c81be34f205ccb46c2665d2930cdc",
+    "task_ids_preserved": 268,
+    "canonical_note_producer": "launch_wave.build_tracker_fields + tracker_sync_note.upsert_tracker_sync_note",
+    "canonical_note_values": "Exact current R2 config; no hand-authored L4 fields or measured indicators.",
+    "carryover_probe": {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -c 'import json,sys; from pathlib import Path; sys.path.insert(0,'\\''mu/tools/executors'\\''); import phase_a_executor as pa,phase_b_executor as pb,launch_wave as lw; r=Path.cwd(); assert pa.validate_native_stub_packet_contract(json.loads((r/\".agent_bus-structural-tracker-inputs-r2-20260928/meta/post_merge_routing.json\").read_text()),\"reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md\",lw._project_post_lock_recovery_status((r/\"reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md\").read_text()),allow_post_lock_machine_sections=True); assert pb._tasks_has_canonical_wave_tracker_note(r,wave_id=\"launch-wave-structural-tracker-inputs-r2-2026-09-28\"),'\\''same-wave tracker must be canonical in Ra'\\''; print('\\''Lifecycle-aware native packet contract and canonical Ra tracker: PASS'\\'')'",
+      "exit_code": 0,
+      "output": "Lifecycle-aware native packet contract and canonical Ra tracker: PASS"
+    }
+  },
+  "validation": {
+    "declared_command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -c 'import json,sys; from pathlib import Path; sys.path.insert(0,'\\''mu/tools/executors'\\''); import phase_a_executor as pa,phase_b_executor as pb,launch_wave as lw; r=Path.cwd(); assert pa.validate_native_stub_packet_contract(json.loads((r/\".agent_bus-structural-tracker-inputs-r2-20260928/meta/post_merge_routing.json\").read_text()),\"reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md\",lw._project_post_lock_recovery_status((r/\"reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md\").read_text()),allow_post_lock_machine_sections=True); assert pb._tasks_has_canonical_wave_tracker_note(r,wave_id=\"launch-wave-structural-tracker-inputs-r2-2026-09-28\"),'\\''same-wave tracker must be canonical in Ra'\\''; print('\\''Lifecycle-aware native packet contract and canonical Ra tracker: PASS'\\'')' && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_launch_wave.py mu/tests/tools/test_tracker_sync_note_generation.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+    "status": "PASS",
+    "exit_code": 0,
+    "results": [
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -c 'import json,sys; from pathlib import Path; sys.path.insert(0,'\\''mu/tools/executors'\\''); import phase_a_executor as pa,phase_b_executor as pb,launch_wave as lw; r=Path.cwd(); assert pa.validate_native_stub_packet_contract(json.loads((r/\".agent_bus-structural-tracker-inputs-r2-20260928/meta/post_merge_routing.json\").read_text()),\"reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md\",lw._project_post_lock_recovery_status((r/\"reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md\").read_text()),allow_post_lock_machine_sections=True); assert pb._tasks_has_canonical_wave_tracker_note(r,wave_id=\"launch-wave-structural-tracker-inputs-r2-2026-09-28\"),'\\''same-wave tracker must be canonical in Ra'\\''; print('\\''Lifecycle-aware native packet contract and canonical Ra tracker: PASS'\\'')'",
+        "exit_code": 0,
+        "result": "Lifecycle-aware native packet contract and canonical Ra tracker: PASS"
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_launch_wave.py mu/tests/tools/test_tracker_sync_note_generation.py --tb=short",
+        "exit_code": 0,
+        "passed": 357,
+        "failed": 0,
+        "seconds": 31.55
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+        "exit_code": 0,
+        "passed": 351,
+        "failed": 0,
+        "warnings": 2,
+        "seconds": 1.71
+      }
+    ],
+    "warnings": [
+      {
+        "selector": "mu/tests/docs/test_doc_governance.py::TestLaw2DocLifecycle::test_warn_stale_docs",
+        "message": "Existing documentation freshness warning: listed reference docs last verified 237 days ago."
+      },
+      {
+        "selector": "mu/tests/docs/test_root_files.py::TestStatusMd::test_freshness_via_git",
+        "message": "Existing STATUS.md freshness warning: last git commit 89 days ago (2026-07-01)."
+      }
+    ],
+    "final_bookkeeping_probe": {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -c 'import json,sys; from pathlib import Path; sys.path.insert(0,'\\''mu/tools/executors'\\''); import phase_a_executor as pa,phase_b_executor as pb,launch_wave as lw; r=Path.cwd(); assert pa.validate_native_stub_packet_contract(json.loads((r/\".agent_bus-structural-tracker-inputs-r2-20260928/meta/post_merge_routing.json\").read_text()),\"reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md\",lw._project_post_lock_recovery_status((r/\"reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md\").read_text()),allow_post_lock_machine_sections=True); assert pb._tasks_has_canonical_wave_tracker_note(r,wave_id=\"launch-wave-structural-tracker-inputs-r2-2026-09-28\"),'\\''same-wave tracker must be canonical in Ra'\\''; print('\\''Lifecycle-aware native packet contract and canonical Ra tracker: PASS'\\'')'",
+      "exit_code": 0,
+      "result": "Lifecycle-aware native packet contract and canonical Ra tracker: PASS",
+      "canonical_note_exact_config": true
+    },
+    "final_docs_recheck": {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+      "exit_code": 0,
+      "passed": 351,
+      "failed": 0,
+      "warnings": 2,
+      "seconds": 1.66,
+      "reason": "Confirm final TASKS and CHANGELOG result bookkeeping."
+    }
+  },
+  "preservation": {
+    "sources": {
+      "launch-wave-structural-tracker-inputs-r1-2026-09-28": {
+        "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928",
+        "files_verified": 8,
+        "index_sha256": "ccda54ef7a211b8beef87041c4c4d8c8c56bec6ee07d2dfd49aab36d87a86ea3",
+        "manifest_sha256": "1ac88c1572a5eeaf589727e76fb91bcccb21e7d06515586f9847852987c9055b",
+        "receipt_sha256": "73cf4ee8b3b1ee3adcb313b655884ff05de4ae1f90a5c03dd7b94c82c2ac0fb4",
+        "staged_blobs_verified": 8
+      },
+      "mu-coinduction-guarded-prefix-r2-2026-09-27": {
+        "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927",
+        "files_verified": 21,
+        "index_sha256": "ba5e567d17e089ade276ebd2cab4df3ab55ee9a0143e2f9d4a3a179f84f9e631",
+        "manifest_sha256": "da4341677a97ac2f3fb5db9fea31055e309f3df6bb256ced18b6b4cddc660eda",
+        "receipt_sha256": "edeb7ac7a0ac741089154ed2e5c52daccb33b038ed7034e581f7c04f8e22593e",
+        "staged_blobs_verified": 21
+      }
+    },
+    "hashes": {
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/structural_tracker_r1_stopped_candidate_20260928.json": "1ac88c1572a5eeaf589727e76fb91bcccb21e7d06515586f9847852987c9055b",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-structural-tracker-inputs-r1-20260928/index": "ccda54ef7a211b8beef87041c4c4d8c8c56bec6ee07d2dfd49aab36d87a86ea3",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928/CHANGELOG.md": "39e8323f7596f6fa4686dc6524b4e106190ae1d33e426c6f4190187575b4506a",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928/TASKS.md": "7ec46ad1ff4aea0712433c6bb48c460d6d4b9218b401b542e614817a04c0e513",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928/mu/tests/tools/test_launch_wave.py": "4decb9b8fbbce408fed07311314e9a94da8e40a14f8a9da5e514cc0b8e35aa77",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928/mu/tools/executors/launch_wave.py": "be46ebca12b5ba65e927f20d6fb80e8301caaa6c5d49eae60562fa636c2bd5c6",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928/reports/control_plane/launch-wave-structural-tracker-inputs-r1-2026-09-28_2026-09-28.md": "b013c11369fadefbca62c787db6037d3199689796cae132f81fbec03edea54ab",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928/reports/control_plane/launch-wave-structural-tracker-inputs-r1-2026-09-28_implementation_evidence.json": "a1695dcff95eb4965615f765c0324494eb5e138de07daca859e788a6cf81c4cb",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928/reports/deferred/non_blocking/launch-wave-structural-tracker-inputs-r1-2026-09-28_bridge_nonblockers.md": "a3c340fa2427f7dd02d6567052f0e701b64ee73ce6deca21b5d6f236a7c2917a",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928/reports/l4_wave_indicators/launch-wave-structural-tracker-inputs-r1-2026-09-28.json": "48ad29553a3084a09abd50c8b9416d7944f44470c9632e3738985ddda18138e3",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/launch-wave-structural-tracker-inputs-r1-2026-09-28_wave_config.json": "1d722591db10feb742a3c292632effaa3743692f51643ae030bdada7d3e25c0f",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928/.agent_bus-structural-tracker-inputs-r1-20260928/meta/launch_wave_dispatch_terminal.json": "73cf4ee8b3b1ee3adcb313b655884ff05de4ae1f90a5c03dd7b94c82c2ac0fb4",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-structural-tracker-inputs-r1-20260928/HEAD": "285ff06837d692317df826553fba2b2d817534915a1b9331ef942f57c4602b63",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-structural-tracker-inputs-r1-20260928/commondir": "340ddcb67a6204f742cd1e28e5b462622dde7daaa8ee36001897196aacdc6d47",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-structural-tracker-inputs-r1-20260928/gitdir": "b54247604922f82da30aa4c3d872149f5131b40eb50b9da46c165ed56fa6fc61",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-structural-tracker-inputs-r1-20260928/logs/HEAD": "a89323fc8c6e33e58591582c33150c5e66392410b88cfdbcc40271c531bc8f03",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/structural_tracker_r1_pre_stop_candidate_20260928.patch": "08b1c6a386faa6ae1f3b9c453e3f006d34d083d60363b56b7933762dd6dff372",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/mu_coinduction_r2_stopped_candidate_20260928.json": "da4341677a97ac2f3fb5db9fea31055e309f3df6bb256ced18b6b4cddc660eda",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-mu-coinduction-prefix-r2-20260927/index": "ba5e567d17e089ade276ebd2cab4df3ab55ee9a0143e2f9d4a3a179f84f9e631",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/CHANGELOG.md": "3f36c8577627e6bedeecd6e80546719f564173c9438d88f7a9edb6207f2e82ee",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/STATUS.md": "637aada8a6eac93e80dd851e28cd3cf4b538c08d8ad9d0f17b6952ce0196d6a8",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/TASKS.md": "3e77c5202a5b4d52484750275bc35b1a3d40cf18442b5dd599456568b314ab68",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/docs/README.md": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/docs/core/CoinductionPrefix.v0.md": "3ecfbf432b74972d5f3eaaf9a94c1e1d0545cdff05fb31cdbdfeed56ba3037b1",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/host/js/core/seed_loader.js": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/host/js/engine/kernel.js": "4ddef620a80c46d938b806f564725737632370e54f81dc19cc54d625f229e6b8",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/host/python/rcx_pi/selfhost/seed_integrity.py": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/programs/coinduction_prefix.v1.json": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/seed_registry_manifest.v1.json": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/tests/docs/test_growth_caps.py": "c6cef200638ef70d4a3691c36ca47093dbed7862818dbcfaafae89d55e1cf0f2",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/tests/fixtures/coinduction_prefix_vectors.json": "7440414b90389a3cbd484cc7e1044b9c801e27c9e998cd998dc4e68e5f174496",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/tests/l4_gates/test_coinduction_prefix_gate.py": "04d571582f270c3861c4251bb6fd034d9d654e26210310eb3045607110678d6c",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/tests/l4_gates/test_kernel_run_result_contract.py": "faa24d14e09422b7fe8f0e61b928455393b167ca30e67eb3015e22efff4a03b7",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/tests/parity/test_coinduction_prefix_parity.py": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/tests/parity/test_seed_loading_parity.py": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/mu/tests/structural/test_seed_counts.py": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/reports/control_plane/mu-coinduction-guarded-prefix-r2-2026-09-27_2026-09-27.md": "a56867a330d2c82dcdaa4504abd3aecc3356354034637f8d1efeb5d4c6812a35",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/reports/control_plane/mu-coinduction-guarded-prefix-r2-2026-09-27_implementation_evidence.json": "8e7567a5eab77940553d958385b30a02976b01d7c88bbdcbfc47bcb063fa33a5",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/reports/l4_wave_indicators/mu-coinduction-guarded-prefix-r2-2026-09-27.json": "4942fea7b6c1ede972c037c2898a5b920988a1632056e00c9e998e8599b77058",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/roadmap/MANIFEST.md": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/mu-coinduction-guarded-prefix-r2-2026-09-27_wave_config.json": "0bc9d89e2f511c9e5c09531f5b8c10e59f0967b6fd7d9ab1a4fff7a4bff7a2b4",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927/.agent_bus-mu-coinduction-prefix-r2-20260927/meta/launch_wave_dispatch_terminal.json": "edeb7ac7a0ac741089154ed2e5c52daccb33b038ed7034e581f7c04f8e22593e",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-mu-coinduction-prefix-r2-20260927/HEAD": "1c621417a092d2738a1922ba0a25db7a9df19525f0cf74ce2ba33b506f803cf6",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-mu-coinduction-prefix-r2-20260927/commondir": "340ddcb67a6204f742cd1e28e5b462622dde7daaa8ee36001897196aacdc6d47",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-mu-coinduction-prefix-r2-20260927/gitdir": "855a65fabbd65fda9cde73c3f35915867874f59f5a675a0702e5db163a8203f9",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-mu-coinduction-prefix-r2-20260927/logs/HEAD": "f860d8473f70e248a7a5e1c1f12feef450a85a5eecee01741ccf49c4d8a1c61e",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r2-20260928/reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md": "4c0e1bbebc4b2cfd67a148b68b4f58a08e1e6774d0a660a0b3f4f18df9fa637d",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r2-20260928/.agent_bus-structural-tracker-inputs-r2-20260928/meta/post_merge_routing.json": "9f1de82ed5b67096849237d338b1c73d5305c475a82c08a5c455e2a7ce0ba2d7",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-structural-tracker-inputs-r2-20260928/index": "836161dd327712c1cf15e7c2e18dce6d8ec82cdb5fd453d529dc6ba8bc5b5a4b",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_wave_config.json": "17e7b483efcd42fe6454d244fe92349d0d236fe879be198db9e949a9ca9d6937"
+    },
+    "primary_tasks_sha256": "62595691fda972b7921e3f03d994b3fc265c81be34f205ccb46c2665d2930cdc",
+    "final_comparison": {
+      "immutable_hashes_verified": 50,
+      "mismatches": [],
+      "task_ids_preserved": 268,
+      "exact_preserved_code_and_test": true,
+      "changed_files": [
+        "CHANGELOG.md",
+        "TASKS.md",
+        "mu/tests/tools/test_launch_wave.py",
+        "mu/tools/executors/launch_wave.py"
+      ],
+      "untracked_files": [
+        "reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md",
+        "reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_implementation_evidence.json"
+      ]
+    }
+  },
+  "native_handoff": {
+    "locked_packet": "reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_2026-09-28.md",
+    "indicator_collection": "Native collector/commit-owned; not executed by implementer.",
+    "native_review_commit_ci_sync": "Outer dispatcher-owned; not executed by implementer.",
+    "mu_continuation": "After native landing and sync, use a fresh validated Mu STUB on the landed base with explicit measured structural fields and both real JS timeout cases; preserve the stopped R2 candidate.",
+    "landing_claimed": false,
+    "mu_production_completion_claimed": false
+  },
+  "proof_limits": [
+    "Structural metadata admission and propagation only; fixture measurements are test data, not Mu runtime measurements.",
+    "No runtime, seed, Stage0, host-authority, fleet, recovery, dispatcher or checker implementation changed.",
+    "Stopped Mu R2 evidence remains incomplete: 381 passes and two 900-second JS timeouts (missing_payload and finite_open_tail); no semantic success or full parity claim.",
+    "Full correct evidence must still execute through the native supervisor before landing; review, indicators, commit, pre-push, CI, merge and synchronization remain executor-owned.",
+    "One-shot quota observation is unavailable through this session's tools; no percentage inferred, no watchdog or latch created."
+  ],
+  "files_changed": [
+    "mu/tools/executors/launch_wave.py",
+    "mu/tests/tools/test_launch_wave.py",
+    "TASKS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/launch-wave-structural-tracker-inputs-r2-2026-09-28_implementation_evidence.json"
+  ]
+}

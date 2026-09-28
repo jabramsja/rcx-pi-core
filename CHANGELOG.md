@@ -6,6 +6,24 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-28
 
+### Structural launcher inputs for the existing Mu task (Phase B; landing pending)
+
+- Reproduce the accepted structural configuration whose generated tracker omits
+  `host_semantics_delta_before`, `host_semantics_delta_after` and `workload_target`;
+  the real downstream L4 contract rejects all three before native review.
+- Reuse the preserved, reviewed 20-line launcher change and 154-line regression.
+  Admit the three existing tracker inputs, forward their supplied values unchanged
+  and reject incomplete structural configuration before setup writes. Portable
+  tests cover serialization, native setup, downstream metadata validation and
+  the existing worktree/index checks for same-config tracker authority.
+- Carry current PRIMARY TASKS with all 268 task IDs and rebuild this wave's exact
+  canonical Ra note. Preserve the locked native packet and both stopped candidates.
+  Native review, indicators and landing remain pending; the two actual Mu JS
+  timeout cases remain obligations of the existing Mu production task.
+- The declared packet/Ra probe passed, followed by all 357 launcher/tracker tests
+  in 31.55s and 351 docs tests in 1.71s, with two existing freshness warnings.
+  This validates the input repair; no runtime or Mu completion is claimed.
+
 ### Tested read-only fleet retirement and both stopped candidates (Phase B; landing pending)
 
 - Reconstruct the manifest-verified R2 fleet implementation and direct tests,
