@@ -4,6 +4,39 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-09-28
+
+### Tested read-only fleet retirement and both stopped candidates (Phase B; landing pending)
+
+- Reconstruct the manifest-verified R2 fleet implementation and direct tests,
+  including descriptor-bound owner-write for the observed `0555` root rename,
+  durable restoration intent, exact original-mode restoration and independent
+  content/admin/raw-index/history recovery. Preserve the census
+  `diff.autoRefreshIndex=false` correction and exact raw-index guards.
+- Extend the finite admission from stopped R1 to the actual stopped R2 carrier.
+  Separate manifest bindings require R1's unreviewed stop and R2's tested,
+  review-GO stop respectively; both preserve their exact files, staged blobs,
+  packets, receipts and consumed lifecycle budgets. Unlisted dirty sources
+  remain ineligible. No source or old action authority is rewritten or replayed.
+- Preserve PRIMARY's current queue and all 268 task IDs, using the existing
+  tracker builder for the new Ra note. The declared first probe projects native
+  lifecycle status in memory before strict packet validation; implementation
+  leaves the locked packet unchanged. Native review, indicator collection,
+  publication, CI and synchronization remain with the outer executors; Phase B
+  performs zero live public actions or useful-work closure.
+
+- Fresh native builders cover 15 census entries, six conditional retirements
+  in one new operation and nine explicit holds. Sources 14/17 remain held for
+  ambiguous/live native owner locks, and locked 12/116 remain protected. The
+  245/55/122-owner ledgers, 37 spent public claims, 13 original raw indices and
+  six protected WIP hashes remain intact; archival is not semantic integration.
+
+- The declared lifecycle-aware packet/Ra probe passed, followed by 537 fleet
+  tests with one skip in 331.13s and 351 docs tests in 1.73s. The two existing
+  docs freshness warnings remain. Both stopped manifests, all candidate files,
+  raw indices, receipts and lifecycle records are unchanged; the locked R3
+  packet remains byte-exact. No live APPLY or old claim replay occurred.
+
 ## 2026-09-27
 
 ### Missing fleet registrations and finite historical retirement (Phase B; landing pending)

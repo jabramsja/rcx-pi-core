@@ -776,3 +776,72 @@ def test_missing_registration_requires_exact_fresh_opt_in_and_retains_owner(reti
         classifier.classify(observed, **options, missing_paths=(str(f.root / 'arbitrary'),))
     with pytest.raises(ValueError, match='exact finite'):
         classifier.classify(observed, **options, historical_paths=(str(f.repo),))
+
+
+def test_readonly_wave_is_finite_and_keeps_prior_protection_and_owners(retirement_fleet, monkeypatch):
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    f = retirement_fleet
+    names = {7: f.targets[0].name, 14: f.targets[1].name, 9: f.targets[2].name}
+    monkeypatch.setattr(classifier, 'READONLY_PREDECESSORS', names)
+    retirement_git(f, f.repo, 'worktree', 'lock', str(f.targets[2]))
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    binding = dict(path=str(f.repo / 'predecessor.json'), sha256='b' * 64)
+    inherited = dict(task='FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION', status='PENDING_EXACT_HUNK_REVIEW')
+    observed['readonly_predecessor'] = dict(**binding, useful_work_owners=[inherited], owner_closure_authorized=False)
+    for index, name in names.items():
+        source = next(r for r in observed['entries'] if r['path'] == str(f.root / name))
+        source['readonly_source_review'] = dict(status='VERIFIED', predecessor_index=index,
+            predecessor_plan=binding, independent_recovery_verified=True, liveness_verified=True,
+            source_identity=dict(path=source['path'],
+                **{k: source['git'][k] for k in ('HEAD', 'branch', 'common_dir', 'git_dir')},
+                filesystem_identity=source['filesystem_identity']), inherited_landing_owners=[inherited])
+    options = dict(source_sha256=hashlib.sha256(json.dumps(observed).encode()).hexdigest(),
+        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True, retirement=True,
+        retirement_predecessor=f.landed, wave_id=classifier.READONLY_WAVE_ID,
+        historical_paths=tuple(str(f.root / n) for n in names.values()))
+    report = classifier.classify(observed, **options)
+    rows = {r['path']: r for r in report['entries']}
+    assert rows[str(f.targets[0])]['proposed_action'] == 'RETIRE_WORKTREE'
+    assert rows[str(f.targets[1])]['decision'] == 'HOLD'
+    assert rows[str(f.targets[1])]['landing_owner'] == inherited
+    assert 'prior_protection_retained' in {r['code'] for r in rows[str(f.targets[1])]['reasons']}
+    assert rows[str(f.targets[2])]['decision'] == 'HOLD'  # A verified review cannot remove a Git lock.
+    assert rows[str(f.targets[3])]['decision'] == 'HOLD'  # Unlisted, otherwise valid direct source.
+    for builder in (classifier.useful_work_report, classifier.retirement_coverage_report):
+        assert builder(report, 'c' * 64)['readonly_predecessor'] == observed['readonly_predecessor']
+    assert next(r for r in classifier.classify(observed, **options, protected=(str(f.targets[0]),))['entries']
+                if r['path'] == str(f.targets[0]))['decision'] == 'HOLD'
+    source = next(r for r in observed['entries'] if r['path'] == str(f.targets[0]))
+    source['readonly_source_review']['independent_recovery_verified'] = False
+    assert next(r for r in classifier.classify(observed, **options)['entries']
+                if r['path'] == str(f.targets[0]))['decision'] == 'HOLD'
+    with pytest.raises(ValueError, match='exact finite'):
+        classifier.classify(observed, **{**options, 'historical_paths': (str(f.targets[3]),)})
+
+
+def test_readonly_stopped_sources_require_their_own_manifest_binding():
+    import workingrcx_fleet_classification as classifier
+    root = '/fleet'
+    predecessor = dict(path='/evidence/predecessor.json', sha256='a' * 64,
+        stopped_candidate=dict(path='/evidence/r1.json', sha256='b' * 64),
+        stopped_candidate_r2=dict(path='/evidence/r2.json', sha256='c' * 64))
+    sources = classifier.stopped_readonly_sources()
+    assert set(sources) == {'WorkingRCX-fleet-readonly-source-retirement-r1-20260927',
+                            'WorkingRCX-fleet-readonly-source-retirement-r2-20260927'}
+    assert len(classifier.readonly_source_paths()) == 8
+    for name, spec in sources.items():
+        identity = dict(path=root + '/' + name)
+        review = dict(predecessor_index=None, status='VERIFIED', source_identity=identity,
+            predecessor_plan={k: predecessor[k] for k in ('path', 'sha256')},
+            stopped_candidate=predecessor[spec['binding_key']],
+            independent_recovery_verified=True, liveness_verified=True)
+        assert classifier.readonly_review_matches(identity, review, predecessor, root)
+        other_key = 'stopped_candidate_r2' if spec['binding_key'] == 'stopped_candidate' else 'stopped_candidate'
+        assert not classifier.readonly_review_matches(identity,
+            {**review, 'stopped_candidate': predecessor[other_key]}, predecessor, root)
+        assert not classifier.readonly_review_matches(identity, review,
+            {k: v for k, v in predecessor.items() if k != spec['binding_key']}, root)
+        unlisted = dict(path=root + '/WorkingRCX-unlisted-dirty-candidate')
+        assert not classifier.readonly_review_matches(unlisted,
+            {**review, 'source_identity': unlisted}, predecessor, root)

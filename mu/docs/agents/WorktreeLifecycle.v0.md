@@ -178,6 +178,46 @@ the plan's exact classification hash, authority commit, batch and destination.
 Each operation is consumed once. Prior R1/R2 and September 13 plans, receipts
 and operation roots remain immutable.
 
+The observed macOS retirement failure on a `0555` source root has a bounded
+native permission transition. After independent archive/index/history recovery
+and consumed-once admission, retirement opens the exact directory without
+following links and matches its device, inode and original mode. A durable
+restoration-intent record precedes temporarily adding only owner-write (`0755`).
+The same descriptor restores `0555` after rename, including exceptions before
+or after the move. Child modes/bytes, ownership and ACLs are not edited. Full
+destination and original admin manifests must still match before exact Git
+registration removal. Public verification checks original archived permissions,
+destination content/modes, raw index/history and restoration evidence. An
+interrupted restoration leaves an INCOMPLETE owner and independent original-mode
+recovery; it grants no retry and cannot be reported as retirement.
+
+The read-only-source wave binds PR1319 predecessor indices 2, 7, 8, 9, 14 and 17
+to their exact original paths. Census `--readonly-predecessor-plan` records
+current identity, permissions, idle-owner checks and independent recovery.
+Indices 7–9 additionally verify the unchanged consumed permission-failure claim,
+receipt, source/admin manifests and recovery. Index 2 permits only its carrier's
+landed HEAD advancement with the original inode, branch and admin identity.
+R3 additionally names exactly the stopped read-only-source R1 and R2 carriers
+through `--readonly-stopped-manifest` and `--readonly-stopped-r2-manifest`.
+Their separate manifests bind the preserved packets and terminal receipts, staged
+candidate blobs, raw indices, original HEAD/admin and spent lifecycle records.
+R1 stopped before review; R2 passed review and tests but stopped on a
+root-authored evidence probe that rejected the native commit-ready status.
+Each requires its own recorded terminal state and manifest binding.
+Census proves standalone recovery without altering
+those inputs, including disabling Git diff's automatic index stat-cache refresh
+as well as optional locks. APPLY recreates durable recovery and verifies the same bindings
+before relocation. A changed file, raw index, receipt, owner or live process
+holds that source independently of eligible peers. Both uncommitted action
+plans are preserved evidence and grant no action authority. The governing
+packet remains unchanged by implementation; the declared evidence probe uses
+the existing launcher lifecycle projection in memory before strict validation.
+Indices 14 and 17 retain prior explicit protection and useful-work owners;
+this packet supplies no individual release justification. All unlisted sources,
+locks, PRIMARY, separate dev, stopped Mu, preservation parent and active carrier
+remain held. Fresh operations inherit all prior useful-work ledgers and exact
+intent coverage without closing them or resetting exhausted lifecycle attempts.
+
 ### Explicit historical-source retirement
 
 Census and classification accept `--retirement` with a fresh residual wave.

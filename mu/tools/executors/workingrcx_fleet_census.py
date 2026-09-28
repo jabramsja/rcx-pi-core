@@ -40,7 +40,9 @@ def _git(path: str, *args: str, alternate_objects: str | None = None) -> tuple[b
     operation = "git " + " ".join(args)
     try:
         result = subprocess.run(
-            ["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
+            # Git diff can refresh stat-cache bytes even with optional locks
+            # disabled. The stopped carrier's original raw index is evidence.
+            ["git", "--no-optional-locks", "-c", "diff.autoRefreshIndex=false", "-c", "core.fsmonitor=false",
              "-c", "core.untrackedCache=false", "-C", path, *args],
             env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
         )
@@ -759,8 +761,170 @@ def retirement_observation(path: str, fleet_root: str, common: str, *, prior_own
     return result
 
 
+def readonly_source_reviews(observed: dict, predecessor_plan: Path, comparison_commit: str,
+                            *, stopped_manifest: Path | None = None,
+                            stopped_r2_manifest: Path | None = None) -> None:
+    """Observe PR1319's named remainder and the exact preserved R1/R2 sources."""
+    try:
+        from . import workingrcx_fleet_apply as fleet
+        from . import workingrcx_fleet_classification as classifier
+    except ImportError:
+        import workingrcx_fleet_apply as fleet
+        import workingrcx_fleet_classification as classifier
+    raw = fleet.read_plain(predecessor_plan)
+    previous = json.loads(raw)
+    if (previous.get("wave_id") != classifier.MISSING_WAVE_ID
+            or previous.get("fleet_root") != observed["fleet_root"]
+            or predecessor_plan.name != classifier.MISSING_WAVE_ID + "_apply_plan.json"):
+        raise ValueError("Read-only retirement requires the exact PR1319 predecessor plan")
+    root, repo = Path(observed["fleet_root"]), Path(observed["anchor_repo"])
+    binding = dict(path=str(predecessor_plan), sha256=fleet.digest(raw))
+    observed["readonly_predecessor"] = dict(**binding, wave_id=previous["wave_id"],
+        replay_authorized=False, useful_work_owners=[{k: r.get(k) for k in (
+            "source_index", "path", "landing_owner", "inherited_landing_owners", "current_landing_review")}
+            for r in previous["entries"] if r.get("landing_owner") or r.get("inherited_landing_owners")],
+        owner_closure_authorized=False)
+    continuity = observed["readonly_predecessor"]
+    continuity["retained_evidence"] = []
+    for name in ("workingrcx-fleet-live-authority-r1-2026-09-27_useful_work.json",
+                 "workingrcx-fleet-validation-convergence-r1-2026-09-27_useful_work.json",
+                 classifier.MISSING_WAVE_ID + "_useful_work.json",
+                 classifier.MISSING_WAVE_ID + "_missing_registration_evidence.json"):
+        path = predecessor_plan.parent / name
+        if path.exists():
+            value = json.loads(fleet.read_plain(path))
+            continuity["retained_evidence"].append(dict(path=str(path), sha256=fleet.file_hash(path),
+                owner_count=value.get("landing_owners"), owner_closure_authorized=False))
+    archive = repo / "reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26"
+    for name in ("pr1319_all_ten_pairs_verified_20260927.json",
+                 "pr1319_batch001_permission_blocker_20260927.json",
+                 "retained_staged_tracker_stderr_intent_coverage_20260927.json"):
+        path = archive / name
+        if path.exists():
+            continuity["retained_evidence"].append(dict(path=str(path), sha256=fleet.file_hash(path),
+                evidence=json.loads(fleet.read_plain(path)), owner_closure_authorized=False))
+    sources = {r["path"]: r for r in observed["entries"]}
+    candidates = []
+    for index, name in classifier.READONLY_PREDECESSORS.items():
+        old = previous["entries"][index]
+        path = str(root / name)
+        if old["source_index"] != index or old["path"] != path:
+            raise ValueError("Named predecessor index/path changed")
+        candidates.append((index, path, old, None))
+    stopped_specs = classifier.stopped_readonly_sources()
+    for name, manifest_path in ((classifier.STOPPED_READONLY_SOURCE, stopped_manifest),
+                               (classifier.STOPPED_READONLY_R2_SOURCE, stopped_r2_manifest)):
+        if manifest_path is None:
+            continue
+        stopped_raw = fleet.read_plain(manifest_path)
+        manifest = json.loads(stopped_raw)
+        stopped = dict(path=str(manifest_path), sha256=fleet.digest(stopped_raw))
+        spec = stopped_specs[name]
+        continuity[spec["binding_key"]] = stopped
+        path = str(root / name)
+        old = dict(source_identity=dict(path=manifest.get("path"), HEAD=manifest.get("head"),
+            branch=manifest.get("branch"), git_dir=manifest.get("git_dir"), common_dir=str(repo / ".git")),
+            reason_codes=[spec["state"]], inherited_landing_owners=[])
+        candidates.append((None, path, old, stopped))
+    for index, path, old, stopped in candidates:
+        source = sources.get(path)
+        if source is None:
+            raise ValueError("Named predecessor missing from current census: " + path)
+        owners = list(old.get("inherited_landing_owners", []))
+        for owner in (old.get("landing_owner"), old.get("current_landing_review")):
+            if owner and owner not in owners:
+                owners.append(owner)
+        ident = dict(path=path, **{k: source["git"].get(k) for k in ("HEAD", "branch", "common_dir", "git_dir")},
+                     filesystem_identity=source.get("filesystem_identity"))
+        review = dict(predecessor_index=index, predecessor_plan=binding,
+            source_identity=ident, original_source_identity=old["source_identity"],
+            prior_protection=old["reason_codes"], inherited_landing_owners=owners,
+            status="HOLD", reason=None, independent_recovery_verified=False, liveness_verified=False,
+            consumed_predecessor=None, replay_authorized=False)
+        source["readonly_source_review"] = review
+        if stopped:
+            review["stopped_candidate"] = stopped
+        try:
+            info = Path(path).lstat()
+            review["root_permissions"] = dict(device=info.st_dev, inode=info.st_ino,
+                mode=stat.S_IMODE(info.st_mode), uid=info.st_uid, gid=info.st_gid)
+            entry = dict(path=path, source_identity=ident, action="RETIRE_WORKTREE",
+                retirement_evidence=source["retirement_evidence"], comparison_commit=comparison_commit,
+                landing_owner=old.get("landing_owner"), readonly_source_review=review)
+            with fleet.safe_git_environment():
+                if index in {14, 17}:
+                    # Inspect exact identity/owners but keep the explicit prior
+                    # protection: this wave records no individual release case.
+                    fleet.inspect_identity(ident, retirement=True)
+                    entry.pop("readonly_source_review")
+                    fleet.inspect_retirement(repo, entry)
+                    review.update(liveness_verified=True,
+                        reason="Prior explicit protection retained; no individual native release justification")
+                    continue
+                review["consumed_predecessor"] = fleet.verify_readonly_predecessor(repo, entry)
+                state = fleet.inspect_retirement(repo, entry)
+                review["liveness_verified"] = True
+                review["native_owners"] = state["native_owners"]
+                if index == 2 or stopped:
+                    # A new carrier has no spent retirement archive. Prove a
+                    # standalone recovery in disposable storage, reading only
+                    # the source. APPLY must recreate and verify durable proof.
+                    with tempfile.TemporaryDirectory(prefix="rcx-readonly-recovery-") as temp:
+                        directory = Path(temp).resolve()
+                        hashes = fleet.preserve_retirement(repo, entry, directory, state)
+                        fleet.verify_retirement_preservation(directory, entry, hashes)
+                        review["recovery_observation"] = dict(
+                            content_sha256=fleet.digest(fleet.encoded(state["content"])),
+                            admin_manifest_sha256=fleet.file_hash(directory / "gitdir-before.json"),
+                            raw_index_sha256=state["index_sha256"], head=state["head"],
+                            durable_preservation_required_at_apply=True)
+                if fleet.inspect_retirement(repo, entry) != state:
+                    raise fleet.Hold("Read-only source changed during recovery observation")
+                review.update(status="VERIFIED", independent_recovery_verified=True)
+        except (fleet.Hold, OSError, ValueError, subprocess.SubprocessError) as exc:
+            review.update(status="HOLD", reason=str(exc))
+
+
+def readonly_source_report(observed: dict, *, census_sha256: str) -> dict:
+    """Six named sources, both stopped carriers and two retained locked owners."""
+    try:
+        from . import workingrcx_fleet_apply as fleet
+        from . import workingrcx_fleet_classification as classifier
+    except ImportError:
+        import workingrcx_fleet_apply as fleet
+        import workingrcx_fleet_classification as classifier
+    binding = observed["readonly_predecessor"]
+    raw = fleet.read_plain(Path(binding["path"]))
+    if fleet.digest(raw) != binding["sha256"]:
+        raise ValueError("Read-only predecessor plan changed")
+    previous = json.loads(raw)
+    sources = {r["path"]: r for r in observed["entries"]}
+    rows = []
+    for index in sorted(set(classifier.READONLY_PREDECESSORS) | {12, 116}):
+        old = previous["entries"][index]
+        current = sources.get(old["path"])
+        rows.append(dict(predecessor_index=index, path=old["path"],
+            prior_source_identity=old["source_identity"], prior_protection=old["reason_codes"],
+            prior_landing_owner=old.get("landing_owner"), current=current,
+            disposition="RETAIN_LOCKED_OWNER" if index in {12, 116} else
+                "CONDITIONAL_REVIEW_ONLY" if current and current.get("readonly_source_review", {}).get("status") == "VERIFIED"
+                else "RETAIN_ORIGINAL_HOLD"))
+    for source in observed["entries"]:
+        review = source.get("readonly_source_review", {})
+        if review.get("stopped_candidate"):
+            rows.append(dict(predecessor_index=None, path=source["path"], current=source,
+                stopped_candidate=review["stopped_candidate"], disposition="CONDITIONAL_REVIEW_ONLY"
+                    if review["status"] == "VERIFIED" else "RETAIN_STOPPED_CANDIDATE"))
+    return dict(schema_version=1, wave_id=classifier.READONLY_WAVE_ID,
+        observation_kind="read_only_named_source_permissions_and_owners", mutation_authorized=False,
+        census_sha256=census_sha256, predecessor=binding, entry_count=len(rows), entries=rows,
+        limits="No new missing-source action, lock removal, old claim replay or useful-work owner closure.")
+
+
 def census(fleet_root: str, anchor_repo: str, *, comparison_commit: str | None = None,
-           retirement: bool = False) -> dict:
+           retirement: bool = False, readonly_predecessor_plan: Path | None = None,
+           readonly_stopped_manifest: Path | None = None,
+           readonly_stopped_r2_manifest: Path | None = None) -> dict:
     """Return fresh metadata; only main() writes the explicitly named output."""
     started = _now()
     # Resolve the input directories once (e.g. /var -> /private/var on macOS).
@@ -846,7 +1010,7 @@ def census(fleet_root: str, anchor_repo: str, *, comparison_commit: str | None =
                 row["inspection_status"] = "partial"
         row["observed_finished_at"] = _now()
         rows.append(row)
-    return {
+    report = {
         "schema_version": 1, "observation_kind": "read_only_fleet_census",
         "started_at": started, "finished_at": _now(),
         "fleet_root_input": fleet_root, "fleet_root": root,
@@ -865,6 +1029,18 @@ def census(fleet_root: str, anchor_repo: str, *, comparison_commit: str | None =
         ],
         "entry_count": len(rows), "entries": rows,
     }
+    if (readonly_stopped_manifest is not None or readonly_stopped_r2_manifest is not None) and readonly_predecessor_plan is None:
+        raise ValueError("Stopped read-only source observation requires its predecessor plan")
+    if readonly_predecessor_plan is not None:
+        if not retirement or not comparison_commit:
+            raise ValueError("Read-only predecessor observation requires retirement and comparison authority")
+        readonly_source_reviews(report, readonly_predecessor_plan, comparison_commit,
+                                stopped_manifest=readonly_stopped_manifest,
+                                stopped_r2_manifest=readonly_stopped_r2_manifest)
+        report["limitations"].append("Explicit read-only predecessor mode also probes native/process ownership and independent recovery for the named remainder; it grants no action authority.")
+        report["limitations"][3] = "All entries remain UNCLASSIFIED. No fetch, GitHub inspection or source mutation."
+        report["finished_at"] = _now()
+    return report
 
 
 def _write_report(path: str, report: dict) -> None:
@@ -903,12 +1079,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--anchor-repo", required=True)
     parser.add_argument("--comparison-commit", help="Exact local comparison commit for useful-work inventory")
     parser.add_argument("--retirement", action="store_true", help="Observe native archive/journal owners and exact patch coverage")
+    parser.add_argument("--readonly-predecessor-plan", type=Path,
+                        help="Read-only recovery/liveness observations for the six named PR1319 predecessors")
+    parser.add_argument("--readonly-stopped-manifest", type=Path,
+                        help="Exact preserved R1 candidate manifest; admits no other stopped source")
+    parser.add_argument("--readonly-stopped-r2-manifest", type=Path,
+                        help="Exact tested/reviewed R2 candidate manifest; admits no other stopped source")
     parser.add_argument(
         "--output", required=True,
         help="JSON artifact; a census for the same fleet root and anchor may be refreshed",
     )
     args = parser.parse_args(argv)
-    report = census(args.fleet_root, args.anchor_repo, comparison_commit=args.comparison_commit, retirement=args.retirement)
+    report = census(args.fleet_root, args.anchor_repo, comparison_commit=args.comparison_commit,
+                    retirement=args.retirement, readonly_predecessor_plan=args.readonly_predecessor_plan,
+                    readonly_stopped_manifest=args.readonly_stopped_manifest,
+                    readonly_stopped_r2_manifest=args.readonly_stopped_r2_manifest)
     try:
         _write_report(args.output, report)
     except (OSError, ValueError) as exc:

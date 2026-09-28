@@ -29,6 +29,21 @@ RESIDUAL_BATCH_SIZE = 12
 RETIREMENT_WAVE_ID = "workingrcx-fleet-real-retirement-r1-2026-09-23"
 RETIREMENT_PREDECESSOR = "a76ccb9b238b45474946b93a5f3d3be1b07a8b93"
 MISSING_WAVE_ID = "workingrcx-fleet-missing-registration-retirement-r1-2026-09-27"
+READONLY_WAVE_ID = "workingrcx-fleet-readonly-source-retirement-r3-2026-09-28"
+STOPPED_READONLY_WAVE_ID = "workingrcx-fleet-readonly-source-retirement-r1-2026-09-27"
+STOPPED_READONLY_SOURCE = "WorkingRCX-fleet-readonly-source-retirement-r1-20260927"
+STOPPED_READONLY_RECEIPT = ".agent_bus-fleet-readonly-source-retirement-r1-20260927/meta/launch_wave_dispatch_terminal.json"
+STOPPED_READONLY_R2_WAVE_ID = "workingrcx-fleet-readonly-source-retirement-r2-2026-09-27"
+STOPPED_READONLY_R2_SOURCE = "WorkingRCX-fleet-readonly-source-retirement-r2-20260927"
+STOPPED_READONLY_R2_RECEIPT = ".agent_bus-fleet-readonly-source-retirement-r2-20260927/meta/launch_wave_dispatch_terminal.json"
+READONLY_PREDECESSORS = {
+    2: "WorkingRCX-fleet-missing-registration-retirement-r1-20260927",
+    7: "WorkingRCX-preservation/never-behind-fleet-authority-r1-phase-a-request-changes-20260909",
+    8: "WorkingRCX-preservation/never-behind-fleet-authority-r2-phase-b-policy-bound-20260909",
+    9: "WorkingRCX-preservation/never-behind-fleet-authority-r3-precommit-needs-phase-a-20260909",
+    14: "WorkingRCX-preservation/pr-disposition-apply-r2-terminal-transition-blocked-20260910",
+    17: "WorkingRCX-preservation/pr-disposition-r2-adoption-enabler-diverged-20260910",
+}
 # Only these individually enumerated predecessor sources can be proposed for
 # release. The preservation container itself and the stopped Mu owner cannot.
 HISTORICAL_SOURCES = (
@@ -299,6 +314,40 @@ def retirement_authority_binding(census: dict, *, wave_id: str, predecessor: str
                 anchor_repo=census["anchor_repo"])
 
 
+def stopped_readonly_sources() -> dict[str, dict]:
+    """Exactly the two preserved candidates; their terminal states differ."""
+    return {
+        STOPPED_READONLY_SOURCE: dict(wave_id=STOPPED_READONLY_WAVE_ID,
+            receipt=STOPPED_READONLY_RECEIPT, binding_key="stopped_candidate",
+            state="STOPPED_IMPLEMENTED_NOT_REVIEWED_NOT_LANDED"),
+        STOPPED_READONLY_R2_SOURCE: dict(wave_id=STOPPED_READONLY_R2_WAVE_ID,
+            receipt=STOPPED_READONLY_R2_RECEIPT, binding_key="stopped_candidate_r2",
+            state="STOPPED_TESTED_REVIEW_GO_NOT_LANDED"),
+    }
+
+
+def readonly_source_paths() -> tuple[str, ...]:
+    return (*READONLY_PREDECESSORS.values(), *stopped_readonly_sources())
+
+
+def readonly_review_matches(identity: dict, review: dict, predecessor: dict, root: str) -> bool:
+    """The six predecessor owners and two manifest-bound stopped carriers only."""
+    index = review.get("predecessor_index")
+    stopped = review.get("stopped_candidate")
+    named = (index in {2, 7, 8, 9} and not stopped
+             and identity["path"] == root + "/" + READONLY_PREDECESSORS[index])
+    if stopped:
+        named = index is None and any(
+            stopped == predecessor.get(spec["binding_key"])
+            and identity["path"] == root + "/" + name
+            for name, spec in stopped_readonly_sources().items())
+    return bool(named and review.get("status") == "VERIFIED"
+        and review.get("source_identity") == identity
+        and review.get("predecessor_plan") == {k: predecessor[k] for k in ("path", "sha256")}
+        and review.get("independent_recovery_verified") is True
+        and review.get("liveness_verified") is True)
+
+
 def classify(census: dict, *, source_sha256: str, base_commit: str,
              carrier: str, landed: bool, residual: bool = False,
              wave_id: str | None = None, protected: tuple[str, ...] = (),
@@ -324,12 +373,16 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
             selected_wave != RETIREMENT_WAVE_ID or base_commit != RETIREMENT_PREDECESSOR):
         raise ValueError("Actual fleet retirement requires explicit fresh predecessor authority")
     observed_paths = {r["path"] for r in census["entries"]}
-    allowed_historical = {census["fleet_root"] + "/" + p for p in HISTORICAL_SOURCES}
+    readonly = selected_wave == READONLY_WAVE_ID
+    allowed_historical = {census["fleet_root"] + "/" + p for p in (
+        readonly_source_paths() if readonly else HISTORICAL_SOURCES)}
+    if readonly and (authority is None or missing_paths or not census.get("readonly_predecessor")):
+        raise ValueError("Read-only source renewal requires its exact predecessor observations")
     if missing_paths or historical_paths:
         if (authority is None or not set(missing_paths + historical_paths) <= observed_paths
                 or len(set(missing_paths)) != len(missing_paths)
                 or len(set(historical_paths)) != len(historical_paths)
-                or (historical_paths and (selected_wave != MISSING_WAVE_ID
+                or (historical_paths and (selected_wave not in {MISSING_WAVE_ID, READONLY_WAVE_ID}
                     or not set(historical_paths) <= allowed_historical))):
             raise ValueError("Registration/historical release requires fresh exact finite source authority")
     if not _oid(base_commit):
@@ -490,6 +543,17 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
             # child; explicit --protect and the active carrier always win.
             if not any(path == p or path.startswith(p + "/") for p in (*protected, carrier, census["anchor_repo"])):
                 reasons = [r for r in reasons if r["code"] not in {"protected_evidence", "outside_direct_fleet"}]
+        if readonly:
+            review = source.get("readonly_source_review", {})
+            if path not in allowed_historical or not historical:
+                hold("outside_readonly_remainder", "Only the six named predecessors and exact stopped R1/R2 carriers may be considered in this wave.")
+            elif review.get("predecessor_index") in {14, 17}:
+                hold("prior_protection_retained", "No individual native release justification; retain original protection and useful-work owner.")
+            elif not readonly_review_matches(dict(
+                        path=path, **{k: git.get(k) for k in ("HEAD", "branch", "common_dir", "git_dir")},
+                        filesystem_identity=source.get("filesystem_identity")),
+                    review, census["readonly_predecessor"], census["fleet_root"]):
+                hold("readonly_recovery_unproved", "Exact current identity, idle owners and independent original-mode recovery must be observed before renewal.")
         if empty:
             reasons = [r for r in reasons if r["code"] not in {"inspection_uncertain", "not_linked_worktree",
                 "repository_identity_uncertain", "head_or_branch_uncertain", "registration_uncertain", "dirty_or_unknown"}]
@@ -564,6 +628,9 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
                 inherited = source.get("retirement_evidence", {}).get("preserved_operation") or {}
                 previous_owners = [r["landing_owner"] for r in source.get("retirement_evidence", {}).get("prior_owners", [])
                                    if r.get("landing_owner")]
+                for owner in source.get("readonly_source_review", {}).get("inherited_landing_owners", []):
+                    if owner not in previous_owners:
+                        previous_owners.append(owner)
                 rows[-1]["inherited_landing_owners"] = previous_owners
                 if inherited.get("landing_owner"):
                     rows[-1]["landing_owner"] = inherited["landing_owner"]
@@ -614,6 +681,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
         report["policy"]["protected_heads"] = []
     if authority is not None:
         report["retirement_authority"] = authority
+    if readonly:
+        report["readonly_predecessor"] = census["readonly_predecessor"]
     if missing_paths or historical_paths:
         report["policy"].update(missing_registration_paths=list(missing_paths),
                                 reviewed_historical_paths=list(historical_paths),
@@ -633,6 +702,8 @@ def useful_work_report(classification: dict, classification_sha256: str) -> dict
             row["inherited_landing_owners"] = source.get("inherited_landing_owners", [])
             row["current_landing_review"] = source.get("current_landing_review")
     return dict(schema_version=1, wave_id=classification["wave_id"],
+        **({"readonly_predecessor": classification["readonly_predecessor"]}
+           if "readonly_predecessor" in classification else {}),
         **({"retirement_authority": classification["retirement_authority"]}
            if "retirement_authority" in classification else {}),
         census_sha256=classification["source_sha256"], classification_sha256=classification_sha256,
@@ -661,6 +732,8 @@ def retirement_coverage_report(classification: dict, classification_sha256: str)
                     or journal.get("state") == "PREPARED" else "HISTORICAL_RECOVERY_EVIDENCE",
                 integration_completed=False) for journal in evidence.get("journals", [])]))
     return dict(schema_version=1, wave_id=classification["wave_id"],
+        **({"readonly_predecessor": classification["readonly_predecessor"]}
+           if "readonly_predecessor" in classification else {}),
         **({"retirement_authority": classification["retirement_authority"]}
            if "retirement_authority" in classification else {}),
         comparison_commit=classification["comparison_commit"], classification_sha256=classification_sha256,

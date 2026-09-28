@@ -4,11 +4,13 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 import fcntl
+import errno
 import json
 import os
 from pathlib import Path
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -3203,3 +3205,147 @@ def test_missing_registration_original_cohort_cannot_be_rebound(fleet):
         apply.apply_residual_plan(f.repo, plan, **kwargs)
     assert admin.exists() and str(target) in apply.registration_paths(f.repo)
     assert not kwargs['operation_root'].exists()
+
+
+def test_readonly_root_native_retirement_restores_modes_index_and_history(fleet, monkeypatch):
+    f = fleet
+    target = f.targets[0]
+    (target / 'tracked').write_bytes(b'staged-only retained intent\x00\xff')
+    git(f, target, 'add', 'tracked')
+    (target / 'tracked').write_bytes(b'different unstaged retained intent\n')
+    (target / 'tracked').chmod(0o440)
+    (target / 'ignored-evidence').chmod(0o551)
+    target.chmod(0o555)
+    original = apply.tree_manifest(target)
+    admin = f.common / 'worktrees' / target.name
+    raw_index = (admin / 'index').read_bytes()
+    raw_admin = apply.tree_manifest(admin)
+    root_info = target.stat()
+    parent_mode = target.parent.stat().st_mode
+    rename = os.rename
+    if sys.platform == 'darwin':
+        # The macOS restriction is a change of parent (updating '..'), not
+        # merely a different name within the original writable parent.
+        probe_parent = f.root / 'rename-probe-parent'
+        probe_parent.mkdir(mode=0o700)
+        with pytest.raises(PermissionError) as failed:
+            rename(target, probe_parent / 'worktree')
+        assert failed.value.errno == errno.EACCES
+    calls = []
+    def macos_rename(source, destination):
+        if source == target:
+            mode = stat.S_IMODE(source.stat().st_mode)
+            calls.append(mode)
+            if mode == 0o555:
+                raise PermissionError(errno.EACCES, 'macOS requires write permission on the source root')
+            assert mode == 0o755
+            assert apply.tree_manifest(source) == {**original, '.': {'kind': 'directory', 'mode': 0o755}}
+        rename(source, destination)
+    monkeypatch.setattr(apply.os, 'rename', macos_rename)
+    plan, kwargs = retirement_fixture(f)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result['outcome_counts'] == {'RETIRED': 4}, result
+    entry = next(e for e in plan['entries'] if e['path'] == str(target))
+    destination = Path(entry['destination'])
+    assert calls == [0o755]
+    assert apply.tree_manifest(destination) == original
+    moved_info = destination.stat()
+    assert (moved_info.st_dev, moved_info.st_ino, moved_info.st_uid, moved_info.st_gid, moved_info.st_mode) == (
+        root_info.st_dev, root_info.st_ino, root_info.st_uid, root_info.st_gid, root_info.st_mode)
+    assert target.parent.stat().st_mode == parent_mode
+    recovery = destination.parent / 'recovery.git'
+    assert (recovery / 'index').read_bytes() == raw_index
+    assert git(f, recovery, 'rev-parse', 'HEAD') == f.original
+    assert json.loads((destination.parent / 'gitdir-before.json').read_bytes()) == raw_admin
+    apply.verify_archive(destination.parent / 'before.tar', original)
+    assert apply.verify_residual_plan(f.repo, plan, **kwargs)['batch_complete']
+    destination.chmod(0o755)
+    with pytest.raises(apply.Hold, match='proof changed'):
+        apply.verify_residual_plan(f.repo, plan, **kwargs)
+    destination.chmod(0o555)
+
+
+@pytest.mark.parametrize('after_move', [False, True])
+def test_readonly_failed_rename_restores_root_and_preserves_consumed_recovery(fleet, monkeypatch, after_move):
+    f = fleet
+    target = f.targets[0]
+    target.chmod(0o555)
+    before = apply.tree_manifest(target)
+    admin = f.common / 'worktrees' / target.name
+    admin_before = apply.tree_manifest(admin)
+    plan, kwargs = retirement_fixture(f)
+    rename = os.rename
+    def failed(source, destination):
+        if source == target:
+            assert stat.S_IMODE(source.stat().st_mode) == 0o755
+            if after_move:
+                rename(source, destination)
+            raise PermissionError(errno.EACCES, 'observed rename failure')
+        rename(source, destination)
+    monkeypatch.setattr(apply.os, 'rename', failed)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result['outcome_counts'] == {'INCOMPLETE': 1, 'RETIRED': 3}, result
+    outcome = result['outcomes'][0]
+    destination = Path(outcome['destination'])
+    assert apply.tree_manifest(destination if after_move else target) == before
+    assert apply.tree_manifest(admin) == admin_before
+    assert str(target) in apply.registration_paths(f.repo)
+    assert outcome['boundary']['authority_consumed'] and not outcome['boundary']['action_succeeded']
+    assert not apply.retirement_record_path(f.common, target).exists()
+    assert not apply.verify_residual_plan(f.repo, plan, **kwargs)['batch_complete']
+    with pytest.raises(apply.Hold, match='consumed'):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
+    if not after_move:
+        old_hashes = {p: apply.file_hash(p) for p in kwargs['operation_root'].rglob('*') if p.is_file() and not p.is_symlink()}
+        claims = {p: p.read_bytes() for p in (f.common / 'rcx_terminal_mutation_attempts').glob('*.json')}
+        monkeypatch.setattr(apply.os, 'rename', rename)
+        f.landed = kwargs['authority_commit']
+        fresh, fresh_kwargs = retirement_fixture(f, wave='fixture-readonly-renewal', renew=True)
+        assert fresh['operations'][0]['operation_id'] != plan['operations'][0]['operation_id']
+        renewed = apply.apply_residual_plan(f.repo, fresh, **fresh_kwargs)
+        assert renewed['outcome_counts'] == {'RETIRED': 1}, renewed
+        assert apply.verify_residual_plan(f.repo, fresh, **fresh_kwargs)['batch_complete']
+        assert all(apply.file_hash(p) == sha for p, sha in old_hashes.items())
+        assert all(p.read_bytes() == raw for p, raw in claims.items())
+
+
+def test_readonly_permission_transition_refuses_replaced_root(fleet):
+    target = fleet.targets[0]
+    target.chmod(0o555)
+    info = target.stat()
+    directory = fleet.root / 'readonly-transition'
+    directory.mkdir()
+    entry = dict(path=str(target), destination=str(directory / 'worktree'),
+        source_identity=dict(filesystem_identity=dict(device=info.st_dev, inode=info.st_ino + 1, mode=info.st_mode)))
+    with pytest.raises(apply.Hold, match='identity changed'):
+        apply.rename_retirement_root(entry, directory)
+    assert target.stat().st_mode == info.st_mode and not list(directory.iterdir())
+
+
+def test_readonly_failed_restoration_keeps_honest_incomplete_owner(fleet, monkeypatch):
+    f = fleet
+    target = f.targets[0]
+    target.chmod(0o555)
+    original = apply.tree_manifest(target)
+    root_inode = target.stat().st_ino
+    plan, kwargs = retirement_fixture(f)
+    chmod = os.fchmod
+    def fail_restore(fd, mode):
+        if os.fstat(fd).st_ino == root_inode and mode == 0o555:
+            raise OSError(errno.EIO, 'injected original-mode restoration failure')
+        chmod(fd, mode)
+    monkeypatch.setattr(apply.os, 'fchmod', fail_restore)
+    result = apply.apply_residual_plan(f.repo, plan, **kwargs)
+    assert result['outcome_counts'] == {'INCOMPLETE': 1, 'RETIRED': 3}, result
+    outcome = result['outcomes'][0]
+    destination = Path(outcome['destination'])
+    assert 'restoration failure' in outcome['reason']
+    assert destination.stat().st_mode & 0o777 == 0o755
+    assert (destination.parent / 'root-permission-transition.json').exists()
+    assert not (destination.parent / 'root-permission-restored.json').exists()
+    apply.verify_archive(destination.parent / 'before.tar', original)
+    assert str(target) in apply.registration_paths(f.repo)
+    assert not apply.retirement_record_path(f.common, target).exists()
+    assert not apply.verify_residual_plan(f.repo, plan, **kwargs)['batch_complete']
+    with pytest.raises(apply.Hold, match='consumed'):
+        apply.apply_residual_plan(f.repo, plan, **kwargs)
