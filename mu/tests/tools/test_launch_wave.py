@@ -40,6 +40,9 @@ import executor_dispatch as ed  # noqa: E402  (public dispatcher seams)
 import commit_executor as ce  # noqa: E402  (authoritative continuation producer)
 from meta_bridge_supervisor import compute_repo_state  # noqa: E402  (public state seam)
 
+sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "checks"))
+import enforce_l4_execution_contract as l4_contract  # noqa: E402
+
 
 # --------------------------------------------------------------------------- #
 # Fixtures / helpers                                                           #
@@ -118,6 +121,42 @@ def make_config(**overrides):
     )
     base.update(overrides)
     return lw.WaveConfig(**base)
+
+
+_STRUCTURAL_TRACKER_INPUTS = {
+    "host_semantics_delta_before": "fixture host markers: total=7, python=4, js=3",
+    "host_semantics_delta_after": "fixture host markers: total=5, python=2, js=3",
+    "workload_target": "execution_layer_truth",
+}
+_STRUCTURAL_CHANGED_FILES = [
+    "mu/programs/coinduction_prefix.v1.json",
+    "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+    "mu/tests/structural/test_execution_layer_truth_contract.py",
+]
+
+
+def _structural_config_data(*, include_required=True):
+    """Portable Mu R2 input shape; all measurements here are test fixtures."""
+    data = dataclasses.asdict(make_config(
+        wave_class="L4_STRUCTURAL",
+        task_id="[MU-COINDUCTION-PRODUCTION-PROOF]",
+        structural_artifact_ref=_STRUCTURAL_CHANGED_FILES[0],
+        evidence_command=(
+            "PYTHONHASHSEED=0 python3 -m pytest -q "
+            + " ".join(_STRUCTURAL_CHANGED_FILES[1:])
+        ),
+        post_gate_contract_sweep=(
+            "python3 -m pytest -q " + _STRUCTURAL_CHANGED_FILES[2]
+        ),
+        scope_items=["TASKS.md", *_STRUCTURAL_CHANGED_FILES],
+        progress_proof_before="Fixture guarded-prefix outcome is not represented",
+        progress_proof_after="Fixture guarded-prefix outcome has structural evidence",
+    ))
+    for name in _STRUCTURAL_TRACKER_INPUTS:
+        data.pop(name, None)
+    if include_required:
+        data.update(_STRUCTURAL_TRACKER_INPUTS)
+    return data
 
 
 def _phase_b_packet_content(config):
@@ -1368,6 +1407,121 @@ def test_full_sequential_setup_produces_all_artifacts(wave_repo):
     assert "candidate_authority" not in routing
     assert "candidate_authority_required" not in routing
     assert result.candidate_authority_spec_path is None
+
+
+def test_structural_omitted_inputs_reproduce_downstream_rejection(wave_repo):
+    """Mu R2's formerly accepted input omitted exactly these three fields."""
+    config = lw.WaveConfig.from_dict(_structural_config_data(include_required=False))
+    fields = lw.build_tracker_fields(config)
+    assert {name: getattr(fields, name) for name in _STRUCTURAL_TRACKER_INPUTS} == {
+        name: "" for name in _STRUCTURAL_TRACKER_INPUTS
+    }
+    note = tsn.render_tracker_sync_note(fields)
+    passed, errors = l4_contract.enforce(
+        config.wave_class,
+        _STRUCTURAL_CHANGED_FILES,
+        notes=l4_contract.parse_tracker_notes(note),
+    )
+    assert not passed
+    for name in _STRUCTURAL_TRACKER_INPUTS:
+        assert any(f"missing {name}" in error for error in errors), errors
+
+    before = (wave_repo / "TASKS.md").read_bytes()
+    config_errors = config.validate(wave_repo)
+    for name in _STRUCTURAL_TRACKER_INPUTS:
+        assert any(name in error for error in config_errors), config_errors
+    with pytest.raises(lw.LaunchWaveError, match="invalid wave-config"):
+        lw.run_wave_setup(wave_repo, config)
+    assert (wave_repo / "TASKS.md").read_bytes() == before
+    _assert_no_setup_artifacts(wave_repo, config)
+
+
+@pytest.mark.parametrize("field_name", _STRUCTURAL_TRACKER_INPUTS)
+@pytest.mark.parametrize("bad_value", [None, "", " \t ", 0, []])
+def test_structural_required_inputs_reject_before_writes(
+    wave_repo, field_name, bad_value,
+):
+    data = _structural_config_data()
+    if bad_value is None:
+        data.pop(field_name)
+    else:
+        data[field_name] = bad_value
+    config = lw.WaveConfig.from_dict(data)
+    tasks = wave_repo / "TASKS.md"
+    route = ec.routing_record_path(wave_repo)
+    route.parent.mkdir(parents=True, exist_ok=True)
+    route.write_text('{"sentinel": "unchanged"}\n', encoding="utf-8")
+    bridge = _write_bridge_config(wave_repo, {"sentinel": {"cmd": ["sentinel"]}})
+    before = {path: path.read_bytes() for path in (tasks, route, bridge)}
+    index_before = (wave_repo / ".git" / "index").read_bytes()
+
+    assert any(field_name in error for error in config.validate(wave_repo))
+    with pytest.raises(lw.LaunchWaveError, match=field_name):
+        lw.run_wave_setup(wave_repo, config)
+
+    assert {path: path.read_bytes() for path in before} == before
+    assert (wave_repo / ".git" / "index").read_bytes() == index_before
+    assert not (wave_repo / config.tracked_packet).exists()
+    assert not (wave_repo / config.indicator_artifact_ref).exists()
+    assert not (wave_repo / ".agent_bus" / "meta" / "candidate_authority").exists()
+
+
+@pytest.mark.parametrize("field_name", _STRUCTURAL_TRACKER_INPUTS)
+def test_structural_inputs_survive_setup_and_same_config_authority(
+    wave_repo, monkeypatch, field_name,
+):
+    """Exercise real setup, L4 metadata checks and worktree/index tracker binding."""
+    config_path = wave_repo / "structural-config.json"
+    config_path.write_text(json.dumps(_structural_config_data()), encoding="utf-8")
+    config = lw.load_wave_config(config_path)
+    assert config.validate(wave_repo) == []
+    roundtrip = lw.WaveConfig.from_dict(json.loads(json.dumps(dataclasses.asdict(config))))
+    assert roundtrip == config
+    fields = lw.build_tracker_fields(roundtrip)
+    assert {name: getattr(fields, name) for name in _STRUCTURAL_TRACKER_INPUTS} == (
+        _STRUCTURAL_TRACKER_INPUTS
+    )
+
+    result = lw.run_wave_setup(wave_repo, roundtrip)
+    tasks = wave_repo / "TASKS.md"
+    first_tasks = tasks.read_bytes()
+    lw.run_wave_setup(wave_repo, lw.load_wave_config(config_path))
+    assert tasks.read_bytes() == first_tasks
+    assert _artifact_counts(wave_repo, config.wave_id) == (1, 1, 1)
+    assert result.guards_ok and result.precondition_ok
+    assert not result.launch["launched"]
+    note = _tracker_note_line(tasks.read_text(), config.wave_id)
+    assert note == tsn.render_tracker_sync_note(fields)
+    ra = tasks.read_text().split("## Ra", 1)[1].split("\n---", 1)[0]
+    assert note in ra
+    parsed = l4_contract.parse_tracker_notes(note)
+    assert {name: parsed[0][name] for name in _STRUCTURAL_TRACKER_INPUTS} == (
+        _STRUCTURAL_TRACKER_INPUTS
+    )
+    # This is metadata proof with a portable proof-binding fixture, not a Mu run.
+    proof_file = wave_repo / _STRUCTURAL_CHANGED_FILES[2]
+    proof_file.parent.mkdir(parents=True, exist_ok=True)
+    proof_file.write_text("# Fixture for metadata proof binding only.\n", encoding="utf-8")
+    monkeypatch.chdir(wave_repo)
+    assert l4_contract.enforce(
+        config.wave_class, _STRUCTURAL_CHANGED_FILES, notes=parsed,
+    ) == (True, [])
+
+    _git(wave_repo, "add", "TASKS.md", config.tracked_packet)
+    assert lw._native_phase_b_tracker_matches_config(wave_repo, roundtrip)  # ANTICHEAT_OK: real tracker authority guard.
+    changed_value = (
+        "recurrence_exhaustion" if field_name == "workload_target"
+        else "different fixture inventory: total=9, python=6, js=3"
+    )
+    changed = dataclasses.replace(roundtrip, **{field_name: changed_value})
+    assert changed.validate(wave_repo) == []
+    assert not lw._native_phase_b_tracker_matches_config(wave_repo, changed)  # ANTICHEAT_OK: changed config must not reuse staged tracker authority.
+    tasks.write_text(tasks.read_text().replace(
+        f"{field_name}: {_STRUCTURAL_TRACKER_INPUTS[field_name]}",
+        f"{field_name}: {changed_value}",
+    ), encoding="utf-8")
+    assert not lw._native_phase_b_tracker_matches_config(wave_repo, roundtrip)  # ANTICHEAT_OK: worktree drift must fail.
+    assert not lw._native_phase_b_tracker_matches_config(wave_repo, changed)  # ANTICHEAT_OK: index drift must fail.
 
 
 _NATIVE_PACKET_STRUCTURED_FIELDS = (
