@@ -863,3 +863,253 @@ def test_missing_owner_report_keeps_historical_blob_and_open_ledger(tmp_path):
     assert row['owner']['integration_completed'] is False
     assert report['inherited_ledgers'][0]['original_owners'][0]['landing_owner'] == owner
     assert report['inherited_ledgers'][0]['owner_count'] == 1
+
+
+# Reuse the disposable real-Git boundary fixture for consumed predecessor proof.
+from mu.tests.tools.test_workingrcx_fleet_apply import (
+    fleet as retirement_fleet, git as retirement_git, retirement_fixture, commit as retirement_commit,
+)
+
+
+def test_readonly_census_preserves_consumed_failure_and_prior_holds(retirement_fleet, monkeypatch):
+    import workingrcx_fleet_apply as fleet
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    f = retirement_fleet
+    for target in f.targets[:3]:
+        target.chmod(0o555)
+    active = f.targets[3] / '.agent_bus/recovery/status.json'
+    active.parent.mkdir(parents=True)
+    active.write_text(json.dumps(dict(state='running', active=True, owner_pid=os.getpid())))
+    old, kwargs = retirement_fixture(f, wave='fixture-readonly-consumed')
+    rename = os.rename
+    def failed(source, destination):
+        if source in f.targets[:3]:
+            raise PermissionError(errno.EACCES, 'original macOS permission failure')
+        rename(source, destination)
+    with monkeypatch.context() as context:
+        context.setattr(fleet.os, 'rename', failed)
+        result = fleet.apply_residual_plan(f.repo, old, **kwargs)
+    assert result['outcome_counts'] == {'INCOMPLETE': 3, 'HOLD': 1}, result
+    active.unlink()  # The disposable carrier's original live owner exits.
+    names = {i: t.name for i, t in zip((7, 8, 9, 2), f.targets)}
+    for index in (14, 17):
+        target = f.root / f'WorkingRCX-protected-{index}'
+        retirement_git(f, f.repo, 'worktree', 'add', '-qb', f'held-{index}-{f.root.name}', str(target), f.original)
+        names[index] = target.name
+    monkeypatch.setattr(classifier, 'READONLY_PREDECESSORS', names)
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    by_path = {r['path']: r for r in observed['entries']}
+    # Export the exact native receipt owners at the locked predecessor indices.
+    # The original executed plan and all claims stay unchanged in their owners.
+    exported = dict(wave_id=classifier.MISSING_WAVE_ID, fleet_root=str(f.root), entries=[{} for _ in range(18)])
+    owner = dict(task='FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION', status='PENDING_EXACT_HUNK_REVIEW')
+    for index, name in names.items():
+        path = str(f.root / name)
+        row = by_path[path]
+        prior = next((r for r in old['entries'] if r['path'] == path), None)
+        exported['entries'][index] = ({**prior, 'source_index': index} if prior else dict(
+            source_index=index, path=path, source_identity=dict(path=path,
+                **{k: row['git'][k] for k in ('HEAD', 'branch', 'common_dir', 'git_dir')},
+                filesystem_identity=row['filesystem_identity']), reason_codes=['protected_evidence'],
+            action='UNTOUCHED_HOLD', landing_owner=owner))
+    predecessor = f.repo / 'reports/control_plane' / (classifier.MISSING_WAVE_ID + '_apply_plan.json')
+    predecessor.write_bytes(fleet.encoded(exported))
+    before = {p: p.read_bytes() for p in (f.common / 'rcx_terminal_mutation_attempts').glob('*.json')}
+    manifests = [fleet.tree_manifest(target) for target in f.targets]
+    native_git = fleet.git
+    def read_only_git(root, *args, **options):
+        assert os.environ.get('GIT_OPTIONAL_LOCKS') == '0'
+        assert os.environ.get('GIT_NO_LAZY_FETCH') == '1'
+        return native_git(root, *args, **options)
+    monkeypatch.setattr(fleet, 'git', read_only_git)
+    census_tool.readonly_source_reviews(observed, predecessor, f.landed)
+    reviews = {r['readonly_source_review']['predecessor_index']: r['readonly_source_review']
+               for r in observed['entries'] if r.get('readonly_source_review')}
+    assert all(reviews[i]['status'] == 'VERIFIED' for i in (2, 7, 8, 9)), reviews
+    assert all(reviews[i]['status'] == 'HOLD' and reviews[i]['inherited_landing_owners'] == [owner] for i in (14, 17))
+    assert reviews[7]['root_permissions']['mode'] == 0o555
+    assert reviews[7]['consumed_predecessor']['replay_authorized'] is False
+    assert manifests == [fleet.tree_manifest(target) for target in f.targets]
+    assert before == {p: p.read_bytes() for p in before}
+    with pytest.raises(fleet.Hold, match='consumed'):
+        fleet.apply_residual_plan(f.repo, old, **kwargs)
+    # An old recovery artifact changes: the exact source holds, peers remain
+    # eligible and no consumed evidence is rewritten by the observer.
+    receipt_dir = Path(reviews[7]['consumed_predecessor']['directory'])
+    archive = receipt_dir / 'before.tar'
+    archive.write_bytes(archive.read_bytes() + b'changed')
+    census_tool.readonly_source_reviews(observed, predecessor, f.landed)
+    reviews = {r['readonly_source_review']['predecessor_index']: r['readonly_source_review']
+               for r in observed['entries'] if r.get('readonly_source_review')}
+    assert reviews[7]['status'] == 'HOLD'
+    assert reviews[8]['status'] == reviews[9]['status'] == 'VERIFIED'
+    assert before == {p: p.read_bytes() for p in before}
+    # Publish only in this disposable fixture, then exercise the exact new-wave
+    # plan through native APPLY/VERIFY. The damaged predecessor remains held.
+    wave = classifier.READONLY_WAVE_ID
+    classification_path, census_path, plan_path = fleet.residual_paths(wave)
+    raw = fleet.encoded(observed)
+    (f.repo / census_path).write_bytes(raw)
+    classified = classifier.classify(observed, source_sha256=fleet.digest(raw), base_commit=f.landed,
+        carrier=str(f.repo), landed=False, residual=True, retirement=True,
+        retirement_predecessor=f.landed, wave_id=wave,
+        historical_paths=tuple(str(f.root / n) for n in names.values()))
+    raw = fleet.encoded(classified)
+    sha = fleet.digest(raw)
+    (f.repo / classification_path).write_bytes(raw)
+    for suffix, builder in (('useful_work', classifier.useful_work_report),
+                            ('useful_work_coverage', classifier.retirement_coverage_report)):
+        (f.repo / f'reports/control_plane/{wave}_{suffix}.json').write_bytes(fleet.encoded(builder(classified, sha)))
+    fresh = fleet.build_residual_plan(f.repo, f.repo / classification_path, sha, wave_id=wave)
+    (f.repo / plan_path).write_bytes(fleet.encoded(fresh))
+    authority = retirement_commit(f, 'bounded read-only source renewal fixture')
+    retirement_git(f, f.repo, 'push', '-q', 'origin', 'HEAD:dev')
+    operation = fresh['operations'][0]
+    fresh_args = dict(authority_commit=authority, batch=operation['batch'], operation_root=Path(operation['operation_root']))
+    assert {r['readonly_source_review']['predecessor_index'] for r in fresh['entries']
+            if r['action'] != 'UNTOUCHED_HOLD'} == {2, 8, 9}
+    result = fleet.apply_residual_plan(f.repo, fresh, **fresh_args)
+    assert result['outcome_counts'] == {'RETIRED': 3}, result
+    assert fleet.verify_residual_plan(f.repo, fresh, **fresh_args)['batch_complete']
+    assert f.targets[0].exists() and stat.S_IMODE(f.targets[0].stat().st_mode) == 0o555
+    assert before == {p: p.read_bytes() for p in before}
+
+
+@pytest.mark.parametrize('generation', ['r1', 'r2'])
+def test_stopped_readonly_candidate_requires_exact_index_packet_receipt_and_recovery(retirement_fleet, monkeypatch, generation):
+    import workingrcx_fleet_apply as fleet
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    f = retirement_fleet
+    source = f.targets[1]
+    monkeypatch.setattr(classifier, 'READONLY_PREDECESSORS', {2: f.targets[0].name})
+    source_constant = 'STOPPED_READONLY_SOURCE' if generation == 'r1' else 'STOPPED_READONLY_R2_SOURCE'
+    monkeypatch.setattr(classifier, source_constant, source.name)
+    spec = classifier.stopped_readonly_sources()[source.name]
+    manifest_argument = 'stopped_manifest' if generation == 'r1' else 'stopped_r2_manifest'
+    packet = source / ('reports/control_plane/' + spec['wave_id'] + '_2026-09-27.md')
+    packet.parent.mkdir(parents=True)
+    packet.write_text('# Preserved failed packet\n\n## Forbidden implementation section\n' if generation == 'r1'
+                      else '# Reviewed packet\nStatus: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT\n')
+    (source / 'tracked').write_bytes(b'original staged-only stopped intent\x00\xff')
+    retirement_git(f, source, 'add', 'tracked', str(packet.relative_to(source)))
+    (source / 'tracked').write_bytes(b'distinct unstaged stopped intent\n')
+    receipt = source / spec['receipt']
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text(json.dumps(dict(state='available', returncode=1)))
+    lifecycle = f.common / 'rcx_worktree_lifecycle/frozen-stopped-owner'
+    lifecycle.mkdir(parents=True)
+    completion = lifecycle / 'completion.json'
+    completion.write_text(json.dumps(dict(state='ESCALATED', attempts_used=3)))
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    sources = {row['path']: row for row in observed['entries']}
+    def identity(row):
+        return dict(path=row['path'], **{k: row['git'][k] for k in ('HEAD', 'branch', 'common_dir', 'git_dir')},
+                    filesystem_identity=row['filesystem_identity'])
+    prior = identity(sources[str(f.targets[0])])
+    predecessor = f.repo / 'reports/control_plane' / (classifier.MISSING_WAVE_ID + '_apply_plan.json')
+    predecessor.write_bytes(fleet.encoded(dict(wave_id=classifier.MISSING_WAVE_ID, fleet_root=str(f.root),
+        entries=[{}, {}, dict(source_index=2, path=prior['path'], source_identity=prior, reason_codes=['active_carrier'])])))
+    ident = identity(sources[str(source)])
+    index = fleet.git_entries(source)
+    manifest = dict(wave=spec['wave_id'], path=str(source), head=ident['HEAD'],
+        branch=ident['branch'], git_dir=ident['git_dir'], index_sha256=fleet.file_hash(Path(ident['git_dir']) / 'index'),
+        files=[dict(path=str(p.relative_to(source)), worktree_sha256=fleet.file_hash(p),
+                    index_blob=index[str(p.relative_to(source))][1]) for p in (source / 'tracked', packet)],
+        packet_sha256=fleet.file_hash(packet), terminal_receipt_sha256=fleet.file_hash(receipt),
+        lifecycle=dict(path=str(lifecycle), records=[dict(name=completion.name, sha256=fleet.file_hash(completion))]),
+        state=spec['state'], public_pairs_executed=0)
+    manifest_path = f.repo / 'stopped-candidate.json'
+    manifest_path.write_bytes(fleet.encoded(manifest))
+    before = fleet.tree_manifest(source)
+    admin_before = fleet.tree_manifest(Path(ident['git_dir']))
+    def observe():
+        census_tool.readonly_source_reviews(observed, predecessor, f.landed, **{manifest_argument: manifest_path})
+        return sources[str(source)]['readonly_source_review']
+    review = observe()
+    assert review['status'] == 'VERIFIED', review
+    assert review['independent_recovery_verified'] and review['recovery_observation']['raw_index_sha256'] == manifest['index_sha256']
+    assert before == fleet.tree_manifest(source) and admin_before == fleet.tree_manifest(Path(ident['git_dir']))
+    # R2's tested/reviewed stop is distinct from R1's unreviewed failed packet.
+    # A newly observed manifest cannot exchange terminal states or source names.
+    other = classifier.stopped_readonly_sources()[
+        classifier.STOPPED_READONLY_R2_SOURCE if generation == 'r1' else classifier.STOPPED_READONLY_SOURCE]
+    for key, value in [('state', other['state']), ('wave', other['wave_id']),
+                       ('path', str(f.targets[2])), ('public_pairs_executed', 1)]:
+        manifest_path.write_bytes(fleet.encoded({**manifest, key: value}))
+        assert observe()['status'] == 'HOLD'
+        assert sources[str(f.targets[0])]['readonly_source_review']['status'] == 'VERIFIED'
+    manifest_path.write_bytes(fleet.encoded(manifest))
+    # Each exact stopped artifact is mandatory. Damage holds this source only;
+    # an eligible peer keeps its independent authority and all budgets survive.
+    for path in (source / 'tracked', packet, receipt, completion, Path(ident['git_dir']) / 'index'):
+        raw = path.read_bytes()
+        try:
+            path.write_bytes(raw + b'changed')
+            assert observe()['status'] == 'HOLD'
+            assert sources[str(f.targets[0])]['readonly_source_review']['status'] == 'VERIFIED'
+        finally:
+            path.write_bytes(raw)
+    active = source / '.agent_bus/recovery/status.json'
+    active.parent.mkdir(parents=True)
+    active.write_text(json.dumps(dict(state='running', active=True, owner_pid=os.getpid())))
+    assert observe()['status'] == 'HOLD'
+    active.unlink()
+    assert observe()['status'] == 'VERIFIED'
+    wave = classifier.READONLY_WAVE_ID
+    classification_path, census_path, plan_path = fleet.residual_paths(wave)
+    raw = fleet.encoded(observed)
+    (f.repo / census_path).write_bytes(raw)
+    options = dict(source_sha256=fleet.digest(raw), base_commit=f.landed,
+        carrier=str(f.repo), landed=False, residual=True, retirement=True, retirement_predecessor=f.landed,
+        wave_id=wave, historical_paths=tuple(str(f.root / p) for p in classifier.readonly_source_paths()
+                                             if str(f.root / p) in sources))
+    saved_binding = sources[str(source)]['readonly_source_review']['stopped_candidate']
+    sources[str(source)]['readonly_source_review']['stopped_candidate'] = {**saved_binding, 'sha256': '0' * 64}
+    rejected = classifier.classify(observed, **options)
+    assert next(row for row in rejected['entries'] if row['path'] == str(source))['decision'] == 'HOLD'
+    sources[str(source)]['readonly_source_review']['stopped_candidate'] = saved_binding
+    classified = classifier.classify(observed, **options)
+    raw = fleet.encoded(classified)
+    sha = fleet.digest(raw)
+    (f.repo / classification_path).write_bytes(raw)
+    for suffix, builder in (('useful_work', classifier.useful_work_report),
+                            ('useful_work_coverage', classifier.retirement_coverage_report)):
+        (f.repo / f'reports/control_plane/{wave}_{suffix}.json').write_bytes(fleet.encoded(builder(classified, sha)))
+    plan = fleet.build_residual_plan(f.repo, f.repo / classification_path, sha, wave_id=wave)
+    assert plan['conditional_candidates'] == 2
+    (f.repo / plan_path).write_bytes(fleet.encoded(plan))
+    for relative in ('mu/tools/executors/workingrcx_fleet_census.py',
+                     'mu/tools/executors/workingrcx_fleet_classification.py',
+                     'mu/tools/executors/worktree_lifecycle.py',
+                     'mu/tools/observability/pipeline_agent_pager.py'):
+        path = f.repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((REPO_ROOT / relative).read_bytes())
+    authority = retirement_commit(f, 'exact stopped candidate recovery fixture')
+    retirement_git(f, f.repo, 'push', '-q', 'origin', 'HEAD:dev')
+    operation = plan['operations'][0]
+    args = dict(authority_commit=authority, batch=operation['batch'], operation_root=Path(operation['operation_root']))
+    # Identify any subprocess that rewrites the original index: preservation
+    # is required to remain byte-for-byte read-only until registration removal.
+    native_run = subprocess.run
+    original_index = Path(ident['git_dir']) / 'index'
+    def preserve_original_index(*argv, **kwargs):
+        before_index = fleet.file_hash(original_index) if original_index.exists() else None
+        completed = native_run(*argv, **kwargs)
+        if before_index is not None and original_index.exists() and fleet.file_hash(original_index) != before_index:
+            pytest.fail(f"Original stopped index rewritten by {argv[0]!r}; optional_locks={kwargs.get('env', os.environ).get('GIT_OPTIONAL_LOCKS')}")
+        return completed
+    monkeypatch.setattr(subprocess, 'run', preserve_original_index)
+    result = fleet.apply_residual_plan(f.repo, plan, **args)
+    assert result['outcome_counts'] == {'RETIRED': 2}, [
+        (Path(row['source_identity']['path']).name, row['status'], row.get('reason'))
+        for row in result['outcomes'] if row['status'] != 'RETIRED']
+    assert fleet.verify_residual_plan(f.repo, plan, **args)['batch_complete']
+    entry = next(e for e in plan['entries'] if e['path'] == str(source))
+    destination = Path(entry['destination'])
+    assert fleet.file_hash(destination / packet.relative_to(source)) == manifest['packet_sha256']
+    assert fleet.file_hash(destination.parent / 'recovery.git/index') == manifest['index_sha256']
+    assert fleet.file_hash(destination / spec['receipt']) == manifest['terminal_receipt_sha256']
+    assert fleet.file_hash(completion) == manifest['lifecycle']['records'][0]['sha256']

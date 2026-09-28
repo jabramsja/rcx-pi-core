@@ -1747,16 +1747,35 @@ def inspect_retirement(repo: Path, entry: dict) -> dict:
     if ident["common_dir"] == str(common) and ident.get("branch") in {
             "refs/heads/dev", "refs/heads/main", "refs/heads/master"}:
         raise Hold("Base checkout remains protected")
+    if entry.get("readonly_source_review"):
+        verified = verify_readonly_predecessor(repo, entry)
+        if verified != entry["readonly_source_review"].get("consumed_predecessor"):
+            raise Hold("Read-only consumed predecessor evidence changed")
     observed = retirement_observation(str(target), str(repo.parent), str(common))
     if observed != entry["retirement_evidence"] or observed.get("status") != "OBSERVED":
         raise Hold("Retirement original-owner evidence changed")
     state = retirement_state(entry)
+    review = entry.get("readonly_source_review")
+    if review:
+        info = target.lstat()
+        if review.get("root_permissions") != dict(device=info.st_dev, inode=info.st_ino,
+                mode=stat.S_IMODE(info.st_mode), uid=info.st_uid, gid=info.st_gid):
+            raise Hold("Read-only source root permission/owner drift")
+        recovery = review.get("recovery_observation")
+        if recovery and (recovery["content_sha256"] != digest(encoded(state["content"]))
+                or recovery["raw_index_sha256"] != state["index_sha256"] or recovery["head"] != state["head"]
+                or recovery["admin_manifest_sha256"] != digest(encoded(tree_manifest(Path(ident["git_dir"]))))):
+            raise Hold("Read-only carrier content/index drift since independent recovery")
     if entry["action"] == "RETIRE_MISSING_REGISTRATION":
         process_idle(ident, directory=Path(ident["git_dir"]))
     else:
         native_idle(target, state["content"], reconcile_r1=True, retirement_evidence=observed)
         process_idle(ident)
     state["native_owners"] = retirement_owners(common, ident, observed.get("preserved_operation"))
+    if review and review.get("stopped_candidate"):
+        verify_stopped_readonly_state(entry, state)
+    if review and "native_owners" in review and review["native_owners"] != state["native_owners"]:
+        raise Hold("Read-only predecessor lifecycle claims or budgets changed")
     for record in observed["journals"]:
         journal = json.loads(read_plain(Path(record["path"])))
         if journal.get("owner") != "commit_executor:primary_worktree_sync":
@@ -1787,6 +1806,121 @@ def inspect_retirement(repo: Path, entry: dict) -> dict:
         elif journal["state"] not in {"HELD", "RECOVERED"}:
             raise Hold("Pending journal requires its original recovery owner")
     return state
+
+
+def verify_readonly_predecessor(repo: Path, entry: dict) -> dict | None:
+    """Read the original finite owner and independently verify a spent failure."""
+    try:
+        from . import workingrcx_fleet_classification as classifier
+        from . import commit_executor as terminal_boundary
+    except ImportError:
+        import workingrcx_fleet_classification as classifier
+        import commit_executor as terminal_boundary
+    review = entry["readonly_source_review"]
+    binding = review["predecessor_plan"]
+    raw = read_plain(Path(binding["path"]))
+    previous = json.loads(raw)
+    index = review["predecessor_index"]
+    if review.get("stopped_candidate"):
+        if (digest(raw) != binding["sha256"] or previous.get("wave_id") != classifier.MISSING_WAVE_ID
+                or index is not None or entry["path"] not in {
+                    str(repo.parent / name) for name in classifier.stopped_readonly_sources()}):
+            raise Hold("Stopped read-only carrier is outside its exact renewal authority")
+        return None
+    if (digest(raw) != binding["sha256"] or previous.get("wave_id") != classifier.MISSING_WAVE_ID
+            or index not in {2, 7, 8, 9}
+            or entry["path"] != str(repo.parent / classifier.READONLY_PREDECESSORS[index])):
+        raise Hold("Read-only renewal is outside its exact predecessor authority")
+    old = previous["entries"][index]
+    ident = entry["source_identity"]
+    original = old["source_identity"]
+    if old["source_index"] != index or old["path"] != entry["path"] or any(
+            ident.get(k) != value for k, value in original.items() if k != "HEAD" or index != 2):
+        raise Hold("Read-only predecessor source identity drift")
+    if index == 2:
+        # The previous carrier necessarily advanced while implementing PR1319.
+        # Its original inode, branch and admin remain fixed; only landed history
+        # may advance its HEAD, with exact fresh bytes bound by this new plan.
+        git(repo, "merge-base", "--is-ancestor", original["HEAD"], ident["HEAD"])
+        git(repo, "merge-base", "--is-ancestor", ident["HEAD"], entry["comparison_commit"])
+        return None
+    directory = Path(old["destination"]).parent
+    receipt = json.loads(read_plain(directory / "outcome.json"))
+    terminal = json.loads(read_plain(directory / "terminal-identity.json"))
+    result = receipt.get("boundary") or {}
+    started = json.loads(read_plain(directory / "retirement-started.json"))
+    operation = terminal.get("operation_id", "")
+    if not re.fullmatch(r"[0-9a-f]{32}", operation):
+        raise Hold("Read-only predecessor has no exact consumed operation")
+    claim = repo / ".git/rcx_terminal_mutation_attempts" / (operation + ".json")
+    # The public success verifier intentionally rejects failed actions. Reuse
+    # the native read-only claim reader without relabeling failure as success.
+    consumed = terminal_boundary._existing_terminal_mutation_attempt_reason(
+        claim, operation_id=operation,
+        binding_digest=terminal_boundary._terminal_mutation_binding_digest(terminal))
+    if (receipt.get("status") != "INCOMPLETE" or receipt.get("source_identity") != original
+            or result.get("authority_consumed") is not True or result.get("action_succeeded") is not False
+            or result.get("action_invoked") is not True or result.get("decision") != "ACTION_FAILED"
+            or started.get("target_identity") != terminal or started.get("state") != "STARTED_OUTCOME_UNKNOWN"
+            or "PermissionError: [Errno 13]" not in (result.get("action_error") or "")
+            or os.path.lexists(old["destination"])
+            or terminal.get("retirement") != dict(source_identity=original,
+                preservation_directory=str(directory), preservation_sha256=receipt["preservation_sha256"])
+            or result.get("operation_id") != operation or result.get("authority_record_path") != str(claim)
+            or consumed != f"terminal operation {operation} was already attempted; single-use authority cannot be replayed"):
+        raise Hold("Read-only predecessor is not the exact consumed permission failure")
+    state = verify_retirement_preservation(directory, old, receipt["preservation_sha256"])
+    if (tree_manifest(Path(entry["path"]), allowed_fifos=retirement_fifos(old)) != state["content"]
+            or tree_manifest(Path(ident["git_dir"])) != json.loads(read_plain(directory / "gitdir-before.json"))):
+        raise Hold("Read-only predecessor source/admin content or mode drift")
+    return dict(directory=str(directory), operation_id=operation, replay_authorized=False,
+        claim_path=str(claim), claim_sha256=file_hash(claim),
+        files={name: file_hash(directory / name) for name in (
+            "outcome.json", "terminal-identity.json", "retirement-started.json")},
+        preservation_sha256=receipt["preservation_sha256"])
+
+
+def verify_stopped_readonly_state(entry: dict, state: dict) -> None:
+    """Bind each exact stopped packet, staged bytes and spent budgets after moving."""
+    try:
+        from . import workingrcx_fleet_classification as classifier
+    except ImportError:
+        import workingrcx_fleet_classification as classifier
+    binding = entry["readonly_source_review"]["stopped_candidate"]
+    raw = read_plain(Path(binding["path"]))
+    manifest = json.loads(raw)
+    ident = entry["source_identity"]
+    root = Path(ident["common_dir"]).parent.parent
+    spec = next((spec for name, spec in classifier.stopped_readonly_sources().items()
+                 if ident["path"] == str(root / name)), None)
+    if (spec is None or digest(raw) != binding["sha256"] or manifest.get("wave") != spec["wave_id"]
+            or manifest.get("state") != spec["state"]
+            or manifest.get("public_pairs_executed") != 0
+            or any(manifest.get(k) != ident[v] for k, v in (
+                ("path", "path"), ("head", "HEAD"), ("branch", "branch"), ("git_dir", "git_dir")))
+            or state["head"] != manifest["head"] or state["index_sha256"] != manifest["index_sha256"]):
+        raise Hold("Stopped read-only candidate manifest/index identity changed")
+    files = manifest.get("files", [])
+    if not files or len({f["path"] for f in files}) != len(files):
+        raise Hold("Stopped read-only candidate has no exact file inventory")
+    for record in files:
+        name = record["path"]
+        if (Path(name).is_absolute() or ".." in Path(name).parts
+                or state["content"].get(name, {}).get("sha256") != record["worktree_sha256"]
+                or state["index"].get(name, [None, None])[1] != record["index_blob"]):
+            raise Hold("Stopped read-only candidate staged/worktree bytes changed")
+    packet = "reports/control_plane/" + spec["wave_id"] + "_2026-09-27.md"
+    if (state["content"].get(packet, {}).get("sha256") != manifest.get("packet_sha256")
+            or state["content"].get(spec["receipt"], {}).get("sha256")
+                != manifest.get("terminal_receipt_sha256")):
+        raise Hold("Stopped read-only candidate failed packet/receipt changed")
+    lifecycle = manifest["lifecycle"]
+    directory = Path(lifecycle["path"])
+    if directory.parent != Path(ident["common_dir"]) / "rcx_worktree_lifecycle":
+        raise Hold("Stopped read-only candidate lifecycle owner changed")
+    for record in lifecycle["records"]:
+        if Path(record["name"]).name != record["name"] or file_hash(directory / record["name"]) != record["sha256"]:
+            raise Hold("Stopped read-only candidate lifecycle evidence changed")
 
 
 def git_input(root: Path, payload: bytes, *args: str) -> bytes:
@@ -1903,6 +2037,8 @@ def preserve_retirement(repo: Path, entry: dict, directory: Path, state: dict) -
         inherited_owner=inherited, landing_owner=entry.get("landing_owner"),
         current_landing_review=entry.get("current_landing_review"),
         native_owners=state["native_owners"], prior_owners=entry["retirement_evidence"].get("prior_owners", []))
+    if entry.get("readonly_source_review"):
+        proof["readonly_source_review"] = entry["readonly_source_review"]
     write_new(directory / "recovery.json", encoded(proof))
     sync_directory(directory)
     return {p.name: file_hash(p) for p in sorted(directory.iterdir()) if p.is_file()}
@@ -1935,6 +2071,22 @@ def verify_retirement_preservation(directory: Path, entry: dict, hashes: dict) -
             raise Hold("Retirement preservation bytes changed")
     state = json.loads(read_plain(directory / "admitted-state.json"))
     proof = json.loads(read_plain(directory / "recovery.json"))
+    if proof.get("readonly_source_review") != entry.get("readonly_source_review"):
+        raise Hold("Read-only predecessor recovery owner changed")
+    review = proof.get("readonly_source_review")
+    if review:
+        previous = review["predecessor_plan"]
+        if file_hash(Path(previous["path"])) != previous["sha256"]:
+            raise Hold("Original read-only predecessor plan changed")
+        if review.get("stopped_candidate"):
+            verify_stopped_readonly_state(entry, state)
+        consumed = review.get("consumed_predecessor")
+        if consumed:
+            if file_hash(Path(consumed["claim_path"])) != consumed["claim_sha256"]:
+                raise Hold("Original read-only predecessor claim changed")
+            for name, expected in {**consumed["files"], **consumed["preservation_sha256"]}.items():
+                if Path(name).name != name or file_hash(Path(consumed["directory"]) / name) != expected:
+                    raise Hold("Original read-only predecessor receipt or recovery changed")
     if "index_objects" in proof and "index-objects.pack" not in hashes:
         raise Hold("Retirement lacks raw-index object closure pack")
     if (proof["source_identity"] != entry["source_identity"] or proof["head"] != state["head"]
@@ -1955,6 +2107,8 @@ def verify_retirement_preservation(directory: Path, entry: dict, hashes: dict) -
             raise Hold("Missing original admin bytes differ from bound observation")
         if stem == "before" and manifest != state["content"]:
             raise Hold("Retirement admitted content differs from archive")
+        if stem == "before" and manifest["."]["mode"] != stat.S_IMODE(entry["source_identity"]["filesystem_identity"]["mode"]):
+            raise Hold("Retirement archive lost the original root permissions")
     recovery = directory / "recovery.git"
     if missing and read_plain(recovery / "HEAD").hex() != entry["source_identity"]["missing_registration"]["head_raw_hex"]:
         raise Hold("Independent missing HEAD/ref bytes changed")
@@ -2026,6 +2180,58 @@ def registration_paths(repo: Path) -> set[str]:
     return {r["path"] for r in records}
 
 
+def rename_retirement_root(entry: dict, directory: Path) -> None:
+    """Relocate the observed 0555 root, restoring its mode through the same FD.
+
+    macOS requires directory write permission when changing its parent. Only
+    owner-write on the admitted root is temporary; children and ACLs are never
+    edited. The durable intent precedes chmod, so an interrupted process leaves
+    an explicit recovery owner, never an implicit successful retirement.
+    """
+    source, destination = Path(entry["path"]), Path(entry["destination"])
+    fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        identity = dict(device=info.st_dev, inode=info.st_ino, mode=info.st_mode)
+        if identity != entry["source_identity"]["filesystem_identity"] or source.lstat() != info:
+            raise Hold("Retirement root identity changed before rename")
+        original = stat.S_IMODE(info.st_mode)
+        transition = original == 0o555
+        if transition:
+            if info.st_uid != os.geteuid():
+                raise Hold("Read-only retirement root is not owned by the current user")
+            write_new(directory / "root-permission-transition.json", encoded(dict(
+                source_identity=entry["source_identity"], destination=str(destination),
+                uid=info.st_uid, gid=info.st_gid, original_mode=original,
+                temporary_mode=original | stat.S_IWUSR, state="RESTORATION_REQUIRED")))
+        try:
+            if transition:
+                os.fchmod(fd, original | stat.S_IWUSR)
+            current = source.lstat()
+            if (current.st_dev, current.st_ino, current.st_mode) != (
+                    info.st_dev, info.st_ino, info.st_mode | (stat.S_IWUSR if transition else 0)):
+                raise Hold("Retirement root changed during permission transition")
+            os.rename(source, destination)
+        finally:
+            if transition:
+                # Restore even if rename raised after moving the directory.
+                # Never chmod by a pathname that may now name another inode.
+                os.fchmod(fd, original)
+                os.fsync(fd)
+                restored = os.fstat(fd)
+                if (restored.st_mode, restored.st_uid, restored.st_gid) != (
+                        info.st_mode, info.st_uid, info.st_gid):
+                    raise Hold("Retirement root permissions were not restored")
+                write_new(directory / "root-permission-restored.json", encoded(dict(
+                    filesystem_identity=identity, uid=restored.st_uid, gid=restored.st_gid,
+                    state="ORIGINAL_MODE_RESTORED")))
+        moved = destination.lstat()
+        if (moved.st_dev, moved.st_ino, moved.st_mode) != (info.st_dev, info.st_ino, info.st_mode):
+            raise Hold("Retirement destination root identity or mode changed")
+    finally:
+        os.close(fd)
+
+
 def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict:
     target, destination = Path(entry["path"]), Path(entry["destination"])
     missing = entry["action"] == "RETIRE_MISSING_REGISTRATION"
@@ -2076,7 +2282,7 @@ def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict
             # pointer. Git then removes only this exact now-absent registration;
             # no force, prune, branch deletion or dirty-checkout rewrite.
             if not missing:
-                os.rename(target, destination)
+                rename_retirement_root(entry, directory)
                 sync_directory(target.parent)
                 sync_directory(destination.parent)
                 if tree_manifest(destination, allowed_fifos=retirement_fifos(entry)) != state["content"]:
@@ -2100,6 +2306,9 @@ def apply_retirement(repo: Path, entry: dict, directory: Path, boundary) -> dict
             result = dict(destination=str(destination), source_absent=True,
                 registration_retired=linked, registrations_before=sorted(before), registrations_after=sorted(after),
                 manifest_sha256=digest(encoded(state["content"])))
+            if (directory / "root-permission-transition.json").exists():
+                result["root_permission_evidence"] = {name: file_hash(directory / name) for name in (
+                    "root-permission-transition.json", "root-permission-restored.json")}
             if missing:
                 result.update(destination=None, absent_worktree_bytes="UNKNOWN", admin_only=True)
             write_new(retirement_record_path(repo / ".git", target), encoded(dict(
@@ -2128,6 +2337,9 @@ def verify_retirement_record(repo: Path, source: Path) -> dict:
     if entry["path"] != str(source) or entry["source_identity"] != record["source_identity"]:
         raise Hold("Retirement mapping source changed")
     state = verify_retirement_preservation(directory, entry, record["preservation_sha256"])
+    for name, expected in record["result"].get("root_permission_evidence", {}).items():
+        if Path(name).name != name or file_hash(directory / name) != expected:
+            raise Hold("Retirement root permission restoration evidence changed")
     outcome = json.loads(read_plain(directory / "outcome.json"))
     binding = json.loads(read_plain(directory / "terminal-identity.json"))
     try:
@@ -2258,9 +2470,15 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
     historical_paths = data["policy"].get("reviewed_historical_paths", [])
     if (missing_paths or historical_paths) and (authority is None
             or not set(missing_paths + historical_paths) <= {r["path"] for r in census["entries"]}
-            or (historical_paths and (wave_id != classifier.MISSING_WAVE_ID
-                or not set(historical_paths) <= {str(root / p) for p in classifier.HISTORICAL_SOURCES}))):
+            or (historical_paths and (wave_id not in {classifier.MISSING_WAVE_ID, classifier.READONLY_WAVE_ID}
+                or not set(historical_paths) <= {str(root / p) for p in (
+                    classifier.readonly_source_paths() if wave_id == classifier.READONLY_WAVE_ID
+                    else classifier.HISTORICAL_SOURCES)}))):
         raise Hold("Missing/historical sources lack exact finite renewal authority")
+    readonly = wave_id == classifier.READONLY_WAVE_ID
+    if readonly and (authority is None or missing_paths or not census.get("readonly_predecessor")
+            or data.get("readonly_predecessor") != census["readonly_predecessor"]):
+        raise Hold("Read-only renewal lost its immutable predecessor ledger")
     missing_evidence_path = Path(f"reports/control_plane/{wave_id}_missing_registration_evidence.json")
     missing_evidence = None
     if missing_paths and (os.path.lexists(repo / missing_evidence_path) or str(root) == classifier.LANDED_FLEET):
@@ -2306,6 +2524,13 @@ def build_residual_plan(repo: Path, classification: Path, sha256: str,
         entry = dict(source_index=index, path=str(path), source_identity=ident,
                      action=action, owner=row["owner"], comparison_commit=data["comparison_commit"],
                      reason_codes=[r["code"] for r in row["reasons"]])
+        if readonly:
+            review = source.get("readonly_source_review", {})
+            entry["readonly_source_review"] = review
+            if action != "UNTOUCHED_HOLD" and (
+                    not classifier.readonly_review_matches(ident, review, census["readonly_predecessor"], str(root))
+                    or action != "RETIRE_WORKTREE"):
+                raise Hold("Read-only source lacks exact identity/liveness/recovery authority")
         if str(path) in owner_records:
             entry["native_owner_records"] = owner_records[str(path)]
         if fresh_wave:
@@ -2627,6 +2852,18 @@ def retirement_evidence_report(repo: Path, plan: dict, *, root_cause_evidence: P
         note = f", {plan['wave_id']}):"
         report["tracker_sync_note"] = next((line for line in (repo / "TASKS.md").read_text().splitlines()
             if line.startswith("- Tracker sync note (") and note in line), None)
+    if census.get("readonly_predecessor"):
+        report["readonly_predecessor"] = census["readonly_predecessor"]
+        report["readonly_source_reviews"] = [r["readonly_source_review"] for r in census["entries"]
+                                             if r.get("readonly_source_review")]
+        report["protected_files"] = []
+        for retained in census["readonly_predecessor"].get("retained_evidence", []):
+            captured = retained.get("evidence", {})
+            for protected in captured.get("fresh_truth", {}).get("protected_files", []):
+                report["protected_files"].append(dict(path=protected["path"], expected=protected["sha256"],
+                    observed=file_hash(Path(protected["path"]))))
+        if any(r["expected"] != r["observed"] for r in report["protected_files"]):
+            raise Hold("Protected original WIP changed")
     if root_cause_evidence is not None:
         raw = read_plain(root_cause_evidence)
         captured = json.loads(raw)
