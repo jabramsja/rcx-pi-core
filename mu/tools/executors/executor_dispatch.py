@@ -3017,6 +3017,42 @@ def _carry_forward_candidate_authority(
     return carried, None
 
 
+def _carry_forward_native_stub_packet_contract(
+    record: dict[str, Any] | None,
+    *,
+    plan_path: str | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """Transport the validated launch envelope, without minting new authority.
+
+    Packet rendering remains Phase A's responsibility. At a route projection,
+    reuse its strict envelope and routed-identity checks; never reconstruct the
+    contract or its digest from mutable packet text. Absence remains legacy.
+    """
+    from phase_a_executor import (
+        NATIVE_STUB_PACKET_CONTRACT_KEY,
+        PhaseAExecutorError,
+        _native_stub_packet_identity_errors,
+        native_stub_packet_contract_from_routing,
+    )
+
+    source = record or {}
+    try:
+        contract = native_stub_packet_contract_from_routing(source)
+    except PhaseAExecutorError as exc:
+        return {}, str(exc)
+    if contract is None:
+        return {}, None
+    errors = _native_stub_packet_identity_errors(
+        source,
+        plan_path if plan_path is not None else _routing_record_tracked_packet(source),
+        contract,
+    )
+    if errors:
+        return {}, "Native stub packet contract identity mismatch: " + "; ".join(errors)
+    key = NATIVE_STUB_PACKET_CONTRACT_KEY
+    return {key: copy.deepcopy(source[key])}, None
+
+
 def _owned_phase_b_entry_error(
     executor_name: str, *, repo_root: Path, bus_dir: str | Path | None,
 ) -> dict[str, Any] | None:
@@ -3225,6 +3261,19 @@ def _continue_successful_executor_chain(
                 "chained_from": "phase_a_executor",
             }
 
+        carried_native_contract, native_contract_error = (
+            _carry_forward_native_stub_packet_contract(record)
+        )
+        if native_contract_error is not None:
+            return {
+                "status": "error",
+                "decision": "ROUTE_PHASE_B",
+                "executor": "phase_b_executor",
+                "authority_error": "invalid_native_stub_packet_contract",
+                "message": native_contract_error,
+                "chained_from": "phase_a_executor",
+            }
+
         plan_path = _extract_plan_path(completed.stdout, repo_root)
         if plan_path is None:
             return {
@@ -3353,11 +3402,26 @@ def _continue_successful_executor_chain(
             # exact launch-owned object. Rebuilding it from mutable bus state
             # here would make Phase B review authority caller-dependent.
             **carried_candidate_authority,
+            # The launch-owned native envelope binds structural metadata and
+            # packet identity through every Phase B tracker regeneration.
+            **carried_native_contract,
             # The terminal receipt lives outside the cleaned carrier and is the
             # sole authority for this protected candidate. Keep both its
             # top-level binding and the paired candidate copy across A -> B.
             **carried_terminal_receipt,
         }
+        _, native_contract_error = _carry_forward_native_stub_packet_contract(
+            phase_b_routing, plan_path=phase_b_plan_path,
+        )
+        if native_contract_error is not None:
+            return {
+                "status": "error",
+                "decision": "ROUTE_PHASE_B",
+                "executor": "phase_b_executor",
+                "authority_error": "invalid_native_stub_packet_contract",
+                "message": native_contract_error,
+                "chained_from": "phase_a_executor",
+            }
         terminal_hold = _terminal_receipt_gate_result(repo_root, phase_b_routing)
         if terminal_hold is not None:
             return terminal_hold
@@ -4426,6 +4490,19 @@ def _refresh_canonical_routing_record_state(
             "message": candidate_authority_error,
         }
 
+    carried_native_contract, native_contract_error = (
+        _carry_forward_native_stub_packet_contract(record)
+    )
+    if native_contract_error is not None:
+        return False, {
+            "status": "error",
+            "decision": str(record.get("decision") or ""),
+            "executor": resolve_executor(str(record.get("decision") or ""))
+            or "executor_dispatch",
+            "authority_error": "invalid_native_stub_packet_contract",
+            "message": native_contract_error,
+        }
+
     tracked_packet = _routing_record_tracked_packet(record)
     if not tracked_packet:
         if verbose:
@@ -4482,6 +4559,17 @@ def _refresh_canonical_routing_record_state(
 
         refreshed.update(carried_candidate_authority)
         refreshed.update(carried_terminal_receipt)
+        refreshed.update(carried_native_contract)
+        _, native_contract_error = _carry_forward_native_stub_packet_contract(refreshed)
+        if native_contract_error is not None:
+            return False, {
+                "status": "error",
+                "decision": str(record.get("decision") or ""),
+                "executor": resolve_executor(str(record.get("decision") or ""))
+                or "executor_dispatch",
+                "authority_error": "invalid_native_stub_packet_contract",
+                "message": native_contract_error,
+            }
         if carried_terminal_receipt:
             candidates = refreshed.get("next_candidates")
             if isinstance(candidates, list):
@@ -4500,8 +4588,8 @@ def _refresh_canonical_routing_record_state(
                 print(f"[dispatch] Canonical routing rebind still stale: {msg}")
             return False, None
 
-        # The shared builder cannot yet accept launch-owned candidate authority.
-        # Build off-path, add the captured fields, and atomically replace the
+        # The shared builder cannot accept launch-owned candidate/native authority.
+        # Build off-path, add the validated captured fields, and atomically replace the
         # canonical record so no reader can observe a downgraded intermediate.
         staged_path.write_text(
             json.dumps(refreshed, indent=2) + "\n",
@@ -4716,7 +4804,7 @@ def dispatch(
                     not refreshed
                     and isinstance(refresh_record, dict)
                     and refresh_record.get("authority_error")
-                    == "required_candidate_authority_missing"
+                    in {"required_candidate_authority_missing", "invalid_native_stub_packet_contract"}
                 ):
                     return refresh_record
                 if not refreshed and _is_terminal_receipt_hold_result(refresh_record):

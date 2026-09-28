@@ -1,0 +1,309 @@
+{
+  "wave_id": "native-structural-metadata-roundtrip-r2-2026-09-28",
+  "task_id": "[MU-COINDUCTION-PRODUCTION-PROOF]",
+  "wave_class": "L4_ENABLER",
+  "phase": "Phase B local implementation and declared validation passed; native review, indicators and landing pending",
+  "base_commit": "3c562f74b902efca94ea6023234cc418ed94dd38",
+  "recovered_candidate": {
+    "source_manifest": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/metadata_roundtrip_r1_stopped_candidate_20260928.json",
+    "exact_reused_files": {
+      "mu/tests/tools/test_launch_wave.py": "4bb3c10f3d01aac1eef0c8f100e41544c463dcf272628dc6f873e08dbd63a845",
+      "mu/tests/tools/test_phase_a_executor.py": "f18e74e20719da2ded8fcc2ddffe5a61d098d5a6cd3748f399d9a3c71bd139c9",
+      "mu/tests/tools/test_phase_b_executor.py": "2b9abd3423439ed5efbb69d80e277b731bd92bab89b5d1117a288d6ec35862b9",
+      "mu/tools/executors/launch_wave.py": "ee711224c7aa877b5563f5f70299002540816210c1bed189c0b21960eeb05b7d",
+      "mu/tools/executors/phase_a_executor.py": "ce6d4bc0fd3bcf9f88f1cc0c57af6412c206cc12501b18b2ba2bc3c43435c43f",
+      "mu/tools/executors/phase_b_executor.py": "0032d880f400acba8d18179ca1a89fc0d2f9b4a3252f03be190089ee82777bce"
+    },
+    "all_six_equal_preserved_R1": true,
+    "behavior": [
+      "All three explicit structural fields bound into native envelope and packet",
+      "Both Phase B tracker stages consume launch authority and reject changed headers",
+      "Structural NOW/NEXT authorization precedes launch writes and model work",
+      "Test-only reader-clock virtualization retains real artifact IO and production deadlines"
+    ]
+  },
+  "dispatcher_repair": {
+    "producers": [
+      "executor_dispatch._continue_successful_executor_chain",
+      "executor_dispatch._refresh_canonical_routing_record_state"
+    ],
+    "transport": "Deep-copy only the existing native_stub_packet_contract after the existing strict native envelope and route/packet identity checks. Validate projected identity before delivery or atomic replacement; preserve all nested values and original digest.",
+    "absence": "An absent native envelope retains legacy semantics. Present malformed or mismatched authority fails without becoming an unmarked route.",
+    "atomicity": "Generic builder writes off-path; native/candidate/terminal authority is attached and validated before canonical os.replace. Invalid native authority returns from dispatch without post-merge fallback.",
+    "unchanged_behavior": "Existing candidate, terminal, founder and pager behavior remains; unrecognized route fields are not copied."
+  },
+  "red_reproduction": {
+    "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_executor_dispatch.py::TestNativeEnvelopeDispatcherTransport --tb=short",
+    "exit_code": 1,
+    "result": "3 failed in 2.67s",
+    "source_state": "Exact recovered R1 source/test bytes with original dispatcher, plus new portable regressions",
+    "observed_failures": [
+      "Actual Phase B --routing-record argument omitted native_stub_packet_contract",
+      "Actual canonical os.replace source omitted native_stub_packet_contract",
+      "Whole-chain test's persisted canonical route omitted native_stub_packet_contract"
+    ],
+    "output": "FFF                                                                      [100%]\n=================================== FAILURES ===================================\n_ TestNativeEnvelopeDispatcherTransport.test_phase_a_to_b_delivers_exact_envelope _\nmu/tests/tools/test_executor_dispatch.py:17591: in test_phase_a_to_b_delivers_exact_envelope\n    assert delivered.get(\"native_stub_packet_contract\") == original[\"native_stub_packet_contract\"]\nE   AssertionError: assert None == {'contract': {'acceptance_criteria': ['All three fields survive the native handoff'], 'constraints': ['Preserve exact ...78b480dbd805f198ec47c98d57d0730f0dabcbf85bf72317a5d19df0bb383154', 'producer': 'launch_wave.py', 'required': True, ...}\nE    +  where None = <built-in method get of dict object at 0x10fd05a00>('native_stub_packet_contract')\nE    +    where <built-in method get of dict object at 0x10fd05a00> = {'candidate_authority': {'precommit_inventory': True, 'required': False, 'spec_identity': {'candidate': {'allowlist': ...te_authority_required': False, 'decision': 'ROUTE_PHASE_B', 'founder_override': 'mu-roundtrip-fixture-2026-09-28', ...}.get\n_ TestNativeEnvelopeDispatcherTransport.test_canonical_rebind_persists_exact_envelope_atomically _\nmu/tests/tools/test_executor_dispatch.py:17624: in test_canonical_rebind_persists_exact_envelope_atomically\n    success, refreshed = dispatch_mod._refresh_canonical_routing_record_state(  # ANTICHEAT_OK: real canonical producer and atomic write.\nmu/tools/executors/executor_dispatch.py:4510: in _refresh_canonical_routing_record_state\n    os.replace(staged_path, target_path)\nmu/tests/tools/test_executor_dispatch.py:17618: in replace\n    assert staged.get(\"native_stub_packet_contract\") == original[\"native_stub_packet_contract\"]\nE   AssertionError: assert None == {'contract': {'acceptance_criteria': ['All three fields survive the native handoff'], 'constraints': ['Preserve exact ...78b480dbd805f198ec47c98d57d0730f0dabcbf85bf72317a5d19df0bb383154', 'producer': 'launch_wave.py', 'required': True, ...}\nE    +  where None = <built-in method get of dict object at 0x10fedbf80>('native_stub_packet_contract')\nE    +    where <built-in method get of dict object at 0x10fedbf80> = {'blocker_report_paths': [], 'candidate_authority': {'precommit_inventory': True, 'required': False, 'spec_identity': ...ity/candidate-authority-wave.spec.json', ...}, 'candidate_authority_required': False, 'decision': 'ROUTE_PHASE_A', ...}.get\n_ TestNativeEnvelopeDispatcherTransport.test_whole_chain_preserves_structural_metadata _\nmu/tests/tools/test_executor_dispatch.py:17646: in test_whole_chain_preserves_structural_metadata\n    assert persisted.get(\"native_stub_packet_contract\") == fixture[\"record\"][\"native_stub_packet_contract\"]\nE   AssertionError: assert None == {'contract': {'acceptance_criteria': ['All three fields survive the native handoff'], 'constraints': ['Preserve exact ...78b480dbd805f198ec47c98d57d0730f0dabcbf85bf72317a5d19df0bb383154', 'producer': 'launch_wave.py', 'required': True, ...}\nE    +  where None = <built-in method get of dict object at 0x10f7ac800>('native_stub_packet_contract')\nE    +    where <built-in method get of dict object at 0x10f7ac800> = {'blocker_report_paths': [], 'candidate_authority': {'precommit_inventory': True, 'required': False, 'spec_identity': ...ity/candidate-authority-wave.spec.json', ...}, 'candidate_authority_required': False, 'decision': 'ROUTE_PHASE_A', ...}.get\n=========================== short test summary info ============================\nFAILED mu/tests/tools/test_executor_dispatch.py::TestNativeEnvelopeDispatcherTransport::test_phase_a_to_b_delivers_exact_envelope\nFAILED mu/tests/tools/test_executor_dispatch.py::TestNativeEnvelopeDispatcherTransport::test_canonical_rebind_persists_exact_envelope_atomically\nFAILED mu/tests/tools/test_executor_dispatch.py::TestNativeEnvelopeDispatcherTransport::test_whole_chain_preserves_structural_metadata\n3 failed in 2.67s\n"
+  },
+  "cheap_candidate_code_gate": {
+    "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_executor_dispatch.py::TestNativeEnvelopeDispatcherTransport --tb=short",
+    "exit_code": 0,
+    "result": ".................................                                        [100%]\n33 passed in 4.82s",
+    "coverage": [
+      "WaveConfig -> real native envelope/packet -> real generic route builder -> atomic canonical rebind -> actual Phase B argv",
+      "Real pre-supervisor finalizer and canonical Ra persistence -> final tracker builder -> durable Phase B handoff -> existing commit marker extraction",
+      "Exact execution_layer_truth despite conflicting stage0_vm path, with distinct exact before/after host-semantics descriptions",
+      "All three changed-header/unchanged-envelope attacks rejected before trusted tracker rendering, persistence or staging",
+      "Malformed schemas/digests/identities rejected before write/dispatch; projected identity drift rejected; canonical fallback fenced",
+      "Builder/freshness failures leave original canonical route bytes intact",
+      "Unmarked legacy and old native envelopes preserve original applicability and authority"
+    ]
+  },
+  "native_authority_observation": {
+    "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'\nimport hashlib,json,sys\nfrom pathlib import Path\nsys.path[:0]=['mu/tools/executors','mu/tools/agents']\nimport phase_a_executor as pa, phase_b_executor as pb, launch_wave as lw\nfrom meta_bridge_supervisor import check_tasks_authorization\nroot=Path.cwd(); wave='native-structural-metadata-roundtrip-r2-2026-09-28'\npacket=f'reports/control_plane/{wave}_2026-09-28.md'\nroute_path=root/'.agent_bus-structural-metadata-roundtrip-r2-20260928/meta/post_merge_routing.json'\nroute=json.loads(route_path.read_text())\nresult={'packet_sha256':hashlib.sha256((root/packet).read_bytes()).hexdigest(),'route_sha256':hashlib.sha256(route_path.read_bytes()).hexdigest(),'envelope_present':'native_stub_packet_contract' in route,'packet_validation':pa.validate_native_stub_packet_contract(route,packet,lw._project_post_lock_recovery_status((root/packet).read_text()),allow_post_lock_machine_sections=True),'canonical_Ra':pb._tasks_has_canonical_wave_tracker_note(root,wave_id=wave),'structural_NOW_NEXT':check_tasks_authorization(root,'[MU-COINDUCTION-PRODUCTION-PROOF]',wave_class='L4_STRUCTURAL').passed}\nprint(json.dumps(result,indent=2))\nPY",
+    "exit_code": 0,
+    "packet_sha256": "67832a137ce5b351af8155a47aa08d9f986615675467e086b274113deb281ee1",
+    "route_sha256": "27eda09c361a8d13eca0c713e8f7561359fe492ddef0ae4ebdc0b4c98eca1a02",
+    "envelope_present": true,
+    "packet_validation": true,
+    "canonical_Ra": true,
+    "structural_NOW_NEXT": true,
+    "interpretation": "Read-only candidate-code validation of actual current R2 packet/route, canonical Ra and current Mu NOW/NEXT authorization. This is independent of the immutable pytest evidence gate; no claim that an already-running dispatcher hot-loaded the candidate patch."
+  },
+  "complete_declared_modules": {
+    "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_a_executor.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_tracker_sync_note_generation.py mu/tests/tools/test_commit_executor_receipt.py --tb=short",
+    "status": "PASS",
+    "exit_code": 0,
+    "result": "2889 passed in 222.53s (0:03:42)",
+    "passed": 2889,
+    "failed": 0,
+    "skipped": 0,
+    "validation_point": "All final production and test edits were present; subsequent edits only recorded observed results in TASKS.md, CHANGELOG.md and this evidence artifact."
+  },
+  "preservation": {
+    "R1": {
+      "manifest": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/metadata_roundtrip_r1_stopped_candidate_20260928.json",
+      "manifest_sha256": "8f9eeec0c25594b3900f7e3cd4d49da6ab4df1cbee070ab5b8a7d8d95ca04144",
+      "source_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-metadata-roundtrip-r1-20260928",
+      "files": {
+        "CHANGELOG.md": "7a6e886c1edbf282d41ae401a9c48c54faf9723b32479b90a0ae2ac8b717a679",
+        "TASKS.md": "14a92c53bb34a044a8c72072992c60f5687124ccbbc6f65d60922c8fbe3782ac",
+        "mu/tests/tools/test_launch_wave.py": "4bb3c10f3d01aac1eef0c8f100e41544c463dcf272628dc6f873e08dbd63a845",
+        "mu/tests/tools/test_phase_a_executor.py": "f18e74e20719da2ded8fcc2ddffe5a61d098d5a6cd3748f399d9a3c71bd139c9",
+        "mu/tests/tools/test_phase_b_executor.py": "2b9abd3423439ed5efbb69d80e277b731bd92bab89b5d1117a288d6ec35862b9",
+        "mu/tools/executors/launch_wave.py": "ee711224c7aa877b5563f5f70299002540816210c1bed189c0b21960eeb05b7d",
+        "mu/tools/executors/phase_a_executor.py": "ce6d4bc0fd3bcf9f88f1cc0c57af6412c206cc12501b18b2ba2bc3c43435c43f",
+        "mu/tools/executors/phase_b_executor.py": "0032d880f400acba8d18179ca1a89fc0d2f9b4a3252f03be190089ee82777bce",
+        "reports/control_plane/native-structural-metadata-roundtrip-r1-2026-09-28_2026-09-28.md": "f342f23d55df7df551aa48b86763e6466eaf3c8a3df57660652cefcb46ec7992",
+        "reports/control_plane/native-structural-metadata-roundtrip-r1-2026-09-28_implementation_evidence.json": "e3c932c069c7e05f170e8143fadded3b7f95f168c2522ac17fe2c548f2b14d26",
+        "reports/deferred/non_blocking/native-structural-metadata-roundtrip-r1-2026-09-28_bridge_nonblockers.md": "9371a9f736ec7dd0fedb3a61261bf1903c21b1586ab537b6a6f6ad487b9e60fe",
+        "reports/l4_wave_indicators/native-structural-metadata-roundtrip-r1-2026-09-28.json": "43e9e024050044de7055f66e92588f02a3be2c5f184b0b7314d1421340a71f61"
+      },
+      "file_count": 12,
+      "index_sha256": "2c4143fb2047ac716b13f6a406595e3bd7f7be1903a603410dc58c95f87459e1",
+      "config_sha256": "327fab2214d16de19b3d325731dbda02576dd3dd29d172c7beaa0e302473eadc",
+      "routing_sha256": "ee5d6d41009722f5bfe6c1d31cfc02e16f940c44980694c3ba6a1db2557bcb6f",
+      "all_files_match_manifest": true
+    },
+    "recovered_files": {
+      "mu/tests/tools/test_launch_wave.py": "4bb3c10f3d01aac1eef0c8f100e41544c463dcf272628dc6f873e08dbd63a845",
+      "mu/tests/tools/test_phase_a_executor.py": "f18e74e20719da2ded8fcc2ddffe5a61d098d5a6cd3748f399d9a3c71bd139c9",
+      "mu/tests/tools/test_phase_b_executor.py": "2b9abd3423439ed5efbb69d80e277b731bd92bab89b5d1117a288d6ec35862b9",
+      "mu/tools/executors/launch_wave.py": "ee711224c7aa877b5563f5f70299002540816210c1bed189c0b21960eeb05b7d",
+      "mu/tools/executors/phase_a_executor.py": "ce6d4bc0fd3bcf9f88f1cc0c57af6412c206cc12501b18b2ba2bc3c43435c43f",
+      "mu/tools/executors/phase_b_executor.py": "0032d880f400acba8d18179ca1a89fc0d2f9b4a3252f03be190089ee82777bce"
+    },
+    "Mu_R4": {
+      "manifest": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/mu_coinduction_r4_stopped_candidate_20260928.json",
+      "manifest_sha256": "d343c9fb7746a3d4c4ebadfcecfb0df5879f8bb50b2a8ed34b335ba388190339",
+      "source_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r4-20260928",
+      "files": {
+        "CHANGELOG.md": "baadb2cbdbde0460d4095855f32af1d6d84da5d72bdf61a49a707ddcac50832e",
+        "STATUS.md": "c96246352210c8c66c03c61330d1d306eda36ed9ecfff9cf39fb6fe27a4fe615",
+        "TASKS.md": "e8bb466cf56e0a20ae9ef45d2fcc32a6b9d8f40b8469b6c14a43002317ca416f",
+        "mu/docs/README.md": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+        "mu/docs/core/CoinductionPrefix.v0.md": "ec9d098634e2a88f744f78d58b677af032a94028e605e68d353639e2a2a912b1",
+        "mu/host/js/core/seed_loader.js": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+        "mu/host/js/engine/kernel.js": "99370fa903748dd112f73b24b586ba205daaea12035887116bfc08ee87e74e25",
+        "mu/host/python/rcx_pi/selfhost/seed_integrity.py": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+        "mu/programs/coinduction_prefix.v1.json": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+        "mu/seed_registry_manifest.v1.json": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+        "mu/tests/docs/test_growth_caps.py": "ea1bafebf2b4deae7b60c180ad34f24fb2ebf5fa09c0430d2a2094968ab5f9d5",
+        "mu/tests/fixtures/coinduction_prefix_vectors.json": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d",
+        "mu/tests/l4_gates/test_coinduction_prefix_gate.py": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55",
+        "mu/tests/l4_gates/test_kernel_run_result_contract.py": "b0b87bc94567583793834e02e260a253d6a132f6a7eeca8d7e226aae8df2b14b",
+        "mu/tests/parity/test_coinduction_prefix_parity.py": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+        "mu/tests/parity/test_seed_loading_parity.py": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+        "mu/tests/structural/test_execution_layer_truth_contract.py": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+        "mu/tests/structural/test_seed_counts.py": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+        "reports/control_plane/mu-coinduction-guarded-prefix-r4-2026-09-28_2026-09-28.md": "b47335c18199ceb9fed0531b7c341a1df6cfc95d6f19734f4aaa642a733c8ced",
+        "reports/control_plane/mu-coinduction-guarded-prefix-r4-2026-09-28_implementation_evidence.json": "726a63c2727d2754143e57299750a07d46d6182ed6dc134fb51bdf07b8bd21c9",
+        "reports/deferred/non_blocking/mu-coinduction-guarded-prefix-r4-2026-09-28_bridge_nonblockers.md": "3a832a12ea978dfe263b35894c7744a3248d5d98f88b006c4ff6cd50458ee768",
+        "reports/l4_wave_indicators/mu-coinduction-guarded-prefix-r4-2026-09-28.json": "b980c28df53ab4f8b2fc309aecff4a15fe0ca981e69e9dfc341b329240632f16",
+        "roadmap/MANIFEST.md": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f"
+      },
+      "file_count": 23,
+      "index_sha256": "2189fdb45551fe3edd87dd17fc180a436c0f26cb44ecad69b2282788c7c27ae6",
+      "config_sha256": "4c416262463ae7c7dd9b7a4b6225366f5d94b3aba66c70c23105d6fafd8d686a",
+      "routing_sha256": "51f250bfe463be2fbe580b67c597633270a54f60f2957a9028dcebb1b5605565",
+      "all_files_match_manifest": true
+    },
+    "tasks": {
+      "task_id_count": 268,
+      "task_id_set_sha256": "73368cf00a0f75893d0e8de8a2f71d36d78530939ea1b8c21c5c8ec587110834",
+      "equal_primary_task_ids": true,
+      "canonical_note_sha256": "e79d58f907f9f0810e2457c5cf0e18b70e0776fd334656f06fed86fa8675dbdc"
+    },
+    "locked_packet_sha256": "67832a137ce5b351af8155a47aa08d9f986615675467e086b274113deb281ee1",
+    "candidate_files": {
+      "mu/tests/tools/test_launch_wave.py": "4bb3c10f3d01aac1eef0c8f100e41544c463dcf272628dc6f873e08dbd63a845",
+      "mu/tests/tools/test_phase_a_executor.py": "f18e74e20719da2ded8fcc2ddffe5a61d098d5a6cd3748f399d9a3c71bd139c9",
+      "mu/tests/tools/test_phase_b_executor.py": "2b9abd3423439ed5efbb69d80e277b731bd92bab89b5d1117a288d6ec35862b9",
+      "mu/tools/executors/launch_wave.py": "ee711224c7aa877b5563f5f70299002540816210c1bed189c0b21960eeb05b7d",
+      "mu/tools/executors/phase_a_executor.py": "ce6d4bc0fd3bcf9f88f1cc0c57af6412c206cc12501b18b2ba2bc3c43435c43f",
+      "mu/tools/executors/phase_b_executor.py": "0032d880f400acba8d18179ca1a89fc0d2f9b4a3252f03be190089ee82777bce",
+      "mu/tools/executors/executor_dispatch.py": "78f62d4922047e68acae2f8389fe904846458af99f9c02309c82ed6466a6479f",
+      "mu/tests/tools/test_executor_dispatch.py": "374c3bdb84fc77bca0ad7f2334b46a01888d14ed468c72a4e740d626383de220"
+    }
+  },
+  "tasks_sync": {
+    "strategy": "Carry complete current PRIMARY TASKS through the existing launch_wave tracker insertion helper, retaining the one exact native launch-owned canonical Ra note until outer Phase B advances it.",
+    "task_id_count": 268,
+    "canonical_note_sha256": "e79d58f907f9f0810e2457c5cf0e18b70e0776fd334656f06fed86fa8675dbdc",
+    "continuation": "After enabler landing, directly reuse preserved Mu R4 passing fixes and all 24 expected vector outcomes. Change only the new document's hardcoded projection-count wording to a registry/count-test reference; retain current NOW authority and prove explicit metadata with landed builders before expensive suites."
+  },
+  "invariant_tuple": {
+    "runtime_substrate_seed_changes": 0,
+    "host_semantics_baseline_changes": 0,
+    "host_authority_or_debt_baseline_changes": 0,
+    "measurement": "Code-scope preservation only; native measured L4_ENABLER indicators remain collector-owned."
+  },
+  "final_read_only_verification": {
+    "exit_code": 0,
+    "validation": "Read-only native packet/Ra/NOW probe, preserved manifests/files/index/config/routes, exact tested source hashes and declared-scope comparison after recording the full-suite result.",
+    "native_packet": true,
+    "canonical_Ra": true,
+    "Mu_NOW_NEXT_authorization": true,
+    "locked_packet_unchanged": true,
+    "live_R2_routing_unchanged": true,
+    "all_eight_final_code_test_hashes_equal_tested_candidate": true,
+    "R1_twelve_files_index_config_route_and_manifest_unchanged": true,
+    "Mu_R4_twenty_three_files_index_config_route_and_manifest_unchanged": true,
+    "exact_recovered_R1_code_test_files": 6,
+    "task_id_count": 268,
+    "task_ids_equal_current_primary": true,
+    "canonical_Ra_note_unchanged": true,
+    "only_declared_files_changed": true,
+    "no_files_staged": true
+  },
+  "proof_limits": [
+    "No runtime implementation copied, edited, executed or claimed landed by this enabler; stopped Mu R4 continuation remains required.",
+    "No live route, configuration, raw index, stash, receipt, preservation manifest or locked native packet edited.",
+    "No startup/preflight, attestation, dispatcher/executor launch, staging, commit, push, PR, merge or closeout command run by this implementer. Disposable-repository tests use only isolated local builders and intercept executor/provider boundaries.",
+    "Full declared module results are candidate-code behavior evidence, not independent review or production-complete/infinite-productivity proof.",
+    "Docs/L4 governance gates, indicator collection, independent review, commit/pre-push/CI/merge and protected dev synchronization remain outer-executor responsibilities under the Phase B execution boundary."
+  ],
+  "issues_encountered": [
+    {
+      "kind": "DEFECT",
+      "status": "reproduced_then_fixed",
+      "description": "Both original dispatcher projections dropped native_stub_packet_contract. The initial three-test RED run failed at actual delivery/replacement/persistence; the final 33-test candidate-code transport run and full six-module gate pass."
+    }
+  ],
+  "files_changed": [
+    "TASKS.md",
+    "CHANGELOG.md",
+    "mu/tools/executors/launch_wave.py",
+    "mu/tools/executors/phase_a_executor.py",
+    "mu/tools/executors/phase_b_executor.py",
+    "mu/tools/executors/executor_dispatch.py",
+    "mu/tests/tools/test_launch_wave.py",
+    "mu/tests/tools/test_phase_a_executor.py",
+    "mu/tests/tools/test_phase_b_executor.py",
+    "mu/tests/tools/test_executor_dispatch.py",
+    "reports/control_plane/native-structural-metadata-roundtrip-r2-2026-09-28_implementation_evidence.json"
+  ],
+  "private_attribute_gate_reentry": {
+    "completed_at": "2026-09-28 12:11:23 UTC",
+    "status": "PASS",
+    "validation_point": "This entry records the repaired candidate after the private-attribute gate reentry. Earlier validation and candidate hashes above remain historical evidence from the initial implementation.",
+    "change": "Move the unchanged candidate-authority data factory out of a private test-class helper into the public candidate_authority_factory pytest fixture. Inject it into native_dispatch_fixture and both existing authority-preservation tests; retain all payload values, assertions and test cases.",
+    "files_changed": [
+      "mu/tests/tools/test_executor_dispatch.py",
+      "reports/control_plane/native-structural-metadata-roundtrip-r2-2026-09-28_implementation_evidence.json"
+    ],
+    "private_attribute_gate": {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 tools/checks/linters/check_private_attr_access.py . mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_a_executor.py mu/tests/tools/test_phase_b_executor.py",
+      "before": {
+        "exit_code": 1,
+        "result": "mu/tests/tools/test_executor_dispatch.py:17540: ._authority"
+      },
+      "after": {
+        "exit_code": 0,
+        "result": "No violations in the four wave-owned Python test files."
+      },
+      "checker_sha256": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+      "checker_unchanged": true,
+      "added_allowlist_entries_or_ANTICHEAT_OK_markers": false
+    },
+    "focused_regression": {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_executor_dispatch.py::TestNativeEnvelopeDispatcherTransport mu/tests/tools/test_executor_dispatch.py::TestCandidateAuthorityCarryForward --tb=short",
+      "exit_code": 0,
+      "result": "37 passed in 5.01s",
+      "coverage": "All 33 native envelope transport/whole-chain cases and four existing candidate-authority carry-forward cases."
+    },
+    "complete_declared_modules": {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_a_executor.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_tracker_sync_note_generation.py mu/tests/tools/test_commit_executor_receipt.py --tb=short",
+      "exit_code": 0,
+      "result": "2889 passed in 217.71s (0:03:37)",
+      "passed": 2889,
+      "failed": 0,
+      "skipped": 0
+    },
+    "native_authority_observation": {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'\nimport hashlib,json,sys\nfrom pathlib import Path\nsys.path[:0]=['mu/tools/executors','mu/tools/agents']\nimport phase_a_executor as pa\nimport phase_b_executor as pb\nimport launch_wave as lw\nfrom meta_bridge_supervisor import check_tasks_authorization\nroot=Path.cwd()\nwave='native-structural-metadata-roundtrip-r2-2026-09-28'\npacket=f'reports/control_plane/{wave}_2026-09-28.md'\nroute_path=root/'.agent_bus-structural-metadata-roundtrip-r2-20260928/meta/post_merge_routing.json'\nroute=json.loads(route_path.read_text())\nresult={\n    'packet_sha256':hashlib.sha256((root/packet).read_bytes()).hexdigest(),\n    'route_sha256':hashlib.sha256(route_path.read_bytes()).hexdigest(),\n    'envelope_present':'native_stub_packet_contract' in route,\n    'packet_validation':pa.validate_native_stub_packet_contract(route,packet,lw._project_post_lock_recovery_status((root/packet).read_text()),allow_post_lock_machine_sections=True),\n    'canonical_Ra':pb._tasks_has_canonical_wave_tracker_note(root,wave_id=wave),\n    'structural_NOW_NEXT':check_tasks_authorization(root,'[MU-COINDUCTION-PRODUCTION-PROOF]',wave_class='L4_STRUCTURAL').passed,\n}\nprint(json.dumps(result,indent=2))\nPY",
+      "exit_code": 0,
+      "packet_sha256": "28501f8b437d916be0ab411797fd71fa1de4a55e87dc6daa080148c0d4a95dc5",
+      "route_sha256": "27eda09c361a8d13eca0c713e8f7561359fe492ddef0ae4ebdc0b4c98eca1a02",
+      "envelope_present": true,
+      "packet_validation": true,
+      "canonical_Ra": true,
+      "structural_NOW_NEXT": true,
+      "interpretation": "Read-only candidate-code observation. The current native envelope is present and validates; this does not claim an already-running dispatcher hot-loaded the patch."
+    },
+    "preservation": {
+      "R1": {
+        "file_count": 12,
+        "mismatches": [],
+        "manifest_matches": true,
+        "index_matches": true
+      },
+      "Mu_R4": {
+        "file_count": 23,
+        "mismatches": [],
+        "manifest_matches": true,
+        "index_matches": true
+      },
+      "six_recovered_R1_source_test_files_remain_exact": true,
+      "all_eight_source_test_hashes_unchanged_during_full_suite": true,
+      "tested_source_hashes": {
+        "mu/tests/tools/test_executor_dispatch.py": "ef1f3f134db4e6e9abd3aa282e1cbb093c6b744a7149bd0875107ac8f53fc1ae",
+        "mu/tests/tools/test_launch_wave.py": "4bb3c10f3d01aac1eef0c8f100e41544c463dcf272628dc6f873e08dbd63a845",
+        "mu/tests/tools/test_phase_a_executor.py": "f18e74e20719da2ded8fcc2ddffe5a61d098d5a6cd3748f399d9a3c71bd139c9",
+        "mu/tests/tools/test_phase_b_executor.py": "2b9abd3423439ed5efbb69d80e277b731bd92bab89b5d1117a288d6ec35862b9",
+        "mu/tools/executors/executor_dispatch.py": "78f62d4922047e68acae2f8389fe904846458af99f9c02309c82ed6466a6479f",
+        "mu/tools/executors/launch_wave.py": "ee711224c7aa877b5563f5f70299002540816210c1bed189c0b21960eeb05b7d",
+        "mu/tools/executors/phase_a_executor.py": "ce6d4bc0fd3bcf9f88f1cc0c57af6412c206cc12501b18b2ba2bc3c43435c43f",
+        "mu/tools/executors/phase_b_executor.py": "0032d880f400acba8d18179ca1a89fc0d2f9b4a3252f03be190089ee82777bce"
+      },
+      "dispatch_test_before_sha256": "374c3bdb84fc77bca0ad7f2334b46a01888d14ed468c72a4e740d626383de220",
+      "packet_TASKS_CHANGELOG_route_and_indicator_unchanged_since_reentry": true,
+      "wave_index_unchanged": true
+    },
+    "proof_limits": [
+      "Only the test fixture and this evidence record were changed during reentry; prior production changes and immutable wave authority were retained.",
+      "Startup, pipeline launches, staging, commit/pre-push/CI/merge and closeout remain outer-executor responsibilities. No governance bypass or gate relaxation was introduced.",
+      "The stopped Mu R4 runtime remains preserved and unlanded by this enabler."
+    ],
+    "issues_encountered": "The reported cross-class private helper access was reproduced and corrected through a public pytest fixture. No remaining Phase B-local validation failure."
+  }
+}

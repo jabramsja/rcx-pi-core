@@ -22,7 +22,7 @@ from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
 from mu.tests.tools.test_phase_b_executor import (
     PrivateReviewCrash, private_review_checkpoint, real_pre_review_package,
-    reentry_private_bridge_lane,
+    reentry_private_bridge_lane, native_structural_tracker_fixture,
 )
 from mu.tests.tools.test_worktree_lifecycle import native_base, native_lane
 
@@ -17516,6 +17516,364 @@ class TestLaneMonitorLifecycle:
         assert mock_term.call_args.args[0] == [700]
 
 
+@pytest.fixture
+def candidate_authority_factory():
+    """Build independent authority values for dispatcher transport fixtures."""
+    def build_authority(*, required: bool) -> dict:
+        return {
+            "required": required,
+            "precommit_inventory": True,
+            "spec_path": (
+                ".agent_bus-route/meta/candidate_authority/"
+                "candidate-authority-wave.spec.json"
+            ),
+            "spec_identity": {
+                "version": 1,
+                "spec_hash": "authority-spec-hash",
+                "candidate": {
+                    "comparison_commit": "a" * 40,
+                    "allowlist": ["mu/tools/executors/executor_dispatch.py"],
+                },
+            },
+            "target_branch_authority": {
+                "target_branch": "jabramsja/candidate-authority-wave",
+                "target_initial_head": "b" * 40,
+                "nested": {
+                    "source": {"detached": True, "clean": True},
+                    "labels": ["launch-owned", {"depth": 2}],
+                },
+            },
+        }
+
+    return build_authority
+
+
+@pytest.fixture
+def native_dispatch_fixture(
+    tmp_path, monkeypatch, native_structural_tracker_fixture, candidate_authority_factory,
+):
+    """Real launcher and route builders in an independent disposable repository."""
+    import launch_wave
+
+    fixture = native_structural_tracker_fixture
+    repo, _ = _init_builder_repo(tmp_path)
+    config = fixture["config"]
+    config.pager_route = "codex"
+    bus_dir = ".agent_bus-structural-fixture"
+    (repo / "TASKS.md").write_text(
+        f"## NOW\n\n- {config.task_id} active\n\n## Ra\n\n{fixture['initial']}\n\n---\n",
+        encoding="utf-8",
+    )
+    packet_path = repo / config.tracked_packet
+    packet_path.write_text(fixture["packet"], encoding="utf-8")
+    record = launch_wave.setup_routing_record(repo, config, bus_dir=bus_dir)
+    # Other recognized authority must survive alongside the native envelope;
+    # unrelated route fields must not acquire carry-forward authority.
+    record.update({
+        "candidate_authority_required": False,
+        "candidate_authority": candidate_authority_factory(required=False),
+        "unrecognized_route_field": {"must_not_be_copied": True},
+    })
+    canonical = repo / bus_dir / "meta" / "post_merge_routing.json"
+    canonical.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    monkeypatch.setattr(phase_b_mod, "_active_bus_dir", lambda: bus_dir)
+    assert phase_a_mod.validate_native_stub_packet_contract(
+        record, config.tracked_packet, packet_path.read_text(),
+    )
+    return {**fixture, "repo": repo, "bus_dir": bus_dir, "canonical": canonical,
+            "packet_path": packet_path, "record": record}
+
+
+def _run_native_phase_a_chain(fixture, monkeypatch, record=None, *, plan_path=None):
+    """Capture the actual child argv, stopping at the subprocess boundary."""
+    calls = []
+
+    def capture(args, *, cwd, timeout):
+        calls.append((list(args), cwd, timeout))
+        return subprocess.CompletedProcess(args, 2, stdout="", stderr="fixture child boundary")
+
+    monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", capture)
+    result = dispatch_mod._continue_successful_executor_chain(  # ANTICHEAT_OK: exercise the real A-to-B producer without launching an executor.
+        "phase_a_executor",
+        subprocess.CompletedProcess(
+            ["phase-a"], 0,
+            stdout=json.dumps({"plan_path": plan_path or fixture["config"].tracked_packet}), stderr="",
+        ),
+        repo_root=fixture["repo"],
+        config={"timeouts": {"phase_b_executor": 10}, "bridge_loop_limits": {"phase_b": 1}},
+        record=fixture["record"] if record is None else record,
+        bus_dir=fixture["bus_dir"],
+    )
+    return result, calls
+
+
+class TestNativeEnvelopeDispatcherTransport:
+    """The two observed dispatcher projections must retain native authority."""
+
+    def test_phase_a_to_b_delivers_exact_envelope(self, native_dispatch_fixture, monkeypatch):
+        fixture = native_dispatch_fixture
+        original = copy.deepcopy(fixture["record"])
+        result, calls = _run_native_phase_a_chain(fixture, monkeypatch)
+        assert result["status"] == "failed"  # Deliberate child-boundary stop.
+        assert len(calls) == 1
+        args, cwd, timeout = calls[0]
+        assert cwd == fixture["repo"] and timeout == 10
+        assert args[args.index("--plan") + 1] == fixture["config"].tracked_packet
+        assert args[args.index("--bus-dir") + 1] == fixture["bus_dir"]
+        delivered = json.loads(args[args.index("--routing-record") + 1])
+        assert delivered["decision"] == "ROUTE_PHASE_B"
+        assert delivered.get("native_stub_packet_contract") == original["native_stub_packet_contract"]
+        for key in ("candidate_authority", "candidate_authority_required", "founder_override", "pager_route"):
+            assert delivered[key] == original[key]
+        assert "unrecognized_route_field" not in delivered
+        assert phase_a_mod.validate_native_stub_packet_contract(
+            delivered, fixture["config"].tracked_packet, fixture["packet"],
+        )
+        assert fixture["record"] == original
+
+    def test_canonical_rebind_persists_exact_envelope_atomically(self, native_dispatch_fixture, monkeypatch):
+        fixture = native_dispatch_fixture
+        canonical, original = fixture["canonical"], copy.deepcopy(fixture["record"])
+        before = canonical.read_bytes()
+        real_builder = dispatch_mod._common_build_and_write_routing_record  # ANTICHEAT_OK: spy preserves real builder and filesystem behavior.
+        real_replace = dispatch_mod.os.replace
+        writes = []
+
+        def build(**kwargs):
+            assert kwargs["output_path"] != canonical
+            result = real_builder(**kwargs)
+            assert canonical.read_bytes() == before
+            return result
+
+        def replace(source, target):
+            assert target == canonical
+            assert canonical.read_bytes() == before
+            staged = json.loads(Path(source).read_text())
+            assert staged.get("native_stub_packet_contract") == original["native_stub_packet_contract"]
+            writes.append(staged)
+            return real_replace(source, target)
+
+        monkeypatch.setattr(dispatch_mod, "_common_build_and_write_routing_record", build)
+        monkeypatch.setattr(dispatch_mod.os, "replace", replace)
+        success, refreshed = dispatch_mod._refresh_canonical_routing_record_state(  # ANTICHEAT_OK: real canonical producer and atomic write.
+            fixture["repo"], fixture["record"], output_path=canonical, bus_dir=fixture["bus_dir"],
+        )
+        assert success and len(writes) == 1
+        assert json.loads(canonical.read_text()) == refreshed == writes[0]
+        for key in ("native_stub_packet_contract", "candidate_authority", "candidate_authority_required", "founder_override", "pager_route"):
+            assert refreshed[key] == original[key]
+        assert refreshed["native_stub_packet_contract"] is not fixture["record"]["native_stub_packet_contract"]
+        assert refreshed["native_stub_packet_contract"]["contract"] is not fixture["record"]["native_stub_packet_contract"]["contract"]
+        assert "unrecognized_route_field" not in refreshed
+        assert fixture["record"] == original
+        assert phase_a_mod.validate_native_stub_packet_contract(
+            refreshed, fixture["config"].tracked_packet, fixture["packet"],
+        )
+
+    @pytest.mark.parametrize("tamper_field", [
+        None, "workload_target", "host_semantics_delta_before", "host_semantics_delta_after",
+    ], ids=["unchanged", "changed-target", "changed-before", "changed-after"])
+    def test_whole_chain_preserves_structural_metadata(self, native_dispatch_fixture, monkeypatch, tamper_field):
+        fixture = native_dispatch_fixture
+        success, refreshed = dispatch_mod._refresh_canonical_routing_record_state(  # ANTICHEAT_OK: exercise canonical rebind before A-to-B delivery.
+            fixture["repo"], fixture["record"], bus_dir=fixture["bus_dir"],
+        )
+        assert success
+        persisted = json.loads(fixture["canonical"].read_text())
+        assert persisted.get("native_stub_packet_contract") == fixture["record"]["native_stub_packet_contract"]
+        assert refreshed == persisted
+        result, calls = _run_native_phase_a_chain(fixture, monkeypatch, persisted)
+        assert result["status"] == "failed" and len(calls) == 1
+        args = calls[0][0]
+        delivered = json.loads(args[args.index("--routing-record") + 1])
+        assert delivered.get("native_stub_packet_contract") == persisted["native_stub_packet_contract"]
+        kwargs = dict(fixture["kwargs"], routing_record=delivered)
+        if tamper_field is not None:
+            replacement = "recurrence_exhaustion" if tamper_field == "workload_target" else "fixture altered host inventory total=9"
+            kwargs["plan_content"] = kwargs["plan_content"].replace(
+                f"{tamper_field}: {fixture['metadata'][tamper_field]}",
+                f"{tamper_field}: {replacement}",
+            )
+            before = (fixture["repo"] / "TASKS.md").read_bytes()
+            with patch.object(phase_b_mod, "render_tracker_sync_note", wraps=phase_b_mod.render_tracker_sync_note) as render, \
+                 patch.object(phase_b_mod, "_stage_files_for_pipeline") as stage:
+                note, _, _, modified, _, error = phase_b_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: changed header must fail before trusted rendering, persistence or staging.
+                    fixture["repo"], bridge_status={"rounds": 1}, **kwargs,
+                )
+                assert error and "structural metadata" in error
+                assert note == "" and not modified
+                with pytest.raises(phase_b_mod.PhaseBExecutorError, match="structural metadata"):
+                    phase_b_mod.build_phase_b_tracker_note(
+                        repo_root=fixture["repo"], bus_dir=fixture["bus_dir"], bridge_rounds=1, **kwargs,
+                    )
+                render.assert_not_called()
+                stage.assert_not_called()
+            assert (fixture["repo"] / "TASKS.md").read_bytes() == before
+            assert json.loads(fixture["canonical"].read_text())["native_stub_packet_contract"] == delivered["native_stub_packet_contract"]
+            assert not (fixture["repo"] / fixture["bus_dir"] / "executors" / "phase_b_handoff.json").exists()
+            return
+        with patch.object(phase_b_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(phase_b_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kw: sorted(set(files))):
+            note, _, _, modified, _, error = phase_b_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: real tracker generation and Ra persistence; isolate staging only.
+                fixture["repo"], bridge_status={"rounds": 1}, **kwargs,
+            )
+        assert error is None, error
+        assert modified and note in (fixture["repo"] / "TASKS.md").read_text()
+        final_note = phase_b_mod.build_phase_b_tracker_note(
+            repo_root=fixture["repo"], bus_dir=fixture["bus_dir"], bridge_rounds=1, **kwargs,
+        )
+        config = fixture["config"]
+        handoff_path = phase_b_mod.prepare_commit_handoff(
+            fixture["repo"], wave_id=config.wave_id, task_id=config.task_id,
+            wave_class=config.wave_class, target_gate_id=config.target_gate_id,
+            tracker_note_text=final_note, files_to_stage=fixture["changed_files"],
+            commit_message="feat: structural metadata fixture\n\nCo-Authored-By: Test <test@example.com>",
+            fixes_implemented=["Preserve native metadata"], tracked_packet=config.tracked_packet,
+            pre_commit_receipt_path=kwargs["receipt_path"], bus_dir=fixture["bus_dir"],
+        )
+        handoff = json.loads(handoff_path.read_text())
+        for tracker in (fixture["initial"], note, final_note, handoff["tracker_note_text"]):
+            assert {
+                name: commit_mod.tracker_marker_value(
+                    tracker, name, marker_names=(*fixture["metadata"], "structural_artifact_ref"),
+                ).removesuffix(".") for name in fixture["metadata"]
+            } == fixture["metadata"]
+
+    @pytest.mark.parametrize("projection", ["canonical", "phase-a-to-b"])
+    @pytest.mark.parametrize("defect", [
+        "null", "required-int", "version-bool", "digest", "unknown-key", "partial-metadata",
+        "wave", "task", "candidate", "packet",
+    ])
+    def test_invalid_native_authority_never_downgrades(
+        self, native_dispatch_fixture, monkeypatch, projection, defect,
+    ):
+        fixture = native_dispatch_fixture
+        record = copy.deepcopy(fixture["record"])
+        envelope = record["native_stub_packet_contract"]
+        if defect == "null":
+            record["native_stub_packet_contract"] = None
+        elif defect == "required-int":
+            envelope["required"] = 1
+        elif defect == "version-bool":
+            envelope["version"] = True
+        elif defect == "digest":
+            envelope["digest"] = "0" * 64
+        elif defect == "unknown-key":
+            envelope["extra"] = True
+        elif defect == "partial-metadata":
+            envelope["contract"].pop("host_semantics_delta_after")
+            envelope["digest"] = phase_a_mod.native_stub_packet_contract_digest(envelope["contract"])
+        elif defect == "wave":
+            record["wave_name"] = "other-wave"
+        elif defect == "task":
+            record["task_id"] = "[OTHER-TASK]"
+        elif defect == "candidate":
+            record["next_candidates"][0]["candidate"] = "other-wave"
+        else:
+            record["next_candidates"][0]["tracked_packet"] = "reports/control_plane/other.md"
+        fixture["canonical"].write_text(json.dumps(record) + "\n", encoding="utf-8")
+        before = fixture["canonical"].read_bytes()
+        with patch.object(dispatch_mod, "_common_build_and_write_routing_record", wraps=dispatch_mod._common_build_and_write_routing_record) as builder:  # ANTICHEAT_OK: spy on write boundary, retain actual builder.
+            if projection == "canonical":
+                success, result = dispatch_mod._refresh_canonical_routing_record_state(  # ANTICHEAT_OK: malformed authority cannot reach the temporary write or atomic replacement.
+                    fixture["repo"], record, bus_dir=fixture["bus_dir"],
+                )
+                assert not success
+            else:
+                result, calls = _run_native_phase_a_chain(fixture, monkeypatch, record)
+                assert calls == []
+            assert result["status"] == "error"
+            assert result["authority_error"] == "invalid_native_stub_packet_contract"
+            builder.assert_not_called()
+        assert fixture["canonical"].read_bytes() == before
+
+    def test_invalid_canonical_authority_stops_dispatch_fallback(self, native_dispatch_fixture, monkeypatch):
+        fixture = native_dispatch_fixture
+        record = copy.deepcopy(fixture["record"])
+        record["native_stub_packet_contract"]["digest"] = "0" * 64
+        record["state_sha"] = "stale-state"
+        fixture["canonical"].write_text(json.dumps(record), encoding="utf-8")
+        before = fixture["canonical"].read_bytes()
+        with patch.object(dispatch_mod, "_auto_refresh_routing") as fallback, \
+             patch.object(dispatch_mod, "_run_executor_in_group") as runner:
+            result = dispatch_mod.dispatch(
+                record, repo_root=fixture["repo"], routing_record_path=fixture["canonical"],
+                bus_dir=fixture["bus_dir"],
+            )
+        assert result["authority_error"] == "invalid_native_stub_packet_contract"
+        fallback.assert_not_called()
+        runner.assert_not_called()
+        assert fixture["canonical"].read_bytes() == before
+
+    def test_phase_a_output_cannot_change_native_packet_identity(self, native_dispatch_fixture, monkeypatch):
+        fixture = native_dispatch_fixture
+        other_path = "reports/control_plane/other-output.md"
+        (fixture["repo"] / other_path).write_text(fixture["packet"], encoding="utf-8")
+        before = fixture["canonical"].read_bytes()
+        result, calls = _run_native_phase_a_chain(fixture, monkeypatch, plan_path=other_path)
+        assert result["authority_error"] == "invalid_native_stub_packet_contract"
+        assert calls == []
+        assert fixture["canonical"].read_bytes() == before
+
+    @pytest.mark.parametrize("failure", ["builder", "freshness", "projected-identity"])
+    def test_failed_rebind_preserves_canonical_authority(self, native_dispatch_fixture, monkeypatch, failure):
+        fixture = native_dispatch_fixture
+        before = fixture["canonical"].read_bytes()
+        real_builder = dispatch_mod._common_build_and_write_routing_record  # ANTICHEAT_OK: inject failure only after the real temporary builder write.
+
+        def build(**kwargs):
+            refreshed, errors = real_builder(**kwargs)
+            assert errors == []
+            if failure == "builder":
+                return refreshed, ["fixture builder rejection"]
+            if failure == "projected-identity":
+                refreshed["task_id"] = "[OTHER-TASK]"
+            return refreshed, errors
+
+        monkeypatch.setattr(dispatch_mod, "_common_build_and_write_routing_record", build)
+        if failure == "freshness":
+            monkeypatch.setattr(dispatch_mod, "validate_routing_record_freshness", lambda *_a: (False, "fixture stale"))
+        success, result = dispatch_mod._refresh_canonical_routing_record_state(  # ANTICHEAT_OK: all failures leave the existing canonical bytes intact.
+            fixture["repo"], fixture["record"], bus_dir=fixture["bus_dir"],
+        )
+        assert not success
+        if failure == "projected-identity":
+            assert result["authority_error"] == "invalid_native_stub_packet_contract"
+        assert fixture["canonical"].read_bytes() == before
+
+    @pytest.mark.parametrize("legacy", ["unmarked", "old-native"])
+    def test_legacy_routes_keep_their_original_authority(self, native_dispatch_fixture, monkeypatch, legacy):
+        fixture = native_dispatch_fixture
+        record = copy.deepcopy(fixture["record"])
+        packet = fixture["packet"]
+        envelope = record["native_stub_packet_contract"]
+        for name, value in fixture["metadata"].items():
+            envelope["contract"].pop(name)
+            packet = packet.replace(f"{name}: {value}\n", "")
+        digest = phase_a_mod.native_stub_packet_contract_digest(envelope["contract"])
+        packet = packet.replace(envelope["digest"], digest)
+        envelope["digest"] = digest
+        if legacy == "unmarked":
+            record.pop("native_stub_packet_contract")
+            packet = "\n".join(line for line in packet.splitlines() if not line.startswith("Native-Stub-Packet-Contract")) + "\n"
+        fixture["packet_path"].write_text(packet, encoding="utf-8")
+        fixture["canonical"].write_text(json.dumps(record), encoding="utf-8")
+        success, refreshed = dispatch_mod._refresh_canonical_routing_record_state(  # ANTICHEAT_OK: legacy absence and old complete envelopes retain real-route compatibility.
+            fixture["repo"], record, bus_dir=fixture["bus_dir"],
+        )
+        assert success and json.loads(fixture["canonical"].read_text()) == refreshed
+        result, calls = _run_native_phase_a_chain(fixture, monkeypatch, refreshed)
+        assert result["status"] == "failed" and len(calls) == 1
+        args = calls[0][0]
+        delivered = json.loads(args[args.index("--routing-record") + 1])
+        for route in (refreshed, delivered):
+            assert phase_a_mod.validate_native_stub_packet_contract(route, fixture["config"].tracked_packet, packet) is (legacy == "old-native")
+            if legacy == "unmarked":
+                assert "native_stub_packet_contract" not in route
+            else:
+                assert route["native_stub_packet_contract"] == envelope
+
+
 class TestChainFounderOverrideCarryForward:
     """The A->B chain rebuild must propagate a wave's declared FOUNDER_OVERRIDE.
 
@@ -17639,40 +17997,13 @@ class TestChainFounderOverrideCarryForward:
 class TestCandidateAuthorityCarryForward:
     """Launch-owned candidate authority survives both dispatcher rebuild seams."""
 
-    @staticmethod
-    def _authority(*, required: bool) -> dict:
-        return {
-            "required": required,
-            "precommit_inventory": True,
-            "spec_path": (
-                ".agent_bus-route/meta/candidate_authority/"
-                "candidate-authority-wave.spec.json"
-            ),
-            "spec_identity": {
-                "version": 1,
-                "spec_hash": "authority-spec-hash",
-                "candidate": {
-                    "comparison_commit": "a" * 40,
-                    "allowlist": ["mu/tools/executors/executor_dispatch.py"],
-                },
-            },
-            "target_branch_authority": {
-                "target_branch": "jabramsja/candidate-authority-wave",
-                "target_initial_head": "b" * 40,
-                "nested": {
-                    "source": {"detached": True, "clean": True},
-                    "labels": ["launch-owned", {"depth": 2}],
-                },
-            },
-        }
-
     def test_canonical_refresh_preserves_exact_candidate_authority(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, candidate_authority_factory,
     ):
         canonical = tmp_path / ".agent_bus-route" / "meta" / "post_merge_routing.json"
         canonical.parent.mkdir(parents=True)
         canonical.write_text('{"sentinel":"old"}\n', encoding="utf-8")
-        authority = self._authority(required=False)
+        authority = candidate_authority_factory(required=False)
         record = {
             "decision": "ROUTE_PHASE_A",
             "summary": "candidate authority refresh",
@@ -17807,7 +18138,7 @@ class TestCandidateAuthorityCarryForward:
         assert canonical.read_text(encoding="utf-8") == sentinel
 
     def test_phase_a_chain_preserves_exact_candidate_authority(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, candidate_authority_factory,
     ):
         packet_rel = "reports/control_plane/candidate-authority-wave.md"
         packet = tmp_path / packet_rel
@@ -17823,7 +18154,7 @@ class TestCandidateAuthorityCarryForward:
             stdout=json.dumps({"plan_path": packet_rel}),
             stderr="",
         )
-        authority = self._authority(required=True)
+        authority = candidate_authority_factory(required=True)
         captured: dict[str, object] = {}
 
         def fake_phase_b(args, *, cwd, timeout):

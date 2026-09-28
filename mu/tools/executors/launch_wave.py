@@ -131,20 +131,6 @@ def _load_line_ref_checker() -> Any:
 _line_ref = _load_line_ref_checker()
 
 
-def _load_l4_contract_checker() -> Any:
-    """Load the canonical L4 field rules without running the checker CLI."""
-    import importlib.util as ilu
-
-    path = _CHECKS_DIR / "enforce_l4_execution_contract.py"
-    spec = ilu.spec_from_file_location("enforce_l4_execution_contract", str(path))
-    module = ilu.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-_l4_contract = _load_l4_contract_checker()
-
-
 class LaunchWaveError(RuntimeError):
     """Raised when the wave launcher cannot complete a setup step."""
 
@@ -682,27 +668,9 @@ class WaveConfig:
             # so reject missing or semantically invalid inputs before writes.
             # Reuse the downstream checker's rules to avoid validation drift.
             errors.extend(_tsn.validate_fields(build_tracker_fields(self)))
-            for field_name in (
-                "host_semantics_delta_before",
-                "host_semantics_delta_after",
-                "workload_target",
-            ):
-                value = getattr(self, field_name)
-                if not isinstance(value, str) or not value.strip():
-                    errors.append(
-                        f"{field_name} required as a non-empty string for L4_STRUCTURAL"
-                    )
-                elif field_name == "workload_target":
-                    if value not in _l4_contract.VALID_WORKLOAD_TARGETS:
-                        errors.append(
-                            "workload_target must be one of "
-                            f"{sorted(_l4_contract.VALID_WORKLOAD_TARGETS)!r} "
-                            f"for L4_STRUCTURAL (got {value!r})"
-                        )
-                elif _l4_contract._is_low_signal_proof(value):
-                    errors.append(
-                        f"{field_name} is low-signal/placeholder text for L4_STRUCTURAL"
-                    )
+            errors.extend(_pa.native_structural_metadata_errors({
+                name: getattr(self, name) for name in _pa.NATIVE_STUB_STRUCTURAL_FIELDS
+            }))
         return errors
 
 
@@ -817,6 +785,10 @@ def _require_native_phase_a_contract_inputs(config: WaveConfig) -> None:
     if config.routing_decision != "ROUTE_PHASE_A":
         return
     errors = _native_phase_a_contract_input_errors(config)
+    if config.wave_class == "L4_STRUCTURAL":
+        errors.extend(_pa.native_structural_metadata_errors({
+            name: getattr(config, name) for name in _pa.NATIVE_STUB_STRUCTURAL_FIELDS
+        }))
     if errors:
         raise LaunchWaveError(
             "invalid native ROUTE_PHASE_A packet inputs: " + "; ".join(errors)
@@ -844,6 +816,10 @@ def build_native_stub_packet_contract(config: WaveConfig) -> dict[str, Any]:
         "evidence_command": config.evidence_command,
         "slow_functions": list(config.slow_functions),
     }
+    if config.wave_class == "L4_STRUCTURAL":
+        contract.update({
+            name: getattr(config, name) for name in _pa.NATIVE_STUB_STRUCTURAL_FIELDS
+        })
     return {
         "required": NATIVE_STUB_PACKET_CONTRACT_REQUIRED,
         "producer": NATIVE_STUB_PACKET_CONTRACT_PRODUCER,
@@ -925,12 +901,16 @@ def render_wave_packet(config: WaveConfig) -> str:
     # packets carry the discriminator before routing exists; non-native renders
     # remain unmarked for legacy/direct compatibility.
     provenance_lines: list[str] = []
+    structural_block = ""
     if config.routing_decision == "ROUTE_PHASE_A":
         envelope = build_native_stub_packet_contract(config)
         provenance_lines = [
             NATIVE_STUB_PACKET_CONTRACT_MARKER_LINE,
             f"{NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX}{envelope['digest']}",
         ]
+        structural_lines = _pa.native_stub_structural_metadata_lines(envelope["contract"])
+        if structural_lines:
+            structural_block = "\n" + "\n".join(structural_lines)
     provenance_block = "\n".join(provenance_lines)
     if provenance_block:
         provenance_block += "\n"
@@ -966,7 +946,7 @@ Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
 Task: {config.task_id}
 Wave ID: {config.wave_id}
 Phase-A-Lock: UNLOCKED
-{provenance_block}Purpose: {config.purpose}
+{provenance_block}Purpose: {config.purpose}{structural_block}
 
 ## Scope
 
@@ -2219,10 +2199,12 @@ def _native_phase_b_advanced_tracker_note(repo_root: Path, config: WaveConfig, *
             receipt_path=".scratch/phase_b_supervisor_package.json", bridge_rounds=rounds,
             reentry=reentry, founder_override=config.founder_override, pre_supervisor=True,
             packet_evidence_command=config.evidence_command, tracker_date=tracker_date,
+            routing_record=_native_stub_packet_contract_routing_record(config),
         )
         initial = _tsn.render_tracker_sync_note(build_tracker_fields(config))
         return note if note in {rendered, initial} else None
-    except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError):
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError,
+            phase_b.PhaseBExecutorError):
         return None
 
 
@@ -3101,6 +3083,19 @@ def _preserve_advanced_tracker_note_if_present(
 # --------------------------------------------------------------------------- #
 
 
+def _require_structural_task_authorization(repo_root: Path, config: WaveConfig) -> None:
+    """Use Gate 8 before structural launch writes, including lifecycle state."""
+    if config.wave_class != "L4_STRUCTURAL":
+        return
+    from meta_bridge_supervisor import check_tasks_authorization
+
+    result = check_tasks_authorization(
+        Path(repo_root), config.task_id, wave_class=config.wave_class,
+    )
+    if not result.passed:
+        raise LaunchWaveError(f"structural launch authorization failed: {result.error}")
+
+
 def setup_packet(repo_root: Path, config: WaveConfig) -> Path:
     """Step 1: render + fence-check FIRST, then place/reuse the packet.
 
@@ -3122,6 +3117,7 @@ def setup_packet(repo_root: Path, config: WaveConfig) -> Path:
     canonical render, so a re-run with the same config is a no-op on an
     already-fenced packet.
     """
+    _require_structural_task_authorization(repo_root, config)
     # A prior packet-side marker is same-attempt authority even when the proposed
     # route is no longer Phase A. Inspect it before any route-specific render or
     # fence exit can obscure the required corrected-config-relaunch result.
@@ -3156,9 +3152,15 @@ def setup_packet(repo_root: Path, config: WaveConfig) -> Path:
     return packet_path
 
 
-def setup_tracker_note(repo_root: Path, config: WaveConfig) -> None:
+def setup_tracker_note(
+    repo_root: Path,
+    config: WaveConfig,
+    *,
+    bus_dir: str | Path | None = None,
+) -> None:
     """Step 2: upsert the TASKS.md tracker-sync note (keyed by wave id)."""
-    _require_native_stub_packet_contract_relaunch_safe(repo_root, config)
+    _require_structural_task_authorization(repo_root, config)
+    _require_native_stub_packet_contract_relaunch_safe(repo_root, config, bus_dir=bus_dir)
     _require_native_phase_a_contract_inputs(config)
     if _preserve_advanced_tracker_note_if_present(repo_root, config):
         return
@@ -3178,6 +3180,7 @@ def setup_routing_record(
     bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Step 3: write the post-merge routing record (single next-candidate)."""
+    _require_structural_task_authorization(repo_root, config)
     # The shared builder writes immediately.  Compare any same-attempt envelope
     # first so direct helper use cannot replace the immutable contract in place.
     _require_native_stub_packet_contract_relaunch_safe(
@@ -4273,6 +4276,11 @@ def run_wave_setup(
     runner: Callable[..., Any] = subprocess.run,
 ) -> WaveSetupResult:
     """Retain ownership if native setup refuses before dispatcher entry."""
+    if config.wave_class == "L4_STRUCTURAL":
+        errors = config.validate(Path(repo_root), bus_dir=bus_dir)
+        if errors:
+            raise LaunchWaveError("invalid wave-config: " + "; ".join(errors))
+        _require_structural_task_authorization(repo_root, config)
     directory = None
     if launch and _native_relaunch_guard_identity_is_safe(config):
         try:
@@ -4505,7 +4513,7 @@ def _run_wave_setup_impl(
     # Persist the step-3 route before bridge setup so an interrupted run still
     # leaves packet, tracker, and routing artifacts for same-config recovery.
     packet_path = setup_packet(repo_root, config)
-    setup_tracker_note(repo_root, config)
+    setup_tracker_note(repo_root, config, bus_dir=bus_dir)
     setup_routing_record(repo_root, config, bus_dir=bus_dir)
     candidate_authority_spec = setup_candidate_authority_spec(
         repo_root,

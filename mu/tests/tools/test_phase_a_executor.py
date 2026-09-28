@@ -657,6 +657,162 @@ _NATIVE_CONTRACT_EVIDENCE_COMMAND = (
 )
 
 
+def _structural_native_builder_fixture():
+    import launch_wave
+
+    metadata = {
+        "workload_target": "execution_layer_truth",
+        "host_semantics_delta_before": "fixture execution proof missing; host markers total=5",
+        "host_semantics_delta_after": "fixture finite prefix proof present; host markers total=5",
+    }
+    source = _native_aggregate_contract()
+    config = launch_wave.WaveConfig(
+        wave_id=source["identity"]["wave_id"],
+        title=source["identity"]["title"],
+        date=source["identity"]["date"],
+        task_id="[MU-COINDUCTION-PRODUCTION-PROOF]",
+        wave_class="L4_STRUCTURAL",
+        target_gate_id="G8",
+        primary_blocker_class="INTEGRATION",
+        primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
+        indicator_artifact_ref="reports/l4_wave_indicators/fixture.json",
+        indicator_collection_command="python3 mu/tools/metrics/collect_l4_wave_indicators.py",
+        purpose=source["purpose"],
+        scope_summary=source["scope_summary"],
+        scope_items=["TASKS.md", "mu/tests/structural/test_stage0_vm.py"],
+        work_items=source["work_items"],
+        constraints=source["constraints"],
+        stop_conditions=source["stop_conditions"],
+        acceptance_criteria=source["acceptance_criteria"],
+        evidence_command=source["evidence_command"],
+        **metadata,
+    )
+    envelope = launch_wave.build_native_stub_packet_contract(config)
+    routing = _native_aggregate_routing(envelope["contract"])
+    routing["native_stub_packet_contract"] = envelope
+    return config, routing, launch_wave.render_wave_packet(config), metadata
+
+
+def test_native_structural_builder_exact_metadata_contract_and_render():
+    config, routing, packet, metadata = _structural_native_builder_fixture()
+    contract = phase_a_mod.native_stub_packet_contract_from_routing(routing)
+    assert {name: contract.get(name) for name in metadata} == metadata
+    assert phase_a_mod.validate_native_stub_packet_contract(routing, config.tracked_packet, packet)
+    assert phase_a_mod.native_stub_structural_metadata_from_packet(
+        packet, routing_record=routing, plan_path=config.tracked_packet,
+    ) == metadata
+    for name, value in metadata.items():
+        assert f"{name}: {value}" in packet.split("## Scope", 1)[0].splitlines()
+
+
+@pytest.mark.parametrize("drift", ["missing", "duplicate", "reordered", "body-only"])
+def test_native_structural_header_requires_exact_complete_declaration(drift):
+    config, routing, packet, metadata = _structural_native_builder_fixture()
+    lines = [f"{name}: {value}\n" for name, value in metadata.items()]
+    if drift == "missing":
+        packet = packet.replace(lines[1], "")
+    elif drift == "duplicate":
+        packet = packet.replace(lines[1], lines[1] * 2)
+    elif drift == "reordered":
+        packet = packet.replace("".join(lines), "".join(reversed(lines)))
+    else:
+        packet = packet.replace("".join(lines), "")
+        packet = packet.replace("## Scope\n", "## Scope\n" + "".join(lines))
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="Native stub packet contract"):
+        phase_a_mod.validate_native_stub_packet_contract(routing, config.tracked_packet, packet)
+
+
+def test_existing_native_contract_without_structural_extension_keeps_identity():
+    contract = _native_aggregate_contract()
+    routing = _native_aggregate_routing(contract)
+    packet = _native_aggregate_packet_text(contract)
+    before = copy.deepcopy(routing)
+    assert phase_a_mod.validate_native_stub_packet_contract(routing, _NATIVE_CONTRACT_PLAN_PATH, packet)
+    assert phase_a_mod.native_stub_structural_metadata_from_packet(
+        packet, routing_record=routing, plan_path=_NATIVE_CONTRACT_PLAN_PATH,
+    ) == {}
+    assert routing == before
+
+
+@pytest.mark.parametrize("field_name", ["workload_target", "host_semantics_delta_before", "host_semantics_delta_after"])
+@pytest.mark.parametrize("surface", ["packet", "contract", "rehashed-contract", "rehashed-provenance"])
+def test_native_structural_metadata_tampering_is_rejected(field_name, surface):
+    config, routing, packet, metadata = _structural_native_builder_fixture()
+    changed = "recurrence_exhaustion" if field_name == "workload_target" else "fixture changed host inventory total=9"
+    envelope = routing["native_stub_packet_contract"]
+    if surface == "packet":
+        packet = packet.replace(f"{field_name}: {metadata[field_name]}", f"{field_name}: {changed}")
+    else:
+        envelope["contract"][field_name] = changed
+        if surface.startswith("rehashed"):
+            old_digest = envelope["digest"]
+            envelope["digest"] = phase_a_mod.native_stub_packet_contract_digest(envelope["contract"])
+            if surface == "rehashed-provenance":
+                packet = packet.replace(old_digest, envelope["digest"])
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="Native stub packet contract"):
+        phase_a_mod.validate_native_stub_packet_contract(routing, config.tracked_packet, packet)
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="Native stub packet contract"):
+        phase_a_mod.native_stub_structural_metadata_from_packet(
+            packet, routing_record=routing, plan_path=config.tracked_packet,
+        )
+
+
+@pytest.mark.parametrize("envelope", [None, {}, {"required": False}])
+def test_native_structural_consumption_rejects_missing_or_invalid_authority(envelope):
+    config, routing, packet, _metadata = _structural_native_builder_fixture()
+    if envelope is None:
+        routing.pop("native_stub_packet_contract")
+    else:
+        routing["native_stub_packet_contract"] = envelope
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="Native stub packet contract"):
+        phase_a_mod.native_stub_structural_metadata_from_packet(
+            packet, routing_record=routing, plan_path=config.tracked_packet,
+        )
+
+
+def test_native_structural_consumption_requires_authority_after_prior_validation():
+    config, routing, packet, _metadata = _structural_native_builder_fixture()
+    assert phase_a_mod.validate_native_stub_packet_contract(routing, config.tracked_packet, packet)
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match="launch-owned routing envelope"):
+        phase_a_mod.native_stub_structural_metadata_from_packet(packet)
+
+
+def test_unmarked_structural_prose_retains_legacy_inference():
+    assert phase_a_mod.native_stub_structural_metadata_from_packet(
+        "# Legacy packet\nworkload_target: execution_layer_truth\n\n## Scope\nLegacy scope.\n",
+    ) == {}
+
+
+@pytest.mark.parametrize("status", [
+    "Phase B (pre-supervisor pending, bridge-converged)",
+    "IMPLEMENTED / LOCAL EVIDENCE",
+    "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT",
+])
+def test_structural_consumption_preserves_metadata_across_machine_status_updates(status):
+    config, routing, packet, metadata = _structural_native_builder_fixture()
+    packet = packet.replace(
+        "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+        f"Status: {status}",
+    )
+    assert phase_a_mod.native_stub_structural_metadata_from_packet(
+        packet, routing_record=routing, plan_path=config.tracked_packet,
+    ) == metadata
+
+
+@pytest.mark.parametrize("field_name", ["workload_target", "host_semantics_delta_before", "host_semantics_delta_after"])
+@pytest.mark.parametrize("bad_value", [None, "", " \t ", [], "unknown", "first\nworkload_target: host_debt_reduction", " padded "])
+def test_native_structural_contract_rejects_malformed_metadata(field_name, bad_value):
+    _config, routing, _packet, _metadata = _structural_native_builder_fixture()
+    envelope = routing["native_stub_packet_contract"]
+    if bad_value is None:
+        envelope["contract"].pop(field_name, None)
+    else:
+        envelope["contract"][field_name] = bad_value
+    envelope["digest"] = phase_a_mod.native_stub_packet_contract_digest(envelope["contract"])
+    with pytest.raises(phase_a_mod.PhaseAExecutorError, match=field_name):
+        phase_a_mod.native_stub_packet_contract_from_routing(routing)
+
+
 def _native_aggregate_contract() -> dict:
     return {
         "identity": {
