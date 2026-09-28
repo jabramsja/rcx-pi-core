@@ -131,6 +131,20 @@ def _load_line_ref_checker() -> Any:
 _line_ref = _load_line_ref_checker()
 
 
+def _load_l4_contract_checker() -> Any:
+    """Load the canonical L4 field rules without running the checker CLI."""
+    import importlib.util as ilu
+
+    path = _CHECKS_DIR / "enforce_l4_execution_contract.py"
+    spec = ilu.spec_from_file_location("enforce_l4_execution_contract", str(path))
+    module = ilu.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_l4_contract = _load_l4_contract_checker()
+
+
 class LaunchWaveError(RuntimeError):
     """Raised when the wave launcher cannot complete a setup step."""
 
@@ -665,7 +679,8 @@ class WaveConfig:
             errors.extend(_native_phase_a_contract_input_errors(self))
         if self.wave_class == "L4_STRUCTURAL":
             # Structural metadata is needed before the first native review,
-            # so reject missing inputs before packet/tracker/route writes.
+            # so reject missing or semantically invalid inputs before writes.
+            # Reuse the downstream checker's rules to avoid validation drift.
             errors.extend(_tsn.validate_fields(build_tracker_fields(self)))
             for field_name in (
                 "host_semantics_delta_before",
@@ -676,6 +691,17 @@ class WaveConfig:
                 if not isinstance(value, str) or not value.strip():
                     errors.append(
                         f"{field_name} required as a non-empty string for L4_STRUCTURAL"
+                    )
+                elif field_name == "workload_target":
+                    if value not in _l4_contract.VALID_WORKLOAD_TARGETS:
+                        errors.append(
+                            "workload_target must be one of "
+                            f"{sorted(_l4_contract.VALID_WORKLOAD_TARGETS)!r} "
+                            f"for L4_STRUCTURAL (got {value!r})"
+                        )
+                elif _l4_contract._is_low_signal_proof(value):
+                    errors.append(
+                        f"{field_name} is low-signal/placeholder text for L4_STRUCTURAL"
                     )
         return errors
 
