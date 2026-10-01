@@ -922,6 +922,31 @@ def _extract_founder_override_from_routing_record(
     return ""
 
 
+def _extract_growth_cap_invocation_token(
+    handoff: dict[str, Any],
+    repo_root: Path,
+    *,
+    wave_id: str,
+) -> str:
+    """Read explicit handoff authority or a same-wave staged packet override."""
+    for key in ("founder_override_token", "founder_override"):
+        token = _normalize_founder_override_token(handoff.get(key))
+        if token:
+            return token
+    token = _extract_founder_override_from_tracker_note(
+        str(handoff.get("tracker_note_text") or "")
+    )
+    if token:
+        return token
+
+    # Structural handoffs skip packet validation in Step 5c. Check the staged
+    # packet's declared identity before its token can authorize any cap edits.
+    packet_text = _tracked_packet_text_from_record(handoff, repo_root)
+    if not _packet_declares_same_wave_id(packet_text, normalize_wave_id(wave_id)):
+        return ""
+    return _extract_founder_override_token(packet_text)
+
+
 def _extract_same_wave_founder_override_from_tasks(repo_root: Path, wave_id: str) -> str:
     """Return a same-wave founder override already staged or written in TASKS.md."""
     normalized_wave_id = normalize_wave_id(wave_id)
@@ -20163,7 +20188,9 @@ def _run_commit_pipeline_impl(
         # structural supervisor override or deriving authority from routing alone.
         growth_cap_invocation_token = (
             founder_override_token
-            or _extract_founder_override_from_routing_record(handoff, repo_root)
+            or _extract_growth_cap_invocation_token(
+                handoff, repo_root, wave_id=wave_id
+            )
         )
         growth_cap_outcome = _maybe_autobump_growth_cap_for_founder_override(
             repo_root,
