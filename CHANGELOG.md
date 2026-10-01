@@ -6,6 +6,33 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-09-28
 
+### Native structural metadata through dispatcher handoffs (Phase B; landing pending)
+
+- Recover the exact manifest-verified R1 launcher, Phase A, Phase B and three
+  test files, including immutable structural metadata binding, early NOW/NEXT
+  authorization and the test-only bridge reader clock. Preserve the stopped
+  twelve-file R1 candidate and twenty-three-file Mu R4 candidate unchanged.
+- Reproduce both missing-envelope projections with real disposable-repository
+  builders: Phase A-to-B child arguments and canonical routing replacement.
+  Carry the exact validated native envelope through both, preserving nested
+  identity, contract and digest alongside candidate/founder/pager authority.
+  Malformed or mismatched authority fails before dispatch or replacement;
+  failed native authority cannot fall through to a generic routing rebuild.
+- The final focused run passed 33 transport/integration tests after three
+  failing reproduction assertions; all six complete declared modules passed
+  2,889 tests in 222.53s. The whole chain retains explicit
+  `execution_layer_truth` despite conflicting `stage0_vm` scope and preserves
+  both exact host-semantics descriptions through both tracker stages, durable
+  handoff and commit extraction. Changed headers with unchanged envelopes fail
+  before tracker emission. Legacy absence and old native envelopes remain valid.
+- Carry complete current PRIMARY TASKS and all 268 task IDs, preserving the
+  native canonical Ra note. The current native packet, Ra and actual Mu NOW
+  authorization probes pass. Native review, indicators, publication, CI and
+  synchronization remain pending. Resume the
+  preserved Mu runtime directly after this enabler lands, keeping all 24 vector
+  outcomes and correcting only the new document's projection-count wording to
+  cite the registry/count test. No runtime or Mu completion is claimed here.
+
 ### Structural launcher inputs for the existing Mu task (Phase B; landing pending)
 
 - Reproduce the accepted structural configuration whose generated tracker omits

@@ -38,7 +38,8 @@ import tracker_sync_note as tsn  # noqa: E402  (reuse proof for the note builder
 import executor_common as ec  # noqa: E402  (public seam for the routing-record path)
 import executor_dispatch as ed  # noqa: E402  (public dispatcher seams)
 import commit_executor as ce  # noqa: E402  (authoritative continuation producer)
-from meta_bridge_supervisor import compute_repo_state  # noqa: E402  (public state seam)
+import phase_a_executor as pa  # noqa: E402
+from meta_bridge_supervisor import check_tasks_authorization, compute_repo_state  # noqa: E402
 
 sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "checks"))
 import enforce_l4_execution_contract as l4_contract  # noqa: E402
@@ -132,6 +133,7 @@ _STRUCTURAL_CHANGED_FILES = [
     "mu/programs/coinduction_prefix.v1.json",
     "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
     "mu/tests/structural/test_execution_layer_truth_contract.py",
+    "mu/tests/structural/test_stage0_vm.py",
 ]
 
 
@@ -1008,6 +1010,7 @@ def _publish_native_pre_supervisor_fixture(repo, config, bus_dir):
         receipt_path=".scratch/phase_b_supervisor_package.json", bridge_rounds=2, reentry=True,
         founder_override=config.founder_override, pre_supervisor=True,
         packet_evidence_command=config.evidence_command, tracker_date=config.date,
+        routing_record=lw._native_stub_packet_contract_routing_record(config),  # ANTICHEAT_OK: use the launch builder's bound envelope for tracker consumption.
     )
     tasks = repo / "TASKS.md"
     initial = tsn.render_tracker_sync_note(lw.build_tracker_fields(config))
@@ -1474,6 +1477,8 @@ def test_structural_inputs_survive_setup_and_same_config_authority(
     config_path = wave_repo / "structural-config.json"
     config_path.write_text(json.dumps(_structural_config_data()), encoding="utf-8")
     config = lw.load_wave_config(config_path)
+    tasks = wave_repo / "TASKS.md"
+    tasks.write_text(f"## NOW\n\n- {config.task_id} active\n\n" + tasks.read_text())
     assert config.validate(wave_repo) == []
     roundtrip = lw.WaveConfig.from_dict(json.loads(json.dumps(dataclasses.asdict(config))))
     assert roundtrip == config
@@ -1490,6 +1495,15 @@ def test_structural_inputs_survive_setup_and_same_config_authority(
     assert _artifact_counts(wave_repo, config.wave_id) == (1, 1, 1)
     assert result.guards_ok and result.precondition_ok
     assert not result.launch["launched"]
+    routing = json.loads(Path(result.routing_record_path).read_text())
+    packet = Path(result.packet_path).read_text()
+    assert pa.validate_native_stub_packet_contract(routing, config.tracked_packet, packet)
+    contract = pa.native_stub_packet_contract_from_routing(routing)
+    assert {name: contract.get(name) for name in _STRUCTURAL_TRACKER_INPUTS} == (
+        _STRUCTURAL_TRACKER_INPUTS
+    )
+    for name, value in _STRUCTURAL_TRACKER_INPUTS.items():
+        assert f"{name}: {value}" in packet.split("## Scope", 1)[0].splitlines()
     note = _tracker_note_line(tasks.read_text(), config.wave_id)
     assert note == tsn.render_tracker_sync_note(fields)
     ra = tasks.read_text().split("## Ra", 1)[1].split("\n---", 1)[0]
@@ -1522,6 +1536,101 @@ def test_structural_inputs_survive_setup_and_same_config_authority(
     ), encoding="utf-8")
     assert not lw._native_phase_b_tracker_matches_config(wave_repo, roundtrip)  # ANTICHEAT_OK: worktree drift must fail.
     assert not lw._native_phase_b_tracker_matches_config(wave_repo, changed)  # ANTICHEAT_OK: index drift must fail.
+
+
+@pytest.mark.parametrize("launch", [False, True])
+@pytest.mark.parametrize("anchor", ["queue", "ra", "struck-now", "missing"])
+def test_structural_authorization_fails_before_any_launch_write(
+    wave_repo, monkeypatch, launch, anchor,
+):
+    config = lw.WaveConfig.from_dict(_structural_config_data())
+    tasks = wave_repo / "TASKS.md"
+    declaration = f"- {config.task_id} FOUNDER_OVERRIDE:{config.wave_id}\n"
+    prefix = {
+        "queue": "## PROGRAM QUEUE\n" + declaration,
+        "ra": "",
+        "struck-now": f"## NOW\n- ~~**{config.task_id} completed**~~\n",
+        "missing": "## NOW\nNo active task\n",
+    }[anchor]
+    text = tasks.read_text()
+    if anchor == "ra":
+        text = text.replace("## Ra\n", "## Ra\n" + declaration)
+    tasks.write_text(prefix + text)
+    result = check_tasks_authorization(
+        wave_repo, config.task_id, founder_override_token=f"FOUNDER_OVERRIDE:{config.wave_id}",
+        wave_name=config.wave_id, wave_class="L4_STRUCTURAL",
+    )
+    assert not result.passed
+    before = {p.relative_to(wave_repo): p.read_bytes() for p in wave_repo.rglob("*") if p.is_file()}
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("structural admission must precede lifecycle writes and model dispatch")
+
+    import worktree_lifecycle
+    monkeypatch.setattr(worktree_lifecycle, "register_lane", forbidden)
+    with pytest.raises(lw.LaunchWaveError, match="structural launch authorization.*NOW.*NEXT"):
+        lw.run_wave_setup(wave_repo, config, launch=launch, runner=forbidden)
+    after = {p.relative_to(wave_repo): p.read_bytes() for p in wave_repo.rglob("*") if p.is_file()}
+    assert after == before
+
+
+@pytest.mark.parametrize("section", ["NOW", "NEXT"])
+def test_structural_authorization_accepts_existing_active_task(wave_repo, section):
+    config = lw.WaveConfig.from_dict(_structural_config_data())
+    tasks = wave_repo / "TASKS.md"
+    tasks.write_text(f"## {section}\n- {config.task_id} active\n\n" + tasks.read_text())
+    assert check_tasks_authorization(wave_repo, config.task_id, wave_class="L4_STRUCTURAL").passed
+    result = lw.run_wave_setup(wave_repo, config)
+    assert result.guards_ok and result.precondition_ok
+    assert not result.launch["launched"]
+
+
+@pytest.mark.parametrize("field_name", list(_STRUCTURAL_TRACKER_INPUTS))
+@pytest.mark.parametrize("surface", ["packet", "envelope"])
+@pytest.mark.parametrize("bus_dir", [None, ".agent_bus-structural-fixture"])
+def test_phase_a_tracker_refresh_rejects_structural_authority_mismatch(
+    wave_repo, field_name, surface, bus_dir,
+):
+    config = lw.WaveConfig.from_dict(_structural_config_data())
+    tasks = wave_repo / "TASKS.md"
+    tasks.write_text(f"## NOW\n- {config.task_id} active\n\n" + tasks.read_text())
+    result = lw.run_wave_setup(wave_repo, config, bus_dir=bus_dir)
+    packet_path = Path(result.packet_path)
+    route_path = Path(result.routing_record_path)
+    changed = "recurrence_exhaustion" if field_name == "workload_target" else "fixture changed host inventory total=9"
+    if surface == "packet":
+        packet_path.write_text(packet_path.read_text().replace(
+            f"{field_name}: {_STRUCTURAL_TRACKER_INPUTS[field_name]}",
+            f"{field_name}: {changed}",
+        ), encoding="utf-8")
+    else:
+        routing = json.loads(route_path.read_text())
+        envelope = routing["native_stub_packet_contract"]
+        envelope["contract"][field_name] = changed
+        envelope["digest"] = pa.native_stub_packet_contract_digest(envelope["contract"])
+        route_path.write_text(json.dumps(routing), encoding="utf-8")
+    before = {path: path.read_bytes() for path in (tasks, packet_path, route_path)}
+    with pytest.raises(lw.LaunchWaveError, match="corrected-config-relaunch-required"):
+        lw.setup_tracker_note(wave_repo, config, bus_dir=bus_dir)
+    assert {path: path.read_bytes() for path in before} == before
+
+
+def test_structural_extension_cannot_rewrite_existing_native_envelope(wave_repo):
+    config = lw.WaveConfig.from_dict(_structural_config_data())
+    tasks = wave_repo / "TASKS.md"
+    tasks.write_text(f"## NOW\n- {config.task_id} active\n\n" + tasks.read_text())
+    # The non-structural builder emits the exact pre-extension contract shape;
+    # wave_class itself was never part of that immutable envelope.
+    old_shape = dataclasses.replace(config, wave_class="L4_ENABLER")
+    result = lw.run_wave_setup(wave_repo, old_shape)
+    routing = json.loads(Path(result.routing_record_path).read_text())
+    assert not set(_STRUCTURAL_TRACKER_INPUTS).intersection(
+        routing["native_stub_packet_contract"]["contract"]
+    )
+    before = {p.relative_to(wave_repo): p.read_bytes() for p in wave_repo.rglob("*") if p.is_file()}
+    with pytest.raises(lw.LaunchWaveError, match="corrected-config-relaunch-required"):
+        lw.run_wave_setup(wave_repo, config)
+    assert {p.relative_to(wave_repo): p.read_bytes() for p in wave_repo.rglob("*") if p.is_file()} == before
 
 
 _NATIVE_PACKET_STRUCTURED_FIELDS = (

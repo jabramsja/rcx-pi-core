@@ -46,6 +46,285 @@ _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"
 
 
 @pytest.fixture
+def native_structural_tracker_fixture(tmp_path, monkeypatch):
+    """Portable launch authority with the conflicting Mu R4 stage0_vm scope."""
+    import launch_wave
+    import tracker_sync_note
+
+    metadata = {
+        "workload_target": "execution_layer_truth",
+        "host_semantics_delta_before": "fixture guarded prefix lacks execution evidence; host markers total=5",
+        "host_semantics_delta_after": "fixture finite guarded prefix has execution evidence; host markers total=5",
+    }
+    changed_files = [
+        "mu/programs/coinduction_prefix.v1.json",
+        "mu/tests/structural/test_execution_layer_truth_contract.py",
+        "mu/tests/structural/test_stage0_vm.py",
+        "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+    ]
+    config = launch_wave.WaveConfig(
+        wave_id="mu-roundtrip-fixture-2026-09-28", date="2026-09-28",
+        title="Finite guarded prefix metadata fixture",
+        task_id="[MU-COINDUCTION-PRODUCTION-PROOF]", wave_class="L4_STRUCTURAL",
+        purpose="Prove exact declared structural metadata through native builders.",
+        target_gate_id="G8", primary_blocker_class="INTEGRATION",
+        primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
+        indicator_artifact_ref="reports/l4_wave_indicators/mu-roundtrip-fixture-2026-09-28.json",
+        indicator_collection_command="python3 mu/tools/metrics/collect_l4_wave_indicators.py",
+        evidence_command="python3 -m pytest -q " + " ".join(changed_files[1:]),
+        evidence_delta="Fixture gains finite prefix execution evidence",
+        progress_proof_before="Fixture lacks finite prefix evidence",
+        progress_proof_after="Fixture carries finite prefix evidence",
+        structural_artifact_ref=changed_files[0],
+        post_gate_contract_sweep="python3 -m pytest -q " + changed_files[1],
+        scope_items=["TASKS.md", *changed_files],
+        work_items=["Retain explicit execution_layer_truth through both tracker refreshes"],
+        constraints=["Preserve exact metadata; no target relabel"],
+        stop_conditions=["Stop on metadata drift"],
+        acceptance_criteria=["All three fields survive the native handoff"],
+        **metadata,
+    )
+    assert config.validate(tmp_path) == []
+
+    initial = tracker_sync_note.render_tracker_sync_note(launch_wave.build_tracker_fields(config))
+    packet = launch_wave.render_wave_packet(config).replace("Phase-A-Lock: UNLOCKED", "Phase-A-Lock: LOCKED")
+    envelope = launch_wave.build_native_stub_packet_contract(config)
+    routing = {
+        "decision": "ROUTE_PHASE_A", "summary": "Portable structural launch authority",
+        "wave_name": config.wave_id, "task_id": config.task_id,
+        "native_stub_packet_contract": envelope,
+        "next_candidates": [{"candidate": config.wave_id, "bounded": True, "tracked_packet": config.tracked_packet}],
+    }
+    assert pa_mod.validate_native_stub_packet_contract(routing, config.tracked_packet, packet)
+    bus_dir = ".agent_bus-structural-fixture"
+    route_path = tmp_path / bus_dir / "meta" / "post_merge_routing.json"
+    route_path.parent.mkdir(parents=True)
+    route_path.write_text(json.dumps(routing), encoding="utf-8")
+    monkeypatch.setattr(pb_mod, "_active_bus_dir", lambda: bus_dir)
+    (tmp_path / "TASKS.md").write_text(f"## Ra\n\n{initial}\n\n---\n")
+    kwargs = dict(
+        wave_id=config.wave_id, task_id=config.task_id, wave_class=config.wave_class,
+        target_gate_id=config.target_gate_id, plan_path=config.tracked_packet,
+        plan_content=packet, changed_files=[*changed_files, config.indicator_artifact_ref],
+        test_files=changed_files[1:],
+        receipt_path=".agent_bus/meta/pre_commit_receipt.json", reentry=False,
+        # The real A-to-B dispatcher drops the native envelope from this copy.
+        routing_record={
+            "decision": "ROUTE_PHASE_B", "summary": "Chained from Phase A convergence",
+            "wave_name": config.wave_id, "task_id": config.task_id,
+        },
+    )
+    return {
+        "config": config, "metadata": metadata, "changed_files": changed_files,
+        "initial": initial, "packet": packet, "routing": routing,
+        "route_path": route_path, "kwargs": kwargs,
+    }
+
+
+@pytest.mark.parametrize("pre_supervisor", [True, False], ids=["pre-supervisor", "handoff"])
+def test_native_structural_metadata_roundtrip_to_commit(
+    tmp_path, native_structural_tracker_fixture, pre_supervisor,
+):
+    fixture = native_structural_tracker_fixture
+    config, metadata = fixture["config"], fixture["metadata"]
+    changed_files, kwargs = fixture["changed_files"], fixture["kwargs"]
+
+    def consumed_fields(note):
+        # Remove exactly the separator period added by the tracker builder.
+        return {
+            name: commit_mod.tracker_marker_value(
+                note, name, marker_names=(*metadata, "structural_artifact_ref"),
+            ).removesuffix(".")
+            for name in metadata
+        }
+
+    assert consumed_fields(fixture["initial"]) == metadata
+    if pre_supervisor:
+        # Isolate staging only; the real finalizer renders, persists and verifies Ra.
+        with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: sorted(set(files))):
+            note, _override, _package_override, modified, _scope, error = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: real pre-supervisor refresh integration with disposable TASKS.
+                tmp_path, bridge_status={"rounds": 1}, **kwargs,
+            )
+        assert error is None, error
+        assert modified
+        assert note in (tmp_path / "TASKS.md").read_text()
+    else:
+        note = pb_mod.build_phase_b_tracker_note(repo_root=tmp_path, bridge_rounds=1, **kwargs)
+    assert consumed_fields(note) == metadata
+    assert {name: fixture["routing"]["native_stub_packet_contract"]["contract"].get(name) for name in metadata} == metadata
+    handoff, errors = commit_mod.build_commit_handoff(
+        wave_id=config.wave_id, task_id=config.task_id, wave_class=config.wave_class,
+        target_gate_id=config.target_gate_id, caller="phase_b",
+        files_to_stage=changed_files,
+        commit_message="feat: finite prefix fixture\n\nCo-Authored-By: Test <test@example.com>",
+        fixes_implemented=["Preserve declared structural metadata"],
+        tracker_note_text=note, tracked_packet=config.tracked_packet,
+        pre_commit_receipt_path=kwargs["receipt_path"],
+    )
+    assert errors == []
+    assert consumed_fields(handoff["tracker_note_text"]) == metadata
+
+
+@pytest.mark.parametrize("pre_supervisor", [True, False], ids=["pre-supervisor", "handoff"])
+def test_structural_tracker_pure_render_requires_launch_envelope(
+    native_structural_tracker_fixture, pre_supervisor,
+):
+    fixture = native_structural_tracker_fixture
+    kwargs = dict(fixture["kwargs"], pre_supervisor=pre_supervisor, bridge_rounds=1)
+    with pytest.raises(pb_mod.PhaseBExecutorError, match="launch-owned routing envelope"):
+        pb_mod.build_phase_b_tracker_note(**kwargs)
+    kwargs["routing_record"] = fixture["routing"]
+    note = pb_mod.build_phase_b_tracker_note(**kwargs)
+    for name, value in fixture["metadata"].items():
+        assert f"{name}: {value}." in note
+
+
+def _assert_structural_tracker_rejected(repo, kwargs, *, pre_supervisor):
+    before = (repo / "TASKS.md").read_bytes()
+    with (
+        patch.object(pb_mod, "render_tracker_sync_note", wraps=pb_mod.render_tracker_sync_note) as render,
+        patch.object(pb_mod, "_sync_phase_b_tasks_tracker_note", wraps=pb_mod._sync_phase_b_tasks_tracker_note) as sync,  # ANTICHEAT_OK: spy on the real tracker write boundary.
+        patch.object(pb_mod, "_stage_files_for_pipeline") as stage,
+    ):
+        if pre_supervisor:
+            note, _override, _package_override, modified, _scope, error = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: metadata rejection must precede tracker persistence and staging.
+                repo, bridge_status={"rounds": 1}, **kwargs,
+            )
+            assert error and "structural" in error.lower(), error
+            assert note == ""
+            assert not modified
+        else:
+            with pytest.raises(pb_mod.PhaseBExecutorError, match="[Ss]tructural"):
+                pb_mod.build_phase_b_tracker_note(repo_root=repo, bridge_rounds=1, **kwargs)
+        render.assert_not_called()
+        sync.assert_not_called()
+        stage.assert_not_called()
+    assert (repo / "TASKS.md").read_bytes() == before
+
+
+@pytest.mark.parametrize("pre_supervisor", [True, False], ids=["pre-supervisor", "handoff"])
+@pytest.mark.parametrize("field_name", ["workload_target", "host_semantics_delta_before", "host_semantics_delta_after"])
+def test_structural_tracker_rejects_valid_header_value_mismatching_launch(
+    tmp_path, native_structural_tracker_fixture, pre_supervisor, field_name,
+):
+    fixture = native_structural_tracker_fixture
+    metadata = fixture["metadata"]
+    # Phase A validated the original packet in the fixture. A later validly
+    # typed declaration still cannot replace the launch-owned value.
+    changed = "recurrence_exhaustion" if field_name == "workload_target" else "fixture altered host inventory total=9"
+    assert pa_mod.native_structural_metadata_errors({**metadata, field_name: changed}) == []
+    kwargs = dict(fixture["kwargs"])
+    kwargs["plan_content"] = fixture["packet"].replace(
+        f"{field_name}: {metadata[field_name]}", f"{field_name}: {changed}",
+    )
+    _assert_structural_tracker_rejected(tmp_path, kwargs, pre_supervisor=pre_supervisor)
+
+
+@pytest.mark.parametrize("pre_supervisor", [True, False], ids=["pre-supervisor", "handoff"])
+@pytest.mark.parametrize("drift", [
+    "removed-fields", "removed-provenance", "damaged-marker", "missing-envelope",
+    "missing-route", "malformed-route", "malformed-envelope", "bad-digest",
+    "rehashed-envelope", "old-envelope-injected-fields", "forged-inline-envelope",
+    "malformed-inline-envelope", "wrong-path", "wrong-wave", "wrong-task",
+])
+def test_structural_tracker_authority_failure_never_falls_back(
+    tmp_path, native_structural_tracker_fixture, pre_supervisor, drift,
+):
+    fixture = native_structural_tracker_fixture
+    kwargs = dict(fixture["kwargs"])
+    routing = json.loads(fixture["route_path"].read_text())
+    envelope = routing["native_stub_packet_contract"]
+    packet = fixture["packet"]
+    if drift == "removed-fields":
+        for name, value in fixture["metadata"].items():
+            packet = packet.replace(f"{name}: {value}\n", "")
+    elif drift == "removed-provenance":
+        packet = "\n".join(line for line in packet.splitlines() if not line.startswith("Native-Stub-Packet-Contract")) + "\n"
+    elif drift == "damaged-marker":
+        packet = packet.replace("producer=launch_wave.py", "producer=other.py")
+    elif drift == "missing-envelope":
+        routing.pop("native_stub_packet_contract")
+    elif drift == "malformed-envelope":
+        routing["native_stub_packet_contract"] = None
+    elif drift == "bad-digest":
+        envelope["digest"] = "0" * 64
+    elif drift == "malformed-inline-envelope":
+        # Python dict equality equates 1 and True, but envelope validation must
+        # reject this marker before the valid persisted route can replace it.
+        envelope["required"] = 1
+        kwargs["routing_record"] = routing
+        routing = fixture["routing"]
+    elif drift in {"rehashed-envelope", "old-envelope-injected-fields", "forged-inline-envelope"}:
+        old_digest = envelope["digest"]
+        if drift == "old-envelope-injected-fields":
+            for name in fixture["metadata"]:
+                envelope["contract"].pop(name)
+        else:
+            envelope["contract"]["workload_target"] = "recurrence_exhaustion"
+        envelope["digest"] = pa_mod.native_stub_packet_contract_digest(envelope["contract"])
+        packet = packet.replace(old_digest, envelope["digest"])
+        if drift == "forged-inline-envelope":
+            # Internally consistent inline authority must not replace the
+            # different envelope still persisted by the launcher.
+            packet = packet.replace("workload_target: execution_layer_truth", "workload_target: recurrence_exhaustion")
+            kwargs["routing_record"] = routing
+            assert pa_mod.validate_native_stub_packet_contract(routing, kwargs["plan_path"], packet)
+            routing = fixture["routing"]
+    elif drift == "wrong-path":
+        kwargs["plan_path"] = "reports/control_plane/another-wave.md"
+    elif drift == "wrong-wave":
+        kwargs["wave_id"] = "another-wave-2026-09-28"
+    elif drift == "wrong-task":
+        kwargs["task_id"] = "[ANOTHER-TASK]"
+    fixture["route_path"].write_text(json.dumps(routing), encoding="utf-8")
+    if drift == "missing-route":
+        fixture["route_path"].unlink()
+    elif drift == "malformed-route":
+        fixture["route_path"].write_text("{broken", encoding="utf-8")
+    kwargs["plan_content"] = packet
+    _assert_structural_tracker_rejected(tmp_path, kwargs, pre_supervisor=pre_supervisor)
+
+
+@pytest.mark.parametrize("pre_supervisor", [True, False], ids=["pre-supervisor", "handoff"])
+@pytest.mark.parametrize("legacy_kind", ["unmarked", "old-native"])
+def test_structural_tracker_legacy_inference_remains_available(
+    tmp_path, native_structural_tracker_fixture, pre_supervisor, legacy_kind,
+):
+    fixture = native_structural_tracker_fixture
+    kwargs = dict(fixture["kwargs"])
+    routing = json.loads(fixture["route_path"].read_text())
+    envelope = routing["native_stub_packet_contract"]
+    packet = fixture["packet"]
+    for name, value in fixture["metadata"].items():
+        packet = packet.replace(f"{name}: {value}\n", "")
+        envelope["contract"].pop(name)
+    digest = pa_mod.native_stub_packet_contract_digest(envelope["contract"])
+    packet = packet.replace(envelope["digest"], digest)
+    envelope["digest"] = digest
+    if legacy_kind == "unmarked":
+        routing.pop("native_stub_packet_contract")
+        packet = "\n".join(line for line in packet.splitlines() if not line.startswith("Native-Stub-Packet-Contract")) + "\n"
+    else:
+        assert pa_mod.validate_native_stub_packet_contract(routing, kwargs["plan_path"], packet)
+    fixture["route_path"].write_text(json.dumps(routing), encoding="utf-8")
+    kwargs["plan_content"] = packet
+    if pre_supervisor:
+        with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kw: sorted(set(files))):
+            note, _override, _package_override, modified, _scope, error = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: real legacy tracker refresh with disposable TASKS.
+                tmp_path, bridge_status={"rounds": 1}, **kwargs,
+            )
+        assert error is None, error
+        assert modified
+        assert note in (tmp_path / "TASKS.md").read_text()
+    else:
+        note = pb_mod.build_phase_b_tracker_note(repo_root=tmp_path, bridge_rounds=1, **kwargs)
+    assert "workload_target: host_debt_reduction." in note
+    assert "host_semantics_delta_before: host semantics ratchet baseline" in note
+
+
+@pytest.fixture
 def mock_routing_record():
     """Patch load_routing_record to return a valid ROUTE_PHASE_B record."""
     with patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
@@ -72,6 +351,33 @@ def isolate_phase_b_pager_transport():
 def real_pre_review_package():
     """Opt a focused integration test into the real pre-review package helper."""
     yield
+
+
+@pytest.fixture(autouse=True)
+def isolate_phase_b_review_material_clock(monkeypatch):
+    """Poll real artifacts without wall-clock waits for mocked bridge reviews.
+
+    Many orchestration stubs never publish raw transcripts, so each review
+    otherwise spends the full two-second settle window waiting for no writer.
+    Keep the real reader and its deadline; virtualize time only during that
+    call so subprocess supervision and other timing tests retain real clocks.
+    """
+    real_read_material = pb_mod._read_bridge_review_material  # ANTICHEAT_OK: retain the real artifact reader while isolating its clock.
+    clock = SimpleNamespace(now=0.0, sleeps=[])
+    clock.monotonic = lambda: clock.now
+
+    def sleep(delay):
+        clock.sleeps.append(delay)
+        clock.now += delay
+
+    clock.sleep = sleep
+
+    def read_material(*args, **kwargs):
+        with patch.object(pb_mod, "time", clock):
+            return real_read_material(*args, **kwargs)
+
+    monkeypatch.setattr(pb_mod, "_read_bridge_review_material", read_material)
+    return clock
 
 
 @pytest.fixture(autouse=True)
@@ -7961,6 +8267,65 @@ class TestPreparedPrivateReviewResume:
 
 class TestBridgeRenderAssociation:
     """Bridge review uses exact job_id, not newest/freshest render."""
+
+    @pytest.mark.parametrize("raw_state", ["missing", "partial", "ready", "delayed"])
+    def test_bridge_material_polling_uses_virtual_time_with_real_artifacts(
+        self, tmp_path, monkeypatch, isolate_phase_b_review_material_clock, raw_state,
+    ):
+        """Retain deadline, late-flush and blocking-finding behavior without sleep."""
+        clock = isolate_phase_b_review_material_clock
+        real_time = pb_mod.time
+        monkeypatch.setattr(pb_mod, "_active_bus_dir", lambda: ".agent_bus")
+        job_id = "phase-b-r1-clock-test"
+        bus = tmp_path / ".agent_bus"
+        render_path = bus / "rendered" / f"{job_id}.md"
+        render_path.parent.mkdir(parents=True)
+        render_path.write_text("render before flush", encoding="utf-8")
+        raw_path = bus / "raw" / job_id / "reviewer.txt"
+        finding = {
+            "title": "Late blocking defect", "severity": "high",
+            "type": "DEFECT", "disposition": "blocking",
+        }
+        partial = 'BEGIN_AGENT_ENVELOPE\n{"findings":'
+        complete = (
+            "BEGIN_AGENT_ENVELOPE\n"
+            + json.dumps({"decision": "NO_GO", "findings": [finding]})
+            + "\nEND_AGENT_ENVELOPE"
+        )
+        if raw_state != "missing":
+            raw_path.parent.mkdir(parents=True)
+            raw_path.write_text(complete if raw_state == "ready" else partial, encoding="utf-8")
+        if raw_state == "delayed":
+            advance_clock = clock.sleep
+
+            def publish_on_poll(delay):
+                advance_clock(delay)
+                raw_path.write_text(complete, encoding="utf-8")
+                render_path.write_text("render after flush", encoding="utf-8")
+
+            monkeypatch.setattr(clock, "sleep", publish_on_poll)
+
+        with patch.object(real_time, "sleep", side_effect=AssertionError("real settle sleep")) as wall_sleep:
+            material = pb_mod._read_bridge_review_material(  # ANTICHEAT_OK: exercise real polling, artifact IO and deadline behavior.
+                tmp_path, job_id, poll_sleep=0.5,
+            )
+        wall_sleep.assert_not_called()
+        assert pb_mod.time is real_time
+        expected_sleeps = {
+            "missing": [0.5] * 4, "partial": [0.5] * 4,
+            "ready": [], "delayed": [0.5],
+        }[raw_state]
+        assert clock.sleeps == expected_sleeps
+        assert clock.now == sum(expected_sleeps)
+        expected_raw = [] if raw_state == "missing" else [partial if raw_state == "partial" else complete]
+        assert material == ("render after flush" if raw_state == "delayed" else "render before flush", expected_raw)
+        findings = pb_mod._parse_findings_from_render(*material)  # ANTICHEAT_OK: incomplete and completed artifacts retain fail-closed parsing.
+        if raw_state in {"ready", "delayed"}:
+            assert findings == [finding]
+        elif raw_state == "partial":
+            assert findings and findings[0]["disposition"] == "blocking"
+        else:
+            assert findings == []
 
     def test_run_bridge_review_passes_job_id(self, tmp_path):
         """run_bridge_review passes --job-id to bridge_supervisor."""

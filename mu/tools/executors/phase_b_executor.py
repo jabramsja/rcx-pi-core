@@ -1986,6 +1986,52 @@ def _effective_phase_b_tracker_wave_class(
     return wave_class
 
 
+def _phase_b_structural_metadata(
+    *,
+    plan_content: str,
+    plan_path: str,
+    wave_id: str,
+    task_id: str,
+    repo_root: Path | None,
+    routing_record: dict[str, Any] | None,
+    bus_dir: str | Path | None,
+) -> dict[str, str]:
+    """Resolve launch-owned metadata even when the A-to-B route was reduced."""
+    phase_a_mod = _load_phase_a_executor_for_launch_tracker_restore()
+    route = routing_record if routing_record is not None else {}
+    key = phase_a_mod.NATIVE_STUB_PACKET_CONTRACT_KEY
+    # Validate a supplied envelope before consulting durable authority. Dict
+    # equality alone would equate malformed required=1/version=True markers
+    # with the launcher's required=True/version=1 values and erase the failure.
+    try:
+        phase_a_mod.native_stub_packet_contract_from_routing(route)
+    except phase_a_mod.PhaseAExecutorError as exc:
+        raise PhaseBExecutorError(f"Invalid structural routing metadata: {exc}") from exc
+    native = key in route or phase_a_mod.native_stub_packet_has_contract_provenance(plan_content)
+    if repo_root is not None:
+        effective_bus = bus_dir if bus_dir is not None else _active_bus_dir()
+        route_path = agent_bus_path(repo_root, effective_bus, "meta", "post_merge_routing.json")
+        if native or route_path.exists():
+            try:
+                launch_route = load_routing_record(repo_root, bus_dir=effective_bus)
+            except (ExecutorCommonError, OSError, ValueError, TypeError, AttributeError) as exc:
+                raise PhaseBExecutorError(f"Structural launch authority is unavailable: {exc}") from exc
+            if not isinstance(launch_route, dict):
+                raise PhaseBExecutorError("Structural launch authority must be a routing object")
+            if key in route and (key not in launch_route or route[key] != launch_route[key]):
+                raise PhaseBExecutorError("Structural routing envelope differs from launch-owned authority")
+            route = launch_route
+    try:
+        metadata = phase_a_mod.native_stub_structural_metadata_from_packet(
+            plan_content, routing_record=route, plan_path=plan_path,
+        )
+    except phase_a_mod.PhaseAExecutorError as exc:
+        raise PhaseBExecutorError(f"Invalid structural packet metadata: {exc}") from exc
+    if key in route and (route.get("wave_name") != wave_id or route.get("task_id") != task_id):
+        raise PhaseBExecutorError("Structural tracker identity differs from launch-owned authority")
+    return metadata
+
+
 def build_phase_b_tracker_note(
     *,
     wave_id: str,
@@ -2006,8 +2052,16 @@ def build_phase_b_tracker_note(
     pre_supervisor: bool = False,
     packet_evidence_command: str | None = None,
     tracker_date: str = "",
+    repo_root: Path | None = None,
+    routing_record: dict[str, Any] | None = None,
+    bus_dir: str | Path | None = None,
 ) -> str:
-    """Render a Phase B tracker note through the public package-class seam."""
+    """Render a Phase B tracker note through the public package-class seam.
+
+    Native structural packets require repository launch authority or an explicit
+    routing envelope for pure rendering. Repository consumers re-read the active
+    launch route so a reduced dispatcher record cannot erase that authority.
+    """
     effective_wave_class = _effective_phase_b_tracker_wave_class(
         wave_class,
         plan_content=plan_content,
@@ -2032,6 +2086,9 @@ def build_phase_b_tracker_note(
         pre_supervisor=pre_supervisor,
         packet_evidence_command=packet_evidence_command,
         tracker_date=tracker_date,
+        repo_root=repo_root,
+        routing_record=routing_record,
+        bus_dir=bus_dir,
     )
 
 
@@ -6792,23 +6849,29 @@ def prepare_dispatcher_commit_handoff_from_routing_record(
 
     bridge_status = _build_effective_bridge_status(repo_root, wave_id, resolved_plan_path, 0)
     test_files = _select_pytest_gate_files(wave_owned_files, repo_root=repo_root)
-    tracker_note_text = build_phase_b_tracker_note(
-        wave_id=wave_id,
-        task_id=str(routing_record.get("task_id") or plan.get("task_id") or f"[{wave_id}]"),
-        wave_class=wave_class,
-        target_gate_id=target_gate_id,
-        plan_path=resolved_plan_path,
-        plan_content=plan_content,
-        changed_files=wave_owned_files,
-        test_files=test_files,
-        receipt_path=receipt_rel,
-        bridge_rounds=_bridge_rounds_for_tracker_note(bridge_status),
-        reentry=False,
-        founder_override=str(plan.get("founder_override") or ""),
-        unblocks_wave_id=str(plan.get("unblocks_wave_id") or ""),
-        unblocks_runtime_blocker=str(plan.get("unblocks_runtime_blocker") or ""),
-        packet_evidence_command=packet_evidence_command,
-    )
+    try:
+        tracker_note_text = build_phase_b_tracker_note(
+            wave_id=wave_id,
+            task_id=str(routing_record.get("task_id") or plan.get("task_id") or f"[{wave_id}]"),
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            plan_path=resolved_plan_path,
+            plan_content=plan_content,
+            changed_files=wave_owned_files,
+            test_files=test_files,
+            receipt_path=receipt_rel,
+            bridge_rounds=_bridge_rounds_for_tracker_note(bridge_status),
+            reentry=False,
+            founder_override=str(plan.get("founder_override") or ""),
+            unblocks_wave_id=str(plan.get("unblocks_wave_id") or ""),
+            unblocks_runtime_blocker=str(plan.get("unblocks_runtime_blocker") or ""),
+            packet_evidence_command=packet_evidence_command,
+            repo_root=repo_root,
+            routing_record=routing_record,
+            bus_dir=bus_dir,
+        )
+    except PhaseBExecutorError as exc:
+        return None, [str(exc)]
     handoff_scope_items = list(dict.fromkeys([resolved_plan_path, *handoff_staged_deletions]))
     handoff_path = prepare_commit_handoff(
         repo_root,
@@ -6976,8 +7039,22 @@ def _build_phase_b_tracker_note(
     pre_supervisor: bool = False,
     packet_evidence_command: str | None = None,
     tracker_date: str = "",
+    repo_root: Path | None = None,
+    routing_record: dict[str, Any] | None = None,
+    bus_dir: str | Path | None = None,
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
+    declared_metadata = {}
+    if wave_class == "L4_STRUCTURAL":
+        declared_metadata = _phase_b_structural_metadata(
+            plan_content=plan_content,
+            plan_path=plan_path,
+            wave_id=wave_id,
+            task_id=task_id,
+            repo_root=repo_root,
+            routing_record=routing_record,
+            bus_dir=bus_dir,
+        )
     display_task = (task_id or "").strip() or wave_id
     if display_task.startswith("[") and display_task.endswith("]"):
         display_task = display_task[1:-1]
@@ -7134,6 +7211,9 @@ def _build_phase_b_tracker_note(
                 or _build_structural_post_gate_sweep(effective_test_files, changed_files)
             ),
         })
+        # Both pre-supervisor and final handoff notes use this builder. The
+        # validated native declaration outranks scope heuristics and defaults.
+        tracker_kwargs.update(declared_metadata)
     if wave_class == "MAINTENANCE":
         runtime_like = [
             path for path in changed_files
@@ -9668,6 +9748,7 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
     allowed_files: set[str] | None = None,
     launch_tracker_restore_session: dict[str, Any] | None = None,
     packet_evidence_command: str | None = None,
+    routing_record: dict[str, Any] | None = None,
 ) -> tuple[str, str, str, bool, list[str], str | None]:
     """Finalize the pre-supervisor note from generic or restored launch authority."""
     final_scope = _phase_b_pre_supervisor_note_scope(changed_files)
@@ -9702,24 +9783,29 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
         if preserved_tracker_note is not None:
             tracker_note = preserved_tracker_note
         else:
-            tracker_note = build_phase_b_tracker_note(
-                wave_id=wave_id,
-                task_id=task_id,
-                wave_class=note_wave_class,
-                target_gate_id=target_gate_id,
-                plan_path=plan_path,
-                plan_content=plan_content,
-                changed_files=final_scope,
-                test_files=test_files,
-                receipt_path=receipt_path,
-                bridge_rounds=_bridge_rounds_for_tracker_note(bridge_status),
-                reentry=reentry,
-                founder_override=founder_override,
-                unblocks_wave_id=unblocks_wave_id,
-                unblocks_runtime_blocker=unblocks_runtime_blocker,
-                pre_supervisor=True,
-                packet_evidence_command=packet_evidence_command,
-            )
+            try:
+                tracker_note = build_phase_b_tracker_note(
+                    wave_id=wave_id,
+                    task_id=task_id,
+                    wave_class=note_wave_class,
+                    target_gate_id=target_gate_id,
+                    plan_path=plan_path,
+                    plan_content=plan_content,
+                    changed_files=final_scope,
+                    test_files=test_files,
+                    receipt_path=receipt_path,
+                    bridge_rounds=_bridge_rounds_for_tracker_note(bridge_status),
+                    reentry=reentry,
+                    founder_override=founder_override,
+                    unblocks_wave_id=unblocks_wave_id,
+                    unblocks_runtime_blocker=unblocks_runtime_blocker,
+                    pre_supervisor=True,
+                    packet_evidence_command=packet_evidence_command,
+                    repo_root=repo_root,
+                    routing_record=routing_record,
+                )
+            except PhaseBExecutorError as exc:
+                return tracker_note, raw_founder_override, package_founder_override, modified_any, final_scope, str(exc)
         raw_founder_override = _extract_founder_override_from_tracker_note(tracker_note)
         package_founder_override = _supervisor_package_founder_override_token(
             raw_founder_override,
@@ -12922,6 +13008,7 @@ def run_phase_b(
             allowed_files=exact_stage_scope_files or None,
             launch_tracker_restore_session=launch_tracker_restore_session,
             packet_evidence_command=packet_evidence_command,
+            routing_record=routing_record,
         )
         if tracker_sync_error is not None:
             _clear_state(repo_root)
@@ -13919,6 +14006,7 @@ def run_phase_b(
             allowed_files=exact_stage_scope_files or None,
             launch_tracker_restore_session=launch_tracker_restore_session,
             packet_evidence_command=packet_evidence_command,
+            routing_record=routing_record,
         )
         if reentry_tracker_sync_error is not None:
             _clear_state(repo_root)
@@ -14451,23 +14539,31 @@ def run_phase_b(
             return result
         tracker_note_text = authoritative_tracker_note_text
     else:
-        tracker_note_text = build_phase_b_tracker_note(
-            wave_id=wave_id,
-            task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
-            wave_class=wave_class,
-            target_gate_id=target_gate_id,
-            plan_path=plan_path,
-            plan_content=plan.get("content", ""),
-            changed_files=wave_owned_files,
-            test_files=handoff_test_files,
-            receipt_path=receipt_path,
-            bridge_rounds=_bridge_rounds_for_tracker_note(handoff_bridge_status),
-            reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
-            founder_override=plan.get("founder_override", ""),
-            unblocks_wave_id=plan.get("unblocks_wave_id", ""),
-            unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
-            packet_evidence_command=packet_evidence_command,
-        )
+        try:
+            tracker_note_text = build_phase_b_tracker_note(
+                wave_id=wave_id,
+                task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
+                wave_class=wave_class,
+                target_gate_id=target_gate_id,
+                plan_path=plan_path,
+                plan_content=plan.get("content", ""),
+                changed_files=wave_owned_files,
+                test_files=handoff_test_files,
+                receipt_path=receipt_path,
+                bridge_rounds=_bridge_rounds_for_tracker_note(handoff_bridge_status),
+                reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
+                founder_override=plan.get("founder_override", ""),
+                unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+                unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
+                packet_evidence_command=packet_evidence_command,
+                repo_root=repo_root,
+                routing_record=routing_record,
+            )
+        except PhaseBExecutorError as exc:
+            result["status"] = "error"
+            result["step"] = "commit_handoff_tracker_note"
+            result["errors"] = [str(exc)]
+            return result
     handoff_scope_items = list(dict.fromkeys([plan_path, *handoff_staged_deletions]))
     log(
         "Preparing commit handoff "

@@ -130,6 +130,13 @@ NATIVE_STUB_PACKET_CONTRACT_VERSION = 1
 _NATIVE_STUB_PACKET_CONTRACT_ENVELOPE_KEYS = frozenset(
     {"required", "producer", "version", "digest", "contract"}
 )
+# Version 1 permits this complete extension. Absence preserves old envelope
+# bytes/digests; partial presence is invalid rather than a legacy downgrade.
+NATIVE_STUB_STRUCTURAL_FIELDS = (
+    "workload_target",
+    "host_semantics_delta_before",
+    "host_semantics_delta_after",
+)
 _NATIVE_STUB_PACKET_CONTRACT_KEYS = frozenset(
     {
         "identity",
@@ -712,6 +719,80 @@ def native_stub_packet_contract_digest(contract: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def native_structural_metadata_errors(metadata: dict[str, Any]) -> list[str]:
+    """Validate the existing structural declarations without normalizing values."""
+    checks_dir = str(SCRIPT_DIR.parent / "checks")
+    if checks_dir not in sys.path:
+        sys.path.insert(0, checks_dir)
+    import enforce_l4_execution_contract as l4_contract
+
+    errors: list[str] = []
+    for name in NATIVE_STUB_STRUCTURAL_FIELDS:
+        value = metadata.get(name)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"{name} required as a non-empty string for L4_STRUCTURAL")
+        elif value != value.strip() or len(value.splitlines()) != 1:
+            errors.append(f"{name} must be one canonical line")
+        elif name == "workload_target":
+            if value not in l4_contract.VALID_WORKLOAD_TARGETS:
+                errors.append(
+                    f"workload_target must be one of {sorted(l4_contract.VALID_WORKLOAD_TARGETS)!r} "
+                    f"for L4_STRUCTURAL (got {value!r})"
+                )
+        elif l4_contract._is_low_signal_proof(value):
+            errors.append(f"{name} is low-signal/placeholder text for L4_STRUCTURAL")
+    return errors
+
+
+def native_stub_structural_metadata_lines(contract: dict[str, Any]) -> list[str]:
+    """Render the optional structural header in one exact, shared order."""
+    return [f"{name}: {contract[name]}" for name in NATIVE_STUB_STRUCTURAL_FIELDS if name in contract]
+
+
+def native_stub_structural_metadata_from_packet(
+    content: str,
+    *,
+    routing_record: dict[str, Any] | None = None,
+    plan_path: str | Path = "",
+) -> dict[str, str]:
+    """Consume structural declarations only from matching launch authority.
+
+    Validate the envelope, identity, provenance and structural header at the
+    consumption boundary. Post-lock body/status updates are outside this
+    metadata check. Only unmarked legacy packets or validated old envelopes
+    without the extension may use inference; validation errors never downgrade.
+    """
+    route = routing_record if routing_record is not None else {}
+    contract = native_stub_packet_contract_from_routing(route)
+    if contract is None:
+        if native_stub_packet_has_contract_provenance(content):
+            _raise_native_stub_packet_contract_error(
+                ["native structural metadata requires the launch-owned routing envelope"]
+            )
+        return {}
+
+    errors = _native_stub_packet_identity_errors(route, plan_path, contract)
+    errors.extend(_native_stub_packet_provenance_errors(content, contract))
+    header, _body = _split_plan_header(content)
+    errors.extend(_native_stub_packet_provenance_errors(header, contract))
+    for label, value in (
+        ("Task", contract["identity"]["task_id"]),
+        ("Wave ID", contract["identity"]["wave_id"]),
+    ):
+        lines = [line for line in header.splitlines() if line.lstrip(" \t").startswith(f"{label}:")]
+        if lines != [f"{label}: {value}"]:
+            errors.append(f"packet {label} header does not exactly match the contract")
+    structural_lines = [
+        line for line in header.splitlines()
+        if any(line.lstrip(" \t").startswith(f"{name}:") for name in NATIVE_STUB_STRUCTURAL_FIELDS)
+    ]
+    if structural_lines != native_stub_structural_metadata_lines(contract):
+        errors.append("packet structural metadata does not exactly match the launch-owned envelope")
+    if errors:
+        _raise_native_stub_packet_contract_error(errors)
+    return {name: contract[name] for name in NATIVE_STUB_STRUCTURAL_FIELDS if name in contract}
+
+
 def _native_stub_packet_contract_shape_errors(contract: Any) -> list[str]:
     """Return exact schema errors for the immutable version-1 contract body."""
     if not isinstance(contract, dict):
@@ -720,11 +801,13 @@ def _native_stub_packet_contract_shape_errors(contract: Any) -> list[str]:
     errors: list[str] = []
     keys = set(contract)
     missing = sorted(_NATIVE_STUB_PACKET_CONTRACT_KEYS - keys)
-    unknown = sorted(keys - _NATIVE_STUB_PACKET_CONTRACT_KEYS)
+    unknown = sorted(keys - _NATIVE_STUB_PACKET_CONTRACT_KEYS - set(NATIVE_STUB_STRUCTURAL_FIELDS))
     if missing:
         errors.append(f"contract missing key(s): {missing!r}")
     if unknown:
         errors.append(f"contract has unknown key(s): {unknown!r}")
+    if keys.intersection(NATIVE_STUB_STRUCTURAL_FIELDS):
+        errors.extend(native_structural_metadata_errors(contract))
 
     identity = contract.get("identity")
     if not isinstance(identity, dict):
@@ -1205,9 +1288,10 @@ def _native_stub_packet_reserved_lane_errors(
 
     header, _body = _split_plan_header(content)
     header_lines = [line for line in header.splitlines() if line]
-    if len(header_lines) != 9:
+    structural_lines = native_stub_structural_metadata_lines(contract)
+    if len(header_lines) != 9 + len(structural_lines):
         errors.append(
-            "marked native packet header must contain only the nine exact "
+            "marked native packet header must contain only the exact "
             "launcher metadata lines"
         )
     else:
@@ -1221,6 +1305,7 @@ def _native_stub_packet_reserved_lane_errors(
             7: f"{NATIVE_STUB_PACKET_CONTRACT_DIGEST_PREFIX}{expected_digest}",
             8: f"Purpose: {contract['purpose']}",
         }
+        expected_header_lines.update(enumerate(structural_lines, start=9))
         for index, expected_line in expected_header_lines.items():
             if header_lines[index] != expected_line:
                 errors.append(
@@ -1407,23 +1492,12 @@ def _native_stub_packet_reserved_lane_errors(
     return errors
 
 
-def validate_native_stub_packet_contract(
+def _native_stub_packet_identity_errors(
     routing_record: dict[str, Any],
     plan_path: str | Path,
-    plan_content: str,
-    *,
-    allow_post_lock_machine_sections: bool = False,
-) -> bool:
-    """Validate marked native metadata and exact aggregate packet preservation.
-
-    Returns ``False`` for an unmarked legacy/direct route and ``True`` for a
-    valid marked native route.  A present marker never returns ``False``: every
-    metadata, digest, identity, and canonical-section defect raises.
-    """
-    contract = native_stub_packet_contract_from_routing(routing_record)
-    if contract is None:
-        return False
-
+    contract: dict[str, Any],
+) -> list[str]:
+    """Bind the launch envelope to its routed wave, task and tracked packet."""
     errors: list[str] = []
     identity = contract["identity"]
     wave_id = identity["wave_id"]
@@ -1461,6 +1535,30 @@ def validate_native_stub_packet_contract(
         errors.append(
             "loaded plan path does not match contract identity tracked_packet"
         )
+    return errors
+
+
+def validate_native_stub_packet_contract(
+    routing_record: dict[str, Any],
+    plan_path: str | Path,
+    plan_content: str,
+    *,
+    allow_post_lock_machine_sections: bool = False,
+) -> bool:
+    """Validate marked native metadata and exact aggregate packet preservation.
+
+    Returns ``False`` for an unmarked legacy/direct route and ``True`` for a
+    valid marked native route.  A present marker never returns ``False``: every
+    metadata, digest, identity, and canonical-section defect raises.
+    """
+    contract = native_stub_packet_contract_from_routing(routing_record)
+    if contract is None:
+        return False
+
+    errors = _native_stub_packet_identity_errors(routing_record, plan_path, contract)
+    identity = contract["identity"]
+    wave_id = identity["wave_id"]
+    task_id = identity["task_id"]
 
     if not isinstance(plan_content, str):
         errors.append("loaded plan content must be text")
