@@ -6,7 +6,31 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-01
 
-### Structural growth-cap invocation (Phase B; landing pending)
+### Guarded finite Coinduction prefixes (Mu R8, Phase B; landing pending)
+
+- Reconstruct the preserved R7 implementation at `39c9e067` on landed
+  PR1324 (`3f9d33b0`). The registered 32-projection Mu program selects guarded
+  observations, consumes finite demand, returns resumable open tails and
+  rejects malformed requests through the production Python/JS kernels.
+- Retain all 24 shared vector outcomes, canonical StructuralNumbers inputs,
+  complete trace/stall/step parity and emission-removal controls. Preserve
+  the paired 1000-step JS substitution replay bound and private-continuation
+  replay correction, with external binding and forged-input rejection intact.
+- Reproduce the two R7 pre-push inventory failures, then repair only their
+  existing tests using exact checked-in manifest/JS registry expectations.
+  Both failing selectors now pass; complete current-wave validation is
+  recorded in
+  `reports/control_plane/mu-coinduction-guarded-prefix-r8-2026-10-01_implementation_evidence.json`.
+  The native generator supplies the exact same-wave growth-cap bytes.
+- Finite kernel traces prove bounded progress and causal projection use;
+  engine observability, infinite productivity, bisimulation, full Coinduction
+  and L4 completion remain unproved. Host semantics/authority are unchanged.
+  Native review, measured indicators, commit/pre-push/CI, landing and protected
+  synchronization remain pending. Existing rows 38/40 own residual cleanup
+  and the measured reader-release race after Mu, before Fixpoint; the
+  diagnostic-only recovery retry remains with the existing parked owner.
+
+### Structural growth-cap invocation (landed PR1324; broader automation parked)
 
 - Resolve explicit cap invocation authority independently of the structural
   supervisor override filter. Settle the validated growth-cap scope for
@@ -19,14 +43,15 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   canonical retries leave the cap and raw index unchanged during settlement.
   Complete local validation and preservation checks are recorded in
   `reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_implementation_evidence.json`.
-- Preserve all 268 PRIMARY task IDs, cleanup rows 38/40, retained-source owners
-  and the frozen Mu R6 candidate/index/receipts. Native review, commit, CI,
-  merge and protected synchronization remain pending. Mu remains blocked on
-  this consumer landing and requires fresh continuation authority; seven
-  prior physical retirements remain verified, with residual fleet and
-  useful-work obligations open.
+- Landed as PR1324 (`3f9d33b0`) with seven CI checks passed and PRIMARY/dev
+  synchronized. All 268 PRIMARY task IDs, cleanup rows 38/40, retained-source
+  owners and frozen Mu R6 source/index/receipts remain preserved. The corrected
+  head's review wait ended on a clean snapshot, without a fresh review approval.
+  Broader pre-bump automation remains parked; the bounded consumer defect no
+  longer blocks Mu. Carrier retirement held after three spent attempts;
+  existing rows 38/40 own the measured reader-release race and fresh authority.
 
-### Remaining-folder cleanup successor (Phase B; landing and retirement pending)
+### Remaining-folder cleanup successor (landed PR1323; seven retirements verified)
 
 - Reuse the preserved R1 commit executor, receipt/cleanup regressions and
   lifecycle documentation from `6f2bd99b88d0f983ae35d255d4fd404b11c3c177`.
@@ -44,12 +69,14 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   operation. Frozen cleanup R1, active R2, latest Mu R4 and every unlisted
   source remain protected. Three targets are dev-covered; four retain
   useful-work landing owners and require independent recovery at APPLY.
-- Preserve current PRIMARY TASKS, its queue and all 269 task IDs, the exact
+- Preserve then-current PRIMARY TASKS, its queue and all 269 task IDs, the exact
   native Ra note, stopped source files/raw indices and historical action
   records. Final local validation is recorded in this wave's implementation
-  evidence. Native review/commit/CI/merge, PRIMARY synchronization and
-  foreground public APPLY/VERIFY remain pending.
-  No physical retirement, Mu integration or fleet completion is claimed.
+  evidence. PR1323 landed as `c653cf03`; protected synchronization and all
+  seven authorized physical retirements were independently verified.
+  Residual carrier holds, retained sources and useful-work adoption remain
+  open under existing owners. These retirements do not establish Mu
+  integration or full fleet completion.
 
 ## 2026-09-28
 

@@ -950,6 +950,159 @@ class TestKernelRunResultPython:
         assert not isinstance(result, dict) or "termination_reason" not in result
 
 
+@pytest.mark.slow
+def test_coinduction_continuation_substitution_replay():
+    # SPEED_OK: replay the actual malformed-machine vector's kernel continuation.
+    from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
+    from tests.l4_gates.test_coinduction_prefix_gate import (
+        VECTORS, assert_complete_outcomes, run_python, trace_entries,
+    )
+    from tests.parity.test_coinduction_prefix_parity import JS_KERNEL_SETUP
+
+    outcomes, _ = run_python("malformed_machine_tail")
+    assert_complete_outcomes(VECTORS["malformed_machine_tail"], outcomes)
+    # Select a real reduction from the causal trace, not a fabricated machine.
+    entry = next(e for e in trace_entries(outcomes[0])
+                 if e["projection"] == "co_prefix.position_end")
+    seed = load_verified_seed(get_seed_path("coinduction_prefix.v1.json"), verify=True)
+    projection = next(p for p in seed["projections"] if p["id"] == entry["projection"])
+    initial = entry["state"]
+    options = {"kernel_mode": "core", "validation_mode": "domain",
+               "return_packet": True, "max_steps": 10000}
+    packet = step_kernel_mu([projection], initial, **options)
+    for _ in range(1000):
+        assert packet["kind"] == "continuation"
+        continuation = packet["continuation"]
+        if "subst" in continuation["kernel_state"]:
+            break
+        packet = step_kernel_mu([projection], initial, continuation_state=continuation, **options)
+    else:
+        pytest.fail("real kernel never reached substitution replay")
+
+    resumed = step_kernel_mu([projection], initial, continuation_state=continuation, **options)
+    changed_input = deepcopy(initial)
+    changed_input["co_position"]["context"]["machine"]["rest"] = None
+    changed_projection = {**projection, "body": {"forged": True}}
+    for candidate_input, candidate_projection in (
+        (changed_input, projection), (initial, changed_projection),
+    ):
+        with pytest.raises(ValueError, match="SECURITY"):
+            step_kernel_mu([candidate_projection], candidate_input,
+                           continuation_state=continuation, **options)
+
+    script = JS_KERNEL_SETUP + r"""
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const { stage0VmRun } = require('./mu/host/js/core/stage0_vm');
+const request = muCopy(JSON.parse(fs.readFileSync(0, 'utf8')), true, 'replay regression');
+// The public VM independently measures this actual substitution workload.
+const replay = stage0VmRun(vmConfig.substBundle, request.continuation.kernel_state, 1000);
+const options = {continuationState: request.continuation, returnPacket: true,
+                 maxSteps: 10000, validationMode: 'domain', vmConfig};
+const resumed = stepKernel(kernel, request.input, [request.projection], options);
+const rejected = [];
+for (const [input, projection] of [
+  [request.changed_input, request.projection],
+  [request.input, request.changed_projection],
+]) {
+  try {
+    stepKernel(kernel, input, [projection], options);
+    rejected.push(null);
+  } catch (error) {
+    rejected.push(error.message);
+  }
+}
+console.log(JSON.stringify({resumed, replay_steps: replay.steps.length, rejected}));
+"""
+    process = subprocess.run(
+        ["node", "-e", script], cwd=REPO_ROOT, text=True, capture_output=True,
+        input=json.dumps({"input": initial, "projection": projection,
+                          "continuation": continuation, "changed_input": changed_input,
+                          "changed_projection": changed_projection}), timeout=60,
+    )
+    assert process.returncode == 0, process.stderr
+    actual = json.loads(process.stdout)
+    assert 100 < actual["replay_steps"] < 1000
+    assert actual["resumed"] == resumed
+    assert all(error and "SECURITY" in error for error in actual["rejected"])
+
+
+@pytest.mark.slow
+def test_internal_domain_continuations_do_not_replay_external_binding(record_property):
+    # SPEED_OK: count real continuation replays without a long vector timeout.
+    from rcx_pi.selfhost.step_mu import run_mu_structural
+    from tests.parity.test_coinduction_prefix_parity import JS_KERNEL_SETUP
+
+    projections = [
+        {"id": "probe.miss", "pattern": {"x": "other"}, "body": {"x": "unused"}},
+        {"id": "probe.apply", "pattern": {"x": "start"}, "body": {"x": "done"}},
+    ]
+    initial = {"x": "start"}
+    expected = run_mu_structural(
+        projections, initial, max_steps=4, kernel_mode="core",
+        validation_mode="domain", trace_output=True, reject_nonlinear=True,
+    )
+    script = JS_KERNEL_SETUP + r"""
+// Instrument only counters in a disposable module; run the unchanged kernel
+// branches, VM bundles and public exports. No replacement evaluator or proof.
+const Module = require('module');
+const kernelPath = require.resolve('./mu/host/js/engine/kernel');
+let source = fs.readFileSync(kernelPath, 'utf8');
+const resumeAnchor = 'const kernelState = continuationState.kernel_state;';
+const replayAnchor = 'const projectionHashes = new Set();';
+assert.strictEqual(source.split(resumeAnchor).length, 2);
+assert.strictEqual(source.split(replayAnchor).length, 2);
+globalThis.prefixReplayProbe = {internalResumes: 0, internalReplays: 0, externalReplays: 0};
+source = source.replace(resumeAnchor, `
+  if (useDomainValidation && trustedContinuationProof) {
+    globalThis.prefixReplayProbe.internalResumes++;
+  }
+  ${resumeAnchor}`);
+source = source.replace(replayAnchor, `
+  globalThis.prefixReplayProbe[trustedContinuationProof ? 'internalReplays' : 'externalReplays']++;
+  ${replayAnchor}`);
+const instrumented = new Module(kernelPath, module);
+instrumented.filename = kernelPath;
+instrumented.paths = module.paths;
+instrumented._compile(source, kernelPath);
+assert.deepStrictEqual(Object.keys(instrumented.exports).sort(),
+                       Object.keys(require(kernelPath)).sort());
+const request = muCopy(JSON.parse(fs.readFileSync(0, 'utf8')), true, 'replay probe');
+const outcome = instrumented.exports.runStructural(
+  kernel, request.projections, request.input, 4, vmConfig);
+const afterTrace = {...globalThis.prefixReplayProbe};
+const options = {validationMode: 'domain', vmConfig, maxSteps: 10000};
+const meta = instrumented.exports.stepKernel(
+  kernel, request.input, request.projections, {...options, returnMeta: true});
+const afterCompatibility = {...globalThis.prefixReplayProbe};
+const packet = instrumented.exports.stepKernel(
+  kernel, request.input, request.projections, {...options, returnPacket: true});
+assert.strictEqual(packet.kind, 'continuation');
+assert.deepStrictEqual(Object.keys(packet).sort(), ['continuation', 'kind', 'result']);
+instrumented.exports.stepKernel(kernel, request.input, request.projections,
+  {...options, returnPacket: true, continuationState: packet.continuation});
+console.log(JSON.stringify({outcome, meta, afterTrace, afterCompatibility,
+                           afterExternal: globalThis.prefixReplayProbe}));
+"""
+    process = subprocess.run(
+        ["node", "-e", script], cwd=REPO_ROOT, text=True, capture_output=True,
+        input=json.dumps({"input": initial, "projections": projections}), timeout=60,
+    )
+    assert process.returncode == 0, process.stderr
+    actual = json.loads(process.stdout)
+    assert actual["outcome"] == expected
+    assert actual["meta"]["output"] == {"x": "done"}
+    assert actual["meta"]["termination_reason"] == "projection_applied"
+    trace_counts = actual["afterTrace"]
+    compatibility_counts = actual["afterCompatibility"]
+    external_counts = actual["afterExternal"]
+    assert trace_counts["internalResumes"] > 0
+    assert compatibility_counts["internalResumes"] > trace_counts["internalResumes"]
+    assert external_counts["externalReplays"] == 1
+    assert compatibility_counts["externalReplays"] == 0
+    record_property("continuation_replay_counts", actual)
+    assert external_counts["internalReplays"] == 0, external_counts
+
+
 class TestKernelRunResultJS:
     """JS stepKernel via --json-api (live seeded kernel) must produce KernelRunResult."""
 

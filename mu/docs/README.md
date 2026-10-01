@@ -43,6 +43,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [Boot1LoopContract.v0.md](core/Boot1LoopContract.v0.md) | Boot1 Recursive Loop Contract v0 |
 | [BootstrapPrimitives.v0.md](core/BootstrapPrimitives.v0.md) | Bootstrap Primitives (Phase 8a) |
 | [BootstrapStructuralBridge.v0.md](core/BootstrapStructuralBridge.v0.md) | Bootstrap-Structural Bridge: Non-Linear Pattern Support |
+| [CoinductionPrefix.v0.md](core/CoinductionPrefix.v0.md) | Guarded finite Coinduction prefixes and resumable open tails |
 | [DebtCategories.v0.md](core/DebtCategories.v0.md) | Debt Categories v0 |
 | [DocGovernance.v0.md](core/DocGovernance.v0.md) | Documentation Governance v0 |
 | [EVAL_SEED.v0.md](core/EVAL_SEED.v0.md) | EVAL_SEED Specification v0 |
