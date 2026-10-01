@@ -2785,8 +2785,7 @@ def _commit_post_commit_source() -> str:
     parts = [
         inspect.getsource(commit_mod.run_commit_pipeline),
         inspect.getsource(commit_mod._run_commit_pipeline_impl),  # ANTICHEAT_OK: testing extracted commit pipeline implementation
-        post_commit_source,
-        inspect.getsource(commit_mod._run_post_commit_pipeline_impl),  # ANTICHEAT_OK: post-commit steps live behind the lifecycle wrapper
+        commit_mod.post_commit_pipeline_source(),
     ]
     for helper in ("_extract_review_findings", "_attempt_bot_finding_remediation"):
         if hasattr(commit_mod, helper):
@@ -10090,10 +10089,23 @@ class TestCommitContinuationAndBotFreshness:
                 "detail": "merged origin/dev, resolved TASKS chronologically, pushed",
             }
 
+        def fake_pr_review_state(repo_root, *, repo_owner, repo_name, pr_number):
+            assert (repo_root, repo_owner, repo_name, pr_number) == (
+                repo, "jabramsja", "rcx-pi-core", "673",
+            )
+            # The failed merge re-queries this still-open PR before resolving
+            # the conflict. Only the resolver's push advances its remote head.
+            return {
+                "state": "OPEN",
+                "headRefOid": resolved_head_sha if auto_resolve_calls else head_sha,
+                "headRefName": "jabramsja/test-wave-id",
+                "baseRefName": "dev",
+                "isDraft": False,
+            }
+
         monkeypatch.setattr(commit_mod, "_run", fake_run)
         monkeypatch.setattr(commit_mod, "_parse_origin_owner_repo", lambda _: ("jabramsja", "rcx-pi-core"))
-        monkeypatch.setattr(commit_mod, "_query_pr_review_state", lambda *args, **kwargs: {"headRefOid": "ignored"})
-        monkeypatch.setattr(commit_mod, "_assert_expected_pr_head", lambda pr_data, head_sha: None)
+        monkeypatch.setattr(commit_mod, "_query_pr_review_state", fake_pr_review_state)
         monkeypatch.setattr(commit_mod, "_has_recorded_current_head_bot_request", lambda *args, **kwargs: False)
         monkeypatch.setattr(commit_mod, "_has_fresh_connector_review", lambda pr_data, head_sha: True)
         monkeypatch.setattr(
@@ -10129,6 +10141,8 @@ class TestCommitContinuationAndBotFreshness:
         assert len(ci_watch_calls) == 6
         assert merge_attempts["count"] == 2
         assert list(head_reads) == []
+        assert post_commit["commit_sha"] == resolved_head_sha
+        assert post_commit["remote_pr_merged"] is True
         assert post_commit["merge_sha"] == merge_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert continuation_path.exists() is False

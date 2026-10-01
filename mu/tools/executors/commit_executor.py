@@ -260,8 +260,11 @@ PR_REVIEW_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
+      state
       headRefOid
       headRefName
+      baseRefName
+      mergeCommit { oid }
       isDraft
       reviewDecision
       latestReviews(first: 20) {
@@ -9832,7 +9835,11 @@ def _query_pr_review_state(
         timeout=30,
     )
     review_data = json.loads(review_result.stdout)
-    pr_data = review_data.get("data", {}).get("repository", {}).get("pullRequest", {})
+    if not isinstance(review_data, dict) or review_data.get("errors"):
+        raise ValueError("PR review query failed or returned GraphQL errors")
+    pr_data = review_data
+    for key in ("data", "repository", "pullRequest"):
+        pr_data = pr_data.get(key) if isinstance(pr_data, dict) else None
     if not isinstance(pr_data, dict):
         raise ValueError("PR review query returned no pullRequest object")
     return pr_data
@@ -9869,6 +9876,22 @@ def _assert_current_pr_identity(
             f"PR head branch moved from expected {target_branch!r} "
             f"to {head_ref_name!r}"
         )
+
+
+def _verified_remote_merge_sha(
+    pr_data: dict[str, Any], *, head_sha: str, target_branch: str, base_branch: str,
+) -> str:
+    """Admit only a freshly queried merge of this exact carrier into its base."""
+    if pr_data.get("state") != "MERGED":
+        return ""
+    _assert_current_pr_identity(pr_data, head_sha=head_sha, target_branch=target_branch)
+    if pr_data.get("baseRefName") != base_branch:
+        raise ValueError("Merged PR base does not match the authorized base branch")
+    merge_commit = pr_data.get("mergeCommit")
+    merge_sha = merge_commit.get("oid") if isinstance(merge_commit, dict) else None
+    if not isinstance(merge_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", merge_sha):
+        raise ValueError("Merged PR query missing exact merge commit")
+    return merge_sha
 
 
 def _refresh_pr_head_after_executor_update(
@@ -16475,6 +16498,14 @@ def _run_post_commit_pipeline(
                 )
                 if returned is not None:
                     returned["remote_pr_merged"] = True
+                    if merge_sha:
+                        returned.setdefault("merge_sha", merge_sha)
+                if result.get("post_merge_followup"):
+                    detail += "; post_merge_followup=" + json.dumps(
+                        result["post_merge_followup"], sort_keys=True,
+                    )
+                    if returned is not None:
+                        returned["post_merge_followup"] = result["post_merge_followup"]
             else:
                 detail = str((returned or {}).get("step") or "native commit unwound")
             try:
@@ -16860,6 +16891,19 @@ def _run_post_commit_pipeline_impl(
         # used by terminal preparation below; the original staged-candidate
         # digest remains bound separately and must not be recomputed here.
         result["commit_sha"] = head_sha_before_merge
+        verified_merge = _verified_remote_merge_sha(
+            pr_data, head_sha=head_sha_before_merge,
+            target_branch=target_branch, base_branch=base_branch,
+        )
+        if verified_merge:
+            # A merged current head cannot acquire another code-remediation or
+            # merge cycle. Late findings retain the existing native owner.
+            return _complete_post_merge_pipeline(
+                handoff=handoff, repo_root=repo_root, result=result,
+                target_branch=target_branch, base_branch=base_branch,
+                continuation_path=continuation_path, log=log,
+                verified_merge_sha=verified_merge, review_state=pr_data,
+            )
         existing_issue_comment_outcome = None
         if _has_recorded_current_head_bot_request(continuation_path, head_sha_before_merge):
             existing_issue_comment_outcome = _current_head_connector_issue_comment_outcome(
@@ -17049,6 +17093,33 @@ def _run_post_commit_pipeline_impl(
             cwd=repo_root.parent, timeout=120,
         )
     except subprocess.CalledProcessError as exc:
+        # merge_pr.sh includes post-merge thread/sweep work. Its exit status
+        # alone cannot distinguish a rejected merge from a failed later sweep.
+        try:
+            merged_pr_data = _query_pr_review_state(
+                repo_root, repo_owner=repo_owner, repo_name=repo_name,
+                pr_number=pr_number,
+            )
+            _assert_current_pr_identity(
+                merged_pr_data, head_sha=head_sha_before_merge, target_branch=target_branch,
+            )
+            verified_merge = _verified_remote_merge_sha(
+                merged_pr_data, head_sha=head_sha_before_merge,
+                target_branch=target_branch, base_branch=base_branch,
+            )
+        except (subprocess.SubprocessError, OSError, ValueError) as query_exc:
+            return {"status": "error", "step": "ensure_review_clear_and_merge",
+                    "errors": [f"merge_pr.sh failed: {exc.stderr or exc.stdout or exc}",
+                               f"Remote merge verification failed: {query_exc}"],
+                    "steps_completed": result["steps_completed"], "pr_number": pr_number}
+        if verified_merge:
+            return _complete_post_merge_pipeline(
+                handoff=handoff, repo_root=repo_root, result=result,
+                target_branch=target_branch, base_branch=base_branch,
+                continuation_path=continuation_path, log=log,
+                verified_merge_sha=verified_merge, review_state=merged_pr_data,
+                merge_wrapper_error=str(exc.stderr or exc.stdout or exc).strip(),
+            )
         if not late_conflict_retry_used:
             resolve_result = _try_auto_resolve_pr_conflict(
                 repo_root,
@@ -17100,10 +17171,36 @@ def _run_post_commit_pipeline_impl(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
+    return _complete_post_merge_pipeline(
+        handoff=handoff, repo_root=repo_root, result=result,
+        target_branch=target_branch, base_branch=base_branch,
+        continuation_path=continuation_path, log=log,
+    )
+
+
+def _complete_post_merge_pipeline(
+    *, handoff: dict[str, Any], repo_root: Path, result: dict[str, Any],
+    target_branch: str, base_branch: str, continuation_path: Path, log: Any,
+    verified_merge_sha: str = "", review_state: dict[str, Any] | None = None,
+    merge_wrapper_error: str = "",
+) -> dict[str, Any]:
+    """Use the existing landed sync and closeout after merge authority is proven."""
+    pr_number = str(result.get("pr_number") or "")
     # Remote merge success precedes local verification. Preserve that fact for
     # lifecycle finalization even if root resolution, fetch, or ff-only sync
     # fails before merge_sha can be populated.
     result["remote_pr_merged"] = True
+    if verified_merge_sha:
+        result["merge_sha"] = verified_merge_sha
+        result["post_merge_followup"] = {
+            "status": "PENDING_LANDED_REVIEW",
+            "owner": dict(result["pr_lifecycle"]["owner"]),
+            "pr_number": pr_number, "head_sha": result["commit_sha"],
+            "merge_sha": verified_merge_sha, "base_branch": base_branch,
+            "review_state": review_state, "merge_wrapper_error": merge_wrapper_error,
+            "next_action": "Review late findings and any failed sweep on the landed base under this owner; do not remediate or remerge the merged PR.",
+        }
+        log(f"Step 15: verified PR #{pr_number} already merged at {verified_merge_sha}; continuing landed closeout")
 
     queue_commit_sha = ""
     terminal_required = _is_pr_disposition_terminal_sweep_wave(
@@ -17112,6 +17209,11 @@ def _run_post_commit_pipeline_impl(
     try:
         verify_root = _resolve_post_merge_verify_root(repo_root, base_branch, log=log)
         _run(["git", "fetch", "origin", base_branch], cwd=verify_root, timeout=60)
+        if verified_merge_sha:
+            _run(["git", "merge-base", "--is-ancestor", result["commit_sha"],
+                  verified_merge_sha], cwd=verify_root, timeout=30)
+            _run(["git", "merge-base", "--is-ancestor", verified_merge_sha,
+                  f"origin/{base_branch}"], cwd=verify_root, timeout=30)
         pre_verify_status = _run(["git", "status", "--short"], cwd=verify_root).stdout.strip()
         pre_verify_dirty = _dirty_worktree_paths(verify_root) if pre_verify_status else set()
         # Ordinary postmerge synchronization belongs to the landed child and
@@ -17119,18 +17221,20 @@ def _run_post_commit_pipeline_impl(
         # The exact terminal-disposition wave still needs its landed evidence
         # here before its separately guarded terminal preparation below.
         if not terminal_required:
-            head_sha = _run(
+            fetched_head_sha = _run(
                 ["git", "rev-parse", f"origin/{base_branch}"], cwd=verify_root
             ).stdout.strip()
+            head_sha = verified_merge_sha or fetched_head_sha
             status_output = pre_verify_status or "\n".join(sorted(pre_verify_dirty))
             result["merge_sha"] = head_sha
-            queue_commit_sha = head_sha
+            # A resumed PR merge can precede later queue and blocker updates.
+            queue_commit_sha = fetched_head_sha
             if "ensure_review_clear_and_merge" not in result["steps_completed"]:
                 result["steps_completed"].append("ensure_review_clear_and_merge")
             _clear_continuation_record(continuation_path)
             if pre_verify_dirty:
                 result["post_merge_verify_warning"] = status_output
-            log(f"Step 15: merged tip origin/{base_branch}={head_sha[:8]}; "
+            log(f"Step 15: merge={head_sha[:8]}, fetched origin/{base_branch}={fetched_head_sha[:8]}; "
                 f"checkout {verify_root} will synchronize through the landed preservation transaction")
         else:
             _run(["git", "merge", "--ff-only", f"origin/{base_branch}"], cwd=verify_root, timeout=60)
@@ -17255,6 +17359,9 @@ def _run_post_commit_pipeline_impl(
     )
     result["post_merge_cleanup"] = cleanup_outcome
     result["steps_completed"].append("post_merge_cleanup")
+    if verified_merge_sha and cleanup_outcome.get("completion_state") == "INCOMPLETE":
+        result.update(status="error", step="post_merge_cleanup",
+                      errors=list(cleanup_outcome.get("warnings") or ["Native closeout ownership incomplete"]))
 
     # Apply R2 is a consumed mutation wave.  Its second verifier runs only now,
     # from the landed/surviving root, and finalizes the common-dir receipt before
@@ -17294,11 +17401,13 @@ def _run_post_commit_pipeline_impl(
     # ── Step 16c: publish successor authority after cleanup/sweep only ─
     if queue_authority_error is None:
         try:
+            # Bind the package to the queue snapshot; result["merge_sha"]
+            # retains the PR's merge identity for lifecycle and landed review.
             _refresh_post_merge_package_for_next_open_queue(
                 repo_root=Path(result.get("post_merge_authority_root") or verify_root),
                 handoff=handoff,
                 result=result,
-                merge_sha=str(result.get("merge_sha") or ""),
+                merge_sha=queue_commit_sha,
                 log=log,
                 queue_commit_sha=queue_commit_sha,
                 terminal_receipt=terminal_binding,
@@ -19078,7 +19187,9 @@ def commit_pipeline_impl_source() -> str:
 
 def post_commit_pipeline_source() -> str:
     """Return post-merge source so regressions can pin cleanup/sweep ordering."""
-    return inspect.getsource(_run_post_commit_pipeline) + inspect.getsource(_run_post_commit_pipeline_impl)
+    return (inspect.getsource(_run_post_commit_pipeline)
+            + inspect.getsource(_run_post_commit_pipeline_impl)
+            + inspect.getsource(_complete_post_merge_pipeline))
 
 
 def _landed_commit_candidate_authority() -> tuple[Any, Any]:
