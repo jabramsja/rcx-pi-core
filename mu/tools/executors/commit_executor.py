@@ -17227,7 +17227,8 @@ def _complete_post_merge_pipeline(
             head_sha = verified_merge_sha or fetched_head_sha
             status_output = pre_verify_status or "\n".join(sorted(pre_verify_dirty))
             result["merge_sha"] = head_sha
-            queue_commit_sha = head_sha
+            # A resumed PR merge can precede later queue and blocker updates.
+            queue_commit_sha = fetched_head_sha
             if "ensure_review_clear_and_merge" not in result["steps_completed"]:
                 result["steps_completed"].append("ensure_review_clear_and_merge")
             _clear_continuation_record(continuation_path)
@@ -17400,11 +17401,13 @@ def _complete_post_merge_pipeline(
     # ── Step 16c: publish successor authority after cleanup/sweep only ─
     if queue_authority_error is None:
         try:
+            # Bind the package to the queue snapshot; result["merge_sha"]
+            # retains the PR's merge identity for lifecycle and landed review.
             _refresh_post_merge_package_for_next_open_queue(
                 repo_root=Path(result.get("post_merge_authority_root") or verify_root),
                 handoff=handoff,
                 result=result,
-                merge_sha=str(result.get("merge_sha") or ""),
+                merge_sha=queue_commit_sha,
                 log=log,
                 queue_commit_sha=queue_commit_sha,
                 terminal_receipt=terminal_binding,
