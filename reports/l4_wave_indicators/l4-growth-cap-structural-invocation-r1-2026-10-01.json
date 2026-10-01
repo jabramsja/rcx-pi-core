@@ -1,0 +1,25 @@
+{
+  "wave_id": "l4-growth-cap-structural-invocation-r1-2026-10-01",
+  "repeat_run_speedup_ratio": 1.011409,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.323179,
+  "repeat_run_raw_seconds": [
+    0.326866,
+    0.323179
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.326866
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.650045
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-10-01T15:41:46Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "c653cf0380c3a0964842b80532e8ce2f60b77421"
+}

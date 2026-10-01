@@ -2876,6 +2876,164 @@ class TestReceiptChainEndToEnd:
         assert "scope_refs:" in tasks_text
         assert f"`{growth_path}`" in captured_package["tracker_note_text"]
 
+    @pytest.mark.parametrize(
+        "candidate,authority",
+        [
+            ("preimage", "tracker"),
+            ("postimage", "tracker"),
+            ("preimage", "packet"),
+            ("postimage", "packet"),
+            ("postimage", "missing"),
+            ("postimage", "wrong_wave"),
+            ("noncanonical", "tracker"),
+        ],
+    )
+    def test_run_commit_pipeline_structural_growth_cap_invocation(
+        self, tmp_path, candidate, authority,
+    ):
+        """Explicit cap authority survives orchestration without proof override."""
+        repo = _setup_repo(tmp_path)
+        _seed_growth_cap_repo_for_test(repo)
+        wave_id = "structural-growth-cap-invocation"
+        packet_path = "reports/control_plane/structural_growth_cap.md"
+        pre_review_block = _write_governance_packet_for_test(repo, wave_id, packet_path)
+        packet_file = repo / packet_path
+        packet_text = packet_file.read_text().replace("L4_ENABLER", "L4_STRUCTURAL")
+        if authority != "packet":
+            packet_text = packet_text.replace(f"FOUNDER_OVERRIDE:{wave_id}\n", "")
+        packet_file.write_text(packet_text)
+
+        new_test = "mu/tests/generated/test_structural_growth.py"
+        authored = {
+            "file.py": b"# structural candidate\n",
+            new_test: b"def test_structural_growth():\n    assert 2 + 2 == 4\n",
+        }
+        for path, content in authored.items():
+            (repo / path).parent.mkdir(parents=True, exist_ok=True)
+            (repo / path).write_bytes(content)
+        growth_path = commit_mod.GROWTH_CAP_TEST_RELPATH
+        cap_file = repo / growth_path
+        head_bytes = cap_file.read_bytes()
+        expected_bytes = head_bytes.replace(
+            b"CAP_TEST_FILES = 0\n",
+            (
+                "CAP_TEST_FILES = 1  # +1 for test_structural_growth.py "
+                f"({wave_id} wave, FOUNDER_OVERRIDE:{wave_id})\n"
+            ).encode(),
+        )
+        candidate_bytes = head_bytes if candidate == "preimage" else expected_bytes
+        if candidate == "noncanonical":
+            candidate_bytes += b"# unrelated authored cap edit\n"
+        cap_file.write_bytes(candidate_bytes)
+        head_before = _inventory_git(repo, "rev-parse", "HEAD")
+
+        tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+        tracker_note = tracker_note.replace("Class: L4_ENABLER", "Class: L4_STRUCTURAL")
+        if authority in {"tracker", "wrong_wave"}:
+            tracker_note = _with_founder_override(
+                tracker_note, wave_id if authority == "tracker" else "other-wave",
+            )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            wave_class="L4_STRUCTURAL",
+            files_to_stage=[*authored, packet_path, *(
+                [growth_path] if candidate != "preimage" else []
+            )],
+            tracked_packet=packet_path,
+            scope_items=[*authored, packet_path],
+            tracker_note_text=tracker_note,
+        )
+        # Routing identity alone must never manufacture missing invocation authority.
+        route = repo / ".agent_bus/meta/post_merge_routing.json"
+        route.write_text(json.dumps({
+            "wave_name": wave_id, "decision": "ROUTE_PHASE_B",
+            "summary": "structural invocation fixture", "next_candidates": [],
+        }))
+
+        observed = []
+        real_refresh = commit_mod.refresh_commit_path_packet_truth
+
+        def observe_packet_refresh(**kwargs):
+            # The public refresh calls bracket settlement: Step 5c returns
+            # before it, and Step 5e enters again only after an authorized cap.
+            index_before = (repo / ".git/index").read_bytes()
+            cap_before = cap_file.read_bytes()
+            outcome = real_refresh(**kwargs)
+            observed.append({
+                "generated_paths": kwargs.get("commit_generated_governance_paths", []),
+                "provenance": kwargs.get("commit_generated_governance_provenance", ""),
+                "index_before": index_before,
+                "index_after": (repo / ".git/index").read_bytes(),
+                "cap_before": cap_before,
+                "error": outcome[2],
+            })
+            return outcome
+
+        packages = []
+
+        def supervisor(package_path, *args, **kwargs):
+            packages.append(json.loads(Path(package_path).read_text()))
+            # Stop at the real supervisor boundary; no fabricated approval or commit.
+            return SimpleNamespace(decision="NEEDS_PHASE_B", summary="fixture review stop")
+
+        client = SimpleNamespace(run_meta_bridge_package=supervisor, MetaBridgeClientError=Exception)
+        with patch.dict(sys.modules, {"meta_bridge_client": client}), patch.object(
+            commit_mod, "refresh_commit_path_packet_truth",
+            side_effect=observe_packet_refresh,
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        authorized = authority in {"tracker", "packet"} and candidate != "noncanonical"
+        assert observed, result
+        assert observed[0]["generated_paths"] == []
+        assert observed[0]["error"] is None
+        assert observed[0]["cap_before"] == candidate_bytes
+        assert observed[0]["index_before"] == observed[0]["index_after"]
+        assert result["status"] == "error", result
+        if authorized:
+            assert len(observed) == 2, result
+            assert observed[1]["generated_paths"] == [growth_path]
+            assert observed[1]["provenance"] == "bumped"
+            assert observed[1]["error"] is None
+            assert observed[1]["cap_before"] == expected_bytes
+            assert (observed[1]["index_before"] == observed[0]["index_after"]) is (
+                candidate == "postimage"
+            )
+            assert "settle_commit_generated_governance" in result["steps_completed"], result
+            assert result["step"] == "build_and_run_supervisor", result
+            assert result["pre_commit_decision"] == "NEEDS_PHASE_B"
+            assert len(packages) == 1, result
+            assert packages[0]["wave_class"] == "L4_STRUCTURAL"
+            assert packages[0]["founder_override_token"] == ""
+            assert growth_path in packages[0]["changed_files"]
+            assert packages[0]["scope_items"].count(growth_path) == 1
+            assert packages[0]["evidence_handles"][
+                commit_mod.COMMIT_GENERATED_GOVERNANCE_EVIDENCE_KEY
+            ] == growth_path
+            surviving_bytes = expected_bytes
+        else:
+            assert result["step"] == "settle_commit_generated_governance", result
+            assert packages == []
+            assert len(observed) == 1, result
+            assert "settle_commit_generated_governance" not in result["steps_completed"]
+            assert (repo / ".git/index").read_bytes() == observed[0]["index_after"]
+            detail = (
+                "target must be the exact HEAD preimage or exact recomputed postimage "
+                "in both index and worktree"
+                if candidate == "noncanonical" else
+                "exact postimage has no matching founder-override invocation authority"
+            )
+            assert result["errors"] == [f"growth-cap retry authority rejected candidate: {detail}"]
+            surviving_bytes = candidate_bytes
+        assert cap_file.read_bytes() == surviving_bytes
+        assert subprocess.check_output(["git", "show", f":{growth_path}"], cwd=repo) == surviving_bytes
+        assert subprocess.check_output(["git", "show", f"HEAD:{growth_path}"], cwd=repo) == head_bytes
+        assert _inventory_git(repo, "rev-parse", "HEAD") == head_before
+        assert pre_review_block in packet_file.read_text()
+        for path, content in authored.items():
+            assert (repo / path).read_bytes() == content
+            assert subprocess.check_output(["git", "show", f":{path}"], cwd=repo) == content
+
     def test_commit_generated_growth_cap_same_wave_retry_reconstructs_scope(self, tmp_path):
         from collections import namedtuple
         import types

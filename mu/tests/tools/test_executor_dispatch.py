@@ -17950,14 +17950,21 @@ class TestChainFounderOverrideCarryForward:
         assert phase_b_routing["founder_override"] == "demo-chain-wave-2026-06-21"
         assert commit_mod._extract_founder_override_from_routing_record(phase_b_routing, REPO_ROOT) == "demo-chain-wave-2026-06-21"  # ANTICHEAT_OK: asserts the carried field is the exact one the commit extractor reads
 
-    def test_phase_a_chain_carries_pager_route_to_phase_b_routing(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("wave_class", ["L4_ENABLER", "L4_STRUCTURAL"])
+    def test_phase_a_chain_carries_pager_route_to_phase_b_routing(
+        self, tmp_path, monkeypatch, wave_class,
+    ):
         packet_rel = "reports/control_plane/route-wave_2026-06-30.md"
         packet = tmp_path / packet_rel
         packet.parent.mkdir(parents=True)
         packet.write_text(
-            "# Route Wave\n\nStatus: Phase B\nWave ID: route-wave\n",
+            "# Route Wave\n\nStatus: Phase B\nWave ID: route-wave\n"
+            f"Class: {wave_class}\n",
             encoding="utf-8",
         )
+        # The public commit consumer derives class from the staged packet.
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", "add", "--", packet_rel], cwd=tmp_path, check=True, capture_output=True)
         phase_a_ok = subprocess.CompletedProcess(
             ["phase-a"],
             0,
@@ -17986,6 +17993,7 @@ class TestChainFounderOverrideCarryForward:
             record={
                 "decision": "ROUTE_PHASE_A",
                 "wave_name": "route-wave",
+                "wave_class": wave_class,
                 "task_id": "[ROUTE]",
                 "summary": "route",
                 "pager_route": "codex",
@@ -18006,6 +18014,17 @@ class TestChainFounderOverrideCarryForward:
         phase_b_routing = json.loads(args[args.index("--routing-record") + 1])
         assert phase_b_routing["pager_route"] == "codex"
         assert phase_b_routing["founder_override"] == "route-wave"
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            {**phase_b_routing, "decision": "UPDATE_TRACKER_ONLY", "files_to_stage": ["TASKS.md"]},
+            tmp_path,
+        )
+        assert errors == []
+        assert handoff is not None
+        assert handoff["wave_class"] == wave_class
+        assert f"Class: {wave_class}" in handoff["tracker_note_text"]
+        assert "FOUNDER_OVERRIDE:route-wave" in handoff["tracker_note_text"]
+        assert handoff["pager_route"] == "codex"
+        assert commit_mod.validate_handoff(handoff, repo_root=tmp_path) == (True, [])
 
 
 class TestCandidateAuthorityCarryForward:

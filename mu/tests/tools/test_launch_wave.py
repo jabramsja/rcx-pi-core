@@ -3459,7 +3459,8 @@ def test_setup_reuses_existing_builders(wave_repo):
 # --------------------------------------------------------------------------- #
 
 
-def test_routing_record_carries_founder_override_for_commit_autobump(wave_repo):
+@pytest.mark.parametrize("wave_class", ["L4_ENABLER", "L4_STRUCTURAL"])
+def test_routing_record_carries_founder_override_for_commit_autobump(wave_repo, wave_class):
     """The launcher threads the wave's FOUNDER_OVERRIDE into the routing record.
 
     Regression for the gate-authoring strand: a wave that adds a governed test
@@ -3472,8 +3473,16 @@ def test_routing_record_carries_founder_override_for_commit_autobump(wave_repo):
     override durable in the routing record so the extractor returns a non-empty
     token (the same token Gate 8 validates).
     """
-    config = make_config()
+    config = (
+        lw.WaveConfig.from_dict(_structural_config_data())
+        if wave_class == "L4_STRUCTURAL" else make_config()
+    )
+    if wave_class == "L4_STRUCTURAL":
+        tasks = wave_repo / "TASKS.md"
+        tasks.write_text(f"## NOW\n- {config.task_id} active\n\n" + tasks.read_text())
     lw.setup_packet(wave_repo, config)  # routing builder validates the packet exists
+    if wave_class == "L4_STRUCTURAL":
+        lw.setup_tracker_note(wave_repo, config)
     record = lw.setup_routing_record(wave_repo, config)
 
     # config.founder_override defaults to the wave_id (the declared override).
@@ -3501,6 +3510,13 @@ def test_routing_record_carries_founder_override_for_commit_autobump(wave_repo):
         "target_gate_id": config.target_gate_id,
         "founder_override": on_disk["founder_override"],
     }
+    if wave_class == "L4_STRUCTURAL":
+        # The real structural launch already authors explicit cap authority;
+        # the commit handoff must retain it without creating a proof override.
+        commit_record["tracker_note_text"] = next(
+            line for line in tasks.read_text().splitlines()
+            if line.startswith("- Tracker sync note (") and config.wave_id in line
+        )
     handoff, errors = ce.prepare_handoff_from_routing_record(
         commit_record,
         wave_repo,
@@ -3508,10 +3524,13 @@ def test_routing_record_carries_founder_override_for_commit_autobump(wave_repo):
 
     assert errors == []
     assert handoff is not None
+    assert handoff["wave_class"] == wave_class
     assert (
         f"FOUNDER_OVERRIDE:{config.founder_override}"
         in handoff["tracker_note_text"]
     )
+    assert f"Class: {wave_class}" in handoff["tracker_note_text"]
+    assert ce.validate_handoff(handoff, repo_root=wave_repo) == (True, [])
 
 
 def test_routing_record_omits_founder_override_when_builder_not_threaded(wave_repo):
