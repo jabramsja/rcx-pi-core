@@ -1240,7 +1240,10 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
         }
       }
-    } else if (useDomainValidation) {
+    } else if (useDomainValidation && !trustedContinuationProof) {
+      // Public resumes must replay binding. Private self-returned continuations
+      // already bind this input, projection cursor and watchdog via the proof
+      // above; replaying every projection on each internal step is redundant.
       const projectionHashes = new Set();
       const bodyHashes = new Set();
       const projectionContexts = [];
@@ -1653,6 +1656,9 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
                 continue;
               }
               expectedBindings = matchResult._bindings;
+              // Use the paired Python continuation replay's 1000-step bound.
+              // The guarded-prefix workload exceeds 100 substitution steps;
+              // exhaustion still throws and only subst_done establishes binding.
               const substOutcome = _stage0VmRunTrusted(vmConfig.substBundle, muContainers.record([
                 ['subst', muContainers.record([
                   ['body', context.projection.body],
@@ -1662,7 +1668,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
                   ['_input', kernelInput._step],
                   ['_remaining', context.projectionRest],
                 ])],
-              ]), 100);
+              ]), 1000);
               expectedSubst = substOutcome.root;
               if (expectedSubst === null ||
                   typeof expectedSubst !== 'object' ||

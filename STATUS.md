@@ -52,7 +52,7 @@ See [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchi
 **L4 current state:** full L4 completion remains in SINK, but bounded reduction work is active. VM cutover is ACTIVE. P7 Meta-Circular Reduction Chain complete (all 33 projections via Stage0 VM). The current autonomous execution order is tracked in `TASKS.md` under the active Codex queue; this file does not duplicate that queue. See architecture doc for full chain details.
 
 **Key facts (summary):**
-- 13 JS-loaded seed files run on both Python and JavaScript
+- 22 registered seeds; 17 in the JS CLI verification view, including the guarded finite-prefix program shared by Python and JavaScript
 - 4 bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED)
 - JS substrate: ~6,488 LOC core, 16 modules at `mu/host/js/`
 - Python substrate: ~8,430 LOC, ~7,525 tests
@@ -153,6 +153,23 @@ Current Exhaustion Layer: META_CIRCULAR
 - `run_algorithm_meta_circular()` defaults to `step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")`
 - Algorithm runtime is bridge-backed meta-circular
 
+**Bounded Coinduction capability (Mu R8, Phase B):** the registered
+`coinduction_prefix.v1.json` program constructs guarded finite observation windows
+and resumable open tails through the production Python/JS structural kernels.
+The 24 shared vectors retain their complete outcomes and emission assertions;
+numeric malformed demand/reference inputs use canonical Mu StructuralNumbers.
+Raw host integers remain outside matcher admission, and exhausted kernels are
+not semantic results. The execution-layer contract binds actual alternating
+progress and loss of the result when the emission projection is removed. This
+is finite kernel-trace evidence, not engine observer evidence, infinite
+productivity, bisimulation or full Coinduction/L4 completion. See
+[`CoinductionPrefix.v0.md`](mu/docs/core/CoinductionPrefix.v0.md) and the
+[current implementation evidence](reports/control_plane/mu-coinduction-guarded-prefix-r8-2026-10-01_implementation_evidence.json).
+R8 reconstructs committed R7 on landed PR1324 and repairs the two reproduced
+seed-inventory expectations against the checked-in manifest and JS registries.
+Current-wave commands and outcomes are recorded in the implementation evidence.
+Native review, measured indicators and landing remain pending.
+
 ---
 
 ## Historical Archives
@@ -161,6 +178,6 @@ Current Exhaustion Layer: META_CIRCULAR
 - Debt marker history: [`archive/status_debt_history.md`](archive/status_debt_history.md)
 - L3/L4 architecture details: [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchitecture.v0.md)
 
-**Last updated:** 2026-07-01 (post-#1194 handoff truth sync -- current `origin/dev` is PR #1194 merge commit `4734ed2a`; Phase 8c/L4 bounded-reduction posture and debt counts unchanged)
+**Last updated:** 2026-10-01 (bounded Mu R8 capability and seed inventory; Phase 8c/L4 posture and debt counts unchanged; current operational chronology remains in TASKS.md)
 **Next milestone:** First clear the ordered control-plane root-fix queue in TASKS.md if it blocks autonomous execution, then continue with **Coinduction** as the next program-structural wave. Recursive ordinals landed in PR #1160 (`b538b8d9`), W-types / inductive types landed in PR #1161 (`6a6b4217`), the nightly StructuralNumbers regression repair landed across PRs #1181-#1187, and Codex/default pager routing landed in PR #1194 (`4734ed2a`). Fixpoint follows Coinduction; Optimization remains LAST. Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET). Canonical authorization remains TASKS.md.
 **Active NEXT items:** See `TASKS.md` PROGRAM QUEUE for the active Codex autonomous queue. Current operational merge evidence includes PR #1194 (`4734ed2a`, committed and missing-config pager fallback routes to Codex), PR #1193 (`0eb8c34c`, commit-executor draft-PR-ready hardening), PR #1192 (`f98c445c`, route/xdist hardening), PR #1191 (`c8c65c4a`, PR #1166 Codex-default preservation), PR #1190 (`5303862f`, recovery/pre-push blocker hardening), PR #1189 (`ea782dc1`, PR #1173 never-behind preservation), PR #1188 (`675f6de8`, WIP/unmerged-PR preservation), and PRs #1181-#1187 (nightly NR structural-numeral repair and verification). Original stale PRs #1173 and #1166 are closed as superseded, and GitHub reported no open PRs against `dev` during this sync. Recurring local cron/autoping/tmux was intentionally stopped after #1194 to conserve model usage; do not assume those local observer surfaces are live until explicitly restarted.

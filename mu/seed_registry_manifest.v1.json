@@ -433,6 +433,48 @@
       "dependencies": [],
       "js_cli_registered": true,
       "js_core_locked": true
+    },
+    "coinduction_prefix.v1.json": {
+      "subdir": "programs",
+      "sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+      "projection_ids": [
+        "co_prefix.take",
+        "co_prefix.lookup_here",
+        "co_prefix.lookup_next",
+        "co_prefix.lookup_unresolved",
+        "co_prefix.guarded",
+        "co_prefix.emit",
+        "co_prefix.ref_zero",
+        "co_prefix.ref_next",
+        "co_prefix.ref_invalid",
+        "co_prefix.finish",
+        "co_prefix.reverse_next",
+        "co_prefix.done",
+        "co_prefix.enter",
+        "co_prefix.window",
+        "co_prefix.window_invalid",
+        "co_prefix.demand_next",
+        "co_prefix.demand_end",
+        "co_prefix.demand_invalid",
+        "co_prefix.tail",
+        "co_prefix.tail_invalid",
+        "co_prefix.position_next",
+        "co_prefix.position_end",
+        "co_prefix.position_invalid",
+        "co_prefix.machine_next",
+        "co_prefix.machine_end",
+        "co_prefix.machine_invalid",
+        "co_prefix.missing_guard",
+        "co_prefix.missing_observation",
+        "co_prefix.observation_invalid",
+        "co_prefix.unguarded",
+        "co_prefix.transition_invalid",
+        "co_prefix.request_invalid"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": true
     }
   }
 }

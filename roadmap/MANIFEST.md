@@ -96,6 +96,7 @@ These `mu/docs/core/` documents have DOC_STATUS TYPE = DESIGN_SPEC or IMPLEMENTA
 | Document | TYPE | Domain |
 |----------|------|--------|
 | [`mu/docs/core/BootstrapStructuralBridge.v0.md`](../mu/docs/core/BootstrapStructuralBridge.v0.md) | DESIGN_SPEC | Structural bridge bootstrap |
+| [`mu/docs/core/CoinductionPrefix.v0.md`](../mu/docs/core/CoinductionPrefix.v0.md) | IMPLEMENTATION | Guarded finite observation prefixes and resumable open tails |
 | [`mu/docs/core/EVAL_SEED.v0.md`](../mu/docs/core/EVAL_SEED.v0.md) | DESIGN_SPEC | Seed evaluation |
 | [`mu/docs/core/EngineNewFixContract.v0.md`](../mu/docs/core/EngineNewFixContract.v0.md) | IMPLEMENTATION | Engine fix contract |
 | [`mu/docs/core/EngineNewsStructural.v0.md`](../mu/docs/core/EngineNewsStructural.v0.md) | IMPLEMENTATION | Engine news (structural) |
