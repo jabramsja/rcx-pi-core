@@ -3831,10 +3831,12 @@ def refresh_commit_path_packet_truth(
 
     handoff_wave_class = str(handoff.get("wave_class") or "").strip()
     if settled_generated_paths:
-        if not _wave_class_allows_founder_override(handoff_wave_class):
+        # Validated growth-cap scope is independent of supervisor override.
+        # Preserve the structural class and its proof gates during settlement.
+        if handoff_wave_class not in VALID_WAVE_CLASSES:
             return handoff, [], (
-                "commit-generated governance settlement requires an L4_ENABLER "
-                "or MAINTENANCE handoff before supervisor"
+                "commit-generated governance settlement requires a valid wave "
+                "class before supervisor"
             )
     elif handoff_wave_class != "L4_ENABLER":
         return handoff, _current_staged_diff_paths(repo_root), None
@@ -20154,11 +20156,20 @@ def _run_commit_pipeline_impl(
     # because Step 5e raised while deriving its authority tuple.
     growth_cap_outcome: dict[str, Any] = {}
     try:
+        # Cap invocation authority is independent of supervisor/proof override.
+        # Structural waves may carry an explicit token in the handoff or staged
+        # packet; Step 5e still validates its wave and the exact candidate bytes.
+        # Retain the existing enabler/maintenance resolution without granting
+        # structural supervisor override or deriving authority from routing alone.
+        growth_cap_invocation_token = (
+            founder_override_token
+            or _extract_founder_override_from_routing_record(handoff, repo_root)
+        )
         growth_cap_outcome = _maybe_autobump_growth_cap_for_founder_override(
             repo_root,
             wave_id=wave_id,
             base_branch=base_branch,
-            founder_override_token=founder_override_token,
+            founder_override_token=growth_cap_invocation_token,
             log=log,
         )
         result["growth_cap_autobump_outcome"] = growth_cap_outcome

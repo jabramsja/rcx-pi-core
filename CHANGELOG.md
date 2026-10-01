@@ -6,6 +6,26 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-01
 
+### Structural growth-cap invocation (Phase B; landing pending)
+
+- Resolve explicit cap invocation authority independently of the structural
+  supervisor override filter. Settle the validated growth-cap scope for
+  structural handoffs while preserving their class, proof gates and empty
+  supervisor override. Exact HEAD/index/postimage and same-wave checks remain
+  unchanged; existing enabler and maintenance resolution is retained.
+- Reproduce four failures through real commit orchestration on the landed
+  consumer, then pass all 12 focused receipt/launcher/dispatcher cases.
+  Missing or wrong-wave authority and noncanonical bytes remain rejected;
+  canonical retries leave the cap and raw index unchanged during settlement.
+  Complete local validation and preservation checks are recorded in
+  `reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_implementation_evidence.json`.
+- Preserve all 268 PRIMARY task IDs, cleanup rows 38/40, retained-source owners
+  and the frozen Mu R6 candidate/index/receipts. Native review, commit, CI,
+  merge and protected synchronization remain pending. Mu remains blocked on
+  this consumer landing and requires fresh continuation authority; seven
+  prior physical retirements remain verified, with residual fleet and
+  useful-work obligations open.
+
 ### Remaining-folder cleanup successor (Phase B; landing and retirement pending)
 
 - Reuse the preserved R1 commit executor, receipt/cleanup regressions and

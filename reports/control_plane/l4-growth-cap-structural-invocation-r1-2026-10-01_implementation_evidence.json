@@ -1,0 +1,309 @@
+{
+  "wave_id": "l4-growth-cap-structural-invocation-r1-2026-10-01",
+  "task_id": "[L4-GROWTH-CAP-PREBUMP-BUILDER]",
+  "phase": "B",
+  "status": "local_validation_passed_native_landing_pending",
+  "base_commit": "c653cf0380c3a0964842b80532e8ce2f60b77421",
+  "governing_packet": "reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_2026-10-01.md",
+  "changed_paths": [
+    "TASKS.md",
+    "CHANGELOG.md",
+    "mu/tools/executors/commit_executor.py",
+    "mu/tests/tools/test_commit_executor_receipt.py",
+    "mu/tests/tools/test_launch_wave.py",
+    "mu/tests/tools/test_executor_dispatch.py",
+    "reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_implementation_evidence.json"
+  ],
+  "production_changes": [
+    {
+      "surface": "_run_commit_pipeline_impl Step 5e",
+      "change": "Use the existing explicit-token extractor on the handoff/staged packet when supervisor-class resolution yields no token. The existing settlement function still checks same-wave invocation, exact canonical bytes, HEAD, staged fingerprint and worktree stability. Existing enabler/maintenance resolution retains precedence."
+    },
+    {
+      "surface": "refresh_commit_path_packet_truth generated-governance class check",
+      "change": "Accept the already validated growth-cap path for valid wave classes, including L4_STRUCTURAL, independently of supervisor override eligibility. Keep structural handoff classification and all existing scope/provenance checks."
+    }
+  ],
+  "reproduced_defects": [
+    "Class-filtered supervisor override was reused as growth-cap invocation authority: authorized structural preimage did not bump; canonical postimage was rejected.",
+    "After correcting invocation authority, generated-governance scope refresh reused the same supervisor class predicate and rejected structural settlement. This second consumer check is in the same allowlisted production file."
+  ],
+  "validation": [
+    {
+      "name": "focused landed-base reproduction",
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_receipt.py -k 'structural_growth_cap_invocation or omits_founder_override_for_structural_handoff' --tb=short",
+      "exit_code": 1,
+      "result": "4 failed, 4 passed in 6.06s",
+      "failures": [
+        "preimage-tracker: no_founder_override",
+        "preimage-packet: no_founder_override",
+        "postimage-tracker: retry_authority_error",
+        "postimage-packet: retry_authority_error"
+      ],
+      "passed": "Missing/wrong-wave/noncanonical rejection and the unchanged structural supervisor omission regression."
+    },
+    {
+      "name": "focused corrected receipt regression",
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_receipt.py -k 'structural_growth_cap_invocation or omits_founder_override_for_structural_handoff' --tb=short",
+      "exit_code": 0,
+      "result": "8 passed in 6.35s"
+    },
+    {
+      "name": "focused receipt/launcher/dispatcher integration",
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_executor_dispatch.py -k 'structural_growth_cap_invocation or omits_founder_override_for_structural_handoff or routing_record_carries_founder_override_for_commit_autobump or phase_a_chain_carries_pager_route_to_phase_b_routing' --tb=short",
+      "exit_code": 0,
+      "result": "12 passed in 8.80s"
+    },
+    {
+      "name": "complete declared validation",
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_executor_dispatch.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+      "status": "passed",
+      "exit_code": 0,
+      "tools_result": "1462 passed in 148.95s (0:02:28)",
+      "docs_result": "351 passed, 2 warnings in 1.85s",
+      "warnings": [
+        "Existing documentation freshness warning: ten referenced docs were last verified 240 days ago.",
+        "Existing STATUS.md Git freshness warning: last commit 2026-07-01, 92 days old."
+      ]
+    }
+  ],
+  "implementation_iterations": [
+    "The initial regression fixture omitted the routing summary; corrected the new fixture before recording the clean landed-base reproduction. Production authority assertions were not changed.",
+    "The token-only fix passed byte settlement but exposed the existing structural scope rejection. The final bounded correction separates that second use of the supervisor predicate as well.",
+    "Private-attribute integrity recovery replaces the settlement-helper observer with a delegating observer of public refresh_commit_path_packet_truth. Launcher and dispatcher additions now use public handoff preparation/validation instead of private extractor/resolver probes; no new ANTICHEAT_OK or checker exception is retained. The unchanged structural supervisor-omission regression and captured real supervisor package continue to prove the override ban.",
+    "The public dispatcher consumer exposed incomplete fixture packet authority: class extraction requires a staged packet using the canonical Class: field. Two focused iterations each reported 2 failed/10 passed while those fixture inputs were corrected; production code and authority assertions were not relaxed."
+  ],
+  "preservation_before": {
+    "baseline_files_sha256": {
+      "TASKS.md": "40c9b5787495a5aad0eb8f2042e5cb8a9ac8bfc330bdd57933bc60ee8603b2b0",
+      "CHANGELOG.md": "46341568daa40ef030e18eb0defa6d1a49708220a8a3d532615b4e84bc9a9b56",
+      "mu/tools/executors/commit_executor.py": "25947324935c69df5d94541da1d487582da011774d28796e295beedf75bb8906",
+      "mu/tests/tools/test_commit_executor_receipt.py": "e7977ef489bcb5835ce2a1bfb02011de677737e666e9de5b07bfdef6174b8a88",
+      "mu/tests/tools/test_launch_wave.py": "4bb3c10f3d01aac1eef0c8f100e41544c463dcf272628dc6f873e08dbd63a845",
+      "mu/tests/tools/test_executor_dispatch.py": "a391826a939a81d2a970cb90c154d75d259748d56f1c4db11092cabedaa55000",
+      "mu/tests/docs/test_growth_caps.py": "c5d6127a36da47b9c35b1d567245a364695467134c9f19f9e8874bd4557ad5b3",
+      "reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_2026-10-01.md": "aa734ee6d9e6c22b794a91af434c644e5f5a643a6263ec4efcea06ff833ccc75"
+    },
+    "implementer_index_sha256": "892c8994f2ca25b3bcc2c12d9cbab6c5191cd5474e7750246e75c7a16964dd24",
+    "stopped_manifest": "../WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/mu_coinduction_r6_stopped_candidate_20261001.json",
+    "stopped_file_count": 30,
+    "manifest_mismatches": [],
+    "stopped_index_matches_manifest": true,
+    "stopped_config_matches_manifest": true,
+    "protected_files_sha256": {
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/mu_coinduction_r6_stopped_candidate_20261001.json": "1ba89048763a59fbbafae653c4c4248a78bb36bb05eb1f397b071f1b886cbf9e",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/mu_r6_growth_cap_invocation_root_cause_20261001.json": "8e1ead56fd9e2d6504a854c1057c51d9cc3abbaf3a1ea6a250e85fdaae238784",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-mu-coinduction-prefix-r6-20261001/index": "8b5178114013faab4429e205bf3b0ef62fd262fadfe54ab577ca9ebabbcda276",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/mu-coinduction-guarded-prefix-r6-2026-10-01_wave_config.json": "5aa928b043412d36e6ab7e32049536bd1e43ed527277102146c456bb673edfee",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/attempt-1/claim.json": "3f328db38ba3f520e75e205c69a23ddf5dbd2051dcfce1ec6af8414ec98fca6f",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/attempt-1/result.json": "c0f4b4b9ffd0b54392422ef606da4102bc8c488e3841e427f31955fecbe0ffa2",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/closeout.json": "6605a2c90ad38a30cd9d9aff0579de480418acc7ac1230442f87e740804ffbdf",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/completion.json": "c0f4b4b9ffd0b54392422ef606da4102bc8c488e3841e427f31955fecbe0ffa2",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/completion.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/owner-25058-launcher.json": "7fffb0e27ed0c47c6e037dd1fefb095fc3d6daca2093b89c906f165eaf329a18",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/owner-27464-dispatcher.json": "d70357e8bf7267fbfe0bd124302f229cb57a8283d972b2df2643a965900580e2",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/owner-86960-commit.json": "899cf836bf0eae7ee5031aba82527e22f4b6c7d4171f30ca57070808e668a9dd",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/pager.json": "4c7a1d41a9dccf8418d2da49d834cd8a1e4e36dba1b06d2e66f18a74834f3684",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/registration.json": "86a569c9346793f6d2e301a20962858878274cfacf204e5d396aa6820c9b9fc8",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/terminal.json": "44885d549cf9c20f4589e7d0e6395cb6b3e6cc647897a9c4f733c06d03f56b48",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_worktree_lifecycle/49abcfcd71425cf81395411277565ca9af1362d917eac4159f37861394d64379/worker.log": "df0485964c402e83121ee5e6dea089e208e8f71abce4b2fedec9ad25f39b993e",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/bridge.db": "e0bc661ed36082c9d8c2436f77478545cf0731996fc9f73cd1311a3566cfa002",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/bridge.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/bridge_config.json": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/executors/phase_b_handoff.json": "74694369768300249ca8aae5f54b11ce07897ca0c3c733826ef68991bfbb8f12",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/candidate_authority/mu-coinduction-guarded-prefix-r6-2026-10-01.spec.json": "1b0cc02d4743e014a72f582a58f44d574e97d017905ed482711fe596b8592dd1",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/candidate_authority_receipts/mu-coinduction-guarded-prefix-r6-2026-10-01/phase_b-bridge_pre_review.json": "2619070982ccc7e021eada4cc53b532b6d08123cef940deb02e52b433f072c60",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/launch_wave_dispatch_terminal.json": "edfaee5388d03282c13974b5d8371d69c7cd31eac5334488908696ec9fe37ec7",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/meta_bridge.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/post_merge_routing.json": "2bc4328f55ec4281e3c22a706c5ba396a06bad6bf33941a542bdad4f338eee25",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/pre_commit_receipt.json": "e70c428b4a916cacaf5829d00ba7e643199fcb390bb575b47d2877ad55f3926a",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/pre_commit_receipts/receipt_2026-10-01T14-08-50p00-00_04dab926.json": "e2f4fc94d3e37fdbb2b5c8dae396908c2f27e9d20c2b1d2d4bb208c2fd093b88",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/pre_commit_receipts/receipt_2026-10-01T14-21-34p00-00_753621b5.json": "e70c428b4a916cacaf5829d00ba7e643199fcb390bb575b47d2877ad55f3926a",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/prompts/meta-[MU-COINDUCTION-PRODUCTION-PROOF]-1d3294f8--r1-meta.txt": "5c35f1a99ad304bcf713d0da44dac6ec49d7d385e3b75ee4d112b9ba5247dee1",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/prompts/meta-[MU-COINDUCTION-PRODUCTION-PROOF]-d83438d5--r1-meta.txt": "5c35f1a99ad304bcf713d0da44dac6ec49d7d385e3b75ee4d112b9ba5247dee1",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/raw/meta-[MU-COINDUCTION-PRODUCTION-PROOF]-1d3294f8--r1-meta.txt": "70e9e4ced67afe2177eec0b6321283f573a8b180d30d8f068f7b881fd97e3721",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/meta/raw/meta-[MU-COINDUCTION-PRODUCTION-PROOF]-d83438d5--r1-meta.txt": "badc7fdad444fd9ee7f6a47141903d7cbb52433ba9f68696bbf99cc65d6aa897",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/observability/pipeline_agent_delivery_receipts.jsonl": "4a5104117d4dae8b023dca6296b5a97c31149f3b519fcb5368a7bece0b60fd18",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/observability/pipeline_agent_events.jsonl": "e9e8212cf3321f85b0bc1fe87969a07ff99897eb772092e49c1e6ffbcba2450b",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/observability/pipeline_agent_pager.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/observability/pipeline_agent_pager_state.json": "cc2407c07510f0a8f7cb859119cde663175558098ce916ebc9e7d8b1066c9908",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/prompts/phase-a-r1-b7c187dc/phase-a-r1-b7c187dc--r1-reader-a6037175.txt": "c5187741952ac7206a4d838b83eb9dbd84098134d0eec701cecf0df3f3abeb29",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/prompts/phase-a-r1-b7c187dc/phase-a-r1-b7c187dc--r1-reviewer-894bef80.txt": "743bba65080f1f93ca8dbd1139acc0d26f131a315a6692f87bced768268f18e0",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/prompts/phase-b-r1-de685389/phase-b-r1-de685389--r1-reader-d57b16ec.txt": "12fb7ed55286784e4db3c47630ff4d0b3f8e7b4879977813b26b1b862357adf8",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/prompts/phase-b-r1-de685389/phase-b-r1-de685389--r1-reviewer-47559207.txt": "495e4348414b92dc0d4735a76798915961b4b4d3820f872d8cf74a3df6442c24",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/raw/phase-a-r1-b7c187dc/phase-a-r1-b7c187dc--r1-reader-a6037175.txt": "777bfbba7e4ca5b1512013fe75572f01d59ddd1f5311be6048a7442a6fe434ea",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/raw/phase-a-r1-b7c187dc/phase-a-r1-b7c187dc--r1-reviewer-894bef80.txt": "26125ced10cf0df0d4d9ab632339f48df9ff7cf76b2651f8716e760c3dab2aba",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/raw/phase-b-r1-de685389/phase-b-r1-de685389--r1-reader-d57b16ec.txt": "8961d8ac739df89e17afee0061102c27bd8da6b531d3f12eb74e141b8d984906",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/raw/phase-b-r1-de685389/phase-b-r1-de685389--r1-reviewer-47559207.txt": "143f9cdc15c5331c4a5ee2fdad95f29d92f7d06996cbfce258f08af0acc3823f",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/recovery/recovery_log.json": "06c9bae100825e7881cee91e0904305c421734d0609ec9b3abae684b0fdb5140",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/recovery/recovery_status.json": "a9a318e9b24035a6dafc7d99ea5e935d81c6744b1010269164169007c70d0689",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/rendered/phase-a-r1-b7c187dc.md": "0189d992fff6df36437b645b56328839b0eb062137793a0ca1256abfaf63e1d6",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/rendered/phase-b-r1-de685389.md": "4ff08aead6b166da160193a70692c32537c8f2b1de8053d6244eca14514ff3ef",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/validations/phase-a-r1-b7c187dc/phase-a-r1-b7c187dc--r1-reader-a6037175/validation-1.txt": "42d1c1f10ed132d97dd34b8ad9f4f2b7624298c3cb860f7a4a264d37d6b07eb9",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/validations/phase-a-r1-b7c187dc/phase-a-r1-b7c187dc--r1-reader-a6037175/validation-2.txt": "746bf63c5bd15ce9d58790a0ee27c3b1e26e1a9df4953eb05ec2bf2f5ac44ad4",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/validations/phase-b-r1-de685389/phase-b-r1-de685389--r1-reader-d57b16ec/validation-1.txt": "0645f2774982578d6cc45fa5ee49a672ce1794f40a7f67675df6527b3d9fab8b",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001/.agent_bus-mu-coinduction-prefix-r6-20261001/validations/phase-b-r1-de685389/phase-b-r1-de685389--r1-reader-d57b16ec/validation-2.txt": "86c0b40758b87094cf42e9e5748a64a130434c56368dcafa683a6d8659ef6563"
+    },
+    "primary_tracker_task_id_count": 268,
+    "local_tracker_task_id_count": 268,
+    "missing_primary_task_ids": [],
+    "primary_task_lines_missing": 0
+  },
+  "tracker_builder": "tracker_sync_note.upsert_tracker_sync_note with the original native WaveConfig fields reproduced the existing canonical Ra note byte-for-byte. The implementation status is an additive paragraph under the existing growth-cap owner; no task ID or owner is removed.",
+  "proof_limits": [
+    "New orchestration cases use disposable Git repositories and the real public run_commit_pipeline, cap settlement, staging and governance refresh. A supplied supervisor returns NEEDS_PHASE_B after package capture; these cases deliberately do not approve or commit a candidate.",
+    "The observer delegates to the unmodified public commit-packet refresh function. Its initial return and generated-governance entry bracket real settlement, proving exact postimage retries preserve the raw index and first bumps change it. Rejected candidates reach no generated-governance refresh or supervisor and preserve the entire raw index through pipeline return. Exact cap, staged candidate, HEAD and authored-file byte assertions remain intact.",
+    "No Mu runtime, seed, kernel, cap constant/generator, launcher, Phase B, dispatcher production, fleet, model or hook implementation is changed.",
+    "Mu R6 is terminal and preserved; this enabler does not establish Mu production completion or authorize replay of its spent receipts/lifecycle attempts.",
+    "Seven prior physical retirements remain a preserved existing result. No new fleet operation or useful-work completion is claimed; cleanup rows 38/40 and retained-source owners remain open.",
+    "Native independent review, staging, commit, CI, merge and protected PRIMARY/dev synchronization belong to the outer pipeline and remain pending.",
+    "No fresh quota observation is available from the tools in this implementer."
+  ],
+  "preservation_after": {
+    "protected_files_checked": 52,
+    "protected_mismatches": [],
+    "stopped_candidate_files_checked": 30,
+    "stopped_candidate_mismatches": [],
+    "implementer_index_unchanged": true,
+    "head_unchanged": true,
+    "locked_packet_unchanged": true,
+    "growth_cap_file_unchanged": true,
+    "primary_tracker_unchanged": true,
+    "current_task_id_count": 268,
+    "missing_primary_task_ids": [],
+    "new_task_ids": [],
+    "primary_task_lines_missing": 0,
+    "cleanup_rows_preserved": true,
+    "growth_cap_owner_precedes_mu": true,
+    "prior_retirements": {
+      "evidence_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/pr1323_landed_live_cleanup_20261001.json",
+      "evidence_sha256": "a77c96a07826b59cf05c95d4979f579a01a5466f22b72e53ea5efa75eb0f3cc2",
+      "checkpoint_verified": true,
+      "retired_target_count": 7,
+      "all_retired_paths_still_absent": true,
+      "residual_fleet_clean": false,
+      "not_new_apply_or_verify": true
+    },
+    "changed_tracked_paths": [
+      "CHANGELOG.md",
+      "TASKS.md",
+      "mu/tests/tools/test_commit_executor_receipt.py",
+      "mu/tests/tools/test_executor_dispatch.py",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tools/executors/commit_executor.py"
+    ],
+    "untracked_paths": [
+      "reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_2026-10-01.md",
+      "reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_implementation_evidence.json"
+    ],
+    "out_of_scope_paths": []
+  },
+  "production_preservation": {
+    "changed_existing_functions": [
+      "refresh_commit_path_packet_truth",
+      "_run_commit_pipeline_impl"
+    ],
+    "unchanged_existing_function_count": 493,
+    "added_functions": [],
+    "method": "SHA-256 of each complete top-level function source segment compared with HEAD.",
+    "unchanged_authority_function_sha256": {
+      "_wave_class_allows_founder_override": "4e92abc40655f9bf10fe6711eb08dbf03aebbed1af9097f454b970315d665f4c",
+      "_resolve_control_surface_founder_override_token": "a455e1070ba5caa2f497f39f4bbd8f5d984c386344fd0897895a223ef1682e9e",
+      "_maybe_autobump_growth_cap_for_founder_override": "1cba55d524ac0794cb76f446123582a0be33b0ae0ec1e267ff5ae40fdfa5f9b4",
+      "_capture_growth_cap_retry_authority": "6778f2afafae7cafe35d319097402b0e60bc3e9a487ff01cdba84daa698cea06",
+      "_growth_cap_snapshot_candidate_state": "8e22b7a12c336e22407875b49395644110a71df2c3e16d5b5002e20c5fbcb3f7"
+    },
+    "invariant_tuple": {
+      "runtime_substrate_delta": "none",
+      "growth_cap_file_delta": "none",
+      "tracked_host_markers": "5 before/after per unchanged STATUS.md and untouched host sources; startup ratchets are outer-owned and were not rerun",
+      "supervisor_override_classes_before_after": [
+        "L4_ENABLER",
+        "MAINTENANCE"
+      ]
+    }
+  },
+  "inherited_state": {
+    "TASKS.md": "Already modified on entry; complete PRIMARY carry-over retained, with one additive implementation paragraph. Native canonical Ra note re-rendered byte-identically.",
+    "reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_2026-10-01.md": "Already untracked on entry; locked packet bytes remain unchanged."
+  },
+  "private_attribute_integrity_recovery": {
+    "status": "phase_b_local_validation_passed_outer_integrity_rerun_pending",
+    "changed_paths": [
+      "mu/tests/tools/test_commit_executor_receipt.py",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_executor_dispatch.py",
+      "reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_implementation_evidence.json"
+    ],
+    "change": "Use the public commit-packet refresh observer and public routing handoff builder/validator. The settlement helper is neither accessed nor patched by the new orchestration regression. Added private extractor/resolver probes and their ANTICHEAT_OK annotations were removed; existing supervisor-package and structural-omission assertions remain.",
+    "validation": [
+      {
+        "name": "focused public-seam fixture iteration 1",
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_executor_dispatch.py -k 'structural_growth_cap_invocation or omits_founder_override_for_structural_handoff or routing_record_carries_founder_override_for_commit_autobump or phase_a_chain_carries_pager_route_to_phase_b_routing' --tb=short",
+        "exit_code": 1,
+        "result": "2 failed, 10 passed in 8.87s",
+        "diagnosis": "The public handoff consumer correctly defaulted the unstaged fixture packet to MAINTENANCE."
+      },
+      {
+        "name": "focused public-seam fixture iteration 2",
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_executor_dispatch.py -k 'structural_growth_cap_invocation or omits_founder_override_for_structural_handoff or routing_record_carries_founder_override_for_commit_autobump or phase_a_chain_carries_pager_route_to_phase_b_routing' --tb=short",
+        "exit_code": 1,
+        "result": "2 failed, 10 passed in 8.88s",
+        "diagnosis": "After staging the fixture, the consumer required canonical Class: syntax; Wave class: is not class authority."
+      },
+      {
+        "name": "focused public-seam regression",
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_executor_dispatch.py -k 'structural_growth_cap_invocation or omits_founder_override_for_structural_handoff or routing_record_carries_founder_override_for_commit_autobump or phase_a_chain_carries_pager_route_to_phase_b_routing' --tb=short",
+        "exit_code": 0,
+        "result": "12 passed in 8.79s"
+      },
+      {
+        "name": "complete declared validation after test-integrity repair",
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_executor_dispatch.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+        "exit_code": 0,
+        "tools_result": "1462 passed in 152.60s (0:02:32)",
+        "docs_result": "351 passed, 2 warnings in 1.79s",
+        "warnings": "The same existing documentation-verification-age and STATUS.md freshness warnings recorded above."
+      }
+    ],
+    "preservation": {
+      "head_before": "c653cf0380c3a0964842b80532e8ce2f60b77421",
+      "head_after": "c653cf0380c3a0964842b80532e8ce2f60b77421",
+      "unchanged_files_sha256": {
+        "TASKS.md": "abaaa0c488271572a5058e651210424167ade6a6c464c6f46dffece8bab8a517",
+        "CHANGELOG.md": "d72315dd64666126460e83e148ceabd771ece577fe84cb9e0d61703fcf48e5f9",
+        "mu/tools/executors/commit_executor.py": "90797921712bd9974655a2b5e21189e2678bb69bc98cc1fa04692bff005f7526",
+        "mu/tests/docs/test_growth_caps.py": "c5d6127a36da47b9c35b1d567245a364695467134c9f19f9e8874bd4557ad5b3",
+        "reports/control_plane/l4-growth-cap-structural-invocation-r1-2026-10-01_2026-10-01.md": "8be4ddbfe7b859e7033b76055e62c15174fee28c35c64bcfd7af757970cdcb41",
+        "reports/l4_wave_indicators/l4-growth-cap-structural-invocation-r1-2026-10-01.json": "eea91048589551e5c186f836e8c8646054ccbd25f901c5dadba50eda67d65db2",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-growth-cap-invocation-r1-20261001/index": "1ed0e5249173ee76fb8a77222469969ad83ffdd326241b2f1bac688bdd7920d0"
+      },
+      "protected_files_checked": 52,
+      "protected_mismatches": [],
+      "stopped_candidate_files_checked": 30,
+      "stopped_candidate_mismatches": [],
+      "prior_retirements": {
+        "evidence_sha256": "a77c96a07826b59cf05c95d4979f579a01a5466f22b72e53ea5efa75eb0f3cc2",
+        "retired_target_count": 7,
+        "all_retired_paths_still_absent": true,
+        "all_recovery_directories_present": true,
+        "residual_fleet_clean": false,
+        "not_new_apply_or_verify": true
+      },
+      "structural_omission_regression": "Unchanged; included in the focused and complete receipt-module runs.",
+      "tasks_changelog_and_native_artifacts": "Byte-identical to entry; the existing PRIMARY task IDs, owner rows, native tracker note and Mu-next ordering are retained."
+    },
+    "proof_limits": [
+      "The original landed-base red/green reproduction is retained above; this gate-only recovery did not replace production code to repeat it.",
+      "Only the plan's focused and complete pytest validations were executed. The private-attribute gate rerun and staging/review/commit/CI/merge remain outer-pipeline work.",
+      "No new ANTICHEAT_OK, allowlist, checker, hook, skip, xfail or timeout change. The index and locked packet were not modified.",
+      "No fresh quota observation is available from this implementer's tools."
+    ]
+  },
+  "remaining_work": [
+    "Outer pipeline independent review, staging, commit, CI, merge and protected PRIMARY/dev synchronization.",
+    "Root may then resume preserved Mu work through fresh authorized continuation using this landed consumer correction; terminal R6 and spent authority must not be replayed.",
+    "Existing cleanup rows 38/40, retained-source and useful-work obligations remain open."
+  ],
+  "issues": "No unresolved Phase B-local blocker. The additional same-file structural settlement class check was reproduced and corrected; two existing docs freshness warnings remain outside this bounded change."
+}
