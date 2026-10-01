@@ -5889,3 +5889,212 @@ def test_recovery_enabler_keeps_original_transaction_plan_and_no_replay_owner(tm
     assert "grants no fresh mutation authority" in candidate["request_for_agent"]
     assert claim.read_bytes() == b'{"consumed":"unchanged"}\n'
     assert not (repo / f"reports/control_plane/{enabler}_apply_plan.json").exists()
+
+
+@pytest.fixture
+def merged_closeout_case(tmp_path, monkeypatch):
+    """Real landed sync/ownership; only remote review, CI and merge are simulated."""
+    from mu.tools.executors import workingrcx_fleet_apply as fleet
+
+    def build(*, executor=commit_mod, reentry=False, fault=None):
+        upstream, primary, old, env = _init_origin_and_primary(tmp_path)
+        _git(["checkout", "-b", "founder"], cwd=primary)
+        local_dev = tmp_path / "local-dev"
+        _git(["worktree", "add", str(local_dev), "dev"], cwd=primary)
+        wave = _cleanup_fixture_identity(primary, "merged-closeout")
+        branch = "wave/" + wave
+        carrier = tmp_path / "carrier"
+        _git(["worktree", "add", "-b", branch, str(carrier)], cwd=primary)
+        for rel in fleet.SYNC_RECOVERY_DEPENDENCIES:
+            path = carrier / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((REPO_ROOT / rel).read_bytes())
+        (carrier / "TASKS.md").write_text("# Tasks\n\n## PROGRAM QUEUE\n\n## Ra\n")
+        script = carrier / "mu/tools/hooks/merge_pr.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/sh\nexit 1\n")
+        _git(["add", "."], cwd=carrier, env=env)
+        _git(["commit", "-m", "reviewed carrier"], cwd=carrier, env=env)
+        head = _git(["rev-parse", "HEAD"], cwd=carrier).stdout.strip()
+        _git(["fetch", str(primary), branch], cwd=upstream)
+        _git(["merge", "--no-ff", "FETCH_HEAD", "-m", "remote merge"], cwd=upstream, env=env)
+        merge = _git(["rev-parse", "HEAD"], cwd=upstream).stdout.strip()
+        before = {}
+        for owner in (primary, local_dev):
+            (owner / "seed.txt").write_text("staged " + owner.name)
+            _git(["add", "seed.txt"], cwd=owner)
+            (owner / "seed.txt").write_text("unstaged " + owner.name)
+            (owner / "private.bin").write_bytes(b"\x00preserved\xff")
+            before[owner] = (_git(["diff", "--cached", "--binary"], cwd=owner).stdout,
+                             _git(["diff", "--binary"], cwd=owner).stdout)
+        events = []
+        handoff = {"wave_id": wave, "task_id": "[MU-COINDUCTION-PRODUCTION-PROOF]"}
+        continuation = carrier / ".agent_bus/continuation.json"
+        continuation.parent.mkdir(exist_ok=True)
+        continuation.write_text('{"retained":"continuation"}\n')
+        result = dict(status="success", pr_number="1322", commit_sha=head,
+                      steps_completed=["run_pre_push_script", "git_push", "ensure_pr", "wait_ci"])
+        original_run = executor._run  # ANTICHEAT_OK: leave all local Git and preservation authority real.
+
+        def payload():
+            merged = reentry or "merge_wrapper" in events
+            data = dict(state="MERGED" if merged else "OPEN", headRefOid=head,
+                        headRefName=branch, baseRefName="dev", isDraft=False,
+                        mergeCommit={"oid": merge} if merged else None,
+                        reviewDecision="APPROVED", comments={"nodes": []},
+                        reviewThreads={"nodes": [], "pageInfo": {"hasNextPage": False}},
+                        latestReviews={"nodes": [{
+                            "author": {"login": executor.BOT_REVIEW_LOGIN}, "state": "COMMENTED",
+                            "body": "![P2 Badge](https://img.shields.io/badge/P2-yellow) Retain packet marker follow-up" if merged else "",
+                            "submittedAt": "2026-10-01T05:40:00Z", "commit": {"oid": head},
+                        }]})
+            if merged and fault in {"head", "branch", "base", "unmerged", "missing_merge", "merge_not_on_base", "merge_before_head"}:
+                key, value = {
+                    "head": ("headRefOid", "f" * 40), "branch": ("headRefName", "other"),
+                    "base": ("baseRefName", "main"), "unmerged": ("state", "OPEN"),
+                    "missing_merge": ("mergeCommit", None),
+                    "merge_not_on_base": ("mergeCommit", {"oid": "f" * 40}),
+                    "merge_before_head": ("mergeCommit", {"oid": old}),
+                }[fault]
+                data[key] = value
+            return data
+
+        def command(args, **kwargs):
+            if args[:3] == ["gh", "api", "graphql"]:
+                events.append("review_query")
+                if (reentry or "merge_wrapper" in events) and fault == "query_failed":
+                    raise subprocess.CalledProcessError(1, args, stderr="remote unavailable")
+                if (reentry or "merge_wrapper" in events) and fault == "malformed":
+                    return subprocess.CompletedProcess(args, 0, "invalid JSON", "")
+                body = {"data": {"repository": {"pullRequest": payload()}}}
+                if (reentry or "merge_wrapper" in events) and fault == "graphql_errors":
+                    body["errors"] = [{"message": "partial response"}]
+                return subprocess.CompletedProcess(args, 0, json.dumps(body), "")
+            if args == ["bash", str(script), "1322", "--sweep"]:
+                events.append("merge_wrapper")
+                raise subprocess.CalledProcessError(1, args, stderr=(
+                    "jq: parse error: Invalid numeric literal at line 1, column 10"))
+            if args and args[0] == "gh":
+                raise AssertionError(f"unexpected remote mutation: {args}")
+            return original_run(args, **kwargs)
+
+        def ci(*args, **kwargs):
+            events.append("pre_merge_ci")
+            return None
+
+        def conflict(*args, **kwargs):
+            events.append("conflict_remediation")
+            return {"resolved": False, "action": "no_action"}
+
+        def remediate(*args, **kwargs):
+            events.append("code_remediation")
+            return {"status": "bot_findings_pending", "step": "ensure_review_clear_and_merge"}
+
+        monkeypatch.setattr(executor, "_run", command)
+        monkeypatch.setattr(executor, "_wait_for_pr_ci", ci)
+        monkeypatch.setattr(executor, "_try_auto_resolve_pr_conflict", conflict)
+        monkeypatch.setattr(executor, "_attempt_bot_finding_remediation", remediate)
+
+        def run():
+            return executor._run_post_commit_pipeline(  # ANTICHEAT_OK: drive the native post-commit continuation with real sync, lifecycle and closeout.
+                handoff=handoff, repo_root=carrier, result=result, target_branch=branch,
+                base_branch="dev", continuation_path=continuation, log=_noop_log)
+
+        return SimpleNamespace(run=run, events=events, primary=primary, local_dev=local_dev,
+            carrier=carrier, before=before, old=old, head=head, merge=merge,
+            branch=branch, handoff=handoff, continuation=continuation, result=result)
+
+    return build
+
+
+@pytest.mark.parametrize("reentry", [False, True])
+def test_remote_merged_closeout_preserves_both_owners_and_publishes_actual_result(
+    merged_closeout_case, reentry,
+):
+    case = merged_closeout_case(reentry=reentry)
+    outcome = case.run()
+    assert outcome["status"] == "success", outcome
+    assert outcome["merge_sha"] == case.merge
+    assert outcome["commit_sha"] == case.head
+    assert outcome["remote_pr_merged"] is True
+    assert case.events.count("merge_wrapper") == (0 if reentry else 1)
+    assert "code_remediation" not in case.events
+    assert "conflict_remediation" not in case.events
+    assert case.events.count("pre_merge_ci") == (0 if reentry else 1)
+    assert outcome["primary_worktree_sync"]["all_owners_current"] is True
+    for owner in (case.primary, case.local_dev):
+        assert _git(["rev-parse", "HEAD"], cwd=owner).stdout.strip() == case.merge
+        assert (_git(["diff", "--cached", "--binary"], cwd=owner).stdout,
+                _git(["diff", "--binary"], cwd=owner).stdout) == case.before[owner]
+        assert (owner / "private.bin").read_bytes() == b"\x00preserved\xff"
+    closeout = json.loads(Path(outcome["durable_closeout_path"]).read_bytes())
+    assert closeout["result"]["status"] == "success"
+    assert closeout["result"]["primary_worktree_sync"]["all_owners_current"] is True
+    followup = closeout["result"]["post_merge_followup"]
+    assert followup["status"] == "PENDING_LANDED_REVIEW"
+    assert followup["owner"]["task_id"] == case.handoff["task_id"]
+    assert "P2 Badge" in followup["review_state"]["latestReviews"]["nodes"][0]["body"]
+    if not reentry:
+        assert "jq: parse error" in followup["merge_wrapper_error"]
+    observation = json.loads(Path(outcome["pr_lifecycle"]["path"]).read_bytes())
+    assert observation["state"] == "MERGED"
+    assert "PENDING_LANDED_REVIEW" in observation["detail"]
+    assert case.carrier.exists()  # Cleanup is owned, not falsely claimed complete.
+    assert outcome["post_merge_cleanup"]["worktree_removed"] is False
+    assert not case.continuation.exists()
+
+
+def test_remote_merged_closeout_keeps_exhausted_failure_and_attempts(merged_closeout_case):
+    from mu.tools.executors import worktree_lifecycle as lifecycle
+    from mu.tools.executors import workingrcx_fleet_apply as fleet
+
+    case = merged_closeout_case(reentry=True)
+    directory = lifecycle.register_lane(case.carrier, case.handoff["wave_id"], role="commit")
+    terminal = lifecycle.request_completion(directory, status="failed", result={"pr_number": "1322"})
+    lifecycle.publish_closeout(directory, repo=case.carrier, handoff=case.handoff,
+                               result={"status": "error", "step": "ensure_review_clear_and_merge"})
+    final = dict(state="ESCALATED", owner=lifecycle.OWNER, attempts_exhausted=3,
+                 reason="Registered native owner remains live or uncertain")
+    for number in range(1, 4):
+        attempt = directory / f"attempt-{number}"
+        attempt.mkdir()
+        (attempt / "claim.json").write_bytes(fleet.encoded(dict(
+            number=number, terminal_sha256=fleet.digest(fleet.encoded(terminal)))))
+        (attempt / "result.json").write_bytes(fleet.encoded(final if number == 3 else {
+            "state": "PENDING", "reason": final["reason"]}))
+    (directory / "completion.json").write_bytes(fleet.encoded(final))
+    before = {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()}
+
+    outcome = case.run()
+
+    assert outcome["remote_pr_merged"] is True
+    assert outcome["primary_worktree_sync"]["all_owners_current"] is True
+    assert outcome["status"] == "error"
+    assert outcome["step"] == "post_merge_cleanup"
+    assert outcome["post_merge_cleanup"]["completion_state"] == "INCOMPLETE"
+    assert "durable_closeout_path" not in outcome
+    assert {p: p.read_bytes() for p in before} == before
+    assert len(list(directory.glob("attempt-*"))) == 3
+    assert not (directory / "merged-successor.json").exists()
+    assert case.carrier.exists()
+
+
+def test_remote_merged_closeout_publication_failure_is_not_success(merged_closeout_case):
+    from mu.tools.executors import worktree_lifecycle as lifecycle
+
+    case = merged_closeout_case(reentry=True)
+    directory = lifecycle.register_lane(case.carrier, case.handoff["wave_id"], role="commit")
+    lifecycle.request_completion(directory, status="merged", result={"merge_sha": case.merge})
+    closeout = lifecycle.publish_closeout(directory, repo=case.carrier, handoff=case.handoff,
+                                         result={"status": "success", "merge_sha": case.merge})
+    original = closeout.read_bytes()
+
+    outcome = case.run()
+
+    assert outcome["status"] == "error"
+    assert outcome["step"] == "durable_closeout"
+    assert outcome["pr_lifecycle"]["state"] == "MERGED"
+    assert outcome["primary_worktree_sync"]["all_owners_current"] is True
+    assert closeout.read_bytes() == original
+    assert "durable_closeout_path" not in outcome
+    assert case.carrier.exists()

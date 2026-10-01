@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-09-27
+LAST_VERIFIED: 2026-10-01
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: mu/tests/tools/test_worktree_lifecycle.py, mu/tests/tools/test_workingrcx_fleet_apply.py, mu/tests/tools/test_commit_executor_post_merge_cleanup.py, mu/tests/tools/test_pipeline_monitor_autofollow.py, mu/tests/tools/test_launch_wave.py, mu/tests/tools/test_recovery_gate.py
@@ -44,6 +44,18 @@ the existing identity-bound, locked transaction API. The base owner is bound
 before PRIMARY sync and rechecked under the shared lock before recovery,
 preparation and fast-forward. Native ownership, process/open-file and content
 checks retain live, uncertain, changed or divergent owners individually.
+
+If the merge wrapper fails during its post-merge sweep, or review reentry finds
+the PR already merged, commit verifies fresh remote MERGED state, the exact
+local/remote head and branch, the authorized base and the merge commit's ancestry
+on the freshly fetched base. Only that proof enters the same landed-source sync
+and closeout path without another merge or pre-merge code remediation. Failed,
+partial or mismatched queries grant no such authority. Late review state and
+the wrapper error remain `PENDING_LANDED_REVIEW` under the original task/wave
+owner in the durable PR observation and actual closeout result. Sync, ownership
+and closeout publication retain their own outcomes; a remote merge alone is
+not successful closeout. Failed receipts and consumed lifecycle attempts remain
+immutable, and incomplete cleanup ownership remains an error.
 
 `primary_worktree_sync` retains PRIMARY's outcome and adds `base_worktree_sync`
 and `all_owners_current`. Each owner reports actual ahead/behind counts and

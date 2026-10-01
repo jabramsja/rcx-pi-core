@@ -4,6 +4,33 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-01
+
+### Remaining-folder cleanup successor (Phase B; landing and retirement pending)
+
+- Reuse the preserved R1 commit executor, receipt/cleanup regressions and
+  lifecycle documentation from `6f2bd99b88d0f983ae35d255d4fd404b11c3c177`.
+  Exact remote MERGED identity and fetched-base ancestry admit the existing
+  landed-source sync/closeout after a failed sweep or already-merged reentry;
+  mismatched or unmerged authority remains fail-closed. Failed receipts,
+  consumed attempts and unresolved landed review owners remain intact.
+- Carry the preserved dispatcher integration repair in the initial allowlist:
+  source assertions use `post_commit_pipeline_source`, and late-conflict
+  fixtures track the real OPEN PR head through resolution without disabling
+  production identity checks. All three required integration selectors pass.
+- Fresh native builders bind predecessor
+  `702a145923f17c421da44f3e2b6f3cce6623c7e0` to 18 observed entries, seven
+  original conditional targets and 11 explicit HOLDs in one new unspent
+  operation. Frozen cleanup R1, active R2, latest Mu R4 and every unlisted
+  source remain protected. Three targets are dev-covered; four retain
+  useful-work landing owners and require independent recovery at APPLY.
+- Preserve current PRIMARY TASKS, its queue and all 269 task IDs, the exact
+  native Ra note, stopped source files/raw indices and historical action
+  records. Final local validation is recorded in this wave's implementation
+  evidence. Native review/commit/CI/merge, PRIMARY synchronization and
+  foreground public APPLY/VERIFY remain pending.
+  No physical retirement, Mu integration or fleet completion is claimed.
+
 ## 2026-09-28
 
 ### Native structural metadata through dispatcher handoffs (Phase B; landing pending)

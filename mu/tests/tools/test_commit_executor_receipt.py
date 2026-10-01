@@ -24,6 +24,7 @@ import pytest
 
 from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
+from mu.tests.tools.test_commit_executor_post_merge_cleanup import merged_closeout_case
 
 
 commit_mod = load_module(
@@ -10505,6 +10506,39 @@ class TestDraftPRReadyBeforeMerge:
 
         assert failure_class.value == "draft_pr_ready_failed"
         assert recovery_gate_mod.tier_for(failure_class) == 3
+
+
+@pytest.mark.parametrize("fault", [
+    "head", "branch", "base", "unmerged", "missing_merge", "merge_not_on_base",
+    "query_failed", "malformed", "graphql_errors", "merge_before_head",
+])
+def test_remote_merged_closeout_requires_fresh_exact_authority(merged_closeout_case, fault):
+    case = merged_closeout_case(executor=commit_mod, fault=fault)
+    continuation = case.continuation.read_bytes()
+    outcome = case.run()
+    assert outcome["status"] != "success", outcome
+    assert "primary_worktree_sync" not in outcome
+    assert "post_merge_cleanup" not in outcome
+    assert "durable_closeout_path" not in outcome
+    assert case.continuation.read_bytes() == continuation
+    for owner in (case.primary, case.local_dev):
+        assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=owner,
+                              check=True, capture_output=True, text=True).stdout.strip() == case.old
+        assert (owner / "private.bin").read_bytes() == b"\x00preserved\xff"
+    assert not list((case.primary / ".git/rcx_worktree_lifecycle").glob("*/closeout.json"))
+    assert case.events.count("merge_wrapper") == 1
+    assert "code_remediation" not in case.events
+
+
+def test_remote_merged_closeout_unmerged_findings_keep_premerge_owner(merged_closeout_case):
+    case = merged_closeout_case(executor=commit_mod, reentry=True, fault="unmerged")
+    outcome = case.run()
+    assert outcome["status"] == "bot_findings_pending"
+    assert outcome["pr_lifecycle"]["state"] == "STOPPED"
+    assert "code_remediation" in case.events
+    assert "merge_wrapper" not in case.events
+    assert "primary_worktree_sync" not in outcome
+    assert "durable_closeout_path" not in outcome
 
 
 class TestCIPollFallbackTimeout:

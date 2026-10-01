@@ -1,0 +1,659 @@
+{
+  "action_contract": [
+    "Fresh committed plan on separately synchronized PRIMARY",
+    "Exact identity/index/WIP/history/owner and independent empty-repository recovery",
+    "Source and preservation bound to one consumed terminal action under the shared lock",
+    "Present sources are renamed; already absent sources preserve only available admin/index/history; exact registered-source removal never uses force or prune",
+    "The exact empty unregistered container needs only identity, empty-content and liveness proof; no Git history is synthesized",
+    "Independent public verify; old receipts/journals/owners and budgets remain unchanged"
+  ],
+  "action_counts": {
+    "RETIRE_WORKTREE": 7,
+    "UNTOUCHED_HOLD": 11
+  },
+  "census_sha256": "86671182f3d3a09e6d0b258e3cfd3561d3f47ba50b0d986b5fb6cdc3a6ff9a11",
+  "classification_sha256": "a8db8123a7cf5fb341682fafdc425bf55cb582a86c1fa953b1cc800bf8967312",
+  "comparison_commit": "702a145923f17c421da44f3e2b6f3cce6623c7e0",
+  "current_identity_checks": [
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-readonly-source-retirement-r3-20260928",
+      "source_index": 1,
+      "status": "MATCH"
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927",
+      "source_index": 5,
+      "status": "MATCH"
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r3-20260928",
+      "source_index": 6,
+      "status": "MATCH"
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-metadata-roundtrip-r1-20260928",
+      "source_index": 12,
+      "status": "MATCH"
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-metadata-roundtrip-r2-20260928",
+      "source_index": 13,
+      "status": "MATCH"
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928",
+      "source_index": 14,
+      "status": "MATCH"
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r2-20260928",
+      "source_index": 15,
+      "status": "MATCH"
+    }
+  ],
+  "fleet_complete": false,
+  "foreground": {
+    "executed_pairs": 0,
+    "state": "PENDING_LANDING_PRIMARY_SYNC_AND_PUBLIC_APPLY_VERIFY"
+  },
+  "identity_check_policy": "Read-only identity observation; action-time liveness, ownership, preservation and committed authority remain required. Drift holds the exact source.",
+  "implementation_sha256": {
+    "mu/tools/executors/commit_executor.py": "aa8bffea72a0539d3a97d23446a55a36d3ebee53df7c5febca4a5692f41e4147",
+    "mu/tools/executors/workingrcx_fleet_apply.py": "bf05e39afd9c06ead2acfc4cce37304b9bf75d8b646baff903074272f2a95252",
+    "mu/tools/executors/workingrcx_fleet_census.py": "e858ee59b88b936f22e6c9a57e083d620be60564e9015bc2e241feda33d43033",
+    "mu/tools/executors/workingrcx_fleet_classification.py": "557d50d35ded8f905d178d69b3a0c0ba9d37497b0742098be415a02385299b1e",
+    "mu/tools/executors/worktree_lifecycle.py": "b7c8a224cd8eeb48460ac34925ac57153d3c07cc2b1cf68f84497687d8128264"
+  },
+  "individual_holds": [
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        },
+        {
+          "code": "not_linked_worktree",
+          "detail": "Non-repository, standalone clone or unknown repository kind is ineligible."
+        },
+        {
+          "code": "repository_identity_uncertain",
+          "detail": "Recorded root/common-dir/linked Git directory does not establish canonical repository identity."
+        },
+        {
+          "code": "unknown_native_link_owner",
+          "detail": "Native owner links require exact known dangling adapter evidence."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-remaining-folders-r1-20261001",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-remaining-folders-r2-20261001",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r1-20260914",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r4-20260928",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-preservation",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        },
+        {
+          "code": "inspection_uncertain",
+          "detail": "Inspection did not succeed without errors; retain exact source evidence."
+        },
+        {
+          "code": "not_linked_worktree",
+          "detail": "Non-repository, standalone clone or unknown repository kind is ineligible."
+        },
+        {
+          "code": "repository_identity_uncertain",
+          "detail": "Recorded root/common-dir/linked Git directory does not establish canonical repository identity."
+        },
+        {
+          "code": "head_or_branch_uncertain",
+          "detail": "HEAD must be exact and the branch symbolic; detached/unknown states remain HOLD."
+        },
+        {
+          "code": "registration_uncertain",
+          "detail": "Registration must uniquely match inspected identity without locked/prunable/detached or unknown flags."
+        },
+        {
+          "code": "dirty_or_unknown",
+          "detail": "Recorded dirty status/counts must be known and entirely clean; ignored evidence is still unproved."
+        },
+        {
+          "code": "useful_work_unknown",
+          "detail": "Exact useful-work inventory requires the recorded native owner."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-preservation/phase-b-private-review-byte-preserving-resume-r1-nonconvergent-r3-20260909",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        },
+        {
+          "code": "outside_direct_fleet",
+          "detail": "Registration is outside the direct WorkingRCX fleet-root scope."
+        },
+        {
+          "code": "registration_uncertain",
+          "detail": "Registration must uniquely match inspected identity without locked/prunable/detached or unknown flags."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-preservation/pr-disposition-apply-r2-terminal-transition-blocked-20260910",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        },
+        {
+          "code": "outside_direct_fleet",
+          "detail": "Registration is outside the direct WorkingRCX fleet-root scope."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-preservation/pr-disposition-r2-adoption-enabler-diverged-20260910",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        },
+        {
+          "code": "outside_direct_fleet",
+          "detail": "Registration is outside the direct WorkingRCX fleet-root scope."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_clarolesfull_20260627",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        },
+        {
+          "code": "protected_branch",
+          "detail": "Active/base checkout remains a synchronization owner."
+        }
+      ]
+    },
+    {
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "path": "/private/tmp/WorkingRCX-source-pr-live-census-reconciliation-r1-Codex0909",
+      "reasons": [
+        {
+          "code": "protected_evidence",
+          "detail": "Primary, preservation, audit/admin/source, carrier or canonical queue evidence remains protected."
+        },
+        {
+          "code": "outside_direct_fleet",
+          "detail": "Registration is outside the direct WorkingRCX fleet-root scope."
+        },
+        {
+          "code": "unavailable_or_non_directory",
+          "detail": "Missing, symlink or unknown entry remains HOLD; missing registration is not deleted-work evidence and must not be pruned."
+        },
+        {
+          "code": "inspection_uncertain",
+          "detail": "Inspection did not succeed without errors; retain exact source evidence."
+        },
+        {
+          "code": "not_linked_worktree",
+          "detail": "Non-repository, standalone clone or unknown repository kind is ineligible."
+        },
+        {
+          "code": "registration_uncertain",
+          "detail": "Registration must uniquely match inspected identity without locked/prunable/detached or unknown flags."
+        },
+        {
+          "code": "dirty_or_unknown",
+          "detail": "Recorded dirty status/counts must be known and entirely clean; ignored evidence is still unproved."
+        },
+        {
+          "code": "filesystem_identity_uncertain",
+          "detail": "Fresh exact filesystem identity is required."
+        }
+      ]
+    }
+  ],
+  "mutation_authorized": false,
+  "observation_kind": "native_retirement_bindings",
+  "observed_counts": {
+    "direct": 14,
+    "entries": 18,
+    "outside_fleet": 1,
+    "registrations": 17
+  },
+  "observed_native_shapes": [
+    {
+      "fifos": [],
+      "journals": [
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/0df39928686d458b84fcbf370967b14f/manifest.json",
+          "sha256": "ee63cd955d40dd95897bb624addf8fbfeefc00818faa006bd324257cb486f8bd",
+          "stash_oid": "c0d75d2823d26e9b0445bf4c9c1fa00effdf47d6",
+          "state": "HELD",
+          "transaction_id": "0df39928686d458b84fcbf370967b14f"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/1489597934ae4b48af7f961317cc8998/manifest.json",
+          "sha256": "9f6f42ab6466844bdc367e4160980502c15f47c05059dcd8655ea99bba7a4316",
+          "stash_oid": "0474aa283fac1d1346c57361fd47fafa10152146",
+          "state": "HELD",
+          "transaction_id": "1489597934ae4b48af7f961317cc8998"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/17c32194f46a42808bbe6652829070cd/manifest.json",
+          "sha256": "d73a4ed921dd5efdd2b448cff8974038d479f9b45343017a96a19e0b20813e07",
+          "stash_oid": "fd0e643ba1d18e71f2ac1609776f66981f0d6f94",
+          "state": "HELD",
+          "transaction_id": "17c32194f46a42808bbe6652829070cd"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/1add163a3daa41338da975a2faa5b3ee/manifest.json",
+          "sha256": "abd6e6bf4c3995c856c2f9b82a703b35930d5657d9ffb51d531868cb84d5663a",
+          "stash_oid": "e897af62772cdc9ca1f1bc0caa857adda22213dc",
+          "state": "HELD",
+          "transaction_id": "1add163a3daa41338da975a2faa5b3ee"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/44019e69b68043d685ebfb4c43992c56/manifest.json",
+          "sha256": "effbc8d20599d8123afe781a560ab1fd0f1a49bfa91f23d56a3fab7d767fa259",
+          "stash_oid": "229d2b76b8849462788d713a8008b451cffa5890",
+          "state": "HELD",
+          "transaction_id": "44019e69b68043d685ebfb4c43992c56"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/465d3e3265ea405ca911437f5739c4cf/manifest.json",
+          "sha256": "53e378c9fb04efdbdee98ac4449b3f82cc27fe29de61287bd08d4e9ac964b3b5",
+          "stash_oid": "c5c096f235692045998e37c36533e89c0b84220a",
+          "state": "HELD",
+          "transaction_id": "465d3e3265ea405ca911437f5739c4cf"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/48a0d67bb4614092860f7e0e7c42ed24/manifest.json",
+          "sha256": "5c2d98c22f5a7b5dfed73df71c7194dc03b1b1c49471d76ad127c59b39c7a232",
+          "stash_oid": "9b8dc88899a748d742c547cd91d85fa0608bcc1c",
+          "state": "HELD",
+          "transaction_id": "48a0d67bb4614092860f7e0e7c42ed24"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/59653ccc8d184dc1a83eb5aa329fe413/manifest.json",
+          "sha256": "7658f458be80efe9c143e6b8abcf51c0c7f2806fc658d8b5a4a2bc7606eb9123",
+          "stash_oid": "944fba65fb33f28f0dd437205431340d8f4b35a2",
+          "state": "HELD",
+          "transaction_id": "59653ccc8d184dc1a83eb5aa329fe413"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/5c4bd02e34ff41feb31aba597beb1a19/manifest.json",
+          "sha256": "d3dce394099f5299249653df0a9994f04788ecf2cf51f4d21c887a09bacd9e53",
+          "stash_oid": "249344221c03f8c1baa551f36e51efb61a2c4422",
+          "state": "HELD",
+          "transaction_id": "5c4bd02e34ff41feb31aba597beb1a19"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/6147418c648e428289ed36b990d200c1/manifest.json",
+          "sha256": "0cc631ba101c897eb4331f5a3a11bf1102f268d44eae26fea8c72a2b955a4cec",
+          "stash_oid": "18e0e6d934d0985d00c3d420d8d16c69bf90b164",
+          "state": "HELD",
+          "transaction_id": "6147418c648e428289ed36b990d200c1"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/664b5b04041b47a191c372befd09d0ab/manifest.json",
+          "sha256": "53dbd5fc1f3d8964023d076b869a495f8020de5ef31dfbdfdcd9142af486cd1c",
+          "stash_oid": "24b527a325e30729f36e8f28afa347e37b86f24a",
+          "state": "HELD",
+          "transaction_id": "664b5b04041b47a191c372befd09d0ab"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/7aa8e7a91cb141a1b0553361de78421f/manifest.json",
+          "sha256": "636694afa0c81622f6effc268649ba3012c0dba19340a9b4f606aa644b46ff69",
+          "stash_oid": "82141201b661082504e4bf42116ab9c01beb5a0f",
+          "state": "HELD",
+          "transaction_id": "7aa8e7a91cb141a1b0553361de78421f"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/7fd68c4fbac14379a46a7ad364d1fdce/manifest.json",
+          "sha256": "9ab2704be7e8abb843d3f888f01613a80e947b306a15b43174d2ce76c5a218e1",
+          "stash_oid": "2c5be99d4dfecac3cd9bcc75ad08ccbb0fcd03c1",
+          "state": "HELD",
+          "transaction_id": "7fd68c4fbac14379a46a7ad364d1fdce"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/85c6192f8c4846c5bd7be08d25ddd176/manifest.json",
+          "sha256": "f9f72cd248b75f11d60a2173fa566b8ffa69487d28c388a1956eb3ffae03db32",
+          "stash_oid": "a1dbec22b6edcb31966487a3c5710d5828abde03",
+          "state": "HELD",
+          "transaction_id": "85c6192f8c4846c5bd7be08d25ddd176"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/88072edc2aa8420d8ca42aa4cf811881/manifest.json",
+          "sha256": "eb1e64724b50adab1578d9521c16cd388a021314182e25b221bd577f41ac46c9",
+          "stash_oid": "76e48a4513310ae527be31d1ac426a77f0d3e48d",
+          "state": "HELD",
+          "transaction_id": "88072edc2aa8420d8ca42aa4cf811881"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/8d352ad79ab4484aa02211bdd279907e/manifest.json",
+          "sha256": "07c233d53936159605f2b6d2ba06f444876af7e426c97039774ae741ceb5accb",
+          "stash_oid": "ab701871034d13ad64ad4c0c422de466b46f5742",
+          "state": "HELD",
+          "transaction_id": "8d352ad79ab4484aa02211bdd279907e"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/a042f4885f04439a9525f350c9255ca3/manifest.json",
+          "sha256": "9d71047571fdafebf00cf8d761bcbfd26c8e581433f290192eed76b25ed48e9e",
+          "stash_oid": "673a84136e45aba8d69686d41b2039e27447193d",
+          "state": "HELD",
+          "transaction_id": "a042f4885f04439a9525f350c9255ca3"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/a2d7b97f06cb46979d477c95c6b75efa/manifest.json",
+          "sha256": "74145a7ef47b204586f69fd1f145d3f9955f25a6c7ab6154236d9f4a1a6bcc5c",
+          "stash_oid": "a0db7fe59c958102ee24d092c1d53ecec2c7dcc5",
+          "state": "HELD",
+          "transaction_id": "a2d7b97f06cb46979d477c95c6b75efa"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/ab25025ded1749b3b70f38e1489f6d46/manifest.json",
+          "sha256": "588ab6d9daec2fc0d62329154469635abc0875c84cf568ffe838b7b1ea12750a",
+          "stash_oid": "6763f6be48375654a46996d171ecb406193815a2",
+          "state": "HELD",
+          "transaction_id": "ab25025ded1749b3b70f38e1489f6d46"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/b531a84775884158aecfd88e1d6460ce/manifest.json",
+          "sha256": "fef7492901d32ddeb54c20a459d8ef33f61b90ff92b7fc30b574926b3ecbae6f",
+          "stash_oid": "c46afa41efe420fedd3379c96d0403585c91201e",
+          "state": "HELD",
+          "transaction_id": "b531a84775884158aecfd88e1d6460ce"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/b76e8a15dae746489bb455cfc22acd94/manifest.json",
+          "sha256": "12fad214f3d545f8310fef480563198fbaa35faede4db5d8610049e47efec885",
+          "stash_oid": "68e137c82b38ab86ce845c3f809b885d58ffc1b3",
+          "state": "HELD",
+          "transaction_id": "b76e8a15dae746489bb455cfc22acd94"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/b8c40a335bd44a198fbfcf5bbf6294f2/manifest.json",
+          "sha256": "1b9bf6c93e6e440b436a9342652d867750787285a8c7eb5025291ffaad91a9fa",
+          "stash_oid": "8271020746511cb9a7917f584dc23766660072de",
+          "state": "HELD",
+          "transaction_id": "b8c40a335bd44a198fbfcf5bbf6294f2"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/c50580400fe14a8fb2bad61629749e23/manifest.json",
+          "sha256": "1c6bf2571797a007c08513bd336f135c32c8f298aa74f4be68a0b73498753290",
+          "stash_oid": "b4f0de1d71f2695b681b3774c9dbedb586994cdf",
+          "state": "HELD",
+          "transaction_id": "c50580400fe14a8fb2bad61629749e23"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/c627580ee5fc4039bb0ea49149a60459/manifest.json",
+          "sha256": "cc5640d96eaab2363cc6370754250f9eb9af9acd01ece54c4207493bf9ee47b6",
+          "stash_oid": "3ceb097aa1aff8f30d1c4af022e22d971b3605b7",
+          "state": "HELD",
+          "transaction_id": "c627580ee5fc4039bb0ea49149a60459"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/cc296848e53947d390b13259bbae54f9/manifest.json",
+          "sha256": "b6ece91a37e31dca58f58919a17d2131437b3a53b75c5c8ff2732160c305b8b2",
+          "stash_oid": "594557af7a878a2693b6dc3c6126bd5064f844e9",
+          "state": "HELD",
+          "transaction_id": "cc296848e53947d390b13259bbae54f9"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/d49943d2fa824569a9b41b1de307a83d/manifest.json",
+          "sha256": "a733e580586fae37232e6b084d1a3518b043aa24e20eb99918887237ba1d852c",
+          "stash_oid": "62a2dbee16f7530242d9a86ebe87152bb34fa251",
+          "state": "HELD",
+          "transaction_id": "d49943d2fa824569a9b41b1de307a83d"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/d4fbca9bbae9436d8d85125c5a15cd2c/manifest.json",
+          "sha256": "e256bbc1efc5a771006d584305f184141604b3de5263a3d42d01243a09e5d8b0",
+          "stash_oid": "7d2d50718eba7f823a003bdd168809d8d1078af8",
+          "state": "HELD",
+          "transaction_id": "d4fbca9bbae9436d8d85125c5a15cd2c"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/d59e58f7862a4299b48d3acb815aab01/manifest.json",
+          "sha256": "73b9dd72b77c4a0f4d0e9bf81569065995b2f60990f1a7b0090940e6e5d075a9",
+          "stash_oid": "87ee4234c0282ba9b9c960998226d73982e312bc",
+          "state": "HELD",
+          "transaction_id": "d59e58f7862a4299b48d3acb815aab01"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/d8dcd473156b409f97148ec999ea880b/manifest.json",
+          "sha256": "80fd386ce4c19d10f0d7b241e26a26e458d0c6d710eaf8f5be1274f870723020",
+          "stash_oid": "a0c49261e829c3c133e6ae13aa6ad3974c16af47",
+          "state": "HELD",
+          "transaction_id": "d8dcd473156b409f97148ec999ea880b"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/db74a2f5649c4d288fc54c4206452578/manifest.json",
+          "sha256": "93a5635a9b5cb44315fdfbdea08c3fc3d474add6efc541025435da246bae8f01",
+          "stash_oid": "d1ebed9e16b2c18538af7aa188c055297c331a4b",
+          "state": "HELD",
+          "transaction_id": "db74a2f5649c4d288fc54c4206452578"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/dc1220cac0cc44fca4e43d9b44bedca2/manifest.json",
+          "sha256": "c6bb5ca8baa9e21d94e42d2cbe82350719311934a8e5330f6812d072a7e8df28",
+          "stash_oid": "4db923118dfd4032dd7d97c3bf1e4584f8afd50d",
+          "state": "HELD",
+          "transaction_id": "dc1220cac0cc44fca4e43d9b44bedca2"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/dc3d80084fea48ab98463ddbdebbc60e/manifest.json",
+          "sha256": "29899d81e494c7d83e98ecb1522ab45ae9d4068029df1d7facf1653f1db045ff",
+          "stash_oid": "3c687d5f785b3b66495bdf927842bdb2a5891eaf",
+          "state": "HELD",
+          "transaction_id": "dc3d80084fea48ab98463ddbdebbc60e"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/f0ab18b223b644d981bd07683fae9571/manifest.json",
+          "sha256": "928011de3dcc0287f4ed081654233baa830a755e385bfd0b34467037ca40832a",
+          "stash_oid": "f9aa4cd9c1ac4d82e100c9f1574e8530b960f50a",
+          "state": "HELD",
+          "transaction_id": "f0ab18b223b644d981bd07683fae9571"
+        },
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/f61bdad628f942cf9f002783869e9095/manifest.json",
+          "sha256": "d34cbbeb11e6fa48d9d4e19d2b9456f4c96c2f9f4311501f62722ce3033d088e",
+          "stash_oid": "7bfc528ba351bf6800e3aea12278d584457505be",
+          "state": "HELD",
+          "transaction_id": "f61bdad628f942cf9f002783869e9095"
+        }
+      ],
+      "native_links": [
+        {
+          "dangling": true,
+          "path": ".agent_bus/codex_runtime_home/tmp/arg0/codex-arg0rbeVuA/apply_patch",
+          "target": "/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex"
+        },
+        {
+          "dangling": true,
+          "path": ".agent_bus/codex_runtime_home/tmp/arg0/codex-arg0rbeVuA/applypatch",
+          "target": "/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex"
+        },
+        {
+          "dangling": true,
+          "path": ".agent_bus/codex_runtime_home/tmp/arg0/codex-arg0rbeVuA/codex-execve-wrapper",
+          "target": "/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex"
+        }
+      ],
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX"
+    },
+    {
+      "fifos": [],
+      "journals": [
+        {
+          "owner": "commit_executor:primary_worktree_sync",
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/rcx_primary_worktree_sync_transactions/705b9ed9917f46929f41d4c0328e5df2/manifest.json",
+          "sha256": "6d19e92652c015cf567db070c029fc9b88bed7ee959ae02ef2d4c6d84a1aa6b4",
+          "stash_oid": "05569a57a3bb7e727ade676bcbae3b5c51856948",
+          "state": "HELD",
+          "transaction_id": "705b9ed9917f46929f41d4c0328e5df2"
+        }
+      ],
+      "native_links": [],
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_clarolesfull_20260627"
+    }
+  ],
+  "operations": [
+    {
+      "batch": 1,
+      "operation_id": "workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001",
+      "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001",
+      "source_indices": [
+        1,
+        5,
+        6,
+        12,
+        13,
+        14,
+        15
+      ]
+    }
+  ],
+  "plan_sha256": "b44c0dcfec1cc2080f22dee8438e32d7cfdf828d9bdb188ca6962bdabf3d0e5d",
+  "prior_operation_summaries": [
+    {
+      "after_prefix_directories": 76,
+      "before_prefix_directories": 76,
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-retirement-r1-2026-09-23-c5414b6ba0184986-004/summary.json",
+      "recorded_outcome_counts": {
+        "INCOMPLETE": 1,
+        "SYNCED_LOCAL_DEV": 1
+      },
+      "registration_delta": null,
+      "replay_authorized": false,
+      "sha256": "eb3b2fb1e73b03ffacbf69d449b2c3732189c32e9cf5be8599ece4463e7f8b71"
+    },
+    {
+      "after_prefix_directories": 240,
+      "before_prefix_directories": 246,
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-completion-r1-2026-09-13-deda466958b093c6-020/summary.json",
+      "recorded_outcome_counts": {
+        "HOLD": 1,
+        "INCOMPLETE": 4,
+        "MOVED": 6,
+        "SYNCED_LOCAL_DEV": 1
+      },
+      "registration_delta": null,
+      "replay_authorized": false,
+      "sha256": "bf88a1f39a4bac8e773d128d5b7e82a66162600d0f4f726c76018921f0628da0"
+    },
+    {
+      "after_prefix_directories": 96,
+      "before_prefix_directories": 106,
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-transaction-landing-r2-2026-09-15-84f5d89ce492daea-013/summary.json",
+      "recorded_outcome_counts": {
+        "INCOMPLETE": 1,
+        "MOVED": 10,
+        "SYNCED_LOCAL_DEV": 1
+      },
+      "registration_delta": null,
+      "replay_authorized": false,
+      "sha256": "9524c21b9201f14172e95934ec16c05f66c81f4c8eec5f6c71f0ec7880567173"
+    }
+  ],
+  "retirement_authority": {
+    "anchor_repo": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX",
+    "census_sha256": "86671182f3d3a09e6d0b258e3cfd3561d3f47ba50b0d986b5fb6cdc3a6ff9a11",
+    "fleet_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal",
+    "predecessor_commit": "702a145923f17c421da44f3e2b6f3cce6623c7e0",
+    "schema_version": 1,
+    "wave_id": "workingrcx-fleet-remaining-wave-folders-r2-2026-10-01"
+  },
+  "schema_version": 1,
+  "tracker_sync_note": "- Tracker sync note (2026-10-01, workingrcx-fleet-remaining-wave-folders-r2-2026-10-01): **Complete remaining-folder cleanup from preserved reviewed candidate.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/workingrcx-fleet-remaining-wave-folders-r2-2026-10-01_2026-10-01.md`. evidence_command: `PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_workingrcx_fleet_apply.py mu/tests/tools/test_workingrcx_fleet_census.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_commit_executor_step14_autoresolve.py mu/tests/tools/test_commit_executor_step14_conflict_precheck.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short`. evidence_delta: Preserved already-reviewed closeout implementation plus the three reproduced dispatcher-test integrations GREEN in fresh scope; newly measured native retirement authority, physical absence/recovery proven only by post-land public APPLY/VERIFY.. progress_proof_before: R1 committed6f2bd99b88d0f983ae35d255d4fd404b11c3c177 after PhaseA/PhaseB and four supervisor GO results. Complete declared modules1180PASS/1skip and docs351PASS; broad pre-push3failed/11318PASS/2skip. Native recovery repaired dispatcher tests, but candidate-authority rejected that omitted path and exited without push/PR/merge/APPLY. Thirteen direct WorkingRCX folders remain including the frozen R1 carrier; source/index/ref preservation receipt retains all17candidate paths.. progress_proof_after: Required: carried-forward implementation and exact dispatcher-test repair pass fresh native review and full declared suites; fresh scope admits all required paths from launch. Commit/CI/merge/current PRIMARY complete, then new committed public APPLY once and independent VERIFY remove eligible physical targets with recoverability. No copied/spent claims, no false Mu integration or fleet-complete claim.. FOUNDER_OVERRIDE:workingrcx-fleet-remaining-wave-folders-r2-2026-10-01. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/workingrcx-fleet-remaining-wave-folders-r2-2026-10-01.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id workingrcx-fleet-remaining-wave-folders-r2-2026-10-01 --output reports/l4_wave_indicators/workingrcx-fleet-remaining-wave-folders-r2-2026-10-01.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.",
+  "useful_work_complete": false,
+  "useful_work_coverage_sha256": "c3338fd30087f3d6a1f81aff607df843ca9ac86801fcb0a16f924892422dd93a",
+  "useful_work_sha256": "77c4906b9df5da12247e4cfb3eb591946e42c50dd4a0c0de442df0e55f9bd215",
+  "wave_id": "workingrcx-fleet-remaining-wave-folders-r2-2026-10-01"
+}
