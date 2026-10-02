@@ -534,6 +534,26 @@ const substReplacedByBridge = runPublicStepOrSecurityError(
   fixture.projection,
   { kernelBundle, bridgeBundle, matchBundle, substBundle: bridgeBundle }
 );
+// Keep canonical provenance labels while replacing executable content. Neither
+// caller labels nor a caller-supplied trust flag can justify a private shortcut.
+const disguisedSubstBundle = {
+  ...substBundle,
+  programs: bridgeBundle.programs,
+  program_order: bridgeBundle.program_order,
+};
+validateBundle(disguisedSubstBundle);
+const disguisedCoreSubst = runPublicStepOrSecurityError(
+  fixture.input,
+  fixture.projection,
+  { kernelBundle, bridgeBundle: null, matchBundle,
+    substBundle: disguisedSubstBundle, domainContinuationSafe: true }
+);
+const swappedCoreSlots = runPublicStepOrSecurityError(
+  fixture.input,
+  fixture.projection,
+  { kernelBundle, bridgeBundle: null, matchBundle: substBundle,
+    substBundle: matchBundle, domainContinuationSafe: true }
+);
 
 process.stdout.write(JSON.stringify({
   max_steps: MAX_STEPS,
@@ -563,6 +583,13 @@ process.stdout.write(JSON.stringify({
   kernel_replaced_by_bridge: kernelReplacedByBridge,
   match_replaced_by_bridge: matchReplacedByBridge,
   subst_replaced_by_bridge: substReplacedByBridge,
+  disguised_core_subst: disguisedCoreSubst,
+  swapped_core_slots: swappedCoreSlots,
+  disguised_subst_provenance: {
+    bundle_id: disguisedSubstBundle.bundle_id === substBundle.bundle_id,
+    source_seed: disguisedSubstBundle.source_seed === substBundle.source_seed,
+    source_digest: disguisedSubstBundle.source_digest === substBundle.source_digest,
+  },
 }));
 """
     result = subprocess.run(
@@ -639,6 +666,22 @@ class TestBridgeVmParity:
 
 class TestJsBridgeVmOrderingE2E:
     """End-to-end JS kernel VM ordering proof with bridge mode enabled."""
+
+    def test_core_slot_content_cannot_borrow_canonical_provenance_or_trust(self):
+        """Bridge absence and canonical labels do not prove VM-slot semantics."""
+        proof = _run_js_bridge_vm_ordering_probe()
+        assert proof["disguised_subst_provenance"] == {
+            "bundle_id": True, "source_seed": True, "source_digest": True,
+        }
+        for key in ("disguised_core_subst", "swapped_core_slots"):
+            assert proof[key] == {
+                "threw": True,
+                "error_name": "Error",
+                "error_message": (
+                    "SECURITY: continuationState kernel_state is not bound to "
+                    "supplied projections/input"
+                ),
+            }
 
     def test_live_vm_kernel_path_depends_on_kernel_bridge_match_subst_order(self):
         """Negative controls prove the live JS VM path is order-sensitive."""

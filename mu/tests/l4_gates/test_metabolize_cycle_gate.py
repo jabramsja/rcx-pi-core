@@ -79,9 +79,36 @@ class TestMetabolizeCycleJSParityGate:
     """Gate: JS substrate loads metabolize_cycle and handles the API action."""
 
     def test_js_loads_metabolize_cycle_seed(self):
+        manifest = json.loads((REPO_ROOT / "mu/seed_registry_manifest.v1.json").read_text())
+        registered = {
+            name: record for name, record in manifest["seeds"].items()
+            if record["js_cli_registered"]
+        }
+        assert "metabolize_cycle.v1.json" in registered
+        assert "coinduction_prefix.v1.json" in registered
+        # Check the actual JS registry identities against checked-in authority,
+        # independently of the get_constants count being exercised below.
+        process = subprocess.run(
+            ["node", "-e", """
+                const sl = require('./mu/host/js/core/seed_loader');
+                process.stdout.write(JSON.stringify({
+                    checksums: sl.SEED_CHECKSUMS,
+                    projection_ids: sl.EXPECTED_PROJECTION_IDS,
+                }));
+            """],
+            capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=60,
+        )
+        assert process.returncode == 0, process.stderr
+        registry = json.loads(process.stdout)
+        assert registry["checksums"] == {
+            name: record["sha256"] for name, record in registered.items()
+        }
+        assert registry["projection_ids"] == {
+            name: record["projection_ids"] for name, record in registered.items()
+        }
         resp = _js_request("get_constants")
         assert resp["success"]
-        assert resp["seed_count"] == 16
+        assert resp["seed_count"] == len(registered)
 
     def test_js_metabolize_cycle_empty_noop(self):
         h = _empty_hemispheres()

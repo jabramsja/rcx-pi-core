@@ -697,23 +697,35 @@ class TestFullLockConsistency:
 
     def test_fully_locked_equals_checksum_intersect_projids(self):
         """Fully-locked set == intersection of CORE_SEED_CHECKSUMS and CORE_SEED_PROJECTION_IDS."""
+        manifest = json.loads((REPO_ROOT / "mu/seed_registry_manifest.v1.json").read_text())
+        expected_checksums = {
+            name: record["sha256"] for name, record in manifest["seeds"].items()
+            if record["js_core_locked"]
+        }
+        expected_projection_ids = {
+            name: record["projection_ids"] for name, record in manifest["seeds"].items()
+            if record["js_core_locked"]
+        }
         js_code = textwrap.dedent("""\
             const sl = require('./mu/host/js/core/seed_loader');
             const locked = Object.keys(sl.SEED_SUBDIRS).filter(s => sl.isFullyLockedSeed(s));
-            process.stdout.write(JSON.stringify(locked.sort()));
+            process.stdout.write(JSON.stringify({
+                locked: locked.sort(),
+                checksums: sl.CORE_SEED_CHECKSUMS,
+                projection_ids: sl.CORE_SEED_PROJECTION_IDS,
+            }));
         """)
         result = _run_js_expr(js_code)
         assert result.returncode == 0
-        locked = set(json.loads(result.stdout))
-        # Expected: seeds in both CORE_SEED_CHECKSUMS and CORE_SEED_PROJECTION_IDS.
-        expected = {
-            "evidence_walker.v1.json",
-            "terminal_classify.v1.json",
-            "hemispheres.v1.json",
-            "rcx_engine.v1.json",
-            "rcx_engine_state.v1.json",
-            "rcx_engine_scheduler.v1.json",
-        }
+        registry = json.loads(result.stdout)
+        locked = set(registry["locked"])
+        # Bind both independent lock inputs to the checked-in manifest, rather
+        # than deriving the expected set by calling isFullyLockedSeed again.
+        assert registry["checksums"] == expected_checksums
+        assert registry["projection_ids"] == expected_projection_ids
+        expected = expected_checksums.keys() & expected_projection_ids.keys()
+        assert "rcx_engine.v1.json" in expected
+        assert "coinduction_prefix.v1.json" in expected
         assert locked == expected, f"Fully-locked set differs: got {locked}, expected {expected}"
 
     def test_js_validator_rejects_unlocked_seed_typed(self):

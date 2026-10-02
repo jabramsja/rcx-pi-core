@@ -1,0 +1,1108 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "COINDUCTION_PREFIX",
+    "description": "Guarded finite observation prefixes and resumable open tails as Mu projections.",
+    "doc": "mu/docs/core/CoinductionPrefix.v0.md",
+    "status": "production",
+    "execution_layer": "APPLICATION",
+    "invariants": [
+      "Only co_prefix.emit constructs an observation and advances the tail.",
+      "All demand, reference, position, table and demanded-transition decisions are projection data.",
+      "Finite prefixes do not prove infinite productivity, bisimulation or full self-hosting."
+    ]
+  },
+  "projections": [
+    {
+      "id": "co_prefix.take",
+      "description": "Consume one finite demand cell and begin structural reference resolution; emit nothing yet.",
+      "pattern": {
+        "co_run": {
+          "machine": {
+            "var": "machine"
+          },
+          "next": {
+            "var": "next"
+          },
+          "path": {
+            "var": "path"
+          },
+          "from": {
+            "var": "from"
+          },
+          "through": {
+            "var": "through"
+          },
+          "demand": {
+            "take": {
+              "var": "rest"
+            }
+          },
+          "prefix": {
+            "var": "prefix"
+          }
+        }
+      },
+      "body": {
+        "co_lookup": {
+          "ref": {
+            "var": "next"
+          },
+          "remaining": {
+            "var": "machine"
+          },
+          "context": {
+            "machine": {
+              "var": "machine"
+            },
+            "source": {
+              "var": "next"
+            },
+            "path": {
+              "var": "path"
+            },
+            "from": {
+              "var": "from"
+            },
+            "demand": {
+              "var": "rest"
+            },
+            "prefix": {
+              "var": "prefix"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.lookup_here",
+      "description": "Select the transition at the resolved structural table position.",
+      "pattern": {
+        "co_lookup": {
+          "ref": null,
+          "remaining": {
+            "transition": {
+              "var": "step"
+            },
+            "rest": {
+              "var": "unused"
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "co_transition": {
+          "step": {
+            "var": "step"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.lookup_next",
+      "description": "Peel one reference successor and one table cell.",
+      "pattern": {
+        "co_lookup": {
+          "ref": {
+            "next": {
+              "var": "rest"
+            }
+          },
+          "remaining": {
+            "transition": {
+              "var": "unused"
+            },
+            "rest": {
+              "var": "table"
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "co_lookup": {
+          "ref": {
+            "var": "rest"
+          },
+          "remaining": {
+            "var": "table"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.lookup_unresolved",
+      "description": "A demanded reference past the finite table fails closed.",
+      "pattern": {
+        "co_lookup": {
+          "ref": {
+            "var": "ref"
+          },
+          "remaining": null,
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "unresolved_reference"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.guarded",
+      "description": "Expose the guarded observation recipe and validate the next reference before emission.",
+      "pattern": {
+        "co_transition": {
+          "step": {
+            "guard": "observed-before-tail",
+            "observation": {
+              "label": "state",
+              "payload": {
+                "var": "payload"
+              }
+            },
+            "next": {
+              "var": "next"
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "co_ref_check": {
+          "focus": {
+            "var": "next"
+          },
+          "then": {
+            "co_emit": {
+              "payload": {
+                "var": "payload"
+              },
+              "next": {
+                "var": "next"
+              },
+              "context": {
+                "var": "ctx"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.emit",
+      "description": "The sole emission site: record the observation and guarded witness before advancing the tail and position.",
+      "pattern": {
+        "co_emit": {
+          "payload": {
+            "var": "payload"
+          },
+          "next": {
+            "var": "next"
+          },
+          "context": {
+            "machine": {
+              "var": "machine"
+            },
+            "source": {
+              "var": "source"
+            },
+            "path": {
+              "var": "path"
+            },
+            "from": {
+              "var": "from"
+            },
+            "demand": {
+              "var": "demand"
+            },
+            "prefix": {
+              "var": "prefix"
+            }
+          }
+        }
+      },
+      "body": {
+        "co_run": {
+          "machine": {
+            "var": "machine"
+          },
+          "next": {
+            "var": "next"
+          },
+          "path": {
+            "_co_position_path": {
+              "step": "next",
+              "rest": {
+                "var": "path"
+              }
+            }
+          },
+          "from": {
+            "var": "from"
+          },
+          "through": {
+            "_co_position": {
+              "path": {
+                "var": "path"
+              }
+            }
+          },
+          "demand": {
+            "var": "demand"
+          },
+          "prefix": {
+            "_co_prefix": {
+              "observation": {
+                "_co_observation": {
+                  "label": "state",
+                  "payload": {
+                    "var": "payload"
+                  },
+                  "position": {
+                    "_co_position": {
+                      "path": {
+                        "var": "path"
+                      }
+                    }
+                  }
+                }
+              },
+              "step": {
+                "_co_guarded_step": {
+                  "source": {
+                    "var": "source"
+                  },
+                  "observation": {
+                    "_co_observation": {
+                      "label": "state",
+                      "payload": {
+                        "var": "payload"
+                      },
+                      "position": {
+                        "_co_position": {
+                          "path": {
+                            "var": "path"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "next": {
+                    "var": "next"
+                  },
+                  "guard": "observed-before-tail"
+                }
+              },
+              "rest": {
+                "var": "prefix"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.ref_zero",
+      "description": "Finish structural reference syntax validation.",
+      "pattern": {
+        "co_ref_check": {
+          "focus": null,
+          "then": {
+            "var": "then"
+          }
+        }
+      },
+      "body": {
+        "var": "then"
+      }
+    },
+    {
+      "id": "co_prefix.ref_next",
+      "description": "Validate one structural reference successor.",
+      "pattern": {
+        "co_ref_check": {
+          "focus": {
+            "next": {
+              "var": "rest"
+            }
+          },
+          "then": {
+            "var": "then"
+          }
+        }
+      },
+      "body": {
+        "co_ref_check": {
+          "focus": {
+            "var": "rest"
+          },
+          "then": {
+            "var": "then"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.ref_invalid",
+      "description": "Reject every unsupported reference shape.",
+      "pattern": {
+        "co_ref_check": {
+          "focus": {
+            "var": "bad"
+          },
+          "then": {
+            "var": "then"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_reference"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.finish",
+      "description": "Demand is exhausted: retain the unresolved tail as an open obligation and restore prefix order.",
+      "pattern": {
+        "co_run": {
+          "machine": {
+            "var": "machine"
+          },
+          "next": {
+            "var": "next"
+          },
+          "path": {
+            "var": "path"
+          },
+          "from": {
+            "var": "from"
+          },
+          "through": {
+            "var": "through"
+          },
+          "demand": null,
+          "prefix": {
+            "var": "prefix"
+          }
+        }
+      },
+      "body": {
+        "co_reverse": {
+          "remaining": {
+            "var": "prefix"
+          },
+          "prefix": {
+            "_co_prefix": null
+          },
+          "context": {
+            "tail": {
+              "_co_tail": {
+                "open": true,
+                "obligation": {
+                  "machine": {
+                    "var": "machine"
+                  },
+                  "next": {
+                    "var": "next"
+                  },
+                  "position": {
+                    "_co_position": {
+                      "path": {
+                        "var": "path"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "from": {
+              "var": "from"
+            },
+            "through": {
+              "var": "through"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.reverse_next",
+      "description": "Reverse one accumulated observation/witness cell into chronological order.",
+      "pattern": {
+        "co_reverse": {
+          "remaining": {
+            "_co_prefix": {
+              "observation": {
+                "var": "observation"
+              },
+              "step": {
+                "var": "step"
+              },
+              "rest": {
+                "var": "rest"
+              }
+            }
+          },
+          "prefix": {
+            "var": "prefix"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "co_reverse": {
+          "remaining": {
+            "var": "rest"
+          },
+          "prefix": {
+            "_co_prefix": {
+              "observation": {
+                "var": "observation"
+              },
+              "step": {
+                "var": "step"
+              },
+              "rest": {
+                "var": "prefix"
+              }
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.done",
+      "description": "Return the finite observation window and full reusable tail obligation.",
+      "pattern": {
+        "co_reverse": {
+          "remaining": {
+            "_co_prefix": null
+          },
+          "prefix": {
+            "var": "prefix"
+          },
+          "context": {
+            "tail": {
+              "var": "tail"
+            },
+            "from": {
+              "var": "from"
+            },
+            "through": {
+              "var": "through"
+            }
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "ok",
+          "window": {
+            "_co_window": {
+              "from": {
+                "var": "from"
+              },
+              "through": {
+                "var": "through"
+              },
+              "prefix": {
+                "var": "prefix"
+              },
+              "finite": true
+            }
+          },
+          "tail": {
+            "var": "tail"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.enter",
+      "description": "Enter a fresh or resumed request through the same data boundary.",
+      "pattern": {
+        "coinduction_prefix": {
+          "tail": {
+            "var": "tail"
+          },
+          "window": {
+            "var": "window"
+          }
+        }
+      },
+      "body": {
+        "co_window": {
+          "tail": {
+            "var": "tail"
+          },
+          "window": {
+            "var": "window"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.window",
+      "description": "Require an explicitly finite structural demand window.",
+      "pattern": {
+        "co_window": {
+          "tail": {
+            "var": "tail"
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "var": "demand"
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "body": {
+        "co_demand": {
+          "focus": {
+            "var": "demand"
+          },
+          "context": {
+            "tail": {
+              "var": "tail"
+            },
+            "demand": {
+              "var": "demand"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.window_invalid",
+      "description": "Reject unsupported window shapes and non-finite claims.",
+      "pattern": {
+        "co_window": {
+          "tail": {
+            "var": "tail"
+          },
+          "window": {
+            "var": "bad"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_window"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.demand_next",
+      "description": "Validate every demand cell before any observation is emitted.",
+      "pattern": {
+        "co_demand": {
+          "focus": {
+            "take": {
+              "var": "rest"
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "co_demand": {
+          "focus": {
+            "var": "rest"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.demand_end",
+      "description": "Finish finite demand validation.",
+      "pattern": {
+        "co_demand": {
+          "focus": null,
+          "context": {
+            "tail": {
+              "var": "tail"
+            },
+            "demand": {
+              "var": "demand"
+            }
+          }
+        }
+      },
+      "body": {
+        "co_tail": {
+          "tail": {
+            "var": "tail"
+          },
+          "demand": {
+            "var": "demand"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.demand_invalid",
+      "description": "Reject a malformed demand suffix, including numeric and host-array requests.",
+      "pattern": {
+        "co_demand": {
+          "focus": {
+            "var": "bad"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_demand"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.tail",
+      "description": "Unpack the complete open-tail continuation, including the machine and structural position.",
+      "pattern": {
+        "co_tail": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "var": "machine"
+                },
+                "next": {
+                  "var": "next"
+                },
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "var": "path"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "demand": {
+            "var": "demand"
+          }
+        }
+      },
+      "body": {
+        "co_position": {
+          "focus": {
+            "var": "path"
+          },
+          "context": {
+            "machine": {
+              "var": "machine"
+            },
+            "next": {
+              "var": "next"
+            },
+            "path": {
+              "var": "path"
+            },
+            "demand": {
+              "var": "demand"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.tail_invalid",
+      "description": "Reject missing or unsupported continuation fields.",
+      "pattern": {
+        "co_tail": {
+          "tail": {
+            "var": "bad"
+          },
+          "demand": {
+            "var": "demand"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_tail"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.position_next",
+      "description": "Validate one position path cell in the supported next-only position alphabet.",
+      "pattern": {
+        "co_position": {
+          "focus": {
+            "_co_position_path": {
+              "step": "next",
+              "rest": {
+                "var": "rest"
+              }
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "co_position": {
+          "focus": {
+            "var": "rest"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.position_end",
+      "description": "Validate the starting reference before the finite table spine.",
+      "pattern": {
+        "co_position": {
+          "focus": {
+            "_co_position_path": null
+          },
+          "context": {
+            "machine": {
+              "var": "machine"
+            },
+            "next": {
+              "var": "next"
+            },
+            "path": {
+              "var": "path"
+            },
+            "demand": {
+              "var": "demand"
+            }
+          }
+        }
+      },
+      "body": {
+        "co_ref_check": {
+          "focus": {
+            "var": "next"
+          },
+          "then": {
+            "co_machine": {
+              "focus": {
+                "var": "machine"
+              },
+              "context": {
+                "machine": {
+                  "var": "machine"
+                },
+                "next": {
+                  "var": "next"
+                },
+                "path": {
+                  "var": "path"
+                },
+                "demand": {
+                  "var": "demand"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.position_invalid",
+      "description": "Reject unsupported or malformed position paths.",
+      "pattern": {
+        "co_position": {
+          "focus": {
+            "var": "bad"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_position"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.machine_next",
+      "description": "Validate the complete finite table spine; undemanded transitions remain obligations.",
+      "pattern": {
+        "co_machine": {
+          "focus": {
+            "transition": {
+              "var": "unused"
+            },
+            "rest": {
+              "var": "rest"
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "co_machine": {
+          "focus": {
+            "var": "rest"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.machine_end",
+      "description": "Start with an empty prefix only after the request structure is validated.",
+      "pattern": {
+        "co_machine": {
+          "focus": null,
+          "context": {
+            "machine": {
+              "var": "machine"
+            },
+            "next": {
+              "var": "next"
+            },
+            "path": {
+              "var": "path"
+            },
+            "demand": {
+              "var": "demand"
+            }
+          }
+        }
+      },
+      "body": {
+        "co_run": {
+          "machine": {
+            "var": "machine"
+          },
+          "next": {
+            "var": "next"
+          },
+          "path": {
+            "var": "path"
+          },
+          "from": {
+            "_co_position": {
+              "path": {
+                "var": "path"
+              }
+            }
+          },
+          "through": null,
+          "demand": {
+            "var": "demand"
+          },
+          "prefix": {
+            "_co_prefix": null
+          }
+        }
+      }
+    },
+    {
+      "id": "co_prefix.machine_invalid",
+      "description": "Reject unsupported table structures, including improper list tails.",
+      "pattern": {
+        "co_machine": {
+          "focus": {
+            "var": "bad"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_machine"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.missing_guard",
+      "description": "A demanded transition without a guard cannot expose an observation.",
+      "pattern": {
+        "co_transition": {
+          "step": {
+            "observation": {
+              "var": "observation"
+            },
+            "next": {
+              "var": "next"
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "missing_guard"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.missing_observation",
+      "description": "A demanded transition must carry an observation recipe.",
+      "pattern": {
+        "co_transition": {
+          "step": {
+            "guard": {
+              "var": "guard"
+            },
+            "next": {
+              "var": "next"
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "missing_observation"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.observation_invalid",
+      "description": "Only a state-labelled observation with an explicit Mu payload is supported.",
+      "pattern": {
+        "co_transition": {
+          "step": {
+            "guard": "observed-before-tail",
+            "observation": {
+              "var": "bad"
+            },
+            "next": {
+              "var": "next"
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_observation"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.unguarded",
+      "description": "Only the explicit observed-before-tail witness enables emission.",
+      "pattern": {
+        "co_transition": {
+          "step": {
+            "guard": {
+              "var": "bad"
+            },
+            "observation": {
+              "var": "observation"
+            },
+            "next": {
+              "var": "next"
+            }
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "unguarded_transition"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.transition_invalid",
+      "description": "Reject all other demanded transition shapes.",
+      "pattern": {
+        "co_transition": {
+          "step": {
+            "var": "bad"
+          },
+          "context": {
+            "var": "ctx"
+          }
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_transition"
+        }
+      }
+    },
+    {
+      "id": "co_prefix.request_invalid",
+      "description": "Reject every other value inside the declared request envelope.",
+      "pattern": {
+        "coinduction_prefix": {
+          "var": "bad"
+        }
+      },
+      "body": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "unsupported_request"
+        }
+      }
+    }
+  ]
+}

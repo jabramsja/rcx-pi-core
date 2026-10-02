@@ -1,0 +1,1699 @@
+{
+  "schema_version": 1,
+  "wave_id": "mu-coinduction-guarded-prefix-r10-2026-10-02",
+  "task": "[MU-COINDUCTION-PRODUCTION-PROOF]",
+  "phase": "B",
+  "status": "phase_b_local_validation_passed_native_review_and_landing_pending",
+  "comparison_commit": "cefb39d113bc7c2db3ac289fec8e302cdede5cbe",
+  "preserved_source_commit": "e5753108b7195f210fdfd0cc3f3d3a6142f4134f",
+  "workload_target": "execution_layer_truth",
+  "host_semantics_delta_before": "Landed cefb39d baseline: Python builtin1/iteration1, JS builtin2/iteration1; authority inventories309total/212subset. R9 content-bound continuation repair is committed/unlanded; its four compiled JSON engine imports violate the existing dependency guard.",
+  "host_semantics_delta_after": "Unchanged host semantic markers and no new authority site. Preserve R9 private proof/snapshot/content binding, original VM-order/custom rejection and finite Mu progress; restore the original engine dependency set through independently verified data-only integrity anchors.",
+  "locked_packet": {
+    "path": "reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_2026-10-02.md",
+    "sha256": "fe79a98c49b4a0dd4ba26848aa42e3c2a3095aea94e5a6e3d00e3ceaad6f4ecc",
+    "modified_by_implementer": false
+  },
+  "source_selection": {
+    "read_from": "Committed git blobs only, e5753108 minus cefb39d; no staged R9 packet/indicator or whole branch history copied.",
+    "carried_files": {
+      "mu/docs/README.md": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+      "mu/docs/core/CoinductionPrefix.v0.md": "52eae857b1e7da3d2fd0c181d030aaf717832db5675bca97173a5f0caa95ae4e",
+      "mu/host/js/core/seed_loader.js": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+      "mu/host/js/engine/kernel.js": "8451a09bc48f09918a083ef98100b3e44168d25e3a51d667a60f6f7f7814ad81",
+      "mu/host/python/rcx_pi/selfhost/seed_integrity.py": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+      "mu/programs/coinduction_prefix.v1.json": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+      "mu/seed_registry_manifest.v1.json": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+      "mu/tests/fixtures/coinduction_prefix_vectors.json": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d",
+      "mu/tests/l4_gates/test_coinduction_prefix_gate.py": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55",
+      "mu/tests/l4_gates/test_kernel_run_result_contract.py": "6cfe853f8eaabfdc8557edb97b169a2c4fb5f454f43012bc5ae1743a8e431565",
+      "mu/tests/l4_gates/test_metabolize_cycle_gate.py": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d",
+      "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1",
+      "mu/tests/parity/test_coinduction_prefix_parity.py": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+      "mu/tests/parity/test_js_vm_bridge_parity.py": "6232a9f658a236e282ef734ddd1446c93d07c0aed11d2eb243327d42992bc4e7",
+      "mu/tests/parity/test_seed_loading_parity.py": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+      "mu/tests/structural/test_execution_layer_truth_contract.py": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+      "mu/tests/structural/test_seed_counts.py": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+      "roadmap/MANIFEST.md": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f"
+    },
+    "excluded": [
+      "R9 TASKS.md",
+      "R9 STATUS.md",
+      "R9 CHANGELOG.md",
+      "R9 packet",
+      "R9 implementation evidence",
+      "R9 indicator"
+    ],
+    "growth": "Generated independently from cefb39d through the pure native builder; not copied."
+  },
+  "preservation_before": {
+    "sources": {
+      "r9": {
+        "manifest": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/mu_coinduction_r9_stopped_candidate_20261002.json",
+        "manifest_sha256": "0a1c81bd72b94fa576ed42f73360bf0be4152c4ae81d5be550a65e9ce3ac755e",
+        "head": "e5753108b7195f210fdfd0cc3f3d3a6142f4134f",
+        "files": [
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r9-20261002/executors/commit_executor_mu-coinduction-guarded-prefix-r9-2026-10-02.json",
+            "sha256": "f199d4cbc2e7c5f268b38cb10d5b47fd8b1cf94b786ff075fbed59bed616352e"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r9-20261002/executors/phase_b_handoff.json",
+            "sha256": "4962fce7d870f758241f786300d670de9fd1dcc036c0534ff6227c00dbeb2979"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r9-20261002/meta/launch_wave_dispatch_terminal.json",
+            "sha256": "14016837de667f91bfd984df5b3df6fa31acd10bff7748d4032e00a8c3ca5f08"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r9-20261002/meta/meta_bridge.lock",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r9-20261002/meta/post_merge_routing.json",
+            "sha256": "83a06149ca91b610c7894736d6b4d5d9d5b4f4185d34442ab74a273dd1567bee"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r9-20261002/meta/pre_commit_receipt.json",
+            "sha256": "ed7c64d15d9cfb89d807bcd34c74de37ee89057c7043010d80c9b5df964043d6"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r9-20261002/recovery/recovery_log.json",
+            "sha256": "12e55a4082d6cd74aae88010acfc5e9059ecf3a9dc0debc54001ad47832d87a9"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r9-20261002/recovery/recovery_status.json",
+            "sha256": "92d319a3dd1a4b1e5fc4101a8d8eef91b434f9948c628db01ee996f93374343d"
+          },
+          {
+            "path": ".scratch/recovery_agent_mu-coinduction-guarded-prefix-r9-2026-10-02-prepare-commit-candidate-authority-1.txt",
+            "sha256": "fc772a3309db36b46e023cd01e2bece1637e6385a6878e12c2c2d3542d99b0b5"
+          },
+          {
+            "path": ".scratch/recovery_agent_mu-coinduction-guarded-prefix-r9-2026-10-02-run-pre-push-script-1.txt",
+            "sha256": "6cfc33752ff66c7fccdb50e192a4e87675b7923becd2136e0578913a20e7e608"
+          },
+          {
+            "path": "CHANGELOG.md",
+            "sha256": "f800b891bf5a17c34a1212725b006c570a01242389df4b828763c33f685616ec"
+          },
+          {
+            "path": "STATUS.md",
+            "sha256": "39683dda76cd4cf31e31c4f041f4b5ee20b1c13026f3c8bcbbf0554f38904c8d"
+          },
+          {
+            "path": "TASKS.md",
+            "sha256": "68516f223b8348e2af4afde9f58fb6545aa6893d774da89a1fa53d815069c6de"
+          },
+          {
+            "path": "mu/docs/README.md",
+            "sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13"
+          },
+          {
+            "path": "mu/docs/core/CoinductionPrefix.v0.md",
+            "sha256": "52eae857b1e7da3d2fd0c181d030aaf717832db5675bca97173a5f0caa95ae4e"
+          },
+          {
+            "path": "mu/host/js/core/seed_loader.js",
+            "sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670"
+          },
+          {
+            "path": "mu/host/js/engine/kernel.js",
+            "sha256": "8451a09bc48f09918a083ef98100b3e44168d25e3a51d667a60f6f7f7814ad81"
+          },
+          {
+            "path": "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+            "sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97"
+          },
+          {
+            "path": "mu/programs/coinduction_prefix.v1.json",
+            "sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b"
+          },
+          {
+            "path": "mu/seed_registry_manifest.v1.json",
+            "sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5"
+          },
+          {
+            "path": "mu/tests/docs/test_growth_caps.py",
+            "sha256": "f8f7114484718d6bd3f5ce4a6deef505d9e326f000029bef6eb3f494025b7e99"
+          },
+          {
+            "path": "mu/tests/fixtures/coinduction_prefix_vectors.json",
+            "sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d"
+          },
+          {
+            "path": "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+            "sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55"
+          },
+          {
+            "path": "mu/tests/l4_gates/test_kernel_run_result_contract.py",
+            "sha256": "6cfe853f8eaabfdc8557edb97b169a2c4fb5f454f43012bc5ae1743a8e431565"
+          },
+          {
+            "path": "mu/tests/l4_gates/test_metabolize_cycle_gate.py",
+            "sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d"
+          },
+          {
+            "path": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+            "sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1"
+          },
+          {
+            "path": "mu/tests/parity/test_coinduction_prefix_parity.py",
+            "sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396"
+          },
+          {
+            "path": "mu/tests/parity/test_js_vm_bridge_parity.py",
+            "sha256": "6232a9f658a236e282ef734ddd1446c93d07c0aed11d2eb243327d42992bc4e7"
+          },
+          {
+            "path": "mu/tests/parity/test_seed_loading_parity.py",
+            "sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41"
+          },
+          {
+            "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+            "sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902"
+          },
+          {
+            "path": "mu/tests/structural/test_seed_counts.py",
+            "sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec"
+          },
+          {
+            "path": "reports/control_plane/mu-coinduction-guarded-prefix-r9-2026-10-02_2026-10-02.md",
+            "sha256": "a2f48586358c705e394b97051685c97a545f30163d8aefe5b26cdce72237bb6c"
+          },
+          {
+            "path": "reports/control_plane/mu-coinduction-guarded-prefix-r9-2026-10-02_implementation_evidence.json",
+            "sha256": "195c18b7e5df91e1bf3cf17d55bcdb0bb2fe7f1e792736762561471a5de73c18"
+          },
+          {
+            "path": "reports/l4_wave_indicators/mu-coinduction-guarded-prefix-r9-2026-10-02.json",
+            "sha256": "4d194a96847d9208db7ad71fedb36024277fc285489ef523391a6447b436865c"
+          },
+          {
+            "path": "roadmap/MANIFEST.md",
+            "sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f"
+          }
+        ],
+        "index_sha256": "1d67095097f0bb4deaeca958f9dff7a90f5496c82805371800436a47792714ef",
+        "config_sha256": "2d92a1359b8cda0839dbda9a57e8657e495dbe1612018477e5f34f5b0138a0aa"
+      },
+      "r8": {
+        "manifest": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/mu_coinduction_r8_stopped_candidate_20261001.json",
+        "manifest_sha256": "00a850e0ef069856a211fb8c294f467d05695cd3e70fb029c3c0252a266628a7",
+        "head": "01cc58b31c0239896cae263ae8e06264d4a6a2f4",
+        "files": [
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/executors/commit_executor_mu-coinduction-guarded-prefix-r8-2026-10-01.json",
+            "sha256": "34cbd18e681de6198e3ad389c47bb5eb8a3709538895369dafdc0e00a6e1a790"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/executors/phase_b_handoff.json",
+            "sha256": "f7d1f8158e5c4160ea043b7cbfc1aff82adbd4755c981f18afbb7e7792c143c6"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/meta/launch_wave_dispatch_terminal.json",
+            "sha256": "546f2fa8656a988874ab9c88a8875feafad72abab5bbd8dafbd63279a746153f"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/meta/post_merge_routing.json",
+            "sha256": "86515f204038032bb15d16bdb6025ce39ab9d3d8b9c73507a5c96872e4ac297c"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/meta/pre_commit_receipt.json",
+            "sha256": "a3ebe09b3af93371854b571ff514cccdc82ac83a60453b47a2cec56c7f7c2c73"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/meta/pre_commit_receipts/receipt_2026-10-01T20-47-35p00-00_68ec96ea.json",
+            "sha256": "82eb6473a4ca3306d7b288b13fac168c7608cff4aec3abb5ca258121bd83a793"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/meta/pre_commit_receipts/receipt_2026-10-01T21-02-21p00-00_ab790bc6.json",
+            "sha256": "48716138639ebb740ba7761dcdabc918affa9e3861595b287fb28c34b6213a14"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/meta/pre_commit_receipts/receipt_2026-10-01T21-16-28p00-00_0fd43604.json",
+            "sha256": "88066cda3ccd17cd55f565ae21bb3ac32984eefb237bb10f73dabe6ecb468b1b"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/meta/pre_commit_receipts/receipt_2026-10-01T21-32-16p00-00_34cb576b.json",
+            "sha256": "a3ebe09b3af93371854b571ff514cccdc82ac83a60453b47a2cec56c7f7c2c73"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/recovery/recovery_log.json",
+            "sha256": "37b04d49bdaad383d065c96ed12d0fbd9089eaedb67d4877416b5b4df5fe39e3"
+          },
+          {
+            "path": ".agent_bus-mu-coinduction-prefix-r8-20261001/recovery/recovery_status.json",
+            "sha256": "672251e5500bddc4b0de3feef295f6b7986a81788cf8c9b93c61992dbcbf5d00"
+          },
+          {
+            "path": "CHANGELOG.md",
+            "sha256": "342d2fdc10ae4b623900eb047c75c6b67f32ecd249d783d0784db89a4937b153"
+          },
+          {
+            "path": "STATUS.md",
+            "sha256": "ac5b22a6abba89916a63bddca00cd883f16ca0415a2301e7e448e665f19e3678"
+          },
+          {
+            "path": "TASKS.md",
+            "sha256": "ddb3b52e3d0282c49a0ce7af67549afb221ced4290750ee0c8e542cd3ecaa68e"
+          },
+          {
+            "path": "mu/docs/README.md",
+            "sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13"
+          },
+          {
+            "path": "mu/docs/core/CoinductionPrefix.v0.md",
+            "sha256": "eb304ef5bb4a2a2b447907ff4ef0762bc17b703460eda05fc5b359f24c1f8c10"
+          },
+          {
+            "path": "mu/host/js/core/seed_loader.js",
+            "sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670"
+          },
+          {
+            "path": "mu/host/js/engine/kernel.js",
+            "sha256": "99370fa903748dd112f73b24b586ba205daaea12035887116bfc08ee87e74e25"
+          },
+          {
+            "path": "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+            "sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97"
+          },
+          {
+            "path": "mu/programs/coinduction_prefix.v1.json",
+            "sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b"
+          },
+          {
+            "path": "mu/seed_registry_manifest.v1.json",
+            "sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5"
+          },
+          {
+            "path": "mu/tests/docs/test_growth_caps.py",
+            "sha256": "2752877631c87a45a6858bc7169b5cb937ae9396af72fe57ee60cd91ac7d15b7"
+          },
+          {
+            "path": "mu/tests/fixtures/coinduction_prefix_vectors.json",
+            "sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d"
+          },
+          {
+            "path": "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+            "sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55"
+          },
+          {
+            "path": "mu/tests/l4_gates/test_kernel_run_result_contract.py",
+            "sha256": "b0b87bc94567583793834e02e260a253d6a132f6a7eeca8d7e226aae8df2b14b"
+          },
+          {
+            "path": "mu/tests/l4_gates/test_metabolize_cycle_gate.py",
+            "sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d"
+          },
+          {
+            "path": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+            "sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1"
+          },
+          {
+            "path": "mu/tests/parity/test_coinduction_prefix_parity.py",
+            "sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396"
+          },
+          {
+            "path": "mu/tests/parity/test_js_vm_bridge_parity.py",
+            "sha256": "dcb086bd3a48a5329b8502c3088a84afdb279cddba7889d4d94c889e3a2bdb4e"
+          },
+          {
+            "path": "mu/tests/parity/test_seed_loading_parity.py",
+            "sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41"
+          },
+          {
+            "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+            "sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902"
+          },
+          {
+            "path": "mu/tests/structural/test_seed_counts.py",
+            "sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec"
+          },
+          {
+            "path": "reports/control_plane/mu-coinduction-guarded-prefix-r8-2026-10-01_2026-10-01.md",
+            "sha256": "37afcb13d8b13fb55f60e959ea8789bcb1fa319f605705ef863c8f3216666898"
+          },
+          {
+            "path": "reports/control_plane/mu-coinduction-guarded-prefix-r8-2026-10-01_implementation_evidence.json",
+            "sha256": "c3f0d3d07cb693539bf13900e7b645d607e2b7a43de4890da94c9b4887a04111"
+          },
+          {
+            "path": "reports/deferred/non_blocking/mu-coinduction-guarded-prefix-r8-2026-10-01_bridge_nonblockers.md",
+            "sha256": "d9e811a7787c29932b148c54f55091f956485f607e7a5e43893fc1d446d008b0"
+          },
+          {
+            "path": "reports/l4_wave_indicators/mu-coinduction-guarded-prefix-r8-2026-10-01.json",
+            "sha256": "2bb75a8cd4af409097c76d56950b2827d93988f33556548c1af7ec3fce4bc64a"
+          },
+          {
+            "path": "roadmap/MANIFEST.md",
+            "sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f"
+          }
+        ],
+        "index_sha256": "f6981657fea672622a7fbae7b1580197b77c93e93dcb958fe2713d71cd10ae61",
+        "config_sha256": "80e635177b4543e73569ec243370a7e22c5c28ea97f49bd7186b8db693cfb70e"
+      }
+    },
+    "initial_hashes": {
+      "TASKS.md": "b06056cf14d2bf81436f21d10d97e196cc1ececb072c81d183a68645ab1c38ab",
+      "STATUS.md": "bbc4362550382ac04cab7bff21cd8ad834fe3f1d17a685dee990ff99f71bc0ab",
+      "CHANGELOG.md": "37719632332058c256c054be574117f1725de50fa3fbc9099f052aa2833818fc",
+      "reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_2026-10-02.md": "fe79a98c49b4a0dd4ba26848aa42e3c2a3095aea94e5a6e3d00e3ceaad6f4ecc",
+      ".agent_bus-mu-coinduction-prefix-r10-20261002/meta/post_merge_routing.json": "cf1b863019cf985b53c694b038840e6f041a4a43f5722681227e17cafd39be4f",
+      "mu/tests/structural/test_engine_pipeline_discipline.py": "c1d7c74f5d755c3eea3e0b5cc1eb5296d534a6ede9e5470d08a97902d6285eb0"
+    },
+    "task_ids": [
+      "ACTIVE-CODEX-AUTONOMOUS-QUEUE",
+      "AGENT-DEFAULTS-OPUS-4-8",
+      "ANTI-DRIFT-ENFORCEMENT",
+      "BOT-REMEDIATION-PREPUSH-SELECTOR-BOUNDS",
+      "BRIDGE-ADAPTER-BUFFERED-STDERR-ENVELOPE-TERMINATION-R1",
+      "BRIDGE-REVIEW-PRESERVATION-ARTIFACT-BOUNDS",
+      "CANONICAL-DOCS-TRUTH-INTEGRATION",
+      "CLAUDE-LOCAL-DURABILITY-TRACKING",
+      "CODEX-AUTOPING-IDLE-SUMMARY-REFRESH-2026-06-20",
+      "CODEX-EFFECTIVE-MODEL-CATALOG-AUTHORITY",
+      "CODEX-STARTUP-HARDENING",
+      "COMMIT-EXECUTOR-E2E",
+      "COMMIT-GENERATED-GOVERNANCE-RETRY-IDEMPOTENCY",
+      "COMMIT-GENERATED-GOVERNANCE-RETRY-IDEMPOTENCY-R3",
+      "COMMIT-SUPERVISOR-NEEDS-PHASE-A-TERMINAL-RETRY-FENCE",
+      "DEFERRED-CONSOLIDATION",
+      "DEFERRED-FINDINGS-SWEEP",
+      "DEFERRED-REPORT-TRUTH-CLEANUP",
+      "DIALECTIC-CONTINUATION-DELIVERY-AND-LINEAGE",
+      "EXECUTOR-SURFACES",
+      "FLEET-CLEANUP-APPLY",
+      "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+      "FLEET-CLEANUP-CENSUS-BUILDER",
+      "FLEET-CLEANUP-CENSUS-R3",
+      "FLEET-CLEANUP-CENSUS-R3-CI-FIXTURE-ISOLATION",
+      "FLEET-CLEANUP-CLASSIFICATION",
+      "FLEET-NATIVE-LIFECYCLE-PREVENTION",
+      "FOUNDER-ORDERED-REDTEAM-BRIDGE-DOC-ACCURACY-CLOSEOUT",
+      "FOUNDER-ORDERED-REDTEAM-DOCS-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-NEXT-SLICE",
+      "FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-REPO-CODE-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-TESTS-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-TESTS-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-TESTS-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-TOOLING-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-TOOLING-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-TOOLING-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-WAVE-QUEUE",
+      "FOUNDER-QUESTION-AUTHENTICATED-RESOLUTION-AUTHORITY",
+      "GENERIC-NEXT-ROUTE-RECONCILIATION",
+      "L4-GROWTH-CAP-PREBUMP-BUILDER",
+      "LAUNCH-WAVE-DETERMINISTIC-CANDIDATE-CARRY-FORWARD-BUILDER",
+      "LAUNCH-WAVE-NATIVE-STUB-PACKET-CONTRACT-R1",
+      "LAUNCH-WAVE-OVERRIDE-AUTHORITY-PRODUCER-R1",
+      "LAUNCH-WAVE-POST-COMMIT-CONTINUATION-CONSUMER-R2",
+      "LAUNCH-WAVE-POST-COMMIT-CONTINUATION-CONSUMER-R4",
+      "LAUNCH-WAVE-POST-COMMIT-CONTINUATION-PRODUCER-R3",
+      "LEGACY-N3-LOCAL-EVIDENCE-ADJUDICATION",
+      "META-BRIDGE-BOUNDED-REVIEW-FIX",
+      "META-BRIDGE-S1",
+      "META-BRIDGE-S2",
+      "MU-COINDUCTION-PRODUCTION-PROOF",
+      "MU-EVIDENCE-RESIDUES",
+      "MU-FIXPOINT-PRODUCTION-PROOF",
+      "MU-OPTIMIZATION-LAST",
+      "MU-PREPRODUCTION-REDTEAM",
+      "N3-ENGINE-PIPELINE-RUN-ALGORITHM-AUTHORITY-SOURCE-PREREQ",
+      "N3-JS-DEBT-SUMMARY-KERNEL-MARKER-TRUTH-SYNC",
+      "N3-JS-KERNEL-ITERATION-MARKER-TRUTH-ALIGNMENT",
+      "N3-KERNEL-DRIVER-MU-DRIVER-BOUNDARY-DESIGN",
+      "N3-KERNEL-DRIVER-MU-FUEL-LOOP-ELIMINATION",
+      "N3-KERNEL-DRIVER-POST-CONTINUATION-MARKER-REDUCTION",
+      "N3-KERNEL-DRIVER-RESIDUAL-HOST-LOOP-ELIMINATION-FOLLOWUP",
+      "N3-PROJECTION-LOADER-JS-BINARY-DECODER-PARITY",
+      "N3-STAGE0-MARKER-TRUTH-CURRENT-PATH-SYNC",
+      "NATIVE-STUB-PHASE-B-SAME-CONFIG-RELAUNCH-REPAIR",
+      "NEVER-BEHIND-FLEET-AUTHORITY",
+      "NEXT-CODEX-POST-REDTEAM",
+      "NIGHTLY-ADMISSION-INTEGRATION",
+      "NIGHTLY-BOOT1-WORKLOAD-CONTRACT-RECONCILIATION-2026-06-30",
+      "NIGHTLY-DEADLINE-TELEMETRY-PROOF",
+      "NIGHTLY-FULL-VERIFY-2026-06-30",
+      "NIGHTLY-JS-MIRROR-PRE-COMMIT-RETRY-2026-06-30",
+      "NIGHTLY-NR5-FULL-GREEN-VERIFY-2026-06-30",
+      "NIGHTLY-NR5-STRUCTURAL-TRACE-META-RESIDUAL-2026-06-30",
+      "NOW-CODEX-REDTEAM",
+      "NR-3",
+      "NR-4",
+      "NR-5",
+      "NR-5-FOLLOW-UP",
+      "OBSERVER-DURABILITY",
+      "ORCHESTRATOR-SWITCH-DRIFT-FIX",
+      "ORCHESTRATOR-SWITCH-DRIFT-FIX-2026-06-30",
+      "P0IBRRCP-HYBRID-READER-TERMINALITY-R1",
+      "P0IBRRCP-POSTMERGE-BATON-QUEUE-R1-2026-08-26",
+      "P0IBRRCP-PROVIDER-NEUTRAL-BRIDGE-CONTEXT-R4",
+      "P1",
+      "P2",
+      "P3",
+      "P4",
+      "P5",
+      "P6",
+      "P7",
+      "P8",
+      "P9",
+      "PAGER-ORCHESTRATOR-LABEL-TRUTH",
+      "PARALLEL-PIPELINE",
+      "PASS",
+      "PBNOGO-INTEGRATION",
+      "PENDING-UNTIL-MERGE",
+      "PHASE-A-POST-REMEDIATION-LINE-REF-PREBRIDGE-GUARD",
+      "PHASE-B-BLOCKING-FINDING-CONVERGENCE-HARDENING-2026-06-20",
+      "PHASE-B-EVIDENCE-COMMAND-WHOLE-FILE-DOMINANCE-R1",
+      "PHASE-B-LAUNCH-TRACKER-AUTHORITY-CONTINUITY-R4C-2026-09-08",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B-R2",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B-R3",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-BOOTSTRAP-R3",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-CAPABILITY-R4A",
+      "PHASE-B-PRIVATE-REVIEW-BYTE-PRESERVING-RESUME-R1",
+      "PHASE-B-PRIVATE-REVIEW-BYTE-PRESERVING-RESUME-R2",
+      "PHASEB-EXACT-STAGE-JS-PARSER-FIX-2026-06-30",
+      "PIPELINE-AGENT-MODEL-EFFORT-BUILDER",
+      "PIPELINE-AGENT-PAGER",
+      "PIPELINE-EASY-SWITCH-PROPAGATION-2026-06-20",
+      "PIPELINE-FIX-17",
+      "PIPELINE-FIX-29",
+      "PIPELINE-FIX-31",
+      "PIPELINE-FIX-33",
+      "PIPELINE-FIX-34",
+      "PIPELINE-FIX-38",
+      "PIPELINE-FIX-50",
+      "PIPELINE-FIX-52",
+      "PIPELINE-FIX-53",
+      "PIPELINE-FIX-54A3",
+      "PIPELINE-FIX-55",
+      "PIPELINE-FIX-56",
+      "PIPELINE-FIX-57",
+      "PIPELINE-FIX-60B",
+      "PIPELINE-FIX-60C",
+      "PIPELINE-FIX-60D",
+      "PIPELINE-FIX-61",
+      "PIPELINE-FIX-62C",
+      "PIPELINE-NR5-DEFECT-HANDOFF-TRUTH",
+      "PIPELINE-NR5-DEFECT-HANDOFF-TRUTH-2026-06-30",
+      "PIPELINE-RECOVERY",
+      "PIPELINE-REENTRY-REROUTE",
+      "PIPELINE-TEST-RUN",
+      "PR-DISPOSITION-APPLY",
+      "PR-DISPOSITION-EXECUTION",
+      "PR-DISPOSITION-R2-NO-REPLAY-FINALIZATION-R1-2026-09-10",
+      "PR-DISPOSITION-R2-PRESERVED-CANDIDATE-ADOPTION-ENABLER-R1-2026-09-10",
+      "PR-DISPOSITION-RECONCILIATION",
+      "PR-DISPOSITION-TERMINAL-SWEEP-ENABLER-R1-2026-09-10",
+      "PR-LIVE-CENSUS-RECONCILIATION",
+      "PR-LIVE-CENSUS-RECONCILIATION-R1",
+      "PR1219-P0IAR-CANONICAL-PHASE-B-REVIEW-RECEIPT",
+      "PR1219-P0IB1",
+      "PR1219-P0IB2",
+      "PR1219-P0IBRR",
+      "PR1219-P0IBRRC",
+      "PR1219-P0IBRRCO",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C4",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C5",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C5-R2",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C6-R4",
+      "PR1219-P0IBRRCO-L4-INDICATOR-COMPARISON-PROVENANCE-R1",
+      "PR1219-P0IBRRCP-ADAPTER-FINALITY-R2",
+      "PR1219-P0IBRRCP-ADAPTER-FINALITY-R3",
+      "PR1219-P0IBRRCP-ADAPTER-FRAMING-R4A",
+      "PR1219-P0IBRRCP-AUTO-DEFER-AMEND-PUSH-DURABILITY-PREREQ-R1",
+      "PR1219-P0IBRRCP-AUTO-DEFER-TIMEOUT-ONLY-PREREQ-R2",
+      "PR1219-P0IBRRCP-AUTO-DEFER-TIMEOUT-ONLY-PREREQ-R3",
+      "PR1219-P0IBRRCP-BRIDGE-ADAPTER-STOP-AFTER-AUTHORITY-PREREQ-R1",
+      "PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R1",
+      "PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R2",
+      "PR1219-P0IBRRCP-CODEX-ROLE-PAGER-DEFAULT-PREREQ-R1",
+      "PR1219-P0IBRRCP-COMMIT-EVIDENCE-REFRESH-PREREQ-R1",
+      "PR1219-P0IBRRCP-COMMIT-EVIDENCE-REFRESH-PREREQ-R2",
+      "PR1219-P0IBRRCP-EXACT-CLOSURE",
+      "PR1219-P0IBRRCP-PBNOGO-DECISION-PRESERVATION-PREREQ-R1",
+      "PR1219-P0IBRRCP-PHASE-B-EVIDENCE-AUTHORITY-PREREQ-R1",
+      "PR1219-P0IBRRCP-PHASE-B-EVIDENCE-HANDOFF-R2",
+      "PR1219-P0IBRRCP-PHASE-B-EXPLICIT-EVIDENCE-PRESERVATION-R1",
+      "PR1219-P0IBRRCP-PROVIDER-NEUTRAL-BRIDGE-CONTEXT-R2",
+      "PR1219-P0IBRRCP-PROVIDER-NEUTRAL-BRIDGE-ROLE-CONTEXT-PREREQ-R1",
+      "PR1219-P0IBRRCP-RECOVERY-TIMEOUT-ENV-CONTAINMENT-PREREQ-R1",
+      "PR1219-P0IBRRCP-REENTRY-DECISION-RESUME-CONTEXT-PREREQ-R1",
+      "PR1219-P0IBRRCP-REVIEWER-CANDIDATE-CAUSALITY-AUTHORITY-R2",
+      "PR1219-P0IBRRCP-REVIEWER-DELTA-SCOPE-AUTHORITY-R1",
+      "PR1219-P0IBRRCP-ROUTING-AUTHORITY-BOOTSTRAP-R4",
+      "PR1219-P0IBRRT",
+      "PR1219-P0IMF-LAUNCH-BOUND-MODEL-AUTHORITY-FREEZE-2026-08-22",
+      "PR1219-P0IMLG-LAUNCH-SOURCE-COMMON-DIR-GUARD-2026-08-22",
+      "PR1219-P0IMQR-CURRENT-ROW-IDENTITY-2026-08-22",
+      "PR1219-P0IMRB-RECOVERY-DELEGATE-BUS-AUTHORITY-2026-08-22",
+      "PR1219-P0IMRP-COMMIT-TARGET-ROLE-AUTHORITY-2026-08-22",
+      "PR1219-P0IMRP-COMMIT-TARGET-ROLE-AUTHORITY-ACTIVATION-2026-08-22",
+      "PR1219-P0IMRP-RECEIPT-MODEL-PROVENANCE-2026-08-22",
+      "PR1219-P0IMRP-RECEIPT-MODEL-PROVENANCE-ACTIVATION-2026-08-22",
+      "PR1219-P0IMRP-RECOVERY-STDOUT-PROVENANCE-2026-08-22",
+      "PR1219-P0IMRP-TARGET-ROLE-TEST-FIXTURE-PREREQUISITE-2026-08-22",
+      "PR1219-P0IMRPA-AUTHORITY-PROVENANCE-BOOTSTRAP",
+      "PR1219-P0IX-CONTROL-PATH",
+      "PRE-COMMIT-SUPERVISOR-STANDING",
+      "PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX",
+      "PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX-2026-06-30",
+      "PREPUSH-RECOVERY-CONTEXT-AUTHORITY",
+      "PRIMARY-FFSYNC-TRACKED-WIP-PRESERVE-2026-06-20",
+      "QUESTION-CHECKPOINT-AND-INV2-AUTHORITY",
+      "RECEIPT-COMMIT-ROBUSTNESS-BOUNDED-SUCCESSORS",
+      "RECOVERY-TIER3-WIRING",
+      "REVIEW-CONVERGENCE-STOPPED-REVIEWER-EDGES",
+      "REVIEWER-EVIDENCE-BUDGET-ENFORCEMENT-R1",
+      "ROLE-SWITCH-CONVERGENCE",
+      "ROLES-ALL-CODEX-PR1219-P0-ROLE-MODEL-BOOTSTRAP",
+      "ROLES-ALL-CODEX-PR1219-P0A-DETACHED-CHILD-CLEANUP",
+      "ROLES-ALL-CODEX-PR1219-P0B-MONITOR-EXCEPTION-CLEANUP",
+      "ROLES-ALL-CODEX-PR1219-P0C-PRIVATE-ATTR-POSTFIX-RESUME",
+      "ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IAH-CANDIDATE-AUTHORITY-TRUST-ORDERING-HARDENING",
+      "ROLES-ALL-CODEX-PR1219-P0IB-PRECOMMIT-INVENTORY-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRC-REENTRY-PRIVATE-ATTR-CHECKPOINT-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R3",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-CODEX-ROLE-PAGER-DEFAULT-PREREQ-R2",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-NORMAL-ROOT-RECORDED-CHILD-CLEANUP",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-PROVIDER-TERMINAL-R4B",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-RECEIPT-AUTHORITY-R1",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-REVIEWER-CANDIDATE-CAUSALITY-AUTHORITY-R3",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-REVIEWER-CANDIDATE-CAUSALITY-AUTHORITY-R4",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-ROUTING-AUTHORITY-BOOTSTRAP-R4",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-SHARED-ENVELOPE-FRAMING-R4A2",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRQ2-CURRENT-NEXT-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRT-PHASE-B-REFUSAL-TRANSPORT",
+      "ROLES-ALL-CODEX-PR1219-P0IC0-THEATER-ALLOWLIST-EXPIRY-RENEWAL",
+      "ROLES-ALL-CODEX-PR1219-P0IC1-LINKED-WORKTREE-REPO-IDENTITY",
+      "ROLES-ALL-CODEX-PR1219-P0IC2-COMMIT-GENERATED-GOVERNANCE-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IC3-IDEMPOTENT-GENERATED-GOVERNANCE-CONTINUATION",
+      "ROLES-ALL-CODEX-PR1219-P0IC4R-TASKS-BASE-AUTHORITY-RECOVERY",
+      "ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP",
+      "ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP-RESTART-2-2026-08-22",
+      "ROLES-ALL-CODEX-PR1219-P0L-PHASE-B-TERMINAL-LIFECYCLE",
+      "ROLES-ALL-CODEX-PR1219-P0R-ROLE-MODEL-AUTHORITY-RECOVERY",
+      "ROLES-ALL-CODEX-PR1219-P0R2-ROLE-MODEL-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0T1-TERMINAL-IDENTITY-QUESTION-JOURNAL",
+      "ROLES-ALL-CODEX-PR1219-P0T2-PRIVATE-REVIEW-DURABILITY",
+      "ROLES-ALL-CODEX-PR1219-P0T3-PROCESS-TREE-CLOSURE",
+      "ROLES-ALL-CODEX-PR1219-P0T4-INV2-SEMANTIC-PROOF",
+      "ROLES-ALL-CODEX-PR1219-P1-BRIDGE-TERMINAL-REFUSAL",
+      "ROLES-ALL-CODEX-PR1219-P2-REVIEW-BINDING",
+      "ROLES-ALL-CODEX-PR1219-P3-RECOVERY-CHECKPOINTS",
+      "ROLES-ALL-CODEX-PR1219-P4-RECOVERY-AUTHORITY-ISOLATION",
+      "ROLES-ALL-CODEX-PR1219-P5-FINAL-RECONCILIATION",
+      "ROLES-ALL-CODEX-PR1219-ROOT-EXIT-R4C",
+      "S1",
+      "S1-SCHED",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "STAGE0-CONTENT-ADDRESSED-TYPEDISPATCH-DECISION-RECOVERY-2026-06-20",
+      "STALE-2026-08-21-COMBINED-PR-FLEET-CONFIGS",
+      "STRUCTURAL-NUMBERS-GCD-JS-PARITY-2026-06-19",
+      "STRUCTURAL-NUMBERS-GCD-PYTHON-2026-06-19",
+      "STRUCTURAL-NUMBERS-RATIONALS-2026-06-19",
+      "STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19",
+      "STRUCTURAL-NUMBERS-STAGE4-INT-FIRST-CUTOVER-2026-06-19",
+      "STRUCTURAL-NUMBERS-STAGE5-ORDINAL-TO-N-2026-06-19",
+      "TEST-PROVIDER-ISOLATION-ROOT-R2-2026-08-26",
+      "TEST-PROVIDER-ISOLATION-ROOT-R3-2026-08-26",
+      "TEST-PROVIDER-ISOLATION-ROOT-R4",
+      "THEATER-CLASSIFIER-PROOF-REGISTRY",
+      "THEATER-RATCHET-EXPIRY-POLICY",
+      "URGENT-PR-FLEET-QUEUE-AUTHORITY-R1",
+      "WIP-PRESERVATION-DIRTY-WORKTREE-RECOVERY-2026-06-20"
+    ],
+    "local_task_ids": [
+      "ACTIVE-CODEX-AUTONOMOUS-QUEUE",
+      "AGENT-DEFAULTS-OPUS-4-8",
+      "ANTI-DRIFT-ENFORCEMENT",
+      "BOT-REMEDIATION-PREPUSH-SELECTOR-BOUNDS",
+      "BRIDGE-ADAPTER-BUFFERED-STDERR-ENVELOPE-TERMINATION-R1",
+      "BRIDGE-REVIEW-PRESERVATION-ARTIFACT-BOUNDS",
+      "CANONICAL-DOCS-TRUTH-INTEGRATION",
+      "CLAUDE-LOCAL-DURABILITY-TRACKING",
+      "CODEX-AUTOPING-IDLE-SUMMARY-REFRESH-2026-06-20",
+      "CODEX-EFFECTIVE-MODEL-CATALOG-AUTHORITY",
+      "CODEX-STARTUP-HARDENING",
+      "COMMIT-EXECUTOR-E2E",
+      "COMMIT-GENERATED-GOVERNANCE-RETRY-IDEMPOTENCY",
+      "COMMIT-GENERATED-GOVERNANCE-RETRY-IDEMPOTENCY-R3",
+      "COMMIT-SUPERVISOR-NEEDS-PHASE-A-TERMINAL-RETRY-FENCE",
+      "DEFERRED-CONSOLIDATION",
+      "DEFERRED-FINDINGS-SWEEP",
+      "DEFERRED-REPORT-TRUTH-CLEANUP",
+      "DIALECTIC-CONTINUATION-DELIVERY-AND-LINEAGE",
+      "EXECUTOR-SURFACES",
+      "FLEET-CLEANUP-APPLY",
+      "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+      "FLEET-CLEANUP-CENSUS-BUILDER",
+      "FLEET-CLEANUP-CENSUS-R3",
+      "FLEET-CLEANUP-CENSUS-R3-CI-FIXTURE-ISOLATION",
+      "FLEET-CLEANUP-CLASSIFICATION",
+      "FLEET-NATIVE-LIFECYCLE-PREVENTION",
+      "FOUNDER-ORDERED-REDTEAM-BRIDGE-DOC-ACCURACY-CLOSEOUT",
+      "FOUNDER-ORDERED-REDTEAM-DOCS-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-NEXT-SLICE",
+      "FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-REPO-CODE-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-TESTS-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-TESTS-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-TESTS-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-TOOLING-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-TOOLING-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-TOOLING-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-WAVE-QUEUE",
+      "FOUNDER-QUESTION-AUTHENTICATED-RESOLUTION-AUTHORITY",
+      "GENERIC-NEXT-ROUTE-RECONCILIATION",
+      "L4-GROWTH-CAP-PREBUMP-BUILDER",
+      "LAUNCH-WAVE-DETERMINISTIC-CANDIDATE-CARRY-FORWARD-BUILDER",
+      "LAUNCH-WAVE-NATIVE-STUB-PACKET-CONTRACT-R1",
+      "LAUNCH-WAVE-OVERRIDE-AUTHORITY-PRODUCER-R1",
+      "LAUNCH-WAVE-POST-COMMIT-CONTINUATION-CONSUMER-R2",
+      "LAUNCH-WAVE-POST-COMMIT-CONTINUATION-CONSUMER-R4",
+      "LAUNCH-WAVE-POST-COMMIT-CONTINUATION-PRODUCER-R3",
+      "LEGACY-N3-LOCAL-EVIDENCE-ADJUDICATION",
+      "META-BRIDGE-BOUNDED-REVIEW-FIX",
+      "META-BRIDGE-S1",
+      "META-BRIDGE-S2",
+      "MU-COINDUCTION-PRODUCTION-PROOF",
+      "MU-EVIDENCE-RESIDUES",
+      "MU-FIXPOINT-PRODUCTION-PROOF",
+      "MU-OPTIMIZATION-LAST",
+      "MU-PREPRODUCTION-REDTEAM",
+      "N3-ENGINE-PIPELINE-RUN-ALGORITHM-AUTHORITY-SOURCE-PREREQ",
+      "N3-JS-DEBT-SUMMARY-KERNEL-MARKER-TRUTH-SYNC",
+      "N3-JS-KERNEL-ITERATION-MARKER-TRUTH-ALIGNMENT",
+      "N3-KERNEL-DRIVER-MU-DRIVER-BOUNDARY-DESIGN",
+      "N3-KERNEL-DRIVER-MU-FUEL-LOOP-ELIMINATION",
+      "N3-KERNEL-DRIVER-POST-CONTINUATION-MARKER-REDUCTION",
+      "N3-KERNEL-DRIVER-RESIDUAL-HOST-LOOP-ELIMINATION-FOLLOWUP",
+      "N3-PROJECTION-LOADER-JS-BINARY-DECODER-PARITY",
+      "N3-STAGE0-MARKER-TRUTH-CURRENT-PATH-SYNC",
+      "NATIVE-STUB-PHASE-B-SAME-CONFIG-RELAUNCH-REPAIR",
+      "NEVER-BEHIND-FLEET-AUTHORITY",
+      "NEXT-CODEX-POST-REDTEAM",
+      "NIGHTLY-ADMISSION-INTEGRATION",
+      "NIGHTLY-BOOT1-WORKLOAD-CONTRACT-RECONCILIATION-2026-06-30",
+      "NIGHTLY-DEADLINE-TELEMETRY-PROOF",
+      "NIGHTLY-FULL-VERIFY-2026-06-30",
+      "NIGHTLY-JS-MIRROR-PRE-COMMIT-RETRY-2026-06-30",
+      "NIGHTLY-NR5-FULL-GREEN-VERIFY-2026-06-30",
+      "NIGHTLY-NR5-STRUCTURAL-TRACE-META-RESIDUAL-2026-06-30",
+      "NOW-CODEX-REDTEAM",
+      "NR-3",
+      "NR-4",
+      "NR-5",
+      "NR-5-FOLLOW-UP",
+      "OBSERVER-DURABILITY",
+      "ORCHESTRATOR-SWITCH-DRIFT-FIX",
+      "ORCHESTRATOR-SWITCH-DRIFT-FIX-2026-06-30",
+      "P0IBRRCP-HYBRID-READER-TERMINALITY-R1",
+      "P0IBRRCP-POSTMERGE-BATON-QUEUE-R1-2026-08-26",
+      "P0IBRRCP-PROVIDER-NEUTRAL-BRIDGE-CONTEXT-R4",
+      "P1",
+      "P2",
+      "P3",
+      "P4",
+      "P5",
+      "P6",
+      "P7",
+      "P8",
+      "P9",
+      "PAGER-ORCHESTRATOR-LABEL-TRUTH",
+      "PARALLEL-PIPELINE",
+      "PASS",
+      "PBNOGO-INTEGRATION",
+      "PENDING-UNTIL-MERGE",
+      "PHASE-A-POST-REMEDIATION-LINE-REF-PREBRIDGE-GUARD",
+      "PHASE-B-BLOCKING-FINDING-CONVERGENCE-HARDENING-2026-06-20",
+      "PHASE-B-EVIDENCE-COMMAND-WHOLE-FILE-DOMINANCE-R1",
+      "PHASE-B-LAUNCH-TRACKER-AUTHORITY-CONTINUITY-R4C-2026-09-08",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B-R2",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B-R3",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-BOOTSTRAP-R3",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-CAPABILITY-R4A",
+      "PHASE-B-PRIVATE-REVIEW-BYTE-PRESERVING-RESUME-R1",
+      "PHASE-B-PRIVATE-REVIEW-BYTE-PRESERVING-RESUME-R2",
+      "PHASEB-EXACT-STAGE-JS-PARSER-FIX-2026-06-30",
+      "PIPELINE-AGENT-MODEL-EFFORT-BUILDER",
+      "PIPELINE-AGENT-PAGER",
+      "PIPELINE-EASY-SWITCH-PROPAGATION-2026-06-20",
+      "PIPELINE-FIX-17",
+      "PIPELINE-FIX-29",
+      "PIPELINE-FIX-31",
+      "PIPELINE-FIX-33",
+      "PIPELINE-FIX-34",
+      "PIPELINE-FIX-38",
+      "PIPELINE-FIX-50",
+      "PIPELINE-FIX-52",
+      "PIPELINE-FIX-53",
+      "PIPELINE-FIX-54A3",
+      "PIPELINE-FIX-55",
+      "PIPELINE-FIX-56",
+      "PIPELINE-FIX-57",
+      "PIPELINE-FIX-60B",
+      "PIPELINE-FIX-60C",
+      "PIPELINE-FIX-60D",
+      "PIPELINE-FIX-61",
+      "PIPELINE-FIX-62C",
+      "PIPELINE-NR5-DEFECT-HANDOFF-TRUTH",
+      "PIPELINE-NR5-DEFECT-HANDOFF-TRUTH-2026-06-30",
+      "PIPELINE-RECOVERY",
+      "PIPELINE-REENTRY-REROUTE",
+      "PIPELINE-TEST-RUN",
+      "PR-DISPOSITION-APPLY",
+      "PR-DISPOSITION-EXECUTION",
+      "PR-DISPOSITION-R2-NO-REPLAY-FINALIZATION-R1-2026-09-10",
+      "PR-DISPOSITION-R2-PRESERVED-CANDIDATE-ADOPTION-ENABLER-R1-2026-09-10",
+      "PR-DISPOSITION-RECONCILIATION",
+      "PR-DISPOSITION-TERMINAL-SWEEP-ENABLER-R1-2026-09-10",
+      "PR-LIVE-CENSUS-RECONCILIATION",
+      "PR-LIVE-CENSUS-RECONCILIATION-R1",
+      "PR1219-P0IAR-CANONICAL-PHASE-B-REVIEW-RECEIPT",
+      "PR1219-P0IB1",
+      "PR1219-P0IB2",
+      "PR1219-P0IBRR",
+      "PR1219-P0IBRRC",
+      "PR1219-P0IBRRCO",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C4",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C5",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C5-R2",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C6-R4",
+      "PR1219-P0IBRRCO-L4-INDICATOR-COMPARISON-PROVENANCE-R1",
+      "PR1219-P0IBRRCP-ADAPTER-FINALITY-R2",
+      "PR1219-P0IBRRCP-ADAPTER-FINALITY-R3",
+      "PR1219-P0IBRRCP-ADAPTER-FRAMING-R4A",
+      "PR1219-P0IBRRCP-AUTO-DEFER-AMEND-PUSH-DURABILITY-PREREQ-R1",
+      "PR1219-P0IBRRCP-AUTO-DEFER-TIMEOUT-ONLY-PREREQ-R2",
+      "PR1219-P0IBRRCP-AUTO-DEFER-TIMEOUT-ONLY-PREREQ-R3",
+      "PR1219-P0IBRRCP-BRIDGE-ADAPTER-STOP-AFTER-AUTHORITY-PREREQ-R1",
+      "PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R1",
+      "PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R2",
+      "PR1219-P0IBRRCP-CODEX-ROLE-PAGER-DEFAULT-PREREQ-R1",
+      "PR1219-P0IBRRCP-COMMIT-EVIDENCE-REFRESH-PREREQ-R1",
+      "PR1219-P0IBRRCP-COMMIT-EVIDENCE-REFRESH-PREREQ-R2",
+      "PR1219-P0IBRRCP-EXACT-CLOSURE",
+      "PR1219-P0IBRRCP-PBNOGO-DECISION-PRESERVATION-PREREQ-R1",
+      "PR1219-P0IBRRCP-PHASE-B-EVIDENCE-AUTHORITY-PREREQ-R1",
+      "PR1219-P0IBRRCP-PHASE-B-EVIDENCE-HANDOFF-R2",
+      "PR1219-P0IBRRCP-PHASE-B-EXPLICIT-EVIDENCE-PRESERVATION-R1",
+      "PR1219-P0IBRRCP-PROVIDER-NEUTRAL-BRIDGE-CONTEXT-R2",
+      "PR1219-P0IBRRCP-PROVIDER-NEUTRAL-BRIDGE-ROLE-CONTEXT-PREREQ-R1",
+      "PR1219-P0IBRRCP-RECOVERY-TIMEOUT-ENV-CONTAINMENT-PREREQ-R1",
+      "PR1219-P0IBRRCP-REENTRY-DECISION-RESUME-CONTEXT-PREREQ-R1",
+      "PR1219-P0IBRRCP-REVIEWER-CANDIDATE-CAUSALITY-AUTHORITY-R2",
+      "PR1219-P0IBRRCP-REVIEWER-DELTA-SCOPE-AUTHORITY-R1",
+      "PR1219-P0IBRRCP-ROUTING-AUTHORITY-BOOTSTRAP-R4",
+      "PR1219-P0IBRRT",
+      "PR1219-P0IMF-LAUNCH-BOUND-MODEL-AUTHORITY-FREEZE-2026-08-22",
+      "PR1219-P0IMLG-LAUNCH-SOURCE-COMMON-DIR-GUARD-2026-08-22",
+      "PR1219-P0IMQR-CURRENT-ROW-IDENTITY-2026-08-22",
+      "PR1219-P0IMRB-RECOVERY-DELEGATE-BUS-AUTHORITY-2026-08-22",
+      "PR1219-P0IMRP-COMMIT-TARGET-ROLE-AUTHORITY-2026-08-22",
+      "PR1219-P0IMRP-COMMIT-TARGET-ROLE-AUTHORITY-ACTIVATION-2026-08-22",
+      "PR1219-P0IMRP-RECEIPT-MODEL-PROVENANCE-2026-08-22",
+      "PR1219-P0IMRP-RECEIPT-MODEL-PROVENANCE-ACTIVATION-2026-08-22",
+      "PR1219-P0IMRP-RECOVERY-STDOUT-PROVENANCE-2026-08-22",
+      "PR1219-P0IMRP-TARGET-ROLE-TEST-FIXTURE-PREREQUISITE-2026-08-22",
+      "PR1219-P0IMRPA-AUTHORITY-PROVENANCE-BOOTSTRAP",
+      "PR1219-P0IX-CONTROL-PATH",
+      "PRE-COMMIT-SUPERVISOR-STANDING",
+      "PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX",
+      "PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX-2026-06-30",
+      "PREPUSH-RECOVERY-CONTEXT-AUTHORITY",
+      "PRIMARY-FFSYNC-TRACKED-WIP-PRESERVE-2026-06-20",
+      "QUESTION-CHECKPOINT-AND-INV2-AUTHORITY",
+      "RECEIPT-COMMIT-ROBUSTNESS-BOUNDED-SUCCESSORS",
+      "RECOVERY-TIER3-WIRING",
+      "REVIEW-CONVERGENCE-STOPPED-REVIEWER-EDGES",
+      "REVIEWER-EVIDENCE-BUDGET-ENFORCEMENT-R1",
+      "ROLE-SWITCH-CONVERGENCE",
+      "ROLES-ALL-CODEX-PR1219-P0-ROLE-MODEL-BOOTSTRAP",
+      "ROLES-ALL-CODEX-PR1219-P0A-DETACHED-CHILD-CLEANUP",
+      "ROLES-ALL-CODEX-PR1219-P0B-MONITOR-EXCEPTION-CLEANUP",
+      "ROLES-ALL-CODEX-PR1219-P0C-PRIVATE-ATTR-POSTFIX-RESUME",
+      "ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IAH-CANDIDATE-AUTHORITY-TRUST-ORDERING-HARDENING",
+      "ROLES-ALL-CODEX-PR1219-P0IB-PRECOMMIT-INVENTORY-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRC-REENTRY-PRIVATE-ATTR-CHECKPOINT-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R3",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-CODEX-ROLE-PAGER-DEFAULT-PREREQ-R2",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-NORMAL-ROOT-RECORDED-CHILD-CLEANUP",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-PROVIDER-TERMINAL-R4B",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-RECEIPT-AUTHORITY-R1",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-REVIEWER-CANDIDATE-CAUSALITY-AUTHORITY-R3",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-REVIEWER-CANDIDATE-CAUSALITY-AUTHORITY-R4",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-ROUTING-AUTHORITY-BOOTSTRAP-R4",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-SHARED-ENVELOPE-FRAMING-R4A2",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRQ2-CURRENT-NEXT-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRT-PHASE-B-REFUSAL-TRANSPORT",
+      "ROLES-ALL-CODEX-PR1219-P0IC0-THEATER-ALLOWLIST-EXPIRY-RENEWAL",
+      "ROLES-ALL-CODEX-PR1219-P0IC1-LINKED-WORKTREE-REPO-IDENTITY",
+      "ROLES-ALL-CODEX-PR1219-P0IC2-COMMIT-GENERATED-GOVERNANCE-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IC3-IDEMPOTENT-GENERATED-GOVERNANCE-CONTINUATION",
+      "ROLES-ALL-CODEX-PR1219-P0IC4R-TASKS-BASE-AUTHORITY-RECOVERY",
+      "ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP",
+      "ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP-RESTART-2-2026-08-22",
+      "ROLES-ALL-CODEX-PR1219-P0L-PHASE-B-TERMINAL-LIFECYCLE",
+      "ROLES-ALL-CODEX-PR1219-P0R-ROLE-MODEL-AUTHORITY-RECOVERY",
+      "ROLES-ALL-CODEX-PR1219-P0R2-ROLE-MODEL-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0T1-TERMINAL-IDENTITY-QUESTION-JOURNAL",
+      "ROLES-ALL-CODEX-PR1219-P0T2-PRIVATE-REVIEW-DURABILITY",
+      "ROLES-ALL-CODEX-PR1219-P0T3-PROCESS-TREE-CLOSURE",
+      "ROLES-ALL-CODEX-PR1219-P0T4-INV2-SEMANTIC-PROOF",
+      "ROLES-ALL-CODEX-PR1219-P1-BRIDGE-TERMINAL-REFUSAL",
+      "ROLES-ALL-CODEX-PR1219-P2-REVIEW-BINDING",
+      "ROLES-ALL-CODEX-PR1219-P3-RECOVERY-CHECKPOINTS",
+      "ROLES-ALL-CODEX-PR1219-P4-RECOVERY-AUTHORITY-ISOLATION",
+      "ROLES-ALL-CODEX-PR1219-P5-FINAL-RECONCILIATION",
+      "ROLES-ALL-CODEX-PR1219-ROOT-EXIT-R4C",
+      "S1",
+      "S1-SCHED",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "STAGE0-CONTENT-ADDRESSED-TYPEDISPATCH-DECISION-RECOVERY-2026-06-20",
+      "STALE-2026-08-21-COMBINED-PR-FLEET-CONFIGS",
+      "STRUCTURAL-NUMBERS-GCD-JS-PARITY-2026-06-19",
+      "STRUCTURAL-NUMBERS-GCD-PYTHON-2026-06-19",
+      "STRUCTURAL-NUMBERS-RATIONALS-2026-06-19",
+      "STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19",
+      "STRUCTURAL-NUMBERS-STAGE4-INT-FIRST-CUTOVER-2026-06-19",
+      "STRUCTURAL-NUMBERS-STAGE5-ORDINAL-TO-N-2026-06-19",
+      "TEST-PROVIDER-ISOLATION-ROOT-R2-2026-08-26",
+      "TEST-PROVIDER-ISOLATION-ROOT-R3-2026-08-26",
+      "TEST-PROVIDER-ISOLATION-ROOT-R4",
+      "THEATER-CLASSIFIER-PROOF-REGISTRY",
+      "THEATER-RATCHET-EXPIRY-POLICY",
+      "URGENT-PR-FLEET-QUEUE-AUTHORITY-R1",
+      "WIP-PRESERVATION-DIRTY-WORKTREE-RECOVERY-2026-06-20"
+    ],
+    "primary_hashes": {
+      "TASKS.md": "412df7544dacb4647a9e8eedafb4b224866d08584f1999a5cb03db1f52d38195",
+      "STATUS.md": "eabda432cdc25617f3f2b87b5a05fcde86e40a9f8d77a1b242d6350c10788abf",
+      "CHANGELOG.md": "37719632332058c256c054be574117f1725de50fa3fbc9099f052aa2833818fc"
+    },
+    "index_sha256": "237869045a9d3344d1682f98e4b7e0f3ca65a1a012f49ac46cef7e6a12c6e2b7"
+  },
+  "semantic_comparison": {
+    "comparison": [
+      {
+        "path": "mu/docs/README.md",
+        "r9_sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+        "r8_sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+        "candidate_sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/docs/core/CoinductionPrefix.v0.md",
+        "r9_sha256": "52eae857b1e7da3d2fd0c181d030aaf717832db5675bca97173a5f0caa95ae4e",
+        "r8_sha256": "eb304ef5bb4a2a2b447907ff4ef0762bc17b703460eda05fc5b359f24c1f8c10",
+        "candidate_sha256": "9f2045af638a0e26f297d686399c06489f59d5f702165c0a00f7efa742cafe87",
+        "r9_identical": false,
+        "r8_identical": false
+      },
+      {
+        "path": "mu/host/js/core/seed_loader.js",
+        "r9_sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+        "r8_sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+        "candidate_sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/host/js/engine/kernel.js",
+        "r9_sha256": "8451a09bc48f09918a083ef98100b3e44168d25e3a51d667a60f6f7f7814ad81",
+        "r8_sha256": "99370fa903748dd112f73b24b586ba205daaea12035887116bfc08ee87e74e25",
+        "candidate_sha256": "e5d3f65ae4720d6a1bfc238d1c12db3cfeeaedd849f3da85a85fc9d16c17a7f2",
+        "r9_identical": false,
+        "r8_identical": false
+      },
+      {
+        "path": "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+        "r9_sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+        "r8_sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+        "candidate_sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/programs/coinduction_prefix.v1.json",
+        "r9_sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+        "r8_sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+        "candidate_sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/seed_registry_manifest.v1.json",
+        "r9_sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+        "r8_sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+        "candidate_sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/tests/fixtures/coinduction_prefix_vectors.json",
+        "r9_sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d",
+        "r8_sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d",
+        "candidate_sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+        "r9_sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55",
+        "r8_sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55",
+        "candidate_sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/tests/l4_gates/test_kernel_run_result_contract.py",
+        "r9_sha256": "6cfe853f8eaabfdc8557edb97b169a2c4fb5f454f43012bc5ae1743a8e431565",
+        "r8_sha256": "b0b87bc94567583793834e02e260a253d6a132f6a7eeca8d7e226aae8df2b14b",
+        "candidate_sha256": "6cfe853f8eaabfdc8557edb97b169a2c4fb5f454f43012bc5ae1743a8e431565",
+        "r9_identical": true,
+        "r8_identical": false
+      },
+      {
+        "path": "mu/tests/l4_gates/test_metabolize_cycle_gate.py",
+        "r9_sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d",
+        "r8_sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d",
+        "candidate_sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+        "r9_sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1",
+        "r8_sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1",
+        "candidate_sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/tests/parity/test_coinduction_prefix_parity.py",
+        "r9_sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+        "r8_sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+        "candidate_sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/tests/parity/test_js_vm_bridge_parity.py",
+        "r9_sha256": "6232a9f658a236e282ef734ddd1446c93d07c0aed11d2eb243327d42992bc4e7",
+        "r8_sha256": "dcb086bd3a48a5329b8502c3088a84afdb279cddba7889d4d94c889e3a2bdb4e",
+        "candidate_sha256": "6232a9f658a236e282ef734ddd1446c93d07c0aed11d2eb243327d42992bc4e7",
+        "r9_identical": true,
+        "r8_identical": false
+      },
+      {
+        "path": "mu/tests/parity/test_seed_loading_parity.py",
+        "r9_sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+        "r8_sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+        "candidate_sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+        "r9_sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+        "r8_sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+        "candidate_sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "mu/tests/structural/test_seed_counts.py",
+        "r9_sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+        "r8_sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+        "candidate_sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+        "r9_identical": true,
+        "r8_identical": true
+      },
+      {
+        "path": "roadmap/MANIFEST.md",
+        "r9_sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f",
+        "r8_sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f",
+        "candidate_sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f",
+        "r9_identical": true,
+        "r8_identical": true
+      }
+    ],
+    "kernel_exact_r9_replacements_verified": true,
+    "original_governance_bytes_preserved": true,
+    "governance_preimage_sha256": "c1d7c74f5d755c3eea3e0b5cc1eb5296d534a6ede9e5470d08a97902d6285eb0",
+    "pins": [
+      {
+        "path": "mu/stage0/compiled/kernel_v1.compiled.v1.json",
+        "file_sha256": "2d72f9018b403061f2f8d193a5f133fae5bd50de10eaeb8d99671ea460e32a9f",
+        "canonical_mu_sha256": "b901dd5d8115f1bd1bc82f2c11e9728cad80eb45386bf2d32426e06f690c798b"
+      },
+      {
+        "path": "mu/stage0/compiled/bootstrap_structural_v1.compiled.v1.json",
+        "file_sha256": "105b551fa3b397ebd432cfe1bb6bb04ea6649ecb2741b74d7ecd5187118ec8d2",
+        "canonical_mu_sha256": "c7c616ba65d9d9a1ec79a78c2f97f5edf65a16b6ef08a915162a50d5073c28f7"
+      },
+      {
+        "path": "mu/stage0/compiled/match_v2.compiled.v1.json",
+        "file_sha256": "e18eed7774228c9cef098deefd2866e0d53bede06e012b11aa72d5ffd014a92c",
+        "canonical_mu_sha256": "5f01d854b915b73841eb2345f8856dd32d9df69ae31b667d2bd92b94a3824d72"
+      },
+      {
+        "path": "mu/stage0/compiled/subst_v2.compiled.v1.json",
+        "file_sha256": "656601856a701964e8a2f98ae0b676fd2600487be54bd405c893113b32938179",
+        "canonical_mu_sha256": "899044137f67b4089f2d6a8ec3485a26efc72c50a4404a5b41da0daa828f4473"
+      }
+    ],
+    "loader_manifest_pin_only": true,
+    "vector_ids": [
+      "constant_three",
+      "alternating_three",
+      "empty_demand",
+      "finite_open_tail",
+      "split_resumed",
+      "missing_guard",
+      "missing_observation",
+      "false_guard",
+      "malformed_observation",
+      "missing_payload",
+      "extra_transition_field",
+      "unsupported_transition",
+      "malformed_next_reference",
+      "unresolved_initial",
+      "unresolved_after_observation",
+      "numeric_demand",
+      "malformed_demand_suffix",
+      "nonfinite_window",
+      "extra_window_field",
+      "malformed_tail",
+      "malformed_position",
+      "malformed_start_reference",
+      "malformed_machine_tail",
+      "unsupported_request"
+    ],
+    "owner_inventory": {
+      "schema_version": 1,
+      "observed_at": "2026-10-02T08:59:20.185Z",
+      "owner": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+      "proof_limit": "Read-only receipt/presence inventory, not semantic coverage, hash revalidation, landing closure, or new apply authority. All existing owners remain PENDING_EXACT_HUNK_REVIEW. Consumed physical-retirement operations must not be replayed.",
+      "owners": [
+        {
+          "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001",
+          "source_index": 12,
+          "outcome_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001/12/outcome.json",
+          "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-metadata-roundtrip-r1-20260928",
+          "source_head": "3c562f74b902efca94ea6023234cc418ed94dd38",
+          "status": "PENDING_EXACT_HUNK_REVIEW",
+          "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+          "scope_count": 12,
+          "local_commits": [],
+          "source_key": "eac7cea16719d9a6508c4f1a65f85a7b3f3ed6e8a4dd2e7ca4e683a538f04084",
+          "preserved_worktree_exists": true,
+          "recovery_git_exists": true
+        },
+        {
+          "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001",
+          "source_index": 14,
+          "outcome_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001/14/outcome.json",
+          "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-structural-tracker-inputs-r1-20260928",
+          "source_head": "1fdd463fe5fde8d42164c88c1f24966b729bf0ee",
+          "status": "PENDING_EXACT_HUNK_REVIEW",
+          "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+          "scope_count": 8,
+          "local_commits": [],
+          "source_key": "e477529770c048667c1a8537cff8581b85715aa0fa4adab542e46b8af5887abd",
+          "preserved_worktree_exists": true,
+          "recovery_git_exists": true
+        },
+        {
+          "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001",
+          "source_index": 5,
+          "outcome_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001/5/outcome.json",
+          "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r2-20260927",
+          "source_head": "1fdd463fe5fde8d42164c88c1f24966b729bf0ee",
+          "status": "PENDING_EXACT_HUNK_REVIEW",
+          "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+          "scope_count": 21,
+          "local_commits": [],
+          "source_key": "d8a2a0e9193b910007fe331842aa43ef4801c1da47153429224246f1081900ac",
+          "preserved_worktree_exists": true,
+          "recovery_git_exists": true
+        },
+        {
+          "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001",
+          "source_index": 6,
+          "outcome_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-remaining-wave-folders-r2-2026-10-01-a8db8123a7cf5fb3-001/6/outcome.json",
+          "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r3-20260928",
+          "source_head": "3c562f74b902efca94ea6023234cc418ed94dd38",
+          "status": "PENDING_EXACT_HUNK_REVIEW",
+          "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+          "scope_count": 21,
+          "local_commits": [],
+          "source_key": "7eb8e0a345fb48fca353636d48b0886e5b7e08567d706344e0e371e66e497cd9",
+          "preserved_worktree_exists": true,
+          "recovery_git_exists": true
+        },
+        {
+          "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001",
+          "source_index": 1,
+          "outcome_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001/1/outcome.json",
+          "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-remaining-folders-r1-20261001",
+          "source_head": "6f2bd99b88d0f983ae35d255d4fd404b11c3c177",
+          "status": "PENDING_EXACT_HUNK_REVIEW",
+          "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+          "scope_count": 17,
+          "local_commits": [
+            "6f2bd99b88d0f983ae35d255d4fd404b11c3c177"
+          ],
+          "source_key": "e46a1d4dea66b6242955d1e25b95397996dbb1a3f022ba437c66b4eb9351bbee",
+          "preserved_worktree_exists": true,
+          "recovery_git_exists": true
+        },
+        {
+          "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001",
+          "source_index": 6,
+          "outcome_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001/6/outcome.json",
+          "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r4-20260928",
+          "source_head": "3c562f74b902efca94ea6023234cc418ed94dd38",
+          "status": "PENDING_EXACT_HUNK_REVIEW",
+          "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+          "scope_count": 23,
+          "local_commits": [],
+          "source_key": "63c992be2717749ddcc9b57ad83dfdb3a6a9bca1db079323104eb93371c5039b",
+          "preserved_worktree_exists": true,
+          "recovery_git_exists": true
+        },
+        {
+          "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001",
+          "source_index": 7,
+          "outcome_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001/7/outcome.json",
+          "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r5-20261001",
+          "source_head": "c653cf0380c3a0964842b80532e8ce2f60b77421",
+          "status": "PENDING_EXACT_HUNK_REVIEW",
+          "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+          "scope_count": 22,
+          "local_commits": [],
+          "source_key": "f56a6da0cd433485d920bde7c48a452852169b6d18e686916f66e2edabe43ef5",
+          "preserved_worktree_exists": true,
+          "recovery_git_exists": true
+        },
+        {
+          "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001",
+          "source_index": 8,
+          "outcome_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001/8/outcome.json",
+          "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r6-20261001",
+          "source_head": "c653cf0380c3a0964842b80532e8ce2f60b77421",
+          "status": "PENDING_EXACT_HUNK_REVIEW",
+          "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+          "scope_count": 22,
+          "local_commits": [],
+          "source_key": "6ca767cb81494aa96995ecfe4785e7167f350248bf1ae7c94d9d29bc7b788143",
+          "preserved_worktree_exists": true,
+          "recovery_git_exists": true
+        },
+        {
+          "operation_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001",
+          "source_index": 9,
+          "outcome_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/fleet-apply-preserved-workingrcx-fleet-residual-wave-folders-r1-2026-10-01-b84939cb0cacdbf8-001/9/outcome.json",
+          "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-mu-coinduction-prefix-r7-20261001",
+          "source_head": "39c9e067c927f6bfefa7215007e81650f7dd7365",
+          "status": "PENDING_EXACT_HUNK_REVIEW",
+          "task": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+          "scope_count": 22,
+          "local_commits": [
+            "39c9e067c927f6bfefa7215007e81650f7dd7365"
+          ],
+          "source_key": "5e94400e15477a8db401948ef9ddae4ef1ffafbb2d8ca5708b538296f372d726",
+          "preserved_worktree_exists": true,
+          "recovery_git_exists": true
+        }
+      ]
+    },
+    "cleanup": {
+      "source": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/pr1326_landed_live_cleanup_20261002.json",
+      "sha256": "2f412631ea0b2f7e86c362fc4d68ec9cea1c3f7b66b2010731e12238521370e5",
+      "merge": {
+        "pr": 1326,
+        "head": "c8fbe17393ade1b1b3600ce6b392d8831714ab00",
+        "merge": "cefb39d113bc7c2db3ac289fec8e302cdede5cbe",
+        "merged_at": "2026-10-02T07:08:45Z"
+      },
+      "proof_limits": {
+        "fleet_complete": false,
+        "semantic_landing_of_retained_work": false,
+        "new_pending_landing_owners": 5,
+        "prior_pending_landing_owners_retained": 4,
+        "mu_r1": "POLICY_BOUND: classifier protected target; retained for exact useful-work review",
+        "mu_r8": "PR1325 unmerged: reproduced JS VM-order CI blocker; source retained",
+        "cleanup_carrier": "Automatic lifecycle successor retained this merged carrier after two remaining claims reported Active process references target identity. Obstructing PID not recorded; exact historical process is not established. No process reference remained at07:17:43Z; do not replay spent claims.",
+        "next": "Mu production correction, then existing retained-work/cleanup ownership; no new prerequisite wave"
+      }
+    },
+    "protected_hashes": {
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.claude/skills/preflight/SKILL.md": "71c87bf624e86ea39b3899dffd356e4d776596a97766608e5fe8ec1e1ab1ab1e",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/STATUS.md": "eabda432cdc25617f3f2b87b5a05fcde86e40a9f8d77a1b242d6350c10788abf",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/deferred/README.md": "3a8676ea401b6e8153693de358ffb17fd762d23dcc97d4d3117a7eb59cb0858b",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/deferred/blocking/README.md": "1bd0cb24e047a6bed8c09dbc3eab68c0c089ea647d8a2656fb0329663703139f",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_clarolesfull_20260627/reports/control_plane/claude-roles-full-2026-06-27_2026-06-27.md": "b0895b34eaf570d123f11a292a3e44d0a5835bff15ef4ff02ce31b345584fa86",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/workingrcx_clarolesfull_20260627/reports/control_plane/native-stub-phase-b-same-config-relaunch-repair-r1-2026-09-10_2026-09-10.md": "86b3d5859cf3b2e672e6a298f2ec1a87c5e669a95259c5a8e93c485c0199f1fa"
+    }
+  },
+  "comparison_command": "PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'\nfrom pathlib import Path\nimport ast,hashlib,json,re,subprocess\nh=lambda b:hashlib.sha256(b).hexdigest()\nr9='e5753108b7195f210fdfd0cc3f3d3a6142f4134f';r8='01cc58b31c0239896cae263ae8e06264d4a6a2f4';base='cefb39d113bc7c2db3ac289fec8e302cdede5cbe'\nget=lambda c,p:subprocess.check_output(['git','show',c+':'+p])\nrouting=json.loads(Path('.agent_bus-mu-coinduction-prefix-r10-20261002/meta/post_merge_routing.json').read_text())\nallowed=routing['candidate_authority']['spec_identity']['candidate_allowlist']\npaths=subprocess.check_output(['git','diff','--name-only',base,r9],text=True).splitlines()\ncarried=[p for p in paths if p in allowed and p not in {'TASKS.md','STATUS.md','CHANGELOG.md','mu/tests/docs/test_growth_caps.py'}]\ncomparison=[]\nfor p in carried:\n now=Path(p).read_bytes();s9=get(r9,p);s8=get(r8,p)\n comparison.append({'path':p,'r9_sha256':h(s9),'r8_sha256':h(s8),'candidate_sha256':h(now),'r9_identical':s9==now,'r8_identical':s8==now})\noriginal=get(base,'mu/tests/structural/test_engine_pipeline_discipline.py')\ncurrent=Path('mu/tests/structural/test_engine_pipeline_discipline.py').read_bytes()\nassert current.startswith(original),'Original governance module was edited rather than extended'\nksrc=get(r9,'mu/host/js/engine/kernel.js').decode();kcur=Path('mu/host/js/engine/kernel.js').read_text()\npins=[]\nfor file in ['kernel_v1','bootstrap_structural_v1','match_v2','subst_v2']:\n f=Path(f'mu/stage0/compiled/{file}.compiled.v1.json');bundle=json.loads(f.read_text());digest=h(json.dumps(bundle,sort_keys=True,ensure_ascii=False).encode())\n old=f\"muHash(muCopy(require('../../../stage0/compiled/{file}.compiled.v1.json'), true))\"\n assert ksrc.count(old)==1\n ksrc=ksrc.replace(old,\"'\"+digest+\"'\")\n pins.append({'path':str(f),'file_sha256':h(f.read_bytes()),'canonical_mu_sha256':digest})\ncomment='// Canonical Mu SHA-256 of the complete compiler artifacts, not source labels.\\n// Data-only integrity anchors keep bundle loading outside the engine boundary.\\n// test_engine_pipeline_discipline recompiles verified seeds, checks both hash\\n// implementations and proves that changing any slot\\'s content/pin restores replay.\\n'\nassert kcur.replace(comment,'')==ksrc,'Unexpected R9 kernel semantic delta'\nfor p in ['mu/host/python/rcx_pi/selfhost/seed_integrity.py','mu/host/js/core/seed_loader.js']:\n old=get(base,p).decode();now=Path(p).read_text();dig=h(Path('mu/seed_registry_manifest.v1.json').read_bytes());old_dig=h(get(base,'mu/seed_registry_manifest.v1.json'))\n assert now==old.replace(old_dig,dig),'Loader edit not manifest digest only'\nfixture=json.loads(Path('mu/tests/fixtures/coinduction_prefix_vectors.json').read_text());ids=[v['id'] for v in fixture['vectors']];assert len(ids)==len(set(ids))==24\nsources=Path('../WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26')\nowners=json.loads((sources/'remaining_nine_landing_owner_recovery_paths_20261002.json').read_text())\ncleanup=json.loads((sources/'pr1326_landed_live_cleanup_20261002.json').read_text())\nprotected={p['path']:h(Path(p['path']).read_bytes()) for p in cleanup['post_verification']['protected']}\nprint(json.dumps({'comparison':comparison,'kernel_exact_r9_replacements_verified':True,'original_governance_bytes_preserved':True,'governance_preimage_sha256':h(original),'pins':pins,'loader_manifest_pin_only':True,'vector_ids':ids,'owner_inventory':owners,'cleanup':{'source':str((sources/'pr1326_landed_live_cleanup_20261002.json').resolve()),'sha256':h((sources/'pr1326_landed_live_cleanup_20261002.json').read_bytes()),'merge':cleanup['merge'],'proof_limits':cleanup['proof_limits']},'protected_hashes':protected}))\nPY",
+  "growth_and_tracker": {
+    "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'\nfrom pathlib import Path\nimport hashlib,json,subprocess,sys\nsys.path.insert(0,'mu/tools/executors')\nfrom commit_executor import _growth_cap_plan_from_head_preimage\nfrom launch_wave import WaveConfig,build_tracker_fields\nfrom tracker_sync_note import upsert_tracker_sync_note\nh=lambda b:hashlib.sha256(b).hexdigest()\nbase='cefb39d113bc7c2db3ac289fec8e302cdede5cbe';wave='mu-coinduction-guarded-prefix-r10-2026-10-02'\nf=Path('mu/tests/docs/test_growth_caps.py')\npreimage=subprocess.check_output(['git','show',f'{base}:{f}'])\nassert h(preimage)=='c5d6127a36da47b9c35b1d567245a364695467134c9f19f9e8874bd4557ad5b3'\ncounts={'tests':len(list(Path('mu/tests').rglob('test_*.py'))),'tools':len(list(Path('mu/tools').rglob('*.py')))+len(list(Path('mu/tools').rglob('*.sh'))),'docs':len(list(Path('mu/docs').rglob('*.md')))}\nassert counts=={'tests':363,'tools':131,'docs':68},counts\nnew_tests=['mu/tests/l4_gates/test_coinduction_prefix_gate.py','mu/tests/parity/test_coinduction_prefix_parity.py'];new_docs=['mu/docs/core/CoinductionPrefix.v0.md']\nplan,error=_growth_cap_plan_from_head_preimage(head_text=preimage.decode(),wave_id=wave,new_test_files=new_tests,new_tool_scripts=[],new_core_docs=new_docs,projected_test_count=counts['tests'],projected_tool_count=counts['tools'],projected_doc_count=counts['docs'])\nassert error is None,error\npostimage=plan['expected_text'].encode();assert h(postimage)=='75457bd635763c75668dfcc2c31418b09e296900805cdc4fb288f716fca906e6'\nr9=subprocess.check_output(['git','show','e5753108b7195f210fdfd0cc3f3d3a6142f4134f:mu/tests/docs/test_growth_caps.py'])\nassert postimage==r9.replace(b'mu-coinduction-guarded-prefix-r9-2026-10-02',wave.encode())\nassert f.read_bytes()==preimage\nf.write_bytes(postimage)\nconfig_path=Path('../WorkingRCX/reports/control_plane/'+wave+'_wave_config.json')\nconfig=WaveConfig(**json.loads(config_path.read_text()))\nassert config.workload_target=='execution_layer_truth'\ntasks=Path('TASKS.md');before=h(tasks.read_bytes())\nupsert_tracker_sync_note(tasks,build_tracker_fields(config))\nafter=h(tasks.read_bytes());assert before==after,'Canonical tracker unexpectedly changed'\nprint(json.dumps({'builder':'commit_executor._growth_cap_plan_from_head_preimage','preimage_sha256':h(preimage),'postimage_sha256':h(postimage),'counts':counts,'new_tests':new_tests,'new_docs':new_docs,'new_tools':[],'cap_bumps':plan['cap_bumps'],'independently_matched_r9_wave_substitution':True,'tracker_builder':'launch_wave.build_tracker_fields + tracker_sync_note.upsert_tracker_sync_note','tracker_idempotent':before==after,'tracker_source_sha256':h(config_path.read_bytes()),'host_semantics_delta_before':config.host_semantics_delta_before,'host_semantics_delta_after':config.host_semantics_delta_after,'workload_target':config.workload_target}))\nPY",
+    "builder": "commit_executor._growth_cap_plan_from_head_preimage",
+    "preimage_sha256": "c5d6127a36da47b9c35b1d567245a364695467134c9f19f9e8874bd4557ad5b3",
+    "postimage_sha256": "75457bd635763c75668dfcc2c31418b09e296900805cdc4fb288f716fca906e6",
+    "counts": {
+      "tests": 363,
+      "tools": 131,
+      "docs": 68
+    },
+    "new_tests": [
+      "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+      "mu/tests/parity/test_coinduction_prefix_parity.py"
+    ],
+    "new_docs": [
+      "mu/docs/core/CoinductionPrefix.v0.md"
+    ],
+    "new_tools": [],
+    "cap_bumps": {
+      "CAP_TEST_FILES": {
+        "bumped": true,
+        "shortfall": 2,
+        "bump_amount": 2,
+        "new_paths": [
+          "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+          "mu/tests/parity/test_coinduction_prefix_parity.py"
+        ],
+        "previous_cap": 171,
+        "new_cap": 173,
+        "reason": "bumped"
+      },
+      "CAP_CORE_DOCS": {
+        "bumped": true,
+        "shortfall": 1,
+        "bump_amount": 1,
+        "new_paths": [
+          "mu/docs/core/CoinductionPrefix.v0.md"
+        ],
+        "previous_cap": 19,
+        "new_cap": 20,
+        "reason": "bumped"
+      }
+    },
+    "independently_matched_r9_wave_substitution": true,
+    "tracker_builder": "launch_wave.build_tracker_fields + tracker_sync_note.upsert_tracker_sync_note",
+    "tracker_idempotent": true,
+    "tracker_source_sha256": "ef95f43dedfc0b164509797c2dd97c7e62b876c04ddc16f1bde79c7c9ee4fdaf",
+    "host_semantics_delta_before": "Landed cefb39d baseline: Python builtin1/iteration1, JS builtin2/iteration1; authority inventories309total/212subset. R9 content-bound continuation repair is committed/unlanded; its four compiled JSON engine imports violate the existing dependency guard.",
+    "host_semantics_delta_after": "Unchanged host semantic markers and no new authority site. Preserve R9 private proof/snapshot/content binding, original VM-order/custom rejection and finite Mu progress; restore the original engine dependency set through independently verified data-only integrity anchors.",
+    "workload_target": "execution_layer_truth",
+    "final_cap_allowances": {
+      "CAP_TEST_FILES": 173,
+      "CAP_TOOL_SCRIPTS": 63,
+      "CAP_CORE_DOCS": 20
+    }
+  },
+  "diagnostic_commands": [
+    {
+      "name": "initial_native_gate",
+      "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -c 'import json,sys; from pathlib import Path; sys.path.insert(0,\"mu/tools/executors\"); import phase_a_executor as pa,phase_b_executor as pb,launch_wave as lw; r=Path.cwd(); assert pa.validate_native_stub_packet_contract(json.loads((r/\".agent_bus-mu-coinduction-prefix-r10-20261002/meta/post_merge_routing.json\").read_text()),\"reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_2026-10-02.md\",lw._project_post_lock_recovery_status((r/\"reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_2026-10-02.md\").read_text()),allow_post_lock_machine_sections=True); assert pb._tasks_has_canonical_wave_tracker_note(r,wave_id=\"mu-coinduction-guarded-prefix-r10-2026-10-02\"),\"same-wave tracker must be canonical in Ra\"; print(\"Lifecycle-aware native packet contract and canonical Ra tracker: PASS\")'",
+      "chunk_id": "829709",
+      "wall_time_seconds": 0.2610125,
+      "exit_code": 0,
+      "original_token_count": 18,
+      "output": "Lifecycle-aware native packet contract and canonical Ra tracker: PASS\n"
+    },
+    {
+      "name": "dependency_repro",
+      "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/structural/test_engine_pipeline_discipline.py::TestJsEnginePipelineShapeGovernance::test_dependency_direction_and_boundary_authority --tb=short",
+      "chunk_id": "b5ca7e",
+      "wall_time_seconds": 0.307403125,
+      "exit_code": 1,
+      "original_token_count": 657,
+      "output": "F                                                                        [100%]\n=================================== FAILURES ===================================\n_ TestJsEnginePipelineShapeGovernance.test_dependency_direction_and_boundary_authority _\nmu/tests/structural/test_engine_pipeline_discipline.py:1717: in test_dependency_direction_and_boundary_authority\n    assert actual_requires == _EXPECTED_ENGINE_REQUIRES, (\nE   AssertionError: JS engine dependency direction changed.\nE     Expected: {'routing.js': {'../core/terminal_classification', './pipeline', './kernel', '../core/constants', '../core/container_factory'}, 'pipeline.js': {'../core/terminal_classification', '../core/bootstrap_core', './kernel', '../core/container_factory', '../core/seed_loader', '../core/types', '../core/constants', '../core/normalize', '../core/security'}, 'kernel.js': {'../core/types', '../core/container_factory', '../core/constants', '../core/normalize', '../core/security', '../core/bootstrap_core', '../core/stage0_vm'}}\nE     Actual: {'kernel.js': {'../../../stage0/compiled/subst_v2.compiled.v1.json', '../../../stage0/compiled/match_v2.compiled.v1.json', '../core/bootstrap_core', '../../../stage0/compiled/kernel_v1.compiled.v1.json', '../core/container_factory', '../core/stage0_vm', '../core/types', '../core/constants', '../core/normalize', '../core/security', '../../../stage0/compiled/bootstrap_structural_v1.compiled.v1.json'}, 'pipeline.js': {'../core/terminal_classification', '../core/bootstrap_core', './kernel', '../core/container_factory', '../core/seed_loader', '../core/types', '../core/constants', '../core/normalize', '../core/security'}, 'routing.js': {'./pipeline', '../core/terminal_classification', './kernel', '../core/container_factory', '../core/constants'}}\nE   assert {'kernel.js':...'./pipeline'}} == {'kernel.js':...'./pipeline'}}\nE     \nE     Omitting 2 identical items, use -vv to show\nE     Differing items:\nE     {'kernel.js': {'../../../stage0/compiled/bootstrap_structural_v1.compiled.v1.json', '../../../stage0/compiled/kernel_v...ed.v1.json', '../../../stage0/compiled/subst_v2.compiled.v1.json', '../core/bootstrap_core', '../core/constants', ...}} != {'kernel.js': {'../core/bootstrap_core', '../core/constants', '../core/container_factory', '../core/normalize', '../core/security', '../core/stage0_vm', ...}}\nE     Use -v to get more diff\n=========================== short test summary info ============================\nFAILED mu/tests/structural/test_engine_pipeline_discipline.py::TestJsEnginePipelineShapeGovernance::test_dependency_direction_and_boundary_authority\n1 failed in 0.07s\n"
+    },
+    {
+      "name": "early_engine",
+      "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/structural/test_engine_pipeline_discipline.py --tb=short",
+      "chunk_id": "b63586",
+      "wall_time_seconds": 1.5e-06,
+      "session_id": 82635,
+      "original_token_count": 496,
+      "output": "........................................................................ [ 75%]\n......................F                                                  [100%]\n=================================== FAILURES ===================================\n_ TestJsVmCanonicalContentAnchors.test_each_content_pin_controls_private_continuation_replay _\nmu/tests/structural/test_engine_pipeline_discipline.py:1910: in test_each_content_pin_controls_private_continuation_replay\n    assert result.returncode == 0, result.stderr\nE   AssertionError: node:assert:149\nE       throw new AssertionError(obj);\nE       ^\nE     \nE     AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\nE     + actual - expected\nE     \nE     + [Object: null prototype] {\nE     - {\nE         x: 'done'\nE       }\nE     \nE         at [eval]:59:8\nE         at runScriptInThisContext (node:internal/vm:219:10)\nE         at node:internal/process/execution:451:12\nE         at [eval]-wrapper:6:24\nE         at runScriptInContext (node:internal/process/execution:449:60)\nE         at evalFunction (node:internal/process/execution:283:30)\nE         at evalTypeScript (node:internal/process/execution:295:3)\nE         at node:internal/main/eval_string:71:3 {\nE       generatedMessage: true,\nE       code: 'ERR_ASSERTION',\nE       actual: [Object: null prototype] { x: 'done' },\nE       expected: { x: 'done' },\nE       operator: 'deepStrictEqual',\nE       diff: 'simple'\nE     }\nE     \nE     Node.js v25.8.0\nE     \nE   assert 1 == 0\nE    +  where 1 = CompletedProcess(args=['node', '-e', \"\\nconst fs = require('fs');\\nconst path = require('path');\\nconst assert = requi... { x: 'done' },\\n  expected: { x: 'done' },\\n  operator: 'deepStrictEqual',\\n  diff: 'simple'\\n}\\n\\nNode.js v25.8.0\\n\").returncode\n=========================== short test summary info ============================\nFAILED mu/tests/structural/test_engine_pipeline_discipline.py::TestJsVmCanonicalContentAnchors::test_each_content_pin_controls_private_continuation_replay\n1 failed, 94 passed in 38.97s\n",
+      "exit_code": 1
+    },
+    {
+      "name": "focused_anchor",
+      "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/structural/test_engine_pipeline_discipline.py::TestJsVmCanonicalContentAnchors --tb=short",
+      "chunk_id": "288a76",
+      "wall_time_seconds": 0.796308208,
+      "exit_code": 0,
+      "original_token_count": 25,
+      "output": ".....                                                                    [100%]\n5 passed in 0.70s\n"
+    },
+    {
+      "name": "early_vm",
+      "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/parity/test_js_vm_bridge_parity.py --tb=short",
+      "chunk_id": "867aab",
+      "wall_time_seconds": 1.083e-06,
+      "session_id": 88284,
+      "original_token_count": 23,
+      "output": "..............                                                           [100%]\n14 passed in 1.44s\n",
+      "exit_code": 0
+    },
+    {
+      "name": "early_continuation",
+      "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/l4_gates/test_kernel_run_result_contract.py::test_coinduction_continuation_substitution_replay mu/tests/l4_gates/test_kernel_run_result_contract.py::test_internal_domain_continuations_do_not_replay_external_binding --tb=short",
+      "chunk_id": "5a5cf2",
+      "wall_time_seconds": 1.417e-06,
+      "session_id": 91525,
+      "original_token_count": 25,
+      "output": "..                                                                       [100%]\n2 passed in 4.15s\n",
+      "exit_code": 0
+    },
+    {
+      "name": "engine_after_fix",
+      "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/structural/test_engine_pipeline_discipline.py --tb=short",
+      "chunk_id": "752fd6",
+      "wall_time_seconds": 0.849264125,
+      "session_id": 96790,
+      "original_token_count": 43,
+      "output": "........................................................................ [ 75%]\n.......................                                                  [100%]\n95 passed in 38.92s\n",
+      "exit_code": 0
+    }
+  ],
+  "issues": [
+    {
+      "status": "fixed",
+      "finding": "R9's four compiled JSON imports violate the original engine require map.",
+      "resolution": "Four complete canonical-content data pins replace only the import-time expressions. Original governance module is preserved byte-for-byte with appended tests."
+    },
+    {
+      "status": "resolved_test_harness",
+      "finding": "The new anchor replay test initially compared a null-prototype Mu record to a plain JS object.",
+      "resolution": "The expected record now uses the existing muCopy boundary; all five focused anchor checks pass."
+    }
+  ],
+  "proof_classes": [
+    "inventory",
+    "source_lock",
+    "behavioral",
+    "negative_control"
+  ],
+  "proof_limits": {
+    "finite_prefix_only": true,
+    "infinite_productivity": false,
+    "bisimulation": false,
+    "full_coinduction": false,
+    "full_l4_completion": false,
+    "engine_observer_evidence": false,
+    "physical_retirement_is_not_semantic_landing": true,
+    "private_fast_path": "Only the exact private proof, same immutable VM snapshot, input/projection/watchdog bindings and canonical bundle content permit omitting internal domain replay.",
+    "public_and_custom": "Full binding replay remains; original SECURITY error assertions and input/projection/watchdog/forged controls retained.",
+    "budgets": "24 vectors unchanged; 96 domain steps and existing 900-second JS process limit unchanged; paired substitution replay remains 1000 steps."
+  },
+  "executor_owned_pending": [
+    "measured current-wave L4 indicators",
+    "actual-index growth authority",
+    "fresh native review",
+    "commit",
+    "pre-push",
+    "CI",
+    "merge",
+    "protected PRIMARY/dev reconciliation",
+    "R8/PR1325 and R9 disposition",
+    "nine pending useful-work landing owners"
+  ],
+  "quota_observation": "No one-shot quota observation is exposed to this implementer; no percentage claimed or watchdog created.",
+  "validation_groups": {
+    "declared_evidence": [
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/structural/test_engine_pipeline_discipline.py --tb=short",
+        "started_at": "2026-10-02T10:24:14.379085+00:00",
+        "finished_at": "2026-10-02T10:24:53.679909+00:00",
+        "elapsed_seconds": 39.301,
+        "returncode": 0,
+        "stdout": "........................................................................ [ 75%]\n.......................                                                  [100%]\n95 passed in 38.99s\n",
+        "stderr": ""
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/parity/test_js_vm_bridge_parity.py::TestJsBridgeVmOrderingE2E::test_live_vm_kernel_path_depends_on_kernel_bridge_match_subst_order --tb=short",
+        "started_at": "2026-10-02T10:24:53.680456+00:00",
+        "finished_at": "2026-10-02T10:24:54.191957+00:00",
+        "elapsed_seconds": 0.512,
+        "returncode": 0,
+        "stdout": ".                                                                        [100%]\n1 passed in 0.22s\n",
+        "stderr": ""
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -c 'import hashlib; from pathlib import Path; f=Path(\"mu/tests/docs/test_growth_caps.py\"); actual=hashlib.sha256(f.read_bytes()).hexdigest(); expected=\"75457bd635763c75668dfcc2c31418b09e296900805cdc4fb288f716fca906e6\"; assert actual==expected, \"Native canonical growth-cap byte mismatch: \"+actual; print(\"Native canonical growth-cap exact bytes: PASS\")'",
+        "started_at": "2026-10-02T10:24:54.192469+00:00",
+        "finished_at": "2026-10-02T10:24:54.218264+00:00",
+        "elapsed_seconds": 0.026,
+        "returncode": 0,
+        "stdout": "Native canonical growth-cap exact bytes: PASS\n",
+        "stderr": ""
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -c 'import json,sys; from pathlib import Path; sys.path.insert(0,'\\''mu/tools/executors'\\''); import phase_a_executor as pa,phase_b_executor as pb,launch_wave as lw; r=Path.cwd(); assert pa.validate_native_stub_packet_contract(json.loads((r/\".agent_bus-mu-coinduction-prefix-r10-20261002/meta/post_merge_routing.json\").read_text()),\"reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_2026-10-02.md\",lw._project_post_lock_recovery_status((r/\"reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_2026-10-02.md\").read_text()),allow_post_lock_machine_sections=True); assert pb._tasks_has_canonical_wave_tracker_note(r,wave_id=\"mu-coinduction-guarded-prefix-r10-2026-10-02\"),'\\''same-wave tracker must be canonical in Ra'\\''; print('\\''Lifecycle-aware native packet contract and canonical Ra tracker: PASS'\\'')'",
+        "started_at": "2026-10-02T10:24:54.218742+00:00",
+        "finished_at": "2026-10-02T10:24:54.634090+00:00",
+        "elapsed_seconds": 0.415,
+        "returncode": 0,
+        "stdout": "Lifecycle-aware native packet contract and canonical Ra tracker: PASS\n",
+        "stderr": ""
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/l4_gates/test_metabolize_cycle_gate.py mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py --tb=short",
+        "started_at": "2026-10-02T10:24:54.634600+00:00",
+        "finished_at": "2026-10-02T10:25:28.834982+00:00",
+        "elapsed_seconds": 34.2,
+        "returncode": 0,
+        "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 42%]\n........................................................................ [ 85%]\n.........................                                                [100%]\n169 passed in 19.82s\n",
+        "stderr": ""
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/l4_gates/test_coinduction_prefix_gate.py mu/tests/parity/test_coinduction_prefix_parity.py mu/tests/structural/test_seed_counts.py mu/tests/engine/test_seed_integrity.py mu/tests/engine/test_seed_registry_consistency.py mu/tests/parity/test_seed_loading_parity.py mu/tests/l4_gates/test_coinduction_foundation_gate.py mu/tests/docs/test_coinduction_foundation_gate.py mu/tests/docs/test_manifest_discoverability.py mu/tests/structural/test_execution_layer_truth_contract.py --tb=short",
+        "started_at": "2026-10-02T10:25:28.835579+00:00",
+        "finished_at": "2026-10-02T10:28:29.747675+00:00",
+        "elapsed_seconds": 180.911,
+        "returncode": 0,
+        "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 17%]\n........................................................................ [ 34%]\n........................................................................ [ 51%]\n........................................................................ [ 68%]\n........................................................................ [ 85%]\n...........................................................              [100%]\n419 passed in 180.60s (0:03:00)\n",
+        "stderr": ""
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/l4_gates/test_kernel_run_result_contract.py mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py --tb=short",
+        "started_at": "2026-10-02T10:28:29.748255+00:00",
+        "finished_at": "2026-10-02T10:28:35.155627+00:00",
+        "elapsed_seconds": 5.407,
+        "returncode": 0,
+        "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 57%]\n......................................................                   [100%]\n126 passed in 5.10s\n",
+        "stderr": ""
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/parity/test_js_vm_bridge_parity.py --tb=short",
+        "started_at": "2026-10-02T10:28:35.156143+00:00",
+        "finished_at": "2026-10-02T10:28:36.847329+00:00",
+        "elapsed_seconds": 1.691,
+        "returncode": 0,
+        "stdout": "..............                                                           [100%]\n14 passed in 1.41s\n",
+        "stderr": ""
+      }
+    ],
+    "post_gate_contract_sweep": [
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/structural/test_engine_pipeline_discipline.py --tb=short",
+        "started_at": "2026-10-02T10:28:36.847852+00:00",
+        "finished_at": "2026-10-02T10:29:16.246686+00:00",
+        "elapsed_seconds": 39.399,
+        "returncode": 0,
+        "stdout": "........................................................................ [ 75%]\n.......................                                                  [100%]\n95 passed in 39.10s\n",
+        "stderr": ""
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 mu/tests/engine/test_seed_integrity.py mu/tests/engine/test_seed_registry_consistency.py mu/tests/parity/test_seed_loading_parity.py mu/tests/structural/test_seed_counts.py mu/tests/structural/test_execution_layer_truth_contract.py mu/tests/docs/test_manifest_discoverability.py mu/tests/docs/test_growth_caps.py mu/tests/l4_gates/test_metabolize_cycle_gate.py mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py --tb=short",
+        "started_at": "2026-10-02T10:29:16.247270+00:00",
+        "finished_at": "2026-10-02T10:30:03.357173+00:00",
+        "elapsed_seconds": 47.11,
+        "returncode": 0,
+        "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 13%]\n........................................................................ [ 26%]\n........................................................................ [ 39%]\n........................................................................ [ 53%]\n........................................................................ [ 66%]\n........................................................................ [ 79%]\n........................................................................ [ 92%]\n.......................................                                  [100%]\n543 passed in 46.81s\n",
+        "stderr": ""
+      },
+      {
+        "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/parity/test_js_vm_bridge_parity.py --tb=short",
+        "started_at": "2026-10-02T10:30:03.357743+00:00",
+        "finished_at": "2026-10-02T10:30:05.073130+00:00",
+        "elapsed_seconds": 1.715,
+        "returncode": 0,
+        "stdout": "..............                                                           [100%]\n14 passed in 1.42s\n",
+        "stderr": ""
+      }
+    ]
+  },
+  "final_preservation": {
+    "observed_at": "2026-10-02T10:31:46.295219+00:00",
+    "sources": {
+      "r9": {
+        "files_verified": 35,
+        "head": "e5753108b7195f210fdfd0cc3f3d3a6142f4134f",
+        "index_sha256": "1d67095097f0bb4deaeca958f9dff7a90f5496c82805371800436a47792714ef",
+        "config_sha256": "2d92a1359b8cda0839dbda9a57e8657e495dbe1612018477e5f34f5b0138a0aa",
+        "unchanged": true
+      },
+      "r8": {
+        "files_verified": 37,
+        "head": "01cc58b31c0239896cae263ae8e06264d4a6a2f4",
+        "index_sha256": "f6981657fea672622a7fbae7b1580197b77c93e93dcb958fe2713d71cd10ae61",
+        "config_sha256": "80e635177b4543e73569ec243370a7e22c5c28ea97f49bd7186b8db693cfb70e",
+        "unchanged": true
+      }
+    },
+    "protected_files_unchanged": 6,
+    "primary_status_tasks_changelog_unchanged": true,
+    "task_ids_retained": 268,
+    "all_unrelated_primary_task_text_retained": true,
+    "packet_unchanged": true,
+    "routing_unchanged": true,
+    "candidate_index_unchanged": true,
+    "no_undeclared_paths": true
+  },
+  "implemented_files": [
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "e3a9eef510c1dc982d337920fe9e3c231237a229262ce644860e5535667c5b27"
+    },
+    {
+      "path": "STATUS.md",
+      "sha256": "b3adac41f1ddb8506b123f517455017b5c2cc8ca4125ba51d9c15b7078966ce1"
+    },
+    {
+      "path": "TASKS.md",
+      "sha256": "61fa28153347f9deeb498289103dee6eb2c578a3607aa3549e0d724469fad20a"
+    },
+    {
+      "path": "mu/docs/README.md",
+      "sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13"
+    },
+    {
+      "path": "mu/docs/core/CoinductionPrefix.v0.md",
+      "sha256": "9f2045af638a0e26f297d686399c06489f59d5f702165c0a00f7efa742cafe87"
+    },
+    {
+      "path": "mu/host/js/core/seed_loader.js",
+      "sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670"
+    },
+    {
+      "path": "mu/host/js/engine/kernel.js",
+      "sha256": "e5d3f65ae4720d6a1bfc238d1c12db3cfeeaedd849f3da85a85fc9d16c17a7f2"
+    },
+    {
+      "path": "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+      "sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97"
+    },
+    {
+      "path": "mu/programs/coinduction_prefix.v1.json",
+      "sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b"
+    },
+    {
+      "path": "mu/seed_registry_manifest.v1.json",
+      "sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5"
+    },
+    {
+      "path": "mu/tests/docs/test_growth_caps.py",
+      "sha256": "75457bd635763c75668dfcc2c31418b09e296900805cdc4fb288f716fca906e6"
+    },
+    {
+      "path": "mu/tests/fixtures/coinduction_prefix_vectors.json",
+      "sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d"
+    },
+    {
+      "path": "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+      "sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55"
+    },
+    {
+      "path": "mu/tests/l4_gates/test_kernel_run_result_contract.py",
+      "sha256": "6cfe853f8eaabfdc8557edb97b169a2c4fb5f454f43012bc5ae1743a8e431565"
+    },
+    {
+      "path": "mu/tests/l4_gates/test_metabolize_cycle_gate.py",
+      "sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d"
+    },
+    {
+      "path": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+      "sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1"
+    },
+    {
+      "path": "mu/tests/parity/test_coinduction_prefix_parity.py",
+      "sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396"
+    },
+    {
+      "path": "mu/tests/parity/test_js_vm_bridge_parity.py",
+      "sha256": "6232a9f658a236e282ef734ddd1446c93d07c0aed11d2eb243327d42992bc4e7"
+    },
+    {
+      "path": "mu/tests/parity/test_seed_loading_parity.py",
+      "sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41"
+    },
+    {
+      "path": "mu/tests/structural/test_engine_pipeline_discipline.py",
+      "sha256": "042fc3ef2f57b4c33120c7ad563ffcad6b1bca451081878816f2d8e6a3431596"
+    },
+    {
+      "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+      "sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902"
+    },
+    {
+      "path": "mu/tests/structural/test_seed_counts.py",
+      "sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec"
+    },
+    {
+      "path": "reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_implementation_evidence.json",
+      "self_hash_omitted": true
+    },
+    {
+      "path": "roadmap/MANIFEST.md",
+      "sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f"
+    }
+  ],
+  "phase_b_result": "PASS: implementation and all declared local evidence/sweeps complete. Native review, measured indicators, actual-index authority and landing remain pending.",
+  "final_handoff_commands": [
+    {
+      "name": "final_native",
+      "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -c 'import json,sys; from pathlib import Path; sys.path.insert(0,\"mu/tools/executors\"); import phase_a_executor as pa,phase_b_executor as pb,launch_wave as lw; r=Path.cwd(); assert pa.validate_native_stub_packet_contract(json.loads((r/\".agent_bus-mu-coinduction-prefix-r10-20261002/meta/post_merge_routing.json\").read_text()),\"reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_2026-10-02.md\",lw._project_post_lock_recovery_status((r/\"reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_2026-10-02.md\").read_text()),allow_post_lock_machine_sections=True); assert pb._tasks_has_canonical_wave_tracker_note(r,wave_id=\"mu-coinduction-guarded-prefix-r10-2026-10-02\"),\"same-wave tracker must be canonical in Ra\"; print(\"Lifecycle-aware native packet contract and canonical Ra tracker: PASS\")'",
+      "chunk_id": "43ff86",
+      "wall_time_seconds": 0.26735675,
+      "exit_code": 0,
+      "original_token_count": 18,
+      "output": "Lifecycle-aware native packet contract and canonical Ra tracker: PASS\n"
+    },
+    {
+      "name": "final_cap",
+      "cmd": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -c 'import hashlib; from pathlib import Path; f=Path(\"mu/tests/docs/test_growth_caps.py\"); actual=hashlib.sha256(f.read_bytes()).hexdigest(); expected=\"75457bd635763c75668dfcc2c31418b09e296900805cdc4fb288f716fca906e6\"; assert actual==expected, \"Native canonical growth-cap byte mismatch: \"+actual; print(\"Native canonical growth-cap exact bytes: PASS\")'",
+      "chunk_id": "697f3e",
+      "wall_time_seconds": 2.5e-06,
+      "exit_code": 0,
+      "original_token_count": 12,
+      "output": "Native canonical growth-cap exact bytes: PASS\n"
+    }
+  ]
+}

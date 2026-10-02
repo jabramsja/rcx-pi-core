@@ -6,6 +6,9 @@ Proves that claimed execution layers are distinguishable via observer evidence:
 - L2 (engine): Observer captures step_boundary + engine_terminal events.
 - No hemisphere events without hemisphere routing.
 - Layer claims are falsifiable: L0 vs L2 produce detectably different evidence.
+- Guarded prefixes: registered Mu projections produce finite kernel traces;
+  removing the emission rule destroys that result, without implying L2 events
+  or infinite Coinduction productivity.
 """
 from __future__ import annotations
 
@@ -140,6 +143,73 @@ class TestExecutionLayerTruth:
             f"L2 terminal must contain engine metadata keys. "
             f"Missing: {engine_keys - l2_keys}"
         )
+
+
+# ===========================================================================
+# Guarded-prefix workload proof binding for execution_layer_truth
+# ===========================================================================
+
+class TestGuardedPrefixExecutionLayer:
+    """A finite structural-kernel trace is distinct from engine observability."""
+
+    @pytest.mark.l4_expensive
+    def test_registered_prefix_progress_and_projection_causality(self, record_property):
+        # SPEED_OK: real registered Mu execution plus a necessary-projection control.
+        from time import perf_counter
+
+        from rcx_pi.selfhost.step_mu import run_mu_structural
+        from tests.l4_gates.test_coinduction_prefix_gate import (
+            FIXTURE, SEED_NAME, VECTORS, assert_complete_outcomes, trace_entries,
+        )
+
+        projections = load_verified_seed(get_seed_path(SEED_NAME), verify=True)["projections"]
+        vector = VECTORS["alternating_three"]
+        options = dict(
+            max_steps=FIXTURE["max_steps"], kernel_mode="core",
+            validation_mode="domain", trace_output=True, reject_nonlinear=True,
+        )
+        started = perf_counter()
+        outcome = run_mu_structural(projections, vector["input"], **options)
+        assert_complete_outcomes(vector, [outcome])
+        assert outcome["steps"] == 42
+
+        # Observe actual selected projections and their states, not engine events.
+        assert set(outcome) == {"result", "trace", "stall", "steps"}
+        entries = list(trace_entries(outcome))
+        applied = [entry["projection"] for entry in entries
+                   if entry["projection"] is not None]
+        assert set(applied) <= {projection["id"] for projection in projections}
+        assert applied.count("co_prefix.take") == 3
+        assert applied.count("co_prefix.guarded") == 3
+        assert applied.count("co_prefix.emit") == 3
+        assert applied[-1] == "co_prefix.done"
+        assert all("event_name" not in entry for entry in entries)
+        emitted = [entry["state"]["co_emit"]["payload"] for entry in entries
+                   if entry["projection"] == "co_prefix.emit"]
+        assert emitted == ["B", "A", "B"]
+        result = outcome["result"]["coinduction_prefix_result"]
+        assert result["window"]["_co_window"]["finite"] is True
+        assert result["tail"]["_co_tail"]["open"] is True
+
+        # Same verified program and request, with only its emission rule removed.
+        # Real guarded selection still occurs, but no prefix result can be claimed.
+        without_emission = [p for p in projections if p["id"] != "co_prefix.emit"]
+        assert len(without_emission) == len(projections) - 1
+        control = run_mu_structural(without_emission, vector["input"], **options)
+        control_entries = list(trace_entries(control))
+        assert control["stall"] is True
+        assert 0 < control["steps"] < outcome["steps"] < FIXTURE["max_steps"]
+        assert "co_emit" in control["result"]
+        assert "coinduction_prefix_result" not in control["result"]
+        assert control["result"] != outcome["result"]
+        assert any(e["projection"] == "co_prefix.guarded" for e in control_entries)
+        assert all(e["projection"] != "co_prefix.emit" for e in control_entries)
+        assert not any(e.get("max_steps") for e in control_entries)
+        record_property("kernel_elapsed_seconds", perf_counter() - started)
+        record_property("domain_steps", outcome["steps"])
+        record_property("control_domain_steps", control["steps"])
+        # The result retains an open obligation: neither this trace nor its final
+        # stall is engine observer evidence, bisimulation or infinite productivity.
 
 
 # ===========================================================================

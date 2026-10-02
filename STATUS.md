@@ -52,7 +52,7 @@ See [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchi
 **L4 current state:** full L4 completion remains in SINK, but bounded reduction work is active. VM cutover is ACTIVE. P7 Meta-Circular Reduction Chain complete (all 33 projections via Stage0 VM). The current autonomous execution order is tracked in `TASKS.md` under the active Codex queue; this file does not duplicate that queue. See architecture doc for full chain details.
 
 **Key facts (summary):**
-- 13 JS-loaded seed files run on both Python and JavaScript
+- 22 registered seeds; 17 in the JS CLI verification view, including the guarded finite-prefix program shared by Python and JavaScript
 - 4 bootstrap primitives: eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED)
 - JS substrate: ~6,488 LOC core, 16 modules at `mu/host/js/`
 - Python substrate: ~8,430 LOC, ~7,525 tests
@@ -152,6 +152,25 @@ Current Exhaustion Layer: META_CIRCULAR
 **Current Algorithm Execution:**
 - `run_algorithm_meta_circular()` defaults to `step_kernel_mu(kernel_mode="bridge", validation_mode="algorithm_runtime")`
 - Algorithm runtime is bridge-backed meta-circular
+
+**Bounded Coinduction capability (Mu R10, Phase B, 2026-10-02):** the registered
+`coinduction_prefix.v1.json` program constructs guarded finite observation windows
+and resumable open tails through the production Python/JS structural kernels.
+It preserves R9's 24 shared vectors, complete outcomes, emission assertions and
+canonical StructuralNumbers inputs. The execution-layer contract requires real
+alternating progress and loss of the result when `co_prefix.emit` is removed.
+This is finite kernel-trace evidence; it does not establish engine observer
+events, infinite productivity, bisimulation or full Coinduction/L4 completion.
+R10 retains R9's paired 1000-step substitution replay bound, immutable VM
+snapshots and private proof identity. Data-only canonical-content pins replace
+four forbidden engine imports; compiler reconstruction and per-slot content/pin
+mutation controls ground those pins in actual artifacts. Public continuations
+and custom configurations retain binding replay and original VM-order rejection.
+Raw host integers remain outside matcher admission; resource exhaustion is not
+a semantic result. See [CoinductionPrefix.v0.md](mu/docs/core/CoinductionPrefix.v0.md)
+and the [current implementation evidence](reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_implementation_evidence.json)
+for actual local validation. Native review, measured indicators and landing
+remain pending; R9 and R8/PR1325 stay preserved under the existing production owner.
 
 ---
 

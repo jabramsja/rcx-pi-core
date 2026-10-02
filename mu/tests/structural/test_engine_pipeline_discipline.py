@@ -1785,3 +1785,131 @@ class TestJsEnginePipelineShapeGovernance:
         assert not re.search(r"operation\s*={2,3}\s*['\"]", service_source), (
             "Boundary operations must not move to JS-only string branch dispatch"
         )
+
+
+class TestJsVmCanonicalContentAnchors:
+    """Content pins preserve the existing dependency boundary and replay rules."""
+
+    @pytest.mark.parametrize("slot, required, seed_name, artifact_name", [
+        ("kernelBundle", "true", "kernel.v1.json", "kernel_v1"),
+        ("bridgeBundle", "false", "bootstrap_structural.v1.json", "bootstrap_structural_v1"),
+        ("matchBundle", "true", "match.v2.json", "match_v2"),
+        ("substBundle", "true", "subst.v2.json", "subst_v2"),
+    ])
+    def test_content_pin_matches_verified_seed_compilation(
+        self, slot, required, seed_name, artifact_name,
+    ):
+        """Independently rebuild full executable content, then hash on both hosts."""
+        import hashlib
+        import subprocess
+
+        from mu.tools.compilers.lower_stage0 import compile_seed
+        from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
+
+        seed_path = get_seed_path(seed_name)
+        seed = load_verified_seed(seed_path, verify=True)
+        rebuilt = compile_seed(
+            seed, seed_name, "sha256:" + hashlib.sha256(seed_path.read_bytes()).hexdigest(),
+        )
+        artifact = json.loads(
+            (_REPO / f"mu/stage0/compiled/{artifact_name}.compiled.v1.json").read_text()
+        )
+        assert artifact == rebuilt, "Checked-in bundle differs from verified seed compilation"
+        # Independent canonical serialization; no bundle provenance field supplies this hash.
+        digest = hashlib.sha256(
+            json.dumps(rebuilt, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        source = _read_text(_JS_KERNEL_PATH)
+        slots = re.search(
+            r"const _VM_CONFIG_BUNDLE_SLOTS = Object\.freeze\(\[(.*?)\]\);",
+            source, re.DOTALL,
+        )
+        assert slots is not None
+        pins = re.findall(r"\['(\w+)', (true|false), '([a-f0-9]{64})'\]", slots[1])
+        assert len(pins) == 4
+        assert (slot, required, digest) in pins
+        result = subprocess.run(
+            ["node", "-e", r"""
+const fs = require('fs');
+const { muHash } = require('./mu/host/js/core/types');
+const { muCopy, validateBundle } = require('./mu/host/js/core/stage0_vm');
+const bundle = muCopy(JSON.parse(fs.readFileSync(0, 'utf8')), true);
+validateBundle(bundle);
+process.stdout.write(muHash(bundle));
+"""], input=json.dumps(artifact), capture_output=True, text=True, cwd=_REPO, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == digest
+
+    @pytest.mark.slow
+    def test_each_content_pin_controls_private_continuation_replay(self):
+        # SPEED_OK: real kernel continuations with per-slot content and pin mutations.
+        import subprocess
+
+        from tests.parity.test_coinduction_prefix_parity import JS_KERNEL_SETUP
+
+        script = JS_KERNEL_SETUP + r"""
+const Module = require('module');
+const { muHash } = require('./mu/host/js/core/types');
+vmConfig.bridgeBundle = JSON.parse(fs.readFileSync(
+  'mu/stage0/compiled/bootstrap_structural_v1.compiled.v1.json', 'utf8'));
+const kernelPath = require.resolve('./mu/host/js/engine/kernel');
+const source = fs.readFileSync(kernelPath, 'utf8');
+const anchor = 'const projectionHashes = new Set();';
+assert.strictEqual(source.split(anchor).length, 2);
+const projections = muCopy([
+  {id: 'probe.miss', pattern: {x: 'other'}, body: {x: 'unused'}},
+  {id: 'probe.apply', pattern: {x: 'start'}, body: {x: 'done'}},
+], true);
+const input = muCopy({x: 'start'}, true);
+let replays = 0;
+// Only count entry to the existing private replay branch in a disposable module.
+globalThis.contentAnchorReplay = () => { replays++; };
+function probe(moduleSource, config) {
+  const instrumented = new Module(kernelPath, module);
+  instrumented.filename = kernelPath;
+  instrumented.paths = module.paths;
+  instrumented._compile(moduleSource.replace(anchor,
+    `if (trustedContinuationProof) globalThis.contentAnchorReplay(); ${anchor}`), kernelPath);
+  assert.deepStrictEqual(Object.keys(instrumented.exports).sort(),
+                         Object.keys(require(kernelPath)).sort());
+  replays = 0;
+  const result = instrumented.exports.stepKernel(kernel, input, projections,
+    {returnMeta: true, validationMode: 'domain', maxSteps: 10000, vmConfig: config});
+  return {result, replays};
+}
+const canonical = probe(source, vmConfig);
+assert.deepStrictEqual(canonical.result.output, muCopy({x: 'done'}, true));
+assert.strictEqual(canonical.result.termination_reason, 'projection_applied');
+assert.strictEqual(canonical.replays, 0);
+const controls = [];
+for (const slot of ['kernelBundle', 'bridgeBundle', 'matchBundle', 'substBundle']) {
+  // Keep program bytes and all three provenance labels; only full content differs.
+  const customBundle = {...vmConfig[slot], note: 'noncanonical content anchor control'};
+  validateBundle(customBundle);
+  for (const label of ['bundle_id', 'source_seed', 'source_digest']) {
+    assert.strictEqual(customBundle[label], vmConfig[slot][label]);
+  }
+  const custom = probe(source, {...vmConfig, [slot]: customBundle,
+                                domainContinuationSafe: true});
+  assert.deepStrictEqual(custom.result, canonical.result);
+  assert(custom.replays > 0, `${slot} custom content skipped binding replay`);
+  // Independently derive the real pin, then corrupt only that pin in the test module.
+  const digest = muHash(muCopy(vmConfig[slot], true));
+  assert.strictEqual(source.split(`'${digest}'`).length, 2);
+  const changedPin = probe(source.replace(`'${digest}'`, `'${'0'.repeat(64)}'`), vmConfig);
+  assert.deepStrictEqual(changedPin.result, canonical.result);
+  assert(changedPin.replays > 0, `${slot} pin did not control binding replay`);
+  controls.push({slot, custom: custom.replays, changedPin: changedPin.replays});
+}
+console.log(JSON.stringify(controls));
+"""
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True, cwd=_REPO, timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        controls = json.loads(result.stdout)
+        assert {row["slot"] for row in controls} == {
+            "kernelBundle", "bridgeBundle", "matchBundle", "substBundle",
+        }
+        assert all(row["custom"] > 0 and row["changedPin"] > 0 for row in controls)

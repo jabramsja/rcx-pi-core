@@ -34,6 +34,7 @@ MU_SEEDS = {
         "metabolize_cycle.v1.json",
         "rcx_engine_state.v1.json",
         "rcx_engine_scheduler.v1.json",
+        "coinduction_prefix.v1.json",
     ],
     "utilities": ["classify.v1.json", "eval.v1.json", "terminal_classify.v1.json", "evidence_walker.v1.json"],
     "bridge": ["bootstrap_structural.v1.json"],
@@ -72,6 +73,7 @@ EXPECTED_COUNTS = {
     "metabolize_cycle.v1.json": 15,  # structural walker for hemisphere metabolization (3 phases + reverse + exit)
     "rcx_engine_state.v1.json": 9,  # explicit rcx engine state schema and fail-closed shape checks
     "rcx_engine_scheduler.v1.json": 22,  # operator scheduler ordering, freeze, and rejection semantics
+    "coinduction_prefix.v1.json": 32,  # guarded finite demand, observation, rejection and resumable tail
     # mu/bridge/
     "bootstrap_structural.v1.json": 5,  # non-linear pattern support
     # mu/utilities/ (structural displacement)

@@ -736,10 +736,10 @@ class TestSeedChecksumParity:
         assert not mismatches, f"Checksum mismatches:\n" + "\n".join(mismatches)
 
     def test_js_loads_expected_seed_count(self):
-        """JS must register exactly 16 seeds including lazy/runtime structural seeds."""
+        """JS registers 17 seeds, including the guarded finite-prefix program."""
         js_checksums = _js_seed_checksums()
-        assert len(js_checksums) == 16, (
-            f"JS seed count changed from 16 to {len(js_checksums)}. "
+        assert len(js_checksums) == 17, (
+            f"JS seed count changed from 17 to {len(js_checksums)}. "
             f"Seeds: {sorted(js_checksums.keys())}"
         )
 
