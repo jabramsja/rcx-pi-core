@@ -9,12 +9,13 @@ authority. This is neither a dispatcher nor a polling service.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import fcntl
 import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,7 @@ OWNER = "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION"
 MAX_ATTEMPTS = 3
 REGISTRY = "rcx_worktree_lifecycle"
 FAILED_CLOSEOUT_REASON = "Native closeout failed; source/config and correction owner retained"
+READER_RELEASE_SECONDS = 2.0
 
 
 def sync_primary_from_landed_source(repo: Path, *, base_branch: str, authority_commit: str) -> dict:
@@ -232,6 +234,91 @@ def terminal_log_record(repo: Path, bus_dir: str = ".agent_bus") -> str | None:
             _surviving_root(terminal)
             released = str(directory)
         return released
+
+
+def _log_reader_lock(identity: dict, bus_dir: str):
+    """One rendezvous for this physical checkout and exact bus, across HEADs."""
+    bus = Path(bus_dir)
+    if not bus.is_absolute():
+        bus = Path(identity["path"]) / bus
+    binding = {k: identity[k] for k in ("path", "git_dir", "common_dir", "filesystem_identity")}
+    key = fleet.digest(fleet.encoded(dict(identity=binding, bus_dir=str(bus))))
+    root = Path(identity["common_dir"]) / REGISTRY
+    root.mkdir(mode=0o700, exist_ok=True)
+    fleet.plain_directory(root)
+    fd = os.open(root / ("reader-" + key + ".lock"),
+                 os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    return os.fdopen(fd, "rb")
+
+
+def follow_terminal_log(repo: Path, bus_dir: str, log: Path) -> None:
+    """Own one tail independently of the watcher's potentially slow refresh.
+
+    The shared lock covers attachment through child reaping. Completion's
+    exclusive acquisition acknowledges release and fences heartbeat/restart
+    attachment until its unchanged mutation gates have finished.
+    """
+    def terminal():
+        try:
+            return terminal_log_record(repo, bus_dir)
+        except (fleet.Hold, OSError, ValueError, KeyError, subprocess.SubprocessError):
+            return None  # Unknown ownership retains monitoring and holds retirement.
+
+    def stop(_signum, _frame):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    with ExitStack() as stack:
+        lock = None
+        if (repo / ".git").is_file():
+            lock = stack.enter_context(_log_reader_lock(lane_identity(repo), bus_dir))
+            try:
+                fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return  # Exact native completion already owns the attachment fence.
+        record = terminal()
+        if record:
+            print(f"\nTerminal lane; live log reader released.\nEvidence: {record}", flush=True)
+            return
+        child = None
+        try:
+            # Inheritance keeps the rendezvous held even if this supervisor
+            # dies unexpectedly while its tail still has the source open.
+            child = subprocess.Popen(["tail", "-f", str(log)],
+                pass_fds=(lock.fileno(),) if lock is not None else ())
+            while child.poll() is None:
+                record = terminal()
+                if record:
+                    break
+                time.sleep(0.1)
+        finally:
+            if child is not None:
+                if child.poll() is None:
+                    child.terminate()  # Only the child created by this follower.
+                child.wait()
+        if record:
+            print(f"\nTerminal lane; live log reader released.\nEvidence: {record}", flush=True)
+
+
+@contextmanager
+def _released_log_readers(directory: Path, registration: dict, terminal: dict):
+    """Bounded acknowledgment before a new claim; never bypass process gates."""
+    with _log_reader_lock(terminal["identity"], registration["bus_dir"]) as lock:
+        deadline = time.monotonic() + READER_RELEASE_SECONDS
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise fleet.Hold("Owned log reader release not acknowledged; no new retirement claim")
+                time.sleep(0.05)
+        fleet.write_new(directory / "reader-release.json", fleet.encoded(dict(
+            state="RELEASED", terminal_sha256=fleet.digest(fleet.read_plain(directory / "terminal.json")),
+            identity=terminal["identity"], bus_dir=registration["bus_dir"],
+            acknowledgment="exclusive lock after owned tail exit; not retirement authority")), verify_existing=True)
+        yield
 
 
 def retirement_owners(common: Path, identity: dict, preserved_operation: dict | None = None) -> list[dict]:
@@ -634,7 +721,7 @@ def complete_pending(directory: Path, *, delay: float = 2.0) -> dict:
                 "required_resolution": value.get("next_action", "Reconcile the recorded owner before fresh authority."),
                 "next_action": inspection}
 
-    with _completion_lock(directory):
+    with _completion_lock(directory), ExitStack() as readers:
         final = directory / "completion.json"
         if final.exists():
             value = json.loads(fleet.read_plain(final))
@@ -684,7 +771,18 @@ def complete_pending(directory: Path, *, delay: float = 2.0) -> dict:
             attempts_used = predecessor["attempts_used"]
         value = dict(state="ESCALATED", owner=OWNER, reason="Bounded native completion budget exhausted",
                      attempts_exhausted=MAX_ATTEMPTS)
-        for number in range(attempts_used + 1, MAX_ATTEMPTS + 1):
+        numbers = range(attempts_used + 1, MAX_ATTEMPTS + 1)
+        # Historical/exhausted claims are inspected exactly as before. Only a
+        # still-unspent attempt needs the reader rendezvous; failures consume
+        # no claim and are sealed as a retained completion, never auto-retried.
+        if any(not (directory / f"attempt-{number}").exists() for number in numbers):
+            try:
+                readers.enter_context(_released_log_readers(directory, registration, terminal))
+            except (fleet.Hold, OSError) as exc:
+                value = dict(state="ESCALATED", owner=OWNER, reason=str(exc),
+                    next_action="Resolve this exact reader release hold; retain all original claims and request fresh authority.")
+                numbers = ()
+        for number in numbers:
             attempt = directory / f"attempt-{number}"
             if attempt.exists():
                 outcome_path = attempt / "result.json"

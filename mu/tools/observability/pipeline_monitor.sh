@@ -472,7 +472,21 @@ switch_tail() {
     printf '\033[H\033[2J\033[3J'
     printf '\033[1;36mPane 1: live pipeline log\033[0m\n'
     printf '\033[1;36m── %s ──\033[0m\n' "$(basename "$new_log")"
-    tail -f "$new_log" &
+    # The follower owns its tail and terminal probe independently of this
+    # loop's root/bus refresh. The native completion rendezvous covers the
+    # exact observed pair through tail exit, including heartbeat replacement.
+    local helper="${RCX_OBS_LIFECYCLE_HELPER:-$OBSERVED_REPO_ROOT/mu/tools/executors/worktree_lifecycle.py}"
+    RCX_LOG_WATCH_ROOT="$OBSERVED_REPO_ROOT" RCX_LOG_WATCH_BUS="$BUS_DIR" RCX_LOG_WATCH_FILE="$new_log" \
+      python3 -I -B - "$helper" <<'FOLLOW_PY' &
+import os
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(sys.argv[1]).resolve().parent))
+import worktree_lifecycle
+worktree_lifecycle.follow_terminal_log(
+    Path(os.environ["RCX_LOG_WATCH_ROOT"]), os.environ["RCX_LOG_WATCH_BUS"],
+    Path(os.environ["RCX_LOG_WATCH_FILE"]))
+FOLLOW_PY
     tail_pid=$!
     current_log="$new_log"
     last_heartbeat_epoch="$(now_seconds)"

@@ -86,10 +86,29 @@ their fixed bus; a terminal record on a different bus cannot release the reader.
 The watcher moves its cwd to the surviving common-directory owner, checks
 terminal state before selection and attachment (including heartbeat and cold
 restart), and leaves the last output visible or renders a finite snapshot.
-It stops only its own tail; it never exempts readers from the generic retirement
-guard. An open writer still holds native completion. The same three-attempt
-budget and all historical claims remain unchanged; reader release grants no
-retry or retirement authority.
+The follower supervises its own tail and probes that exact terminal owner
+independently of root/bus refresh. A slow named-bus resolver cannot postpone
+reader release. A shared common-directory lock binds the physical checkout,
+Git directories and exact bus from attachment through tail exit and reaping.
+The child tail inherits that lock, so supervisor death alone cannot acknowledge
+release while the tail remains attached.
+
+Before spending an unspent completion claim, native completion acquires that
+lock exclusively and retains it through its normal completion gates. This
+acknowledges follower exit and prevents heartbeat or cold-restart attachment
+during retirement. The rendezvous is bounded to two seconds; it changes neither
+the existing inter-attempt delay nor the three-attempt limit. An unacknowledged
+release seals an ESCALATED completion without a new claim. It does not signal
+the reader, reset a budget or retry automatically. `reader-release.json` binds
+successful acknowledgment to the terminal bytes and exact identity; it grants
+no retirement authority.
+
+The follower stops only the tail it created; it never exempts readers from the
+generic retirement guard. An open writer, unknown reader, live native owner or
+changed identity still holds completion. All historical claims remain spent.
+The slow-refresh regression uses the real root/bus resolver and keeps its
+refresh blocked through completion; writer and unknown-reader cases retain
+their holds and replay protection.
 
 Supported inspection and bounded completion commands:
 
