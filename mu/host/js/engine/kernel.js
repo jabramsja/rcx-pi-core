@@ -20,11 +20,15 @@ const { validateBundle, _stage0VmStepTrusted, _stage0VmRunTrusted, muDeepEqual, 
 // Founder GO 2026-03-15: VM path is now primary for match.v2/subst.v2
 const _STAGE0_VM_CUTOVER = true;
 let _STAGE0_SHADOW_ENABLED = false; // Shadow disabled (cutover=true makes shadow dead code)
+// Canonical Mu SHA-256 of the complete compiler artifacts, not source labels.
+// Data-only integrity anchors keep bundle loading outside the engine boundary.
+// test_engine_pipeline_discipline recompiles verified seeds, checks both hash
+// implementations and proves that changing any slot's content/pin restores replay.
 const _VM_CONFIG_BUNDLE_SLOTS = Object.freeze([
-  ['kernelBundle', true],
-  ['bridgeBundle', false],
-  ['matchBundle', true],
-  ['substBundle', true],
+  ['kernelBundle', true, 'b901dd5d8115f1bd1bc82f2c11e9728cad80eb45386bf2d32426e06f690c798b'],
+  ['bridgeBundle', false, 'c7c616ba65d9d9a1ec79a78c2f97f5edf65a16b6ef08a915162a50d5073c28f7'],
+  ['matchBundle', true, '5f01d854b915b73841eb2345f8856dd32d9df69ae31b667d2bd92b94a3824d72'],
+  ['substBundle', true, '899044137f67b4089f2d6a8ec3485a26efc72c50a4404a5b41da0daa828f4473'],
 ]);
 const _VM_CONFIG_TRUST_TOKEN = Object.freeze({
   tag: 'validated_vm_config_trust_token',
@@ -41,7 +45,8 @@ const _vmConfigTrust = {
       );
     }
     const trustedConfig = {};
-    for (const [slotName, required] of _VM_CONFIG_BUNDLE_SLOTS) {
+    let domainContinuationSafe = true;
+    for (const [slotName, required, canonicalHash] of _VM_CONFIG_BUNDLE_SLOTS) {
       if (!Object.hasOwn(vmConfig, slotName)) {
         if (required) {
           throw new Error(`SECURITY: vmConfig.${slotName} is required for trusted Stage0 VM execution`);
@@ -57,6 +62,10 @@ const _vmConfigTrust = {
       try {
         const snapshot = muCopy(bundle, true, `vmConfig.${slotName}`);
         validateBundle(snapshot);
+        // Structural validity alone does not establish this slot's semantics.
+        // Only exact compiled content can justify omitting domain binding replay;
+        // other valid bundles retain the existing replay and its rejection rules.
+        domainContinuationSafe = domainContinuationSafe && muHash(snapshot) === canonicalHash;
         const freezeStack = [snapshot];
         while (freezeStack.length > 0) {
           const node = freezeStack.pop();
@@ -74,6 +83,7 @@ const _vmConfigTrust = {
         );
       }
     }
+    trustedConfig.domainContinuationSafe = domainContinuationSafe;
     Object.freeze(trustedConfig);
     return trustedConfig;
   },
@@ -1240,7 +1250,11 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
         }
       }
-    } else if (useDomainValidation) {
+    } else if (useDomainValidation && !(trustedContinuationProof &&
+        vmConfig && vmConfig.domainContinuationSafe && continuationProof.vmConfig === vmConfig)) {
+      // Public resumes and noncanonical VM slots must replay binding. Private
+      // continuations may skip it only for the same immutable, content-checked
+      // VM configuration as well as the proved input, projections and watchdog.
       const projectionHashes = new Set();
       const bodyHashes = new Set();
       const projectionContexts = [];
@@ -1653,6 +1667,9 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
                 continue;
               }
               expectedBindings = matchResult._bindings;
+              // Use the paired Python continuation replay's 1000-step bound.
+              // The guarded-prefix workload exceeds 100 substitution steps;
+              // exhaustion still throws and only subst_done establishes binding.
               const substOutcome = _stage0VmRunTrusted(vmConfig.substBundle, muContainers.record([
                 ['subst', muContainers.record([
                   ['body', context.projection.body],
@@ -1662,7 +1679,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
                   ['_input', kernelInput._step],
                   ['_remaining', context.projectionRest],
                 ])],
-              ]), 100);
+              ]), 1000);
               expectedSubst = substOutcome.root;
               if (expectedSubst === null ||
                   typeof expectedSubst !== 'object' ||
@@ -2178,6 +2195,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
       normalizedInput: kernelInput._step,
       projectionAuthority: kernelInput._projs,
       watchdogCap,
+      vmConfig,
     }),
   };
 }

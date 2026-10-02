@@ -1,0 +1,2117 @@
+{
+  "description": "Complete finite outcomes asserted after verified Mu execution. Untouched transition rows are open obligations; demanded rows must be guarded. Resume uses the actual previous tail. Matcher-facing numeric data uses canonical StructuralNumbers; raw host integer/float leaves are unsupported.",
+  "max_steps": 96,
+  "vectors": [
+    {
+      "id": "constant_three",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      }
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": {
+                  "take": {
+                    "take": null
+                  }
+                }
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "ok",
+          "window": {
+            "_co_window": {
+              "from": {
+                "_co_position": {
+                  "path": {
+                    "_co_position_path": null
+                  }
+                }
+              },
+              "through": {
+                "_co_position": {
+                  "path": {
+                    "_co_position_path": {
+                      "step": "next",
+                      "rest": {
+                        "_co_position_path": {
+                          "step": "next",
+                          "rest": {
+                            "_co_position_path": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "prefix": {
+                "_co_prefix": {
+                  "observation": {
+                    "_co_observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      },
+                      "position": {
+                        "_co_position": {
+                          "path": {
+                            "_co_position_path": null
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "step": {
+                    "_co_guarded_step": {
+                      "source": null,
+                      "observation": {
+                        "_co_observation": {
+                          "label": "state",
+                          "payload": {
+                            "_num": null
+                          },
+                          "position": {
+                            "_co_position": {
+                              "path": {
+                                "_co_position_path": null
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "next": null,
+                      "guard": "observed-before-tail"
+                    }
+                  },
+                  "rest": {
+                    "_co_prefix": {
+                      "observation": {
+                        "_co_observation": {
+                          "label": "state",
+                          "payload": {
+                            "_num": null
+                          },
+                          "position": {
+                            "_co_position": {
+                              "path": {
+                                "_co_position_path": {
+                                  "step": "next",
+                                  "rest": {
+                                    "_co_position_path": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "step": {
+                        "_co_guarded_step": {
+                          "source": null,
+                          "observation": {
+                            "_co_observation": {
+                              "label": "state",
+                              "payload": {
+                                "_num": null
+                              },
+                              "position": {
+                                "_co_position": {
+                                  "path": {
+                                    "_co_position_path": {
+                                      "step": "next",
+                                      "rest": {
+                                        "_co_position_path": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "next": null,
+                          "guard": "observed-before-tail"
+                        }
+                      },
+                      "rest": {
+                        "_co_prefix": {
+                          "observation": {
+                            "_co_observation": {
+                              "label": "state",
+                              "payload": {
+                                "_num": null
+                              },
+                              "position": {
+                                "_co_position": {
+                                  "path": {
+                                    "_co_position_path": {
+                                      "step": "next",
+                                      "rest": {
+                                        "_co_position_path": {
+                                          "step": "next",
+                                          "rest": {
+                                            "_co_position_path": null
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "step": {
+                            "_co_guarded_step": {
+                              "source": null,
+                              "observation": {
+                                "_co_observation": {
+                                  "label": "state",
+                                  "payload": {
+                                    "_num": null
+                                  },
+                                  "position": {
+                                    "_co_position": {
+                                      "path": {
+                                        "_co_position_path": {
+                                          "step": "next",
+                                          "rest": {
+                                            "_co_position_path": {
+                                              "step": "next",
+                                              "rest": {
+                                                "_co_position_path": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "next": null,
+                              "guard": "observed-before-tail"
+                            }
+                          },
+                          "rest": {
+                            "_co_prefix": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "finite": true
+            }
+          },
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      }
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": {
+                        "step": "next",
+                        "rest": {
+                          "_co_position_path": {
+                            "step": "next",
+                            "rest": {
+                              "_co_position_path": {
+                                "step": "next",
+                                "rest": {
+                                  "_co_position_path": null
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "emissions": 3
+    },
+    {
+      "id": "alternating_three",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": "A"
+                    },
+                    "next": {
+                      "next": {
+                        "next": null
+                      }
+                    }
+                  },
+                  "rest": {
+                    "transition": {
+                      "undemanded": "not a transition"
+                    },
+                    "rest": {
+                      "transition": {
+                        "guard": "observed-before-tail",
+                        "observation": {
+                          "label": "state",
+                          "payload": "B"
+                        },
+                        "next": null
+                      },
+                      "rest": null
+                    }
+                  }
+                },
+                "next": {
+                  "next": {
+                    "next": null
+                  }
+                },
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": {
+                  "take": {
+                    "take": null
+                  }
+                }
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "ok",
+          "window": {
+            "_co_window": {
+              "from": {
+                "_co_position": {
+                  "path": {
+                    "_co_position_path": null
+                  }
+                }
+              },
+              "through": {
+                "_co_position": {
+                  "path": {
+                    "_co_position_path": {
+                      "step": "next",
+                      "rest": {
+                        "_co_position_path": {
+                          "step": "next",
+                          "rest": {
+                            "_co_position_path": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "prefix": {
+                "_co_prefix": {
+                  "observation": {
+                    "_co_observation": {
+                      "label": "state",
+                      "payload": "B",
+                      "position": {
+                        "_co_position": {
+                          "path": {
+                            "_co_position_path": null
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "step": {
+                    "_co_guarded_step": {
+                      "source": {
+                        "next": {
+                          "next": null
+                        }
+                      },
+                      "observation": {
+                        "_co_observation": {
+                          "label": "state",
+                          "payload": "B",
+                          "position": {
+                            "_co_position": {
+                              "path": {
+                                "_co_position_path": null
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "next": null,
+                      "guard": "observed-before-tail"
+                    }
+                  },
+                  "rest": {
+                    "_co_prefix": {
+                      "observation": {
+                        "_co_observation": {
+                          "label": "state",
+                          "payload": "A",
+                          "position": {
+                            "_co_position": {
+                              "path": {
+                                "_co_position_path": {
+                                  "step": "next",
+                                  "rest": {
+                                    "_co_position_path": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "step": {
+                        "_co_guarded_step": {
+                          "source": null,
+                          "observation": {
+                            "_co_observation": {
+                              "label": "state",
+                              "payload": "A",
+                              "position": {
+                                "_co_position": {
+                                  "path": {
+                                    "_co_position_path": {
+                                      "step": "next",
+                                      "rest": {
+                                        "_co_position_path": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "next": {
+                            "next": {
+                              "next": null
+                            }
+                          },
+                          "guard": "observed-before-tail"
+                        }
+                      },
+                      "rest": {
+                        "_co_prefix": {
+                          "observation": {
+                            "_co_observation": {
+                              "label": "state",
+                              "payload": "B",
+                              "position": {
+                                "_co_position": {
+                                  "path": {
+                                    "_co_position_path": {
+                                      "step": "next",
+                                      "rest": {
+                                        "_co_position_path": {
+                                          "step": "next",
+                                          "rest": {
+                                            "_co_position_path": null
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "step": {
+                            "_co_guarded_step": {
+                              "source": {
+                                "next": {
+                                  "next": null
+                                }
+                              },
+                              "observation": {
+                                "_co_observation": {
+                                  "label": "state",
+                                  "payload": "B",
+                                  "position": {
+                                    "_co_position": {
+                                      "path": {
+                                        "_co_position_path": {
+                                          "step": "next",
+                                          "rest": {
+                                            "_co_position_path": {
+                                              "step": "next",
+                                              "rest": {
+                                                "_co_position_path": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "next": null,
+                              "guard": "observed-before-tail"
+                            }
+                          },
+                          "rest": {
+                            "_co_prefix": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "finite": true
+            }
+          },
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": "A"
+                    },
+                    "next": {
+                      "next": {
+                        "next": null
+                      }
+                    }
+                  },
+                  "rest": {
+                    "transition": {
+                      "undemanded": "not a transition"
+                    },
+                    "rest": {
+                      "transition": {
+                        "guard": "observed-before-tail",
+                        "observation": {
+                          "label": "state",
+                          "payload": "B"
+                        },
+                        "next": null
+                      },
+                      "rest": null
+                    }
+                  }
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": {
+                        "step": "next",
+                        "rest": {
+                          "_co_position_path": {
+                            "step": "next",
+                            "rest": {
+                              "_co_position_path": {
+                                "step": "next",
+                                "rest": {
+                                  "_co_position_path": null
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "emissions": 3
+    },
+    {
+      "id": "empty_demand",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": null,
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": null,
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "ok",
+          "window": {
+            "_co_window": {
+              "from": {
+                "_co_position": {
+                  "path": {
+                    "_co_position_path": null
+                  }
+                }
+              },
+              "through": null,
+              "prefix": {
+                "_co_prefix": null
+              },
+              "finite": true
+            }
+          },
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": null,
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "finite_open_tail",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "done": true
+                      }
+                    },
+                    "next": {
+                      "next": null
+                    }
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "ok",
+          "window": {
+            "_co_window": {
+              "from": {
+                "_co_position": {
+                  "path": {
+                    "_co_position_path": null
+                  }
+                }
+              },
+              "through": {
+                "_co_position": {
+                  "path": {
+                    "_co_position_path": null
+                  }
+                }
+              },
+              "prefix": {
+                "_co_prefix": {
+                  "observation": {
+                    "_co_observation": {
+                      "label": "state",
+                      "payload": {
+                        "done": true
+                      },
+                      "position": {
+                        "_co_position": {
+                          "path": {
+                            "_co_position_path": null
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "step": {
+                    "_co_guarded_step": {
+                      "source": null,
+                      "observation": {
+                        "_co_observation": {
+                          "label": "state",
+                          "payload": {
+                            "done": true
+                          },
+                          "position": {
+                            "_co_position": {
+                              "path": {
+                                "_co_position_path": null
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "next": {
+                        "next": null
+                      },
+                      "guard": "observed-before-tail"
+                    }
+                  },
+                  "rest": {
+                    "_co_prefix": null
+                  }
+                }
+              },
+              "finite": true
+            }
+          },
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "done": true
+                      }
+                    },
+                    "next": {
+                      "next": null
+                    }
+                  },
+                  "rest": null
+                },
+                "next": {
+                  "next": null
+                },
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": {
+                        "step": "next",
+                        "rest": {
+                          "_co_position_path": null
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "emissions": 1
+    },
+    {
+      "id": "split_resumed",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": "A"
+                    },
+                    "next": {
+                      "next": {
+                        "next": null
+                      }
+                    }
+                  },
+                  "rest": {
+                    "transition": {
+                      "undemanded": "not a transition"
+                    },
+                    "rest": {
+                      "transition": {
+                        "guard": "observed-before-tail",
+                        "observation": {
+                          "label": "state",
+                          "payload": "B"
+                        },
+                        "next": null
+                      },
+                      "rest": null
+                    }
+                  }
+                },
+                "next": {
+                  "next": {
+                    "next": null
+                  }
+                },
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "ok",
+          "window": {
+            "_co_window": {
+              "from": {
+                "_co_position": {
+                  "path": {
+                    "_co_position_path": null
+                  }
+                }
+              },
+              "through": {
+                "_co_position": {
+                  "path": {
+                    "_co_position_path": null
+                  }
+                }
+              },
+              "prefix": {
+                "_co_prefix": {
+                  "observation": {
+                    "_co_observation": {
+                      "label": "state",
+                      "payload": "B",
+                      "position": {
+                        "_co_position": {
+                          "path": {
+                            "_co_position_path": null
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "step": {
+                    "_co_guarded_step": {
+                      "source": {
+                        "next": {
+                          "next": null
+                        }
+                      },
+                      "observation": {
+                        "_co_observation": {
+                          "label": "state",
+                          "payload": "B",
+                          "position": {
+                            "_co_position": {
+                              "path": {
+                                "_co_position_path": null
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "next": null,
+                      "guard": "observed-before-tail"
+                    }
+                  },
+                  "rest": {
+                    "_co_prefix": null
+                  }
+                }
+              },
+              "finite": true
+            }
+          },
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": "A"
+                    },
+                    "next": {
+                      "next": {
+                        "next": null
+                      }
+                    }
+                  },
+                  "rest": {
+                    "transition": {
+                      "undemanded": "not a transition"
+                    },
+                    "rest": {
+                      "transition": {
+                        "guard": "observed-before-tail",
+                        "observation": {
+                          "label": "state",
+                          "payload": "B"
+                        },
+                        "next": null
+                      },
+                      "rest": null
+                    }
+                  }
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": {
+                        "step": "next",
+                        "rest": {
+                          "_co_position_path": null
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "emissions": 1,
+      "resume": {
+        "window": {
+          "_co_window": {
+            "demand": {
+              "take": {
+                "take": null
+              }
+            },
+            "finite": true
+          }
+        },
+        "expected": {
+          "coinduction_prefix_result": {
+            "status": "ok",
+            "window": {
+              "_co_window": {
+                "from": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": {
+                        "step": "next",
+                        "rest": {
+                          "_co_position_path": null
+                        }
+                      }
+                    }
+                  }
+                },
+                "through": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": {
+                        "step": "next",
+                        "rest": {
+                          "_co_position_path": {
+                            "step": "next",
+                            "rest": {
+                              "_co_position_path": null
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "prefix": {
+                  "_co_prefix": {
+                    "observation": {
+                      "_co_observation": {
+                        "label": "state",
+                        "payload": "A",
+                        "position": {
+                          "_co_position": {
+                            "path": {
+                              "_co_position_path": {
+                                "step": "next",
+                                "rest": {
+                                  "_co_position_path": null
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "step": {
+                      "_co_guarded_step": {
+                        "source": null,
+                        "observation": {
+                          "_co_observation": {
+                            "label": "state",
+                            "payload": "A",
+                            "position": {
+                              "_co_position": {
+                                "path": {
+                                  "_co_position_path": {
+                                    "step": "next",
+                                    "rest": {
+                                      "_co_position_path": null
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "next": {
+                          "next": {
+                            "next": null
+                          }
+                        },
+                        "guard": "observed-before-tail"
+                      }
+                    },
+                    "rest": {
+                      "_co_prefix": {
+                        "observation": {
+                          "_co_observation": {
+                            "label": "state",
+                            "payload": "B",
+                            "position": {
+                              "_co_position": {
+                                "path": {
+                                  "_co_position_path": {
+                                    "step": "next",
+                                    "rest": {
+                                      "_co_position_path": {
+                                        "step": "next",
+                                        "rest": {
+                                          "_co_position_path": null
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "step": {
+                          "_co_guarded_step": {
+                            "source": {
+                              "next": {
+                                "next": null
+                              }
+                            },
+                            "observation": {
+                              "_co_observation": {
+                                "label": "state",
+                                "payload": "B",
+                                "position": {
+                                  "_co_position": {
+                                    "path": {
+                                      "_co_position_path": {
+                                        "step": "next",
+                                        "rest": {
+                                          "_co_position_path": {
+                                            "step": "next",
+                                            "rest": {
+                                              "_co_position_path": null
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "next": null,
+                            "guard": "observed-before-tail"
+                          }
+                        },
+                        "rest": {
+                          "_co_prefix": null
+                        }
+                      }
+                    }
+                  }
+                },
+                "finite": true
+              }
+            },
+            "tail": {
+              "_co_tail": {
+                "open": true,
+                "obligation": {
+                  "machine": {
+                    "transition": {
+                      "guard": "observed-before-tail",
+                      "observation": {
+                        "label": "state",
+                        "payload": "A"
+                      },
+                      "next": {
+                        "next": {
+                          "next": null
+                        }
+                      }
+                    },
+                    "rest": {
+                      "transition": {
+                        "undemanded": "not a transition"
+                      },
+                      "rest": {
+                        "transition": {
+                          "guard": "observed-before-tail",
+                          "observation": {
+                            "label": "state",
+                            "payload": "B"
+                          },
+                          "next": null
+                        },
+                        "rest": null
+                      }
+                    }
+                  },
+                  "next": null,
+                  "position": {
+                    "_co_position": {
+                      "path": {
+                        "_co_position_path": {
+                          "step": "next",
+                          "rest": {
+                            "_co_position_path": {
+                              "step": "next",
+                              "rest": {
+                                "_co_position_path": {
+                                  "step": "next",
+                                  "rest": {
+                                    "_co_position_path": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "emissions": 2
+      }
+    },
+    {
+      "id": "missing_guard",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "observation": {
+                      "label": "state",
+                      "payload": "A"
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "missing_guard"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "missing_observation",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "missing_observation"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "false_guard",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": false,
+                    "observation": {
+                      "label": "state",
+                      "payload": "A"
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "unguarded_transition"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "malformed_observation",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "time",
+                      "payload": "A"
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_observation"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "missing_payload",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state"
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_observation"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "extra_transition_field",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": "A"
+                    },
+                    "next": null,
+                    "host_tick": true
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_transition"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "unsupported_transition",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": "iterator.next",
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_transition"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "malformed_next_reference",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": "A"
+                    },
+                    "next": {
+                      "next": {
+                        "_num": {
+                          "xI": {
+                            "xI": {
+                              "xH": null
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_reference"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "unresolved_initial",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      }
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": {
+                  "next": null
+                },
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "unresolved_reference"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "unresolved_after_observation",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "done": true
+                      }
+                    },
+                    "next": {
+                      "next": null
+                    }
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": {
+                  "take": null
+                }
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "unresolved_reference"
+        }
+      },
+      "emissions": 1
+    },
+    {
+      "id": "numeric_demand",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      }
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "finite": true,
+              "demand": {
+                "_num": {
+                  "xO": {
+                    "xH": null
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_demand"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "malformed_demand_suffix",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      }
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "finite": true,
+              "demand": {
+                "take": []
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_demand"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "nonfinite_window",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      }
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "finite": false,
+              "demand": null
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_window"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "extra_window_field",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      }
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "finite": true,
+              "demand": null,
+              "through": null
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_window"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "malformed_tail",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_tail"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "malformed_position",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      }
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": {
+                        "step": "clock",
+                        "rest": {
+                          "_co_position_path": null
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": {
+                "take": null
+              },
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_position"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "malformed_start_reference",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": {
+                        "_num": null
+                      }
+                    },
+                    "next": null
+                  },
+                  "rest": null
+                },
+                "next": [],
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": null,
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_reference"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "malformed_machine_tail",
+      "input": {
+        "coinduction_prefix": {
+          "tail": {
+            "_co_tail": {
+              "open": true,
+              "obligation": {
+                "machine": {
+                  "transition": {
+                    "guard": "observed-before-tail",
+                    "observation": {
+                      "label": "state",
+                      "payload": "A"
+                    },
+                    "next": null
+                  },
+                  "rest": false
+                },
+                "next": null,
+                "position": {
+                  "_co_position": {
+                    "path": {
+                      "_co_position_path": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "window": {
+            "_co_window": {
+              "demand": null,
+              "finite": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "malformed_machine"
+        }
+      },
+      "emissions": 0
+    },
+    {
+      "id": "unsupported_request",
+      "input": {
+        "coinduction_prefix": [
+          "host",
+          "iterator"
+        ]
+      },
+      "expected": {
+        "coinduction_prefix_result": {
+          "status": "rejected",
+          "reason": "unsupported_request"
+        }
+      },
+      "emissions": 0
+    }
+  ]
+}

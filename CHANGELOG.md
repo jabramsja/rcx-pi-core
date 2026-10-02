@@ -4,6 +4,34 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-02
+
+### Guarded finite Mu prefixes with dependency-safe continuation validation (Phase B; landing pending)
+
+- Carry only R9 commit `e5753108`'s Mu implementation delta from `cefb39d`:
+  the registered 32-projection program, 24 finite vectors, production Python/JS
+  kernel parity, causal execution-layer proof and both independent seed-inventory
+  repairs. Preserve canonical numeric admission and the original Coinduction foundation.
+- Reproduce the four-import engine dependency failure. Replace import-time bundle
+  hashes with data-only canonical-content pins, retaining the original dependency
+  map, immutable snapshots, exact private proof identity and paired 1000-step
+  substitution bound. Recompile verified seeds to check full artifacts and both
+  hosts' hashes; mutate each slot's content and pin to prove replay remains active
+  for noncanonical configurations. Original VM-order and public/forged continuation
+  rejection controls remain unchanged.
+- Generate the exact native growth-cap bytes from the immutable base and retain
+  all 268 PRIMARY task IDs and the canonical same-wave Ra tracker. Actual local
+  commands, results, timings and R9/R8 comparisons are recorded in
+  `reports/control_plane/mu-coinduction-guarded-prefix-r10-2026-10-02_implementation_evidence.json`.
+  Native review, indicators, commit, CI and landing remain pending. Finite prefix
+  evidence does not establish infinite productivity, full Coinduction or full L4.
+- PR1326's seven-source physical retirement remains independently verified in
+  `reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/pr1326_landed_live_cleanup_20261002.json`.
+  The same archive's `remaining_nine_landing_owner_recovery_paths_20261002.json`
+  retains nine pending useful-work owners. Recovery is not semantic landing;
+  R9, R8/PR1325 and retained-work owners remain open for native disposition after
+  replacement landing, without a new Mu prerequisite.
+
 ## 2026-10-01
 
 ### Residual folders and owned-reader coordination (Phase B; landing and retirement pending)

@@ -1,0 +1,25 @@
+{
+  "wave_id": "mu-coinduction-guarded-prefix-r10-2026-10-02",
+  "repeat_run_speedup_ratio": 0.931534,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.371599,
+  "repeat_run_raw_seconds": [
+    0.346157,
+    0.371599
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.346157
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.717756
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-10-02T11:19:17Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "cefb39d113bc7c2db3ac289fec8e302cdede5cbe"
+}
