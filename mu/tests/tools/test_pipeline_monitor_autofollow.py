@@ -60,8 +60,53 @@ def _watcher_tails(watcher, log):
     rows = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,command="],
                           capture_output=True, text=True, check=True,
                           timeout=_TIMEOUT_S).stdout.splitlines()
-    return [int(parts[0]) for row in rows if len(parts := row.strip().split(None, 2)) == 3
-            and parts[1] == str(watcher.pid) and "tail -f " in parts[2] and str(log) in parts[2]]
+    processes = [row.strip().split(None, 2) for row in rows]
+    descendants = {str(watcher.pid)}
+    while children := {p[0] for p in processes if len(p) == 3
+                       and p[1] in descendants and p[0] not in descendants}:
+        descendants.update(children)
+    return [int(p[0]) for p in processes if len(p) == 3 and p[0] in descendants
+            and "tail -f " in p[2] and str(log) in p[2]]
+
+
+@contextmanager
+def slow_autofollow(tmp_path, lane):
+    """Pause the real named-bus resolver after a reader has attached.
+
+    The barrier stays closed throughout completion, longer than the old three
+    attempts. Reader release must not wait for this unrelated root refresh.
+    """
+    from mu.tests.tools.test_worktree_lifecycle import fixture_identity
+    bus = ".agent_bus-" + fixture_identity(lane, "monitor")
+    activity = lane / bus / "executors/phase_b_state.json"
+    activity.parent.mkdir(parents=True)
+    activity.write_text('{"active": true}\n')
+    pause, entered = tmp_path / "pause-refresh", tmp_path / "refresh-entered"
+    helper = tmp_path / "slow-root.sh"
+    helper.write_text('''#!/usr/bin/env bash
+if [ "$1" = "--emit-pair" ] && [ -f "$RCX_TEST_REFRESH_PAUSE" ]; then
+  python3 -B - <<'PY'
+import os, time
+from pathlib import Path
+pause = Path(os.environ['RCX_TEST_REFRESH_PAUSE'])
+Path(os.environ['RCX_TEST_REFRESH_ENTERED']).touch()
+deadline = time.monotonic() + 30
+while pause.exists() and time.monotonic() < deadline:
+    time.sleep(0.05)
+PY
+fi
+exec bash "$RCX_TEST_REAL_ROOT_HELPER" "$@"
+''')
+    monitor_env = {
+        "RCX_OBS_REPO_ROOT": "", "RCX_OBS_ROOT_HELPER": str(helper),
+        "RCX_OBS_AUTOFOLLOW_BUS": "1", "RCX_LOG_WATCHER_HEARTBEAT_SECONDS": "300",
+        "RCX_TEST_REFRESH_PAUSE": str(pause), "RCX_TEST_REFRESH_ENTERED": str(entered),
+        "RCX_TEST_REAL_ROOT_HELPER": str(OBSERVABILITY_DIR / "_resolve_live_root.sh"),
+    }
+    try:
+        yield bus, monitor_env, pause, entered
+    finally:
+        pause.unlink(missing_ok=True)
 
 
 @contextmanager

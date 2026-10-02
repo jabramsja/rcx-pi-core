@@ -6,6 +6,26 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-01
 
+### Residual folders and owned-reader coordination (Phase B; landing and retirement pending)
+
+- Reproduce the PR1324 reader-release ordering with the real named-bus
+  autofollow resolver blocked through native completion: the original code
+  exhausts all three claims while its tail remains attached. Give the generated
+  follower an independent exact-terminal probe and a shared lock held through
+  tail exit. Native completion acquires the lock exclusively before spending
+  an unspent claim; failed acknowledgment retains the source without a new
+  claim. Writer, unknown-reader, identity and native-owner gates remain intact.
+- Generate exact-base native census, classification, useful-work coverage and
+  a new unspent public plan against landed `3f9d33b0`. Seven intended older
+  sources are conditional targets; ten entries remain HOLD. Mu R1's existing
+  fixed classifier protection prevents its selection within this locked scope.
+  Mu R8/PR1325 and this cleanup carrier remain explicitly protected.
+- Preserve the complete PRIMARY tracker and unresolved source owners. Mu
+  candidate comparisons remain unlanded evidence. The implementation report
+  records generator commands, preservation observations and local validation.
+  Native review/landing and foreground public APPLY/VERIFY remain pending;
+  this preparation claims no physical removal or useful-work closure.
+
 ### Structural growth-cap invocation (Phase B; landing pending)
 
 - Resolve explicit cap invocation authority independently of the structural

@@ -171,19 +171,19 @@ def test_native_base_copies_keep_history_index_remote_and_environment_independen
 
 
 def register_from_exited_owner(lane, env, *, status="stopped", result=None,
-                               role="native", closeout=False):
+                               role="native", closeout=False, bus_dir=".agent_bus"):
     program = (
         "import json,sys; from pathlib import Path; "
         "from mu.tools.executors import worktree_lifecycle as w; "
         "p=Path(sys.argv[1]); r=json.loads(sys.argv[3]); "
-        "d=w.register_lane(p,sys.argv[6],role=sys.argv[4]); "
+        "d=w.register_lane(p,sys.argv[6],role=sys.argv[4],bus_dir=sys.argv[7]); "
         "v=w.request_completion(d,status=sys.argv[2],result=r); "
         "w.publish_closeout(Path(v['record']),repo=p, "
         "handoff={'pre_commit_receipt_path':'.agent_bus/receipt.json'},result=r) "
         "if json.loads(sys.argv[5]) else None; print(v['record'])"
     )
     result = subprocess.run([sys.executable, "-c", program, str(lane), status,
-        json.dumps(result), role, json.dumps(closeout), fixture_identity(lane, "wave")],
+        json.dumps(result), role, json.dumps(closeout), fixture_identity(lane, "wave"), bus_dir],
         check=False, capture_output=True, text=True, env=env)
     if result.returncode:
         pytest.fail(f"Native lifecycle registration exited {result.returncode}:\n"
@@ -191,39 +191,52 @@ def register_from_exited_owner(lane, env, *, status="stopped", result=None,
     return Path(result.stdout.strip())
 
 
-@pytest.mark.parametrize("writer", [False, True], ids=["reader-retires", "writer-holds"])
-def test_finished_generated_reader_releases_within_native_completion_budget(native_lane, tmp_path, writer):
+@pytest.mark.parametrize("obstruction", [None, "writer", "unknown-reader"],
+                         ids=["reader-retires", "writer-holds", "unknown-reader-holds"])
+def test_finished_generated_reader_releases_within_native_completion_budget(native_lane, tmp_path, obstruction):
     from mu.tests.tools.test_pipeline_monitor_autofollow import (
-        generated_log_watcher, _wait_for, _watcher_tails)
+        generated_log_watcher, slow_autofollow, _wait_for, _watcher_tails)
     primary, lane, _, env = native_lane
     log = lane / ".scratch/commit_executor_live.log"
     log.parent.mkdir()
     log.write_text("last completed output\n")
     process = None
-    if writer:
+    if obstruction:
         process = subprocess.Popen([sys.executable, "-c",
-            "import os,sys; f=open(os.environ['RCX_TEST_WRITER_PATH'],'a'); "
+            "import os,sys; f=open(os.environ['RCX_TEST_WRITER_PATH'],os.environ['RCX_TEST_OPEN_MODE']); "
             "print('ready',flush=True); sys.stdin.readline()"], cwd=primary,
-            env=env | {"RCX_TEST_WRITER_PATH": str(log)}, stdin=subprocess.PIPE,
+            env=env | {"RCX_TEST_WRITER_PATH": str(log),
+                       "RCX_TEST_OPEN_MODE": "a" if obstruction == "writer" else "r"}, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, text=True)
         assert select.select([process.stdout], [], [], 10)[0]
         assert process.stdout.readline().strip() == "ready"
     try:
-        with generated_log_watcher(tmp_path, lane, env) as (watcher, output):
-            _wait_for(lambda: bool(_watcher_tails(watcher, log)))
-            directory = register_from_exited_owner(lane, env, status="success")
+        with slow_autofollow(tmp_path, lane) as (bus, monitor_env, pause, entered), \
+                generated_log_watcher(tmp_path, primary, env, monitor_env=monitor_env) as (watcher, output):
+            _wait_for(lambda: _watcher_tails(watcher, log))
+            pause.touch()
+            _wait_for(entered.exists)
+            assert _watcher_tails(watcher, log)
+            directory = register_from_exited_owner(lane, env, status="success", bus_dir=bus)
             terminal = (directory / "terminal.json").read_bytes()
             result = lifecycle.complete_pending(directory)
+            assert pause.exists()  # Root/bus refresh still has not returned.
+            if not obstruction:
+                assert result["state"] == "COMPLETE", result
             _wait_for(lambda: not _watcher_tails(watcher, log))
             assert watcher.poll() is None
             assert (directory / "terminal.json").read_bytes() == terminal
-            if writer:
+            if obstruction:
                 assert result["state"] == "ESCALATED", result
                 assert result["attempts_exhausted"] == lifecycle.MAX_ATTEMPTS
                 assert "Open target files/processes" in result["reason"], result
                 assert lane.exists() and process.poll() is None
             else:
                 assert result["state"] == "COMPLETE", result
+                assert len(list(directory.glob("attempt-*/claim.json"))) == 1
+                release = json.loads((directory / "reader-release.json").read_text())
+                assert release["terminal_sha256"] == fleet.digest(terminal)
+                assert release["state"] == "RELEASED"
                 assert not lane.exists()
                 assert (Path(result["destination"]) / ".scratch/commit_executor_live.log").read_text() == "last completed output\n"
             receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
@@ -232,6 +245,33 @@ def test_finished_generated_reader_releases_within_native_completion_budget(nati
             process.communicate(input="exit\n", timeout=10)
     assert lifecycle.complete_pending(directory, delay=0) == result
     assert all(p.read_bytes() == data for p, data in receipts.items())
+
+
+def test_unacknowledged_owned_reader_consumes_no_claim_and_cannot_replay(native_lane):
+    primary, lane, _, env = native_lane
+    directory = register_from_exited_owner(lane, env, status="success")
+    program = (
+        "import fcntl,sys; from pathlib import Path; "
+        "from mu.tools.executors import worktree_lifecycle as w; "
+        "f=w._log_reader_lock(w.lane_identity(Path(sys.argv[1])),'.agent_bus'); "
+        "fcntl.flock(f,fcntl.LOCK_SH); print('held',flush=True); sys.stdin.readline()")
+    reader = subprocess.Popen([sys.executable, "-c", program, str(lane)], cwd=primary,
+        env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert select.select([reader.stdout], [], [], 10)[0]
+        assert reader.stdout.readline().strip() == "held"
+        result = lifecycle.complete_pending(directory)
+        assert result["state"] == "ESCALATED"
+        assert "release not acknowledged" in result["reason"]
+        assert not list(directory.glob("attempt-*"))
+        assert not (directory / "reader-release.json").exists()
+        assert lane.exists() and reader.poll() is None
+        receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+    finally:
+        reader.communicate(input="released\n", timeout=10)
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert not list(directory.glob("attempt-*"))
+    assert all(p.read_bytes() == raw for p, raw in receipts.items())
 
 
 @pytest.mark.parametrize("hold", ["divergent", "live-owner"])
