@@ -1,0 +1,359 @@
+{
+  "wave_id": "workingrcx-postmerge-fixture-r1-2026-10-03",
+  "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+  "status": "PHASE_B_LOCAL_GATES_PASSED_NATIVE_REVIEW_PENDING",
+  "tracker_authority": "TASKS.md: 2026-10-03 tracker sync note for workingrcx-postmerge-fixture-r1-2026-10-03 is the single source of truth for L4 fields; native packet derives from that note",
+  "comparison_commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+  "carrier_start_commit": "8e26fd566bc188ea8d5b468ae6f6b9bbb578e40d",
+  "implementation": {
+    "method": "Adopt only the repaired postmerge test file byte-for-byte from the verified R2 worktree. Six inherited implementation/test files and four historical reports remain exact committed R2 bytes.",
+    "adopted_path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+    "adopted_sha256": "f1da85023f3cc6f47ee13a085efb6e51b28c47c78943c4bf8b43250d449511d5",
+    "regressions": [
+      "mount-warning",
+      "incomplete-process"
+    ],
+    "behavior": "Controlled disposable lsof fixtures reach child interpreters in successful cleanup and landed sync cases; existing assertions remain. Uncertain OS evidence still leaves the dirty base behind/in HOLD with no transaction, no carrier removal and unchanged index, staged/unstaged WIP, untracked bytes and stashes.",
+    "patch_verification": "The independent patch equals the hash-bound stopped worktree diff plus one trailing newline; that artifact formatting difference does not alter any hunk or source byte.",
+    "source_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r2-20261003"
+  },
+  "preservation_before": {
+    "checked_at_utc": "2026-10-03T13:04:31.845062+00:00",
+    "inventory_sha256": "d694d4d7e23be3f5bfdf59053a98380846c6f3b71486bc4a6ea857b7e344b715",
+    "patch_sha256": "d05d8bbda8808c40f01ecd120506ab7288ca0b94e741dfa749a017bfeb0feefb",
+    "source_files": 13,
+    "evidence_files": 29,
+    "checked_bindings": 191,
+    "errors": [],
+    "inherited_paths": [
+      "CHANGELOG.md",
+      "TASKS.md",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tools/executors/launch_wave.py",
+      "mu/tools/executors/phase_b_executor.py",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json",
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json"
+    ],
+    "frozen_hashes": {
+      "mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+      "mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42",
+      "mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+      "mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+      "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md": "0558ac51dfb2456d9b77af7ca59c593d948d4eddfef87879205e062dd22ea036",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json": "6af110d1d3ea4e55fbb63960fb0db263e2bc7560b02df7429d88efb03280cf69",
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md": "742c4491afd0fc69f7661533b05c4b878036d05b8a1806006fe9b1b662d041ba",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json": "ee631f18758c4dc7acab4a3fd3541564ee99a1e8c054409918e64eac9e811e92"
+    },
+    "fence": [
+      "CHANGELOG.md",
+      "TASKS.md",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tools/executors/launch_wave.py",
+      "mu/tools/executors/phase_b_executor.py",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json",
+      "reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_implementation_evidence.json",
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md",
+      "reports/deferred/non_blocking/workingrcx-postmerge-fixture-r1-2026-10-03_bridge_nonblockers.md",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json",
+      "reports/l4_wave_indicators/workingrcx-postmerge-fixture-r1-2026-10-03.json"
+    ],
+    "candidate_paths": [
+      "CHANGELOG.md",
+      "TASKS.md",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tools/executors/launch_wave.py",
+      "mu/tools/executors/phase_b_executor.py",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json",
+      "reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_2026-10-03.md",
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json"
+    ],
+    "prior_lanes": {
+      "r1": {
+        "files": 57,
+        "git_bindings": 7
+      },
+      "original_cleanup": {
+        "files": 33,
+        "git_bindings": 7
+      }
+    },
+    "artifact_hashes": {
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/commit_ready_r2_preserved_sources_20261003.json": "d694d4d7e23be3f5bfdf59053a98380846c6f3b71486bc4a6ea857b7e344b715",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/commit_ready_r2_native_postmerge_fixture_repair_20261003.patch": "d05d8bbda8808c40f01ecd120506ab7288ca0b94e741dfa749a017bfeb0feefb",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/commit_ready_r2_repaired_full_pytest_validation_20261003.json": "b1adabb1a3814eb3500b769ab5b907fca183268ccc308ba12f7ff0e65823036e",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r2-20261003/.scratch/recovery_agent_workingrcx-commit-ready-resume-r2-2026-10-03-run-pre-push-script-1.txt": "55ada197d581744abac1c53c60b8f870931acd0eb7d7c9b60aaf9b0da96b9cdd",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r2-20261003/.agent_bus-commit-ready-resume-r2-20261003/recovery/recovery_status.json": "a8e7e681ee4981f826a3f1a21e3f7a25c6f6354a6ab25fe7b1544476566a2676",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_wave_config.json": "b83644375e0d2d292b08491c002567bcce4beae6c3131a2643002393ecc09dc4",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-postmerge-fixture-r1-20261003/.agent_bus-postmerge-fixture-r1-20261003/meta/candidate_authority/workingrcx-postmerge-fixture-r1-2026-10-03.spec.json": "766324b2e11f09cc8d6b2c666f77ae590e161d9b8ffecddba41663a404cc88f5",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-postmerge-fixture-r1-20261003/reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_2026-10-03.md": "0545254d762da0c2f47c8b4b219b43b8bf622dda54e7658b9701d068382cefbc"
+    },
+    "production_guards_sha256": {
+      "mu/tools/executors/commit_executor.py": "8ae6fe3ceef2c344bd967dc695278658aca71b0c54ce33d7112fe3b2e33b7455",
+      "mu/tools/executors/worktree_lifecycle.py": "7ec609743ae9977a4cceee0628e178f925bb58e4de3d09310e8e14cc3cfb2eec",
+      "mu/tools/executors/workingrcx_fleet_apply.py": "bf05e39afd9c06ead2acfc4cce37304b9bf75d8b646baff903074272f2a95252"
+    },
+    "source_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r2-20261003",
+    "source_git_bindings": {
+      "head": "8e26fd566bc188ea8d5b468ae6f6b9bbb578e40d",
+      "branch": "jabramsja/workingrcx-commit-ready-resume-r2-2026-10-03",
+      "config_sha256": "e9c3c4c94ab139974e0a9837804e66e40208111ae5f24f72c704a7e541171f27",
+      "raw_index_sha256": "75c7f9d25a576f8f7ae895701d4c555cde57863446067a4c84a5e07dff5a7ac8",
+      "index_entries_sha256": "1d54647eaa205498c85b1081e7a126c584b5d97886c82519f78ec615c8347021",
+      "staged_diff_sha256": "6b4c9dbb81e9fbc97e5c66d712c2e5bcb0b86d9ed207358a1a2a1a7d5c881825",
+      "unstaged_diff_sha256": "ba3657fc8ba96c8abdf0ad1ab551f795d6a8c692ea8f3e2ec4154d2d998bea8e",
+      "status": " M mu/tests/tools/test_commit_executor_post_merge_cleanup.py\nM  reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md\nM  reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json\n"
+    }
+  },
+  "preservation_method": {
+    "files": "Read-only SHA-256 of every source/evidence/config path in the preserved R2 inventory and 90 original/R1 file bindings in the committed R2 implementation evidence",
+    "git_environment": "GIT_OPTIONAL_LOCKS=0",
+    "git_commands": [
+      "git rev-parse HEAD",
+      "git branch --show-current",
+      "git rev-parse --git-path index",
+      "git ls-files --stage (R2 snapshot format)",
+      "git ls-files --stage -z (R1/original snapshot format)",
+      "git diff --cached --binary",
+      "git diff --binary",
+      "git status --short",
+      "git diff --name-only --cached",
+      "git diff --name-only"
+    ],
+    "identity": "Carrier HEAD and parent, local PRIMARY/dev/origin/dev, native config/spec comparison base and seventeen-path allowlist match the locked packet",
+    "historical_reports": "Compared to git show 8e26fd566bc188ea8d5b468ae6f6b9bbb578e40d:<path>, not the stopped tree's later staged metadata"
+  },
+  "candidate_authority": {
+    "basis": "Complete cumulative dev-based candidate; never use the unmerged carrier start as review base",
+    "comparison_commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+    "candidate_allowlist": [
+      "CHANGELOG.md",
+      "TASKS.md",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tools/executors/launch_wave.py",
+      "mu/tools/executors/phase_b_executor.py",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json",
+      "reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_implementation_evidence.json",
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md",
+      "reports/deferred/non_blocking/workingrcx-postmerge-fixture-r1-2026-10-03_bridge_nonblockers.md",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json",
+      "reports/l4_wave_indicators/workingrcx-postmerge-fixture-r1-2026-10-03.json"
+    ],
+    "inherited_paths": [
+      "CHANGELOG.md",
+      "TASKS.md",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tools/executors/launch_wave.py",
+      "mu/tools/executors/phase_b_executor.py",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json",
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json"
+    ],
+    "immutable_inherited_sha256": {
+      "mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+      "mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42",
+      "mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+      "mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+      "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md": "0558ac51dfb2456d9b77af7ca59c593d948d4eddfef87879205e062dd22ea036",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json": "6af110d1d3ea4e55fbb63960fb0db263e2bc7560b02df7429d88efb03280cf69",
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md": "742c4491afd0fc69f7661533b05c4b878036d05b8a1806006fe9b1b662d041ba",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json": "ee631f18758c4dc7acab4a3fd3541564ee99a1e8c054409918e64eac9e811e92"
+    },
+    "fresh_reviews": "Pending outer native Phase B/commit review of the complete cumulative candidate; no old receipt reused",
+    "native_outputs_pending": [
+      "reports/deferred/non_blocking/workingrcx-postmerge-fixture-r1-2026-10-03_bridge_nonblockers.md",
+      "reports/l4_wave_indicators/workingrcx-postmerge-fixture-r1-2026-10-03.json"
+    ]
+  },
+  "task_preservation": {
+    "source": "Current PRIMARY tracker plus byte-preserved native R2/current-wave Ra notes and explicit inherited lifecycle obligations",
+    "primary_tracker_sha256": "beb2985c1bbdbb12d1d424e70b70ca8bebc0c87acb0fd1b7371a34a6edf3a679",
+    "before": 268,
+    "after": 268,
+    "added": [],
+    "lost": [],
+    "ordered_queue_rows": 44,
+    "id_order_unchanged": true,
+    "queue_identity_order_unchanged": true,
+    "native_tracker_notes_unchanged": true,
+    "row38_wave": "workingrcx-postmerge-fixture-r1-2026-10-03",
+    "held_transaction": "467ab73478004be89b8b4298ea2e22fd",
+    "held_stash": "4989dd3d7962d92fe28b23a800de0bb6a461b6ad",
+    "remaining": "Original cleanup, five old targets, PR1325 eight-path/21-hunk exact coverage, all useful-work owners, original/R1/R2/current carrier retirement and unresolved/platform-paused Mu finding retain existing owners; no numbered prerequisite added",
+    "final_id_order_sha256": "43ff61debad41a405f763fb92ff8bc61377ddc69b59f348e98186189115e540e",
+    "final_queue_identity_sha256": "28382fda14d3956a6f490e91cfbe5327ba7f935cf0fd89a6524c23c9d09727a7"
+  },
+  "production_guards_sha256": {
+    "mu/tools/executors/commit_executor.py": "8ae6fe3ceef2c344bd967dc695278658aca71b0c54ce33d7112fe3b2e33b7455",
+    "mu/tools/executors/worktree_lifecycle.py": "7ec609743ae9977a4cceee0628e178f925bb58e4de3d09310e8e14cc3cfb2eec",
+    "mu/tools/executors/workingrcx_fleet_apply.py": "bf05e39afd9c06ead2acfc4cce37304b9bf75d8b646baff903074272f2a95252"
+  },
+  "prior_diagnostic_evidence": {
+    "classification": "Historical read-only repaired stopped-tree test evidence; not new-wave review, pre-push/CI, post-hook or landing authority",
+    "artifact": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/commit_ready_r2_repaired_full_pytest_validation_20261003.json",
+    "before": {
+      "failed": 9,
+      "passed": 11356,
+      "skipped": 15,
+      "duration_seconds": 1091.41,
+      "step": "native R2 run_pre_push_script failed"
+    },
+    "after": {
+      "exit_code": 0,
+      "passed": 11367,
+      "skipped": 15,
+      "duration_seconds": 1076.5,
+      "scope": "Complete canonical FAST pytest selection only; excludes shell audit's separate linters and JS end checks"
+    },
+    "recovery": "Stopped R2 recovery_status.json is inactive/exhausted; prepare_commit_candidate_authority rejected the repaired test path outside its twelve-path allowlist"
+  },
+  "validation_runs": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 tools/checks/linters/check_private_attr_access.py . mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "exit_code": 0,
+      "result": "Passed; no output or violations"
+    },
+    {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_post_merge_cleanup.py --tb=short",
+      "exit_code": 0,
+      "passed": 173,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 38.49
+    },
+    {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+      "exit_code": 0,
+      "passed": 351,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 1,
+      "duration_seconds": 1.79
+    }
+  ],
+  "post_landing_continuation": {
+    "owner": "Outer operator after actual merge, PRIMARY synchronization, preserved-state recheck and required focused post-hook checks",
+    "command": "PYTHONDONTWRITEBYTECODE=1 python3 /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/mu/tools/executors/launch_wave.py /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_wave_config.json --repo-root /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003 --bus-dir .agent_bus-fleet-residual-pr-folders-r1-20261003 --launch",
+    "executed": false,
+    "requirements": [
+      "Use newly landed PRIMARY public launcher with exact original config, repo and bus",
+      "Preserve original checkpoints, source, index, configs, terminal receipts and budgets; do not copy repaired source into stopped lanes",
+      "Require fresh current-candidate native approval; historical receipts are not new authority",
+      "Physical cleanup requires complete fresh process evidence; missing SMB lsof evidence remains HOLD",
+      "Original cleanup retains eligible APPLY/VERIFY and exact PR1325 coverage/disposition"
+    ]
+  },
+  "completion_boundary": {
+    "phase_b_local": "Fixture adoption, bounded tracker/changelog/evidence edits and declared local gates only",
+    "outer_owned_pending": [
+      "fresh native full-candidate reviews",
+      "staging and generated indicator/nonblocker outputs",
+      "mandatory commit/pre-push/CI gates",
+      "native push, PR and merge",
+      "PRIMARY synchronization",
+      "actual post-hook sweep",
+      "public original-cleanup continuation"
+    ],
+    "landing_claimed": false,
+    "physical_retirement_claimed": false,
+    "pr1325_closed": false
+  },
+  "limits": [
+    "No production process/lifecycle guard, runtime/substrate, model/access/safety setting, test-integrity exemption or retry/timeout budget changed",
+    "No pipeline launch, startup/preflight, attestation, commit/push/PR/merge/closeout command executed by this implementer",
+    "No live quota reader was available; no quota value inferred and no watchdog created",
+    "Fixture results and skipped system probes provide no physical-retirement readiness"
+  ],
+  "modified_by_implementer": [
+    "CHANGELOG.md",
+    "TASKS.md",
+    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+    "reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_implementation_evidence.json"
+  ],
+  "native_packet": "Present at implementer entry; locked packet unchanged by implementer",
+  "carried_r2_commit_merged": false,
+  "preservation_after": {
+    "checked_at_utc": "2026-10-03T13:10:22.560235+00:00",
+    "checked_bindings": 191,
+    "r2_source_files": 13,
+    "r2_evidence_files": 29,
+    "r1_file_bindings": 57,
+    "original_cleanup_file_bindings": 33,
+    "original_r1_git_bindings": 14,
+    "result": "All preserved file, Git, index, config, artifact, inherited-commit and production-guard bindings unchanged",
+    "errors": [],
+    "before_after_drift": {},
+    "method": "Same read-only preservation comparisons as before adoption; R2 index entry digest uses newline-delimited git ls-files --stage, original/R1 snapshots use -z",
+    "fixture_sha256": "f1da85023f3cc6f47ee13a085efb6e51b28c47c78943c4bf8b43250d449511d5"
+  },
+  "declared_gate": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 python3 tools/checks/linters/check_private_attr_access.py . mu/tests/tools/test_commit_executor_post_merge_cleanup.py && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_commit_executor_post_merge_cleanup.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+    "exit_code": 0,
+    "started_at_utc": "2026-10-03 13:08:41 UTC",
+    "finished_at_utc": "2026-10-03 13:09:28 UTC",
+    "execution": "Exact declared && chain; all three commands completed successfully. No full-candidate governance command was run by this implementer."
+  },
+  "validation_notes": {
+    "warnings": "Existing test_warn_stale_docs warning lists ten out-of-scope documents last verified 242 days ago; no change made to those documents",
+    "skips": "Neither fresh local pytest invocation reported skips. Prior stopped-tree FAST evidence has 15 skips and does not establish live process-evidence completeness.",
+    "post_hook": "The declared full local module includes both uncertain-evidence HOLD parameters and all four native merge-owner parameters. This is local test evidence; the required outer post-hook sweep has not run.",
+    "preservation_format": "Initial read-only probes used -z for the R2 index listing and byte-compared the patch to the raw diff. The snapshot instead hashes newline-delimited entries and the archived patch adds one trailing newline. Exact producer-format comparisons passed; raw index, source and evidence hashes never drifted."
+  },
+  "candidate_fence_check": {
+    "comparison_commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+    "allowed_paths": 17,
+    "current_paths": [
+      "CHANGELOG.md",
+      "TASKS.md",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tools/executors/launch_wave.py",
+      "mu/tools/executors/phase_b_executor.py",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json",
+      "reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_implementation_evidence.json",
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json"
+    ],
+    "current_path_count": 15,
+    "outside_allowlist": [],
+    "pending_native_outputs": [
+      "reports/deferred/non_blocking/workingrcx-postmerge-fixture-r1-2026-10-03_bridge_nonblockers.md",
+      "reports/l4_wave_indicators/workingrcx-postmerge-fixture-r1-2026-10-03.json"
+    ],
+    "qualification": "Inventory of the complete current cumulative dev-based candidate including untracked packet/evidence; native reviewer authority/receipts remain outer-owned."
+  }
+}

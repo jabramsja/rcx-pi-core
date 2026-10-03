@@ -6,6 +6,26 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-03
 
+### Complete postmerge cleanup fixtures on the preserved enabler (Phase B; landing pending)
+
+- Adopt the hash-bound native R2 postmerge test repair exactly. Successful
+  disposable transactions supply controlled `lsof` evidence to child processes;
+  mount-warning and incomplete-process regressions retain dirty base owners,
+  index/WIP/stashes and the carrier in HOLD. Existing assertions remain intact.
+- Carry the six source/test files and four historical reports byte-for-byte from
+  local, unmerged commit `8e26fd566bc188ea8d5b468ae6f6b9bbb578e40d`. Fresh native
+  review must cover the complete cumulative candidate against dev
+  `146ca4955dca1c56111fc482876290ee1c0b12e2` within the seventeen-path fence.
+  Production process/lifecycle guards remain unchanged.
+- Record fresh local gates and before/after preservation checks in
+  `reports/control_plane/workingrcx-postmerge-fixture-r1-2026-10-03_implementation_evidence.json`.
+  The prior stopped-tree result of 11,367 passed and 15 skipped is diagnostic
+  evidence; this wave still requires fresh native review, hooks, CI, landing and
+  PRIMARY synchronization. The successor retains row38, all 268 task IDs and
+  44 queue rows. Original cleanup continuation, PR1325 exact coverage, useful
+  work, held PRIMARY transaction/stash and the paused Mu finding remain owned.
+  Fixture results establish no physical retirement or complete SMB evidence.
+
 ### Preserved cleanup continuation and isolated fleet fixtures (Phase B; landing pending)
 
 - Carry the four hash-verified continuation source/test files from preserved
