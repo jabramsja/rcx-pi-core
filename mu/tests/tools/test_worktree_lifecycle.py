@@ -19,7 +19,7 @@ from mu.tools.executors import workingrcx_fleet_apply as fleet
 from tests.repo_root import REPO_ROOT
 from mu.tests.tools.test_workingrcx_fleet_apply import (
     fleet as retirement_fleet, retirement_fixture,
-    apply as retirement_apply)
+    apply as retirement_apply, fixture_lsof, require_system_lsof)
 
 
 def fixture_identity(lane, kind):
@@ -85,6 +85,8 @@ def native_git(tmp_path, monkeypatch):
     wrapper.write_text(f'#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL={shlex.quote(os.devnull)} '
                        f'exec {shlex.quote(real_git)} "$@"\n')
     wrapper.chmod(0o700)
+    lsof = fixture_lsof(bindir, root)
+    env["RCX_TEST_LSOF_RESPONSE"] = str(lsof.response)
     env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -197,6 +199,7 @@ def test_finished_generated_reader_releases_within_native_completion_budget(nati
     from mu.tests.tools.test_pipeline_monitor_autofollow import (
         generated_log_watcher, slow_autofollow, _wait_for, _watcher_tails)
     primary, lane, _, env = native_lane
+    require_system_lsof(lane, Path(env["RCX_TEST_LSOF_RESPONSE"]))
     log = lane / ".scratch/commit_executor_live.log"
     log.parent.mkdir()
     log.write_text("last completed output\n")
@@ -403,7 +406,9 @@ def test_landed_sync_admits_recovered_wip_and_rechecks_later_drift(native_lane, 
 def test_parallel_fixture_process_identity_controls(native_lane, tmp_path, monkeypatch, shared_branch):
     """A real peer holds a shared branch, but cannot own another fixture's lane."""
     primary, lane, git, env = native_lane
-    peer_primary, peer_lane, peer_git, peer_env = make_native_lane(tmp_path / "peer", monkeypatch)
+    # Keep each process's probe bound to its own fixture root.
+    with monkeypatch.context() as isolated:
+        peer_primary, peer_lane, peer_git, peer_env = make_native_lane(tmp_path / "peer", isolated)
     branch = git(lane, "branch", "--show-current")
     peer_branch = peer_git(peer_lane, "branch", "--show-current")
     wave = fixture_identity(lane, "wave")
@@ -1017,7 +1022,8 @@ def test_same_head_merge_completes_with_immutable_stopped_evidence(native_lane, 
     head = git(lane, "rev-parse", "HEAD")
     stopped = register_from_exited_owner(lane, env)
     first = lifecycle.complete_pending(stopped, delay=0)
-    assert first["state"] == "ESCALATED" and first["landing_owner"]["head"] == head
+    assert first["state"] == "ESCALATED" and first.get("landing_owner", {}).get("head") == head, first
+    assert [p.name for p in stopped.glob("attempt-*")] == ["attempt-1"]
     old = {p.relative_to(stopped): p.read_bytes() for p in stopped.rglob("*") if p.is_file()}
     git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
     git(primary, "push", "origin", "dev")
@@ -1048,11 +1054,14 @@ def test_same_head_merge_keeps_consumed_attempt_budget(native_lane, monkeypatch)
     git(lane, "commit", "-m", "retained work")
     head = git(lane, "rev-parse", "HEAD")
     stopped = register_from_exited_owner(lane, env)
-    assert lifecycle.complete_pending(stopped, delay=0)["state"] == "ESCALATED"
+    first = lifecycle.complete_pending(stopped, delay=0)
+    assert first["state"] == "ESCALATED" and first.get("landing_owner", {}).get("head") == head, first
+    assert [p.name for p in stopped.glob("attempt-*")] == ["attempt-1"]
     git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
     git(primary, "push", "origin", "dev")
     successor = register_from_exited_owner(lane, env, status="merged", result={"merge_sha": head})
     assert successor != stopped
+    assert json.loads((successor / "predecessor.json").read_bytes())["attempts_used"] == 1
     monkeypatch.setattr(fleet, "_absent_pid", lambda _pid: False)
     result = lifecycle.complete_pending(successor, delay=0)
     assert result["state"] == "ESCALATED" and result["attempts_exhausted"] == 3
@@ -1073,12 +1082,48 @@ def test_same_head_successor_requires_verified_merge_authority(native_lane, auth
     head = git(lane, "rev-parse", "HEAD")
     stopped = register_from_exited_owner(lane, env)
     first = lifecycle.complete_pending(stopped, delay=0)
+    assert first["state"] == "ESCALATED" and first.get("landing_owner", {}).get("head") == head, first
     before = fleet.tree_manifest(lane)
     with pytest.raises(fleet.Hold, match="merge authority"):
         lifecycle.request_completion(stopped, status="merged",
             result={"merge_sha": head if authority == "unlanded" else base})
     assert not list(stopped.glob("successor-*.json"))
     assert lifecycle.complete_pending(stopped, delay=0) == first
+    assert fleet.tree_manifest(lane) == before
+
+
+@pytest.mark.parametrize("stdout,stderr", [
+    ("", "lsof: WARNING: can't stat() smbfs file system /unavailable-mount\n"),
+    ("p123\ncunknown\n", ""),
+])
+def test_same_head_process_hold_cannot_become_verified_escalation(native_lane, stdout, stderr):
+    primary, lane, git, env = native_lane
+    (lane / "tracked").write_bytes(b"retained implementation\n")
+    git(lane, "add", "tracked")
+    git(lane, "commit", "-m", "retained implementation")
+    head = git(lane, "rev-parse", "HEAD")
+    response = Path(env["RCX_TEST_LSOF_RESPONSE"])
+    response.write_text(json.dumps(dict(returncode=1, stdout=stdout, stderr=stderr)))
+    stopped = register_from_exited_owner(lane, env)
+    first = lifecycle.complete_pending(stopped, delay=0)
+    assert first["state"] == "ESCALATED" and first["attempts_exhausted"] == lifecycle.MAX_ATTEMPTS, first
+    assert "uncertain lsof evidence" in first["reason"] and not first.get("landing_owner"), first
+    attempts = sorted(stopped.glob("attempt-*"))
+    assert [p.name for p in attempts] == [f"attempt-{n}" for n in range(1, lifecycle.MAX_ATTEMPTS + 1)]
+    assert all(json.loads((p / "result.json").read_bytes())["state"] == "PENDING" for p in attempts)
+    saved = {p: p.read_bytes() for p in stopped.rglob("*") if p.is_file()}
+    git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
+    git(primary, "push", "origin", "dev")
+    # Later clear evidence and a landed HEAD cannot reset consumed claims or
+    # turn an OS hold into the required useful-work/failed-closeout evidence.
+    response.write_text(json.dumps(dict(returncode=1, stdout="", stderr="")))
+    before = fleet.tree_manifest(lane)
+    with pytest.raises(fleet.Hold, match="verified pre-mutation escalation"):
+        lifecycle.request_completion(stopped, status="merged", result={"merge_sha": head})
+    assert not (stopped / "merged-successor.json").exists()
+    assert {p: p.read_bytes() for p in saved} == saved
+    assert lifecycle.complete_pending(stopped, delay=0) == first
+    assert sorted(stopped.glob("attempt-*")) == attempts
     assert fleet.tree_manifest(lane) == before
 
 
@@ -1111,7 +1156,8 @@ def test_same_head_successor_rechecks_immutable_predecessor_before_completion(na
     git(lane, "commit", "-m", "retained work")
     head = git(lane, "rev-parse", "HEAD")
     stopped = register_from_exited_owner(lane, env)
-    assert lifecycle.complete_pending(stopped, delay=0)["state"] == "ESCALATED"
+    first = lifecycle.complete_pending(stopped, delay=0)
+    assert first["state"] == "ESCALATED" and first.get("landing_owner", {}).get("head") == head, first
     git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
     git(primary, "push", "origin", "dev")
     successor = register_from_exited_owner(lane, env, status="merged", result={"merge_sha": head})
@@ -1136,8 +1182,8 @@ def test_live_dispatcher_failed_then_successful_commit_children_complete_after_e
         git(primary, "merge", "--ff-only", fixture_identity(lane, "branch"))
         git(primary, "push", "origin", "dev")
     # The real dispatcher and commit lifecycle boundaries run in separate
-    # processes. Only the mechanical commit body and recovery decision are
-    # supplied by the fixture; all owner, closeout and worker code remains real.
+    # processes. The fixture supplies the mechanical commit body, recovery
+    # decision and lsof observations; owner, closeout and worker code stays real.
     child_program = """
 import json, os, sys
 from pathlib import Path

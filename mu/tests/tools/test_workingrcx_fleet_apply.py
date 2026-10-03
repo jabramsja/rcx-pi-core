@@ -36,6 +36,56 @@ BINDING_REPORT = json.loads((REPO_ROOT / (
     "reports/control_plane/workingrcx-fleet-validation-convergence-r1-2026-09-27_retirement_evidence.json"
 )).read_bytes())
 BINDING_CAPTURE = BINDING_REPORT["root_cause_evidence"]["captured"]
+SYSTEM_LSOF = shutil.which("lsof")
+
+
+def fixture_lsof(bindir, root):
+    """Supply explicit OS evidence to parent and child interpreters alike.
+
+    Lifecycle/preservation tests must not depend on unrelated host mounts.
+    Keep the production parser and ps/PID checks; descriptor integration tests
+    explicitly restore the system probe below.
+    """
+    response, calls = bindir / "lsof-response.json", bindir / "lsof-calls.jsonl"
+    response.write_text(json.dumps(dict(returncode=1, stdout="", stderr="")))
+    program = """
+import json, os, sys
+from pathlib import Path
+root, response, calls = map(Path, sys.argv[1:4])
+args = sys.argv[4:]
+assert len(args) == 4 and args[:2] == ['-nP', '+D'] and args[3] == '-FpcfatDin', args
+target = Path(args[2])
+assert target.is_dir() and target.resolve().is_relative_to(root.resolve()), args
+with calls.open('a') as stream:
+    stream.write(json.dumps(args) + '\\n')
+value = json.loads(response.read_text())
+if 'executable' in value:
+    os.execv(value['executable'], [value['executable'], *args])
+sys.stdout.write(value['stdout'])
+sys.stderr.write(value['stderr'])
+raise SystemExit(value['returncode'])
+"""
+    wrapper = bindir / "lsof"
+    wrapper.write_text("#!/bin/sh\nexec " + shlex.join([
+        sys.executable, "-B", "-c", program, str(root), str(response), str(calls)]) + ' "$@"\n')
+    wrapper.chmod(0o700)
+    return SimpleNamespace(response=response, calls=calls)
+
+
+def require_system_lsof(target, response=None):
+    """Real descriptor proofs require an OS probe without availability warnings."""
+    if not SYSTEM_LSOF:
+        pytest.skip("lsof unavailable; production holds when OS evidence is unavailable")
+    try:
+        observed = subprocess.run([SYSTEM_LSOF, "-nP", "+D", str(target), "-FpcfatDin"],
+                                  capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        pytest.skip(f"System lsof unavailable; production holds: {exc}")
+    if observed.stderr or observed.returncode not in (0, 1):
+        pytest.skip(f"System lsof evidence unavailable; production holds: "
+                    f"exit={observed.returncode}, stderr={os.fsdecode(observed.stderr)!r}")
+    if response is not None:
+        response.write_text(json.dumps(dict(executable=SYSTEM_LSOF)))
 
 
 def git(f, root, *args):
@@ -82,6 +132,7 @@ def fleet(monkeypatch):
             f'#!/bin/sh\nGIT_CONFIG_NOSYSTEM=1 exec {shlex.quote(real_git)} '
             '-c core.compression=1 "$@"\n')
         wrapper.chmod(0o700)
+        lsof = fixture_lsof(bindir, root)
         env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
         for key in tuple(os.environ):
             if key.startswith("GIT_"):
@@ -89,7 +140,8 @@ def fleet(monkeypatch):
         for key, value in env.items():
             monkeypatch.setenv(key, value)
         f = SimpleNamespace(root=root, repo=root / "WorkingRCX", remote=root / "remote.git",
-                            git=shutil.which("git"), env=env, original_idle=apply.process_idle)
+                            git=shutil.which("git"), env=env, original_idle=apply.process_idle,
+                            lsof=lsof)
         assert f.git
         f.repo.mkdir()
         f.remote.mkdir()
@@ -170,7 +222,8 @@ def fleet(monkeypatch):
         git(f, f.repo, "remote", "add", "origin", str(f.remote))
         git(f, f.repo, "push", "-q", "origin", "dev")
         # Tests concerned with Git and preservation isolate OS process timing.
-        # The complete four-candidate success test below restores real probes.
+        # The four-candidate success test restores the production probe/parser
+        # with explicit lsof evidence; real descriptors have dedicated tests.
         monkeypatch.setattr(apply, "process_idle", lambda _ident, **_options: None)
         yield f
 
@@ -282,6 +335,7 @@ def test_orphan_admission_keeps_real_locks_and_whole_tree_process_fences(fleet, 
             with pytest.raises(apply.Hold, match="lock is active"):
                 apply.native_idle(target, apply.tree_manifest(target), reconcile_r1=True)
         return
+    require_system_lsof(target, f.lsof.response)
     code = ("import os,sys; "
             "f=open('tracked',sys.argv[1]) if sys.argv[1] else None; "
             "os.chdir('/') if f else None; print('ready',flush=True); sys.stdin.read()")
@@ -631,6 +685,7 @@ def test_ambiguous_interruption_blocks_second_preparation(fleet, monkeypatch):
 
 def test_process_probe_detects_target_cwd(fleet):
     f = fleet
+    require_system_lsof(f.targets[0], f.lsof.response)
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], cwd=f.targets[0])
     try:
         with pytest.raises(apply.Hold, match="Open target"):
@@ -1061,9 +1116,8 @@ def test_malformed_stale_lock_document_is_a_hold(native_evidence, raw):
 @pytest.mark.parametrize("mode, trusted, allowed", [("r", True, True), ("w", True, False),
                                                     ("cwd", True, False), ("r", False, False)])
 def test_real_open_descriptors_distinguish_readers_writers_and_cwd(native_evidence, monkeypatch, mode, trusted, allowed):
-    if not shutil.which("lsof"):
-        pytest.skip("lsof unavailable; production holds when OS evidence is unavailable")
     target, _ = native_evidence
+    require_system_lsof(target)
     source = target / "content.bin"
     source.write_bytes(b"stable captured bytes")
     code = ("import os,sys; p=sys.stdin.readline().strip(); m=sys.argv[1]; "
@@ -1796,6 +1850,7 @@ def test_captured_pid_reuse_requires_creation_identity_and_historical_bytes(flee
         apply.inspect_retirement(f.repo, entry)
         # A process using the source still holds even if recorded PID identity
         # is obsolete. Exercise the production whole-tree process probe.
+        require_system_lsof(target, f.lsof.response)
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], cwd=target)
         try:
             monkeypatch.setattr(apply, "process_idle", f.original_idle)
@@ -2355,6 +2410,9 @@ def test_supported_original_owner_cli_restores_0600_wip_and_only_observes_repeat
     foreign_bytes = git(f, f.repo, "cat-file", "-p", case.foreign_oid)
     first = recovery_cli(f, case)
     assert first.returncode == 0, (first.stdout, first.stderr)
+    probes = f.lsof.calls.read_bytes()
+    assert ["-nP", "+D", str(case.target), "-FpcfatDin"] in [
+        json.loads(line) for line in probes.splitlines()]
     value = json.loads(first.stdout)
     assert value["state"] == "RECOVERED"
     assert case.target.exists() and git(f, case.target, "rev-parse", "HEAD") == case.authority
@@ -2369,9 +2427,31 @@ def test_supported_original_owner_cli_restores_0600_wip_and_only_observes_repeat
     repeated = recovery_cli(f, case)
     assert repeated.returncode == 0, repeated.stderr
     assert json.loads(repeated.stdout) == value
+    assert f.lsof.calls.read_bytes() == probes  # Observation never re-enters admission.
     assert {str(p): p.read_bytes() for p in native_root.glob("*/*.json")} == saved
     assert (f.common / "worktrees" / case.target.name / "index").read_bytes() == index
     assert not (f.common / "rcx_fleet_apply_operations").exists()
+
+
+@pytest.mark.parametrize("stdout,stderr", [
+    ("", "lsof: WARNING: can't stat() smbfs file system /unavailable-mount\n"),
+    ("p123\ncunknown\n", ""),
+])
+def test_original_owner_cli_requires_complete_process_evidence_before_claim(fleet, stdout, stderr):
+    f = fleet
+    case = pending_sync_case(f)
+    f.lsof.response.write_text(json.dumps(dict(returncode=1, stdout=stdout, stderr=stderr)))
+    before = apply.transaction_state(case.target)
+    journal = case.journal.read_bytes()
+    stashes = git(f, f.repo, "stash", "list", "--format=%H%x00%gs")
+    result = recovery_cli(f, case)
+    assert result.returncode == 2 and "uncertain lsof evidence" in result.stderr, (result.stdout, result.stderr)
+    assert json.loads(f.lsof.calls.read_text().splitlines()[-1]) == [
+        "-nP", "+D", str(case.target), "-FpcfatDin"]
+    assert not case.claim.exists() and not case.result.exists()
+    assert case.journal.read_bytes() == journal
+    assert apply.transaction_state(case.target) == before
+    assert git(f, f.repo, "stash", "list", "--format=%H%x00%gs") == stashes
 
 
 @pytest.mark.parametrize("dependency", apply.SYNC_RECOVERY_DEPENDENCIES)

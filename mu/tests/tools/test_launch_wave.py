@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -39,6 +40,9 @@ import executor_common as ec  # noqa: E402  (public seam for the routing-record 
 import executor_dispatch as ed  # noqa: E402  (public dispatcher seams)
 import commit_executor as ce  # noqa: E402  (authoritative continuation producer)
 import phase_a_executor as pa  # noqa: E402
+from tests.tools.test_phase_b_executor import (  # noqa: E402,F401
+    commit_ready_resume_lane, real_pre_review_package, isolate_phase_b_pager_transport,
+)
 from meta_bridge_supervisor import check_tasks_authorization, compute_repo_state  # noqa: E402
 
 sys.path.insert(0, str(REPO_ROOT / "mu" / "tools" / "checks"))
@@ -48,6 +52,195 @@ import enforce_l4_execution_contract as l4_contract  # noqa: E402
 # --------------------------------------------------------------------------- #
 # Fixtures / helpers                                                           #
 # --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["legacy", "future"], indirect=True)
+def test_commit_ready_resume_native_public_continuation(commit_ready_resume_lane, monkeypatch, capsys):
+    import phase_b_executor as phase_b
+    lane = commit_ready_resume_lane
+    _forbid_phase_b_resume_producers(monkeypatch)
+    before = lane.state_path.read_bytes()
+    original_receipt = lane.receipts[0].read_bytes()
+    source_bytes = {p: (lane.repo / p).read_bytes() for p in lane.config.candidate_allowlist if (lane.repo / p).is_file()}
+    staged = subprocess.check_output(["git", "diff", "--cached", "--binary"], cwd=lane.repo)
+    calls = []
+    child_calls = []
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Completed implementation/review must not replay")
+
+    monkeypatch.setattr(phase_b, "run_bridge_review", forbidden)
+    monkeypatch.setattr(phase_b, "run_sdk_agents", forbidden)
+    def passing_gate(*args, **kwargs):
+        assert kwargs["timeout"] == json.loads(before)["implementer_mutation_context"]["pytest_gate_timeout"]
+        return {"passed": True}
+
+    monkeypatch.setattr(phase_b, "run_private_attr_gate", passing_gate)
+    monkeypatch.setattr(phase_b, "_run_pytest_on_files", passing_gate)
+    monkeypatch.setattr(phase_b, "run_pre_commit_supervisor", lane.approve)
+    lane.impl.invoke_implementer.side_effect = forbidden
+    monkeypatch.setitem(sys.modules, "phase_b_implementer", lane.impl)
+
+    def native_child(cmd, *, cwd, timeout):
+        assert cwd == lane.repo
+        child_calls.append(Path(cmd[1]).name)
+        assert cmd[cmd.index("--bus-dir") + 1] == lane.bus
+        if child_calls == ["phase_b_executor.py", "commit_executor.py"]:
+            handoff = Path(cmd[cmd.index("--handoff") + 1])
+            assert handoff.is_file()
+            assert not phase_b.implementer_failure_blocks_recovery(lane.repo, {"status": "error"}, bus_dir=lane.bus)
+            # Public dispatcher reaches its commit subprocess seam. No commit,
+            # hook, model, push or external action is run in this fixture.
+            return subprocess.CompletedProcess(cmd, 0, json.dumps({"status": "success"}), "")
+        assert child_calls == ["phase_b_executor.py"]
+        assert "--dispatcher-owned-recovery" in cmd
+        result = phase_b.run_phase_b(lane.repo, lane.plan_path, bus_dir=lane.bus,
+            routing_record_override=json.loads(cmd[cmd.index("--routing-record") + 1]))
+        assert result["status"] == "commit_ready", result
+        assert result["receipt_path"] != str(lane.receipts[0].relative_to(lane.repo))
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(result), "")
+
+    monkeypatch.setattr(ed, "_run_executor_in_group", native_child)
+    monkeypatch.setattr(ed, "resolve_repo_root_for_dispatch", lambda **kwargs: lane.repo)
+    monkeypatch.setattr(ed, "load_config", lambda: {})
+    monkeypatch.setattr(ed, "_LaneMonitor", Mock())
+    monkeypatch.setattr(ed, "_install_wave_end_signal_cleanup", Mock())
+    monkeypatch.setattr(ed, "_remove_wave_end_signal_cleanup", Mock())
+    monkeypatch.setattr(ed, "attempt_recovery", forbidden)
+
+    def dispatch(cmd, **kwargs):
+        assert cmd[2] == "phase-b"
+        calls.append(cmd)
+        capsys.readouterr()
+        code = ed.main(cmd[2:])
+        output = capsys.readouterr()
+        assert code == 0, output
+        return subprocess.CompletedProcess(cmd, code, output.out, output.err)
+
+    lw.run_wave_setup(lane.repo, lane.config, launch=True, runner=dispatch, bus_dir=lane.bus)
+    assert len(calls) == 1
+    assert child_calls == ["phase_b_executor.py", "commit_executor.py"]
+    assert not lane.state_path.exists()
+    adoption = json.loads((lane.repo / lane.bus / "meta/phase_b_commit_ready_adoption.json").read_bytes())
+    assert adoption["prepared_checkpoint_text"].encode("utf-8") == before
+    assert adoption["authority"]["state_sha256"] == hashlib.sha256(before).hexdigest()
+    assert lane.receipts[0].read_bytes() == original_receipt
+    assert {p: (lane.repo / p).read_bytes() for p in source_bytes} == source_bytes
+    assert subprocess.check_output(["git", "diff", "--cached", "--binary"], cwd=lane.repo) == staged
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(lane.repo, lane.config, launch=True, runner=dispatch, bus_dir=lane.bus)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("fault", [
+    "code", "tasks", "packet", "indicator", "index_only", "unstaged", "mode", "flags",
+    "approval", "bridge", "package", "checkpoint", "config", "receipt", "spent", "model",
+    "terminal_rejection", "envelope_present", "events_missing",
+])
+@pytest.mark.parametrize("commit_ready_resume_lane", ["legacy"], indirect=True)
+def test_commit_ready_resume_refuses_changed_or_incomplete_authority(commit_ready_resume_lane, monkeypatch, fault):
+    lane = commit_ready_resume_lane
+    repo = lane.repo
+    meta = repo / lane.bus / "meta"
+    available = meta / "launch_wave_dispatch_terminal.json"
+    config = lane.config
+    if fault in {"code", "tasks", "packet", "indicator", "index_only", "unstaged", "mode", "flags"}:
+        path = {"tasks": "TASKS.md", "packet": lane.plan_path, "indicator": lane.indicator_path}.get(fault, "f.py")
+        old = (repo / path).read_bytes()
+        if fault == "mode":
+            (repo / path).chmod(0o755)
+        elif fault == "flags":
+            _git(repo, "update-index", "--assume-unchanged", path)
+        elif fault == "indicator":
+            measured = json.loads(old)
+            measured["repeat_run_speedup_ratio"] += 1
+            (repo / path).write_text(json.dumps(measured, sort_keys=True) + "\n")
+        else:
+            (repo / path).write_bytes(old + b"\n# unrelated change\n")
+        if fault not in {"unstaged", "flags"}:
+            _git(repo, "add", path)
+        if fault == "index_only":
+            (repo / path).write_bytes(old)
+    elif fault == "approval":
+        lane.receipts[0].unlink()
+    elif fault == "bridge":
+        with sqlite3.connect(repo / lane.bus / "bridge.db") as conn:
+            conn.execute("UPDATE jobs SET terminal_decision = 'QUESTION' WHERE task_text LIKE '%private-attr%'")
+    elif fault == "package":
+        package = repo / ".scratch/phase_b_supervisor_package.json"
+        package.write_bytes(package.read_bytes() + b" ")
+    elif fault == "checkpoint":
+        lane.state_path.write_bytes(lane.state_path.read_bytes().replace(b'"bridge_rounds": 1', b'"bridge_rounds": 0'))
+    elif fault == "config":
+        config = dataclasses.replace(config, reviewer_agent="claude")
+    elif fault == "model":
+        bridge = repo / lane.bus / "bridge_config.json"
+        bridge.write_bytes(bridge.read_bytes() + b" ")
+    elif fault == "terminal_rejection":
+        events = repo / lane.bus / "observability/pipeline_agent_events.jsonl"
+        events.write_bytes(events.read_bytes().replace(b"commit_ready_status_refresh_ERROR_INTERNAL", b"commit_ready_status_refresh_NEEDS_PHASE_B"))
+    elif fault == "envelope_present":
+        raw = next((meta / "raw").glob("meta-*.txt"))
+        raw.write_text('BEGIN_META_ENVELOPE\n{"decision":"STOP_FOR_FOUNDER"}\nEND_META_ENVELOPE')
+    elif fault == "events_missing":
+        (repo / lane.bus / "observability/pipeline_agent_events.jsonl").unlink()
+    elif fault == "receipt":
+        available.unlink()
+    elif fault == "spent":
+        available.rename(meta / "launch_wave_dispatch_terminal.claimed.json")
+    snapshot_paths = [lane.state_path, available, repo / ".git/index",
+                      repo / ".scratch/phase_b_supervisor_package.json"]
+    snapshot_paths.extend(repo / p for p in lane.config.candidate_allowlist)
+    before = {str(p): p.read_bytes() if p.is_file() else None for p in snapshot_paths}
+    _forbid_phase_b_resume_producers(monkeypatch)
+
+    def forbidden(*a, **k):
+        raise AssertionError("Invalid authority must refuse before dispatch")
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(repo, config, launch=True, runner=forbidden, bus_dir=lane.bus)
+    assert {str(p): p.read_bytes() if p.is_file() else None for p in snapshot_paths} == before
+
+
+@pytest.mark.parametrize("outcome", ["historical_receipt", "missing_envelope", "changed_during_review"])
+@pytest.mark.parametrize("commit_ready_resume_lane", ["legacy"], indirect=True)
+def test_commit_ready_resume_requires_fresh_unchanged_approval(commit_ready_resume_lane, monkeypatch, outcome):
+    import phase_b_executor as phase_b
+    lane = commit_ready_resume_lane
+    meta = lane.repo / lane.bus / "meta"
+    original = lane.state_path.read_bytes()
+    calls = []
+    monkeypatch.setattr(phase_b, "run_private_attr_gate", lambda *a, **k: {"passed": True})
+    monkeypatch.setattr(phase_b, "_run_pytest_on_files", lambda *a, **k: {"passed": True})
+
+    def supervisor(*args, **kwargs):
+        calls.append(outcome)
+        if outcome == "missing_envelope":
+            return {"parsed": {"decision": "ERROR_INTERNAL"}, "receipt_path": ""}
+        if outcome == "historical_receipt":
+            return {"exit_code": 0, "parsed": {"decision": "COMMIT_GO"}, "receipt_path": str(lane.receipts[0])}
+        result = lane.approve(*args, **kwargs)
+        (lane.repo / "f.py").write_text("changed after approval\n")
+        return result
+
+    monkeypatch.setattr(phase_b, "run_pre_commit_supervisor", supervisor)
+
+    def dispatch(cmd, **kwargs):
+        result = phase_b.run_phase_b(lane.repo, lane.plan_path, bus_dir=lane.bus,
+            routing_record_override={**lane.route, "decision": "ROUTE_PHASE_B"})
+        assert result["step"] == "commit_ready_resume", result
+        assert result["status"] == "error"
+        return subprocess.CompletedProcess(cmd, 1)
+
+    with pytest.raises(lw.LaunchWaveError, match="dispatcher launch failed"):
+        lw.run_wave_setup(lane.repo, lane.config, launch=True, runner=dispatch, bus_dir=lane.bus)
+    assert not (lane.repo / lane.bus / "executors/phase_b_handoff.json").exists()
+    assert lane.state_path.read_bytes() == original
+    adoption = (meta / "phase_b_commit_ready_adoption.json").read_bytes()
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(lane.repo, lane.config, launch=True, runner=dispatch, bus_dir=lane.bus)
+    assert calls == [outcome]
+    assert (meta / "phase_b_commit_ready_adoption.json").read_bytes() == adoption
 
 _NOTE_HEADER_RE = re.compile(r"^- Tracker sync note \([^,]+,\s*([^)]+)\):", re.MULTILINE)
 _DISPATCHER_OVERRIDE_ENV_KEYS_FOR_TEST = (

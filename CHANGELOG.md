@@ -4,6 +4,26 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-03
+
+### Preserved cleanup continuation and isolated fleet fixtures (Phase B; landing pending)
+
+- Carry the four hash-verified continuation source/test files from preserved
+  commit `5547f803` and the two inventoried native fixture repairs. A separate
+  commit-ready checkpoint binds native late progress; public legacy adoption
+  preserves the prepared checkpoint, requires fresh approval of the unchanged
+  candidate and retains single-use terminal receipt semantics.
+- Isolate controlled `lsof` responses inside disposable repositories, including
+  child interpreters. Preserve real system-probe descriptor tests with explicit
+  availability skips. Incomplete evidence still blocks the public CLI before a
+  claim and cannot convert an exhausted lifecycle hold into predecessor authority.
+  Production process guards and attempt budgets are unchanged.
+- Fresh local validation and both stopped lanes' hash bindings are recorded in
+  `reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json`.
+  R2 replaces R1 under the existing cleanup owner. Native review, hooks, landing
+  and the original cleanup continuation remain pending; no physical retirement,
+  PR1325 disposition or useful-work completion is claimed.
+
 ## 2026-10-02
 
 ### Guarded finite Mu prefixes with dependency-safe continuation validation (Phase B; landing pending)

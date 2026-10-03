@@ -70,6 +70,7 @@ try:
         run_bridge_subprocess,
         resolve_agent_bus_dir,
         emit_pipeline_agent_event,
+        reviewer_launch_provenance,
     )
 except ImportError:
     # Fallback for direct execution
@@ -97,6 +98,7 @@ except ImportError:
     run_bridge_subprocess = _mod.run_bridge_subprocess
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
+    reviewer_launch_provenance = _mod.reviewer_launch_provenance
 
 _ACTIVE_BUS_DIR: ContextVar[Path | None] = ContextVar("phase_b_executor_bus_dir", default=None)
 
@@ -8079,6 +8081,398 @@ def _validate_private_attr_prepared_state(
     return None
 
 
+COMMIT_READY_STATUS = "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT"
+
+
+def commit_ready_resume_authority(
+    repo_root: Path, *, bus_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Validate the retained private-review -> commit-ready transition read-only.
+
+    This is deliberately limited to the observed ordinary private-attr case.
+    The old checkpoint and receipt remain evidence, never current approval.
+    Temporary indexes refer only to already existing Git objects; neither the
+    candidate index nor the object store is rewritten to manufacture authority.
+    """
+    if bus_dir is not None:
+        token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+        try:
+            return commit_ready_resume_authority(repo_root)
+        finally:
+            _ACTIVE_BUS_DIR.reset(token)
+    repo_root = Path(repo_root)
+
+    def read(path: Path) -> bytes:
+        if path.is_symlink() or not path.is_file():
+            raise PhaseBExecutorError(f"Missing regular commit-ready evidence: {path}")
+        return path.read_bytes()
+
+    def git(*args: str, input: bytes | None = None, env=None) -> bytes:
+        proc = subprocess.run(["git", *args], cwd=repo_root, input=input,
+                              capture_output=True, env=env or {**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+        if proc.returncode:
+            raise PhaseBExecutorError(f"Cannot read commit-ready Git evidence: {args[0]}")
+        return proc.stdout
+
+    state_path = _state_file_path(repo_root)
+    state_raw = read(state_path)
+    state = json.loads(state_raw)
+    if (not isinstance(state, dict)
+            or state.get("completed_step") != "private_attr_remediation_prepared_pending_review"
+            or state.get("native_supervisor_reentry_exhausted")
+            or _validate_resumable_state_shape(state_path, state) is not None):
+        raise PhaseBExecutorError("Not a completed ordinary private-review checkpoint")
+    payload = {k: v for k, v in state.items() if k != "private_attr_prepared_sha256"}
+    if state.get("private_attr_prepared_sha256") != _canonical_json_sha256(payload):
+        raise PhaseBExecutorError("Prepared checkpoint seal changed")
+    if ("implementer_mutation" not in state or _implementer_mutation_issue(state)
+            or state["implementer_mutation"]["state"] != "SUCCESS_PENDING_FINALIZE"
+            or state["implementer_mutation_context"]["kind"] != "private"):
+        raise PhaseBExecutorError("Prepared implementer ownership is invalid")
+    wave, plan_path = state["wave_id"], state["plan_path"]
+    if (state["private_attr_review_round"] != state["bridge_rounds"] + 1
+            or state["private_attr_review_summary"] !=
+            f"Phase B private-attr remediation review R{state['private_attr_review_round']} for {plan_path}"):
+        raise PhaseBExecutorError("Prepared review accounting changed")
+    route_path = agent_bus_path(repo_root, _active_bus_dir(), "meta", "post_merge_routing.json")
+    route_raw = read(route_path)
+    route = json.loads(route_raw)
+    before = state["private_attr_prepared_authority"]
+    if (before["candidate"] != _private_attr_candidate_binding(repo_root, wave, route)
+            or not before["candidate"]["required"]):
+        raise PhaseBExecutorError("Prepared candidate/role authority changed")
+    candidate_receipt = json.loads(read(_candidate_authority.receipt_path_for(
+        repo_root, bus_dir=_active_bus_dir(), wave_id=wave,
+        phase="phase_b", review_round=PHASE_B_BRIDGE_AUTHORITY_ROUND,
+    )))
+    try:
+        provenance = reviewer_launch_provenance(
+            repo_root, bus_dir=_active_bus_dir(),
+            selected_agent=route["candidate_authority"]["spec_identity"]["reviewer_agent"],
+        )
+    except ExecutorCommonError as exc:
+        raise PhaseBExecutorError(str(exc)) from exc
+    if provenance != candidate_receipt.get("reviewer_launch_provenance"):
+        raise PhaseBExecutorError("Reviewer command/model/config changed")
+    current = _private_attr_index_snapshot(repo_root, state["private_attr_review_files"])
+    prior = before["index"]
+    if any(current[k] != prior[k] for k in ("head_commit", "branch", "staged_files")):
+        raise PhaseBExecutorError("Commit-ready branch or inventory changed")
+    indicator = f"reports/l4_wave_indicators/{wave}.json"
+    permitted = {"TASKS.md", plan_path, indicator}
+    old_blobs = {v["path"]: v for v in prior["blobs"]}
+    new_blobs = {v["path"]: v for v in current["blobs"]}
+    if old_blobs.keys() != new_blobs.keys() or not permitted <= old_blobs.keys():
+        raise PhaseBExecutorError("Commit-ready metadata inventory changed")
+    entries = git("ls-files", "--stage", "-z")
+    old_entries = entries
+    for name, old in old_blobs.items():
+        new = new_blobs[name]
+        if old == new:
+            continue
+        if name not in permitted or old["mode"] != new["mode"] or old["mode"] != "100644":
+            raise PhaseBExecutorError(f"Unrelated candidate change: {name}")
+        original = git("cat-file", "blob", old["oid"])
+        if _sha256_bytes(original) != old["sha256"]:
+            raise PhaseBExecutorError("Prepared blob evidence changed")
+        old_entries = old_entries.replace(
+            f"{new['mode']} {new['oid']} 0\t{name}\0".encode(),
+            f"{old['mode']} {old['oid']} 0\t{name}\0".encode(),
+        )
+    if _sha256_bytes(old_entries) != prior["index_entries_sha256"]:
+        raise PhaseBExecutorError("Index outside the three producer paths changed")
+    flags = git("ls-files", "-v", "-z")
+    if any(row[:1] != b"H" for row in flags.split(b"\0") if row):
+        raise PhaseBExecutorError("Hidden index flags are not continuation authority")
+    old_packet = git("cat-file", "blob", old_blobs[plan_path]["oid"]).decode()
+    packet = read(repo_root / plan_path)
+
+    def status_text(text: str, status: str) -> bytes:
+        lines = text.splitlines()
+        positions = [i for i, line in enumerate(lines) if line.startswith("Status:")]
+        if len(positions) != 1:
+            raise PhaseBExecutorError("Ambiguous packet status")
+        lines[positions[0]] = f"Status: {status}"
+        return "\n".join(lines).encode()
+
+    if packet != status_text(old_packet, COMMIT_READY_STATUS):
+        raise PhaseBExecutorError("Packet changed beyond the producer status transition")
+    identity, error = _bridge_fix_active_identity(
+        repo_root, routing_record=route, plan=load_plan_packet(repo_root, plan_path),
+        plan_path=plan_path, wave_id=wave,
+    )
+    if error or identity != {**before["identity"], "plan_sha256": _sha256_bytes(packet)}:
+        raise PhaseBExecutorError("Commit-ready invocation identity changed")
+    package_path = repo_root / ".scratch/phase_b_supervisor_package.json"
+    package_raw = read(package_path)
+    package = json.loads(package_raw)
+    if (package.get("changed_files") != current["staged_files"]
+            or package.get("task_id") != identity["task_id"] or package.get("wave_name") != wave
+            or package.get("bridge_status") != {"rounds": state["private_attr_review_round"],
+                                                "total_rounds": state["private_attr_review_round"]}):
+        raise PhaseBExecutorError("Supervisor package scope or completed review accounting changed")
+    note = package["tracker_note_text"]
+    note_date = note.split("- Tracker sync note (", 1)[1].split(",", 1)[0]
+    expected_note = build_phase_b_tracker_note(
+        wave_id=wave, task_id=identity["task_id"], wave_class=package["wave_class"],
+        target_gate_id="G8", plan_path=plan_path, plan_content=old_packet,
+        changed_files=current["staged_files"], test_files=state["private_attr_gate_test_files"],
+        receipt_path=".scratch/phase_b_supervisor_package.json",
+        bridge_rounds=state["private_attr_review_round"], reentry=False,
+        founder_override=wave, pre_supervisor=True, tracker_date=note_date,
+        packet_evidence_command=package["evidence_command"], routing_record=route,
+    )
+    if note != expected_note:
+        raise PhaseBExecutorError("Tracker note is not the native pre-supervisor rendering")
+    old_tasks = git("cat-file", "blob", old_blobs["TASKS.md"]["oid"])
+    tasks = read(repo_root / "TASKS.md")
+    old_notes = _same_wave_tracker_note_indices(old_tasks, wave)
+    new_notes = _same_wave_tracker_note_indices(tasks, wave)
+    old_lines, new_lines = old_tasks.splitlines(keepends=True), tasks.splitlines(keepends=True)
+    if len(old_notes) != 1 or len(new_notes) != 1 or new_lines[new_notes[0]] != (note + "\n").encode():
+        raise PhaseBExecutorError("Missing exact producer tracker note")
+    old_lines.pop(old_notes[0])
+    new_lines.pop(new_notes[0])
+    if old_lines != new_lines:
+        raise PhaseBExecutorError("TASKS changed outside the same-wave tracker note")
+    old_indicator = json.loads(git("cat-file", "blob", old_blobs[indicator]["oid"]))
+    new_indicator = json.loads(read(repo_root / indicator))
+    measured = {"repeat_run_speedup_ratio", "step_growth_slope", "repeat_run_raw_seconds",
+                "step_growth_points", "collection_timestamp_utc"}
+    if (old_indicator.keys() != new_indicator.keys()
+            or {k: v for k, v in old_indicator.items() if k not in measured}
+            != {k: v for k, v in new_indicator.items() if k not in measured}):
+        raise PhaseBExecutorError("Indicator authority changed beyond fresh measurements")
+    # The historical receipt must authorize the complete intermediate index,
+    # including the refreshed tracker and measured indicator. Do not restamp it.
+    intermediate = status_text(old_packet, PHASE_B_PRE_SUPERVISOR_PENDING_STATUS)
+    intermediate_oid = git("hash-object", "--stdin", input=intermediate).decode().strip()
+    if git("cat-file", "blob", intermediate_oid) != intermediate:
+        raise PhaseBExecutorError("Missing retained pre-supervisor packet object")
+    with tempfile.TemporaryDirectory(prefix="rcx-commit-ready-proof-") as temp:
+        index = Path(temp) / "index"
+        index_path = Path(os.fsdecode(git("rev-parse", "--git-path", "index")).strip())
+        if not index_path.is_absolute():
+            index_path = repo_root / index_path
+        index.write_bytes(read(index_path))
+        env = {**os.environ, "GIT_INDEX_FILE": str(index), "GIT_OPTIONAL_LOCKS": "0"}
+        git("update-index", "--cacheinfo", f"100644,{intermediate_oid},{plan_path}", env=env)
+        approved_sha = _sha256_bytes(git("diff", "--cached", "--binary", env=env))
+    receipt_dir = agent_bus_path(repo_root, _active_bus_dir(), "meta", "pre_commit_receipts")
+    receipts = []
+    for path in receipt_dir.glob("*.json"):
+        raw = read(path)
+        value = json.loads(raw)
+        if (value.get("decision") in {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}
+                and value.get("staged_sha") == approved_sha
+                and value.get("package_digest") == _sha256_bytes(package_raw)[:16]
+                and value.get("package_path") == str(package_path)):
+            receipts.append((path, raw, value))
+    if len(receipts) != 1:
+        raise PhaseBExecutorError("Missing or ambiguous historical COMMIT_GO binding")
+    receipt_path, receipt_raw, _receipt = receipts[0]
+    db_path = agent_bus_path(repo_root, _active_bus_dir(), "bridge.db").resolve()
+    with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        jobs = conn.execute("SELECT * FROM jobs WHERE task_text = ?", (state["private_attr_review_summary"],)).fetchall()
+    if (len(jobs) != 1 or jobs[0]["status"] != "DONE" or jobs[0]["terminal_decision"] != "GO"
+            or jobs[0]["reader_agent"] != state["private_attr_review_reader"]
+            or jobs[0]["reviewer_agent"] != route["candidate_authority"]["spec_identity"]["reviewer_agent"]):
+        raise PhaseBExecutorError("Missing completed private-review owner")
+    job = dict(jobs[0])
+    envelope = _read_recovered_private_attr_envelope(
+        repo_root, job["job_id"], {"job_id": job["job_id"], "decision": "GO"},
+    )
+    if _classify_findings(envelope["findings"])[0]:
+        raise PhaseBExecutorError("Retained private review has blocking findings")
+    return {
+        "version": 1, "wave_id": wave, "plan_path": plan_path,
+        "pytest_gate_timeout": state["implementer_mutation_context"]["pytest_gate_timeout"],
+        "state_sha256": _sha256_bytes(state_raw), "route_sha256": _sha256_bytes(route_raw),
+        "candidate": before["candidate"], "index": current, "index_flags_sha256": _sha256_bytes(flags),
+        "package_sha256": _sha256_bytes(package_raw),
+        "initial_receipt_path": str(receipt_path.relative_to(repo_root)),
+        "initial_receipt_sha256": _sha256_bytes(receipt_raw), "approved_staged_sha": approved_sha,
+        "private_review_job_id": job["job_id"],
+        "private_review_sha256": _canonical_json_sha256({"job": job, "envelope": envelope}),
+    }
+
+
+def commit_ready_interruption_authority(
+    repo_root: Path, progress: dict[str, Any], *, bus_dir: str | Path | None = None,
+) -> dict[str, str]:
+    """Require the retained native missing-envelope sequence, not a rejection."""
+    bus = _active_bus_dir() if bus_dir is None else bus_dir
+    events_path = agent_bus_path(repo_root, bus, "observability", "pipeline_agent_events.jsonl")
+    if events_path.is_symlink():
+        raise PhaseBExecutorError("Interrupted review events must be regular evidence")
+    events = [json.loads(line) for line in events_path.read_bytes().splitlines() if line.strip()]
+    if any(not isinstance(event, dict) for event in events):
+        raise PhaseBExecutorError("Malformed interrupted-review event")
+    package = json.loads((repo_root / ".scratch/phase_b_supervisor_package.json").read_bytes())
+    relevant = [event for event in events if event.get("phase") == "phase_b"
+                and event.get("wave_id") == progress["wave_id"]]
+    expected = [
+        ("phase_b_bridge_completed", "private_attr_bridge_go"),
+        ("phase_b_final_pytest_started", "final_pytest_started"),
+        ("phase_b_final_pytest_passed", "final_pytest_passed"),
+        ("pre_commit_supervisor_started", "started"),
+        ("pre_commit_supervisor_completed", json.loads(
+            (repo_root / progress["initial_receipt_path"]).read_bytes())["decision"]),
+        ("pre_commit_supervisor_started", "commit_ready_status_refresh_started"),
+        ("pre_commit_supervisor_completed", "commit_ready_status_refresh_ERROR_INTERNAL"),
+    ]
+    tail = relevant[-len(expected):]
+    test_files = ",".join(select_pytest_gate_files(progress["index"]["staged_files"], repo_root))
+    if ([(e.get("event_type"), e.get("state")) for e in tail] != expected
+            or any(e.get("plan_path") != progress["plan_path"] or e.get("task_id") != package["task_id"] for e in tail)
+            or tail[0].get("transition_key") != progress["private_review_job_id"] + ":private_attr_bridge_go"
+            or any(e.get("artifact_paths", {}).get("test_files") != test_files for e in tail[1:3])
+            or tail[4].get("artifact_paths", {}).get("supervisor_receipt") != progress["initial_receipt_path"]
+            or tail[-1].get("artifact_paths", {}).get("supervisor_receipt")):
+        raise PhaseBExecutorError("Missing native private-GO/tests/COMMIT_GO/interrupted-review sequence")
+    incomplete = []
+    meta = agent_bus_path(repo_root, bus, "meta")
+    for prompt in (meta / "prompts").glob("meta-*--r1-meta.txt"):
+        raw = meta / "raw" / prompt.name
+        if prompt.is_symlink() or raw.is_symlink():
+            raise PhaseBExecutorError("Supervisor evidence must not be a symlink")
+        text = prompt.read_text()
+        try:
+            supplied = json.loads(text.split("## Package Under Review", 1)[1].split("```json\n", 1)[1].split("\n```", 1)[0])
+        except (ValueError, IndexError):
+            continue
+        if supplied != package:
+            continue
+        output = raw.read_bytes()
+        if output and b"BEGIN_META_ENVELOPE" not in output and b"END_META_ENVELOPE" not in output:
+            incomplete.append((prompt, raw, output))
+    if len(incomplete) != 1:
+        raise PhaseBExecutorError("Missing or ambiguous retained supervisor output without a terminal envelope")
+    prompt, raw, output = incomplete[0]
+    return {"events_sha256": _canonical_json_sha256(tail),
+            "prompt_path": str(prompt.relative_to(repo_root)), "prompt_sha256": _sha256_bytes(prompt.read_bytes()),
+            "raw_path": str(raw.relative_to(repo_root)), "raw_sha256": _sha256_bytes(output)}
+
+
+def _resume_commit_ready_supervisor(
+    repo_root: Path, plan_path: str, *, verbose: bool, invocation: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Spend one launcher claim on fresh approval, preserving all prior evidence."""
+    try:
+        authority = commit_ready_resume_authority(repo_root)
+        interruption = commit_ready_interruption_authority(repo_root, authority)
+        if authority["plan_path"] != plan_path:
+            raise PhaseBExecutorError("Commit-ready plan mismatch")
+        meta = agent_bus_path(repo_root, _active_bus_dir(), "meta")
+        claimed = meta / "launch_wave_dispatch_terminal.claimed.json"
+        if (not claimed.is_file() or claimed.is_symlink()
+                or (meta / "launch_wave_dispatch_terminal.json").exists()):
+            raise PhaseBExecutorError("Commit-ready continuation requires the native launcher claim")
+        route = json.loads((meta / "post_merge_routing.json").read_bytes())
+        active = invocation if invocation is not None else load_routing_record(repo_root, bus_dir=_active_bus_dir())
+        if (active.get("decision") != "ROUTE_PHASE_B"
+                or any(active.get(k) != route.get(k) for k in ("task_id", "wave_name"))
+                or ("candidate_authority" in active and active["candidate_authority"] != route["candidate_authority"])):
+            raise PhaseBExecutorError("Commit-ready dispatcher invocation changed")
+        receipt = json.loads(claimed.read_bytes())
+        if (receipt.get("state") != "available" or receipt.get("wave_id") != authority["wave_id"]
+                or type(receipt.get("version")) is not int or receipt["version"] != 1
+                or type(receipt.get("returncode")) is not int or receipt["returncode"] == 0
+                or receipt.get("task_id") != route["task_id"] or receipt.get("tracked_packet") != plan_path
+                or receipt.get("native_stub_packet_contract_digest") != route["native_stub_packet_contract"]["digest"]
+                or receipt.get("routing_record_sha256") != authority["route_sha256"]
+                or receipt.get("packet_index_sha256") != _sha256_bytes((repo_root / plan_path).read_bytes())
+                or receipt.get("packet_worktree_sha256") != receipt.get("packet_index_sha256")
+                or receipt.get("candidate_authority_spec_sha256") != authority["candidate"]["spec_sha256"]):
+            raise PhaseBExecutorError("Claimed terminal authority changed")
+        checkpoint = meta / "phase_b_commit_ready_checkpoint.json"
+        if checkpoint.exists() and json.loads(checkpoint.read_bytes()) != authority:
+            raise PhaseBExecutorError("Producer commit-ready checkpoint changed")
+        adoption = meta / "phase_b_commit_ready_adoption.json"
+        # Exclusive creation is the bounded adoption transaction. A torn or
+        # interrupted adoption remains spent; no resets and no actor replay.
+        claimed_hash = _sha256_bytes(claimed.read_bytes())
+        prepared_raw = _state_file_path(repo_root).read_bytes()
+        if _sha256_bytes(prepared_raw) != authority["state_sha256"]:
+            raise PhaseBExecutorError("Prepared checkpoint changed before adoption")
+        adoption_record = {"authority": authority, "interruption": interruption,
+                           "terminal_sha256": claimed_hash, "state": "CLAIMED",
+                           "prepared_checkpoint_text": prepared_raw.decode("utf-8")}
+        with adoption.open("x", encoding="utf-8") as handle:
+            json.dump(adoption_record, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        package_path = repo_root / ".scratch/phase_b_supervisor_package.json"
+        package = json.loads(package_path.read_bytes())
+        files = authority["index"]["staged_files"]
+        gate = run_private_attr_gate(repo_root, files, timeout=authority["pytest_gate_timeout"])
+        if not gate.get("passed"):
+            raise PhaseBExecutorError("Commit-ready private-attribute gate failed")
+        tests = _run_pytest_on_files(repo_root, select_pytest_gate_files(files, repo_root),
+                                    timeout=authority["pytest_gate_timeout"])
+        if not tests.get("passed"):
+            raise PhaseBExecutorError("Commit-ready final tests failed")
+        if commit_ready_resume_authority(repo_root) != authority:
+            raise PhaseBExecutorError("Candidate changed during continuation gates")
+        review = run_pre_commit_supervisor(repo_root, package_path, verbose=verbose, bus_dir=_active_bus_dir())
+        decision = review.get("parsed", {}).get("decision")
+        fresh_path = review.get("receipt_path", "")
+        if (review.get("exit_code") != 0 or decision not in {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}
+                or not fresh_path):
+            raise PhaseBExecutorError(f"Fresh commit-ready supervisor returned {decision}")
+        fresh = repo_root / fresh_path
+        if (fresh.is_symlink() or fresh.resolve().parent != (meta / "pre_commit_receipts").resolve()
+                or fresh.resolve() == (repo_root / authority["initial_receipt_path"]).resolve()):
+            raise PhaseBExecutorError("Historical approval cannot authorize continuation")
+        fresh_receipt = json.loads(fresh.read_bytes())
+        diff = _git_binary_output(repo_root, ["diff", "--cached", "--binary"])
+        if (diff is None or fresh_receipt.get("staged_sha") != _sha256_bytes(diff)
+                or fresh_receipt.get("decision") != decision
+                or fresh_receipt.get("package_digest") != authority["package_sha256"][:16]
+                or fresh_receipt.get("package_path") != str(package_path)
+                or commit_ready_resume_authority(repo_root) != authority
+                or commit_ready_interruption_authority(repo_root, authority) != interruption
+                or _sha256_bytes(claimed.read_bytes()) != claimed_hash):
+            raise PhaseBExecutorError("Fresh supervisor receipt does not bind the unchanged candidate")
+        branch = authority["index"]["branch"]
+        handoff = prepare_commit_handoff(
+            repo_root, wave_id=authority["wave_id"], task_id=package["task_id"],
+            wave_class=package["wave_class"], target_gate_id="G8",
+            target_branch=branch, branch_prefix=branch.split("/", 1)[0],
+            tracker_note_text=package["tracker_note_text"], files_to_stage=files,
+            fixes_implemented=package.get("fixes_implemented", []),
+            commit_message=f"feat: Phase B implementation for {authority['wave_id']}",
+            pr_title=f"feat: Phase B - {authority['wave_id']}",
+            pr_body=f"Phase B implementation per locked plan at {plan_path}",
+            pre_commit_receipt_path=fresh_path, tracked_packet=plan_path,
+            supervisor_lane=package["lane"], deferred_items=package["deferred_items"],
+            bridge_status=package["bridge_status"], scope_items=package["scope_items"],
+            evidence_handles=package["evidence_handles"], pager_route=route.get("pager_route"),
+            bus_dir=_active_bus_dir(),
+        )
+        if (commit_ready_resume_authority(repo_root) != authority
+                or json.loads(adoption.read_bytes()) != adoption_record):
+            raise PhaseBExecutorError("Preserved authority changed during handoff")
+        # Use normal terminal ownership consumption only after the handoff.
+        # The immutable adoption retains the exact original checkpoint bytes;
+        # leaving it active would make the dispatcher reject a valid handoff
+        # as outstanding implementer ownership.
+        _clear_state(repo_root, terminal_success=True)
+        if _state_file_path(repo_root).exists():
+            raise PhaseBExecutorError("Completed ownership could not be consumed")
+        return {"status": "commit_ready", "resumed_from": "commit_ready_status_supervisor",
+                "wave_id": authority["wave_id"], "plan_path": plan_path,
+                "handoff_path": str(handoff), "receipt_path": fresh_path,
+                "preserved_checkpoint_path": str(adoption),
+                "pre_commit_decision": decision, "implementer_invoked": False,
+                "agent_review_ran": False, "bridge_rounds": package["bridge_status"]["total_rounds"]}
+    except (PhaseBExecutorError, OSError, ValueError, KeyError, TypeError, IndexError, sqlite3.Error) as exc:
+        return {"status": "error", "step": "commit_ready_resume", "authority_error": "invalid_or_spent",
+                "errors": [str(exc)]}
+
+
 def _read_recovered_private_attr_envelope(
     repo_root: Path, job_id: str, bridge_result: dict[str, Any],
 ) -> dict[str, Any]:
@@ -10070,6 +10464,12 @@ def run_phase_b(
     if _is_state_load_error(saved_state):
         return _state_load_error_result(saved_state)
     saved_step = saved_state.get("completed_step") if saved_state else None
+    if saved_step == "private_attr_remediation_prepared_pending_review" and plan_path:
+        packet = repo_root / plan_path
+        if packet.is_file() and f"Status: {COMMIT_READY_STATUS}" in packet.read_text().splitlines():
+            return _resume_commit_ready_supervisor(
+                repo_root, plan_path, verbose=verbose, invocation=routing_record_override,
+            )
     if isinstance(saved_step, str) and saved_step in QUESTION_TERMINAL_STEPS | {QUESTION_RECEIVED_STEP}:
         return _recover_terminal_question(repo_root, saved_state, plan_path, routing_record_override)
     if saved_step == "implementer_mutation":
@@ -14290,6 +14690,23 @@ def run_phase_b(
             wave_id,
         )
         package_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
+
+        # Preserve the original prepared evidence and advance authority in a
+        # separate producer checkpoint before the fallible terminal review.
+        prepared = _load_state(repo_root) or {}
+        if (prepared.get("completed_step") == "private_attr_remediation_prepared_pending_review"
+                and _candidate_authority_required_from_routing_record(routing_record)
+                and routing_record.get("native_stub_packet_contract")):
+            try:
+                authority = commit_ready_resume_authority(repo_root)
+                checkpoint = agent_bus_path(repo_root, _active_bus_dir(), "meta", "phase_b_commit_ready_checkpoint.json")
+                with checkpoint.open("x", encoding="utf-8") as handle:
+                    json.dump(authority, handle, indent=2, sort_keys=True)
+                    handle.write("\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except (PhaseBExecutorError, OSError, ValueError, TypeError, KeyError, IndexError, sqlite3.Error) as exc:
+                return {"status": "error", "step": "commit_ready_checkpoint", "errors": [str(exc)]}
 
         log("Re-running supervisor after commit-ready packet status refresh...")
         try:
