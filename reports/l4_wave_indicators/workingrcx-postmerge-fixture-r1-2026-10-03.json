@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-postmerge-fixture-r1-2026-10-03",
+  "repeat_run_speedup_ratio": 1.029924,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.342001,
+  "repeat_run_raw_seconds": [
+    0.352235,
+    0.342001
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.352235
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.694236
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-10-03T13:30:48Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "8e26fd566bc188ea8d5b468ae6f6b9bbb578e40d"
+}

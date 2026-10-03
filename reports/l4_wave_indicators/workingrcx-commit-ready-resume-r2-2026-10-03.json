@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-commit-ready-resume-r2-2026-10-03",
+  "repeat_run_speedup_ratio": 0.97465,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.373054,
+  "repeat_run_raw_seconds": [
+    0.363597,
+    0.373054
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.363597
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.736651
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-10-03T10:41:35Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "146ca4955dca1c56111fc482876290ee1c0b12e2"
+}

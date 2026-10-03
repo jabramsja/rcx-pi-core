@@ -7508,6 +7508,146 @@ def test_reentry_private_findings_checkpoint_retains_context(private_review_chec
 
 
 @pytest.fixture
+def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_package, isolate_phase_b_pager_transport):
+    """Real native producers with only model, pager and test subprocess seams replaced."""
+    import launch_wave as launcher
+    from tests.tools.test_launch_wave import make_config
+    from meta_bridge_supervisor import MetaBridgeResponse, write_pre_commit_receipt, build_meta_reviewer_prompt
+    from executor_common import emit_pipeline_agent_event
+
+    repo = tmp_path / "commit-ready"
+    repo.mkdir()
+    wave = "commit-ready-resume-fixture"
+    bus = ".agent_bus-commit-ready-fixture"
+    _, test_path, _ = _write_bridge_receipt_fixture_repo(repo, "commit-ready-base")
+    indicator = f"reports/l4_wave_indicators/{wave}.json"
+    subprocess.run(["git", "checkout", "-b", f"jabramsja/{wave}"], cwd=repo, check=True, capture_output=True)
+    collector = repo / "mu/tools/metrics/collect_l4_wave_indicators.py"
+    collector.write_text(collector.read_text().replace(
+        "json.dumps({'wave_id': args.wave_id}, sort_keys=True)",
+        "json.dumps({'wave_id': args.wave_id, 'repeat_run_speedup_ratio': "
+        "json.loads(output.read_text()).get('repeat_run_speedup_ratio', 0) + 1 if output.exists() else 1}, sort_keys=True)"))
+    subprocess.run(["git", "add", str(collector)], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "fixture measured collector"], cwd=repo, check=True, capture_output=True)
+    (repo / "mu/tools/executors").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(launcher, "SCRIPT_DIR", repo / "mu/tools/executors")
+    exclude = repo / ".git/info/exclude"
+    exclude.write_text(exclude.read_text() + "\n.scratch/\n.agent_bus*/\n")
+    bridge_config = repo / ".agent_bus/bridge_config.json"
+    bridge_config.write_bytes((_EXECUTORS_DIR.parent / "agents/bridge_config.example.json").read_bytes())
+    probe = make_config(wave_id=wave, date="2026-10-03")
+    files = sorted(["f.py", test_path, "TASKS.md", probe.tracked_packet, indicator])
+    config = make_config(
+        wave_id=wave, date="2026-10-03", task_id="[PIPELINE-RECOVERY]",
+        indicator_artifact_ref=indicator,
+        indicator_collection_command=f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave} --output {indicator}",
+        evidence_command=f"python3 -m pytest -q {test_path}",
+        scope_items=files, candidate_allowlist=files,
+        comparison_commit=_git_stdout(repo, "rev-parse", "HEAD"),
+        pre_review_authority=True, implementer_agent="codex", reviewer_agent="codex",
+        pager_route="notify-only",
+    )
+    lane = SimpleNamespace(repo=repo, config=config, bus=bus, plan_path=config.tracked_packet,
+                           test_path=test_path, indicator_path=indicator, reviews=[], gates=0,
+                           state_path=repo / bus / "executors/phase_b_state.json", receipts=[])
+    impl = _make_successful_impl_with_edits(test_path)
+
+    def bridge(repo_root, summary, **kwargs):
+        job = kwargs["job_id"]
+        lane.reviews.append(summary)
+        if "private-attr" in summary:
+            lane.prepared = lane.state_path.read_bytes()
+            lane.prepared_index = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo)
+        turn = f"{job}--r1-reviewer-1234abcd"
+        envelope = dict(job_id=job, turn_id=turn, agent_role="reviewer", decision="GO",
+                        summary="Reviewed fixture candidate", request_for_next_agent="",
+                        findings=[], touched_files_claimed=[], validations_claimed=[])
+        with sqlite3.connect(repo / bus / "bridge.db") as conn:
+            conn.executescript((_EXECUTORS_DIR.parent / "agents/bridge_schema.sql").read_text())
+            conn.execute("INSERT INTO jobs (job_id, created_at, updated_at, status, task_text, reader_agent, reviewer_agent, acceptance_checks_json, current_round, terminal_decision) VALUES (?, '', '', 'DONE', ?, 'codex', 'codex', '[]', 1, 'GO')", (job, summary))
+            conn.execute("INSERT INTO turns (turn_id, job_id, round_no, agent_role, status, decision, state_sha_start, prompt_path, raw_output_path, envelope_json, started_at) VALUES (?, ?, 1, 'reviewer', 'completed', 'GO', '', '', '', ?, '')", (turn, job, json.dumps(envelope)))
+        return dict(decision="GO", exit_code=0, stdout="GO", stderr="", job_id=job)
+
+    def gate(*args, **kwargs):
+        lane.gates += 1
+        return dict(passed=lane.gates != 1, exit_code=int(lane.gates == 1),
+                    test_files=[test_path], stdout="private attr fixture", stderr="")
+
+    def approve(repo_root, package_path, **kwargs):
+        receipt = write_pre_commit_receipt(
+            MetaBridgeResponse(status="success", decision="COMMIT_GO", summary="Fixture review", findings=[]),
+            package_path, repo_root=repo, bus_dir=bus,
+        )
+        lane.receipts.append(receipt)
+        return dict(exit_code=0, receipt_path=str(receipt.relative_to(repo)),
+                    parsed=dict(decision="COMMIT_GO", status="success", findings=[], summary="Fixture review"))
+
+    def supervisor(repo_root, package_path, **kwargs):
+        if not lane.receipts:
+            return approve(repo_root, package_path, **kwargs)
+        meta = repo / bus / "meta"
+        prompt = meta / "prompts/meta-fixture-12345678--r1-meta.txt"
+        raw = meta / "raw" / prompt.name
+        prompt.parent.mkdir(exist_ok=True)
+        raw.parent.mkdir(exist_ok=True)
+        prompt.write_text(build_meta_reviewer_prompt(json.loads(package_path.read_bytes()), [], repo))
+        raw.write_text('{"type":"item.completed","item":{"type":"command_execution","exit_code":0}}\n')
+        return dict(exit_code=-1, receipt_path="", parsed=dict(
+            decision="ERROR_INTERNAL", status="error", summary="Codex adapter timed out after 1200s; no terminal envelope"))
+
+    def dispatched(cmd, **kwargs):
+        # Model the Phase A actor's exact native locked output, then exercise
+        # the real Phase B producer. No executor subprocess or live actor runs.
+        packet = repo / lane.plan_path
+        packet.write_text(packet.read_text().replace(
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)",
+            "Status: Phase B (locked, implementing)").replace("Phase-A-Lock: UNLOCKED", "Phase-A-Lock: LOCKED"))
+        subprocess.run(["git", "add", "--", "TASKS.md", lane.plan_path], cwd=repo, check=True, capture_output=True)
+        lane.route = json.loads((repo / bus / "meta/post_merge_routing.json").read_bytes())
+        lane.result = pb_mod.run_phase_b(repo, lane.plan_path, bus_dir=bus,
+            routing_record_override={**lane.route, "decision": "ROUTE_PHASE_B"})
+        if getattr(request, "param", "future") == "legacy":
+            # The old producer had no supplemental checkpoint. Let the real
+            # terminal producer issue its original receipt shape in that case.
+            (repo / bus / "meta/phase_b_commit_ready_checkpoint.json").unlink(missing_ok=True)
+        return subprocess.CompletedProcess(cmd, 1)
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=emit_pipeline_agent_event))
+        stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+        stack.enter_context(patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0}))
+        stack.enter_context(patch.object(pb_mod, "run_bridge_review", side_effect=bridge))
+        stack.enter_context(patch.object(pb_mod, "run_private_attr_gate", side_effect=gate))
+        stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}))
+        stack.enter_context(patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor))
+        with pytest.raises(launcher.LaunchWaveError, match="dispatcher launch failed"):
+            launcher.run_wave_setup(repo, config, launch=True, runner=dispatched, bus_dir=bus)
+    assert lane.result["step"] == "commit_ready_status_supervisor", lane.result
+    assert lane.result["status"] == "supervisor_rejected", lane.result
+    assert len(lane.reviews) == 2
+    prepared = json.loads(lane.prepared)
+    delta = {blob["path"] for blob in prepared["private_attr_prepared_authority"]["index"]["blobs"]
+             if hashlib.sha256((repo / blob["path"]).read_bytes()).hexdigest() != blob["sha256"]}
+    assert delta == {"TASKS.md", lane.plan_path, indicator}
+    assert lane.state_path.read_bytes() == lane.prepared
+    lane.approve = approve
+    lane.impl = impl
+    return lane
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["legacy", "future"], indirect=True)
+def test_commit_ready_resume_stale_prepared_checkpoint(commit_ready_resume_lane):
+    lane = commit_ready_resume_lane
+    # This assertion is red before the consumer correction: the original
+    # executor refuses at private_attr_prepared_resume, before any supervisor.
+    result = pb_mod.run_phase_b(lane.repo, lane.plan_path, bus_dir=lane.bus,
+        routing_record_override={**lane.route, "decision": "ROUTE_PHASE_B"})
+    assert result["step"] == "commit_ready_resume", result
+    assert "launcher claim" in str(result["errors"])
+    assert lane.state_path.read_bytes() == lane.prepared
+
+
+@pytest.fixture
 def private_review_checkpoint(tmp_path, real_pre_review_package):
     def create(*, reentry=False, boundary="prepared", max_rounds=3, runtime_reentry=None):
         repo = tmp_path / "repo"

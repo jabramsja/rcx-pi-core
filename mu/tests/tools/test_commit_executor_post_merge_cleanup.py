@@ -35,7 +35,9 @@ import pytest
 
 from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
-from mu.tests.tools.test_workingrcx_fleet_apply import fleet as retirement_fleet, git as retirement_git
+from mu.tests.tools.test_workingrcx_fleet_apply import (
+    fleet as retirement_fleet, git as retirement_git, fixture_lsof,
+)
 
 
 commit_mod = load_module(
@@ -5128,12 +5130,27 @@ def _cleanup_fixture_identity(repo: Path, kind: str) -> str:
     return f"cleanup-{kind}-{suffix}"
 
 
+def _cleanup_lsof(tmp_path, monkeypatch):
+    """Give cleanup and landed-source children the same bounded OS evidence.
+
+    These tests exercise lifecycle and WIP transactions in disposable repos.
+    Keep the production lsof parser and real ps/PID checks, while excluding
+    unrelated host mount warnings from the successful-transaction fixtures.
+    """
+    bindir = tmp_path / "lsof-bin"
+    bindir.mkdir()
+    evidence = fixture_lsof(bindir, tmp_path)
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ["PATH"])
+    return evidence
+
+
 @pytest.mark.parametrize("config_source", ["system", "global"])
 @pytest.mark.parametrize("operation", ["clean", "process"])
 def test_native_merge_owner_survives_lane_retirement_without_closing_predecessor(
         tmp_path, monkeypatch, config_source, operation):
     from mu.tools.executors import worktree_lifecycle, workingrcx_fleet_apply as fleet
 
+    lsof = _cleanup_lsof(tmp_path, monkeypatch)
     real_git = shutil.which("git")
     assert real_git
     ambient = tmp_path / "runner config"
@@ -5239,6 +5256,9 @@ def test_native_merge_owner_survives_lane_retirement_without_closing_predecessor
             assert peer.poll() is None, evidence
             assert completed["state"] == "COMPLETE", evidence
             assert not carrier.exists()
+            assert str(carrier) in {
+                json.loads(line)[2] for line in lsof.calls.read_text().splitlines()
+            }
             assert [p.name for p in directory.glob("attempt-*")] == ["attempt-1"]
             assert (Path(completed["destination"]) / "seed.txt").read_bytes() == b"seed"
             assert _git(["rev-parse", target_branch], cwd=repo).stdout.strip() == head
@@ -5678,8 +5698,9 @@ def test_captured_ad_intent_survives_shared_fleet_preparation(tmp_path, monkeypa
         assert git(restored, "rev-parse", ":" + relpath) == capture["index_blob_sha"]
 
 
-def test_landed_sync_automatically_preserves_primary_and_checked_out_dirty_base(tmp_path):
+def test_landed_sync_automatically_preserves_primary_and_checked_out_dirty_base(tmp_path, monkeypatch):
     from mu.tools.executors import workingrcx_fleet_apply as fleet
+    lsof = _cleanup_lsof(tmp_path, monkeypatch)
     upstream, primary, _, env = _init_origin_and_primary(tmp_path)
     _git(["checkout", "-b", "founder/" + tmp_path.name], cwd=primary)
     local_dev = tmp_path / "workingrcx_clarolesfull_20260627"
@@ -5708,9 +5729,12 @@ def test_landed_sync_automatically_preserves_primary_and_checked_out_dirty_base(
     assert result["synced"] is True, result
     # PRIMARY success must not conceal a still-behind sibling.
     assert _git(["rev-parse", "HEAD"], cwd=local_dev).stdout.strip() == authority, result
-    assert result["all_owners_current"] is True
+    assert result["all_owners_current"] is True, result
     assert result["base_worktree_sync"]["primary"] == str(local_dev)
     assert result["base_worktree_sync"]["behind_count"] == 0
+    assert str(local_dev) in {
+        json.loads(line)[2] for line in lsof.calls.read_text().splitlines()
+    }
     for owner in (primary, local_dev):
         assert _git(["rev-parse", "HEAD"], cwd=owner).stdout.strip() == authority
         assert (_git(["diff", "--cached", "--binary"], cwd=owner).stdout,
@@ -5893,8 +5917,9 @@ def test_recovery_enabler_keeps_original_transaction_plan_and_no_replay_owner(tm
 
 @pytest.fixture
 def merged_closeout_case(tmp_path, monkeypatch):
-    """Real landed sync/ownership; only remote review, CI and merge are simulated."""
+    """Real sync/ownership with controlled remote replies and lsof evidence."""
     from mu.tools.executors import workingrcx_fleet_apply as fleet
+    lsof = _cleanup_lsof(tmp_path, monkeypatch)
 
     def build(*, executor=commit_mod, reentry=False, fault=None):
         upstream, primary, old, env = _init_origin_and_primary(tmp_path)
@@ -6002,7 +6027,8 @@ def merged_closeout_case(tmp_path, monkeypatch):
 
         return SimpleNamespace(run=run, events=events, primary=primary, local_dev=local_dev,
             carrier=carrier, before=before, old=old, head=head, merge=merge,
-            branch=branch, handoff=handoff, continuation=continuation, result=result)
+            branch=branch, handoff=handoff, continuation=continuation, result=result,
+            lsof=lsof)
 
     return build
 
@@ -6021,7 +6047,10 @@ def test_remote_merged_closeout_preserves_both_owners_and_publishes_actual_resul
     assert "code_remediation" not in case.events
     assert "conflict_remediation" not in case.events
     assert case.events.count("pre_merge_ci") == (0 if reentry else 1)
-    assert outcome["primary_worktree_sync"]["all_owners_current"] is True
+    assert outcome["primary_worktree_sync"]["all_owners_current"] is True, outcome
+    assert str(case.local_dev) in {
+        json.loads(line)[2] for line in case.lsof.calls.read_text().splitlines()
+    }
     for owner in (case.primary, case.local_dev):
         assert _git(["rev-parse", "HEAD"], cwd=owner).stdout.strip() == case.merge
         assert (_git(["diff", "--cached", "--binary"], cwd=owner).stdout,
@@ -6042,6 +6071,52 @@ def test_remote_merged_closeout_preserves_both_owners_and_publishes_actual_resul
     assert case.carrier.exists()  # Cleanup is owned, not falsely claimed complete.
     assert outcome["post_merge_cleanup"]["worktree_removed"] is False
     assert not case.continuation.exists()
+
+
+@pytest.mark.parametrize("probe", [
+    pytest.param(dict(returncode=1, stdout="",
+                      stderr="lsof: WARNING: can't stat() smbfs file system /Volumes/unavailable\n"),
+                 id="mount-warning"),
+    pytest.param(dict(returncode=1, stdout="p43434\ncmdworker_shared\n", stderr=""),
+                 id="incomplete-process"),
+])
+def test_remote_merged_closeout_retains_dirty_base_on_uncertain_process_evidence(
+    merged_closeout_case, probe,
+):
+    """The landed child must hold incomplete evidence, even after PRIMARY sync."""
+    case = merged_closeout_case(reentry=True)
+    case.lsof.response.write_text(json.dumps(probe))
+    index_before = _git(["ls-files", "--stage", "-z"], cwd=case.local_dev).stdout
+    stashes_before = _git(["stash", "list", "--format=%H"], cwd=case.primary).stdout
+
+    outcome = case.run()
+
+    assert outcome["remote_pr_merged"] is True
+    sync = outcome["primary_worktree_sync"]
+    assert sync["current"] is True, sync
+    assert sync["all_owners_current"] is False, sync
+    base = sync["base_worktree_sync"]
+    assert base["state"] == "HOLD" and base["current"] is False, base
+    assert base["synced"] is False and base["skipped"] is True, base
+    assert "uncertain lsof evidence" in base["reason"]
+    assert base["primary_sync_transaction_path"] is None
+    assert base["behind_count"] > 0
+    assert _git(["rev-parse", "HEAD"], cwd=case.primary).stdout.strip() == case.merge
+    assert _git(["rev-parse", "HEAD"], cwd=case.local_dev).stdout.strip() == case.old
+    assert _git(["ls-files", "--stage", "-z"], cwd=case.local_dev).stdout == index_before
+    for owner in (case.primary, case.local_dev):
+        assert (_git(["diff", "--cached", "--binary"], cwd=owner).stdout,
+                _git(["diff", "--binary"], cwd=owner).stdout) == case.before[owner]
+        assert (owner / "private.bin").read_bytes() == b"\x00preserved\xff"
+    assert _git(["stash", "list", "--format=%H"], cwd=case.primary).stdout == stashes_before
+    assert str(case.local_dev) in {
+        json.loads(line)[2] for line in case.lsof.calls.read_text().splitlines()
+    }
+    closeout = json.loads(Path(outcome["durable_closeout_path"]).read_bytes())
+    assert closeout["result"]["primary_worktree_sync"]["all_owners_current"] is False
+    assert closeout["result"]["base_worktree_sync"]["state"] == "HOLD"
+    assert outcome["post_merge_cleanup"]["worktree_removed"] is False
+    assert case.carrier.exists()
 
 
 def test_remote_merged_closeout_keeps_exhausted_failure_and_attempts(merged_closeout_case):
@@ -6068,7 +6143,7 @@ def test_remote_merged_closeout_keeps_exhausted_failure_and_attempts(merged_clos
     outcome = case.run()
 
     assert outcome["remote_pr_merged"] is True
-    assert outcome["primary_worktree_sync"]["all_owners_current"] is True
+    assert outcome["primary_worktree_sync"]["all_owners_current"] is True, outcome
     assert outcome["status"] == "error"
     assert outcome["step"] == "post_merge_cleanup"
     assert outcome["post_merge_cleanup"]["completion_state"] == "INCOMPLETE"
@@ -6094,7 +6169,7 @@ def test_remote_merged_closeout_publication_failure_is_not_success(merged_closeo
     assert outcome["status"] == "error"
     assert outcome["step"] == "durable_closeout"
     assert outcome["pr_lifecycle"]["state"] == "MERGED"
-    assert outcome["primary_worktree_sync"]["all_owners_current"] is True
+    assert outcome["primary_worktree_sync"]["all_owners_current"] is True, outcome
     assert closeout.read_bytes() == original
     assert "durable_closeout_path" not in outcome
     assert case.carrier.exists()

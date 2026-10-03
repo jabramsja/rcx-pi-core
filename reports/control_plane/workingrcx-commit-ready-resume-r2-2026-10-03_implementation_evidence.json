@@ -1,0 +1,603 @@
+{
+  "wave_id": "workingrcx-commit-ready-resume-r2-2026-10-03",
+  "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+  "status": "PHASE_B_LOCAL_GATES_PASSED_NATIVE_REVIEW_PENDING",
+  "tracker_authority": "TASKS.md: 2026-10-03 tracker sync note for workingrcx-commit-ready-resume-r2-2026-10-03; packet derives its L4 fields from that note",
+  "source_bindings": {
+    "inventory": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/commit_ready_r1_preserved_sources_20261003.json",
+    "inventory_sha256": "1d0178a3c33f2a51a7239cd9292dd19c060b41d0c6c0486e8e0bc93b794c54d8",
+    "diagnosis_sha256": "d9a9159d02106bd0ad1c128576c5a1669ecbedb86576f764acfde9fc55a424bf",
+    "r1_evidence_sha256": "e86e48a92c8084ee78040a5a959dfc4ea543ef118f20402def9ffae33b040001",
+    "verified_bindings": [
+      {
+        "binding": "commit:mu/tools/executors/launch_wave.py",
+        "sha256": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092"
+      },
+      {
+        "binding": "commit:mu/tools/executors/phase_b_executor.py",
+        "sha256": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7"
+      },
+      {
+        "binding": "commit:mu/tests/tools/test_launch_wave.py",
+        "sha256": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab"
+      },
+      {
+        "binding": "commit:mu/tests/tools/test_phase_b_executor.py",
+        "sha256": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c"
+      },
+      {
+        "binding": "worktree:mu/tests/tools/test_worktree_lifecycle.py",
+        "sha256": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27"
+      },
+      {
+        "binding": "worktree:mu/tests/tools/test_workingrcx_fleet_apply.py",
+        "sha256": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-commit-ready-resume-r1-2026-10-03_wave_config.json",
+        "sha256": "12899f94e360146a9939a5da658c182c85e0f2bb3d2dbe05a52e6824c0905fc8"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/launch_wave_dispatch_terminal.json",
+        "sha256": "200cd9e8f7b1a9749e130f7a847762de624134d13a6dbd580d5c2ae16f9d823c"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/CHANGELOG.md",
+        "sha256": "e78f66c94b428eb23e1afb48d5d6d7ccd2ad2800fefa3910a079019fa0ffd022"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/TASKS.md",
+        "sha256": "2570cecf9865e414486bf8d837c1891958061d1f4593a3c2a86e87933cd8e532"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/docs/agents/WorktreeLifecycle.v0.md",
+        "sha256": "bfb4b9ef44c3f994f0a9f607a8cc326532f166cdfa8a6e0a9e9da51520f36b8b"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tests/tools/test_pipeline_monitor_autofollow.py",
+        "sha256": "e54776973891a702516d7abc05f0ef39c296c663f7ca305845d3fc3cbb1b4088"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tests/tools/test_workingrcx_fleet_classification.py",
+        "sha256": "d642bff8ab04a68ab0e0d487f04a909852407a25ac57afda82ee5b1d6e7c4312"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tests/tools/test_worktree_lifecycle.py",
+        "sha256": "22b326a62439752bc96360691f4ed9bbd1f18ae663edc662f857c00df133c3b0"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tools/executors/workingrcx_fleet_classification.py",
+        "sha256": "2a02c7e150c09dea20cc3bd9d99e68df56bbe614e5a6fd6b3dc75fb0a9f11f78"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tools/executors/worktree_lifecycle.py",
+        "sha256": "feaaca6320eeb90184e378a2762be27ddf6a8b42febed50f26d8135b2cd36948"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tools/observability/pipeline_monitor.sh",
+        "sha256": "638adbf2dd09cd4176a74885b1d30c11ca0f00c75a088ca12618ac9ad5ad0256"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_2026-10-03.md",
+        "sha256": "429c15318efe42a4bbea98ff0d4960836643d9eea9b5fa37cbb579b9cb4101e8"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_apply_plan.json",
+        "sha256": "f470c2536bc418de7e928e719c8529c7db9b5bf5313ad69d729a55f5378b8829"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_census.json",
+        "sha256": "29a8fe4bc6b0449ab417030f70be485aa2ea60386c44fe25e8b27abfa213a35a"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_classification.json",
+        "sha256": "42353f2623a24c30751536eacea323261bbd5e8acab414fdcc3ffc4deb75d113"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_coverage.json",
+        "sha256": "b9cdbf7eb3d91e37695b3a33c5d2449fc85b36ea16f1055cd00e2f4460ff1c7e"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_implementation_evidence.json",
+        "sha256": "60c2a3ab684bafee8f9bf042fa94811ca0aa6ea853e583fa663b184c52c7d204"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_retirement_evidence.json",
+        "sha256": "aa09a147fe9a7f3b50f83b5e8f5ff1af04001224a55f4a96963898390ea6a2ec"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_useful_work.json",
+        "sha256": "a00533ac9d6f471530315202f7106adafa622a23369fcdf42f6fc28e66fc02fc"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_useful_work_coverage.json",
+        "sha256": "571913dc9aa3537a218a16036ba0763b6b33b2f2ff95dcb607c8fed6d5abdd16"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/l4_wave_indicators/workingrcx-fleet-residual-pr-folders-r1-2026-10-03.json",
+        "sha256": "8e2bd099e2c45951cbd58a0cb8e1dd9d81a56da84443a7908d51cff359ba1939"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/executors/phase_b_state.json",
+        "sha256": "81754b920d968e9670c726840c69ca2703914c2f976730c6f8a797d382ac2303"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/launch_wave_dispatch_terminal.json",
+        "sha256": "ec9c8b9f3bf7a9d200598827dcf93363c2a1e19083a244e390212aacf1a59c5b"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/post_merge_routing.json",
+        "sha256": "40c95cff5104b08eadea9c4d562f0740838c07776a3f20f56e0f5bd89f017dd2"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.scratch/phase_b_supervisor_package.json",
+        "sha256": "e537103a274eddf66eeb7c2b69afcc1e60dfddf8e58ceb06e1071e603a820ab2"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/pre_commit_receipts/receipt_2026-10-03T04-26-41p00-00_433eb8ab.json",
+        "sha256": "1f9e20cd6bebd2810bcfb92d0a56574a989fbd918f4c788561fc012e72cd01c4"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/bridge_config.json",
+        "sha256": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/observability/pipeline_agent_events.jsonl",
+        "sha256": "44138d9d999daf9d9645717e413a47716a97fe86896564bdce1f8dc879c0ef04"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-4054ca27--r1-meta.txt",
+        "sha256": "9513347ba3d26564155aadc404324078d09ddae97d0502979fda389d0590c9ea"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-6f3c7b25--r1-meta.txt",
+        "sha256": "9e1f1bd6bb8d72c13056bef9fb0cd489d096cb00539e6587e65eb359436d6d1f"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-4054ca27--r1-meta.txt",
+        "sha256": "6d3b0ebd16196cbcbd290121ca5711d2ea990c89e842a37521fc5c8643893cfe"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-6f3c7b25--r1-meta.txt",
+        "sha256": "6d3b0ebd16196cbcbd290121ca5711d2ea990c89e842a37521fc5c8643893cfe"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/candidate_authority/workingrcx-fleet-residual-pr-folders-r1-2026-10-03.spec.json",
+        "sha256": "c675ccdd7df03a3206e779f42fcec3964207d5e0c56cfcdbc5d39e1463a5f0a8"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/candidate_authority_receipts/workingrcx-fleet-residual-pr-folders-r1-2026-10-03/phase_b-bridge_pre_review.json",
+        "sha256": "73811f83493c753df81b9a886069a4063dd5b3c02caf2d73f23c19882f537238"
+      },
+      {
+        "binding": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_wave_config.json",
+        "sha256": "1a675a945f72792df0b2a68147b1adb98f47e3277b380bf8b062eb8c53a35ff6"
+      }
+    ]
+  },
+  "preservation_before": {
+    "r1": {
+      "root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003",
+      "head": "5547f803679cdc375d94d175441e0afc5cc51cd4",
+      "branch": "jabramsja/workingrcx-commit-ready-resume-r1-2026-10-03",
+      "index_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-commit-ready-resume-r1-20261003/index",
+      "raw_index_sha256": "817854b8ea39d263eaa905ce37fe3d7fa37a214045e022af9460102bbcd5b192",
+      "status": " M mu/tests/tools/test_workingrcx_fleet_apply.py\n M mu/tests/tools/test_worktree_lifecycle.py\nM  reports/control_plane/workingrcx-commit-ready-resume-r1-2026-10-03_2026-10-03.md\nM  reports/l4_wave_indicators/workingrcx-commit-ready-resume-r1-2026-10-03.json\n",
+      "index_entries_sha256": "8450754be10d1580c5e1a6a6ad750a57ccdcf08a21983511ee1363b66e1eaa54",
+      "staged_diff_sha256": "8de57ec65b5b97508a5963ca7cff1de3d136da82a929d60cb6fe294d89acaeed",
+      "unstaged_diff_sha256": "77c294e85ab67e7e6c91b47f09c631f6d730a2f660dc2fc484aada0ff8536a66",
+      "files_sha256": {
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/commit_ready_r1_preserved_sources_20261003.json": "1d0178a3c33f2a51a7239cd9292dd19c060b41d0c6c0486e8e0bc93b794c54d8",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/residual_cleanup_supervisor_timeout_continuation_diagnosis_20261003.json": "d9a9159d02106bd0ad1c128576c5a1669ecbedb86576f764acfde9fc55a424bf",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-commit-ready-resume-r1-2026-10-03_wave_config.json": "12899f94e360146a9939a5da658c182c85e0f2bb3d2dbe05a52e6824c0905fc8",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/bridge.db": "bd2b81802a4595b048106fb552393ca76b080fe5083d090ac5f52c461c1de5ed",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/bridge.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/bridge_config.json": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/executors/commit_executor_workingrcx-commit-ready-resume-r1-2026-10-03.json": "7b4aadb134b73ba07b3a172e9c53e869786b98a0b4001dfd4be95968da12bbf0",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/executors/phase_b_handoff.json": "cfc58e16b2879525c16bff4f64f91bcd06fe2af2730697fd61754da633158999",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/candidate_authority/workingrcx-commit-ready-resume-r1-2026-10-03.spec.json": "8c2aeb58d3f79cdd83271999efe6305600a85fba71871a17fc1c96e780debf04",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/candidate_authority_receipts/workingrcx-commit-ready-resume-r1-2026-10-03/commit-pre-supervisor.json": "16d68e9f78025fee3cac8175fa5a96dc3f40fd294d415455e18639a0f616579c",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/candidate_authority_receipts/workingrcx-commit-ready-resume-r1-2026-10-03/phase_b-bridge_pre_review.json": "76bfefc1ab39234423da4aa22255fbe8a656c04021dd31a86b815c64aed18b5b",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/launch_wave_dispatch_terminal.json": "200cd9e8f7b1a9749e130f7a847762de624134d13a6dbd580d5c2ae16f9d823c",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/meta_bridge.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/post_merge_routing.json": "cdb77055f11a5977d303eab6aa2c56b43fab32408e1a56b35ad74e7dfbcca1b7",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/pre_commit_receipt.json": "45a6a240351c9b968dd7e537fc61c67d6f954cf04f260f3330647041a18c6d5c",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/pre_commit_receipts/receipt_2026-10-03T06-56-54p00-00_bffb1e10.json": "11f58a20564e5700c7b50bb60137844b22f479856023769ae5ee1217da4c67d9",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/pre_commit_receipts/receipt_2026-10-03T07-09-51p00-00_16ddb62d.json": "aa4d640ad64281f7073e2a36228ebf46f5cb1768cca1dc23a044d2d1dd24b69c",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/pre_commit_receipts/receipt_2026-10-03T07-23-12p00-00_08cea3ca.json": "3f903ac536fd3efaabd8499025aa4bace54e126f0a348a10943c36868b382361",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/pre_commit_receipts/receipt_2026-10-03T07-48-13p00-00_280cc200.json": "45a6a240351c9b968dd7e537fc61c67d6f954cf04f260f3330647041a18c6d5c",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-093f2395--r1-meta.txt": "46b5117ba2e7e34a45b03afb387d2be237be7f4a3746e18a39d13140db36e5f2",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-21bdf830--r1-meta.txt": "0ba811bf98d24b54e9378e47300537985fbc2290959be9ce38776ce4b2ffb930",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-82d025a9--r1-meta.txt": "0ba811bf98d24b54e9378e47300537985fbc2290959be9ce38776ce4b2ffb930",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-f197a2b3--r1-meta.txt": "57dd8809e7ff0ddc74e678ab608842fd10f5b60f35859bcb84ee57ff382719fe",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-093f2395--r1-meta.txt": "62abee770094f9ee24bf38fa666d06c32714cf1988950589dca91031b8a6ba39",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-21bdf830--r1-meta.txt": "2967231c64673ff9ce89051df79a75f4b65179ab175a993a770c10aa3d04cae6",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-82d025a9--r1-meta.txt": "5c9472dec1b2be5d60c1f89d784b25779e4064fabfb1cb4a7b7046566a24695b",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-f197a2b3--r1-meta.txt": "5d4cdefcdbb508cf4381a9c628d79d057419a98794010543d51dc696152b7b2f",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/observability/pipeline_agent_delivery_receipts.jsonl": "f92e544c331b763396353fc8a40a48b4c1fae50c84ca70a3000a678ef84a5acc",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/observability/pipeline_agent_events.jsonl": "8f1401672b3e0c98084428e21aeaa3edbf8fbd216e707d227f61e34658e70a6a",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/observability/pipeline_agent_pager.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/observability/pipeline_agent_pager_state.json": "9243341c75c3256ffa2d19dddc8aa8e39368de86d674fb9d80586999e885a113",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/prompts/phase-a-r1-0594f274/phase-a-r1-0594f274--r1-reader-a7123994.txt": "be03be748e0092d6d6bc304c8aee13c815d99ca31b1060ee3e3b5b4b4cbfdd28",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/prompts/phase-a-r1-0594f274/phase-a-r1-0594f274--r1-reviewer-99013a31.txt": "7d7c3aebffa976ed0299b13470643dc39a2e5796b2f14b28afbacaa553815b5a",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/prompts/phase-b-r1-1ce26d8c/phase-b-r1-1ce26d8c--r1-reader-38ad55d0.txt": "bc4e27bd004976aa6321407af6c6c6bd4a33335786fd7f01c53caa586b77b858",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/prompts/phase-b-r1-1ce26d8c/phase-b-r1-1ce26d8c--r1-reviewer-b99f9481.txt": "2e13da812af1a452363862096b15015fcd9dcfa3aa41743a2414b70f33b40593",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/raw/phase-a-r1-0594f274/phase-a-r1-0594f274--r1-reader-a7123994.txt": "4ecab2a04a827a10627a4278397650bdf6ffdd6576dcae36057fdcaa4ba3ba45",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/raw/phase-a-r1-0594f274/phase-a-r1-0594f274--r1-reviewer-99013a31.txt": "b4d338d4b61a0d4e9f0feb1fcba3566b6c078585491b4ba36fafc263622760f3",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/raw/phase-b-r1-1ce26d8c/phase-b-r1-1ce26d8c--r1-reader-38ad55d0.txt": "f13daa466794abaaa70a39dbb27ad3c922fc5d4835ffa66709bf77068634e354",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/raw/phase-b-r1-1ce26d8c/phase-b-r1-1ce26d8c--r1-reviewer-b99f9481.txt": "52ce521737e46ee930a9849ce9112dbe194db39b66af4b951b767c925c178605",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/recovery/recovery_log.json": "fe0be56fcb087892a93b0a747a47d961e5954e4fe2ba0d741f8a3f5b17b09998",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/recovery/recovery_status.json": "7d00a330ef3eb54c49768b0baab21e272a08ca9c776ac505c530903aef685c35",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/rendered/phase-a-r1-0594f274.md": "ac84c7ea459600d874f90fb479b3fb51f3fb4ae52f3d9b2ba985771b64c5eb93",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/rendered/phase-b-r1-1ce26d8c.md": "4c664ab3a4e358c81333cb8853840cec44585c12eceb0056bf182bed6b070883",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/validations/phase-a-r1-0594f274/phase-a-r1-0594f274--r1-reader-a7123994/validation-1.txt": "7b9804ba5390fbb524a6849ff9ddbd8a6bec4cf98a13a2dd31ea103661f6df89",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/validations/phase-a-r1-0594f274/phase-a-r1-0594f274--r1-reader-a7123994/validation-2.txt": "746bf63c5bd15ce9d58790a0ee27c3b1e26e1a9df4953eb05ec2bf2f5ac44ad4",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/validations/phase-b-r1-1ce26d8c/phase-b-r1-1ce26d8c--r1-reader-38ad55d0/validation-1.txt": "467a20650bda9686d0378c977d4898c563293ed62b6339e0e7cce5187859d2a9",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/.agent_bus-commit-ready-resume-r1-20261003/validations/phase-b-r1-1ce26d8c/phase-b-r1-1ce26d8c--r1-reader-38ad55d0/validation-2.txt": "07f2e6cd5ad94f17e7f2592c32916fce721454da25ce47ce95e3b72829816801",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/TASKS.md": "bb8cc1368ff7130a232aac71c3ce19e43fedf93a15da3693d3bde36169104ef9",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/reports/control_plane/workingrcx-commit-ready-resume-r1-2026-10-03_2026-10-03.md": "c712049714477530ab3e0b20181809e9fc5ac68a14ca2e6985c3116ac2793c1e",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/reports/control_plane/workingrcx-commit-ready-resume-r1-2026-10-03_implementation_evidence.json": "e86e48a92c8084ee78040a5a959dfc4ea543ef118f20402def9ffae33b040001",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r1-20261003/reports/l4_wave_indicators/workingrcx-commit-ready-resume-r1-2026-10-03.json": "3054713944261cf2399aa1182972fa77db5c9aa664d4c80ee7c127034566d4b0"
+      }
+    },
+    "original_cleanup": {
+      "root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003",
+      "head": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+      "branch": "jabramsja/workingrcx-fleet-residual-pr-folders-r1-2026-10-03",
+      "index_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/WorkingRCX-fleet-residual-pr-folders-r1-20261003/index",
+      "raw_index_sha256": "40e0e4f334b080c8e0e2a887e8c39b101b23310d1aa26b0beb94710677ab7e7e",
+      "status": "M  CHANGELOG.md\nM  TASKS.md\nM  mu/docs/agents/WorktreeLifecycle.v0.md\nM  mu/tests/tools/test_pipeline_monitor_autofollow.py\nM  mu/tests/tools/test_workingrcx_fleet_classification.py\nM  mu/tests/tools/test_worktree_lifecycle.py\nM  mu/tools/executors/workingrcx_fleet_classification.py\nM  mu/tools/executors/worktree_lifecycle.py\nM  mu/tools/observability/pipeline_monitor.sh\nA  reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_2026-10-03.md\nA  reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_apply_plan.json\nA  reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_census.json\nA  reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_classification.json\nA  reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_coverage.json\nA  reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_implementation_evidence.json\nA  reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_retirement_evidence.json\nA  reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_useful_work.json\nA  reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_useful_work_coverage.json\nA  reports/l4_wave_indicators/workingrcx-fleet-residual-pr-folders-r1-2026-10-03.json\n",
+      "index_entries_sha256": "c96ddd1dca9d5791cb5c4600881290b9e9ff160ea9fe5ea9bab2594872d25e26",
+      "staged_diff_sha256": "f505fea0ad9cae6f021c379fe8dd97a1c0aceb45905255a7d9c1ceef6e7458c6",
+      "unstaged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "files_sha256": {
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/CHANGELOG.md": "e78f66c94b428eb23e1afb48d5d6d7ccd2ad2800fefa3910a079019fa0ffd022",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/TASKS.md": "2570cecf9865e414486bf8d837c1891958061d1f4593a3c2a86e87933cd8e532",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/docs/agents/WorktreeLifecycle.v0.md": "bfb4b9ef44c3f994f0a9f607a8cc326532f166cdfa8a6e0a9e9da51520f36b8b",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tests/tools/test_pipeline_monitor_autofollow.py": "e54776973891a702516d7abc05f0ef39c296c663f7ca305845d3fc3cbb1b4088",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tests/tools/test_workingrcx_fleet_classification.py": "d642bff8ab04a68ab0e0d487f04a909852407a25ac57afda82ee5b1d6e7c4312",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tests/tools/test_worktree_lifecycle.py": "22b326a62439752bc96360691f4ed9bbd1f18ae663edc662f857c00df133c3b0",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tools/executors/workingrcx_fleet_classification.py": "2a02c7e150c09dea20cc3bd9d99e68df56bbe614e5a6fd6b3dc75fb0a9f11f78",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tools/executors/worktree_lifecycle.py": "feaaca6320eeb90184e378a2762be27ddf6a8b42febed50f26d8135b2cd36948",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/mu/tools/observability/pipeline_monitor.sh": "638adbf2dd09cd4176a74885b1d30c11ca0f00c75a088ca12618ac9ad5ad0256",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_2026-10-03.md": "429c15318efe42a4bbea98ff0d4960836643d9eea9b5fa37cbb579b9cb4101e8",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_apply_plan.json": "f470c2536bc418de7e928e719c8529c7db9b5bf5313ad69d729a55f5378b8829",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_census.json": "29a8fe4bc6b0449ab417030f70be485aa2ea60386c44fe25e8b27abfa213a35a",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_classification.json": "42353f2623a24c30751536eacea323261bbd5e8acab414fdcc3ffc4deb75d113",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_coverage.json": "b9cdbf7eb3d91e37695b3a33c5d2449fc85b36ea16f1055cd00e2f4460ff1c7e",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_implementation_evidence.json": "60c2a3ab684bafee8f9bf042fa94811ca0aa6ea853e583fa663b184c52c7d204",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_retirement_evidence.json": "aa09a147fe9a7f3b50f83b5e8f5ff1af04001224a55f4a96963898390ea6a2ec",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_useful_work.json": "a00533ac9d6f471530315202f7106adafa622a23369fcdf42f6fc28e66fc02fc",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_useful_work_coverage.json": "571913dc9aa3537a218a16036ba0763b6b33b2f2ff95dcb607c8fed6d5abdd16",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/reports/l4_wave_indicators/workingrcx-fleet-residual-pr-folders-r1-2026-10-03.json": "8e2bd099e2c45951cbd58a0cb8e1dd9d81a56da84443a7908d51cff359ba1939",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/executors/phase_b_state.json": "81754b920d968e9670c726840c69ca2703914c2f976730c6f8a797d382ac2303",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/launch_wave_dispatch_terminal.json": "ec9c8b9f3bf7a9d200598827dcf93363c2a1e19083a244e390212aacf1a59c5b",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/post_merge_routing.json": "40c95cff5104b08eadea9c4d562f0740838c07776a3f20f56e0f5bd89f017dd2",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.scratch/phase_b_supervisor_package.json": "e537103a274eddf66eeb7c2b69afcc1e60dfddf8e58ceb06e1071e603a820ab2",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/pre_commit_receipts/receipt_2026-10-03T04-26-41p00-00_433eb8ab.json": "1f9e20cd6bebd2810bcfb92d0a56574a989fbd918f4c788561fc012e72cd01c4",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/bridge_config.json": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/observability/pipeline_agent_events.jsonl": "44138d9d999daf9d9645717e413a47716a97fe86896564bdce1f8dc879c0ef04",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-4054ca27--r1-meta.txt": "9513347ba3d26564155aadc404324078d09ddae97d0502979fda389d0590c9ea",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-6f3c7b25--r1-meta.txt": "9e1f1bd6bb8d72c13056bef9fb0cd489d096cb00539e6587e65eb359436d6d1f",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-4054ca27--r1-meta.txt": "6d3b0ebd16196cbcbd290121ca5711d2ea990c89e842a37521fc5c8643893cfe",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-6f3c7b25--r1-meta.txt": "6d3b0ebd16196cbcbd290121ca5711d2ea990c89e842a37521fc5c8643893cfe",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/candidate_authority/workingrcx-fleet-residual-pr-folders-r1-2026-10-03.spec.json": "c675ccdd7df03a3206e779f42fcec3964207d5e0c56cfcdbc5d39e1463a5f0a8",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003/.agent_bus-fleet-residual-pr-folders-r1-20261003/meta/candidate_authority_receipts/workingrcx-fleet-residual-pr-folders-r1-2026-10-03/phase_b-bridge_pre_review.json": "73811f83493c753df81b9a886069a4063dd5b3c02caf2d73f23c19882f537238",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_wave_config.json": "1a675a945f72792df0b2a68147b1adb98f47e3277b380bf8b062eb8c53a35ff6"
+      }
+    }
+  },
+  "candidate_authority": {
+    "config_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_wave_config.json",
+    "config_sha256": "e9c3c4c94ab139974e0a9837804e66e40208111ae5f24f72c704a7e541171f27",
+    "candidate_allowlist": [
+      "TASKS.md",
+      "CHANGELOG.md",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json",
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md",
+      "mu/tools/executors/launch_wave.py",
+      "mu/tools/executors/phase_b_executor.py",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py"
+    ],
+    "spec_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-commit-ready-resume-r2-20261003/.agent_bus-commit-ready-resume-r2-20261003/meta/candidate_authority/workingrcx-commit-ready-resume-r2-2026-10-03.spec.json",
+    "spec_sha256": "415b924f0a4c4ea5b580181c93d45523b0997437383d47f0d4cb62a7fa57003e",
+    "allowlist_matches_native_spec_and_packet": true
+  },
+  "comparison_commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+  "implementation": {
+    "source_commit": "5547f803679cdc375d94d175441e0afc5cc51cd4",
+    "method": "Exact hash-verified carry-forward of four committed code/test files and two inventoried fixture worktree files; no R1 tracker, packet or indicator adoption",
+    "producer": "Separate commit-ready checkpoint retains the original prepared checkpoint",
+    "consumer": "Native public legacy/future continuation validates producer progress, interruption provenance and a single-use terminal claim; requires fresh current-candidate approval before handoff",
+    "permitted_late_metadata": [
+      "TASKS.md same-wave native note",
+      "locked packet native status",
+      "same-wave indicator measurement fields"
+    ],
+    "fixtures": "Disposable root-bound lsof executable and response file reach subprocesses; real descriptor tests restore system lsof and skip on incomplete OS evidence"
+  },
+  "validation_runs": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 tools/checks/linters/check_private_attr_access.py . mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "exit_code": 0,
+      "summary": "No violations reported",
+      "log_path": "/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-r2-phase-b-65owvzz_/private_attr.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidate_source_sha256": {
+        "mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+        "mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+        "mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+        "mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42"
+      }
+    },
+    {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_workingrcx_fleet_apply.py --tb=short",
+      "exit_code": 0,
+      "summary": "2919 passed, 13 skipped in 654.30s (0:10:54)",
+      "passed": 2919,
+      "skipped": 13,
+      "log_path": "/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-r2-phase-b-65owvzz_/five_modules.log",
+      "log_sha256": "fa4e65149c0d3fa322b51b75f08f0a21ebd2026242381088ee6df17c29a879ef",
+      "candidate_source_sha256": {
+        "mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+        "mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+        "mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+        "mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42"
+      }
+    },
+    {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+      "exit_code": 0,
+      "summary": "351 passed, 1 warning in 1.87s",
+      "passed": 351,
+      "warnings": 1,
+      "log_path": "/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-r2-phase-b-65owvzz_/docs.log",
+      "log_sha256": "1505f01f8673fc3b2fd944ebf76214bd70a6a44a0fe97fecb648e7e7d35726c0",
+      "candidate_source_sha256": {
+        "mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+        "mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+        "mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+        "mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42"
+      }
+    },
+    {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py -k commit_ready_resume --tb=short",
+      "exit_code": 0,
+      "summary": "26 passed, 1621 deselected in 201.27s (0:03:21)",
+      "passed": 26,
+      "skipped": 0,
+      "deselected": 1621,
+      "seconds": 201.27,
+      "log_path": "/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-r2-phase-b-65owvzz_/focused_continuation.log",
+      "log_sha256": "2b91e89280705b923d5706dc328fd535522be6cef4038370b0bec867e70c1b9d",
+      "candidate_source_sha256": {
+        "mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+        "mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+        "mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+        "mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42"
+      },
+      "qualification": "Fresh Phase B-local run of the declared sweep; not native post-hook evidence"
+    },
+    {
+      "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_worktree_lifecycle.py::test_same_head_process_hold_cannot_become_verified_escalation mu/tests/tools/test_workingrcx_fleet_apply.py::test_original_owner_cli_requires_complete_process_evidence_before_claim --tb=short",
+      "exit_code": 0,
+      "summary": "4 passed in 7.34s",
+      "passed": 4,
+      "skipped": 0,
+      "seconds": 7.34,
+      "log_path": "/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-r2-phase-b-65owvzz_/focused_process.log",
+      "log_sha256": "1bd5111cee90ff598e7098dae0177efd3370d9ed15d008ccf4e7d003c34c7cec",
+      "candidate_source_sha256": {
+        "mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+        "mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+        "mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+        "mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42"
+      },
+      "qualification": "Fresh Phase B-local run of the declared sweep; not native post-hook evidence"
+    }
+  ],
+  "post_landing_continuation": {
+    "owner": "Outer operator after this repair lands; not executed in this Phase B turn",
+    "command": "PYTHONDONTWRITEBYTECODE=1 python3 /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/mu/tools/executors/launch_wave.py /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-fleet-residual-pr-folders-r1-2026-10-03_wave_config.json --repo-root /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r1-20261003 --bus-dir .agent_bus-fleet-residual-pr-folders-r1-20261003 --launch",
+    "requirements": [
+      "Use the newly landed PRIMARY launcher/dispatcher/Phase B scripts, which share the original Git common directory; preserve the stopped worktree source/index and exact original config.",
+      "Do not manually reset dispatcher retry records or budgets, change bridge configuration, replace original receipts or prepared checkpoint, or copy repair source into the stopped candidate. The native transaction archives exact checkpoint bytes in its adoption record and consumes active completed ownership only after fresh approval and handoff.",
+      "The original terminal receipt must remain available. Native admission must validate the retained authority. One fresh current-candidate COMMIT_GO is required before handoff.",
+      "Any changed/incomplete evidence or spent adoption refuses. A new failure is retained rather than recycled through fresh claims.",
+      "Original cleanup owns subsequent review/commit/landing, eligible public APPLY/VERIFY and exact PR1325 coverage/disposition; this repair has not performed those actions."
+    ]
+  },
+  "production_guards_sha256": {
+    "mu/tools/executors/worktree_lifecycle.py": "7ec609743ae9977a4cceee0628e178f925bb58e4de3d09310e8e14cc3cfb2eec",
+    "mu/tools/executors/workingrcx_fleet_apply.py": "bf05e39afd9c06ead2acfc4cce37304b9bf75d8b646baff903074272f2a95252"
+  },
+  "completion_boundary": {
+    "local_implementation": "Complete: six exact preserved source/test files, tracker/changelog sync, fresh before/after and local validation evidence",
+    "native_review_staging_hooks_post_hook_sweep_commit_push_merge_sync": "pending outer pipeline; not executed by this implementer",
+    "packet_indicator_bridge_outputs": "native actor-owned; no copied historical authority or fabricated measurement",
+    "original_cleanup_continuation_apply_verify_pr1325": "pending after actual repair landing; no live action taken",
+    "local_declared_and_focused_gates": "Passed; focused continuation 26/0 skips and process-evidence 4/0 skips; actual native post-hook execution remains pending",
+    "local_source_preservation_and_scope": "Passed: all original 19 source/13 evidence files and both stopped lanes retained; 10 current candidate paths inside the exact twelve-path fence"
+  },
+  "limits": [
+    "Only declared Phase B-local validation is executed. Fixture model/reviewer outcomes and commit subprocess boundary are isolated; tests provide behavior evidence, not live approval or landing.",
+    "All historical approvals remain historical. Both stopped lanes, raw indexes, configs, checkpoint/receipt evidence and spent budgets stay read-only.",
+    "Controlled lsof evidence proves fixture determinism, not physical-retirement readiness. Production still requires fresh complete system evidence.",
+    "No runtime/substrate, process-idle guard, lifecycle budget, model/access/safety setting, test-integrity exemption or unrelated diagnostic-success retry change.",
+    "Native post-hook sweep must still run after actual native hooks. Local focused results are not post-hook evidence."
+  ],
+  "reproduction": {
+    "command": "PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py -k commit_ready_resume --tb=short",
+    "exit_code": 1,
+    "result": "7 failed, 19 passed, 1621 deselected in 182.04s (0:03:02)",
+    "failed_cases": [
+      "FAILED mu/tests/tools/test_launch_wave.py::test_commit_ready_resume_native_public_continuation[legacy]",
+      "FAILED mu/tests/tools/test_launch_wave.py::test_commit_ready_resume_native_public_continuation[future]",
+      "FAILED mu/tests/tools/test_launch_wave.py::test_commit_ready_resume_requires_fresh_unchanged_approval[legacy-historical_receipt]",
+      "FAILED mu/tests/tools/test_launch_wave.py::test_commit_ready_resume_requires_fresh_unchanged_approval[legacy-missing_envelope]",
+      "FAILED mu/tests/tools/test_launch_wave.py::test_commit_ready_resume_requires_fresh_unchanged_approval[legacy-changed_during_review]",
+      "FAILED mu/tests/tools/test_phase_b_executor.py::test_commit_ready_resume_stale_prepared_checkpoint[legacy]",
+      "FAILED mu/tests/tools/test_phase_b_executor.py::test_commit_ready_resume_stale_prepared_checkpoint[future]"
+    ],
+    "launcher_refusal": "same-wave Phase B continuation authority or terminal receipt is incomplete, mismatched, already consumed, or forbidden; corrected-config-relaunch-required",
+    "executor_refusal": {
+      "step": "private_attr_prepared_resume",
+      "errors": [
+        "Prepared checkpoint authority or staged candidate changed"
+      ]
+    },
+    "log_path": "/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-r2-phase-b-65owvzz_/before.log",
+    "log_sha256": "3546bb1e28efdda978b18263576b07bb0db230fed4b2e5a6bc002d98e02fc911",
+    "comparison_commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+    "qualification": "Preserved current tests exercised comparison-base production code in disposable native fixtures. Seven expected failures: public continuation and direct consumer refusals (legacy/future), plus three fresh-approval controls unable to pass old launcher admission. Nineteen changed/incomplete-authority refusal controls passed. No stopped lane or live executor launch was used."
+  },
+  "adopted_candidate_sha256": {
+    "mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+    "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+    "mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+    "mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+    "mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+    "mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42"
+  },
+  "task_preservation": {
+    "id_pattern": "\\[([A-Z][A-Z0-9_-]+)\\]",
+    "baseline": "R2 native tracker overlay at implementer entry",
+    "before": 268,
+    "after": 268,
+    "added": [],
+    "lost": [],
+    "ordered_queue_rows": 44,
+    "queue_order_unchanged": true,
+    "canonical_r2_tracker_note_unchanged": true,
+    "held_transaction": "467ab73478004be89b8b4298ea2e22fd",
+    "held_stash": "4989dd3d7962d92fe28b23a800de0bb6a461b6ad",
+    "remaining": "Original cleanup and PR1325 eight-path/21-hunk hold, nine recent/inherited useful-work owners, existing R1/R2 lifecycle carrier retirement and unresolved/platform-paused late Mu finding remain owned; no new numbered prerequisite",
+    "unique_id_order_unchanged": true
+  },
+  "regression_coverage": {
+    "public_path": "launcher.run_wave_setup -> executor_dispatch.main -> phase_b_executor.run_phase_b -> native handoff -> isolated commit subprocess seam, legacy and future checkpoint states",
+    "focused_cases": 26,
+    "assertions": [
+      "Phase A, completed implementation/bridge review, staging, indicator recollection and checkpoint restamping are forbidden on continuation",
+      "Exactly TASKS.md, packet status and indicator measurements differ from the retained prepared checkpoint",
+      "Current unchanged candidate requires a fresh supervisor receipt; historical/missing approval and drift during review refuse",
+      "Terminal receipt and exclusive adoption stay single-use, including failed continuation",
+      "Unrelated source/task/packet/indicator, index-only/unstaged/mode/flag changes and missing or altered config/reviewer/bridge/package/checkpoint/receipt/interruption evidence refuse before dispatch"
+    ],
+    "fixture_fail_closed_tests": [
+      "mu/tests/tools/test_worktree_lifecycle.py::test_same_head_process_hold_cannot_become_verified_escalation",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py::test_original_owner_cli_requires_complete_process_evidence_before_claim"
+    ],
+    "fixture_fail_closed_parameters": [
+      "lsof SMB mount warning",
+      "incomplete lsof process record"
+    ]
+  },
+  "declared_gate": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 python3 tools/checks/linters/check_private_attr_access.py . mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_workingrcx_fleet_apply.py && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider -n 4 --dist worksteal mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_workingrcx_fleet_apply.py --tb=short && PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider mu/tests/docs --tb=short",
+    "exit_code": 0,
+    "private_attribute_gate": "passed",
+    "five_modules": {
+      "passed": 2919,
+      "skipped": 13,
+      "failed": 0,
+      "seconds": 654.3
+    },
+    "docs": {
+      "passed": 351,
+      "skipped": 0,
+      "warnings": 1,
+      "seconds": 1.87
+    }
+  },
+  "validation_notes": {
+    "skips": "13 skips were reported separately from passing tests. Real descriptor tests use require_system_lsof and explicitly skip when the system probe is absent, times out, warns or otherwise cannot provide complete evidence. The declared quiet run does not retain per-case skip reasons; no descriptor success or physical-retirement readiness is inferred from any skipped case.",
+    "docs_warning": "Existing test_warn_stale_docs warning names ten out-of-scope documents last verified 242 days ago; those files were not edited.",
+    "post_hook": "The same declared focused sweep is being run locally. Native hooks and the actual post-hook run remain owned by the outer pipeline."
+  },
+  "preservation_after": {
+    "result": "unchanged",
+    "method": "Read-only SHA-256 comparisons and Git reads with GIT_OPTIONAL_LOCKS=0",
+    "checked_at_utc": "2026-10-03T09:18:08.988786+00:00",
+    "retained_files_compared": 90,
+    "original_cleanup_source_files": 19,
+    "original_cleanup_evidence_files": 13,
+    "git_identity_index_diff_status_checks": 14,
+    "inventory_and_diagnosis_unchanged": true,
+    "r1_bound_sources_config_index_terminal_unchanged": true,
+    "original_terminal_receipt_state": "available",
+    "changed": []
+  },
+  "candidate_fence_check": {
+    "native_allowlist_paths": 12,
+    "native_spec_and_packet_match": true,
+    "candidate_paths": [
+      "CHANGELOG.md",
+      "TASKS.md",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tools/executors/launch_wave.py",
+      "mu/tools/executors/phase_b_executor.py",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json"
+    ],
+    "candidate_count": 10,
+    "outside_allowlist": [],
+    "reserved_native_outputs_pending": [
+      "reports/deferred/non_blocking/workingrcx-commit-ready-resume-r2-2026-10-03_bridge_nonblockers.md",
+      "reports/l4_wave_indicators/workingrcx-commit-ready-resume-r2-2026-10-03.json"
+    ],
+    "includes_both_fixture_files": true,
+    "basis": "Final unstaged worktree candidate plus native locked packet present at implementer entry; no staging or approval minted"
+  },
+  "implementation_candidate": {
+    "head": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+    "files_sha256": {
+      "CHANGELOG.md": "380449ffb27df45e6c0541d485a83a59994a81c3fcb39dcd8ed4960f2333bda8",
+      "TASKS.md": "67e404a9d4f3d1a0e96d58e9de1ecf407b1a792cebf458a38bd6d98a98899cc6",
+      "mu/tests/tools/test_launch_wave.py": "9d87eaa34acd979e44f4a283bd287c618980afdf41ada5d14532797761a393ab",
+      "mu/tests/tools/test_phase_b_executor.py": "5adba49c0aab331993810ed0137bd0d300294f7ee4ffb93e80edeffcc440308c",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py": "6f645445365fc3f7ce9530c5cde4e36f013d87f5b10c5bfcb965082a0753ef42",
+      "mu/tests/tools/test_worktree_lifecycle.py": "9b54b285e56205576d756416ed93b1334953e5e7c63eaa3cc53afc8cbae8ba27",
+      "mu/tools/executors/launch_wave.py": "2b82b4dccddf0e6b8d08d4c3163e61827733da7296cff2514efb1dafa1fa4092",
+      "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+      "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_2026-10-03.md": "248773e29d450f5cc0683b1534d3ed6e1dde7ff943ca6b9969ee02b2718f3b7d"
+    },
+    "self_reference": "The evidence file is excluded from its own digest inventory",
+    "native_locked_packet": "Present at implementer entry and unchanged by this implementer"
+  },
+  "modified_by_implementer": [
+    "CHANGELOG.md",
+    "TASKS.md",
+    "mu/tests/tools/test_launch_wave.py",
+    "mu/tests/tools/test_phase_b_executor.py",
+    "mu/tests/tools/test_workingrcx_fleet_apply.py",
+    "mu/tests/tools/test_worktree_lifecycle.py",
+    "mu/tools/executors/launch_wave.py",
+    "mu/tools/executors/phase_b_executor.py",
+    "reports/control_plane/workingrcx-commit-ready-resume-r2-2026-10-03_implementation_evidence.json"
+  ]
+}

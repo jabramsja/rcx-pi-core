@@ -1546,6 +1546,11 @@ def _build_dispatch_terminal_receipt(
         receipt["phase_b_advanced_authority"] = _native_phase_b_advanced_snapshot(
             repo_root, config, bus_dir=bus_dir,
         )
+    if b"Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT" in worktree_packet.splitlines():
+        checkpoint = _ec.agent_bus_path(repo_root, bus_dir, "meta", "phase_b_commit_ready_checkpoint.json")
+        if checkpoint.exists():
+            receipt["phase_b_commit_ready_checkpoint_sha256"] = _sha256_bytes(
+                _read_regular_file_bytes(checkpoint, label="commit-ready producer checkpoint"))
     return receipt
 
 
@@ -1983,15 +1988,19 @@ def _native_phase_b_route_matches_config(
 def _native_phase_b_packet_matches_config(
     packet_text: str,
     config: WaveConfig,
+    *, commit_ready: bool = False,
 ) -> bool:
     """Accept the initial and exact producer-owned pre-supervisor grammar."""
     if not isinstance(packet_text, str):
         return False
     lines = packet_text.splitlines()
-    if sum(lines.count(status) for status in (
+    statuses = (
         "Status: Phase B (locked, implementing)",
         "Status: Phase B (pre-supervisor pending, bridge-converged)",
-    )) != 1:
+    )
+    if commit_ready:
+        statuses += ("Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT",)
+    if sum(lines.count(status) for status in statuses) != 1:
         return False
     if sum(line.startswith("Status:") for line in lines) != 1:
         return False
@@ -2037,18 +2046,19 @@ def _native_phase_b_packet_matches_config(
         # after the end marker is an out-of-order continuation candidate.
         return False
 
+    validation_text = _project_post_lock_recovery_status(packet_text) if commit_ready else packet_text
     try:
         expected_routing = _native_stub_packet_contract_routing_record(config)
         _pa.validate_native_stub_packet_contract(
             expected_routing,
             config.tracked_packet,
-            packet_text,
+            validation_text,
             allow_post_lock_machine_sections=True,
         )
     except (LaunchWaveError, _pa.PhaseAExecutorError):
         return False
     return not check_packet_fences(
-        packet_text,
+        validation_text,
         config,
         allow_post_lock_machine_sections=True,
     )
@@ -2096,6 +2106,7 @@ def _native_phase_b_tracker_matches_config(
 def _native_phase_b_packet_sources_match(
     repo_root: Path,
     config: WaveConfig,
+    *, commit_ready: bool = False,
 ) -> bool:
     """Require exactly one byte-identical worktree/index tracked packet."""
     try:
@@ -2118,7 +2129,28 @@ def _native_phase_b_packet_sources_match(
         packet_text = worktree_bytes.decode("utf-8")
     except UnicodeDecodeError:
         return False
-    return _native_phase_b_packet_matches_config(packet_text, config)
+    return _native_phase_b_packet_matches_config(packet_text, config, commit_ready=commit_ready)
+
+
+def _native_commit_ready_authority(repo_root: Path, *, bus_dir) -> dict[str, Any] | None:
+    try:
+        from . import phase_b_executor as phase_b
+    except ImportError:
+        import phase_b_executor as phase_b
+    try:
+        adoption = _ec.agent_bus_path(repo_root, bus_dir, "meta", "phase_b_commit_ready_adoption.json")
+        if _path_lexists(adoption):
+            return None
+        authority = phase_b.commit_ready_resume_authority(repo_root, bus_dir=bus_dir)
+        checkpoint = _ec.agent_bus_path(repo_root, bus_dir, "meta", "phase_b_commit_ready_checkpoint.json")
+        if _path_lexists(checkpoint) and json.loads(_read_regular_file_bytes(
+                checkpoint, label="commit-ready producer checkpoint")) != authority:
+            return None
+        return {"progress": authority, "interruption": phase_b.commit_ready_interruption_authority(
+            repo_root, authority, bus_dir=bus_dir)}
+    except (phase_b.PhaseBExecutorError, LaunchWaveError, OSError, ValueError,
+            TypeError, KeyError, IndexError, sqlite3.Error):
+        return None
 
 
 def _native_phase_b_advanced_snapshot(repo_root: Path, config: WaveConfig, *, bus_dir) -> dict:
@@ -4054,9 +4086,17 @@ def _native_phase_b_resume_authority(
         config,
         bus_dir=bus_dir,
     )
-    if not _native_phase_b_packet_sources_match(repo_root, config):
+    try:
+        is_commit_ready = "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT" in (
+            repo_root / config.tracked_packet).read_text().splitlines()
+    except (OSError, UnicodeError):
         return None
-    if not _native_phase_b_tracker_matches_config(repo_root, config, bus_dir=bus_dir):
+    commit_ready_authority = _native_commit_ready_authority(repo_root, bus_dir=bus_dir) if is_commit_ready else None
+    if is_commit_ready and commit_ready_authority is None:
+        return None
+    if not _native_phase_b_packet_sources_match(repo_root, config, commit_ready=is_commit_ready):
+        return None
+    if not is_commit_ready and not _native_phase_b_tracker_matches_config(repo_root, config, bus_dir=bus_dir):
         return None
 
     candidate_ok, candidate_spec_path, _target_branch = (
@@ -4121,6 +4161,7 @@ def _native_phase_b_resume_authority(
         "available_receipt_path": available_path,
         "claimed_receipt_path": claimed_path,
         "immutable_snapshot": immutable_snapshot,
+        "commit_ready_authority": commit_ready_authority,
     }
 
 
@@ -4443,6 +4484,11 @@ def _run_wave_setup_impl(
                     "changed during bridge reconciliation; claimed state "
                     "remains fail-closed"
                 )
+            if phase_b_authority["commit_ready_authority"] is not None and (
+                _native_commit_ready_authority(repo_root, bus_dir=bus_dir)
+                != phase_b_authority["commit_ready_authority"]
+            ):
+                raise LaunchWaveError("Commit-ready evidence changed during claim; claim remains spent")
 
             phase_b_command = build_phase_b_dispatch_command(
                 repo_root,
