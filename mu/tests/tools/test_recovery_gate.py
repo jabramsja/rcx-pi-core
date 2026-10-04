@@ -11743,12 +11743,29 @@ esac
             encoding="utf-8",
         )
 
-    def _fake_tmux_dir(self, tmp_path: Path, *, log_path: Path) -> Path:
+    def _fake_tmux_dir(
+        self, tmp_path: Path, *, log_path: Path, repo_roots: tuple[Path, ...]
+    ) -> Path:
         bin_dir = tmp_path / "tmux-bin"
         bin_dir.mkdir(exist_ok=True)
         counter_path = tmp_path / "tmux-split-counter.txt"
         session_path = tmp_path / "tmux-session-active"
         panes_path = tmp_path / "tmux-panes.txt"
+        # This fake tmux records commands without launching pane processes.
+        # Supply its reader-protocol double only in these disposable unit repos;
+        # lifecycle/autofollow integration fixtures keep the real dependency.
+        for repo_root in repo_roots:
+            executors_dir = repo_root / "mu" / "tools" / "executors"
+            assert executors_dir.resolve().is_relative_to(tmp_path.resolve())
+            executors_dir.mkdir(parents=True, exist_ok=True)
+            # Exclusive creation prevents replacing a real lifecycle module.
+            with (executors_dir / "worktree_lifecycle.py").open("x", encoding="utf-8") as fixture:
+                fixture.write(
+                    '"""Reader-protocol double for the fake-tmux unit fixture only."""\n'
+                    "from pathlib import Path\n\n"
+                    "def monitor_reader_protocol(session, *, adopt=False):\n"
+                    f"    return not adopt and Path({str(session_path)!r}).is_file()\n"
+                )
         script = f"""#!/usr/bin/env bash
 set -eu
 log_path={str(log_path)!r}
@@ -12486,7 +12503,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
             "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
@@ -12531,7 +12548,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
             "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
@@ -12574,7 +12591,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
             "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
@@ -12619,7 +12636,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
             "CODEX_THREAD_ID": "thread-123",
@@ -12674,7 +12691,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         state_dir = tmp_path / "monitor-state"
         env = os.environ.copy()
         env.pop("CODEX_THREAD_ID", None)
@@ -12747,7 +12764,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         env = os.environ.copy()
         env.update({
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
@@ -12830,7 +12847,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         env = os.environ.copy()
         # Clean checkout: no orchestrator mode selected via env, and no
         # orchestrator_mode.json is written below, so the fallback default applies.
@@ -12876,7 +12893,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         state_dir = tmp_path / "monitor-state"
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
@@ -12933,7 +12950,7 @@ esac
             branch="jabramsja/repo-b",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_a, repo_b))
         state_dir = tmp_path / "monitor-state"
         base_env = os.environ | {
             "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
@@ -13003,7 +13020,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         state_dir = tmp_path / "monitor-state"
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
@@ -13063,7 +13080,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         state_dir = tmp_path / "monitor-state"
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
@@ -13107,7 +13124,7 @@ esac
             branch="jabramsja/test-wave",
         )
         tmux_log = tmp_path / "tmux.log"
-        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo_root,))
         state_dir = tmp_path / "monitor-state"
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
@@ -13588,7 +13605,7 @@ esac
                 + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
                 + _shell_quote(str(script))
                 + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
-                + "source \"$watcher\"; "
+                + "source \"$watcher\" --rcx-log-reader-v2; "
                 + "find_newest_log; "
                 + "rm -f \"$watcher\"",
             ],
@@ -13634,7 +13651,7 @@ esac
                 + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
                 + _shell_quote(str(script))
                 + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
-                + "source \"$watcher\"; "
+                + "source \"$watcher\" --rcx-log-reader-v2; "
                 + "find_newest_log; "
                 + "rm -f \"$watcher\"",
             ],
@@ -13678,7 +13695,7 @@ esac
                 + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
                 + _shell_quote(str(script))
                 + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
-                + "source \"$watcher\"; "
+                + "source \"$watcher\" --rcx-log-reader-v2; "
                 + "find_newest_log; "
                 + "rm -f \"$watcher\"",
             ],
@@ -13722,7 +13739,7 @@ esac
                 + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
                 + _shell_quote(str(script))
                 + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
-                + "source \"$watcher\"; "
+                + "source \"$watcher\" --rcx-log-reader-v2; "
                 + "find_newest_log; "
                 + "rm -f \"$watcher\"",
             ],
@@ -13747,6 +13764,7 @@ esac
             "RCX_OBS_REPO_ROOT": str(repo_root),
             "RCX_PIPELINE_LIVE_LOG": str(live_log),
             "RCX_LOG_WATCHER_HEARTBEAT_SECONDS": "0",
+            "RCX_OBS_LIFECYCLE_HELPER": str(_EXECUTORS_DIR / "worktree_lifecycle.py"),
         }
 
         result = subprocess.run(
@@ -13757,7 +13775,7 @@ esac
                 + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
                 + _shell_quote(str(script))
                 + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
-                + "source \"$watcher\"; "
+                + "source \"$watcher\" --rcx-log-reader-v2; "
                 + "switch_tail \"$RCX_PIPELINE_LIVE_LOG\" >/dev/null; "
                 + "first=\"$tail_pid\"; "
                 + "refresh_tail_if_due \"$RCX_PIPELINE_LIVE_LOG\" >/dev/null; "

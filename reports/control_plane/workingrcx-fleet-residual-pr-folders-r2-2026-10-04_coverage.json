@@ -1,0 +1,1035 @@
+{
+  "comparison_commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+  "manifest_sha256": "c1d0689efa1f1fe21669b3c6e751bc4c29b4f66084e405b44aa0739e9251a986",
+  "repository": {
+    "id": "R_kgDOQvy8bg",
+    "nameWithOwner": "jabramsja/rcx-pi-core",
+    "url": "https://github.com/jabramsja/rcx-pi-core"
+  },
+  "schema_version": 2,
+  "targets": [
+    {
+      "coverage": [
+        {
+          "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+          "hunks": [
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -6,7 +6,31 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "5c714e7c14cbbd2530d02014b14ed727aae6e98394620285f14967f67960768d"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -19,14 +43,15 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "599cf2c7af2606ae8284395ccea9ab505dcd084696fda624c77cf924932b5e2e"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -44,12 +69,14 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "c55f30f9752ef02346fd3d0ccf99124910f2be740f558e1b4d7473d7c31fceae"
+            }
+          ],
+          "patch_sha256": "e3e0e752fd5c18af2812e7124d5d5c6da0096305727332752a786c4c618e17b4",
+          "path": "CHANGELOG.md",
+          "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+          "references": [],
+          "resolution": "missing"
+        },
+        {
+          "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+          "hunks": [
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -52,7 +52,7 @@ See [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchi",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "eb8f1e4abf8cfc2e64552f942d0b0d334e98eaad1116daf5581b558fbe4b0e38"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -153,6 +153,23 @@ Current Exhaustion Layer: META_CIRCULAR",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "258ba52e8558feb5bd57065ed7b70dc8d5e3ba952db3139e4df01ee379befbeb"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -161,6 +178,6 @@ Current Exhaustion Layer: META_CIRCULAR",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "b8d7db0c289bf2df0e644ea1828053cd340cf5574be7973c5c5a9bbbbdf758f3"
+            }
+          ],
+          "patch_sha256": "776c06ac4b29739849b9dfac077b31d54a874ff7d917d8c33d78c80924bb47a6",
+          "path": "STATUS.md",
+          "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+          "references": [],
+          "resolution": "missing"
+        },
+        {
+          "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+          "hunks": [
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -11,7 +11,7 @@ Founder model selection (2026-09-11): every selected local model-bearing pipelin",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "877ec8eb02b3a00b619cc7305612af2d86ca0391e0b10e80222ea6acc0cad68c"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -548,7 +548,7 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "be0a679ef5052fc0c98d10a1ad85434cd98dbd2fd3ec36a7ada732296ac4b004"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -675,6 +675,8 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "a91bfe22c5bac829f051e0c12a8db86b640595ee08de4257431f5003ce0e553b"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -762,20 +764,30 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "f0aa49dca6884eb35ed1769749cad67110a8716bfde7e1cac6a28f1ad53bbddf"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -806,7 +818,7 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "1b650f326bb8891fe16eae77e13f35fd0c1336614eec267506fe97a4053332bd"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -882,6 +894,8 @@ These existing tasks are retained, not completed. Their former numeric positions",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "1fb91447d3fd75875a440342cc89d00769910e9aca149f5dfbf2e081045937e5"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -1822,6 +1836,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "4426002d7fac526693c66446469d0b9b0b2173efd6c9e81336f89c39218b550a"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -2131,7 +2147,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "32d354228ba015fb645a1a50ec7673e1d8108b88699df13fc5fec043468afcc3"
+            }
+          ],
+          "patch_sha256": "be6f09789edc366a38b1148ff1764af784bff3a7d12e125bc7c8ee5b2726af96",
+          "path": "TASKS.md",
+          "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+          "references": [],
+          "resolution": "missing"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -43,6 +43,7 @@ Run: pytest tests/docs/test_doc_contracts.py -v",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 150,
+                  "path": "mu/docs/README.md",
+                  "sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 150,
+                  "path": "mu/docs/README.md",
+                  "sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "6651bbdbad3fee328e49743bc18d0dfb8a9ee9e90dc6c391007b4b824c4e7ecd"
+            }
+          ],
+          "patch_sha256": "ed540c30f02b58b438fdfe6f2c0964705bc5a0c76180aa8ae6e61ed5ace6b5f6",
+          "path": "mu/docs/README.md",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 150,
+              "path": "mu/docs/README.md",
+              "sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 150,
+              "path": "mu/docs/README.md",
+              "sha256": "ec262565150b5859bba37bc87c6f7c8cea7b1e5978bc7cb216b461b19a287f13",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+          "hunks": [
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -0,0 +1,332 @@",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "821e7db4add16a786b7a887eb7ee9c7ef95b198b78e786c9997cf4b00d454d83"
+            }
+          ],
+          "patch_sha256": "06c56f073392ff9c81b52f34ccbbd143764201476717983433abb64098e95b0f",
+          "path": "mu/docs/core/CoinductionPrefix.v0.md",
+          "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+          "references": [],
+          "resolution": "missing"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -17,7 +17,7 @@ const { muCopy } = require('./stage0_vm');",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 918,
+                  "path": "mu/host/js/core/seed_loader.js",
+                  "sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 918,
+                  "path": "mu/host/js/core/seed_loader.js",
+                  "sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "b1251353735da040b5ca1efa65e71ced8a5adfce02d0b818b7bbd74ded0e8f42"
+            }
+          ],
+          "patch_sha256": "4914efce995eb72bffb80b4e7f4bc98bf2c1d77f872b7421b3a1f3925d42e62d",
+          "path": "mu/host/js/core/seed_loader.js",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 918,
+              "path": "mu/host/js/core/seed_loader.js",
+              "sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 918,
+              "path": "mu/host/js/core/seed_loader.js",
+              "sha256": "d70789afb22280ee2c24ca820e7bbb70508e5ed4003108e329aa5b12e460a670",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+          "hunks": [
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -1240,7 +1240,10 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "3ab96fdb8e7303018bef8a2079c99a8f1a6101b424a82071c753cfed4a8414fb"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -1653,6 +1656,9 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "ae65f58d0a7c0943f650c99e1823f7e997a016d1166c46c353502dc8a16f952a"
+            },
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -1662,7 +1668,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "b415b21ac5dddb5e6a6550a3295867fa1d20ef53e077f6fa1bef66b0e7eb3e71"
+            }
+          ],
+          "patch_sha256": "9f220e55ddba890cb8785a3c7a8eb71d53ed5d75de3e7ed40eedcb2862326846",
+          "path": "mu/host/js/engine/kernel.js",
+          "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+          "references": [],
+          "resolution": "missing"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -25,7 +25,7 @@ from typing import Any",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 487,
+                  "path": "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+                  "sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 487,
+                  "path": "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+                  "sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "9c1367e9fc303d7b5b18df198de3c0f031d84bd076ef946e6658dbe05bdad435"
+            }
+          ],
+          "patch_sha256": "992c4aaf27fb1fa054174f76a11bf9b0334ec9aec622d5c0a59f3ff37fbdaafc",
+          "path": "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 487,
+              "path": "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+              "sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 487,
+              "path": "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+              "sha256": "4991217f23bdd23c7e335dc6d8d956dfe07f73166b4b1faf54b863b37028ed97",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,1108 @@",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 1108,
+                  "path": "mu/programs/coinduction_prefix.v1.json",
+                  "sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 1108,
+                  "path": "mu/programs/coinduction_prefix.v1.json",
+                  "sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "bf5f6e5be629bdaec779736413affcf8cf4014a3b4f925ecb32ab4b9d68fcaa9"
+            }
+          ],
+          "patch_sha256": "7a1b2cc2e64575650a3af7dabe33a45bbfe24cfb2bff48c9def3bab9c4a1a67a",
+          "path": "mu/programs/coinduction_prefix.v1.json",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 1108,
+              "path": "mu/programs/coinduction_prefix.v1.json",
+              "sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 1108,
+              "path": "mu/programs/coinduction_prefix.v1.json",
+              "sha256": "6891d59cda6b73b3091bcedd24b7e11410b5c999770e03d72461cc599e7ba72b",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -433,6 +433,48 @@",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 480,
+                  "path": "mu/seed_registry_manifest.v1.json",
+                  "sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 480,
+                  "path": "mu/seed_registry_manifest.v1.json",
+                  "sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "32185c0fda3a42c7d9f59515a573370c6ce03cf574ad132034e9c6901e155388"
+            }
+          ],
+          "patch_sha256": "053f82499d28220cb9aa9f18490d81032fb51695f0f6a39505e97ed2979e922f",
+          "path": "mu/seed_registry_manifest.v1.json",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 480,
+              "path": "mu/seed_registry_manifest.v1.json",
+              "sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 480,
+              "path": "mu/seed_registry_manifest.v1.json",
+              "sha256": "365f2ea0ce4819c31fd8ae06a32f26c25c9395f21ee9f96d052e1c54e082afa5",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+          "hunks": [
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -20,9 +20,9 @@ BASELINE_TOOL_SCRIPTS = 68  # .py + .sh in mu/tools/ (67 + sync_native_agents.sh",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "981f570c787ba81bcad6452ce66fab2f78031977a8b7f684acbe726490450723"
+            }
+          ],
+          "patch_sha256": "f7f0cce7a9f489ba9f0589acd1d2b1cac01cde5064d00d188f9d162117c8b35f",
+          "path": "mu/tests/docs/test_growth_caps.py",
+          "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+          "references": [],
+          "resolution": "missing"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,2117 @@",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 2117,
+                  "path": "mu/tests/fixtures/coinduction_prefix_vectors.json",
+                  "sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 2117,
+                  "path": "mu/tests/fixtures/coinduction_prefix_vectors.json",
+                  "sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "7995523d3429092f522a8f6a274fa00998a565c6f71c262106c2da4804fa2c6d"
+            }
+          ],
+          "patch_sha256": "3151b0aca8a1a14805b3a23363f78e0f5ae4400642a90cd8122665a970dd4a32",
+          "path": "mu/tests/fixtures/coinduction_prefix_vectors.json",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 2117,
+              "path": "mu/tests/fixtures/coinduction_prefix_vectors.json",
+              "sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 2117,
+              "path": "mu/tests/fixtures/coinduction_prefix_vectors.json",
+              "sha256": "9a9f3b827acf47bb8a572f1b3a6162241ecafd7a8c685ce050dd27b17dec9a3d",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,192 @@",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 192,
+                  "path": "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+                  "sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 192,
+                  "path": "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+                  "sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "7c30567b86e579c97e33009d769f09a9e2f5c549231bd4a547b35a8b73c78085"
+            }
+          ],
+          "patch_sha256": "b0d9f5ecbe005d92dd7cf18284c1ae8edbff2078000f9fa1d53fbf6c5bb3817e",
+          "path": "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 192,
+              "path": "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+              "sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 192,
+              "path": "mu/tests/l4_gates/test_coinduction_prefix_gate.py",
+              "sha256": "182864f0e0701df4be9b8f41a0db62952d16a2ee5f97721457255b015a95da55",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+          "hunks": [
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -950,6 +950,159 @@ class TestKernelRunResultPython:",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "6cce17a5c14c45f2ec12dbf029199c490f3066f05f88e5c23d253aee8fa6ea67"
+            }
+          ],
+          "patch_sha256": "07fbee04acc425ae301fb9e45b5677f698f5a20d6004e6359566e0fcc89e788e",
+          "path": "mu/tests/l4_gates/test_kernel_run_result_contract.py",
+          "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+          "references": [],
+          "resolution": "missing"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -79,9 +79,36 @@ class TestMetabolizeCycleJSParityGate:",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 233,
+                  "path": "mu/tests/l4_gates/test_metabolize_cycle_gate.py",
+                  "sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 233,
+                  "path": "mu/tests/l4_gates/test_metabolize_cycle_gate.py",
+                  "sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "fbb268c3d83e7e5f0ad7943231dc4c79f29c8e897b969da77cbd9151a62c4c33"
+            }
+          ],
+          "patch_sha256": "4516ce5120f43092431e19ffb037c40f310c746716f1f38b3871c42349f0dd4c",
+          "path": "mu/tests/l4_gates/test_metabolize_cycle_gate.py",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 233,
+              "path": "mu/tests/l4_gates/test_metabolize_cycle_gate.py",
+              "sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 233,
+              "path": "mu/tests/l4_gates/test_metabolize_cycle_gate.py",
+              "sha256": "cb11c050ef2e0b753c70b34af22c7dbff0f578b11745ced4e2ec19c7e0f4513d",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -697,23 +697,35 @@ class TestFullLockConsistency:",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 2652,
+                  "path": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+                  "sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 2652,
+                  "path": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+                  "sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "9564f439547b81890b91c7a345c40b393ab41bc8021e7e404d4dfcfd04a8d282"
+            }
+          ],
+          "patch_sha256": "3453e21c91f441055585360f924e3bc36403c804727b561f68c5ddda342e969a",
+          "path": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 2652,
+              "path": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+              "sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 2652,
+              "path": "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+              "sha256": "cec45ba76f293d4b39c90d82c1c44e775d69e803808d6d2ef96bccedbfe68fa1",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,124 @@",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 124,
+                  "path": "mu/tests/parity/test_coinduction_prefix_parity.py",
+                  "sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 124,
+                  "path": "mu/tests/parity/test_coinduction_prefix_parity.py",
+                  "sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "441c7af9269d1c688fe6ee00aad6e969f6346ab66464a7e9a4f9d32f1ad04cd2"
+            }
+          ],
+          "patch_sha256": "dc58a186f61b05cd00bc7cf16acf8af6a196b33538256c1cdac084d61a2f295d",
+          "path": "mu/tests/parity/test_coinduction_prefix_parity.py",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 124,
+              "path": "mu/tests/parity/test_coinduction_prefix_parity.py",
+              "sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 124,
+              "path": "mu/tests/parity/test_coinduction_prefix_parity.py",
+              "sha256": "f5d7542c3389eda50ad7962bae83bbaddfda9b92087b39a71b6d75581fe3c396",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -736,10 +736,10 @@ class TestSeedChecksumParity:",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 2059,
+                  "path": "mu/tests/parity/test_seed_loading_parity.py",
+                  "sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 2059,
+                  "path": "mu/tests/parity/test_seed_loading_parity.py",
+                  "sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "514a076d2208c83096f2196e0ea6837c331cb5761255dfbe3e072f9d0fe2550d"
+            }
+          ],
+          "patch_sha256": "56e2e2c1cfb5d227212549840b6e50753c8c371840cfdcbaf612f31799b4a7e2",
+          "path": "mu/tests/parity/test_seed_loading_parity.py",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 2059,
+              "path": "mu/tests/parity/test_seed_loading_parity.py",
+              "sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 2059,
+              "path": "mu/tests/parity/test_seed_loading_parity.py",
+              "sha256": "d4fb68d902125f1ce1fd5240c9069e42680edfce2b22f03bf921bc6decf9dc41",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -6,6 +6,9 @@ Proves that claimed execution layers are distinguishable via observer evidence:",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 347,
+                  "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+                  "sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 347,
+                  "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+                  "sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d052da421cb63416a80c03c1509cbe44aa43886951bcc6c80b8878b14361772c"
+            },
+            {
+              "header": "@@ -142,6 +145,73 @@ class TestExecutionLayerTruth:",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 347,
+                  "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+                  "sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 347,
+                  "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+                  "sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "b6d94d8c08e5fab914f0b8f07f8fb51004cfda0b1faed0034f833184a72bc62b"
+            }
+          ],
+          "patch_sha256": "2da882ff73977a504110931da586c11f311382d824d0851613641cdfa7c1f4a1",
+          "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 347,
+              "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+              "sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 347,
+              "path": "mu/tests/structural/test_execution_layer_truth_contract.py",
+              "sha256": "1ca64344bf3d23116d4c597e8eb3b9ba750d0a7c125faa730f5816e8e0144902",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -34,6 +34,7 @@ MU_SEEDS = {",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 353,
+                  "path": "mu/tests/structural/test_seed_counts.py",
+                  "sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 353,
+                  "path": "mu/tests/structural/test_seed_counts.py",
+                  "sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "5cc55d5844ca4dbfc02d348ad299c5edbde271b06aef766db3ee189b06820b81"
+            },
+            {
+              "header": "@@ -72,6 +73,7 @@ EXPECTED_COUNTS = {",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 353,
+                  "path": "mu/tests/structural/test_seed_counts.py",
+                  "sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 353,
+                  "path": "mu/tests/structural/test_seed_counts.py",
+                  "sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "ff9a21f930a9a29b4d79c82b87557913622ec43e08e2132cb0e8c142ba074290"
+            }
+          ],
+          "patch_sha256": "ff4c3e1a7e2d66a2533e109e410a1b8012188e28782a9f849526e650829639da",
+          "path": "mu/tests/structural/test_seed_counts.py",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 353,
+              "path": "mu/tests/structural/test_seed_counts.py",
+              "sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 353,
+              "path": "mu/tests/structural/test_seed_counts.py",
+              "sha256": "0aec7f7f772ebc874a6e29566610b4ed7a2c4bbeca8f97693a97a421d62cf7ec",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,224 @@",
+              "reason": "Historical R8 packet/measurement retained at the exact source branch; it records that stopped attempt and is not runtime integration evidence.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "ab56a99d1181706ce83f18436034043ead24984b919eb5bc9051c3323f32dc56"
+            }
+          ],
+          "patch_sha256": "11cb6a3fa01482d1d2ad2dae3f9890f51b01ef8bdd72c555974b9e3c8c0a426b",
+          "path": "reports/control_plane/mu-coinduction-guarded-prefix-r8-2026-10-01_2026-10-01.md",
+          "reason": "Historical R8 packet/measurement retained at the exact source branch; it records that stopped attempt and is not runtime integration evidence.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,853 @@",
+              "reason": "Historical R8 packet/measurement retained at the exact source branch; it records that stopped attempt and is not runtime integration evidence.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "2c9005542b4c9eb0af95ba53b388471cc86b5fc756f1a6fc751f7f5903f0f63a"
+            }
+          ],
+          "patch_sha256": "215893d32eb33e0096952897268e45dfbc48d07d25b2a87017ed6e9e42175b37",
+          "path": "reports/control_plane/mu-coinduction-guarded-prefix-r8-2026-10-01_implementation_evidence.json",
+          "reason": "Historical R8 packet/measurement retained at the exact source branch; it records that stopped attempt and is not runtime integration evidence.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+          "hunks": [
+            {
+              "followup": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] native PR1325 per-hunk landing review; retain refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01 at 01cc58b31c0239896cae263ae8e06264d4a6a2f4; outstanding Mu production findings remain [MU-COINDUCTION-PRODUCTION-PROOF].",
+              "header": "@@ -0,0 +1,14 @@",
+              "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+              "references": [],
+              "resolution": "missing",
+              "sha256": "3d060e122fe704d121260d8c121874e5d454aa8ce5c4b652efc5efc285e29bd4"
+            }
+          ],
+          "patch_sha256": "c5d106ccc350d344e5d95f4499d49829926b96dd7ec8e62c73537e35bb021733",
+          "path": "reports/deferred/non_blocking/mu-coinduction-guarded-prefix-r8-2026-10-01_bridge_nonblockers.md",
+          "reason": "Source bytes differ from the actual replacement or current landed comparison. Exact hunk disposition remains unresolved pending native review; no runtime defect or semantic equivalence is inferred.",
+          "references": [],
+          "resolution": "missing"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "Historical R8 packet/measurement retained at the exact source branch; it records that stopped attempt and is not runtime integration evidence.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "4e7c99a12811bc51d9f5cf76b674829be279d2350bad77d144253e5240f20c3f"
+            }
+          ],
+          "patch_sha256": "4e621b8577beb0a7e98f4c8e9409d52f0000409b760c6fd8e1222d5933c599d7",
+          "path": "reports/l4_wave_indicators/mu-coinduction-guarded-prefix-r8-2026-10-01.json",
+          "reason": "Historical R8 packet/measurement retained at the exact source branch; it records that stopped attempt and is not runtime integration evidence.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -96,6 +96,7 @@ These `mu/docs/core/` documents have DOC_STATUS TYPE = DESIGN_SPEC or IMPLEMENTA",
+              "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+              "references": [
+                {
+                  "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+                  "end": 131,
+                  "path": "roadmap/MANIFEST.md",
+                  "sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f",
+                  "start": 1
+                },
+                {
+                  "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+                  "end": 131,
+                  "path": "roadmap/MANIFEST.md",
+                  "sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "72bbc309a7d6362a908b15320da32abb4c575c8f6624dffa9ac4a8c36af300f2"
+            }
+          ],
+          "patch_sha256": "07ac50f9966b0b0f5da1654079b84b1d53de49ba1dbfb187a22a44b98d9d6589",
+          "path": "roadmap/MANIFEST.md",
+          "reason": "Complete source bytes exactly match both actual PR1327 merge and the current landed comparison; native semantic review remains required.",
+          "references": [
+            {
+              "commit": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+              "end": 131,
+              "path": "roadmap/MANIFEST.md",
+              "sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f",
+              "start": 1
+            },
+            {
+              "commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+              "end": 131,
+              "path": "roadmap/MANIFEST.md",
+              "sha256": "a473315943efcfb3a9d76032ded06c850572f94c0b720beb760c89595e53052f",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        }
+      ],
+      "evidence_refs": [
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/pr1325_to_mu_r10_committed_inventory_20261002.json",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/remaining_nine_landing_owner_recovery_paths_20261002.json",
+        "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_implementation_evidence.json"
+      ],
+      "owner": {
+        "packet": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_2026-10-04.md",
+        "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+        "wave_id": "workingrcx-fleet-residual-pr-folders-r2-2026-10-04"
+      },
+      "preservation_ref": "refs/heads/jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01",
+      "replacement": {
+        "head": "58baed7117a267974200071f8bd72743e01b4a33",
+        "id": "PR_kwDOQvy8bs8AAAABGR0czg",
+        "merge": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+        "number": 1327
+      },
+      "source_base": "3f9d33b0bfaf0129f0e8a397f3f6739fa54b975d",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/mu-coinduction-guarded-prefix-r8-2026-10-01",
+        "headRefOid": "01cc58b31c0239896cae263ae8e06264d4a6a2f4",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABGL3CAw",
+        "mergedAt": null,
+        "number": 1325,
+        "state": "OPEN"
+      }
+    }
+  ],
+  "wave_id": "workingrcx-fleet-residual-pr-folders-r2-2026-10-04"
+}

@@ -34,6 +34,178 @@ MAX_ATTEMPTS = 3
 REGISTRY = "rcx_worktree_lifecycle"
 FAILED_CLOSEOUT_REASON = "Native closeout failed; source/config and correction owner retained"
 READER_RELEASE_SECONDS = 2.0
+LOG_READER_PROTOCOL = "rcx-log-reader-v2"
+
+
+def _reader_process(pid: int) -> dict | None:
+    """Observe a PID's birth and full command; PID reuse is never adoption."""
+    proc = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "pid=,ppid=,lstart=,command="],
+        capture_output=True, text=True, timeout=10, env={**os.environ, "LC_ALL": "C"})
+    if proc.returncode == 1 and not proc.stdout.strip() and not proc.stderr:
+        return None
+    parts = proc.stdout.strip().split(None, 7)
+    if proc.returncode or proc.stderr or len(parts) != 8 or int(parts[0]) != pid:
+        raise fleet.Hold("Log watcher process identity is uncertain")
+    return dict(pid=pid, ppid=int(parts[1]), started=" ".join(parts[2:7]), command=parts[7])
+
+
+def _watcher_script(process: dict | None) -> Path | None:
+    if not process:
+        return None
+    args = shlex.split(process["command"])
+    if (len(args) not in {2, 3} or Path(args[0]).name != "bash"
+            or (len(args) == 3 and args[2] != "--" + LOG_READER_PROTOCOL)):
+        return None
+    script = Path(args[1])
+    if (not script.is_absolute() or script.name != "rcx_log_watcher.sh"
+            or not any(script.resolve().is_relative_to(root.resolve())
+                       for root in (Path("/tmp"), Path(tempfile.gettempdir())))
+            or script.is_symlink()):
+        return None
+    return script
+
+
+def _reader_panes(session: str | None = None) -> list[dict]:
+    proc = subprocess.run(["tmux", "list-panes", *(["-t", session] if session else ["-a"]),
+        "-F", "#{pane_id}\t#{pane_pid}\t#{pane_title}\t#{pane_start_command}\t#{@rcx_log_reader_protocol}"],
+        capture_output=True, text=True, timeout=10)
+    if proc.returncode or proc.stderr:
+        raise fleet.Hold("Live log watcher pane ownership is unavailable")
+    panes = []
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 5 or not parts[0].startswith("%") or not parts[1].isdigit():
+            raise fleet.Hold("Live log watcher pane identity is malformed")
+        if parts[2] == "PANE 1 · LIVE PIPELINE LOG":
+            panes.append(dict(pane=parts[0], pid=int(parts[1]), title=parts[2],
+                              command=parts[3], acknowledgment=parts[4]))
+    return panes
+
+
+def _reader_adopted(pane: dict, process: dict | None) -> bool:
+    return bool(_watcher_script(process)
+        and shlex.split(process["command"])[-1] == "--" + LOG_READER_PROTOCOL
+        and pane["pid"] == process["pid"]
+        and pane["acknowledgment"] == f"{process['pid']}|{process['started']}|{LOG_READER_PROTOCOL}")
+
+
+def _adopt_monitor_pane(pane: dict, *, expected: dict | None = None) -> dict:
+    """Gracefully replace only the exact old generated watcher in its own pane.
+
+    The old trap reaps its own tail. There is no forced kill, process-name-wide
+    signal or dead-PID reuse. A missing acknowledgment holds before any claim.
+    """
+    process = _reader_process(pane["pid"])
+    script = _watcher_script(process)
+    if script is None or (expected is not None and process != expected):
+        raise fleet.Hold("Old log watcher identity changed or is unknown; no adoption")
+    if _reader_adopted(pane, process):
+        return dict(previous=process, current=process, pane=pane["pane"])
+    # A new watcher may still be initializing; wait for its own live ack rather
+    # than restarting it. Only the observed two-argument legacy Bash is replaced.
+    if len(shlex.split(process["command"])) == 2:
+        command = pane["command"]
+        # tmux shell-quotes a single original command in pane_start_command.
+        # Decode exactly that wrapper before comparing or respawning it.
+        arguments = shlex.split(command)
+        if len(arguments) == 1:
+            command = arguments[0]
+        suffixes = ("bash " + str(script), "bash " + shlex.quote(str(script)))
+        if not any(command.endswith(suffix) for suffix in suffixes):
+            raise fleet.Hold("Old log watcher launch command is not owned by this pane")
+        # Render the same bounded heredoc used by the monitor. New disk bytes
+        # are an input to respawn; only a new process's acknowledgment proves it.
+        monitor = Path(__file__).resolve().parents[1] / "observability/pipeline_monitor.sh"
+        source = monitor.read_text()
+        rendered = source.split("  cat <<'WATCHER_EOF'\n", 1)[1].split("\nWATCHER_EOF", 1)[0] + "\n"
+        fleet.read_plain(script)  # Refuse symlinks, special files and ambiguous ownership.
+        subprocess.run(["tmux", "set-option", "-p", "-t", pane["pane"], "remain-on-exit", "on"],
+                       check=True, capture_output=True, timeout=10)
+        current_panes = {p["pane"]: p for p in _reader_panes()}
+        if current_panes.get(pane["pane"]) != pane or _reader_process(process["pid"]) != process:
+            raise fleet.Hold("Old log watcher PID/start/pane changed before adoption")
+        os.kill(process["pid"], signal.SIGTERM)
+        deadline = time.monotonic() + READER_RELEASE_SECONDS
+        while _reader_process(process["pid"]) is not None:
+            if time.monotonic() >= deadline:
+                raise fleet.Hold("Old log watcher exit not acknowledged; no new retirement claim")
+            time.sleep(0.05)
+        if {p["pane"]: p for p in _reader_panes()}.get(pane["pane"]) != pane:
+            raise fleet.Hold("Old log watcher pane changed after exit; no respawn")
+        fd, pending = tempfile.mkstemp(prefix=".rcx-reader-", dir=script.parent)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                os.fchmod(stream.fileno(), 0o700)
+                stream.write(rendered)
+            os.replace(pending, script)
+        finally:
+            Path(pending).unlink(missing_ok=True)
+        # No -k: if another process acquired the pane, tmux refuses this respawn.
+        subprocess.run(["tmux", "respawn-pane", "-t", pane["pane"], command],
+                       check=True, capture_output=True, timeout=10)
+    deadline = time.monotonic() + READER_RELEASE_SECONDS
+    while True:
+        current = next((p for p in _reader_panes() if p["pane"] == pane["pane"]), None)
+        live = _reader_process(current["pid"]) if current else None
+        if current and _reader_adopted(current, live):
+            return dict(previous=process, current=live, pane=pane["pane"])
+        if time.monotonic() >= deadline:
+            raise fleet.Hold("Live log watcher protocol adoption not acknowledged; no new retirement claim")
+        time.sleep(0.05)
+
+
+def monitor_reader_protocol(session: str, *, adopt: bool = False) -> bool:
+    """Monitor health must describe the live process, not a generated file."""
+    panes = _reader_panes(session)
+    if len(panes) != 1:
+        return False
+    pane = panes[0]
+    if _reader_adopted(pane, _reader_process(pane["pid"])):
+        return True
+    if not adopt:
+        return False
+    _adopt_monitor_pane(pane)
+    return monitor_reader_protocol(session, adopt=False)
+
+
+def _legacy_log_readers(identity: dict) -> list[dict]:
+    proc = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,command="],
+                          capture_output=True, text=True, timeout=10)
+    if proc.returncode or proc.stderr or not proc.stdout.strip():
+        raise fleet.Hold("Owned log reader process evidence is unavailable")
+    parents = {}
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) != 3 or not all(p.isdigit() for p in parts[:2]):
+            raise fleet.Hold("Owned log reader process evidence is malformed")
+        # Parse only an actual tail command, never prose in an executor argv.
+        if not parts[2].startswith(("tail ", "/usr/bin/tail ", "/bin/tail ")):
+            continue
+        args = shlex.split(parts[2])
+        if len(args) != 3 or args[1] != "-f" or not Path(args[2]).is_relative_to(identity["path"]):
+            continue
+        parent = _reader_process(int(parts[1]))
+        if _watcher_script(parent):
+            parents[parent["pid"]] = parent
+    return list(parents.values())
+
+
+def _adopt_terminal_log_readers(registration: dict, terminal: dict) -> list[dict]:
+    readers = _legacy_log_readers(terminal["identity"])
+    if not readers:
+        return []
+    if terminal_log_record(Path(terminal["identity"]["path"]), registration["bus_dir"]) != terminal["record"]:
+        raise fleet.Hold("Old log reader lacks exact exited terminal ownership")
+    panes = _reader_panes()
+    adoptions = []
+    for reader in readers:
+        matches = [p for p in panes if p["pid"] == reader["pid"]]
+        if len(matches) != 1:
+            raise fleet.Hold("Old raw log reader lacks an exact owned pane; no new retirement claim")
+        adoptions.append(_adopt_monitor_pane(matches[0], expected=reader))
+    if _legacy_log_readers(terminal["identity"]):
+        raise fleet.Hold("Raw log reader remains after adoption; no new retirement claim")
+    return adoptions
 
 
 def sync_primary_from_landed_source(repo: Path, *, base_branch: str, authority_commit: str) -> dict:
@@ -304,6 +476,7 @@ def follow_terminal_log(repo: Path, bus_dir: str, log: Path) -> None:
 @contextmanager
 def _released_log_readers(directory: Path, registration: dict, terminal: dict):
     """Bounded acknowledgment before a new claim; never bypass process gates."""
+    adoptions = _adopt_terminal_log_readers(registration, terminal)
     with _log_reader_lock(terminal["identity"], registration["bus_dir"]) as lock:
         deadline = time.monotonic() + READER_RELEASE_SECONDS
         while True:
@@ -317,6 +490,7 @@ def _released_log_readers(directory: Path, registration: dict, terminal: dict):
         fleet.write_new(directory / "reader-release.json", fleet.encoded(dict(
             state="RELEASED", terminal_sha256=fleet.digest(fleet.read_plain(directory / "terminal.json")),
             identity=terminal["identity"], bus_dir=registration["bus_dir"],
+            watcher_adoptions=adoptions,
             acknowledgment="exclusive lock after owned tail exit; not retirement authority")), verify_existing=True)
         yield
 
@@ -778,7 +952,7 @@ def complete_pending(directory: Path, *, delay: float = 2.0) -> dict:
         if any(not (directory / f"attempt-{number}").exists() for number in numbers):
             try:
                 readers.enter_context(_released_log_readers(directory, registration, terminal))
-            except (fleet.Hold, OSError) as exc:
+            except (fleet.Hold, OSError, ValueError, subprocess.SubprocessError) as exc:
                 value = dict(state="ESCALATED", owner=OWNER, reason=str(exc),
                     next_action="Resolve this exact reader release hold; retain all original claims and request fresh authority.")
                 numbers = ()
