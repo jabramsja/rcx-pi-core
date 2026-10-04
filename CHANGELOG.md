@@ -4,6 +4,36 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-04
+
+### Residual folder/PR cleanup R2 with verified monitor fixtures (Phase B; landing pending)
+
+- Reconstruct the eight authorized source/test/doc paths from preserved cleanup
+  R1, retaining PR1328's lifecycle fixtures. Before the production correction,
+  the declared tools suite reproduced six live-reader regression failures with
+  2,401 passed and one skipped; the old raw tail exhausted all three claims.
+  Carry the exact live watcher handshake, optional common-directory probe
+  tolerance and verified adjacent recovery-test repair. Writer, unknown-reader,
+  identity and spent-budget controls remain intact.
+- Bind the explicit oldest-MuR1 release to this wave and exact landed `35f7c225`,
+  retaining actual PR1327 replacement merge `146ca495`. Fresh classification
+  exposed an unlisted completed archive losing its explicit protection; retain
+  that hold in the native classifier. Regenerated canonical artifacts select
+  only the five named sources and retain fourteen individual HOLDs.
+- Rebuild PR1325's complete 25-path/40-hunk manifest against the actual merged
+  replacement and current dev. Fourteen source files match exactly; eight
+  differing paths/21 hunks retain native review/landing owners. Historical
+  attempt evidence is preserved separately from semantic integration.
+- Preserve all 268 task IDs, existing queue/owners, the stopped R1 source/index/
+  history/bus and held PRIMARY transaction/stash. The same-wave implementation
+  evidence records actual generator commands and final gates: 2,423 tools tests
+  passed with one skipped; 351 docs tests passed with one existing stale-doc warning.
+  The two live blocker controls use actual descriptor evidence in the retained
+  PR1328 disposable fixture. Native review,
+  indicators, commit/CI/merge/protected sync, public APPLY/VERIFY, PR terminal
+  disposition and separate carrier retirement remain pending. No physical
+  removal, runtime completion or closure of inherited useful-work owners is claimed.
+
 ## 2026-10-03
 
 ### Complete postmerge cleanup fixtures on the preserved enabler (Phase B; landing pending)

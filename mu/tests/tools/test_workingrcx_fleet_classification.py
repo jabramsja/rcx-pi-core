@@ -26,13 +26,82 @@ STAMP = "2026-09-11T18:34:09+00:00"
 ZERO_COUNTS = dict(entries=0, tracked=0, untracked=0, staged=0, unstaged=0, unmerged=0)
 
 
-def test_fresh_retirement_admits_detached_but_keeps_exact_locks_and_protected_owners(retirement_fleet):
+@pytest.mark.parametrize("fault", [None, "default", "explicit-protection", "head", "branch",
+    "git-dir", "common-dir", "filesystem", "unknown-work", "unknown-recovery", "archive", "unmerged",
+    "replacement", "comparison", "wave"])
+def test_exact_reviewed_oldest_mu_release_keeps_other_owners(retirement_fleet, monkeypatch, fault):
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    f = retirement_fleet
+    spec = classifier.OLDEST_MU_RELEASE
+    target = f.root / spec["source_name"]
+    retirement_git(f, f.repo, "worktree", "move", str(f.targets[0]), str(target))
+    retirement_git(f, target, "branch", "-m", spec["branch"].removeprefix("refs/heads/"))
+    # Disposable commits substitute only the immutable production object IDs.
+    local_spec = dict(spec, head=retirement_git(f, target, "rev-parse", "HEAD"),
+                      replacement_head=f.landed, merge=f.landed, predecessor=f.landed,
+                      git_dir_name=f.targets[0].name)
+    monkeypatch.setattr(classifier, "OLDEST_MU_RELEASE", local_spec)
+    monkeypatch.setattr(classifier, "LANDED_FLEET", str(f.root))
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    source = next(r for r in observed["entries"] if r["path"] == str(target))
+    if fault == "head":
+        source["git"]["HEAD"] = source["registered_worktrees"][0]["HEAD"] = f.landed
+    elif fault == "branch":
+        source["git"]["branch"] = source["registered_worktrees"][0]["branch"] = "refs/heads/changed-owner"
+    elif fault in {"git-dir", "common-dir"}:
+        source["git"][fault.replace("-", "_")] += "-changed"
+    elif fault == "filesystem":
+        source["filesystem_identity"] = {}
+    elif fault == "unknown-work":
+        source["useful_work"]["status"] = "UNKNOWN"
+    elif fault == "unknown-recovery":
+        source["retirement_evidence"]["status"] = "UNKNOWN"
+    elif fault == "archive":
+        source["retirement_evidence"]["preserved_operation"] = {"lifecycle_completion": True}
+    elif fault == "unmerged":
+        source["git"]["dirty_counts"]["unmerged"] = 1
+    elif fault == "replacement":
+        local_spec["replacement_head"] = "a" * 40
+    elif fault == "comparison":
+        local_spec["predecessor"] = f.original
+    options = dict(source_sha256=hashlib.sha256(json.dumps(observed).encode()).hexdigest(),
+        base_commit=f.landed, retirement_predecessor=f.landed, carrier=str(f.repo),
+        landed=False, residual=True, retirement=True,
+        wave_id="wrong-owner-wave" if fault == "wave" else spec["wave_id"],
+        protected=(str(f.targets[1]),) + ((str(target),) if fault == "explicit-protection" else ()))
+    before = snapshot(target)
+    result = classifier.classify(observed, **options,
+        reviewed_oldest_mu_release=None if fault == "default" else str(target))
+    rows = {r["path"]: r for r in result["entries"]}
+    assert rows[str(target)]["decision"] == ("CONDITIONAL_RETIRE_CANDIDATE" if fault is None else "HOLD")
+    assert rows[str(f.repo)]["decision"] == rows[str(f.targets[1])]["decision"] == "HOLD"
+    assert rows[str(f.targets[2])]["decision"] == "CONDITIONAL_RETIRE_CANDIDATE"
+    if fault is None:
+        release = result["policy"]["reviewed_oldest_mu_release"]
+        assert release["source_identity"]["HEAD"] == local_spec["head"]
+        assert release["comparison_commit"] == f.landed
+        assert release["independent_preservation_required"] is True
+        assert release["semantic_integration_claimed"] is False
+        assert str(target) not in result["policy"]["protected_paths"]
+    assert snapshot(target) == before
+
+
+@pytest.mark.parametrize("archived_protected_source", [False, True])
+def test_fresh_retirement_admits_detached_but_keeps_exact_locks_and_protected_owners(
+    retirement_fleet, archived_protected_source,
+):
     import workingrcx_fleet_census as census_tool
     import workingrcx_fleet_classification as classifier
     f = retirement_fleet
     retirement_git(f, f.targets[0], "checkout", "--detach")
     retirement_git(f, f.repo, "worktree", "lock", str(f.targets[2]))
     observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    if archived_protected_source:
+        # R2's fresh census found an unlisted lifecycle archive selected despite
+        # its explicit --protect. Completion evidence cannot release that hold.
+        protected_source = next(r for r in observed["entries"] if r["path"] == str(f.targets[1]))
+        protected_source["retirement_evidence"]["preserved_operation"] = {"lifecycle_completion": True}
     options = dict(source_sha256=hashlib.sha256(json.dumps(observed).encode()).hexdigest(),
         base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True,
         wave_id="fixture-retirement-classification", protected=(str(f.targets[1]),))

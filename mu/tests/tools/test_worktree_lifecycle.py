@@ -250,6 +250,104 @@ def test_finished_generated_reader_releases_within_native_completion_budget(nati
     assert all(p.read_bytes() == data for p, data in receipts.items())
 
 
+@pytest.mark.parametrize("obstruction", [None, "writer", "unknown-reader"])
+def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_path, monkeypatch, obstruction):
+    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher
+    primary, lane, _, env = native_lane
+    blocker = None
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
+        if obstruction:
+            blocker = subprocess.Popen([sys.executable, "-c",
+                "import json,os,sys; f=open(os.environ['READER_TEST_PATH'],os.environ['READER_TEST_MODE']); "
+                "s=os.fstat(f.fileno()); "
+                "print(json.dumps(dict(pid=os.getpid(),fd=f.fileno(),device=s.st_dev,inode=s.st_ino)),flush=True); "
+                "sys.stdin.readline()"], cwd=primary,
+                env=env | {"READER_TEST_PATH": str(log),
+                           "READER_TEST_MODE": "a" if obstruction == "writer" else "r"},
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            assert select.select([blocker.stdout], [], [], 10)[0]
+            descriptor = json.loads(blocker.stdout.readline())
+            assert descriptor["pid"] == blocker.pid
+            # PR1328 isolates lsof evidence in every disposable native lane.
+            # Bind this response to the real blocker descriptor instead of
+            # letting the fixture's default empty response conceal that owner.
+            access = "w" if obstruction == "writer" else "r"
+            Path(env["RCX_TEST_LSOF_RESPONSE"]).write_text(json.dumps(dict(
+                returncode=0, stderr="", stdout=(
+                    f"p{blocker.pid}\ncPython\nf{descriptor['fd']}\na{access}\ntREG\n"
+                    f"D{descriptor['device']:x}\ni{descriptor['inode']}\nn{log}\n"))))
+        try:
+            directory = register_from_exited_owner(lane, env, status="success")
+            result = lifecycle.complete_pending(directory, delay=0)
+            if obstruction is None:
+                references = []
+                if result["state"] != "COMPLETE":
+                    ps = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,command="],
+                                        capture_output=True, text=True, check=True)
+                    references = [line for line in ps.stdout.splitlines() if str(lane) in line]
+                assert result["state"] == "COMPLETE", (result, references)
+            for pid in [old.pid, *tails]:
+                with pytest.raises(ProcessLookupError):
+                    os.kill(pid, 0)
+            if obstruction:
+                assert result["state"] == "ESCALATED", result
+                assert result["attempts_exhausted"] == 3
+                assert "Open target files/processes or uncertain lsof evidence" in result["reason"]
+                assert lane.exists() and blocker.poll() is None
+            else:
+                assert result["state"] == "COMPLETE", result
+                assert len(list(directory.glob("attempt-*/claim.json"))) == 1
+                assert not lane.exists()
+                assert (Path(result["destination"]) / ".scratch/commit_executor_live.log").read_text() == "retained live log\n"
+            receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+        finally:
+            if blocker is not None:
+                blocker.communicate(input="done\n", timeout=10)
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert all(p.read_bytes() == raw for p, raw in receipts.items())
+
+
+@pytest.mark.parametrize("fault", ["missing-pane", "changed-start"])
+def test_stale_reader_adoption_refuses_unknown_or_changed_owner_before_claim(native_lane, tmp_path, monkeypatch, fault):
+    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher, _watcher_tails
+    primary, lane, _, env = native_lane
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (run, pane, old, tails, log):
+        observations = 0
+        if fault == "missing-pane":
+            run("select-pane", "-t", pane, "-T", "unowned live reader")
+        else:
+            # Change the OS observation through the public subprocess seam;
+            # keep the real lifecycle parser and identity comparison active.
+            original = subprocess.run
+            def changed_start(command, *args, **kwargs):
+                nonlocal observations
+                result = original(command, *args, **kwargs)
+                if command == ["ps", "-ww", "-p", str(old.pid), "-o", "pid=,ppid=,lstart=,command="]:
+                    assert result.returncode == 0 and not result.stderr
+                    observations += 1
+                    if observations > 1:
+                        fields = result.stdout.strip().split(None, 7)
+                        assert len(fields) == 8
+                        fields[6] = str(int(fields[6]) + 1)
+                        return subprocess.CompletedProcess(result.args, result.returncode,
+                            " ".join(fields) + "\n", result.stderr)
+                return result
+            monkeypatch.setattr(subprocess, "run", changed_start)
+        directory = register_from_exited_owner(lane, env, status="success")
+        result = lifecycle.complete_pending(directory, delay=0)
+        assert result["state"] == "ESCALATED", result
+        if fault == "changed-start":
+            assert observations >= 2
+            assert "Old log watcher identity changed or is unknown" in result["reason"]
+        assert not list(directory.glob("attempt-*"))
+        assert not (directory / "reader-release.json").exists()
+        assert _watcher_tails(old, log) == tails
+        assert lane.exists()
+        receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert all(p.read_bytes() == raw for p, raw in receipts.items())
+
+
 def test_unacknowledged_owned_reader_consumes_no_claim_and_cannot_replay(native_lane):
     primary, lane, _, env = native_lane
     directory = register_from_exited_owner(lane, env, status="success")

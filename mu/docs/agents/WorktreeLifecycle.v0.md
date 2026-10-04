@@ -98,10 +98,26 @@ lock exclusively and retains it through its normal completion gates. This
 acknowledges follower exit and prevents heartbeat or cold-restart attachment
 during retirement. The rendezvous is bounded to two seconds; it changes neither
 the existing inter-attempt delay nor the three-attempt limit. An unacknowledged
-release seals an ESCALATED completion without a new claim. It does not signal
-the reader, reset a budget or retry automatically. `reader-release.json` binds
+release seals an ESCALATED completion without a new claim. It does not reset a
+budget or retry automatically. `reader-release.json` binds
 successful acknowledgment to the terminal bytes and exact identity; it grants
 no retirement authority.
+
+An old in-memory Bash watcher can still own a raw tail after its generated
+script is updated. An empty reader lock does not acknowledge that process.
+Monitor health therefore checks the running watcher's coordinated-reader
+protocol, not just pane titles, paths or updated script bytes. A stale watcher
+is upgraded only through its exact live-log tmux pane, Bash command, PID and
+start identity. The watcher receives TERM through its existing child-cleanup
+trap; replacement uses a dead-pane respawn, never a forced pane kill. Unknown
+process identities remain holds. Native completion performs this adoption for
+an observed direct raw-tail child before acquiring the reader fence and before
+any unspent claim. Missing pane ownership, changed process identity, failed
+adoption or a surviving raw reader seals an individual hold without spending a
+claim. Historical ESCALATED completions and all three consumed claims remain
+immutable. Regression coverage starts the old Bash/raw-tail pair, updates the
+script while that same pair is alive, then exercises health adoption and native
+completion with writer and unknown-reader controls.
 
 The follower stops only the tail it created; it never exempts readers from the
 generic retirement guard. An open writer, unknown reader, live native owner or
@@ -273,6 +289,23 @@ classification. The fresh plan pins their hashes; foreground apply and verify
 require committed bytes, index and mode for the complete authority, including
 the coverage ledger. Native merge, ancestor checks and synchronized PRIMARY
 remain mandatory before any public apply.
+
+The October 4 residual-PR R2 wave can explicitly request
+`--reviewed-oldest-mu-release <exact-MuR1-path>`. The default protection remains.
+This opt-in is restricted to that wave, the original MuR1 path/HEAD/branch and
+Git directories, and replacement PR1327 head `58baed71` actually landed at the
+merge `146ca495`, ancestral to the exact current comparison `35f7c225`.
+The R2 predecessor is distinct from the actual replacement merge; the stopped
+R1 wave and its receipts are never rebound. Changed or unknown identities, work
+inventories, recovery ownership or replacement ancestry keep MuR1 protected individually.
+Explicit protections, PRIMARY, separate dev, preservation containers and the
+new carrier remain unchanged. Explicit `--protect` also retains a completed
+lifecycle archive; its completion receipt cannot release an unlisted source.
+The generated proposal binds the raw census and requires the existing action
+to independently recover all file bytes, raw index,
+indexed objects, refs/history/stashes and journals before retirement. Missing
+useful hunks retain their native landing owners; this release asserts no
+semantic integration and grants no spent-attempt replay.
 
 The September 27 observation found device `16777231` where the September 26
 census recorded `16777229`; matching inodes and modes did not authorize a

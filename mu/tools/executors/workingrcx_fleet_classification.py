@@ -72,6 +72,16 @@ LANDED_CENSUS = "workingrcx-fleet-census-r3-2026-09-11_census.json"
 LANDED_SHA256 = "ac6f61337081c9adb7c100bac061270f6c7864aaed55d48912f50b8473d0cd81"
 LANDED_BASE = "c209bf29841425305003eeceddfd567a93874742"
 LANDED_FLEET = "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal"
+OLDEST_MU_RELEASE = dict(
+    wave_id="workingrcx-fleet-residual-pr-folders-r2-2026-10-04",
+    source_name="WorkingRCX-mu-coinduction-prefix-r1-20260914",
+    git_dir_name="WorkingRCX-mu-coinduction-prefix-r1-20260914",
+    head="fa13dada1e0d2d58d4981a279358f63fa6674ab4",
+    branch="refs/heads/jabramsja/mu-coinduction-guarded-prefix-r1-2026-09-14",
+    replacement_head="58baed7117a267974200071f8bd72743e01b4a33",
+    merge="146ca4955dca1c56111fc482876290ee1c0b12e2",
+    predecessor="35f7c225a25025aec893230c072754cf7d7c76fc",
+)
 CARRIER_NAME = "WorkingRCX-fleet-classification-r1-20260911"
 DECISIONS = ("HOLD", "CONDITIONAL_RETIRE_CANDIDATE")
 DIRTY_KEYS = ("entries", "tracked", "untracked", "staged", "unstaged", "unmerged")
@@ -348,11 +358,61 @@ def readonly_review_matches(identity: dict, review: dict, predecessor: dict, roo
         and review.get("liveness_verified") is True)
 
 
+def _reviewed_oldest_mu_release(census: dict, authority: dict | None, carrier: str,
+                               requested: str | None) -> dict | None:
+    """Release one default policy hold, conditionally, under the locked wave.
+
+    This is a proposal for the existing preservation-first retirement action.
+    It neither declares missing hunks landed nor waives any recovery/idle gate.
+    Unknown or changed source evidence retains this source without blocking peers.
+    """
+    if requested is None:
+        return None
+    spec = OLDEST_MU_RELEASE
+    path = census["fleet_root"] + "/" + spec["source_name"]
+    if requested != path:
+        raise ValueError("Oldest Mu release requires its one exact original source path")
+    if (census["fleet_root"] != LANDED_FLEET or authority is None
+            or authority["wave_id"] != spec["wave_id"]
+            or authority["predecessor_commit"] != spec["predecessor"]):
+        return None
+    source = next((r for r in census["entries"] if r["path"] == path), {})
+    git = source.get("git") or {}
+    useful = source.get("useful_work") or {}
+    evidence = source.get("retirement_evidence") or {}
+    common = census["anchor_repo"] + "/.git"
+    expected = dict(HEAD=spec["head"], branch=spec["branch"], root=path,
+                    common_dir=common, git_dir=common + "/worktrees/" + spec["git_dir_name"])
+    fs = source.get("filesystem_identity") or {}
+    if (any(git.get(k) != v for k, v in expected.items())
+            or source.get("repository_kind") != "linked_worktree"
+            or source.get("inspection_status") != "ok" or source.get("errors") != []
+            or source.get("registered_worktrees") != [dict(path=path, HEAD=spec["head"], branch=spec["branch"])]
+            or set(fs) != {"device", "inode", "mode"} or any(type(v) is not int for v in fs.values())
+            or git.get("dirty_counts", {}).get("unmerged") != 0
+            or useful.get("status") not in {"COVERED", "NEEDS_LANDING"}
+            or useful.get("errors") != [] or useful.get("comparison_commit") != spec["predecessor"]
+            or evidence.get("status") != "OBSERVED" or evidence.get("errors") != []
+            or evidence.get("preserved_operation") is not None
+            or not _success(_git(carrier, "merge-base", "--is-ancestor", spec["replacement_head"], spec["merge"]))
+            or not _success(_git(carrier, "merge-base", "--is-ancestor", spec["merge"], spec["predecessor"]))
+            or not _success(_git(carrier, "merge-base", "--is-ancestor", spec["predecessor"], "origin/dev"))):
+        return None
+    return dict(source_identity=dict(path=path, **{k: git[k] for k in (
+        "HEAD", "branch", "common_dir", "git_dir")}, filesystem_identity=fs),
+        census_sha256=authority["census_sha256"], wave_id=authority["wave_id"],
+        comparison_commit=spec["predecessor"], replacement_head=spec["replacement_head"],
+        replacement_merge=spec["merge"], independent_preservation_required=True,
+        preservation_contract="Existing RETIRE_WORKTREE must independently recover all tracked/untracked/ignored bytes, raw index and indexed objects, refs/history/stashes and original journals before mutation.",
+        semantic_integration_claimed=False, original_attempts_unchanged=True)
+
+
 def classify(census: dict, *, source_sha256: str, base_commit: str,
              carrier: str, landed: bool, residual: bool = False,
              wave_id: str | None = None, protected: tuple[str, ...] = (),
              retirement: bool = False, retirement_predecessor: str | None = None,
-             missing_paths: tuple[str, ...] = (), historical_paths: tuple[str, ...] = ()) -> dict:
+             missing_paths: tuple[str, ...] = (), historical_paths: tuple[str, ...] = (),
+             reviewed_oldest_mu_release: str | None = None) -> dict:
     """Return one decision per validated row using only carrier-local objects."""
     _validate_inventory(census)
     if residual and landed:
@@ -412,7 +472,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
     if residual:
         protected_paths = [census["fleet_root"] + "/" + name for name in (
             "WorkingRCX", "WorkingRCX-preservation", "workingrcx_pr_preservation_20260630")]
-    if retirement:
+    oldest_mu_release = _reviewed_oldest_mu_release(census, authority, carrier, reviewed_oldest_mu_release)
+    if retirement and oldest_mu_release is None:
         protected_paths.append(census["fleet_root"] + "/WorkingRCX-mu-coinduction-prefix-r1-20260914")
     protected_paths += [census["anchor_repo"], carrier]
     if any(not _absolute(p) for p in protected):
@@ -508,7 +569,9 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
             archive = evidence.get("preserved_operation")
             if archive and os.path.commonpath([path, census["fleet_root"]]) == census["fleet_root"]:
                 reasons = [r for r in reasons if r["code"] != "outside_direct_fleet"]
-                if archive.get("lifecycle_completion"):
+                if (archive.get("lifecycle_completion")
+                        and path != census["fleet_root"] + "/" + OLDEST_MU_RELEASE["source_name"]
+                        and not any(path == p or path.startswith(p + "/") for p in protected)):
                     reasons = [r for r in reasons if r["code"] != "protected_evidence"]
             if evidence.get("status") != "OBSERVED" or evidence.get("errors") != []:
                 hold("retirement_ownership_unknown", "Fresh archive, native-bus and original journal evidence is required.")
@@ -681,6 +744,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
         report["policy"]["protected_heads"] = []
     if authority is not None:
         report["retirement_authority"] = authority
+    if oldest_mu_release is not None:
+        report["policy"]["reviewed_oldest_mu_release"] = oldest_mu_release
     if readonly:
         report["readonly_predecessor"] = census["readonly_predecessor"]
     if missing_paths or historical_paths:
@@ -785,6 +850,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--retirement-predecessor", help="Explicit exact comparison commit for a new reviewed retirement authority; cannot rebind the original wave")
     parser.add_argument("--wave-id", help="Fresh residual owner; omitted retains the legacy authority")
     parser.add_argument("--protect", action="append", default=[], help="Exact additional active/preserved source path")
+    parser.add_argument("--reviewed-oldest-mu-release", help="Explicit locked-wave conditional release of the exact original MuR1 source after replacement landing; all independent recovery and liveness gates remain required")
     parser.add_argument("--missing-registration", action="append", default=[], help="One exact observed admin-only source; repeated finite opt-in")
     parser.add_argument("--historical-source", action="append", default=[], help="One exact enumerated historical source in this wave")
     parser.add_argument("--census", required=True)
@@ -817,6 +883,7 @@ def main(argv: list[str] | None = None) -> int:
                           carrier=os.getcwd(), landed=landed, residual=args.residual,
                           wave_id=args.wave_id, protected=tuple(args.protect), retirement=args.retirement,
                           retirement_predecessor=args.retirement_predecessor,
+                          reviewed_oldest_mu_release=args.reviewed_oldest_mu_release,
                           missing_paths=tuple(args.missing_registration), historical_paths=tuple(args.historical_source))
         payload = (json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True) + "\n").encode("ascii")
         _write_or_verify(output, payload)

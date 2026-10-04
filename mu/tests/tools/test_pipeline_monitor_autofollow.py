@@ -25,10 +25,14 @@ from __future__ import annotations
 from contextlib import contextmanager
 import json
 import os
+import re
 import select
 import signal
+import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -135,6 +139,107 @@ def generated_log_watcher(tmp_path, lane, env, *, monitor_env=None):
             except ProcessLookupError:
                 pass
             watcher.wait(timeout=10)
+
+
+@contextmanager
+def stale_live_watcher(tmp_path, primary, lane, env, monkeypatch):
+    """Keep a real pre-coordination Bash/tail alive while its file is updated.
+
+    A private tmux server owns the pane, just as the observed old monitor did.
+    No model processes or developer tmux sessions are touched by this fixture.
+    """
+    tmux = shutil.which("tmux")
+    assert tmux, "The stale live watcher regression requires tmux"
+    # AF_UNIX paths are short on macOS; pytest's per-worker path is too long.
+    socket_dir = tempfile.TemporaryDirectory(prefix="rcx-reader-", dir="/tmp")
+    socket = Path(socket_dir.name) / "tmux.sock"
+    bindir = tmp_path / "reader-bin"
+    bindir.mkdir()
+    shim = bindir / "tmux"
+    shim.write_text(f"#!/bin/sh\nexec {shlex.quote(tmux)} -S {shlex.quote(str(socket))} \"$@\"\n")
+    shim.chmod(0o700)
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + env["PATH"])
+    script = tmp_path / "rcx_log_watcher.sh"
+    log = lane / ".scratch/commit_executor_live.log"
+    log.parent.mkdir(exist_ok=True)
+    log.write_text("retained live log\n")
+    # This old loop has already read its functions into memory before update.
+    script.write_text('''#!/usr/bin/env bash
+tail -f "$RCX_TEST_OLD_LOG" &
+tail_pid=$!
+trap 'kill "$tail_pid" 2>/dev/null; wait "$tail_pid" 2>/dev/null' EXIT
+trap 'exit 0' TERM INT
+while true; do sleep 0.1; done
+''')
+    from mu.tools.executors import worktree_lifecycle
+    launch_env = env | {
+        "RCX_TEST_OLD_LOG": str(log), "RCX_OBS_REPO_ROOT": str(lane),
+        "RCX_OBS_ROOT_HELPER": "", "RCX_OBS_STATUS_SCRIPT": "",
+        "RCX_AGENT_BUS_DIR": ".agent_bus",
+        "RCX_OBS_LIFECYCLE_HELPER": worktree_lifecycle.__file__,
+        "RCX_PIPELINE_LIVE_LOG": str(tmp_path / "unused-log"),
+        "RCX_LOG_WATCHER_HEARTBEAT_SECONDS": "300",
+    }
+    def run(*args):
+        result = subprocess.run([tmux, "-f", os.devnull, "-S", str(socket), *args], cwd=primary,
+            env=launch_env, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+    try:
+        # Preserve the production launch shape, including shell setup before
+        # the final Bash watcher (not a synthetic direct exec-only pane).
+        # Keep the selected source in the environment, as the live autofollow
+        # resolver does. tmux retains its initial argv: embedding the source
+        # there would correctly make the server itself a retirement hold.
+        launch = ("cd " + shlex.quote(str(primary)) + " && RCX_AGENT_BUS_DIR=.agent_bus bash "
+                  + shlex.quote(str(script)))
+        run("new-session", "-d", "-s", "reader-test", launch)
+        pane = run("display-message", "-p", "-t", "reader-test", "#{pane_id}")
+        run("select-pane", "-t", pane, "-T", "PANE 1 · LIVE PIPELINE LOG")
+        for title in ("PANE 2 · REVIEW FINDINGS", "PANE 3 · PLAIN-ENGLISH STATUS", "PANE 4 · SESSION TIMELINE"):
+            peer = run("split-window", "-d", "-h", "-t", "reader-test", "-P", "-F", "#{pane_id}", "sleep 120")
+            run("select-pane", "-t", peer, "-T", title)
+        pid = int(run("display-message", "-p", "-t", pane, "#{pane_pid}"))
+        old = type("Watcher", (), {"pid": pid})()
+        tails = _wait_for(lambda: _watcher_tails(old, log))
+        source = (OBSERVABILITY_DIR / "pipeline_monitor.sh").read_text()
+        current = source.split("  cat <<'WATCHER_EOF'\n", 1)[1].split("\nWATCHER_EOF", 1)[0]
+        script.write_text(current)
+        # Updating disk alone leaves the same raw child of the same Bash alive.
+        assert _watcher_tails(old, log) == tails
+        yield run, pane, old, tails, log
+    finally:
+        subprocess.run([tmux, "-S", str(socket), "kill-server"], capture_output=True)
+        socket_dir.cleanup()
+
+
+def test_monitor_health_adopts_already_live_pre_update_watcher(tmp_path, monkeypatch):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane
+    primary, lane, _, env = make_native_lane(tmp_path, monkeypatch)
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (run, pane, old, tails, log):
+        source = (OBSERVABILITY_DIR / "pipeline_monitor.sh").read_text()
+        functions = "\n".join(re.search(r"^" + name + r"\(\) \{\n.*?^\}", source, re.M | re.S).group()
+            for name in ("normalize_path", "log_reader_protocol", "tmux_session_health_detail", "ensure_tmux_session"))
+        setup = "\n".join([
+            "SESSION=reader-test", "SCRIPT_DIR=" + shlex.quote(str(OBSERVABILITY_DIR)),
+            "EXPECTED_PANE_1='PANE 1 · LIVE PIPELINE LOG'", "EXPECTED_PANE_2='PANE 2 · REVIEW FINDINGS'",
+            "EXPECTED_PANE_3='PANE 3 · PLAIN-ENGLISH STATUS'", "EXPECTED_PANE_4='PANE 4 · SESSION TIMELINE'",
+            functions, "rebuild_tmux_session() { return 91; }"])
+        def health(command):
+            return subprocess.run(["bash", "-c", setup + "\n" + command + " " + shlex.quote(str(primary))],
+                                  capture_output=True, text=True)
+        assert health("tmux_session_health_detail").returncode == 2
+        adopted = health("ensure_tmux_session")
+        assert adopted.returncode == 0, adopted.stdout + adopted.stderr
+        assert health("tmux_session_health_detail").returncode == 0
+        new_pid = int(run("display-message", "-p", "-t", pane, "#{pane_pid}"))
+        assert new_pid != old.pid
+        new = type("Watcher", (), {"pid": new_pid})()
+        _wait_for(lambda: _watcher_tails(new, log))
+        assert not _watcher_tails(old, log)
+        for pid in [old.pid, *tails]:
+            with pytest.raises(ProcessLookupError):
+                os.kill(pid, 0)
 
 
 def test_generated_watcher_releases_terminal_reader_on_heartbeat_and_restart(tmp_path, monkeypatch):
@@ -391,7 +496,9 @@ esac
     return bin_dir
 
 
-def _fake_tmux_dir(tmp_path: Path, *, log_path: Path) -> Path:
+def _fake_tmux_dir(
+    tmp_path: Path, *, log_path: Path, repo_roots: tuple[Path, ...]
+) -> Path:
     """A recording ``tmux`` shim — logs every call and fakes pane/window ids.
 
     Mirrors the proven shim in test_recovery_gate.py so the first ``start`` runs a
@@ -402,6 +509,21 @@ def _fake_tmux_dir(tmp_path: Path, *, log_path: Path) -> Path:
     counter_path = tmp_path / "tmux-split-counter.txt"
     session_path = tmp_path / "tmux-session-active"
     panes_path = tmp_path / "tmux-panes.txt"
+    # This shim records pane commands without launching real reader processes.
+    # Match the recovery-gate fixture's protocol double only in disposable repos;
+    # the live watcher integration fixtures retain the production dependency.
+    for repo_root in repo_roots:
+        executors_dir = repo_root / "mu" / "tools" / "executors"
+        assert executors_dir.resolve().is_relative_to(tmp_path.resolve())
+        executors_dir.mkdir(parents=True, exist_ok=True)
+        # Exclusive creation prevents replacing a real lifecycle module.
+        with (executors_dir / "worktree_lifecycle.py").open("x", encoding="utf-8") as fixture:
+            fixture.write(
+                '"""Reader-protocol double for the fake-tmux unit fixture only."""\n'
+                "from pathlib import Path\n\n"
+                "def monitor_reader_protocol(session, *, adopt=False):\n"
+                f"    return not adopt and Path({str(session_path)!r}).is_file()\n"
+            )
     script = f"""#!/usr/bin/env bash
 set -eu
 log_path={str(log_path)!r}
@@ -775,7 +897,7 @@ def _start_and_capture(
 
     git_bin = _fake_git_dir(tmp_path, show_toplevel=str(repo), branch="jabramsja/test-wave")
     tmux_log = tmp_path / "tmux.log"
-    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log)
+    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo,))
     env = os.environ | {
         "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
         "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
@@ -937,7 +1059,7 @@ exit 0
     )
     git_bin = _fake_git_dir(tmp_path, show_toplevel=str(repo), branch="jabramsja/test-wave")
     tmux_log = tmp_path / "tmux.log"
-    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log)
+    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo,))
     env = os.environ | {
         "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
         "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
@@ -1011,7 +1133,7 @@ while true; do sleep 30 & wait $!; done
     )
     git_bin = _fake_git_dir(tmp_path, show_toplevel=str(repo), branch="jabramsja/test-wave")
     tmux_log = tmp_path / "tmux.log"
-    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log)
+    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo,))
     state_dir = tmp_path / "monitor-state"
     env = os.environ | {
         "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
@@ -1064,7 +1186,7 @@ def test_orchestrator_monitor_replaces_same_session_wrong_bus_owner(tmp_path):
     _install(repo, "pipeline_monitor_identity.py")
     git_bin = _fake_git_dir(tmp_path, show_toplevel=str(repo), branch="jabramsja/test-wave")
     tmux_log = tmp_path / "tmux.log"
-    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log)
+    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log, repo_roots=(repo,))
     state_dir = tmp_path / "monitor-state"
     env = os.environ | {
         "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
