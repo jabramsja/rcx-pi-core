@@ -4831,8 +4831,15 @@ def _run_pytest_on_files(
     # policy whenever the exact full module is selected, including mixed gates.
     # Keep every selector, the existing finite budget and the marker/import mode.
     full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in test_files
+    # The preserved PR1329 lifecycle diagnostic passed in 260.699s wall time on
+    # 2026-10-04, beyond the ordinary 240s deadline. Give only the exact full
+    # module finite slack; node selectors and other paths keep the default.
+    selector_budgets = {
+        "mu/tests/tools/test_workingrcx_fleet_apply.py": 900,
+        "mu/tests/tools/test_worktree_lifecycle.py": 600,
+    }
     effective_timeout = max(timeout, sum(
-        900 if selector == "mu/tests/tools/test_workingrcx_fleet_apply.py" else 240
+        selector_budgets.get(selector, 240)
         for selector in test_files
     ))
     try:

@@ -4,6 +4,27 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-04
+
+### Measured lifecycle targeted-gate budget (Phase B; landing pending)
+
+- Give only the exact full `mu/tests/tools/test_worktree_lifecycle.py` selector
+  a finite 600s budget in the commit pytest helper. The archived preserved-R2
+  diagnostic took 260.699s wall time, exceeding the former 240s policy. Ordinary
+  selectors remain 240s; full fleet remains 900s with four workers. Mixed budgets
+  still sum and respect the caller's timeout floor.
+- Extend existing helper/subprocess-boundary regressions for lifecycle and mixed
+  selectors, caller floors, alternate paths, node selectors, nonzero exits and
+  timeout failures. Keep all selected tests, marker/import settings, validation
+  environment and failure propagation. Fresh results are recorded in
+  `reports/control_plane/workingrcx-lifecycle-gate-budget-r1-2026-10-04_implementation_evidence.json`;
+  the historical 108-pass lifecycle diagnostic is not current validation.
+- Row38 still owns native enabler landing, then preserved PR1329 continuation
+  using landed dispatcher/commit code with fresh gates, merge and PRIMARY sync,
+  five exact-target APPLY/VERIFY, PR1325 useful-work disposition and existing Mu
+  work. No cleanup or PR closure is claimed; timeout-output diagnostics and
+  unchanged recovery reinspection remain nonblocking under row40.
+
 ## 2026-10-03
 
 ### Complete postmerge cleanup fixtures on the preserved enabler (Phase B; landing pending)
