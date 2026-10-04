@@ -1087,7 +1087,8 @@ ensure_owner_running() {
     return 0
   fi
 
-  if [ "$BUS_DIR" != ".agent_bus" ]; then
+  # Carry an explicit default-bus pin across the owner shell boundary.
+  if [ "$EXPLICIT_PIN" = "1" ] || [ "$BUS_DIR" != ".agent_bus" ]; then
     owner_args+=(--bus-dir "$BUS_DIR")
   fi
   if [ -n "$REQUESTED_LANE" ]; then

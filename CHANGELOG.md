@@ -4,6 +4,23 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-04
+
+### Preserve explicit default-bus monitor pin across owner startup (Phase B; landing pending)
+
+- Forward an explicit `.agent_bus` selection into the native background owner.
+  Unpinned default autofollow and existing named-bus/lane/session behavior remain.
+- Extend the existing fake-tmux fixture to require real owner pane construction,
+  verify its PID and wait for all four commands. Keep the original autofollow
+  assertions and ordinary-start cases. The declared module fails on the original
+  production script (1 failed, 23 passed, exit 1) and passes on the minimal fix
+  (45 passed, exit 0). Exact evidence is recorded in
+  `reports/control_plane/workingrcx-monitor-default-pin-r1-2026-10-04_implementation_evidence.json`.
+- Keep row38 and all 268 task IDs/44 queue rows. Native review, indicators, CI,
+  landing and protected PRIMARY sync remain pending before preserved PR1330,
+  preserved PR1329, five-target APPLY/VERIFY and PR1325 useful-work disposition.
+  No old PR closure, physical cleanup or runtime-investigation progress is claimed.
+
 ## 2026-10-03
 
 ### Complete postmerge cleanup fixtures on the preserved enabler (Phase B; landing pending)
