@@ -130,6 +130,32 @@ def test_retirement_terminal_uses_surviving_primary_and_preserves_detached_sourc
     (["mu/tests/tools/test_workingrcx_fleet_apply.py::test_original_owner_cli_rejects_each_uncommitted_dependency_before_claim"],
      120, 240),
     (["elsewhere/test_workingrcx_fleet_apply.py"], 120, 240),
+    (["mu/tests/tools/test_worktree_lifecycle.py"], 120, 600),
+    (["mu/tests/tools/test_worktree_lifecycle.py"], 1800, 1800),
+    (["mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate"],
+     120, 840),
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_worktree_lifecycle.py"], 120, 1500),
+    (["mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py"], 120, 1740),
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "mu/tests/tools/test_worktree_lifecycle.py"], 120, 1740),
+    (["mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py"], 1800, 1800),
+    (["mu/tests/tools/test_worktree_lifecycle.py::test_completed_move_can_follow_fresh_registration_retirement_without_replaying_owner"],
+     120, 240),
+    (["mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py::test_original_owner_cli_rejects_each_uncommitted_dependency_before_claim"],
+     120, 840),
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py",
+      "mu/tests/tools/test_worktree_lifecycle.py::test_completed_move_can_follow_fresh_registration_retirement_without_replaying_owner"],
+     120, 1140),
+    (["elsewhere/test_worktree_lifecycle.py"], 120, 240),
+    (["test_worktree_lifecycle.py"], 120, 240),
+    (["tests/tools/test_worktree_lifecycle.py"], 120, 240),
 ])
 def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
     tmp_path, monkeypatch, selectors, caller_timeout, expected_budget,
@@ -168,28 +194,51 @@ def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
         assert 574.48 < kwargs["timeout"] <= 900
 
 
+@pytest.mark.parametrize("selectors, expected_budget", [
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 900),
+    (["mu/tests/tools/test_worktree_lifecycle.py"], 600),
+    (["mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate"], 840),
+    (["mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py"], 1500),
+])
 @pytest.mark.parametrize("returncode, stdout, stderr", [
     (1, "1 failed\n", "assertion diagnostic\n"),
+    (2, "interrupted\n", "interruption diagnostic\n"),
+    (3, "INTERNALERROR\n", "internal error diagnostic\n"),
+    (4, "", "ERROR: collection failed\n"),
     (5, "no tests ran\n", ""),
 ])
-def test_fleet_pytest_budget_keeps_nonzero_failure_output(
-    tmp_path, monkeypatch, returncode, stdout, stderr,
+def test_targeted_pytest_budget_keeps_nonzero_failure_output(
+    tmp_path, monkeypatch, selectors, expected_budget, returncode, stdout, stderr,
 ):
     def run(args, **kwargs):
-        assert kwargs["timeout"] == 900
+        assert kwargs["timeout"] == expected_budget
         return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
 
     monkeypatch.setattr(commit_mod.subprocess, "run", run)
-    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: a larger fleet budget must not turn failed or empty collection into success.
-        tmp_path, ["mu/tests/tools/test_workingrcx_fleet_apply.py"],
+    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: larger module budgets must not turn failed or empty collection into success.
+        tmp_path, selectors,
     )
     assert result == {"exit_code": returncode, "stdout": stdout,
                       "stderr": stderr, "passed": False}
 
 
-@pytest.mark.parametrize("caller_timeout, expected_budget", [(120, 900), (1800, 1800)])
-def test_fleet_pytest_timeout_reports_selected_budget(
-    tmp_path, monkeypatch, caller_timeout, expected_budget,
+@pytest.mark.parametrize("selectors, caller_timeout, expected_budget", [
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 120, 900),
+    (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 1800, 1800),
+    (["mu/tests/tools/test_worktree_lifecycle.py"], 120, 600),
+    (["mu/tests/tools/test_worktree_lifecycle.py"], 1800, 1800),
+    (["mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate"],
+     120, 840),
+    (["mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py"], 120, 1500),
+    (["mu/tests/tools/test_worktree_lifecycle.py",
+      "mu/tests/tools/test_workingrcx_fleet_apply.py"], 1800, 1800),
+])
+def test_targeted_pytest_timeout_reports_selected_budget(
+    tmp_path, monkeypatch, selectors, caller_timeout, expected_budget,
 ):
     def run(args, **kwargs):
         assert kwargs["timeout"] == expected_budget
@@ -197,7 +246,7 @@ def test_fleet_pytest_timeout_reports_selected_budget(
 
     monkeypatch.setattr(commit_mod.subprocess, "run", run)
     result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: the real runner must still fail closed at its selected finite deadline.
-        tmp_path, ["mu/tests/tools/test_workingrcx_fleet_apply.py"], timeout=caller_timeout,
+        tmp_path, selectors, timeout=caller_timeout,
     )
     assert result == {"exit_code": -1, "stdout": "",
                       "stderr": f"pytest timed out after {expected_budget}s", "passed": False}

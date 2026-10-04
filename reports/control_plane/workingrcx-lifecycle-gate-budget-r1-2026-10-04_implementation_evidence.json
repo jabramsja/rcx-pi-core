@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "wave_id": "workingrcx-lifecycle-gate-budget-r1-2026-10-04",
+  "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+  "status": "PHASE_B_LOCAL_VALIDATION_PASSED_NATIVE_LANDING_PENDING",
+  "tracker_authority": "TASKS.md: 2026-10-04 tracker sync note for workingrcx-lifecycle-gate-budget-r1-2026-10-04 is canonical for this packet's L4 fields.",
+  "diagnosis": {
+    "helper": "mu/tools/executors/commit_executor.py::_run_pytest_on_files",
+    "native_caller": "Step 8b calls the helper without a timeout override; the caller still propagates passed=False as a gate failure.",
+    "cause": "The exact full lifecycle selector previously inherited the 240s ordinary-selector deadline; the archived successful preserved-R2 diagnostic took 260.699s wall time.",
+    "historical_diagnostic": {
+      "artifact": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/r2_pr1329_serial_timing_diagnostic_20261004.json",
+      "preservation_manifest": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/r2_pr1329_targeted_timeout_preservation_20261004.json",
+      "recorded_at_utc": "2026-10-04T09:59:30Z",
+      "working_directory": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX-fleet-residual-pr-folders-r2-20261004",
+      "recorded_head": "537fb0461e7272e063c170e6d7d1cfa4de1b52a2",
+      "command_source": "The archive's command and result.stdout were read directly. Its wrapper launches sys.executable with the following argv under _commit_validation_env and a 600s subprocess deadline.",
+      "pytest_argv": [
+        "-m",
+        "pytest",
+        "-x",
+        "--tb=short",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "--durations=10",
+        "mu/tests/tools/test_worktree_lifecycle.py"
+      ],
+      "validation_environment_pins": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "archived_exit_code": 0,
+      "archived_pytest_result": "108 passed in 256.11s (0:04:16)",
+      "archived_wall_seconds": 260.699,
+      "proof_limit": "Historical diagnostic on the preserved corrective R2 candidate, not a test of this enabler, current-source hash attestation, native gate receipt or merge authority. Not rerun during this implementation."
+    }
+  },
+  "implementation": {
+    "source": "mu/tools/executors/commit_executor.py",
+    "regression_file": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+    "exact_selector_budgets_seconds": {
+      "mu/tests/tools/test_worktree_lifecycle.py": 600,
+      "mu/tests/tools/test_workingrcx_fleet_apply.py": 900
+    },
+    "ordinary_selector_budget_seconds": 240,
+    "effective_timeout": "max(caller_timeout, sum(per-selector budgets))",
+    "full_fleet_parallel_args": [
+      "-n",
+      "4",
+      "--dist",
+      "worksteal"
+    ],
+    "matching": "Exact full path strings only; basename, alternate path and node selections retain the ordinary budget.",
+    "regression_observations": [
+      "Exact lifecycle receives 600s; lifecycle plus ordinary receives 840s; lifecycle plus full fleet receives 1500s; both full modules plus ordinary receive 1740s in either tested order.",
+      "An 1800s caller floor remains 1800s for lifecycle alone and with fleet. The subprocess argv, marker/import settings and protected validation environment remain asserted.",
+      "Existing fleet 900s/four-worker policy and real-child mixed xdist success/failure regressions remain selected.",
+      "Subprocess exit codes 1 through 5 for assertion, interruption, internal, collection and empty-collection failures retain their output and passed=False.",
+      "TimeoutExpired still yields exit -1, passed=False and the selected finite deadline, including mixed selectors and larger caller floors."
+    ],
+    "unchanged": "Lifecycle source/tests, runtime/substrate/host semantics, test markers/assertions, validation environment constructor, Step 8b failure propagation and timeout-output handling."
+  },
+  "validation": {
+    "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -x --tb=short --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+    "exit_code": 0,
+    "collected": 231,
+    "passed": 231,
+    "skipped": 0,
+    "deselected": 0,
+    "pytest_elapsed_seconds": 112.73,
+    "output_summary": "231 passed in 112.73s (0:01:52)",
+    "proof_limit": "Declared Phase B regression suite only. Budget/failure cases invoke the actual helper with a controlled subprocess boundary; existing real-child tests also ran. This does not establish PR1329 CI resolution, landing or physical cleanup."
+  },
+  "deferred_nonblocking": {
+    "owner": "TASKS.md row40 [FLEET-NATIVE-LIFECYCLE-PREVENTION]",
+    "report": "reports/deferred/non_blocking/workingrcx-lifecycle-gate-budget-r1-2026-10-04_bridge_nonblockers.md",
+    "topics": [
+      "Partial stdout/stderr retention on pytest timeout",
+      "Recovery reinspection retrying the unchanged undersized gate"
+    ]
+  },
+  "native_outputs_pending": {
+    "indicator_artifact": "reports/l4_wave_indicators/workingrcx-lifecycle-gate-budget-r1-2026-10-04.json",
+    "indicator_owner": "Outer Phase B executor _collect_and_stage_l4_indicator_artifact; no metrics were fabricated or collected by this implementer.",
+    "packet": "Native Phase A locked packet left unchanged; later status/scope updates remain executor-owned.",
+    "actions": [
+      "Native indicator collection/staging, review, commit, CI, merge and protected PRIMARY synchronization"
+    ]
+  },
+  "preservation_and_next": {
+    "preservation_limit": "This implementer only read the archived R2 evidence and did not write R2/R1 sources, indices, archives, native authority/receipts or recovery counters. No new byte-preservation attestation is claimed.",
+    "working_sequence": [
+      "Land this measured budget enabler and synchronize protected PRIMARY through the native pipeline.",
+      "Resume preserved PR1329 using landed native dispatcher/commit code with fresh review, gates and CI; no unchanged R2 restart.",
+      "Merge PR1329 and synchronize protected PRIMARY.",
+      "Perform the five exact-target cleanup APPLY operations and independent VERIFY.",
+      "Disposition PR1325 useful work and continue the existing Mu owner, with inherited retained-work obligations intact."
+    ],
+    "cleanup_complete": false,
+    "new_queue_rows": 0
+  }
+}
