@@ -122,7 +122,7 @@ FOUNDER_OVERRIDE:workingrcx-local-review-quota-r3-2026-10-05
 ## Commit-Time Generated Governance Authorization
 
 - Refresh wave: `workingrcx-local-review-quota-r3-2026-10-05`
-- Step-5e provenance: `bumped`
+- Step-5e provenance: `already_recorded`
 - Purpose: commit automation may bind the exact same-wave growth-cap governance file after Phase B review; first bumps require staged-index proof, while already-recorded reuse requires clean HEAD/index proof.
 - Authorized generated governance path(s):
   - `mu/tests/docs/test_growth_caps.py`
@@ -144,20 +144,12 @@ FOUNDER_OVERRIDE:workingrcx-local-review-quota-r3-2026-10-05
 - Commit-generated governance paths:
   - `mu/tests/docs/test_growth_caps.py`
 - Evidence handles:
+  - `candidate_authority_receipt`: `.agent_bus-local-review-quota-r3-20261005/meta/candidate_authority_receipts/workingrcx-local-review-quota-r3-2026-10-05/commit-pre-supervisor.json`
   - `commit_time_generated_governance`: `mu/tests/docs/test_growth_caps.py`
   - `indicator`: `reports/l4_wave_indicators/workingrcx-local-review-quota-r3-2026-10-05.json`
 - Current staged files:
-  - `CHANGELOG.md`
   - `TASKS.md`
-  - `mu/tests/docs/test_growth_caps.py`
-  - `mu/tests/tools/test_commit_executor_local_review.py`
-  - `mu/tests/tools/test_executor_dispatch.py`
-  - `mu/tests/tools/test_launch_wave.py`
   - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/executor_config.json`
-  - `mu/tools/executors/executor_dispatch.py`
-  - `mu/tools/executors/launch_wave.py`
   - `reports/control_plane/workingrcx-local-review-quota-r3-2026-10-05_2026-10-05.md`
-  - `reports/control_plane/workingrcx-local-review-quota-r3-2026-10-05_implementation_evidence.json`
   - `reports/l4_wave_indicators/workingrcx-local-review-quota-r3-2026-10-05.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

@@ -17704,7 +17704,7 @@ def _run_post_commit_pipeline_impl(
 
     try:
         if local_review is not None:
-            # The legacy wrapper auto-resolves threads and forces --admin.
+            # The legacy wrapper auto-resolves threads and forces an administrative override.
             # A quota approval grants neither power. Keep the native Step15
             # CI/identity/landed-ownership flow, with a protected exact-head merge.
             pr_data = _query_pr_review_state(
