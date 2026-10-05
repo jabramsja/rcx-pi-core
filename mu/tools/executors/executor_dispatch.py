@@ -1972,7 +1972,9 @@ def build_surface_command(
         cmd.extend(["--bus-dir", str(args.bus_dir)])
     if getattr(args, "verbose", False):
         cmd.append("--verbose")
-    if getattr(args, "json", False):
+    # Phase B results are consumed by the continuation/commit chain even when
+    # the caller selects human-readable dispatcher output.
+    if args.surface == "phase-b" or getattr(args, "json", False):
         cmd.append("--json")
     return cmd
 
@@ -3087,7 +3089,9 @@ def _is_protected_ordinary_dispatch_error(
         result.get("executor") == "phase_b_executor"
         and (
             implementer_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
-            or (result.get("status") == "error" and result.get("step") == "ordinary_bridge_fix_continuation")
+            or (result.get("status") == "error" and result.get("step") in {
+                "ordinary_bridge_fix_continuation", "phase_b_result",
+            })
             or ordinary_bridge_fix_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
         )
     )
@@ -3109,7 +3113,7 @@ def _ordinary_bridge_fix_error_result(
     if not isinstance(payload, dict) or not ordinary_bridge_fix_failure_blocks_recovery(repo_root, payload, bus_dir=bus_dir):
         implementer_owned = implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir)
         if implementer_owned or (
-            (not isinstance(payload, dict) or payload.get("status") in {"error", "failed", "timeout", "needs_phase_b"})
+            (not isinstance(payload, dict) or payload.get("status") in ("error", "failed", "timeout", "needs_phase_b"))
             and ordinary_bridge_fix_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir)
         ):
             # Timeout/abrupt-exit/embedded-recovery output cannot erase ownership.
@@ -3545,6 +3549,7 @@ def _continue_successful_executor_chain(
                     "decision": "ROUTE_PHASE_B", "executor": executor_name,
                     "message": "Repeated ordinary continuation without consuming the finalized checkpoint; checkpoint preserved.",
                 }
+            payload = following
         handoff_path = agent_bus_path(repo_root, bus_dir, "executors", "phase_b_handoff.json")
         if not handoff_path.exists():
             origin = chain_origin or "phase_b_executor"
@@ -3598,6 +3603,22 @@ def _continue_successful_executor_chain(
                 "chained_from": (
                     "phase_a_executor" if origin == "phase_a_executor" else None
                 ),
+            }
+
+        # An old same-wave handoff can survive a nonterminal Phase B return.
+        # Exit 0 alone (including text continuation or embedded recovery) must
+        # never select commit preparation or mutate its packet/checkpoint.
+        if not isinstance(payload, dict) or payload.get("status") not in (
+            "success", "ready", "commit_ready",
+        ):
+            return {
+                "status": "error", "step": "phase_b_result",
+                "decision": "ROUTE_PHASE_B", "executor": executor_name,
+                "message": (
+                    "Phase B requires a structured terminal success before chaining commit; "
+                    "checkpoint and handoff preserved."
+                ),
+                "chained_from": chain_origin,
             }
 
         if record and (

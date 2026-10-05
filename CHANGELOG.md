@@ -4,6 +4,30 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-05
+
+### Complete local quota review and preserve continuation authority (Phase B; landing pending)
+
+- Reuse the three byte-verified R2 feature sources. Preserve authentic GitHub
+  code-review quota eligibility, independent exact-head/diff/model-bound local
+  approval, retained findings, native generated-governance authority and CI.
+- Reject known-incomplete review connections before route classification and
+  during pre-merge refresh, including the reproduced hidden finding among
+  31 issue comments and truncation arriving during CI.
+- Request JSON across native launcher/dispatcher continuation and require a
+  structured terminal Phase B result before an existing handoff can select
+  commit preparation. Valid continuation keeps its byte-bound checkpoint and
+  original routing, task, bus, script owner and bounded recovery authority.
+- The declared four-module gate passes 1,701 tests in 704.81 seconds (exit 0),
+  retaining all 479 prior local/Step14 cases and all original assertions.
+  Record failing reproductions, source-bound results and donor preservation
+  in `reports/control_plane/workingrcx-local-review-quota-r3-2026-10-05_implementation_evidence.json`.
+  Both donors remain preserved. Native review, generated cap/indicator evidence,
+  CI, landing and protected sync remain pending before PR1330/PR1329 continuation,
+  APPLY/VERIFY, all remaining folders/useful-work owners and PR1325 disposition,
+  then existing Mu work. Keep row38, all 268 task IDs and 44 queue rows; no
+  physical cleanup completion or runtime-investigation progress is claimed.
+
 ## 2026-10-04
 
 ### Preserve explicit default-bus monitor pin across owner startup (Phase B; landing pending)

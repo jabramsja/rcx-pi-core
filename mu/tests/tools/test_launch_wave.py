@@ -54,6 +54,26 @@ import enforce_l4_execution_contract as l4_contract  # noqa: E402
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("bus_dir", [None, ".agent_bus-continuation"])
+def test_phase_b_continuation_requests_json_through_dispatcher(tmp_path, bus_dir):
+    config = make_config()
+    command = lw.build_phase_b_dispatch_command(tmp_path, config, bus_dir=bus_dir)
+    args = ed.build_surface_parser().parse_args(command[2:])
+    route = {"decision": "ROUTE_PHASE_B", "wave_id": config.wave_id,
+             "task_id": config.task_id, "tracked_packet": config.tracked_packet}
+    child = ed.build_surface_command(args, routing_record=route, script_repo_root=tmp_path)
+    assert command.count("--json") == child.count("--json") == 1
+    assert child[child.index("--plan") + 1] == config.tracked_packet
+    assert child[child.index("--task-id") + 1] == config.task_id
+    assert json.loads(child[child.index("--routing-record") + 1]) == route
+    assert Path(child[1]) == tmp_path / "mu/tools/executors/phase_b_executor.py"
+    assert "--dispatcher-owned-recovery" in child
+    if bus_dir:
+        assert child[child.index("--bus-dir") + 1] == bus_dir
+    args.json = False
+    assert "--json" in ed.build_surface_command(args, routing_record=route, script_repo_root=tmp_path)
+
+
 @pytest.mark.parametrize("commit_ready_resume_lane", ["legacy", "future"], indirect=True)
 def test_commit_ready_resume_native_public_continuation(commit_ready_resume_lane, monkeypatch, capsys):
     import phase_b_executor as phase_b

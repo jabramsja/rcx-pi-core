@@ -81,6 +81,91 @@ _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"
 _PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
 
 
+@pytest.mark.parametrize("output", [
+    "[phase-b] Status: continue_phase_b\n", "", '{"status":', '[]', '{}',
+    '{"status":[]}', '{"status":null}',
+    '{"status":"needs_phase_b"}', '{"status":"question_for_founder"}',
+    '{"status":"error","recovery":{"recovered":true}}',
+    '{"status":"continue_phase_b"}',
+    '{"status":"success"}', '{"status":"ready"}', '{"status":"commit_ready"}',
+], ids=["text-continuation", "missing", "malformed", "array", "missing-status", "invalid-status", "null-status",
+        "needs-phase-b", "question", "recovered-error", "unbound-continuation",
+        "success", "ready", "commit-ready"])
+@pytest.mark.parametrize("after_continuation", [False, True])
+def test_launcher_dispatch_output_cannot_consume_old_handoff(native_lane, output, after_continuation):
+    """Use the real launcher argv and consumer with a matching old handoff."""
+    import hashlib
+    import launch_wave
+
+    _primary, repo, git, _env = native_lane
+    bus = ".agent_bus-transport"
+    packet_rel = "reports/control_plane/transport.md"
+    packet = repo / packet_rel
+    packet.parent.mkdir(parents=True)
+    packet.write_text("# Transport\nWave ID: transport\nPhase-A-Lock: LOCKED\n")
+    config = SimpleNamespace(tracked_packet=packet_rel, task_id="[TRANSPORT]")
+    route = {"decision": "ROUTE_PHASE_B", "wave_id": "transport",
+             "tracked_packet": packet_rel, "task_id": config.task_id}
+    route_path = common_mod.routing_record_path(repo, bus)
+    route_path.parent.mkdir(parents=True)
+    route_path.write_text(json.dumps(route))
+    state_path = repo / bus / "executors/phase_b_state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({
+        "plan_path": packet_rel, "wave_id": "transport", "completed_step": "bridge_round_2",
+        "bridge_fix_mutation": {"state": "SUCCESS_PENDING_FINALIZE"},
+        "bridge_fix_task_id": config.task_id,
+    }, indent=3) + "\n")
+    continuation = {
+        "status": "continue_phase_b", "step": "bridge_fix_finalize", "resumed_from": "bridge_fix_pending",
+        "plan_path": packet_rel, "wave_id": "transport", "completed_step": "bridge_round_2",
+        "checkpoint_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(),
+    }
+    handoff = state_path.with_name("phase_b_handoff.json")
+    _write_phase_b_handoff(handoff, wave_id="transport", task_id=config.task_id, tracked_packet=packet_rel)
+    index = Path(git(repo, "rev-parse", "--absolute-git-dir")) / "index"
+    before = {p: p.read_bytes() for p in (packet, index, state_path, handoff, route_path)}
+    command = launch_wave.build_phase_b_dispatch_command(repo, config, bus_dir=bus)
+    args = dispatch_mod.build_surface_parser().parse_args(command[2:])
+    args._teammate_script_repo_root = repo  # ANTICHEAT_OK: exercise selected native script owner propagation
+    phase_b_calls, commit_calls = [], []
+
+    def process(child, *, cwd, timeout):
+        assert cwd == repo
+        assert Path(child[1]).parent == repo / "mu/tools/executors"
+        assert child[child.index("--bus-dir") + 1] == bus
+        if Path(child[1]).name == "commit_executor.py":
+            commit_calls.append(child)
+            return subprocess.CompletedProcess(child, 0, '{"status":"success"}', "")
+        assert Path(child[1]).name == "phase_b_executor.py"
+        phase_b_calls.append(child)
+        assert child[child.index("--task-id") + 1] == config.task_id
+        assert child[child.index("--plan") + 1] == packet_rel
+        assert json.loads(child[child.index("--routing-record") + 1])["wave_id"] == "transport"
+        assert "--json" in child and "--dispatcher-owned-recovery" in child
+        assert len(phase_b_calls) <= (2 if after_continuation else 1)
+        assert child == phase_b_calls[0]
+        assert all(p.read_bytes() == content for p, content in before.items())
+        text = json.dumps(continuation) if after_continuation and len(phase_b_calls) == 1 else output
+        return subprocess.CompletedProcess(child, 0, text, "")
+
+    with patch.dict(os.environ), \
+         patch.object(dispatch_mod, "_run_executor_in_group", side_effect=process), \
+         patch.object(dispatch_mod, "attempt_recovery") as recovery, \
+         patch.object(dispatch_mod, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_emit_executor_hard_fail_event"):
+        exit_code = dispatch_mod.run_recoverable_surface_command(args, repo_root=repo, config={})
+    terminal = output in ('{"status":"success"}', '{"status":"ready"}', '{"status":"commit_ready"}')
+    assert len(commit_calls) == int(terminal), {"output": output, "commit_commands": commit_calls}
+    assert exit_code == (0 if terminal else 1)
+    assert len(phase_b_calls) == (2 if after_continuation else 1)
+    assert all(p.read_bytes() == content for p, content in before.items())
+    recovery.assert_not_called()
+
+
 @pytest.mark.parametrize("route,targets", [
     ("codex", {"codex"}), ("claude", {"claude"}), ("both", {"codex", "claude"}),
 ])
@@ -10108,10 +10193,15 @@ class TestCommitContinuationAndBotFreshness:
         monkeypatch.setattr(commit_mod, "_query_pr_review_state", fake_pr_review_state)
         monkeypatch.setattr(commit_mod, "_has_recorded_current_head_bot_request", lambda *args, **kwargs: False)
         monkeypatch.setattr(commit_mod, "_has_fresh_connector_review", lambda pr_data, head_sha: True)
+
+        def clear_findings(pr_data, head_sha, *, result, pr_number, classify_quota=False):
+            assert classify_quota is False
+            return {"outcome": "clear"}
+
         monkeypatch.setattr(
             commit_mod,
             "_extract_review_findings",
-            lambda pr_data, head_sha, *, result, pr_number: {"outcome": "clear"},
+            clear_findings,
         )
         monkeypatch.setattr(commit_mod, "_try_auto_resolve_pr_conflict", fake_auto_resolve)
         monkeypatch.setattr(commit_mod, "_wait_for_required_checks_to_register", lambda *args, **kwargs: None)
@@ -10862,7 +10952,7 @@ class TestModularSurfaceEntrypoints:
             "detail": "phase-b re-entry succeeded",
         }
         failed = subprocess.CompletedProcess(["phase-b"], 1, stdout="", stderr="")
-        succeeded = subprocess.CompletedProcess(["phase-b"], 0, stdout="", stderr="")
+        succeeded = subprocess.CompletedProcess(["phase-b"], 0, stdout='{"status":"commit_ready"}', stderr="")
         commit_ok = subprocess.CompletedProcess(
             ["commit"], 0, "[commit-executor] Status: success\n", ""
         )
@@ -16669,7 +16759,7 @@ class TestRecoveryGateWiring:
         """
         record = {"decision": "ROUTE_PHASE_B", "summary": "test chain timeout"}
         # Phase B succeeds
-        phase_b_ok = MagicMock(returncode=0, stdout="{}", stderr="")
+        phase_b_ok = MagicMock(returncode=0, stdout='{"status":"commit_ready"}', stderr="")
         # Create handoff file so the commit chain is reached
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
