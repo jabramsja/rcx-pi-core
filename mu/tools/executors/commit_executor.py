@@ -10226,25 +10226,98 @@ def _is_explicit_code_review_quota_notice(body: str) -> bool:
     return " ".join(body.split()).casefold() in {notice, notice + details}
 
 
-def _is_standalone_connector_control_comment(body: str) -> bool:
-    # Quota finding retention needs the complete control message, not the
-    # legacy signal regex or summary prefix. Neither quoted clear text nor an
-    # activity marker can exempt accompanying findings from the local gates.
+# Only the observed service boilerplate is control content. Whitespace may
+# vary, but HTML, links and prose are consumed literally, never stripped.
+_CONNECTOR_DETAILS_HEADER = (
+    '<details> <summary>ℹ️ About Codex in GitHub</summary> <br/> '
+    '[Your team has set up Codex to review pull requests in this repo]'
+    '(https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you '
+    '- Open a pull request for review - Mark a draft as ready '
+)
+_CONNECTOR_ACTIVITY_DETAILS = (
+    _CONNECTOR_DETAILS_HEADER
+    + '- Comment "@codex review" or "@codex security review". '
+    'Codex reacts with 👀 while any review is running, comments if it has suggestions, '
+    'and reacts with 👍 once all reviews finish with no findings. </details>'
+)
+_CONNECTOR_CLEAR_DETAILS = (
+    _CONNECTOR_DETAILS_HEADER
+    + '- Comment "@codex review". '
+    'If Codex has suggestions, it will comment; otherwise it will react with 👍. '
+    'Codex can also answer questions or update the PR. '
+    'Try commenting "@codex address that feedback". </details>'
+)
+
+
+def _connector_no_issues_control_head(body: str) -> str | None:
+    """Parse an entire known clear message; recognition alone grants no authority.
+
+    An empty head denotes the established compact message. Its authority needs
+    a recorded current-head request; the complete service form also binds the
+    explicit reviewed commit. None denotes unknown or mixed content.
+    """
+    if len(body) > 65536:
+        return None
     normalized = " ".join(body.split())
     if re.fullmatch(
         r"Codex Review:\s*did(?:n't| not) find any major issues\.?",
         normalized, re.IGNORECASE,
     ):
-        return True
-    # Recognize the known activity rows, including optional commit anchors and
-    # multiple jobs. Every cell must be metadata; arbitrary prose in a cell or
-    # before/after the table remains a finding. Keep the legacy parser intact.
-    return bool(re.fullmatch(
+        return ""
+    match = re.fullmatch(
+        r"Codex Review: Didn't find any major issues\. Nice work! "
+        r"\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})` " + re.escape(_CONNECTOR_CLEAR_DETAILS),
+        normalized,
+    )
+    return match[1] if match else None
+
+
+def _is_connector_activity_control_comment(body: str) -> bool:
+    """Consume known compact controls or a complete, bounded service table."""
+    if len(body) > 65536:
+        return False
+    normalized = " ".join(body.split())
+    if re.fullmatch(
         r"<!-- codex-pull-request-review-summary --> ## Codex Review Summary"
         r"(?: \| Code Review \| \*\*(?:Running|Completed)\*\* \|"
         r"(?: `[0-9a-f]{7,40}` \|)? Manual request \|)+",
         normalized, re.IGNORECASE,
-    ))
+    ):
+        return True
+    prefix = (
+        "<!-- codex-pull-request-review-summary --> ## Codex Review Summary "
+        "This comment shows the latest Codex review activity on this pull request. "
+        "| Review | Status | Commit | Review trigger | | --- | --- | --- | --- | "
+    )
+    suffix = " " + _CONNECTOR_ACTIVITY_DETAILS
+    if not normalized.startswith(prefix) or not normalized.endswith(suffix):
+        return False
+    rows = normalized[len(prefix):-len(suffix)]
+    # Only the two observed status forms and identical valid ISO timestamps
+    # are accepted. Any extra cell, row, attribute or prose fails consumption.
+    row_pattern = (
+        r'\| 📝 \*\*Code Review\*\* \| (?:🔄 \*\*Running\*\* since|✅ \*\*Completed\*\*) '
+        r'<relative-time datetime="(?P<stamp>[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+        r'[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z)">(?P=stamp)</relative-time> '
+        r'\| `[0-9a-f]{7,40}` \| Manual request \|'
+    )
+    for _ in range(16):
+        match = re.match(row_pattern, rows)
+        if not match or _parse_github_timestamp_seconds(match["stamp"]) is None:
+            return False
+        rows = rows[match.end():]
+        if not rows:
+            return True
+        if not rows.startswith(" "):
+            return False
+        rows = rows[1:]
+    return False
+
+
+def _is_standalone_connector_control_comment(body: str) -> bool:
+    # Neither quoted clear text nor an activity marker can exempt findings.
+    return (_connector_no_issues_control_head(body) is not None
+            or _is_connector_activity_control_comment(body))
 
 
 def _is_blocking_connector_review_body(body: str) -> bool:
@@ -10299,9 +10372,7 @@ def _current_head_connector_issue_comment_outcome(
             continue
         # The editable activity table describes running/completed jobs. It is
         # neither a finding nor current-head clearance (PR1304 recurrence).
-        if str(comment.get("body") or "").lstrip().startswith(
-            "<!-- codex-pull-request-review-summary -->"
-        ):
+        if _is_connector_activity_control_comment(str(comment.get("body") or "")):
             continue
         if not isinstance(created_at, str) or not created_at or created_at <= floor_timestamp:
             continue
@@ -10692,7 +10763,8 @@ def _extract_review_findings(
             continue
         finding = {
             "author": author,
-            "body": latest_comment.get("body", "")[:500],
+            "body": (latest_comment.get("body", "") if classify_quota
+                     else latest_comment.get("body", "")[:500]),
             "path": latest_comment.get("path", ""),
             "line": latest_comment.get("line"),
         }
@@ -10807,6 +10879,57 @@ def _assert_complete_review_evidence(
         if require_page_info or "pageInfo" in comments:
             if comments.get("pageInfo", {}).get("hasPreviousPage") is not False:
                 raise ValueError("Review requires complete review thread comments")
+
+
+def _require_quota_history_cloud_clearance(
+    pr_data: dict[str, Any], head_sha: str, continuation_path: Path,
+) -> None:
+    """Quota history needs genuine current-head clearance, never mere silence.
+
+    Retained findings are checked separately before this gate. In particular,
+    activity tables (even Completed), stale quota notices and a wait timeout
+    cannot bind a review to a head or substitute for an approval.
+    """
+    _assert_expected_pr_head(pr_data, head_sha)
+    _assert_complete_review_evidence(pr_data)
+    request = _latest_bot_review_request_comment(pr_data) or {}
+    request_time = _parse_github_timestamp_seconds(request.get("createdAt", ""))
+    reviews = [r for r in pr_data["latestReviews"]["nodes"]
+               if _is_connector_review_author(r.get("author", {}).get("login", ""))
+               and r.get("commit", {}).get("oid") == head_sha]
+    if any(r.get("state") == "PENDING" for r in reviews):
+        raise ValueError("Current-head GitHub review is pending")
+    outcome = _current_head_connector_issue_comment_outcome(pr_data, head_sha)
+    if outcome is not None and outcome["kind"] != "clear":
+        raise ValueError("Current GitHub response is not review clearance")
+    if reviews and outcome is None:
+        latest = max(reviews, key=lambda r: r.get("submittedAt") or "")
+        submitted = _parse_github_timestamp_seconds(latest.get("submittedAt", ""))
+        if (latest.get("author", {}).get("__typename") == "Bot"
+                and latest.get("state") == "APPROVED" and submitted is not None
+                and (not request or (request_time is not None and submitted > request_time))):
+            return
+    if outcome is None or outcome["kind"] != "clear":
+        raise ValueError("Quota history requires genuine current-head GitHub clearance")
+    reviewed_head = _connector_no_issues_control_head(outcome["body"])
+    if reviewed_head is None or (reviewed_head and not head_sha.startswith(reviewed_head)):
+        raise ValueError("GitHub clearance does not name the current reviewed head")
+    continuation = _read_continuation_record(continuation_path) or {}
+    request_id = continuation.get("bot_review_request_comment_id")
+    created = _parse_github_timestamp_seconds(outcome["createdAt"])
+    matching = [c for c in _iter_pr_issue_comments(pr_data)
+                if c.get("body") == outcome["body"] and c.get("createdAt") == outcome["createdAt"]
+                and c.get("author", {}).get("login") == outcome["author"]]
+    if (not _has_recorded_current_head_bot_request(continuation_path, head_sha)
+            or type(request_id) is not int or request_id <= 0
+            or type(request.get("databaseId")) is not int
+            or request.get("databaseId") != request_id
+            or request.get("author", {}).get("__typename") != "User"
+            or request_time is None or created is None or created <= request_time
+            or not matching or any(c.get("author", {}).get("__typename") != "Bot"
+                                   or type(c.get("databaseId")) is not int or c["databaseId"] <= 0
+                                   for c in matching)):
+        raise ValueError("GitHub clearance is not authenticated to the recorded current-head request")
 
 
 def _local_quota_review_identity(
@@ -17551,7 +17674,8 @@ def _run_post_commit_pipeline_impl(
                     existing.append({
                         "author": "chatgpt-codex-connector[bot]",
                         "path": sf.get("path", ""),
-                        "body": sf.get("body", "")[:500],
+                        "body": (sf.get("body", "") if retain_quota_findings
+                                 else sf.get("body", "")[:500]),
                         "source": f"sweep-pr-{sf.get('pr', '?')}",
                     })
                 findings_result["bot_findings"] = existing
@@ -17586,6 +17710,20 @@ def _run_post_commit_pipeline_impl(
                     "errors": [f"Connector usage-limit exhaustion; local review blocked: {exc}"],
                     "steps_completed": result["steps_completed"], "pr_number": pr_number,
                     "local_pr_review": result.get("local_pr_review")}
+
+    protected_quota_merge = retain_quota_findings or local_review is not None
+    cloud_review_identity = None
+    if retain_quota_findings and local_review is None:
+        try:
+            _require_quota_history_cloud_clearance(pr_data, head_sha_before_merge, continuation_path)
+            cloud_review_identity, _ = _local_quota_review_identity(
+                repo_root, pr_data, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+                head_sha=head_sha_before_merge, target_branch=target_branch, base_branch=base_branch,
+            )
+        except (subprocess.SubprocessError, OSError, ValueError) as exc:
+            return {"status": "error", "step": "ensure_review_clear_and_merge",
+                    "errors": [f"Quota-history GitHub clearance blocked: {exc}"],
+                    "steps_completed": result["steps_completed"], "pr_number": pr_number}
 
     if findings_result["outcome"] == "bot_findings" and review_wait_timed_out is None:
         # Only remediate bot findings if the bot actually reviewed the
@@ -17665,14 +17803,13 @@ def _run_post_commit_pipeline_impl(
         return draft_ready_response
 
     if retain_quota_findings and local_review is None:
-        # A genuine later GitHub clearance can keep its existing merge path,
-        # but findings arriving during CI still need the same retention rules
-        # used before local approval and protected local-review merge.
+        # Refresh the full cloud clearance after CI with the same retention
+        # and exact PR identity as the independent quota-review lane.
         try:
             pr_data = _query_pr_review_state(
                 repo_root, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
             )
-            _assert_complete_review_evidence(pr_data, require_page_info=False)
+            _assert_complete_review_evidence(pr_data)
             remaining = _extract_review_findings(
                 pr_data, head_sha_before_merge, result=result, pr_number=pr_number, classify_quota=True,
             )
@@ -17690,31 +17827,39 @@ def _run_post_commit_pipeline_impl(
                         "errors": ["GitHub control messages do not clear existing bot findings"]}
             if remaining["outcome"] == "usage_limit":
                 raise ValueError("Current GitHub quota response requires independent local review")
+            _require_quota_history_cloud_clearance(pr_data, head_sha_before_merge, continuation_path)
+            current_identity, _ = _local_quota_review_identity(
+                repo_root, pr_data, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+                head_sha=head_sha_before_merge, target_branch=target_branch, base_branch=base_branch,
+            )
+            if current_identity != cloud_review_identity:
+                raise ValueError("GitHub clearance PR head/base/diff identity changed during CI")
         except (subprocess.SubprocessError, OSError, ValueError) as exc:
             return {"status": "error", "step": "ensure_review_clear_and_merge",
                     "errors": [f"Quota finding retention pre-merge check failed: {exc}"],
                     "steps_completed": result["steps_completed"], "pr_number": pr_number}
 
     merge_script = repo_root / "mu" / "tools" / "hooks" / "merge_pr.sh"
-    if local_review is None and not merge_script.exists():
+    if not protected_quota_merge and not merge_script.exists():
         return {"status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": ["merge_pr.sh not found"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
     try:
-        if local_review is not None:
+        if protected_quota_merge:
             # The legacy wrapper auto-resolves threads and forces an administrative override.
-            # A quota approval grants neither power. Keep the native Step15
+            # Neither a quota approval nor later cloud clearance grants those powers. Keep Step15
             # CI/identity/landed-ownership flow, with a protected exact-head merge.
-            pr_data = _query_pr_review_state(
-                repo_root, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
-            )
-            _verify_local_quota_review(
-                local_review, repo_root=repo_root, pr_data=pr_data, result=result,
-                repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
-                head_sha=head_sha_before_merge, target_branch=target_branch, base_branch=base_branch,
-            )
+            if local_review is not None:
+                pr_data = _query_pr_review_state(
+                    repo_root, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+                )
+                _verify_local_quota_review(
+                    local_review, repo_root=repo_root, pr_data=pr_data, result=result,
+                    repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+                    head_sha=head_sha_before_merge, target_branch=target_branch, base_branch=base_branch,
+                )
             _run(["gh", "pr", "merge", pr_number, "--repo", f"{repo_owner}/{repo_name}",
                   "--merge", "--delete-branch", "--match-head-commit", head_sha_before_merge],
                  cwd=repo_root, timeout=120)
@@ -17726,7 +17871,7 @@ def _run_post_commit_pipeline_impl(
                 target_branch=target_branch, base_branch=base_branch,
             )
             if not verified_merge:
-                raise ValueError("Local approval merge has not been verified as landed")
+                raise ValueError("Protected quota-history merge has not been verified as landed")
             return _complete_post_merge_pipeline(
                 handoff=handoff, repo_root=repo_root, result=result,
                 target_branch=target_branch, base_branch=base_branch,
@@ -17766,9 +17911,9 @@ def _run_post_commit_pipeline_impl(
                 verified_merge_sha=verified_merge, review_state=merged_pr_data,
                 merge_wrapper_error=str(exc.stderr or exc.stdout or exc).strip(),
             )
-        if local_review is not None:
+        if protected_quota_merge:
             return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"Protected local-review merge failed: {exc.stderr or exc}"],
+                    "errors": [f"Protected quota-history merge failed: {exc.stderr or exc}"],
                     "steps_completed": result["steps_completed"], "pr_number": pr_number,
                     "local_pr_review": result.get("local_pr_review")}
         if not late_conflict_retry_used:
@@ -17822,10 +17967,11 @@ def _run_post_commit_pipeline_impl(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
     except Exception as exc:
-        if local_review is None:
+        if not protected_quota_merge:
             raise
         return {"status": "error", "step": "ensure_review_clear_and_merge",
-                "errors": [f"Local review pre-merge/landing verification stopped: {exc}"],
+                "errors": [f"{'Local review' if local_review is not None else 'GitHub quota-history review'} "
+                           f"pre-merge/landing verification stopped: {exc}"],
                 "steps_completed": result["steps_completed"], "pr_number": pr_number,
                 "local_pr_review": result.get("local_pr_review")}
 

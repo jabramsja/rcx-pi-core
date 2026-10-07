@@ -33,6 +33,64 @@ SERVICE_QUOTA = (
 )
 BOT = "chatgpt-codex-connector[bot]"
 
+# PR1332 service payload, saved 2026-10-07. Keep raw bytes (including blank lines).
+SERVICE_ACTIVITY_RUNNING = (
+    '<!-- codex-pull-request-review-summary -->\n'
+    '\n'
+    '## Codex Review Summary\n'
+    '\n'
+    'This comment shows the latest Codex review activity on this pull request.\n'
+    '\n'
+    '| Review | Status | Commit | Review trigger |\n'
+    '| --- | --- | --- | --- |\n'
+    '| 📝 **Code Review** | 🔄 **Running** since <relative-time datetime="2026-10-07T21:44:31.317178Z">2026-10-07T21:44:31.317178Z</relative-time> | `b27d1d8` | Manual request |\n'
+    '\n'
+    '\n'
+    '\n'
+    '<details> <summary>ℹ️ About Codex in GitHub</summary>\n'
+    '<br/>\n'
+    '\n'
+    '[Your team has set up Codex to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you\n'
+    '- Open a pull request for review\n'
+    '- Mark a draft as ready\n'
+    '- Comment "@codex review" or "@codex security review".\n'
+    '\n'
+    'Codex reacts with 👀 while any review is running, comments if it has suggestions, and reacts with 👍 once all reviews finish with no findings.\n'
+    '\n'
+    '</details>'
+)
+SERVICE_ACTIVITY_RUNNING_SHA256 = "618ca236e14153dda36ca9900c48228253d725d31498831bdcb5bb534f0c9321"
+
+# Model the recorded Completed row; the rest is the same exact service body.
+SERVICE_ACTIVITY_COMPLETED = SERVICE_ACTIVITY_RUNNING.replace(
+    '🔄 **Running** since <relative-time datetime="2026-10-07T21:44:31.317178Z">2026-10-07T21:44:31.317178Z</relative-time>',
+    '✅ **Completed** <relative-time datetime="2026-10-07T21:56:09.654997Z">2026-10-07T21:56:09.654997Z</relative-time>',
+)
+
+# Complete no-issues response from the same saved completed-control observation.
+SERVICE_CLEAR = (
+    "Codex Review: Didn't find any major issues. Nice work!\n"
+    '\n'
+    '**Reviewed commit:** `b27d1d8861`\n'
+    '\n'
+    '<details> <summary>ℹ️ About Codex in GitHub</summary>\n'
+    '<br/>\n'
+    '\n'
+    '[Your team has set up Codex to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you\n'
+    '- Open a pull request for review\n'
+    '- Mark a draft as ready\n'
+    '- Comment "@codex review".\n'
+    '\n'
+    'If Codex has suggestions, it will comment; otherwise it will react with 👍.\n'
+    '\n'
+    '\n'
+    '\n'
+    '\n'
+    'Codex can also answer questions or update the PR. Try commenting "@codex address that feedback".\n'
+    '            \n'
+    '</details>'
+)
+
 
 def git(root, *args):
     return subprocess.run(["git", *args], cwd=root, check=True, text=True,
@@ -223,9 +281,303 @@ def carrier(tmp_path, monkeypatch):
     return Carrier(tmp_path, monkeypatch)
 
 
-@pytest.mark.parametrize("truncated,has_finding", [(True, True), (False, True), (False, False), (True, False)])
+@pytest.mark.parametrize("body", [SERVICE_ACTIVITY_RUNNING, SERVICE_ACTIVITY_COMPLETED],
+                         ids=["recorded-running", "modeled-completed"])
+@pytest.mark.parametrize("phase", ["initial", "review", "ci"])
+def test_recorded_activity_survives_each_real_quota_gate(carrier, phase, body):
+    assert hashlib.sha256(SERVICE_ACTIVITY_RUNNING.encode()).hexdigest() == SERVICE_ACTIVITY_RUNNING_SHA256
+    assert hashlib.sha256(SERVICE_ACTIVITY_COMPLETED.encode()).hexdigest() == (
+        "de5ad7c034880671b02814dd349fc3c003267907f90ced43b5b6f15a94f7c9a5")
+    comment = {"databaseId": 6047467226, "author": {"login": BOT, "__typename": "Bot"},
+               "body": body, "createdAt": "2026-10-04T13:08:20Z"}
+    before = carrier.continuation.read_bytes()
+
+    def arrive():
+        carrier.pr["comments"]["nodes"].append(copy.deepcopy(comment))
+
+    if phase == "initial":
+        arrive()
+    else:
+        setattr(carrier, "after_review" if phase == "review" else "after_ci", arrive)
+    outcome = carrier.execute()
+
+    assert outcome["status"] == "success", outcome
+    assert carrier.pr["comments"]["nodes"][-1] == comment
+    assert carrier.continuation.read_bytes() == before
+    # Activity is metadata even for a different commit. Only the genuine,
+    # separately authenticated current quota response admits this review.
+    assert len(carrier.reviews) == len(carrier.landed) == 1
+    assert carrier.receipts()[0]["quota_comment"]["body"] == QUOTA
+    assert carrier.receipts()[0]["status"] == "APPROVED"
+    merges = [a for a in carrier.commands if a[:3] == ["gh", "pr", "merge"]]
+    assert merges == [["gh", "pr", "merge", "1331", "--repo", "fixture/repo", "--merge",
+                       "--delete-branch", "--match-head-commit", carrier.head]]
+    assert not any(a[0] == "bash" or "--admin" in a for a in carrier.commands)
+
+
+def _prior_review_bytes(carrier):
+    """Pre-existing receipts are immutable on every success and hold path."""
+    paths = [carrier.bus / "meta/pre_commit_receipt.json",
+             carrier.bus / "meta/pre_commit_receipts/prior.json",
+             carrier.bus / "meta/prior_local_review/receipt.json"]
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'{"status": "historical", "authority": "spent"}\n')
+    return {p: p.read_bytes() for p in [carrier.continuation, *paths]}
+
+
+def _cloud_clearance(carrier, form="service"):
+    carrier.pr["comments"]["nodes"][-1].update(body=SERVICE_QUOTA, createdAt="2026-10-04T13:07:00Z")
+    carrier.pr["comments"]["nodes"].append({
+        "databaseId": 6047467226, "author": {"login": BOT, "__typename": "Bot"},
+        "body": SERVICE_ACTIVITY_COMPLETED, "createdAt": "2026-10-04T13:08:01Z"})
+    if form == "formal":
+        carrier.pr["latestReviews"]["nodes"] = [{
+            "author": {"login": BOT, "__typename": "Bot"}, "state": "APPROVED", "body": "",
+            "commit": {"oid": carrier.head}, "submittedAt": "2026-10-04T13:09:00Z"}]
+    else:
+        # Only this modeled per-carrier commit changes; SERVICE_CLEAR remains
+        # the exact offline body captured from PR1332.
+        body = (SERVICE_CLEAR.replace("`b27d1d8861`", f"`{carrier.head[:10]}`")
+                if form == "service" else "Codex Review: didn't find any major issues.")
+        carrier.pr["comments"]["nodes"].append({
+            "databaseId": 6047647915, "author": {"login": BOT, "__typename": "Bot"},
+            "body": body, "createdAt": "2026-10-04T13:09:00Z"})
+
+
+@pytest.mark.parametrize("form", ["service", "compact", "formal"])
+def test_quota_history_cloud_clearance_uses_protected_exact_head_merge(carrier, form):
+    assert hashlib.sha256(SERVICE_CLEAR.encode()).hexdigest() == (
+        "7d939bab6b6089e0ea89d069a9e3d8cb37e3df052fa58c7c54dee81a228e816b")
+    _cloud_clearance(carrier, form)
+    before = _prior_review_bytes(carrier)
+    comments = copy.deepcopy(carrier.pr["comments"])
+
+    outcome = carrier.execute()
+
+    assert outcome["status"] == "success", outcome
+    assert not carrier.reviews and not carrier.receipts()
+    assert carrier.pr["comments"] == comments
+    assert all(p.read_bytes() == value for p, value in before.items())
+    assert [a for a in carrier.commands if a[:3] == ["gh", "pr", "merge"]] == [
+        ["gh", "pr", "merge", "1331", "--repo", "fixture/repo", "--merge",
+         "--delete-branch", "--match-head-commit", carrier.head]]
+    assert not any(a[0] == "bash" or "--admin" in a or "resolveReviewThread" in " ".join(a)
+                   for a in carrier.commands)
+    checks = [a for a in carrier.commands if a[:3] == ["gh", "pr", "checks"]]
+    assert any("--watch" in a for a in checks) and any("--json" in a for a in checks)
+    assert carrier.landed[0]["verified_merge_sha"] == "f" * 40
+    assert carrier.landed[0]["review_state"]["headRefOid"] == carrier.head
+
+
+@pytest.mark.parametrize("mutation", [
+    "leading", "trailing", "quoted", "cell", "details", "unknown-row", "header", "separator",
+    "unknown-details", "extra-html", "bad-time", "mismatched-time", "bad-commit", "empty-table",
+    "completed-cell", "completed-details", "clear-leading", "clear-trailing", "clear-quoted",
+    "clear-details", "clear-unknown-details",
+])
+@pytest.mark.parametrize("phase", ["initial", "review", "ci"])
+def test_complete_activity_with_unknown_content_remains_a_full_finding(carrier, phase, mutation):
+    body = SERVICE_ACTIVITY_RUNNING
+    defect = "Retained defect in earlier.py. " * 30
+    if mutation.startswith("clear-"):
+        body = SERVICE_CLEAR
+        if mutation == "clear-leading":
+            body = defect + "\n" + body
+        elif mutation == "clear-trailing":
+            body += "\n" + defect
+        elif mutation == "clear-quoted":
+            body = "> " + body.replace("\n", "\n> ")
+        elif mutation == "clear-details":
+            body = body.replace("</details>", defect + "\n</details>")
+        else:
+            body = body.replace("If Codex has suggestions", "If Codex overlooks findings")
+    elif mutation == "completed-cell":
+        body = SERVICE_ACTIVITY_COMPLETED.replace("Manual request", defect)
+    elif mutation == "completed-details":
+        body = SERVICE_ACTIVITY_COMPLETED.replace("</details>", defect + "\n</details>")
+    elif mutation == "leading":
+        body = defect + "\n" + body
+    elif mutation == "trailing":
+        body += "\n" + defect
+    elif mutation == "quoted":
+        body = "> " + body.replace("\n", "\n> ")
+    elif mutation == "cell":
+        body = body.replace("Manual request", "Manual request: " + defect)
+    elif mutation == "details":
+        body = body.replace("</details>", defect + "\n</details>")
+    elif mutation == "unknown-row":
+        body = body.replace("**Running**", "**Approved**")
+    elif mutation == "header":
+        body = body.replace("| Review | Status |", "| Finding | Status |")
+    elif mutation == "separator":
+        body = body.replace("| --- | --- | --- | --- |", "| --- | --- |")
+    elif mutation == "unknown-details":
+        body = body.replace("while any review is running", "and clears all findings")
+    elif mutation == "extra-html":
+        body = body.replace('<relative-time datetime=', '<relative-time data-finding="hidden" datetime=')
+    elif mutation == "bad-time":
+        body = body.replace("2026-10-07T21:44:31.317178Z", "2026-99-07T21:44:31.317178Z")
+    elif mutation == "mismatched-time":
+        body = body.replace('>2026-10-07T21:44:31.317178Z', '>2026-10-07T21:44:32.317178Z')
+    elif mutation == "bad-commit":
+        body = body.replace("`b27d1d8`", "`wrong-head`")
+    else:
+        body = "\n".join(line for line in body.split("\n") if not line.startswith("| 📝"))
+    finding = {"databaseId": 3, "author": {"login": BOT, "__typename": "Bot"},
+               "body": body, "createdAt": "2026-10-04T13:08:20Z"}
+    prior = _prior_review_bytes(carrier)
+
+    def arrive():
+        prior.update({p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/receipt.json")})
+        carrier.pr["comments"]["nodes"].append(copy.deepcopy(finding))
+
+    if phase == "initial":
+        arrive()
+    else:
+        setattr(carrier, "after_review" if phase == "review" else "after_ci", arrive)
+    outcome = carrier.execute()
+
+    carrier.assert_stopped(outcome, reviews=int(phase != "initial"))
+    assert all(p.read_bytes() == value for p, value in prior.items())
+    assert carrier.pr["comments"]["nodes"][-1] == finding
+    assert outcome["pr_number"] == "1331"
+    if phase == "initial":
+        assert outcome["bot_findings"] == [{"author": BOT, "body": body, "path": "", "line": None}]
+        assert not carrier.receipts()
+    else:
+        assert repr(body) in outcome["errors"][0]
+        assert carrier.receipts()[0]["status"] == ("ERROR" if phase == "review" else "APPROVED")
+
+
 @pytest.mark.parametrize("phase", ["initial", "ci"])
-def test_later_clear_requires_complete_31_comment_history(carrier, phase, truncated, has_finding):
+@pytest.mark.parametrize("failure", [
+    "running-only", "completed-only", "stale-clear", "wrong-reviewed-head", "pending-review",
+    "empty-commented-review", "stale-formal-approval", "unauthenticated", "wrong-request-id",
+    "head-moved", "branch-moved", "repository-moved", "pr-moved", "base-moved",
+    "incomplete-comments", "missing-page-info", "new-quota",
+    "human-thread", "human-changes", "newer-wrong-head-clear-after-approval",
+])
+def test_quota_history_cloud_merge_requires_live_clearance(carrier, monkeypatch, phase, failure):
+    _cloud_clearance(carrier)
+    # The recorded request is fresh; advance only the polling clock, keeping
+    # the real freshness/classification functions and all remote I/O fixtures.
+    clock = iter([0, 0, *range(10000, 1000000, 10000)])
+    monkeypatch.setattr(commit, "time", SimpleNamespace(
+        time=lambda: next(clock), sleep=lambda _: None, monotonic=commit.time.monotonic))
+    expected_pr = {}
+
+    def invalidate():
+        clear = carrier.pr["comments"]["nodes"][-1]
+        if failure in {"running-only", "completed-only"}:
+            carrier.pr["comments"]["nodes"].pop()
+            carrier.pr["comments"]["nodes"][-1]["body"] = (
+                SERVICE_ACTIVITY_RUNNING if failure == "running-only" else SERVICE_ACTIVITY_COMPLETED)
+        elif failure == "stale-clear":
+            clear["createdAt"] = "2026-10-04T13:07:30Z"
+        elif failure == "wrong-reviewed-head":
+            clear["body"] = SERVICE_CLEAR.replace("`b27d1d8861`", f"`{carrier.base[:10]}`")
+        elif failure in {"pending-review", "empty-commented-review", "stale-formal-approval"}:
+            carrier.pr["comments"]["nodes"].pop()
+            carrier.pr["latestReviews"]["nodes"] = [{
+                "author": {"login": BOT, "__typename": "Bot"}, "body": "",
+                "state": {"pending-review": "PENDING", "empty-commented-review": "COMMENTED",
+                          "stale-formal-approval": "APPROVED"}[failure],
+                "commit": {"oid": carrier.base if failure == "stale-formal-approval" else carrier.head},
+                "submittedAt": "2026-10-04T13:09:00Z"}]
+        elif failure == "unauthenticated":
+            clear["author"]["__typename"] = "User"
+        elif failure == "wrong-request-id":
+            carrier.pr["comments"]["nodes"][0]["databaseId"] = 99
+        elif failure == "head-moved":
+            carrier.pr["headRefOid"] = carrier.base
+        elif failure == "branch-moved":
+            carrier.pr["headRefName"] = "fixture/wrong"
+        elif failure == "repository-moved":
+            carrier.pr["headRepository"]["nameWithOwner"] = "another/repo"
+        elif failure == "pr-moved":
+            carrier.pr["number"] = 1332
+        elif failure == "base-moved":
+            carrier.pr["baseRefName"] = "main"
+        elif failure == "incomplete-comments":
+            carrier.pr["comments"]["pageInfo"]["hasPreviousPage"] = True
+        elif failure == "missing-page-info":
+            carrier.pr["latestReviews"].pop("pageInfo")
+        elif failure == "human-thread":
+            carrier.pr["reviewThreads"]["nodes"] = [thread(author="maintainer", outdated=True)]
+        elif failure == "human-changes":
+            carrier.pr["reviewDecision"] = "CHANGES_REQUESTED"
+        elif failure == "newer-wrong-head-clear-after-approval":
+            carrier.pr["latestReviews"]["nodes"] = [{
+                "author": {"login": BOT, "__typename": "Bot"}, "state": "APPROVED", "body": "",
+                "commit": {"oid": carrier.head}, "submittedAt": "2026-10-04T13:08:30Z"}]
+            clear["body"] = SERVICE_CLEAR.replace("`b27d1d8861`", f"`{carrier.base[:10]}`")
+        elif failure == "new-quota":
+            clear["body"] = SERVICE_QUOTA
+            # It is not the response to the recorded request: no local-review
+            # authority may be inferred from an old request ID.
+            carrier.pr["comments"]["nodes"][0]["databaseId"] = 99
+        expected_pr.update(copy.deepcopy(carrier.pr))
+
+    before = _prior_review_bytes(carrier)
+    if phase == "initial":
+        invalidate()
+    else:
+        carrier.after_ci = invalidate
+    outcome = carrier.execute()
+
+    carrier.assert_stopped(outcome, reviews=0)
+    assert all(p.read_bytes() == value for p, value in before.items())
+    assert carrier.pr == expected_pr
+    assert not carrier.receipts()
+    assert outcome["step"] == "ensure_review_clear_and_merge"
+
+
+@pytest.mark.parametrize("changed", ["local-head", "base-object"])
+def test_quota_history_rechecks_local_head_and_exact_base_after_ci(carrier, changed):
+    _cloud_clearance(carrier)
+    prior = _prior_review_bytes(carrier)
+
+    def arrive():
+        if changed == "local-head":
+            git(carrier.root, "update-ref", "HEAD", carrier.base)
+        else:
+            carrier.pr["baseRefOid"] = git(carrier.root, "rev-parse", "HEAD^")
+
+    carrier.after_ci = arrive
+    outcome = carrier.execute()
+
+    carrier.assert_stopped(outcome, reviews=0)
+    assert all(p.read_bytes() == value for p, value in prior.items())
+    assert "changed" in " ".join(outcome["errors"])
+
+
+@pytest.mark.parametrize("mode", ["ci-failure", "blocked", "queued"])
+def test_quota_history_protected_merge_never_falls_back_to_admin(carrier, mode):
+    _cloud_clearance(carrier)
+    carrier.ci_failure = mode == "ci-failure"
+    carrier.merge_failure = mode == "blocked"
+    carrier.merge_queued = mode == "queued"
+    before = _prior_review_bytes(carrier)
+
+    outcome = carrier.execute()
+
+    assert outcome["status"] != "success" and not carrier.landed
+    assert not carrier.reviews and not carrier.receipts()
+    assert not any(a[0] == "bash" or "--admin" in a for a in carrier.commands)
+    merges = [a for a in carrier.commands if a[:3] == ["gh", "pr", "merge"]]
+    assert len(merges) == int(mode != "ci-failure")
+    if merges:
+        assert merges[0][-2:] == ["--match-head-commit", carrier.head]
+    assert all(p.read_bytes() == value for p, value in before.items())
+
+
+@pytest.mark.parametrize("truncated,has_finding,quota_history", [
+    (True, True, True), (False, True, True), (False, False, True), (True, False, True),
+    (False, False, False),  # Retain the original wrapper assertion on the unrelated legacy lane.
+])
+@pytest.mark.parametrize("phase", ["initial", "ci"])
+def test_later_clear_requires_complete_31_comment_history(carrier, phase, truncated, has_finding, quota_history):
     """The newest 30 comments must not hide the unresolved first comment."""
     clear = {"databaseId": 31, "author": {"login": BOT, "__typename": "Bot"},
              "body": "Codex Review: didn't find any major issues.", "createdAt": "2026-10-04T13:09:00Z"}
@@ -235,6 +587,9 @@ def test_later_clear_requires_complete_31_comment_history(carrier, phase, trunca
     controls = [{**clear, "databaseId": n} for n in range(4, 31)]
     history = [first, *copy.deepcopy(carrier.pr["comments"]["nodes"]), *controls, clear]
     history[2]["body"] = SERVICE_QUOTA
+    if not quota_history:
+        history[2].update(author={"login": "founder", "__typename": "User"}, body="Prior context")
+        carrier.pr["comments"]["nodes"][-1] = copy.deepcopy(history[2])
     assert len(history) == 31
 
     def arrive():
@@ -263,7 +618,12 @@ def test_later_clear_requires_complete_31_comment_history(carrier, phase, trunca
             assert [f["body"] for f in outcome["bot_findings"]] == [first["body"]]
     else:
         assert outcome["status"] == "success"
-        assert len(merges) == 1 and merges[0][-1] == "--sweep"
+        if quota_history:
+            assert merges == [["gh", "pr", "merge", "1331", "--repo", "fixture/repo", "--merge",
+                               "--delete-branch", "--match-head-commit", carrier.head]]
+            assert carrier.landed[0]["verified_merge_sha"] == "f" * 40
+        else:
+            assert len(merges) == 1 and merges[0][-1] == "--sweep"
 
 
 @pytest.mark.parametrize("connection", ["comments", "latestReviews", "reviewThreads", "thread-comments"])
@@ -545,12 +905,19 @@ def test_later_mixed_clear_cannot_disable_quota_finding_retention(carrier, phase
         assert prior_receipts
 
 
+@pytest.mark.parametrize("service_control", [False, True], ids=["compact", "complete-service"])
 @pytest.mark.parametrize("channel", ["issue", "formal", "outdated-thread", "sweep", "malformed-sweep"])
 @pytest.mark.parametrize("phase", ["initial", "review", "ci", "ci-after-clear"])
-def test_later_clear_preserves_each_quota_finding_channel(carrier, phase, channel):
+def test_later_clear_preserves_each_quota_finding_channel(carrier, phase, channel, service_control):
     clear = {"databaseId": 3, "author": {"login": BOT, "__typename": "Bot"},
              "body": "Codex Review: didn't find any major issues.", "createdAt": "2026-10-04T13:08:20Z"}
     body = "A blocking defect remains in earlier.py"
+    if service_control:
+        clear["body"] = SERVICE_CLEAR.replace("`b27d1d8861`", f"`{carrier.head[:10]}`")
+        body += "\nFull retained finding detail." * 40
+        carrier.pr["comments"]["nodes"].append({
+            "databaseId": 6047467226, "author": {"login": BOT, "__typename": "Bot"},
+            "body": SERVICE_ACTIVITY_COMPLETED, "createdAt": "2026-10-04T13:08:01Z"})
     sweep = carrier.bus / "meta/sweep_findings.json"
     prior_receipts = {}
     expected_pr = {}
@@ -602,7 +969,8 @@ def test_later_clear_preserves_each_quota_finding_channel(carrier, phase, channe
             assert [f["body"] for f in outcome["bot_findings"]] == [body]
     else:
         assert carrier.receipts()[0]["status"] == ("ERROR" if phase == "review" else "APPROVED")
-        assert "retained sweep" in outcome["errors"][0] if "sweep" in channel else body in outcome["errors"][0]
+        assert "retained sweep" in outcome["errors"][0] if "sweep" in channel else (
+            repr(body) in outcome["errors"][0] if service_control else body in outcome["errors"][0])
     if "sweep" in channel:
         expected = "{invalid retained findings\n" if channel == "malformed-sweep" else json.dumps({
             "pr": 1200, "path": "earlier.py", "body": body}) + "\n"
@@ -682,7 +1050,10 @@ def test_quota_mixed_clear_and_summary_comments_keep_findings(carrier, phase, cr
     "<!-- codex-pull-request-review-summary -->\n## Codex Review Summary\n"
     "| Code Review | **Completed** | `bbbbbbb` | Manual request |\n"
     "| Code Review | **Running** | `ccccccc` | Manual request |",
-], ids=["clear-no-period", "clear-case-whitespace", "summary", "summary-running", "summary-multiple-jobs"])
+    SERVICE_ACTIVITY_RUNNING,
+    SERVICE_ACTIVITY_COMPLETED,
+], ids=["clear-no-period", "clear-case-whitespace", "summary", "summary-running", "summary-multiple-jobs",
+        "recorded-running", "modeled-completed"])
 @pytest.mark.parametrize("has_finding", [False, True])
 @pytest.mark.parametrize("phase", ["initial", "review", "ci"])
 def test_standalone_clear_and_activity_controls_preserve_separate_findings(carrier, phase, has_finding, control_body):

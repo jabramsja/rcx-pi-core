@@ -2299,6 +2299,46 @@ def test_pr1304_activity_metadata_does_not_mask_older_unresolved_p1():
             data, "b" * 40) is None
 
 
+def test_pr1332_complete_activity_preserves_full_retained_thread_identity():
+    from mu.tests.tools.test_commit_executor_local_review import (
+        SERVICE_ACTIVITY_RUNNING, SERVICE_ACTIVITY_COMPLETED,
+    )
+
+    for body in (SERVICE_ACTIVITY_RUNNING, SERVICE_ACTIVITY_COMPLETED):
+        finding_body = "P1 retained verified defect\n" * 40
+        thread = _residual_review_thread("older-p1", finding_body)
+        thread["isOutdated"] = True
+        thread["comments"]["nodes"][0]["author"]["__typename"] = "Bot"
+        data = _residual_review_state([thread])
+        data["comments"]["nodes"][0]["body"] = body
+        extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: real classifier, full service control
+            data, "b" * 40, result={"steps_completed": []}, pr_number="1332", classify_quota=True)
+        assert extracted["outcome"] == "bot_findings"
+        assert extracted["bot_findings"] == [{
+            "author": commit_mod.BOT_REVIEW_LOGIN, "body": finding_body, "path": "docs/note.md", "line": 1,
+            "thread_id": "older-p1", "comment_id": "older-p1-comment", "reviewed_head": "b" * 40,
+            "thread_snapshot": thread,
+        }]
+        assert commit_mod._current_head_connector_issue_comment_outcome(  # ANTICHEAT_OK: no activity head binding
+            data, "b" * 40) is None
+
+
+def test_pr1332_activity_marker_cannot_hide_unknown_content_from_outcome():
+    from mu.tests.tools.test_commit_executor_local_review import SERVICE_ACTIVITY_COMPLETED
+
+    body = SERVICE_ACTIVITY_COMPLETED + "\nAn unresolved defect remains."
+    data = _residual_review_state([])
+    data["comments"]["nodes"][0]["body"] = body
+    outcome = commit_mod._current_head_connector_issue_comment_outcome(  # ANTICHEAT_OK: full-body consumption
+        data, "b" * 40)
+    assert outcome["kind"] == "other" and outcome["body"] == body
+    extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: complete retained issue finding
+        data, "b" * 40, result={"steps_completed": []}, pr_number="1332", classify_quota=True)
+    assert extracted["bot_findings"] == [{
+        "author": commit_mod.BOT_REVIEW_LOGIN, "body": body, "path": "", "line": None,
+    }]
+
+
 def test_pr1304_new_review_does_not_clear_human_or_retained_nonoutdated_thread():
     human = _residual_review_thread("human", author="maintainer")
     extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: human review preservation

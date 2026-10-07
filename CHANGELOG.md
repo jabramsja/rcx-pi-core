@@ -6,6 +6,26 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-07
 
+### Recognize GitHub activity controls and protect PR1332 review transitions (Phase B; landing pending)
+
+- Retain the complete recorded Running comment as an offline regression fixture,
+  with the observed Completed variant and complete no-major-issues response.
+  Recognize only fully consumed known payloads; mixed content, unknown rows,
+  malformed boilerplate and retained findings remain blocking.
+- Keep quota-history clearance on the protected exact-head merge path. Require
+  authenticated current-head GitHub clearance or independent quota approval,
+  fresh required CI, complete retained review evidence and unchanged PR identity.
+  Activity metadata and timeouts grant no review or merge authority.
+- The declared two-module gate passes 656 tests in 153.23 seconds. An isolated
+  focused replay fails all six activity cases on the parent and passes all six
+  on the corrected source, preserving the active candidate throughout.
+- Record phase-scoped source/test evidence in
+  `reports/control_plane/workingrcx-review-control-r1-2026-10-07_implementation_evidence.json`.
+  Preserve all three committed bootstrap-isolation/prompt-checkout test hashes.
+  Native final-candidate approval, hooks, CI, merge and PRIMARY sync remain pending.
+  Existing row40 owns adjacent automation obligations; useful-work dispositions,
+  physical cleanup and producer dedup integration remain open.
+
 ### Preserve prompt-checkout regression coverage on PR1332 (Phase B; landing pending)
 
 - Verify all 74 restored prompt R1 files and carry only the preserved prompt
