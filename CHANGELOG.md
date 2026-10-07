@@ -6,6 +6,27 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-07
 
+### Preserve prompt-checkout regression coverage on PR1332 (Phase B; landing pending)
+
+- Verify all 74 restored prompt R1 files and carry only the preserved prompt
+  contract test. Exempt exactly one verified active-checkout injection from the
+  stale-path assertion; retain the actual-checkout check, all nine agents,
+  27 nested/ordinary/canonical cases and 12 stale-reference controls.
+- The declared five-module serial gate freshly passes 255 tests with one
+  unchanged historical-snapshot skip in 20.68 seconds. The committed bootstrap
+  isolation tests, production loader and templates remain unchanged.
+- Preserve R1's passing gate and native code-review GO as historical evidence.
+  Final approval stopped on outdated governance hashes; recovery then entered
+  Phase A and failed the native packet contract, requiring this fresh R2 wave.
+  Record source/test execution evidence in
+  `reports/control_plane/workingrcx-prompt-checkout-test-r2-2026-10-07_implementation_evidence.json`.
+  Fresh native receipts own the final staged package; approval, hooks, required
+  CI, protected merge and PRIMARY sync remain pending on existing PR1332.
+- Keep both observed automation defects with existing row40, alongside its
+  structured-result transport and raw-stream retention obligations. Preserve
+  PRIMARY WIP, prior receipts/budgets and all PR/useful-work dispositions.
+  This auxiliary test repair produces no physical APPLY plan or retirement.
+
 ### Isolate bootstrap registry tests on existing PR1332 (Phase B; landing pending)
 
 - Restore registry contents in place after each bootstrap registry test, including
