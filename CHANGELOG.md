@@ -4,6 +4,26 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-07
+
+### Isolate bootstrap registry tests on existing PR1332 (Phase B; landing pending)
+
+- Restore registry contents in place after each bootstrap registry test, including
+  exceptional exits. Read empty-registry marker evidence in a fresh Python process
+  so inspection preserves the live runtime's imported `NO_MATCH` identity.
+- Carry only the two verified test modules from preserved CI isolation R1. Add
+  five focused cases for registry/list/sentinel preservation and missing-marker
+  rejection; retain the original marker/path assertions and both victim modules.
+  Fresh R2 runs reproduce all nine original failures before repair and pass the
+  eleven-case ordered reproduction afterward. Exact local commands, results and
+  hashes are recorded in
+  `reports/control_plane/workingrcx-local-review-ci-isolation-r2-2026-10-07_implementation_evidence.json`.
+- Keep PR1332 on its existing branch. R1's tested code carries no review or
+  continuation authority into this corrected R2 packet. Preserve exhausted R3/R1
+  evidence and budgets; native review, governance, CI, merge and PRIMARY sync
+  remain pending. The 2026-10-06 storage retirement of 86 fleet archive folders
+  and 17 sibling checkouts does not complete useful-work or PR disposition.
+
 ## 2026-10-05
 
 ### Complete local quota review and preserve continuation authority (Phase B; landing pending)
