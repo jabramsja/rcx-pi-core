@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-merge-queue-review-r3-2026-10-08",
+  "repeat_run_speedup_ratio": 1.025104,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.302383,
+  "repeat_run_raw_seconds": [
+    0.309974,
+    0.302383
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.309974
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.612357
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-10-08T02:38:40Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "bb837df21e053ce5ad577e36550cb1126dc97055"
+}

@@ -4,6 +4,33 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-08
+
+### Restore the protected-merge continuation repair for fresh PR1332 review (Phase B; landing pending)
+
+- Recover exactly the three hash-verified R2 source/test files from snapshot
+  `337faf8fc20d6d0b4493d4c31e49c2f1302157b122b2b37b7c1eb10c5ea0cd4d`.
+  Preserve guarded public continuation seams, bounded exact-head polling,
+  durable identity-bound merge intent and native held/resume output. Existing
+  tests cover interruption, uncertain outcomes, retained findings, CLI/dispatcher
+  boundaries and exactly-once verified completion with fake remote/model I/O.
+- The fresh R3 declared two-module gate passes 855 tests in 216.10 seconds,
+  exit 0, on the exact recovered hashes. Historical parent/R1 defect proofs and
+  R2 gate/boundary observations remain labeled with their own source versions.
+  All 113 R2 and 87 R1 historical/restored files and all three committed protected
+  test hashes remain intact. Phase-scoped evidence is recorded in
+  `reports/control_plane/workingrcx-merge-queue-review-r3-2026-10-08_2026-10-08_implementation_evidence.json`.
+- R2's corrected source lacked fresh review because its pre-review inventory
+  retained an added-then-deleted optional report; unprepared resume refused it.
+  Existing row40 owns staged-inventory reconciliation, real deletion and drift
+  guards, interrupted-preparation coverage and fresh prepared review authority.
+- The exact unresolved Bot P1 remains blocking. Fresh native final approval,
+  corrected-head CI and independent authenticated review must precede any
+  conditional disposition; complete aggregate clearance must precede protected
+  merge. Native indicator/staged-governance generation, review, hooks, landing
+  and PRIMARY sync remain outer-pipeline owned. No GitHub action, physical APPLY,
+  retirement, useful-work completion or producer dedup integration is claimed.
+
 ## 2026-10-07
 
 ### Recognize GitHub activity controls and protect PR1332 review transitions (Phase B; landing pending)

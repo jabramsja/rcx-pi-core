@@ -322,6 +322,8 @@ BOT_REVIEW_TRIGGER_COMMENT = "@codex review"
 BOT_REVIEW_WAIT_SECONDS = 45
 BOT_REVIEW_ACK_WAIT_SECONDS = 60
 BOT_REVIEW_POLL_SECONDS = 5
+PROTECTED_MERGE_WAIT_SECONDS = 600
+PROTECTED_MERGE_POLL_SECONDS = 5
 BOT_REVIEW_ACK_REACTION = "eyes"
 BOT_REVIEW_QUERY_TRANSIENT_ERRORS = (
     subprocess.CalledProcessError,
@@ -8538,6 +8540,11 @@ def _handoff_sha(handoff: dict[str, Any]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def handoff_sha(handoff: dict[str, Any]) -> str:
+    """Return the native commit handoff identity for continuation consumers."""
+    return _handoff_sha(handoff)
+
+
 def _collect_wave_test_files(paths: list[str]) -> list[str]:
     """Return deduplicated pytest-style module paths from staged wave files."""
     test_files: list[str] = []
@@ -9187,7 +9194,10 @@ def _write_continuation_record(
     staged_candidate_sha256: str | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing_payload = _read_continuation_record(path) or {}
+    existing_payload = _read_continuation_record(path)
+    if path.exists() and existing_payload is None:
+        raise ValueError("Unreadable native continuation cannot be overwritten")
+    existing_payload = existing_payload or {}
     payload: dict[str, Any] = {
         "version": COMMIT_CONTINUATION_VERSION,
         "status": CONTINUATION_ACTIVE_STATUS,
@@ -9226,7 +9236,44 @@ def _write_continuation_record(
     )
     if isinstance(candidate_sha, str) and re.fullmatch(r"[0-9a-f]{64}", candidate_sha):
         payload["staged_candidate_sha256"] = candidate_sha
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    if "protected_merge_intent" in existing_payload:
+        # A checkpoint cannot erase or rebind an already-spent merge request.
+        for key in ("handoff_sha", "target_branch", "commit_sha", "receipt_decision", "pr_number"):
+            if payload.get(key) != existing_payload.get(key):
+                raise ValueError(f"Protected merge continuation cannot change {key}")
+        _atomic_write_fsynced_json(path, {**existing_payload, **payload})
+    else:
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def write_continuation_record(
+    path: Path,
+    *,
+    handoff_sha: str,
+    target_branch: str,
+    commit_sha: str,
+    receipt_decision: str,
+    steps_completed: list[str],
+    pr_number: str | None = None,
+    bot_review_request_sha: str | None = None,
+    pre_push_isolation: dict[str, Any] | None = None,
+    pre_push_restored_paths: list[str] | None = None,
+    staged_candidate_sha256: str | None = None,
+) -> None:
+    """Checkpoint through the native writer, preserving its authority guards."""
+    _write_continuation_record(
+        path,
+        handoff_sha=handoff_sha,
+        target_branch=target_branch,
+        commit_sha=commit_sha,
+        receipt_decision=receipt_decision,
+        steps_completed=steps_completed,
+        pr_number=pr_number,
+        bot_review_request_sha=bot_review_request_sha,
+        pre_push_isolation=pre_push_isolation,
+        pre_push_restored_paths=pre_push_restored_paths,
+        staged_candidate_sha256=staged_candidate_sha256,
+    )
 
 
 def _clear_continuation_record(path: Path) -> None:
@@ -9239,7 +9286,7 @@ def _read_continuation_record(path: Path) -> dict[str, Any] | None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, UnicodeError):
         return None
     if not isinstance(payload, dict):
         return None
@@ -9265,6 +9312,8 @@ def _load_post_commit_continuation(
     if payload.get("status") != CONTINUATION_ACTIVE_STATUS:
         return None
     if payload.get("handoff_sha") != handoff_sha:
+        if "protected_merge_intent" in payload:
+            return None
         expected_wave_id = str(wave_id or "").strip()
         if not expected_wave_id or not _can_rekey_post_commit_continuation_to_handoff(
             handoff,
@@ -9299,6 +9348,8 @@ def _load_post_commit_continuation(
     if branch_name != target_branch:
         return None
     if head_sha != commit_sha:
+        if "protected_merge_intent" in payload:
+            return None
         # HEAD may have moved forward from remediation commits.
         # Accept if commit_sha is an ancestor of current HEAD.
         try:
@@ -9864,6 +9915,7 @@ def _query_pr_review_state(
     repo_owner: str,
     repo_name: str,
     pr_number: str,
+    timeout: float = 30,
 ) -> dict[str, Any]:
     review_result = _run(
         ["gh", "api", "graphql", "-f",
@@ -9872,7 +9924,7 @@ def _query_pr_review_state(
          "-F", f"repo={repo_name}",
          "-F", f"number={pr_number}"],
         cwd=repo_root,
-        timeout=30,
+        timeout=timeout,
     )
     review_data = json.loads(review_result.stdout)
     if not isinstance(review_data, dict) or review_data.get("errors"):
@@ -9932,6 +9984,229 @@ def _verified_remote_merge_sha(
     if not isinstance(merge_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", merge_sha):
         raise ValueError("Merged PR query missing exact merge commit")
     return merge_sha
+
+
+def _protected_merge_hold(result: dict[str, Any], reason: str) -> dict[str, Any]:
+    observation = result.setdefault("protected_merge_observation", {})
+    observation["status"] = "hold"
+    return {**result, "status": "held", "step": "ensure_review_clear_and_merge",
+            "failure_class": "protected_merge_observation_hold",
+            "errors": [f"Protected merge observation held: {reason}"],
+            "next_action": "Retain this continuation and its exact PR owner. Resume observation only; "
+                           "no new merge request, finding disposition or remediation is authorized."}
+
+
+def _run_protected_merge(
+    *, handoff: dict[str, Any], repo_root: Path, result: dict[str, Any],
+    target_branch: str, base_branch: str, continuation_path: Path, log: Any,
+    initiate: bool = False, require_cloud_clearance: bool = True,
+) -> dict[str, Any]:
+    """Spend one durable intent, then only observe, even after an interrupted call.
+
+    The intent is NOT approval. Existing continuation/receipt authority admits
+    it; its only power on re-entry is observation of that same PR. The lock
+    serializes admission and completion, including two simultaneous observers.
+    """
+    try:
+        if continuation_path.is_symlink() or not continuation_path.is_file():
+            raise ValueError("Protected merge requires a regular native continuation")
+        lock_fd = os.open(continuation_path.with_suffix(".merge.lock"),
+                          os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except Exception as exc:
+        return _protected_merge_hold(result, str(exc))
+    with os.fdopen(lock_fd, "rb") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            handoff_sha = result.get("handoff_sha") or _handoff_sha(handoff)
+            payload = _load_post_commit_continuation(
+                continuation_path, repo_root=repo_root, handoff_sha=handoff_sha,
+                target_branch=target_branch,
+            )
+            pr_number = str(result.get("pr_number") or "")
+            if (payload is None or type(payload.get("version")) is not int
+                    or payload.get("commit_sha") != result.get("commit_sha")
+                    or str(payload.get("pr_number")) != pr_number
+                    or not re.fullmatch(r"[1-9][0-9]*", pr_number)
+                    or not re.fullmatch(r"[0-9a-f]{64}", str(handoff_sha))
+                    or not {"git_commit", "git_push", "ensure_pr", "wait_ci"}.issubset(
+                        payload.get("steps_completed", []))):
+                raise ValueError("Protected merge lacks exact native continuation authority")
+            # No ancestor/rekey upgrade is permitted at the mutation boundary.
+            if payload != _read_continuation_record(continuation_path):
+                raise ValueError("Protected merge continuation identity changed")
+            repo_owner, repo_name = _parse_origin_owner_repo(repo_root)
+            binding = {
+                "wave_id": handoff["wave_id"], "handoff_sha": handoff_sha,
+                "owner": {"task_id": str(handoff.get("task_id") or handoff["wave_id"]),
+                          "packet": str(handoff.get("plan_path") or handoff.get("tracked_packet") or ""),
+                          "repo_root": str(repo_root.resolve()),
+                          "continuation_path": str(continuation_path.resolve())},
+                "repository": f"{repo_owner}/{repo_name}", "pr_number": pr_number,
+                "head_sha": payload["commit_sha"], "source_branch": target_branch,
+                "target_base": base_branch,
+                "continuation_sha256": hashlib.sha256(json.dumps({
+                    key: value for key, value in payload.items()
+                    if key not in {"protected_merge_intent", "updated_at_unix"}
+                }, sort_keys=True).encode()).hexdigest(),
+            }
+            new_intent = "protected_merge_intent" not in payload
+            if new_intent:
+                if not initiate:
+                    raise ValueError("Protected merge intent is missing; observation cannot issue a request")
+                authority = {"kind": "cloud"} if require_cloud_clearance else {
+                    "kind": "local", **result["local_pr_review"],
+                }
+                intent = {"version": 1, "binding": binding, "review_authority": authority,
+                          "state": "request_may_have_been_sent"}
+            else:
+                intent = payload["protected_merge_intent"]
+            if (not isinstance(intent, dict) or type(intent.get("version")) is not int
+                    or intent["version"] != 1 or intent.get("binding") != binding
+                    or intent.get("state") not in {"request_may_have_been_sent", "completion_started"}
+                    or set(intent) != {"version", "binding", "review_authority", "state"}):
+                raise ValueError("Invalid or mismatched protected merge intent")
+            authority = intent["review_authority"]
+            if authority != {"kind": "cloud"}:
+                if (not isinstance(authority, dict) or set(authority) != {
+                        "kind", "status", "receipt_path", "receipt_sha256"}
+                        or authority.get("kind") != "local" or authority.get("status") != "APPROVED"):
+                    raise ValueError("Invalid protected merge review authority")
+                receipt_path = authority["receipt_path"]
+                if not isinstance(receipt_path, str) or not _safe_primary_sync_relpath(receipt_path):
+                    raise ValueError("Invalid protected merge review receipt path")
+                receipt_bytes = (repo_root / receipt_path).read_bytes()
+                if hashlib.sha256(receipt_bytes).hexdigest() != authority["receipt_sha256"]:
+                    raise ValueError("Protected merge review receipt changed")
+                review = json.loads(receipt_bytes)
+                if review.get("status") != "APPROVED" or review.get("wave_id") != handoff["wave_id"]:
+                    raise ValueError("Protected merge review receipt lacks original approval")
+                _require_local_quota_review_approval(review["envelope"])
+                for path, digest in review["artifacts"].items():
+                    if hashlib.sha256((repo_root / path).read_bytes()).hexdigest() != digest:
+                        raise ValueError("Protected merge review evidence changed")
+            if intent["state"] == "completion_started":
+                raise ValueError("Verified landing completion already entered; retain the native closeout owner")
+            if new_intent:
+                # Persist BEFORE the side effect. A crash on either side of
+                # this write spends the request; uncertain means observe only.
+                payload["protected_merge_intent"] = intent
+                _atomic_write_fsynced_json(continuation_path, payload)
+            result["protected_merge_observation"] = {"request_accepted": None}
+            if new_intent:
+                try:
+                    _run(["gh", "pr", "merge", pr_number, "--repo", binding["repository"],
+                          "--merge", "--delete-branch", "--match-head-commit", binding["head_sha"]],
+                         cwd=repo_root, timeout=120)
+                    result["protected_merge_observation"]["request_accepted"] = True
+                except Exception as exc:
+                    # Even exit failure/timeout can follow a successful remote
+                    # enqueue. Never enter the legacy merge/recovery handler.
+                    result["protected_merge_observation"]["request_error"] = str(exc)
+            verified_merge, merged_pr_data = _wait_for_protected_merge(
+                repo_root, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+                head_sha=binding["head_sha"], target_branch=target_branch, base_branch=base_branch,
+                result=result, continuation_path=continuation_path,
+                require_cloud_clearance=authority == {"kind": "cloud"}, log=log,
+            )
+            intent["state"] = "completion_started"
+            _atomic_write_fsynced_json(continuation_path, payload)
+        except Exception as exc:
+            return _protected_merge_hold(result, str(exc))
+        # Completion exceptions must not re-enter merge or completion. The
+        # durable state also fences another invocation after a closeout crash.
+        return _complete_post_merge_pipeline(
+            handoff=handoff, repo_root=repo_root, result=result,
+            target_branch=target_branch, base_branch=base_branch,
+            continuation_path=continuation_path, log=log,
+            verified_merge_sha=verified_merge, review_state=merged_pr_data,
+        )
+
+
+def _wait_for_protected_merge(
+    repo_root: Path, *, repo_owner: str, repo_name: str, pr_number: str,
+    head_sha: str, target_branch: str, base_branch: str,
+    result: dict[str, Any], continuation_path: Path, require_cloud_clearance: bool,
+    log: Any,
+) -> tuple[str, dict[str, Any]]:
+    """Observe one accepted or uncertain request; queue admission is not landing.
+
+    The caller retains the continuation on every hold. Observation never
+    requests another merge, remediates findings or grants review authority.
+    """
+    deadline = time.monotonic() + PROTECTED_MERGE_WAIT_SECONDS
+    repository = f"{repo_owner}/{repo_name}"
+    observation = result["protected_merge_observation"] = {
+        **result.get("protected_merge_observation", {}),
+        "status": "pending", "head_sha": head_sha,
+        "pr_number": pr_number, "repository": repository,
+        "deadline_seconds": PROTECTED_MERGE_WAIT_SECONDS, "queries": 0,
+    }
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Protected merge observation deadline reached; landing remains unverified")
+        observation["queries"] += 1
+        try:
+            pr_data = _query_pr_review_state(
+                repo_root, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+                timeout=min(30, remaining),
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            # A transport failure cannot establish landing or authorize a
+            # second mutation. Retry only the read, within the same deadline.
+            observation["last_query_error"] = str(exc)
+            log(f"Step 15: protected merge observation query failed: {exc}")
+        else:
+            observation["review_state"] = pr_data
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Protected merge evidence arrived after the observation deadline")
+            _assert_current_pr_identity(pr_data, head_sha=head_sha, target_branch=target_branch)
+            if (pr_data.get("number") != int(pr_number)
+                    or pr_data.get("url") != f"https://github.com/{repository}/pull/{pr_number}"
+                    or pr_data.get("baseRefName") != base_branch
+                    or pr_data.get("headRepository", {}).get("nameWithOwner") != repository
+                    or pr_data.get("baseRepository", {}).get("nameWithOwner") != repository):
+                raise ValueError("Protected merge PR/repository/base identity mismatch")
+            if pr_data.get("state") not in {"OPEN", "MERGED"}:
+                raise ValueError(f"Protected merge stopped in PR state {pr_data.get('state')!r}")
+            if _pr_is_draft(pr_data):
+                raise ValueError("Protected merge PR became draft")
+            if not re.fullmatch(r"[0-9a-f]{40}", str(pr_data.get("baseRefOid", ""))):
+                raise ValueError("Protected merge query missing exact base object ID")
+            _assert_complete_review_evidence(pr_data)
+            for key in ("latestReviews", "reviewThreads", "comments"):
+                nodes = pr_data[key].get("nodes")
+                if not isinstance(nodes, list) or any(not isinstance(node, dict) for node in nodes):
+                    raise ValueError(f"Protected merge query has invalid {key} records")
+            for thread in pr_data["reviewThreads"]["nodes"]:
+                comments = thread["comments"].get("nodes")
+                if (not isinstance(thread.get("isResolved"), bool)
+                        or not isinstance(thread.get("isOutdated"), bool)
+                        or not isinstance(comments, list) or not comments
+                        or any(not isinstance(comment, dict) for comment in comments)):
+                    raise ValueError("Protected merge query has invalid thread evidence")
+            findings = _extract_review_findings(
+                pr_data, head_sha, result=result, pr_number=pr_number, classify_quota=True,
+            )
+            if findings["outcome"] not in {"clean", "usage_limit"}:
+                observation["findings"] = findings
+                raise ValueError("Retained review findings block protected merge completion")
+            if _local_quota_sweep_findings(repo_root):
+                raise ValueError("Retained sweep findings block protected merge completion")
+            if require_cloud_clearance:
+                _require_quota_history_cloud_clearance(pr_data, head_sha, continuation_path)
+            verified_merge = _verified_remote_merge_sha(
+                pr_data, head_sha=head_sha, target_branch=target_branch, base_branch=base_branch,
+            )
+            if verified_merge:
+                observation.update(status="landed", merge_sha=verified_merge)
+                return verified_merge, pr_data
+            if pr_data.get("mergeCommit") is not None:
+                raise ValueError("Open PR has contradictory merge commit evidence")
+            log(f"Step 15: PR #{pr_number} is still OPEN after protected merge intent; observing")
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(PROTECTED_MERGE_POLL_SECONDS, remaining))
 
 
 def _refresh_pr_head_after_executor_update(
@@ -10247,6 +10522,31 @@ _CONNECTOR_CLEAR_DETAILS = (
     'Codex can also answer questions or update the PR. '
     'Try commenting "@codex address that feedback". </details>'
 )
+
+
+def _is_connector_formal_review_metadata(review: dict[str, Any]) -> bool:
+    """Consume only the observed COMMENTED Bot wrapper, bound to its review.
+
+    This is metadata, never approval, and never applies to a thread/comment.
+    Keep the original formal review and its full body in the source evidence.
+    """
+    author = review.get("author")
+    commit = review.get("commit")
+    body = review.get("body")
+    if (not isinstance(author, dict) or author.get("__typename") != "Bot"
+            or not _is_connector_review_author(author.get("login", ""))
+            or review.get("state") != "COMMENTED" or not isinstance(commit, dict)
+            or not isinstance(body, str) or len(body) > 65536):
+        return False
+    oid = commit.get("oid")
+    if not isinstance(oid, str) or not re.fullmatch(r"[0-9a-f]{40}", oid):
+        return False
+    match = re.fullmatch(
+        r"### 💡 Codex Review Here are some automated review suggestions for this pull request\. "
+        r"\*\*Reviewed commit:\*\* `([0-9a-f]{10})` " + re.escape(_CONNECTOR_CLEAR_DETAILS),
+        " ".join(body.split()),
+    )
+    return bool(match and oid.startswith(match[1]))
 
 
 def _connector_no_issues_control_head(body: str) -> str | None:
@@ -10705,15 +11005,20 @@ def _extract_review_findings(
         body = str(review.get("body") or "")
         if classify_quota:
             is_bot = review.get("author", {}).get("__typename") == "Bot"
-        if classify_quota and is_bot:
+        if classify_quota and (is_bot or "### 💡 Codex Review" in body):
             # A COMMENTED review has no clearance disposition. Neither badge
             # formatting nor a later commit proves its findings were resolved.
             # Keep explicit review dispositions and the complete source record;
             # unresolved threads remain a separate gate even after dismissal.
-            if state != "DISMISSED" and (
-                state == "CHANGES_REQUESTED"
-                or _is_blocking_connector_review_body(body)
-                or (state != "APPROVED" and body.strip())
+            # A wrapper with an invalid author/state is not metadata and cannot
+            # manufacture an APPROVED/DISMISSED disposition through its header.
+            if not _is_connector_formal_review_metadata(review) and (
+                "### 💡 Codex Review" in body
+                or (state != "DISMISSED" and (
+                    state == "CHANGES_REQUESTED"
+                    or _is_blocking_connector_review_body(body)
+                    or (state != "APPROVED" and body.strip())
+                ))
             ):
                 bot_review_findings.append({
                     "author": author, "body": body, "path": "", "line": None,
@@ -17195,6 +17500,16 @@ def _run_post_commit_pipeline_impl(
     pr_number = str(result.get("pr_number") or "")
     late_conflict_retry_used = bool(result.pop("_late_conflict_retry_used", False))
 
+    saved = _read_continuation_record(continuation_path)
+    if continuation_path.exists() and saved is None:
+        return _protected_merge_hold(result, "Unreadable native continuation; request outcome is unknown")
+    if saved is not None and "protected_merge_intent" in saved:
+        return _run_protected_merge(
+            handoff=handoff, repo_root=repo_root, result=result,
+            target_branch=target_branch, base_branch=base_branch,
+            continuation_path=continuation_path, log=log,
+        )
+
     # ── Step 11: run_pre_push_script ──────────────────────────────────
     if "run_pre_push_script" not in result["steps_completed"]:
         pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
@@ -17846,12 +18161,11 @@ def _run_post_commit_pipeline_impl(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
-    try:
-        if protected_quota_merge:
-            # The legacy wrapper auto-resolves threads and forces an administrative override.
-            # Neither a quota approval nor later cloud clearance grants those powers. Keep Step15
-            # CI/identity/landed-ownership flow, with a protected exact-head merge.
-            if local_review is not None:
+    if protected_quota_merge:
+        # Review/CI still admit the first request. Later invocations bypass
+        # mutation/remediation and enter observation at the continuation guard.
+        if local_review is not None:
+            try:
                 pr_data = _query_pr_review_state(
                     repo_root, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
                 )
@@ -17860,29 +18174,23 @@ def _run_post_commit_pipeline_impl(
                     repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
                     head_sha=head_sha_before_merge, target_branch=target_branch, base_branch=base_branch,
                 )
-            _run(["gh", "pr", "merge", pr_number, "--repo", f"{repo_owner}/{repo_name}",
-                  "--merge", "--delete-branch", "--match-head-commit", head_sha_before_merge],
-                 cwd=repo_root, timeout=120)
-            merged_pr_data = _query_pr_review_state(
-                repo_root, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
-            )
-            verified_merge = _verified_remote_merge_sha(
-                merged_pr_data, head_sha=head_sha_before_merge,
-                target_branch=target_branch, base_branch=base_branch,
-            )
-            if not verified_merge:
-                raise ValueError("Protected quota-history merge has not been verified as landed")
-            return _complete_post_merge_pipeline(
-                handoff=handoff, repo_root=repo_root, result=result,
-                target_branch=target_branch, base_branch=base_branch,
-                continuation_path=continuation_path, log=log,
-                verified_merge_sha=verified_merge, review_state=merged_pr_data,
-            )
-        else:
-            _run(
-                ["bash", str(merge_script), pr_number, "--sweep"],
-                cwd=repo_root.parent, timeout=120,
-            )
+            except Exception as exc:
+                return {"status": "error", "step": "ensure_review_clear_and_merge",
+                        "errors": [f"Local review pre-merge verification stopped: {exc}"],
+                        "steps_completed": result["steps_completed"], "pr_number": pr_number,
+                        "local_pr_review": result.get("local_pr_review")}
+        return _run_protected_merge(
+            handoff=handoff, repo_root=repo_root, result=result,
+            target_branch=target_branch, base_branch=base_branch,
+            continuation_path=continuation_path, log=log,
+            initiate=True, require_cloud_clearance=local_review is None,
+        )
+
+    try:
+        _run(
+            ["bash", str(merge_script), pr_number, "--sweep"],
+            cwd=repo_root.parent, timeout=120,
+        )
     except subprocess.CalledProcessError as exc:
         # merge_pr.sh includes post-merge thread/sweep work. Its exit status
         # alone cannot distinguish a rejected merge from a failed later sweep.
@@ -17911,11 +18219,6 @@ def _run_post_commit_pipeline_impl(
                 verified_merge_sha=verified_merge, review_state=merged_pr_data,
                 merge_wrapper_error=str(exc.stderr or exc.stdout or exc).strip(),
             )
-        if protected_quota_merge:
-            return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"Protected quota-history merge failed: {exc.stderr or exc}"],
-                    "steps_completed": result["steps_completed"], "pr_number": pr_number,
-                    "local_pr_review": result.get("local_pr_review")}
         if not late_conflict_retry_used:
             resolve_result = _try_auto_resolve_pr_conflict(
                 repo_root,
@@ -17966,15 +18269,6 @@ def _run_post_commit_pipeline_impl(
                 "errors": [f"merge_pr.sh failed: {exc.stderr.strip()}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
-    except Exception as exc:
-        if not protected_quota_merge:
-            raise
-        return {"status": "error", "step": "ensure_review_clear_and_merge",
-                "errors": [f"{'Local review' if local_review is not None else 'GitHub quota-history review'} "
-                           f"pre-merge/landing verification stopped: {exc}"],
-                "steps_completed": result["steps_completed"], "pr_number": pr_number,
-                "local_pr_review": result.get("local_pr_review")}
-
     return _complete_post_merge_pipeline(
         handoff=handoff, repo_root=repo_root, result=result,
         target_branch=target_branch, base_branch=base_branch,
@@ -20368,6 +20662,10 @@ def _run_commit_pipeline_impl(
         wave_id=wave_id,
         handoff=handoff,
     )
+    saved = _read_continuation_record(continuation_path)
+    if continuation_path.exists() and continuation is None and (
+            saved is None or "protected_merge_intent" in saved):
+        return _protected_merge_hold(result, "Invalid protected native continuation; no inherited authority")
     if continuation:
         result["steps_completed"] = list(continuation.get("steps_completed", []))
         result["commit_sha"] = continuation["commit_sha"]
@@ -20386,9 +20684,9 @@ def _run_commit_pipeline_impl(
         )
         # If resuming after COMMIT_GO_HOLD_PUSH, skip directly to
         # post-commit pipeline (steps 11-15).  Steps 1-10 already ran.
-        if "hold_check" in result["steps_completed"]:
+        if "protected_merge_intent" in continuation or "hold_check" in result["steps_completed"]:
             result["receipt_decision"] = continuation.get("receipt_decision", "COMMIT_GO")
-            log("Prior run held at COMMIT_GO_HOLD_PUSH — continuing to push (steps 11-15)")
+            log("Resuming native post-commit continuation")
             return _run_post_commit_pipeline(
                 handoff=handoff,
                 repo_root=repo_root,
@@ -22369,8 +22667,13 @@ def main() -> int:
             if bus_token is not None:
                 _ACTIVE_BUS_DIR.reset(bus_token)
         if args.json:
-            print(json.dumps(land_result, indent=2))
+            # A held result must survive diagnostic prefixes through the
+            # unchanged dispatcher's per-line JSON parser.
+            print(json.dumps(land_result, indent=None if land_result.get("failure_class") ==
+                             "protected_merge_observation_hold" else 2))
         else:
+            if land_result.get("failure_class") == "protected_merge_observation_hold":
+                print("[commit-executor] Status: held")
             print(f"[land-stranded] Status: {land_result.get('status', 'unknown')}")
             if land_result.get("step"):
                 print(f"[land-stranded] Step: {land_result['step']}")
@@ -22421,6 +22724,7 @@ def main() -> int:
     # reloads the same record and drives the remaining steps (CI-surface wait,
     # the normal completion step, and bot-finding auto-defer) through the normal
     # gates. No privileged path is added; completion uses the standard step.
+    held_resume = None
     if args.resume_continuation:
         continuation = _load_continuation_for_resume(
             handoff,
@@ -22428,15 +22732,22 @@ def main() -> int:
             bus_dir=args.bus_dir,
         )
         if continuation is None:
-            print(
-                "[error] --resume-continuation: no valid post-commit continuation "
-                "record for this worktree (not committed, on the wrong branch, "
-                "dirty tree, or missing/foreign record). No completion action taken.",
-                file=sys.stderr,
-            )
-            return 1
+            path = agent_bus_path(repo_root, args.bus_dir, "executors",
+                                  f"commit_executor_{handoff.get('wave_id')}.json")
+            saved = _read_continuation_record(path)
+            if path.exists() and (saved is None or "protected_merge_intent" in saved):
+                held_resume = _protected_merge_hold(
+                    {"steps_completed": []}, "Invalid protected native continuation; no inherited authority")
+            else:
+                print(
+                    "[error] --resume-continuation: no valid post-commit continuation "
+                    "record for this worktree (not committed, on the wrong branch, "
+                    "dirty tree, or missing/foreign record). No completion action taken.",
+                    file=sys.stderr,
+                )
+                return 1
 
-    result = run_commit_pipeline(
+    result = held_resume if held_resume is not None else run_commit_pipeline(
         handoff,
         repo_root=repo_root,
         verbose=args.verbose,
@@ -22445,7 +22756,10 @@ def main() -> int:
     )
 
     if args.json:
-        print(json.dumps(result, indent=2))
+        # A held result must survive diagnostic prefixes through the
+        # unchanged dispatcher's per-line JSON parser.
+        print(json.dumps(result, indent=None if result.get("failure_class") ==
+                         "protected_merge_observation_hold" else 2))
     else:
         status = result.get("status", "unknown")
         steps = result.get("steps_completed", [])
