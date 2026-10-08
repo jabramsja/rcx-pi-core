@@ -24,6 +24,8 @@ import types
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
 
@@ -2482,7 +2484,8 @@ def test_report_child_cannot_clear_late_unresolved_p1_before_merge(tmp_path, mon
     assert "ensure_review_clear_and_merge" not in result["steps_completed"]
 
 
-def test_protected_held_carrier_native_lifecycle_retains_and_resumes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("evidence", ["unchanged", "open-base-drift", "wrong-parents", "missing-parents"])
+def test_protected_held_carrier_native_lifecycle_retains_and_resumes(tmp_path, monkeypatch, evidence):
     """Real linked carrier, continuation and lifecycle; no retirement subprocess."""
     import shutil
     from mu.tests.tools.test_commit_executor_local_review import (
@@ -2519,6 +2522,15 @@ def test_protected_held_carrier_native_lifecycle_retains_and_resumes(tmp_path, m
     import worktree_lifecycle as standalone_lifecycle
     monkeypatch.setattr(standalone_lifecycle, "start_completion", capture_start)
     assert carrier.execute()["status"] == "held"
+    admission = json.loads(carrier.continuation.read_text())["protected_merge_intent"]["binding"]["review_identity"]
+    assert admission["base_sha"] == carrier.base and admission["head_sha"] == carrier.head
+    if evidence == "open-base-drift":
+        carrier.pr["baseRefOid"] = carrier.commit_evidence([carrier.base])["oid"]
+    elif evidence in {"wrong-parents", "missing-parents"}:
+        merge = carrier.commit_evidence([carrier.head, carrier.base])
+        if evidence == "missing-parents":
+            merge.pop("parents")
+        carrier.pr.update(state="MERGED", mergeCommit=merge)
     held = _resume_native(carrier)
     assert held["status"] == "held", held
     record = Path(held["worktree_completion"]["record"])
@@ -2531,7 +2543,7 @@ def test_protected_held_carrier_native_lifecycle_retains_and_resumes(tmp_path, m
     assert lane.is_dir() and carrier.continuation.read_bytes() == before
     original = {p: p.read_bytes() for p in record.rglob("*") if p.is_file()}
 
-    carrier.pr.update(state="MERGED", mergeCommit={"oid": carrier.head})
+    carrier.pr.update(state="MERGED", baseRefOid=carrier.merge_evidence["oid"], mergeCommit=carrier.merge_evidence)
     # The closeout sink is outside Step15; retain the verified merge fact as
     # the real completion routine does before lifecycle successor admission.
     def complete(**kwargs):
@@ -2539,7 +2551,7 @@ def test_protected_held_carrier_native_lifecycle_retains_and_resumes(tmp_path, m
         return {**kwargs["result"], "status": "success", "merge_sha": kwargs["verified_merge_sha"]}
 
     monkeypatch.setattr(commit, "_complete_post_merge_pipeline", complete)
-    git(primary, "update-ref", "refs/remotes/origin/dev", carrier.head)
+    git(primary, "update-ref", "refs/remotes/origin/dev", carrier.merge_evidence["oid"])
     native_git = standalone_lifecycle.fleet.git
 
     def remote_io(root, *args, **kwargs):
@@ -2552,7 +2564,7 @@ def test_protected_held_carrier_native_lifecycle_retains_and_resumes(tmp_path, m
     assert landed["status"] == "success", landed
     successor = Path(landed["worktree_completion"]["record"])
     assert successor != record
-    assert json.loads((successor / "terminal.json").read_text())["merge_sha"] == carrier.head
+    assert json.loads((successor / "terminal.json").read_text())["merge_sha"] == carrier.merge_evidence["oid"]
     assert json.loads((successor / "predecessor.json").read_text())["attempts_used"] == 1
     assert json.loads((successor / "closeout.json").read_text())["result"]["status"] == "success"
     assert all(p.read_bytes() == raw for p, raw in original.items())

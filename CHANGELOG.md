@@ -6,6 +6,32 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-08
 
+### Restore reviewed-base binding on the existing PR1332 branch (Phase B; landing pending)
+
+- Restore only the three declared source/test files from verified pre-entry R1
+  snapshot `896a300d21f4f145dc9b3b8c681082c59d7c3330a58f60eb19a09b9beb599cec`,
+  retaining their exact required hashes. Version-2 protected intent preserves
+  complete review identity across native reload; OPEN observations require the
+  reviewed base, and completion requires ordered merge parents matching that
+  base and the exact head. Existing receipt, findings, held-output and
+  at-most-one-request/completion protections remain intact.
+- The fresh R2 declared two-module gate passes 952 tests in 427.65 seconds,
+  exit 0, with unchanged source hashes before/after. R1's eight drift failures,
+  859 passing controls, intermediate failures, 952-pass result and approvals
+  remain historical. Phase-scoped evidence is in
+  `reports/control_plane/workingrcx-merge-base-binding-r2-2026-10-08_2026-10-08_implementation_evidence.json`.
+- The actual Phase B selector returns the existing PR branch
+  `jabramsja/workingrcx-local-review-quota-r3-2026-10-05`; local HEAD and the
+  comparison commit remain `678ca40cfa00643a377a0902756540972738118a`.
+  The outer executor must verify the actual handoff target, ancestry, allowed
+  staged inventory and fresh receipt before any commit-entry branch mutation.
+  Row40 retains typed branch authority and raw terminal-stream obligations.
+- Preserve both unresolved Bot findings and all stopped R1 authority. Fresh
+  native final approval, required corrected-head CI and independent current-head
+  clearance precede conditional exact-thread disposition and aggregate clearance.
+  Native indicator/cap generation, hooks, landing and PRIMARY sync remain pending;
+  the separate ENOTEMPTY fixture issue and other PR/useful-work obligations stay open.
+
 ### Restore the protected-merge continuation repair for fresh PR1332 review (Phase B; landing pending)
 
 - Recover exactly the three hash-verified R2 source/test files from snapshot

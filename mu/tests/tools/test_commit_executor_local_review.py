@@ -212,6 +212,7 @@ class Carrier:
         git(root, "add", "latest.py")
         git(root, "commit", "-m", "latest PR change")
         self.head = git(root, "rev-parse", "HEAD")
+        self.merge_evidence = self.commit_evidence([self.base, self.head])
         self.pr = {
             "number": 1331, "url": "https://github.com/fixture/repo/pull/1331",
             "state": "OPEN", "headRefOid": self.head, "headRefName": "fixture/quota",
@@ -267,6 +268,18 @@ class Carrier:
         for name in ("RCX_REVIEWER_AGENT_OVERRIDE", "RCX_BRIDGE_REVIEWER_OVERRIDE"):
             monkeypatch.delenv(name, raising=False)
 
+    def commit_evidence(self, parents):
+        """Real disposable commit objects, exposed at the fake GitHub I/O boundary."""
+        tree = git(self.root, "rev-parse", f"{self.head}^{{tree}}")
+        args = ["commit-tree", tree, "-m", "modeled remote commit"]
+        for parent in parents:
+            args.extend(["-p", parent])
+        oid = git(self.root, *args)
+        actual = git(self.root, "show", "-s", "--format=%P", oid).split()
+        assert actual == parents
+        return {"oid": oid, "parents": {"totalCount": len(actual),
+                "pageInfo": {"hasNextPage": False}, "nodes": [{"oid": p} for p in actual]}}
+
     def complete(self, **kwargs):
         self.landed.append(kwargs)
         return {**kwargs["result"], "status": "success", "landed_owner_entered": True}
@@ -311,7 +324,11 @@ class Carrier:
             if self.merge_failure:
                 raise subprocess.CalledProcessError(1, args, stderr="branch protection blocked merge")
             if not self.merge_queued:
-                self.pr.update(state="MERGED", mergeCommit={"oid": "f" * 40})
+                parents = [self.pr["baseRefOid"], self.head]
+                if [node["oid"] for node in self.merge_evidence["parents"]["nodes"]] != parents:
+                    self.merge_evidence = self.commit_evidence(parents)
+                # Publish the same real object even across a wall-clock second.
+                self.pr.update(state="MERGED", mergeCommit=copy.deepcopy(self.merge_evidence))
             text = ""
         elif args[:3] == ["gh", "pr", "ready"]:
             self.pr["isDraft"] = False
@@ -417,6 +434,7 @@ def _assert_preserved_authority(carrier, before):
             intent = current.pop("protected_merge_intent")
             assert intent["binding"]["head_sha"] == carrier.head
             assert intent["binding"]["handoff_sha"] == commit.handoff_sha(carrier.handoff)
+            assert intent["binding"]["review_identity"]["base_sha"] == carrier.base
             assert intent["state"] in {"request_may_have_been_sent", "completion_started"}
             assert current == json.loads(content)
         else:
@@ -594,7 +612,7 @@ def test_quota_history_cloud_clearance_uses_protected_exact_head_merge(carrier, 
                    for a in carrier.commands)
     checks = [a for a in carrier.commands if a[:3] == ["gh", "pr", "checks"]]
     assert any("--watch" in a for a in checks) and any("--json" in a for a in checks)
-    assert carrier.landed[0]["verified_merge_sha"] == "f" * 40
+    assert carrier.landed[0]["verified_merge_sha"] == carrier.merge_evidence["oid"]
     assert carrier.landed[0]["review_state"]["headRefOid"] == carrier.head
 
 
@@ -849,7 +867,7 @@ def test_later_clear_requires_complete_31_comment_history(carrier, phase, trunca
         if quota_history:
             assert merges == [["gh", "pr", "merge", "1331", "--repo", "fixture/repo", "--merge",
                                "--delete-branch", "--match-head-commit", carrier.head]]
-            assert carrier.landed[0]["verified_merge_sha"] == "f" * 40
+            assert carrier.landed[0]["verified_merge_sha"] == carrier.merge_evidence["oid"]
         else:
             assert len(merges) == 1 and merges[0][-1] == "--sweep"
 
@@ -915,7 +933,7 @@ def test_enabled_local_review_full_pr_diff_and_native_ci_merge(carrier):
                       "--delete-branch", "--match-head-commit", carrier.head]]
     assert carrier.query_count >= 5
     assert not any(a[0] == "bash" or "--admin" in a for a in carrier.commands)
-    assert carrier.landed[0]["verified_merge_sha"] == "f" * 40
+    assert carrier.landed[0]["verified_merge_sha"] == carrier.merge_evidence["oid"]
 
 
 @pytest.mark.parametrize("policy", [None, {"enabled": False}, {"enabled": "true"}, {"enabled": 1}])
@@ -1848,7 +1866,7 @@ def test_protected_queue_observes_exact_head_landing_once(carrier, review_lane, 
     carrier.merge_queued = True
     prior = _prior_review_bytes(carrier)
     pending = copy.deepcopy(carrier.pr)
-    landed = {**copy.deepcopy(pending), "state": "MERGED", "mergeCommit": {"oid": "f" * 40}}
+    landed = {**copy.deepcopy(pending), "state": "MERGED", "mergeCommit": copy.deepcopy(carrier.merge_evidence)}
     # Ordered fresh responses, served only after the single protected mutation.
     snapshots = [copy.deepcopy(pending) for _ in range(queued_reads)] + [landed]
     observed = []
@@ -1867,7 +1885,7 @@ def test_protected_queue_observes_exact_head_landing_once(carrier, review_lane, 
     assert observed == ["OPEN"] * queued_reads + ["MERGED"]
     assert len(carrier.sleeps) == queued_reads
     assert len(carrier.landed) == 1
-    assert carrier.landed[0]["verified_merge_sha"] == "f" * 40
+    assert carrier.landed[0]["verified_merge_sha"] == carrier.merge_evidence["oid"]
     assert carrier.landed[0]["review_state"] == landed
     assert len(carrier.reviews) == int(review_lane == "local")
     assert [a for a in carrier.commands if a[:3] == ["gh", "pr", "merge"]] == [
@@ -1890,7 +1908,7 @@ def test_protected_merge_completion_failure_is_not_reentered(carrier, monkeypatc
     with pytest.raises(subprocess.CalledProcessError, match="git"):
         carrier.execute()
     assert len(entries) == 1
-    assert entries[0]["verified_merge_sha"] == "f" * 40
+    assert entries[0]["verified_merge_sha"] == carrier.merge_evidence["oid"]
     assert len([a for a in carrier.commands if a[:3] == ["gh", "pr", "merge"]]) == 1
     assert _resume_native(carrier)["status"] == "held"
     assert len(entries) == 1
@@ -1914,7 +1932,7 @@ def test_protected_queue_holds_on_terminal_or_invalid_evidence(carrier, monkeypa
     snapshots = [copy.deepcopy(carrier.pr), copy.deepcopy(carrier.pr)]
     bad = snapshots[-1]
     if fault.startswith("merged-") or fault == "bad-merge-sha":
-        bad.update(state="MERGED", mergeCommit={"oid": "f" * 40})
+        bad.update(state="MERGED", mergeCommit=copy.deepcopy(carrier.merge_evidence))
     key = fault.removeprefix("merged-")
     if key in {"head", "branch", "base", "number", "url", "missing-base-oid"}:
         field, value = {"head": ("headRefOid", "c" * 40), "branch": ("headRefName", "wrong/branch"),
@@ -1933,7 +1951,7 @@ def test_protected_queue_holds_on_terminal_or_invalid_evidence(carrier, monkeypa
     elif fault == "bad-merge-sha":
         bad["mergeCommit"] = {"oid": "f" * 7}
     elif fault == "open-merge-commit":
-        bad["mergeCommit"] = {"oid": "f" * 40}
+        bad["mergeCommit"] = copy.deepcopy(carrier.merge_evidence)
     elif fault == "draft":
         bad["isDraft"] = True
     elif fault in {"real-thread", "human-thread", "empty-thread", "invalid-thread-state", "missing-thread-pages"}:
@@ -1988,7 +2006,7 @@ def test_protected_queue_deadline_and_query_errors_are_observation_only(carrier,
         assert not carrier.landed
         reads.append(carrier.elapsed)
         if query_failure == "transient" and len(reads) > 1:
-            carrier.pr.update(state="MERGED", mergeCommit={"oid": "f" * 40})
+            carrier.pr.update(state="MERGED", mergeCommit=copy.deepcopy(carrier.merge_evidence))
         elif query_failure in {"transient", "persistent"}:
             raise subprocess.CalledProcessError(1, ["gh", "api", "graphql"], stderr="query unavailable")
         elif query_failure == "timeout":
@@ -1997,7 +2015,7 @@ def test_protected_queue_deadline_and_query_errors_are_observation_only(carrier,
             raise OSError("transport unavailable")
         elif query_failure == "late-landing":
             carrier.elapsed = 12
-            carrier.pr.update(state="MERGED", mergeCommit={"oid": "f" * 40})
+            carrier.pr.update(state="MERGED", mergeCommit=copy.deepcopy(carrier.merge_evidence))
 
     carrier.on_query = query
     outcome = carrier.execute()
@@ -2532,11 +2550,11 @@ def test_protected_continuation_resumes_without_new_merge(carrier, monkeypatch, 
         assert again["protected_merge_observation"]["request_accepted"] is None
         assert not again.get("merge_sha") and not again.get("remote_pr_merged")
         assert json.loads(carrier.continuation.read_text()) == saved
-    carrier.pr.update(state="MERGED", mergeCommit={"oid": "f" * 40})
+    carrier.pr.update(state="MERGED", mergeCommit=copy.deepcopy(carrier.merge_evidence))
     landed = _resume_native(carrier)
     assert landed["status"] == "success", landed
     assert len(carrier.landed) == 1
-    assert carrier.landed[0]["verified_merge_sha"] == "f" * 40
+    assert carrier.landed[0]["verified_merge_sha"] == carrier.merge_evidence["oid"]
     assert len(carrier.reviews) == int(lane == "local")
     assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == 1
     assert all(p.read_bytes() == raw for p, raw in receipts.items())
@@ -2546,10 +2564,12 @@ def test_protected_continuation_resumes_without_new_merge(carrier, monkeypatch, 
     assert len(carrier.landed) == 1
 
 
+@pytest.mark.parametrize("lane", ["local", "cloud"])
 @pytest.mark.parametrize("when", ["before-write", "after-write", "before-command", "after-command",
                                   "timeout", "failure", "os-error"])
-def test_protected_continuation_interruption_spends_request(carrier, monkeypatch, when):
-    _cloud_clearance(carrier)
+def test_protected_continuation_interruption_spends_request(carrier, monkeypatch, when, lane):
+    if lane == "cloud":
+        _cloud_clearance(carrier)
     _native_continuation(carrier)
     carrier.merge_queued = True
     monkeypatch.setattr(commit, "PROTECTED_MERGE_WAIT_SECONDS", 12)
@@ -2600,10 +2620,19 @@ def test_protected_continuation_interruption_spends_request(carrier, monkeypatch
         assert _resume_native(carrier)["status"] == "held"
         assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == len(sent)
     assert not carrier.landed
+    durable = carrier.continuation.read_bytes()
+    carrier.pr["baseRefOid"] = carrier.commit_evidence([carrier.base])["oid"]
+    drift = _resume_native(carrier)
+    assert drift["status"] == "held" and "OPEN base" in drift["errors"][0]
+    assert carrier.continuation.read_bytes() == durable
+    assert json.loads(durable)["protected_merge_intent"]["binding"]["review_identity"]["base_sha"] == carrier.base
+    assert not carrier.landed
     if sent:
-        carrier.pr.update(state="MERGED", mergeCommit={"oid": "f" * 40})
+        carrier.pr.update(state="MERGED", mergeCommit=copy.deepcopy(carrier.merge_evidence))
         assert _resume_native(carrier)["status"] == "success"
         assert len(carrier.landed) == 1 and len(sent) == 1
+    assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) <= 1
+    assert len(carrier.landed) <= 1
 
 
 @pytest.mark.parametrize("after_replace", [False, True])
@@ -2631,7 +2660,9 @@ def test_protected_continuation_write_failure_prevents_mutation(carrier, monkeyp
 @pytest.mark.parametrize("fault", ["null", "version", "state", "extra", "wave", "owner", "handoff",
                                   "pr", "head", "branch", "base", "repository", "corrupt-record",
                                   "changed-head", "changed-branch", "changed-origin", "changed-handoff",
-                                  "receipt", "request-id", "missing-local-receipt"])
+                                  "receipt", "request-id", "missing-local-receipt", "legacy",
+                                  "missing-review-identity", "invalid-reviewed-base", "diff",
+                                  "review-head", "review-repository", "review-branch", "review-merge-base"])
 def test_protected_continuation_invalid_authority_holds_without_cleanup(carrier, monkeypatch, fault):
     if fault != "missing-local-receipt":
         _cloud_clearance(carrier)
@@ -2663,9 +2694,19 @@ def test_protected_continuation_invalid_authority_holds_without_cleanup(carrier,
         carrier.handoff["fixes_implemented"].append("unreviewed")
     elif fault == "missing-local-receipt":
         (carrier.root / intent["review_authority"]["receipt_path"]).unlink()
+    elif fault in {"legacy", "missing-review-identity"}:
+        intent["binding"].pop("review_identity")
+        if fault == "legacy":
+            intent["version"] = 1
+    elif fault in {"invalid-reviewed-base", "diff", "review-head", "review-repository",
+                   "review-branch", "review-merge-base"}:
+        key = {"invalid-reviewed-base": "base_sha", "diff": "diff_sha256", "review-head": "head_sha",
+               "review-repository": "repository", "review-branch": "base_branch",
+               "review-merge-base": "merge_base_sha"}[fault]
+        intent["binding"]["review_identity"][key] = "invalid"
     carrier.continuation.write_text("{broken" if fault == "corrupt-record" else json.dumps(payload))
     saved = carrier.continuation.read_bytes()
-    carrier.pr.update(state="MERGED", mergeCommit={"oid": "f" * 40})
+    carrier.pr.update(state="MERGED", mergeCommit=copy.deepcopy(carrier.merge_evidence))
     # Driver must never fall back to a fresh precommit or the generic merged
     # shortcut when the old intent is invalid, even with remotely MERGED data.
     outcome = commit.run_commit_pipeline(carrier.handoff, repo_root=carrier.root, bus_dir=BUS)
@@ -2727,7 +2768,7 @@ def test_protected_continuation_resume_checks_fresh_evidence(carrier, monkeypatc
         if fault == "query-error" or fault == "transient-query" and len(reads) == 1:
             raise subprocess.CalledProcessError(1, ["gh", "api"], stderr="read failed")
         if fault == "transient-query":
-            carrier.pr.update(state="MERGED", mergeCommit={"oid": "f" * 40})
+            carrier.pr.update(state="MERGED", mergeCommit=copy.deepcopy(carrier.merge_evidence))
 
     carrier.on_query = query
     result = _resume_native(carrier)
@@ -2769,15 +2810,27 @@ def _held_cli_envelope(carrier, monkeypatch, *, json_output, verbose):
 
 @pytest.mark.parametrize("json_output", [True, False])
 @pytest.mark.parametrize("verbose", [True, False])
-@pytest.mark.parametrize("invalid", [False, True])
+@pytest.mark.parametrize("invalid", [False, True, "base-drift", "wrong-parents", "missing-parents", "legacy"])
 def test_protected_held_cli_dispatch_boundary_never_recovers(carrier, monkeypatch, json_output, verbose, invalid):
     _cloud_clearance(carrier)
     _native_continuation(carrier)
     carrier.merge_queued = True
     monkeypatch.setattr(commit, "PROTECTED_MERGE_WAIT_SECONDS", 12)
     assert carrier.execute()["status"] == "held"
-    if invalid:
+    if invalid is True:
         carrier.continuation.write_bytes(b'\xffinvalid-json')
+    elif invalid == "base-drift":
+        carrier.pr["baseRefOid"] = carrier.commit_evidence([carrier.base])["oid"]
+    elif invalid in {"wrong-parents", "missing-parents"}:
+        merge = carrier.commit_evidence([carrier.head, carrier.base])
+        if invalid == "missing-parents":
+            merge.pop("parents")
+        carrier.pr.update(state="MERGED", mergeCommit=merge)
+    elif invalid == "legacy":
+        payload = json.loads(carrier.continuation.read_text())
+        payload["protected_merge_intent"]["version"] = 1
+        payload["protected_merge_intent"]["binding"].pop("review_identity")
+        carrier.continuation.write_text(json.dumps(payload))
     forbidden = []
 
     def no_recovery(*args, **kwargs):
@@ -2820,4 +2873,215 @@ def test_protected_held_cli_dispatch_boundary_never_recovers(carrier, monkeypatc
     assert dispatch.run_recoverable_surface_command(args, repo_root=carrier.root, config={}) == 0
     assert len(calls) == 1 and forbidden == []
     assert len(carrier.landed) == 0
+    assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == 1
+
+
+@pytest.mark.parametrize("lane", ["local", "cloud"])
+@pytest.mark.parametrize("delivery", ["step15", "native"])
+@pytest.mark.parametrize("scenario", ["unchanged", "open-base-drift", "landed-other-base"])
+def test_reviewed_base_binding_production_reproduction(carrier, monkeypatch, lane, delivery, scenario):
+    """Real Step15 and native reload; ancestor-only base acceptance is insufficient."""
+    if lane == "cloud":
+        _cloud_clearance(carrier)
+    _native_continuation(carrier)
+    monkeypatch.setattr(commit, "PROTECTED_MERGE_WAIT_SECONDS", 12)
+    carrier.merge_queued = True
+    advanced = carrier.commit_evidence([carrier.base])["oid"]
+    assert git(carrier.root, "merge-base", carrier.base, advanced) == carrier.base
+    merge = carrier.commit_evidence([
+        carrier.base if scenario == "unchanged" else advanced, carrier.head])
+    pending = copy.deepcopy(carrier.pr)
+    if scenario == "open-base-drift":
+        pending["baseRefOid"] = advanced
+    landed = {**copy.deepcopy(carrier.pr), "state": "MERGED",
+              "baseRefOid": merge["oid"], "mergeCommit": merge}
+    snapshots = [pending, landed]
+    if delivery == "native":
+        assert carrier.execute()["status"] == "held"
+        saved = carrier.continuation.read_bytes()
+
+    def query(_):
+        if any(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands):
+            assert snapshots, "completion must end observation"
+            carrier.pr = snapshots.pop(0)
+
+    carrier.on_query = query
+    outcome = _resume_native(carrier) if delivery == "native" else carrier.execute()
+    assert outcome["status"] == ("success" if scenario == "unchanged" else "held"), outcome
+    assert len(carrier.landed) == int(scenario == "unchanged")
+    assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == 1
+    if delivery == "native" and scenario != "unchanged":
+        assert carrier.continuation.read_bytes() == saved
+    if scenario == "unchanged":
+        assert carrier.landed[0]["verified_merge_sha"] == merge["oid"]
+
+
+@pytest.mark.parametrize(("lane", "phase"), [
+    ("local", "review"), ("local", "ci"), ("cloud", "ci"), ("local", "admission"), ("cloud", "admission"),
+])
+def test_reviewed_base_changes_before_first_request(carrier, monkeypatch, lane, phase):
+    if lane == "cloud":
+        _cloud_clearance(carrier)
+    _native_continuation(carrier)
+    advanced = carrier.commit_evidence([carrier.base])["oid"]
+    observed = []
+
+    def advance():
+        carrier.pr["baseRefOid"] = advanced
+        observed.append(advanced)
+
+    if phase == "review" and lane == "local":
+        carrier.after_review = advance
+    elif phase in {"review", "ci"}:
+        # Both cloud admission and local approval precede this real CI I/O.
+        carrier.after_ci = advance
+    else:
+        def query(_):
+            saved = json.loads(carrier.continuation.read_text())
+            if "protected_merge_intent" in saved and not observed:
+                assert saved["protected_merge_intent"]["binding"]["review_identity"]["base_sha"] == carrier.base
+                advance()
+        carrier.on_query = query
+    outcome = carrier.execute()
+    carrier.assert_stopped(outcome, reviews=int(lane == "local"))
+    assert observed == [advanced]
+    if phase == "admission":
+        assert outcome["status"] == "held"
+        saved = carrier.continuation.read_bytes()
+        for _ in range(2):
+            assert _resume_native(carrier)["status"] == "held"
+            assert carrier.continuation.read_bytes() == saved
+        assert not any(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands)
+
+
+@pytest.mark.parametrize("lane", ["local", "cloud"])
+@pytest.mark.parametrize("tip", ["reviewed-base", "merge", "later"])
+def test_protected_landing_uses_merge_parents_not_moving_base_ref(carrier, monkeypatch, lane, tip):
+    if lane == "cloud":
+        _cloud_clearance(carrier)
+    _native_continuation(carrier)
+    monkeypatch.setattr(commit, "PROTECTED_MERGE_WAIT_SECONDS", 12)
+    carrier.merge_queued = True
+    assert carrier.execute()["status"] == "held"
+    identity = json.loads(carrier.continuation.read_text())["protected_merge_intent"]["binding"]["review_identity"]
+    assert identity["base_sha"] == carrier.base
+    assert identity["head_sha"] == carrier.head
+    if lane == "local":
+        assert identity == carrier.receipts()[0]["identity"]
+    merge = carrier.merge_evidence
+    base_ref = {"reviewed-base": carrier.base, "merge": merge["oid"],
+                "later": carrier.commit_evidence([merge["oid"]])["oid"]}[tip]
+    carrier.pr.update(state="MERGED", baseRefOid=base_ref, mergeCommit=merge)
+    outcome = _resume_native(carrier)
+    assert outcome["status"] == "success", outcome
+    assert carrier.landed[0]["verified_merge_sha"] == merge["oid"]
+    assert outcome["protected_merge_observation"]["reviewed_base_sha"] == carrier.base
+    queries = [arg for cmd in carrier.commands for arg in cmd if arg.startswith("query=")]
+    assert queries and all("parents(first: 3)" in q and "totalCount" in q and "nodes { oid }" in q for q in queries)
+    assert _resume_native(carrier)["status"] == "held"
+    assert len(carrier.landed) == 1
+    assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == 1
+
+
+@pytest.mark.parametrize("lane", ["local", "cloud"])
+@pytest.mark.parametrize("fault", [
+    "missing", "null", "nodes", "node", "invalid-oid", "missing-page", "partial",
+    "count", "count-type", "squash", "octopus", "reversed", "wrong-head", "wrong-base",
+    "self-parent", "unavailable", "invalid-moving-base",
+])
+def test_protected_landing_parent_evidence_holds_across_reload(carrier, monkeypatch, lane, fault):
+    if lane == "cloud":
+        _cloud_clearance(carrier)
+    _native_continuation(carrier)
+    monkeypatch.setattr(commit, "PROTECTED_MERGE_WAIT_SECONDS", 12)
+    carrier.merge_queued = True
+    assert carrier.execute()["status"] == "held"
+    saved = carrier.continuation.read_bytes()
+    receipts = {p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/*") if p.is_file()}
+    advanced = carrier.commit_evidence([carrier.base])["oid"]
+    other_head = carrier.commit_evidence([carrier.head])["oid"]
+    parent_cases = {"squash": [carrier.base], "octopus": [carrier.base, carrier.head, advanced],
+                    "reversed": [carrier.head, carrier.base], "wrong-head": [carrier.base, other_head],
+                    "wrong-base": [advanced, carrier.head]}
+    merge = carrier.commit_evidence(parent_cases[fault]) if fault in parent_cases else copy.deepcopy(carrier.merge_evidence)
+    parents = merge["parents"]
+    if fault == "missing":
+        merge.pop("parents")
+    elif fault == "null":
+        merge["parents"] = None
+    elif fault == "nodes":
+        parents["nodes"] = {"oid": carrier.base}
+    elif fault == "node":
+        parents["nodes"][0] = None
+    elif fault == "invalid-oid":
+        parents["nodes"][0]["oid"] = carrier.base[:7]
+    elif fault == "missing-page":
+        parents.pop("pageInfo")
+    elif fault == "partial":
+        parents["pageInfo"]["hasNextPage"] = True
+    elif fault in {"count", "count-type"}:
+        parents["totalCount"] = 3 if fault == "count" else "2"
+    elif fault == "self-parent":
+        merge["oid"] = carrier.head
+    elif fault == "unavailable":
+        def unavailable(_):
+            raise subprocess.CalledProcessError(1, ["gh", "api", "graphql"], stderr="commit parents unavailable")
+        carrier.on_query = unavailable
+    # Even a misleading live ref equal to the admission cannot bless wrong parents.
+    carrier.pr.update(state="MERGED", baseRefOid=carrier.base, mergeCommit=merge)
+    if fault == "invalid-moving-base":
+        carrier.pr["baseRefOid"] = int("1" * 40)
+    for _ in range(2):
+        held = _resume_native(carrier)
+        assert held["status"] == "held", held
+        assert held["failure_class"] == "protected_merge_observation_hold"
+        diagnostic = "deadline" if fault == "unavailable" else (
+            "base object ID" if fault == "invalid-moving-base" else "parent")
+        assert diagnostic in held["errors"][0], held
+        assert carrier.continuation.read_bytes() == saved
+        assert not carrier.landed and not held.get("remote_pr_merged")
+    assert all(p.read_bytes() == content for p, content in receipts.items())
+    assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == 1
+    assert len(carrier.reviews) == int(lane == "local")
+    assert not any(a[0] == "bash" or "--admin" in a or "resolveReviewThread" in " ".join(a) for a in carrier.commands)
+
+
+@pytest.mark.parametrize("fault", ["source", "hidden-source", "artifact", "receipt-identity", "request", "legacy"])
+def test_local_review_resume_retains_original_base_authority(carrier, monkeypatch, fault):
+    _native_continuation(carrier)
+    monkeypatch.setattr(commit, "PROTECTED_MERGE_WAIT_SECONDS", 12)
+    carrier.merge_queued = True
+    assert carrier.execute()["status"] == "held"
+    payload = json.loads(carrier.continuation.read_text())
+    intent = payload["protected_merge_intent"]
+    path = carrier.root / intent["review_authority"]["receipt_path"]
+    if fault in {"source", "hidden-source"}:
+        if fault == "hidden-source":
+            git(carrier.root, "update-index", "--assume-unchanged", "earlier.py")
+        (carrier.root / "earlier.py").write_text("unreviewed = True\n")
+    elif fault == "artifact":
+        path.with_name("pr.diff").write_text("substituted diff\n")
+    elif fault == "receipt-identity":
+        # Keep the receipt digest consistent: identity validation must be independent.
+        receipt = json.loads(path.read_text())
+        receipt["identity"]["base_sha"] = carrier.commit_evidence([carrier.base])["oid"]
+        path.write_text(json.dumps(receipt))
+        intent["review_authority"]["receipt_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        carrier.continuation.write_text(json.dumps(payload))
+    elif fault == "request":
+        carrier.pr["comments"]["nodes"].append({
+            "databaseId": 999, "author": {"login": "founder", "__typename": "User"},
+            "body": "@codex review", "createdAt": "2026-10-04T14:00:00Z"})
+    elif fault == "legacy":
+        intent["version"] = 1
+        intent["binding"].pop("review_identity")
+        carrier.continuation.write_text(json.dumps(payload))
+    saved = carrier.continuation.read_bytes()
+    carrier.pr.update(state="MERGED", mergeCommit=carrier.merge_evidence)
+    outcome = commit.run_commit_pipeline(carrier.handoff, repo_root=carrier.root, bus_dir=BUS)
+    assert outcome["status"] == "held", outcome
+    if fault == "hidden-source":
+        assert "hidden/sparse" in outcome["errors"][0]
+    assert carrier.continuation.read_bytes() == saved
+    assert not carrier.landed and len(carrier.reviews) == 1
     assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == 1

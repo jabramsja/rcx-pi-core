@@ -271,7 +271,14 @@ query($owner: String!, $repo: String!, $number: Int!) {
       baseRefOid
       headRepository { nameWithOwner }
       baseRepository { nameWithOwner }
-      mergeCommit { oid }
+      mergeCommit {
+        oid
+        parents(first: 3) {
+          totalCount
+          pageInfo { hasNextPage }
+          nodes { oid }
+        }
+      }
       isDraft
       reviewDecision
       latestReviews(first: 20) {
@@ -9996,10 +10003,33 @@ def _protected_merge_hold(result: dict[str, Any], reason: str) -> dict[str, Any]
                            "no new merge request, finding disposition or remediation is authorized."}
 
 
+def _verify_protected_merge_parents(
+    pr_data: dict[str, Any], *, merge_sha: str, reviewed_base_sha: str, head_sha: str,
+) -> None:
+    """Require the remote merge object's ordered parents for our --merge method.
+
+    The PR's baseRefOid is a moving ref after landing. Neither that ref nor
+    ancestry proves that this merge used the independently reviewed base.
+    Squash/rebase/queue rewrites without these exact two parents stay held.
+    """
+    parents = pr_data["mergeCommit"].get("parents")
+    if (not isinstance(parents, dict)
+            or type(parents.get("totalCount")) is not int or parents["totalCount"] != 2
+            or not isinstance(parents.get("pageInfo"), dict)
+            or parents["pageInfo"].get("hasNextPage") is not False
+            or not isinstance(parents.get("nodes"), list) or len(parents["nodes"]) != 2):
+        raise ValueError("Protected merge lacks complete supported merge-parent evidence")
+    oids = [node.get("oid") if isinstance(node, dict) else None for node in parents["nodes"]]
+    if (any(not isinstance(oid, str) or not re.fullmatch(r"[0-9a-f]{40}", oid) for oid in oids)
+            or merge_sha in oids or oids != [reviewed_base_sha, head_sha]):
+        raise ValueError("Protected merge parents do not match the reviewed base and exact PR head")
+
+
 def _run_protected_merge(
     *, handoff: dict[str, Any], repo_root: Path, result: dict[str, Any],
     target_branch: str, base_branch: str, continuation_path: Path, log: Any,
     initiate: bool = False, require_cloud_clearance: bool = True,
+    review_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Spend one durable intent, then only observe, even after an interrupted call.
 
@@ -10035,6 +10065,27 @@ def _run_protected_merge(
             if payload != _read_continuation_record(continuation_path):
                 raise ValueError("Protected merge continuation identity changed")
             repo_owner, repo_name = _parse_origin_owner_repo(repo_root)
+            new_intent = "protected_merge_intent" not in payload
+            if not new_intent:
+                intent = payload["protected_merge_intent"]
+                if (not isinstance(intent, dict) or type(intent.get("version")) is not int
+                        or intent["version"] != 2 or not isinstance(intent.get("binding"), dict)):
+                    raise ValueError("Protected merge intent lacks original reviewed-base authority")
+                # Never upgrade a legacy record or borrow a newly observed base.
+                review_identity = intent["binding"].get("review_identity")
+            if not isinstance(review_identity, dict):
+                raise ValueError("Protected merge requires the admitted full review identity")
+            git_identity, _ = _quota_review_git_identity(
+                repo_root, base_sha=review_identity.get("base_sha"), head_sha=payload["commit_sha"],
+            )
+            expected_identity = {
+                "repository": f"{repo_owner}/{repo_name}", "pr_number": int(pr_number),
+                "url": f"https://github.com/{repo_owner}/{repo_name}/pull/{pr_number}",
+                "repo_root": str(repo_root.resolve()), "head_branch": target_branch,
+                "base_branch": base_branch, **git_identity,
+            }
+            if review_identity != expected_identity:
+                raise ValueError("Protected merge admitted head/base/diff identity changed")
             binding = {
                 "wave_id": handoff["wave_id"], "handoff_sha": handoff_sha,
                 "owner": {"task_id": str(handoff.get("task_id") or handoff["wave_id"]),
@@ -10044,28 +10095,27 @@ def _run_protected_merge(
                 "repository": f"{repo_owner}/{repo_name}", "pr_number": pr_number,
                 "head_sha": payload["commit_sha"], "source_branch": target_branch,
                 "target_base": base_branch,
+                "review_identity": review_identity,
                 "continuation_sha256": hashlib.sha256(json.dumps({
                     key: value for key, value in payload.items()
                     if key not in {"protected_merge_intent", "updated_at_unix"}
                 }, sort_keys=True).encode()).hexdigest(),
             }
-            new_intent = "protected_merge_intent" not in payload
             if new_intent:
                 if not initiate:
                     raise ValueError("Protected merge intent is missing; observation cannot issue a request")
                 authority = {"kind": "cloud"} if require_cloud_clearance else {
                     "kind": "local", **result["local_pr_review"],
                 }
-                intent = {"version": 1, "binding": binding, "review_authority": authority,
+                intent = {"version": 2, "binding": binding, "review_authority": authority,
                           "state": "request_may_have_been_sent"}
-            else:
-                intent = payload["protected_merge_intent"]
             if (not isinstance(intent, dict) or type(intent.get("version")) is not int
-                    or intent["version"] != 1 or intent.get("binding") != binding
+                    or intent["version"] != 2 or intent.get("binding") != binding
                     or intent.get("state") not in {"request_may_have_been_sent", "completion_started"}
                     or set(intent) != {"version", "binding", "review_authority", "state"}):
                 raise ValueError("Invalid or mismatched protected merge intent")
             authority = intent["review_authority"]
+            local_review = None
             if authority != {"kind": "cloud"}:
                 if (not isinstance(authority, dict) or set(authority) != {
                         "kind", "status", "receipt_path", "receipt_sha256"}
@@ -10080,10 +10130,17 @@ def _run_protected_merge(
                 review = json.loads(receipt_bytes)
                 if review.get("status") != "APPROVED" or review.get("wave_id") != handoff["wave_id"]:
                     raise ValueError("Protected merge review receipt lacks original approval")
+                _, provenance = _local_quota_review_adapter(repo_root)
+                if (review.get("identity") != review_identity
+                        or review["envelope"].get("review_identity") != review_identity
+                        or review.get("reviewer") != provenance
+                        or review.get("source_sha256") != _local_quota_review_source_digest(repo_root)):
+                    raise ValueError("Protected merge local review identity or source changed")
                 _require_local_quota_review_approval(review["envelope"])
                 for path, digest in review["artifacts"].items():
                     if hashlib.sha256((repo_root / path).read_bytes()).hexdigest() != digest:
                         raise ValueError("Protected merge review evidence changed")
+                local_review = review
             if intent["state"] == "completion_started":
                 raise ValueError("Verified landing completion already entered; retain the native closeout owner")
             if new_intent:
@@ -10093,6 +10150,32 @@ def _run_protected_merge(
                 _atomic_write_fsynced_json(continuation_path, payload)
             result["protected_merge_observation"] = {"request_accepted": None}
             if new_intent:
+                # Recheck against the admission, not a newly selected identity.
+                # This read cannot make remote queue admission atomic; any
+                # subsequent race is fenced by OPEN/merge-parent observation.
+                current = _query_pr_review_state(
+                    repo_root, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+                )
+                current_identity, _ = _local_quota_review_identity(
+                    repo_root, current, repo_owner=repo_owner, repo_name=repo_name,
+                    pr_number=pr_number, head_sha=binding["head_sha"],
+                    target_branch=target_branch, base_branch=base_branch,
+                )
+                if current_identity != review_identity or _pr_is_draft(current):
+                    raise ValueError("Protected merge admission changed after review/CI")
+                if local_review is not None:
+                    _verify_local_quota_review(
+                        local_review, repo_root=repo_root, pr_data=current, result=result,
+                        repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+                        head_sha=binding["head_sha"], target_branch=target_branch, base_branch=base_branch,
+                    )
+                else:
+                    findings = _extract_review_findings(
+                        current, binding["head_sha"], result=result, pr_number=pr_number, classify_quota=True,
+                    )
+                    if findings["outcome"] != "clean" or _local_quota_sweep_findings(repo_root):
+                        raise ValueError("Retained findings block protected merge admission")
+                    _require_quota_history_cloud_clearance(current, binding["head_sha"], continuation_path)
                 try:
                     _run(["gh", "pr", "merge", pr_number, "--repo", binding["repository"],
                           "--merge", "--delete-branch", "--match-head-commit", binding["head_sha"]],
@@ -10105,6 +10188,7 @@ def _run_protected_merge(
             verified_merge, merged_pr_data = _wait_for_protected_merge(
                 repo_root, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
                 head_sha=binding["head_sha"], target_branch=target_branch, base_branch=base_branch,
+                reviewed_base_sha=review_identity["base_sha"], local_review=local_review,
                 result=result, continuation_path=continuation_path,
                 require_cloud_clearance=authority == {"kind": "cloud"}, log=log,
             )
@@ -10125,6 +10209,7 @@ def _run_protected_merge(
 def _wait_for_protected_merge(
     repo_root: Path, *, repo_owner: str, repo_name: str, pr_number: str,
     head_sha: str, target_branch: str, base_branch: str,
+    reviewed_base_sha: str, local_review: dict[str, Any] | None,
     result: dict[str, Any], continuation_path: Path, require_cloud_clearance: bool,
     log: Any,
 ) -> tuple[str, dict[str, Any]]:
@@ -10137,7 +10222,7 @@ def _wait_for_protected_merge(
     repository = f"{repo_owner}/{repo_name}"
     observation = result["protected_merge_observation"] = {
         **result.get("protected_merge_observation", {}),
-        "status": "pending", "head_sha": head_sha,
+        "status": "pending", "head_sha": head_sha, "reviewed_base_sha": reviewed_base_sha,
         "pr_number": pr_number, "repository": repository,
         "deadline_seconds": PROTECTED_MERGE_WAIT_SECONDS, "queries": 0,
     }
@@ -10171,8 +10256,11 @@ def _wait_for_protected_merge(
                 raise ValueError(f"Protected merge stopped in PR state {pr_data.get('state')!r}")
             if _pr_is_draft(pr_data):
                 raise ValueError("Protected merge PR became draft")
-            if not re.fullmatch(r"[0-9a-f]{40}", str(pr_data.get("baseRefOid", ""))):
+            base_oid = pr_data.get("baseRefOid")
+            if not isinstance(base_oid, str) or not re.fullmatch(r"[0-9a-f]{40}", base_oid):
                 raise ValueError("Protected merge query missing exact base object ID")
+            if pr_data["state"] == "OPEN" and base_oid != reviewed_base_sha:
+                raise ValueError("Protected merge OPEN base differs from the admitted reviewed base")
             _assert_complete_review_evidence(pr_data)
             for key in ("latestReviews", "reviewThreads", "comments"):
                 nodes = pr_data[key].get("nodes")
@@ -10195,10 +10283,15 @@ def _wait_for_protected_merge(
                 raise ValueError("Retained sweep findings block protected merge completion")
             if require_cloud_clearance:
                 _require_quota_history_cloud_clearance(pr_data, head_sha, continuation_path)
+            elif local_review is None or _latest_bot_review_request_comment(pr_data) != local_review["request_comment"]:
+                raise ValueError("Protected merge local review request identity changed")
             verified_merge = _verified_remote_merge_sha(
                 pr_data, head_sha=head_sha, target_branch=target_branch, base_branch=base_branch,
             )
             if verified_merge:
+                _verify_protected_merge_parents(
+                    pr_data, merge_sha=verified_merge, reviewed_base_sha=reviewed_base_sha, head_sha=head_sha,
+                )
                 observation.update(status="landed", merge_sha=verified_merge)
                 return verified_merge, pr_data
             if pr_data.get("mergeCommit") is not None:
@@ -11254,6 +11347,18 @@ def _local_quota_review_identity(
         raise ValueError("Local review PR/repository/base identity mismatch")
     _assert_complete_review_evidence(pr_data)
     base_sha = pr_data.get("baseRefOid", "")
+    git_identity, diff = _quota_review_git_identity(repo_root, base_sha=base_sha, head_sha=head_sha)
+    return {
+        "repository": repository, "pr_number": int(pr_number), "url": pr_data["url"],
+        "repo_root": str(repo_root.resolve()), "head_branch": target_branch,
+        "base_branch": base_branch, **git_identity,
+    }, diff
+
+
+def _quota_review_git_identity(
+    repo_root: Path, *, base_sha: str, head_sha: str,
+) -> tuple[dict[str, Any], str]:
+    """Recompute the complete immutable Git diff, including on native reload."""
     if not all(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
                for sha in (base_sha, head_sha)):
         raise ValueError("Local review requires exact head and base object IDs")
@@ -11271,9 +11376,7 @@ def _local_quota_review_identity(
                     "--binary", "--full-index", f"{merge_base}..{head_sha}", "--"]
     diff = _run(diff_command, cwd=repo_root).stdout
     identity = {
-        "repository": repository, "pr_number": int(pr_number), "url": pr_data["url"],
-        "repo_root": str(repo_root.resolve()), "head_sha": head_sha,
-        "head_branch": target_branch, "base_sha": base_sha, "base_branch": base_branch,
+        "head_sha": head_sha, "base_sha": base_sha,
         "merge_base_sha": merge_base, "diff_sha256": hashlib.sha256(diff.encode()).hexdigest(),
         "diff_command": diff_command,
     }
@@ -18184,6 +18287,7 @@ def _run_post_commit_pipeline_impl(
             target_branch=target_branch, base_branch=base_branch,
             continuation_path=continuation_path, log=log,
             initiate=True, require_cloud_clearance=local_review is None,
+            review_identity=local_review["identity"] if local_review is not None else cloud_review_identity,
         )
 
     try:
